@@ -59,6 +59,17 @@ function documentationSize(lines: number): DocumentationSize {
   return "normal";
 }
 
+test("Task tree law is parent decomposition without DAG residue", () => {
+  const task = readFileSync(join(docs, "task.md"), "utf8");
+  const cli = readFileSync(join(docs, "cli-task.md"), "utf8");
+  assert.match(task, /task\.tree\(\): Promise<TaskDecompositionTree>/u);
+  assert.match(task, /children: readonly TaskTreeNode\[\]/u);
+  assert.doesNotMatch(task, /TaskDependencyTree/u);
+  assert.doesNotMatch(task, /task\.tree\(input\?: \{ full\?: boolean \}\)/u);
+  assert.match(cli, /task tree <TaskId> \[--json\]/u);
+  assert.doesNotMatch(cli, /task tree <TaskId> \[--full\]/u);
+});
+
 test("formal documentation line thresholds are exact", () => {
   assert.deepEqual(
     [400, 401, 500, 501].map(documentationSize),

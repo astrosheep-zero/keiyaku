@@ -3,7 +3,7 @@ import {
   type BlockedTaskList,
   type TaskBatchResult,
   type TaskCompositionResult,
-  type TaskDependencyTree,
+  type TaskDecompositionTree,
   type TaskDetail,
   type TaskDoctorReport,
   type TaskId,
@@ -20,7 +20,7 @@ import type { ParsedTaskCommand } from "./task.js";
 import type { WorldRoot } from "../../world.js";
 
 export type TaskInvocationResult = TaskMutationResult | TaskUpdateResult | TaskBatchResult | TaskCompositionResult
-  | TaskDetail | TaskList | BlockedTaskList | TaskQueryResult | TaskDependencyTree | TaskDoctorReport | TaskNamespaceResult
+  | TaskDetail | TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskDoctorReport | TaskNamespaceResult
   | TaskWorldObservation;
 
 type TaskWorldRead = TaskList | BlockedTaskList | TaskQueryResult | TaskDoctorReport;
@@ -89,7 +89,7 @@ async function invokeRead(tasks: TaskProduct, command: ParsedTaskCommand): Promi
     case "ready": return tasks.ready({ ...(command.flags.world === true ? { scope: "world" as const } : {}), ...(value(command, "parent") === undefined ? {} : { parent: value(command, "parent")! }), ...(limit(command) === undefined ? {} : { limit: limit(command)! }) });
     case "blocked": return tasks.blocked({ ...(command.flags.world === true ? { scope: "world" as const } : {}), ...(value(command, "parent") === undefined ? {} : { parent: value(command, "parent")! }), ...(limit(command) === undefined ? {} : { limit: limit(command)! }) });
     case "query": return tasks.query({ ...(command.where === undefined ? {} : { where: command.where }), ...(command.flags.world === true ? { scope: "world" as const } : {}), ...(value(command, "sort") === undefined ? {} : { sort: value(command, "sort") as TaskQuerySort }), ...(limit(command) === undefined ? {} : { limit: limit(command)! }) });
-    case "tree": return tasks.task({ id }).tree(command.flags.full === true ? { full: true } : {});
+    case "tree": return tasks.task({ id }).tree();
     case "doctor": return tasks.doctor();
     default: throw new Error(`task action is not a read: ${command.action}`);
   }

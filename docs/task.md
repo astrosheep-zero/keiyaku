@@ -153,7 +153,7 @@ tasks.batch(input: { verb: "done" | "drop" | "hold"; ids: readonly string[]; not
 tasks.compose(input: { markdown: string; signal?: AbortSignal }): Promise<TaskCompositionResult>
 
 task.read(): Promise<TaskDetail | null>
-task.tree(input?: { full?: boolean }): Promise<TaskDependencyTree>
+task.tree(): Promise<TaskDecompositionTree>
 task.update(input: UpdateTaskInput): Promise<TaskUpdateResult>
 task.start(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 task.stop(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
@@ -161,6 +161,19 @@ task.hold(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 task.resume(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 task.done(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult>
 task.drop(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult>
+```
+
+`Task.tree()` accepts no options. Root lookup is exact and returns the
+existing `task-missing` refusal when absent. The accepted value is a
+recursive parent-decomposition node:
+
+```ts
+type TaskTreeNode = Readonly<{
+  task: TaskRef & Readonly<{ priority: TaskPriority | null }>;
+  cycle?: true;
+  children: readonly TaskTreeNode[];
+}>;
+type TaskDecompositionTree = TaskOutcome<TaskTreeNode>;
 ```
 
 `TaskList`, `BlockedTaskList`, and `TaskQueryResult` accepted values carry
@@ -209,9 +222,12 @@ next item and never interrupts an atomic replacement.
 with released status, unresolved blockers, derived blocks/children/
 supersededBy/related, parent, and outgoing supersedes
 bytes when present.
-`tree <TaskId> [--full]` follows the parent decomposition relation recursively,
-marks cycles, and either deduplicates shared nodes or expands every acyclic
-occurrence. `needs` traversal remains the ordering/blocking projection in
+`tree <TaskId>` follows parent decomposition from one observed board.
+Starting at the addressed root, it recursively selects Tasks whose `parent`
+equals the current TaskId, in canonical TaskId byte order. A node seen again
+in its current ancestry is a terminal `cycle: true` node with empty children;
+tree never recurses past it. Missing parent targets remain doctor issues and
+do not invent child nodes. `needs` stays the ordering/blocking projection in
 `show` and readiness; it is not the decomposition tree. `doctor` diagnoses the
 complete world independently of current namespace.
 

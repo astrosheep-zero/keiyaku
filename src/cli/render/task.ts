@@ -3,7 +3,7 @@ import type {
   BlockedTaskRow,
   TaskBatchResult,
   TaskCompositionResult,
-  TaskDependencyTree,
+  TaskDecompositionTree,
   TaskDetail,
   TaskDoctorIssue,
   TaskDoctorReport,
@@ -20,7 +20,7 @@ import type {
 import type { TaskInvocationResult, TaskWorldObservation } from "../commands/task-invoke.js";
 import type { ParsedTaskCommand } from "../commands/task.js";
 
-type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDependencyTree | TaskNamespaceResult;
+type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskNamespaceResult;
 type TaskDocumentChanges = Extract<TaskCompositionResult, { kind: "accepted" }>["documentChanges"];
 type TaskFailure =
   | Extract<TaskMutationResult, { kind: "refused" | "retry" }>
@@ -72,10 +72,10 @@ function renderShow(result: TaskDetail | TaskMutationResult): string {
   if (task.body.length > 0) lines.push("", task.body);
   return lines.join("\n");
 }
-function treeLines(node: Extract<TaskDependencyTree, { kind: "accepted" }>["value"], depth = 0): readonly string[] {
-  const marker = node.cycle ? "cycle" : node.reference ? "reference" : node.task.state;
+function treeLines(node: Extract<TaskDecompositionTree, { kind: "accepted" }>["value"], depth = 0): readonly string[] {
+  const marker = node.cycle ? "cycle" : node.task.state;
   const line = `${"  ".repeat(depth)}${node.task.id} - ${node.task.priority === null ? "P?" : `P${node.task.priority}`} - ${marker}${node.task.title === null ? "" : ` - ${node.task.title}`}`;
-  return [line, ...node.needs.flatMap((child) => treeLines(child, depth + 1))];
+  return [line, ...node.children.flatMap((child) => treeLines(child, depth + 1))];
 }
 function doctorIssue(issue: TaskDoctorIssue): string {
   if (issue.kind === "missing-target") return `${issue.taskId}: ${issue.relation} target missing: ${issue.target}`;
@@ -107,7 +107,7 @@ function renderTaskValue(command: ParsedTaskCommand, result: Exclude<TaskInvocat
   if (command.action === "show") return renderShow(result as TaskDetail | TaskMutationResult);
   if (command.action === "ls" || command.action === "ready" || command.action === "blocked" || command.action === "query") return renderRows(command, result as TaskList | BlockedTaskList | TaskQueryResult);
   if (command.action === "tree") {
-    const tree = result as TaskDependencyTree; return tree.kind === "accepted" ? treeLines(tree.value).join("\n") : failure(tree);
+    const tree = result as TaskDecompositionTree; return tree.kind === "accepted" ? treeLines(tree.value).join("\n") : failure(tree);
   }
   if (command.action === "doctor") {
     const report = result as TaskDoctorReport; return report.issues.length === 0 ? "healthy" : report.issues.map(doctorIssue).join("\n");

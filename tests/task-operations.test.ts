@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Tasks, type TaskId } from "../src/task/index.js";
+import { Tasks, type TaskId, type TaskTreeNode } from "../src/task/index.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskDocument, serializeTaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
@@ -285,6 +285,68 @@ test("malformed current namespace refuses context consumers but not explicit Tas
   const namespace = await tasks.namespace();
   assert.equal(namespace.kind, "refused");
   if (namespace.kind === "refused") assert.equal(namespace.refusal.kind, "invalid-namespace-context");
+});
+
+function treeIds(node: TaskTreeNode): readonly string[] {
+  return [node.task.id, ...node.children.flatMap(treeIds)];
+}
+
+test("task tree is parent decomposition with no needs residue", async () => {
+  const { tasks } = await world();
+  const root = acceptedId(await tasks.add({ title: "Area" }));
+  const need = acceptedId(await tasks.add({ title: "Need" }));
+  const later = acceptedId(await tasks.add({ title: "Zebra", parent: root }));
+  const child = acceptedId(await tasks.add({ title: "Child", parent: root }));
+  const nested = acceptedId(await tasks.add({ title: "Nested", parent: child, needs: [need] }));
+  assert.equal((await tasks.task({ id: root }).update({ needs: [need] })).kind, "accepted");
+
+  const tree = await tasks.task({ id: root }).tree();
+  assert.equal(tree.kind, "accepted");
+  if (tree.kind !== "accepted") return;
+  assert.deepEqual(treeIds(tree.value), [root, child, nested, later]);
+  assert.deepEqual(tree.value.children.map((node) => node.task.id), [child, later]);
+  assert.deepEqual(tree.value.children[0]?.children.map((node) => node.task.id), [nested]);
+  assert.equal("needs" in tree.value, false);
+  assert.equal("reference" in tree.value, false);
+  assert.equal(treeIds(tree.value).includes(need), false);
+
+  const shown = await tasks.task({ id: nested }).read();
+  assert.deepEqual(shown?.needs.map((item) => item.id), [need]);
+  assert.deepEqual(shown?.blockers.map((item) => item.id), [need]);
+  assert.deepEqual(shown?.parent?.id, child);
+  const blocked = await tasks.blocked({ scope: "world" });
+  assert.equal(blocked.kind, "accepted");
+  if (blocked.kind === "accepted") assert.deepEqual(blocked.value.rows.map((row) => row.id), [root, nested]);
+  const ready = await tasks.ready({ scope: "world" });
+  assert.equal(ready.kind, "accepted");
+  if (ready.kind === "accepted") {
+    assert.deepEqual(ready.value.rows.map((row) => row.id), [child, need, later]);
+  }
+
+  assert.deepEqual(await tasks.task({ id: "task/missing" }).tree(), { kind: "refused", refusal: { kind: "task-missing", taskId: "task/missing" } });
+  await assert.rejects(tasks.task({ id: root }).tree({ full: true } as never), /tree accepts no input/u);
+});
+
+test("task tree renders a parent cycle as a terminal cycle node", async () => {
+  const { tasks } = await world();
+  const first = acceptedId(await tasks.add({ title: "First" }));
+  const second = acceptedId(await tasks.add({ title: "Second", parent: first }));
+  assert.equal((await tasks.task({ id: first }).update({ parent: second })).kind, "accepted");
+
+  const tree = await tasks.task({ id: first }).tree();
+  assert.equal(tree.kind, "accepted");
+  if (tree.kind !== "accepted") return;
+  assert.equal(tree.value.cycle, undefined);
+  assert.equal(tree.value.children.length, 1);
+  assert.equal(tree.value.children[0]?.task.id, second);
+  assert.equal(tree.value.children[0]?.cycle, undefined);
+  assert.deepEqual(tree.value.children[0]?.children, [{
+    task: { id: first, title: "First", state: "open", priority: 2 },
+    cycle: true,
+    children: [],
+  }]);
+  assert.equal("reference" in (tree.value.children[0]?.children[0] ?? {}), false);
+  assert.deepEqual((await tasks.doctor()).issues, [{ kind: "cycle", relation: "parent", tasks: [first, second] }]);
 });
 
 test("public inputs reject unknown fields before observing authority", async () => {

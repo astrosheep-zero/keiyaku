@@ -48,7 +48,7 @@ task add [--namespace <ns>] [--json] -`,
   blocked: { arity: [0, 0], flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" }, usage: "task blocked [--world] [--parent <TaskId>] [--limit <n>] [--json]", purpose: "List Tasks blocked by dependencies." },
   query: { arity: [0, 0], flags: { ...COMMON, where: "value", world: "boolean", sort: "value", limit: "value" }, usage: `task query [--where <expression>] [--world]
   [--sort priority|created|updated|id] [--limit <n>] [--json]`, purpose: "Query Task facts with a typed boolean expression." },
-  tree: { arity: [1, 1], flags: { ...COMMON, full: "boolean" }, usage: "task tree <TaskId> [--full] [--json]", purpose: "Read one Task dependency tree." },
+  tree: { arity: [1, 1], flags: COMMON, usage: "task tree <TaskId> [--json]", purpose: "Read one Task parent decomposition tree." },
   doctor: { arity: [0, 0], flags: COMMON, usage: "task doctor [--json]", purpose: "Inspect Task authority without repairing it." },
   update: {
     arity: [1, 1], flags: { ...COMMON, title: "value", body: "value", append: "value", note: "value", priority: "value", needs: "repeat", "drop-needs": "repeat", parent: "value", "no-parent": "boolean", supersedes: "repeat", "drop-supersedes": "repeat", relates: "repeat", "drop-relates": "repeat" },

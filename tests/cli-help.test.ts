@@ -50,6 +50,8 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     "       keiyaku ls aku/*/* [--json]",
   ].join("\n"));
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
+  assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId> \[--json\]/u);
+  assert.doesNotMatch(renderTaskHelp(), /--full/u);
   assert.doesNotMatch(renderTaskHelp(), /--contract|--no-contract/u);
   assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--json\] -/u);
   assert.match(renderTaskHelp("compose"), /documents independently; partial admission has no cross-file atomicity or rollback/u);

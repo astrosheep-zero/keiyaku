@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
@@ -24,6 +25,47 @@ async function runMain(argv: readonly string[]): Promise<Readonly<{ exit: number
   process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
   try { return { exit: await main(argv), stdout, stderr }; }
   finally { process.stdout.write = writeStdout; process.stderr.write = writeStderr; }
+}
+
+const worktree = resolve(import.meta.dirname, "..");
+const cliEntry = join(worktree, "src", "cli", "index.ts");
+const cliArgv = [process.execPath, "--import", "tsx", cliEntry];
+
+type RunResult = Readonly<{ code: number; stdout: string; stderr: string }>;
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function runCli(args: readonly string[], columns?: number): Promise<RunResult> {
+  const invocation = [...cliArgv, ...args];
+  const child = columns === undefined
+    ? spawn(invocation[0]!, invocation.slice(1), {
+      cwd: worktree,
+      env: { ...process.env, NO_COLOR: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    : spawn("script", process.platform === "darwin"
+      ? ["-q", "/dev/null", "sh", "-c", `stty columns ${String(columns)} rows 100; ${invocation.map(shellQuote).join(" ")}`]
+      : ["-q", "-c", `stty columns ${String(columns)} rows 100; ${invocation.map(shellQuote).join(" ")}`, "/dev/null"], {
+      cwd: worktree,
+      env: { ...process.env, NO_COLOR: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  return new Promise((resolveRun, reject) => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer | string) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk: Buffer | string) => { stderr += String(chunk); });
+    child.on("error", reject);
+    child.on("close", (code) => resolveRun({
+      code: code ?? 1,
+      stdout: columns === undefined
+        ? stdout
+        : stdout.replaceAll("\r", "").replace(/\^D/gu, "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, ""),
+      stderr,
+    }));
+  });
 }
 
 test("task parser owns subcommand arity, repeat flags, and selected stdin", () => {
@@ -49,6 +91,7 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
   assert.throws(() => parseArgv(["task", "query", "--where", "title ~ auth"]), /double quotes/u);
   assert.throws(() => parseArgv(["task", "query", "--limit", "0"]), /--limit/u);
   assert.throws(() => parseArgv(["task", "ready", "--parent", "not-a-task"]), /--parent/u);
+  assert.throws(() => parseArgv(["task", "tree", "task/area", "--full"]), /option --full is not valid for task tree/u);
 });
 
 test("Task commands reject the removed Contract association flags", () => {
@@ -232,6 +275,78 @@ test("task doctor renders graph disease and controls exit status", async () => {
   if (command.command !== "task") throw new Error("not a task command");
   assert.match(renderTaskText(command, result), /needs cycle: task\/first -> task\/second/u);
   assert.equal(taskExitCode(result), 1);
+});
+
+test("task tree text follows parent children and marks parent cycles", async () => {
+  const root = world();
+  await invoke(parseArgv(["-C", root, "task", "add", "Area"]));
+  await invoke(parseArgv(["-C", root, "task", "add", "Need"]));
+  await invoke(parseArgv(["-C", root, "task", "add", "Child", "--parent", "task/area"]));
+  await invoke(parseArgv(["-C", root, "task", "add", "Nested", "--parent", "task/child"]));
+  await invoke(parseArgv(["-C", root, "task", "update", "task/area", "--needs", "task/need"]));
+  const tree = await invoke(parseArgv(["-C", root, "task", "tree", "task/area"])) as TaskInvocationResult;
+  const command = parseArgv(["task", "tree", "task/area"]).command;
+  if (command.command !== "task") throw new Error("not a task command");
+  const text = renderTaskText(command, tree);
+  assert.match(text, /^task\/area - P2 - open - Area$/mu);
+  assert.match(text, /^  task\/child - P2 - open - Child$/mu);
+  assert.match(text, /^    task\/nested - P2 - open - Nested$/mu);
+  assert.doesNotMatch(text, /task\/need/u);
+  assert.doesNotMatch(text, /reference/u);
+
+  await invoke(parseArgv(["-C", root, "task", "update", "task/area", "--parent", "task/nested"]));
+  const cycled = await invoke(parseArgv(["-C", root, "task", "tree", "task/area"])) as TaskInvocationResult;
+  const cycledText = renderTaskText(command, cycled);
+  assert.match(cycledText, /task\/area - P2 - cycle - Area/u);
+  assert.doesNotMatch(cycledText, /reference/u);
+  const doctor = await invoke(parseArgv(["-C", root, "task", "doctor"])) as TaskInvocationResult;
+  const doctorCommand = parseArgv(["task", "doctor"]).command;
+  if (doctorCommand.command !== "task") throw new Error("not a task command");
+  assert.match(renderTaskText(doctorCommand, doctor), /parent cycle: task\/area -> task\/child -> task\/nested/u);
+});
+
+test("built CLI task tree follows parent decomposition at 36 columns", async () => {
+  const root = world();
+  const titles = [
+    "Alpha parent decomposition root for tree smoke",
+    "Need only blocker outside the tree",
+    "Child under the alpha parent root",
+    "Nested grandchild under the child",
+  ] as const;
+  for (const title of titles) {
+    const added = await invoke(parseArgv(["-C", root, "task", "add", title])) as { kind: string; value?: { id: string } };
+    assert.equal(added.kind, "accepted");
+  }
+  const ids = {
+    root: "task/alpha-parent-decomposition-root-for-tree-smoke",
+    need: "task/need-only-blocker-outside-the-tree",
+    child: "task/child-under-the-alpha-parent-root",
+    nested: "task/nested-grandchild-under-the-child",
+  };
+  assert.equal((await invoke(parseArgv(["-C", root, "task", "update", ids.child, "--parent", ids.root])) as { kind: string }).kind, "accepted");
+  assert.equal((await invoke(parseArgv(["-C", root, "task", "update", ids.nested, "--parent", ids.child])) as { kind: string }).kind, "accepted");
+  assert.equal((await invoke(parseArgv(["-C", root, "task", "update", ids.root, "--needs", ids.need])) as { kind: string }).kind, "accepted");
+
+  const tree = await runCli(["-C", root, "task", "tree", ids.root], 36);
+  assert.equal(tree.code, 0, tree.stderr);
+  assert.match(tree.stdout, new RegExp(ids.root.replaceAll("/", "\\/"), "u"));
+  assert.match(tree.stdout, new RegExp(`  ${ids.child.replaceAll("/", "\\/")}`, "u"));
+  assert.match(tree.stdout, new RegExp(`    ${ids.nested.replaceAll("/", "\\/")}`, "u"));
+  assert.doesNotMatch(tree.stdout, new RegExp(ids.need.replaceAll("/", "\\/"), "u"));
+  assert.doesNotMatch(tree.stdout, /reference/u);
+
+  const forbidden = await runCli(["-C", root, "task", "tree", "--full", ids.root]);
+  assert.notEqual(forbidden.code, 0);
+  assert.match(`${forbidden.stdout}\n${forbidden.stderr}`, /option --full is not valid for task tree/u);
+
+  assert.equal((await invoke(parseArgv(["-C", root, "task", "update", ids.root, "--parent", ids.nested])) as { kind: string }).kind, "accepted");
+  const cycled = await runCli(["-C", root, "task", "tree", ids.root], 36);
+  assert.equal(cycled.code, 0, cycled.stderr);
+  assert.match(cycled.stdout, /cycle/u);
+  assert.match(cycled.stdout, new RegExp(ids.root.replaceAll("/", "\\/"), "u"));
+  const doctor = await runCli(["-C", root, "task", "doctor", "--json"]);
+  assert.equal(doctor.code, 1, doctor.stderr);
+  assert.match(doctor.stdout, /"relation":"parent"/u);
 });
 
 test("incomplete compose rendering keeps draft on stdout and diagnostics separate", () => {

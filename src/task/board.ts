@@ -10,7 +10,11 @@ export type TaskDetailFacts = Readonly<{
   blocks: readonly TaskRef[]; parent: TaskRef | null; children: readonly TaskRef[];
   supersedes: readonly TaskRef[]; supersededBy: readonly TaskRef[]; related: readonly TaskRef[];
 }>;
-export type TaskTreeNode = Readonly<{ task: TaskRef & Readonly<{ priority: TaskPriority | null }>; cycle?: true; reference?: true; needs: readonly TaskTreeNode[] }>;
+export type TaskTreeNode = Readonly<{
+  task: TaskRef & Readonly<{ priority: TaskPriority | null }>;
+  cycle?: true;
+  children: readonly TaskTreeNode[];
+}>;
 export type TaskBoard = Readonly<{ tasks: ReadonlyMap<TaskId, TaskDocument> }>;
 type TaskRelation = "needs" | "parent" | "supersedes" | "relates";
 export type TaskDoctorIssue =
@@ -142,15 +146,14 @@ export function diagnoseBoard(board: TaskBoard): readonly TaskDoctorIssue[] {
   return issues;
 }
 
-export function buildTree(board: TaskBoard, root: TaskId, full: boolean): TaskTreeNode | null {
+export function buildTree(board: TaskBoard, root: TaskId): TaskTreeNode | null {
   if (!board.tasks.has(root)) return null;
-  const expanded = new Set<TaskId>();
   const walk = (id: TaskId, path: readonly TaskId[]): TaskTreeNode => {
-    const ref = taskRef(board, id); const task = board.tasks.get(id);
-    if (path.includes(id)) return { task: { ...ref, priority: task?.priority ?? null }, cycle: true, needs: [] };
-    if (!full && expanded.has(id)) return { task: { ...ref, priority: task?.priority ?? null }, reference: true, needs: [] };
-    expanded.add(id);
-    return { task: { ...ref, priority: task?.priority ?? null }, needs: task === undefined ? [] : task.needs.map((need) => walk(need, [...path, id])) };
+    const ref = taskRef(board, id);
+    const task = board.tasks.get(id);
+    const node = { task: { ...ref, priority: task?.priority ?? null } };
+    if (path.includes(id)) return { ...node, cycle: true, children: [] };
+    return { ...node, children: children(board, id).map((child) => walk(child.id, [...path, id])) };
   };
   return walk(root, []);
 }

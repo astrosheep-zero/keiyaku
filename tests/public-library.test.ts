@@ -224,19 +224,25 @@ test("task package export exposes only the Tasks-first native surface", () => {
   const directory = externalConsumer();
   const source = [
     'import { World } from "@astrosheep/keiyaku";',
-    'import { Tasks, type Task, type TaskId, type TaskMutationResult } from "@astrosheep/keiyaku/task";',
+    'import { Tasks, type Task, type TaskDecompositionTree, type TaskId, type TaskMutationResult, type TaskTreeNode } from "@astrosheep/keiyaku/task";',
     'const world = null as unknown as import("@astrosheep/keiyaku").WorldRoot;',
     'const tasks = Tasks.of(world);',
     'const task: Task = tasks.task({ id: "task/example" });',
     'const id: TaskId = task.id;',
     'const result: Promise<TaskMutationResult> = tasks.add({ title: "Example", state: "in_progress", note: "initial" });',
+    'const tree: Promise<TaskDecompositionTree> = task.tree();',
+    'const node = null as unknown as TaskTreeNode;',
     'void task.update({ note: "replacement" });',
     'void task.drop({ note: "obsolete" });',
     '// @ts-expect-error Task has no static construction surface',
     'Task.at({ path: "." });',
     '// @ts-expect-error callers do not choose IDs during creation',
     'tasks.add({ id: "task/chosen", title: "Chosen" });',
-    'void tasks; void task; void id; void result;',
+    '// @ts-expect-error tree accepts no full option',
+    'void task.tree({ full: true });',
+    '// @ts-expect-error DAG residue type is not exported',
+    'type OldTree = import("@astrosheep/keiyaku/task").TaskDependencyTree;',
+    'void tasks; void task; void id; void result; void tree; void node;',
   ].join("\n");
   writeFileSync(join(directory, "consumer-task.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer-task.ts"], { cwd: directory, stdio: "ignore" });

@@ -18,8 +18,8 @@ export type BlockedTaskList = TaskOutcome<TaskPage<BlockedTaskRow>>;
 export type TaskQueryResult = TaskOutcome<TaskPage<TaskQueryRow>>;
 export type TaskNamespaceResult = TaskOutcome<readonly string[]>;
 export type TaskDoctorReport = Readonly<{ issues: readonly TaskDoctorIssue[] }>;
-export type TaskDependencyTree = TaskOutcome<TaskTreeNode>;
-export type { AddTaskDocumentInput, AddTaskInput, BlockedTaskRow, TaskBatchResult, TaskCompositionResult, TaskDoctorIssue, TaskId, TaskMutationResult, TaskOutcome, TaskPriority, TaskRef, TaskRefusal, TaskRetry, TaskRow, TaskState, TaskUpdateResult, TaskView, UpdateTaskInput, TaskPage, TaskQueryExpression, TaskQueryPredicate, TaskQueryRow, TaskQuerySort };
+export type TaskDecompositionTree = TaskOutcome<TaskTreeNode>;
+export type { AddTaskDocumentInput, AddTaskInput, BlockedTaskRow, TaskBatchResult, TaskCompositionResult, TaskDoctorIssue, TaskId, TaskMutationResult, TaskOutcome, TaskPriority, TaskRef, TaskRefusal, TaskRetry, TaskRow, TaskState, TaskTreeNode, TaskUpdateResult, TaskView, UpdateTaskInput, TaskPage, TaskQueryExpression, TaskQueryPredicate, TaskQueryRow, TaskQuerySort };
 export { TaskAuthorityCorruptionError };
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -96,10 +96,9 @@ class TaskHandle {
     const facts = projectDetailFacts((await readBoard(this.world)).board, this.id);
     return facts === null ? null : { ...facts, task: taskView(facts.task) };
   }
-  async tree(input?: Readonly<{ full?: boolean }>): Promise<TaskDependencyTree> {
-    const value = record(input ?? {}, "tree input"); closed(value, ["full"], "tree input");
-    if (value.full !== undefined && typeof value.full !== "boolean") throw new TypeError("full must be a boolean");
-    const node = buildTree((await readBoard(this.world)).board, this.id, value.full ?? false);
+  async tree(): Promise<TaskDecompositionTree> {
+    if (arguments.length > 0) throw new TypeError("tree accepts no input");
+    const node = buildTree((await readBoard(this.world)).board, this.id);
     return node === null ? { kind: "refused", refusal: { kind: "task-missing", taskId: this.id } } : { kind: "accepted", value: node };
   }
   update(input: UpdateTaskInput): Promise<TaskUpdateResult> { return updateTask(this.world, this.id, updateInput(input)); }
