@@ -1,5 +1,5 @@
 import type { TaskId, TaskPriority, TaskQueryExpression, TaskQueryPredicate, TaskState } from "../../task/index.js";
-import { MAX_TASK_LIMIT, normalizeTaskQuery } from "../../task/query.js";
+import { isTaskRelationPredicateField, MAX_TASK_LIMIT, normalizeTaskQuery } from "../../task/query.js";
 
 export type { TaskQueryExpression } from "../../task/index.js";
 
@@ -123,11 +123,18 @@ function parseTextPredicate(field: "title" | "id", operator: Token, value: Token
 }
 
 function parseRelationPredicate(
-  field: "under" | "needs" | "blocks",
+  field: Token,
   operator: Token,
   value: Token,
 ): TaskQueryPredicate {
-  return { field, operator: equalityOperator(operator, field), value: canonicalTaskId(value, field) };
+  if (!isTaskRelationPredicateField(field.value)) {
+    syntax(`unknown query field ${JSON.stringify(field.value)}`, field.offset);
+  }
+  return {
+    field: field.value,
+    operator: equalityOperator(operator, field.value),
+    value: canonicalTaskId(value, field.value),
+  };
 }
 
 function parseBooleanPredicate(field: "ready" | "blocked", operator: Token, value: Token): TaskQueryPredicate {
@@ -195,14 +202,13 @@ class Parser {
         operator: equalityOperator(operator, "parent"),
         value: value.value === "none" ? null : canonicalTaskId(value, "parent"),
       };
-      case "under": return parseRelationPredicate("under", operator, value);
-      case "needs": return parseRelationPredicate("needs", operator, value);
-      case "blocks": return parseRelationPredicate("blocks", operator, value);
       case "ready": return parseBooleanPredicate("ready", operator, value);
       case "blocked": return parseBooleanPredicate("blocked", operator, value);
       case "created": return parseTimestampPredicate("created", operator, value);
       case "updated": return parseTimestampPredicate("updated", operator, value);
-      default: return syntax(`unknown query field ${JSON.stringify(field.value)}`, field.offset);
+      default:
+        if (isTaskRelationPredicateField(field.value)) return parseRelationPredicate(field, operator, value);
+        return syntax(`unknown query field ${JSON.stringify(field.value)}`, field.offset);
     }
   }
 }

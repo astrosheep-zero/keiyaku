@@ -1,6 +1,9 @@
 import type { WorldRoot } from "../world.js";
 export type { WorldRoot } from "../world.js";
-import { buildTree, diagnoseBoard, projectDetailFacts, type BlockedTaskRow, type TaskDetailFacts, type TaskDoctorIssue, type TaskRef, type TaskRow, type TaskTreeNode } from "./board.js";
+import {
+  buildTree, diagnoseBoard, projectDetailFacts, taskRelations, type BlockedTaskRow,
+  type TaskDetailFacts, type TaskDoctorIssue, type TaskRef, type TaskRow, type TaskTreeNode,
+} from "./board.js";
 import { composeTasks, type TaskCompositionResult } from "./compose.js";
 import { TaskAuthorityCorruptionError, type TaskPriority, type TaskState } from "./document.js";
 import { isTaskSegment, parseTaskId, type TaskId } from "./identity.js";
@@ -10,7 +13,11 @@ import {
   type TaskMutationResult, type TaskOutcome, type TaskRefusal, type TaskRetry, type TaskUpdateResult, type TaskView, type UpdateTaskInput,
 } from "./operations.js";
 import { readBoard } from "./store.js";
-import { isValidTaskLimit, normalizeTaskQuery, type TaskPage, type TaskQueryExpression, type TaskQueryPredicate, type TaskQueryRow, type TaskQuerySort, MAX_TASK_LIMIT, DEFAULT_TASK_LIMIT } from "./query.js";
+import {
+  isTaskRelationPredicateField, isValidTaskLimit, normalizeTaskQuery, TASK_RELATION_PREDICATE_FIELDS,
+  type TaskPage, type TaskQueryExpression, type TaskQueryPredicate, type TaskQueryRow, type TaskQuerySort,
+  type TaskRelationPredicateField, MAX_TASK_LIMIT, DEFAULT_TASK_LIMIT,
+} from "./query.js";
 
 export type TaskDetail = Omit<TaskDetailFacts, "task"> & Readonly<{ task: TaskView }>;
 export type TaskList = TaskOutcome<TaskPage<TaskRow>>;
@@ -19,8 +26,13 @@ export type TaskQueryResult = TaskOutcome<TaskPage<TaskQueryRow>>;
 export type TaskNamespaceResult = TaskOutcome<readonly string[]>;
 export type TaskDoctorReport = Readonly<{ issues: readonly TaskDoctorIssue[] }>;
 export type TaskDecompositionTree = TaskOutcome<TaskTreeNode>;
-export type { AddTaskDocumentInput, AddTaskInput, BlockedTaskRow, TaskBatchResult, TaskCompositionResult, TaskDoctorIssue, TaskId, TaskMutationResult, TaskOutcome, TaskPriority, TaskRef, TaskRefusal, TaskRetry, TaskRow, TaskState, TaskTreeNode, TaskUpdateResult, TaskView, UpdateTaskInput, TaskPage, TaskQueryExpression, TaskQueryPredicate, TaskQueryRow, TaskQuerySort };
-export { TaskAuthorityCorruptionError };
+export type {
+  AddTaskDocumentInput, AddTaskInput, BlockedTaskRow, TaskBatchResult, TaskCompositionResult, TaskDoctorIssue,
+  TaskId, TaskMutationResult, TaskOutcome, TaskPriority, TaskRef, TaskRefusal, TaskRetry, TaskRow, TaskState,
+  TaskTreeNode, TaskUpdateResult, TaskView, UpdateTaskInput, TaskPage, TaskQueryExpression, TaskQueryPredicate,
+  TaskQueryRow, TaskQuerySort, TaskRelationPredicateField,
+};
+export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS, isTaskRelationPredicateField };
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object`);
@@ -99,12 +111,14 @@ function updateInput(input: unknown): UpdateTaskInput {
 class TaskHandle {
   constructor(readonly id: TaskId, private readonly world: WorldRoot) {}
   async read(): Promise<TaskDetail | null> {
-    const facts = projectDetailFacts((await readBoard(this.world)).board, this.id);
+    const board = (await readBoard(this.world)).board;
+    const facts = projectDetailFacts(board, this.id, taskRelations.of(board));
     return facts === null ? null : { ...facts, task: taskView(facts.task) };
   }
   async tree(): Promise<TaskDecompositionTree> {
     if (arguments.length > 0) throw new TypeError("tree accepts no input");
-    const node = buildTree((await readBoard(this.world)).board, this.id);
+    const board = (await readBoard(this.world)).board;
+    const node = buildTree(board, this.id, taskRelations.of(board));
     return node === null ? { kind: "refused", refusal: { kind: "task-missing", taskId: this.id } } : { kind: "accepted", value: node };
   }
   update(input: UpdateTaskInput): Promise<TaskUpdateResult> { return updateTask(this.world, this.id, updateInput(input)); }

@@ -133,6 +133,13 @@ descendant observation and scoped selection, but never cascades lifecycle or
 propagates needs. `supersedes` is navigation, and `relates` is nonblocking;
 neither changes readiness or lifecycle.
 
+Each complete board observation constructs one Task-owned ephemeral relation
+projection. Task detail, blocker and status views, recursive tree, and query
+consume that same projection; none reconstructs reverse relations by rescanning
+the board. Outgoing declarations remain canonical Task-document authority. The
+projection is derived read state only: it is neither persisted nor cached across
+board observations.
+
 ## Native TypeScript Surface
 
 `@astrosheep/keiyaku/task` is the sole public import. Inputs are readonly
@@ -256,10 +263,11 @@ prose inference. Blocked rows add unresolved blocker references only. File
 mtime is never read.
 
 `query` is the general read surface over one Task board snapshot. Its public
-input is a typed expression tree, never a shell string. The predicate fields
-are `state`, `priority`, `title`, `id`, `parent`, recursive `under`, `needs`,
-reverse `blocks`, `ready`, `blocked`, `created`, and `updated`; boolean nodes
-are `and`, `or`, and `not`. For a candidate row `R`, `blocks=X` is true if and
+input is a typed expression tree, never a shell string. Task owns the exported
+relation-predicate vocabulary for `under`, `needs`, and `blocks`. The predicate
+fields are `state`, `priority`, `title`, `id`, `parent`, recursive `under`,
+`needs`, reverse `blocks`, `ready`, `blocked`, `created`, and `updated`;
+boolean nodes are `and`, `or`, and `not`. For a candidate row `R`, `blocks=X` is true if and
 only if `X` is in `R.blocks`, equivalently if and only if `R.id` is in
 `X.needs`; `blocks!=X` is only the negation of this condition. The evaluator
 rejects unknown fields, incompatible

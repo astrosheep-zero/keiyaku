@@ -5,9 +5,10 @@ import { join } from "node:path";
 import test from "node:test";
 import { Tasks, type TaskId, type TaskTreeNode } from "../src/task/index.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
+import { taskRelations } from "../src/task/board.js";
 import { parseTaskDocument, serializeTaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
-import { settleTask } from "../src/task/operations.js";
+import { observeTaskStatusRows, settleTask } from "../src/task/operations.js";
 import { replaceAuthority, withTaskLocks } from "../src/task/store.js";
 import { World } from "../src/world.js";
 
@@ -146,6 +147,106 @@ test("bounded Task query filters before limit and parent views recurse", async (
   if (blocked.kind === "accepted") assert.deepEqual(blocked.value.rows.map((row) => row.id), [nested]);
   assert.deepEqual(await tasks.ready({ parent: "task/missing" }), { kind: "refused", refusal: { kind: "task-missing", taskId: "task/missing" } });
   assert.deepEqual(await tasks.query({ where: { kind: "predicate", predicate: { field: "under", operator: "=", value: "task/missing" } } }), { kind: "refused", refusal: { kind: "task-missing", taskId: "task/missing" } });
+});
+
+test("detail and query agree that blocks is reverse needs membership", async () => {
+  const { tasks } = await world();
+  const blocker = acceptedId(await tasks.add({ title: "A" }));
+  const blocked = acceptedId(await tasks.add({ title: "B", needs: [blocker] }));
+  const other = acceptedId(await tasks.add({ title: "C" }));
+
+  const shown = await tasks.task({ id: blocker }).read();
+  assert.deepEqual(shown?.blocks.map((item) => item.id), [blocked]);
+  const shownBlocked = await tasks.task({ id: blocked }).read();
+  assert.deepEqual(shownBlocked?.blocks.map((item) => item.id), []);
+
+  const selectsBlocker = await tasks.query({
+    scope: "world",
+    where: { kind: "predicate", predicate: { field: "blocks", operator: "=", value: blocked } },
+  });
+  assert.equal(selectsBlocker.kind, "accepted");
+  if (selectsBlocker.kind === "accepted") {
+    assert.deepEqual(selectsBlocker.value.rows.map((row) => row.id), [blocker]);
+    assert.deepEqual(selectsBlocker.value.rows[0]?.blocks.map((item) => item.id), [blocked]);
+  }
+
+  const doesNotSelectBlocked = await tasks.query({
+    scope: "world",
+    where: { kind: "predicate", predicate: { field: "blocks", operator: "=", value: blocker } },
+  });
+  assert.equal(doesNotSelectBlocked.kind, "accepted");
+  if (doesNotSelectBlocked.kind === "accepted") {
+    assert.deepEqual(doesNotSelectBlocked.value.rows.map((row) => row.id), []);
+  }
+
+  const complement = await tasks.query({
+    scope: "world",
+    where: { kind: "predicate", predicate: { field: "blocks", operator: "!=", value: blocked } },
+  });
+  assert.equal(complement.kind, "accepted");
+  if (complement.kind === "accepted") {
+    assert.deepEqual(complement.value.rows.map((row) => row.id), [blocked, other]);
+  }
+});
+
+test("one board observation constructs one relation projection", async (t) => {
+  const { tasks } = await world();
+  const parent = acceptedId(await tasks.add({ title: "Area" }));
+  const blocker = acceptedId(await tasks.add({ title: "Need" }));
+  const child = acceptedId(await tasks.add({ title: "Child", parent, needs: [blocker], relates: [blocker] }));
+  acceptedId(await tasks.add({ title: "Replacement", supersedes: [child] }));
+  const original = taskRelations.of.bind(taskRelations);
+  let constructions = 0;
+  t.mock.method(taskRelations, "of", (board: Parameters<typeof original>[0]) => {
+    constructions += 1;
+    return original(board);
+  });
+
+  constructions = 0;
+  assert.deepEqual((await tasks.task({ id: blocker }).read())?.blocks.map((item) => item.id), [child]);
+  assert.equal(constructions, 1);
+
+  constructions = 0;
+  const status = await observeTaskStatusRows(tasks.root);
+  assert.ok(status.some((row) => "blockers" in row && row.id === child));
+  assert.equal(constructions, 1);
+
+  constructions = 0;
+  const blocked = await tasks.blocked({ scope: "world" });
+  assert.equal(blocked.kind, "accepted");
+  if (blocked.kind === "accepted") assert.deepEqual(blocked.value.rows.map((row) => row.id), [child]);
+  assert.equal(constructions, 1);
+
+  constructions = 0;
+  const tree = await tasks.task({ id: parent }).tree();
+  assert.equal(tree.kind, "accepted");
+  if (tree.kind === "accepted") assert.deepEqual(tree.value.children.map((node) => node.task.id), [child]);
+  assert.equal(constructions, 1);
+
+  constructions = 0;
+  const queried = await tasks.query({
+    scope: "world",
+    where: { kind: "predicate", predicate: { field: "blocks", operator: "=", value: child } },
+  });
+  assert.equal(queried.kind, "accepted");
+  if (queried.kind === "accepted") assert.deepEqual(queried.value.rows.map((row) => row.id), [blocker]);
+  assert.equal(constructions, 1);
+
+  acceptedId(await tasks.add({ title: "Extra sibling", parent }));
+  constructions = 0;
+  const again = await tasks.query({
+    scope: "world",
+    where: { kind: "predicate", predicate: { field: "under", operator: "=", value: parent } },
+  });
+  assert.equal(again.kind, "accepted");
+  if (again.kind === "accepted") assert.equal(again.value.total, 2);
+  assert.equal(constructions, 1);
+
+  const boardSource = readFileSync(new URL("../src/task/board.ts", import.meta.url), "utf8");
+  const querySource = readFileSync(new URL("../src/task/query.ts", import.meta.url), "utf8");
+  assert.equal((boardSource.match(/function createTaskRelations/g) ?? []).length, 1);
+  assert.doesNotMatch(boardSource, /function reverse\(|function children\(|function related\(/u);
+  assert.doesNotMatch(querySource, /indexChildren|indexReverseNeeds/u);
 });
 
 test("Task query defaults to active Tasks", async () => {

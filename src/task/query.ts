@@ -1,10 +1,15 @@
 import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
 import { formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
-import type { BlockedTaskRow, TaskBoard, TaskRef, TaskRow } from "./board.js";
-import { taskDisposition } from "./board.js";
+import type { BlockedTaskRow, TaskBoard, TaskRef, TaskRelationProjection, TaskRow } from "./board.js";
+import { taskDisposition, taskRef, taskRelations } from "./board.js";
 
 export const DEFAULT_TASK_LIMIT = 100;
 export const MAX_TASK_LIMIT = 1_000;
+export const TASK_RELATION_PREDICATE_FIELDS = ["under", "needs", "blocks"] as const;
+export type TaskRelationPredicateField = (typeof TASK_RELATION_PREDICATE_FIELDS)[number];
+export function isTaskRelationPredicateField(value: string): value is TaskRelationPredicateField {
+  return (TASK_RELATION_PREDICATE_FIELDS as readonly string[]).includes(value);
+}
 
 export type TaskQueryComparison = "=" | "!=" | "<" | "<=" | ">" | ">=" | "~";
 
@@ -119,7 +124,7 @@ function normalizeParentPredicate(
 
 function normalizeRelationPredicate(
   input: Record<string, unknown>,
-  field: "under" | "needs" | "blocks",
+  field: TaskRelationPredicateField,
   operator: TaskQueryComparison,
 ): TaskQueryPredicate {
   return { field, operator: equalityOperator(operator, field), value: taskId(input.value, `${field} value`) };
@@ -154,14 +159,13 @@ function predicate(value: unknown): TaskQueryPredicate {
     case "title": return normalizeTextPredicate(input, "title", operator);
     case "id": return normalizeTextPredicate(input, "id", operator);
     case "parent": return normalizeParentPredicate(input, operator);
-    case "under": return normalizeRelationPredicate(input, "under", operator);
-    case "needs": return normalizeRelationPredicate(input, "needs", operator);
-    case "blocks": return normalizeRelationPredicate(input, "blocks", operator);
     case "ready": return normalizeBooleanPredicate(input, "ready", operator);
     case "blocked": return normalizeBooleanPredicate(input, "blocked", operator);
     case "created": return normalizeTimestampPredicate(input, "created", operator);
     case "updated": return normalizeTimestampPredicate(input, "updated", operator);
-    default: return fail(`unknown query field: ${field}`);
+    default:
+      if (isTaskRelationPredicateField(field)) return normalizeRelationPredicate(input, field, operator);
+      return fail(`unknown query field: ${field}`);
   }
 }
 
@@ -186,48 +190,29 @@ function compare(left: string | number, operator: Exclude<TaskQueryComparison, "
   return left >= right;
 }
 function membership(left: boolean, operator: "=" | "!=", right: boolean): boolean { return operator === "=" ? left === right : left !== right; }
-type TaskChildren = ReadonlyMap<TaskId, readonly TaskId[]>;
-type ReverseNeeds = ReadonlyMap<TaskId, ReadonlySet<TaskId>>;
 
-function indexChildren(board: TaskBoard): TaskChildren {
-  const children = new Map<TaskId, TaskId[]>();
-  for (const task of board.tasks.values()) {
-    if (task.parent === null) continue;
-    const siblings = children.get(task.parent) ?? [];
-    siblings.push(task.id);
-    children.set(task.parent, siblings);
-  }
-  return children;
-}
-
-function indexReverseNeeds(board: TaskBoard): ReverseNeeds {
-  const reverse = new Map<TaskId, Set<TaskId>>();
-  for (const task of board.tasks.values()) {
-    for (const need of task.needs) {
-      const blockers = reverse.get(need) ?? new Set<TaskId>();
-      blockers.add(task.id);
-      reverse.set(need, blockers);
-    }
-  }
-  return reverse;
-}
-
-function descendants(children: TaskChildren, parent: TaskId): Set<TaskId> {
+function descendants(relations: TaskRelationProjection, parent: TaskId): Set<TaskId> {
   const result = new Set<TaskId>(), pending = [parent];
   while (pending.length > 0) {
     const current = pending.shift()!;
-    for (const child of children.get(current) ?? []) {
-      if (result.has(child)) continue;
-      result.add(child);
-      pending.push(child);
+    for (const child of relations.children(current)) {
+      if (result.has(child.id)) continue;
+      result.add(child.id);
+      pending.push(child.id);
     }
   }
   return result;
 }
-function relation(board: TaskBoard, reverseNeeds: ReverseNeeds, id: TaskId, field: "needs" | "blocks", target: TaskId): boolean {
+function relation(
+  board: TaskBoard,
+  relations: TaskRelationProjection,
+  id: TaskId,
+  field: "needs" | "blocks",
+  target: TaskId,
+): boolean {
   const task = board.tasks.get(id);
   if (task === undefined) return false;
-  return field === "needs" ? task.needs.includes(target) : reverseNeeds.get(target)?.has(id) === true;
+  return field === "needs" ? task.needs.includes(target) : relations.blocks(id).some((ref) => ref.id === target);
 }
 
 function matchText(left: string, operator: "=" | "!=" | "~", right: string): boolean {
@@ -246,14 +231,9 @@ function isBlocked(board: TaskBoard, task: TaskDocument): boolean {
   });
 }
 
-function taskRef(board: TaskBoard, id: TaskId): TaskRef {
-  const task = board.tasks.get(id);
-  return task === undefined ? { id, title: null, state: "missing" } : { id, title: task.title, state: task.state };
-}
-
 function matchesPredicate(
   board: TaskBoard,
-  reverseNeeds: ReverseNeeds,
+  relations: TaskRelationProjection,
   task: TaskDocument,
   value: TaskQueryPredicate,
   under: ReadonlyMap<TaskId, Set<TaskId>>,
@@ -265,8 +245,8 @@ function matchesPredicate(
     case "id": return matchText(task.id, value.operator, value.value);
     case "parent": return compare(task.parent ?? "", value.operator, value.value ?? "");
     case "under": return matchRelation(under.get(value.value)?.has(task.id) === true, value.operator);
-    case "needs": return matchRelation(relation(board, reverseNeeds, task.id, "needs", value.value), value.operator);
-    case "blocks": return matchRelation(relation(board, reverseNeeds, task.id, "blocks", value.value), value.operator);
+    case "needs": return matchRelation(relation(board, relations, task.id, "needs", value.value), value.operator);
+    case "blocks": return matchRelation(relation(board, relations, task.id, "blocks", value.value), value.operator);
     case "ready": return membership(taskDisposition(board, task) === "ready", value.operator, value.value);
     case "blocked": return membership(isBlocked(board, task), value.operator, value.value);
     case "created": return compare(task.createdAt, value.operator, value.value);
@@ -274,23 +254,27 @@ function matchesPredicate(
   }
 }
 
-function matches(board: TaskBoard, reverseNeeds: ReverseNeeds, task: TaskDocument, expression: TaskQueryExpression, under: ReadonlyMap<TaskId, Set<TaskId>>): boolean {
-  if (expression.kind === "not") return !matches(board, reverseNeeds, task, expression.term, under);
+function matches(
+  board: TaskBoard,
+  relations: TaskRelationProjection,
+  task: TaskDocument,
+  expression: TaskQueryExpression,
+  under: ReadonlyMap<TaskId, Set<TaskId>>,
+): boolean {
+  if (expression.kind === "not") return !matches(board, relations, task, expression.term, under);
   if (expression.kind !== "predicate") {
     return expression.kind === "and"
-      ? expression.terms.every((term) => matches(board, reverseNeeds, task, term, under))
-      : expression.terms.some((term) => matches(board, reverseNeeds, task, term, under));
+      ? expression.terms.every((term) => matches(board, relations, task, term, under))
+      : expression.terms.some((term) => matches(board, relations, task, term, under));
   }
-  return matchesPredicate(board, reverseNeeds, task, expression.predicate, under);
+  return matchesPredicate(board, relations, task, expression.predicate, under);
 }
-function row(board: TaskBoard, reverseNeeds: ReverseNeeds, task: TaskDocument): TaskQueryRow {
+function row(board: TaskBoard, relations: TaskRelationProjection, task: TaskDocument): TaskQueryRow {
   return {
     id: task.id, title: task.title, state: task.state, priority: task.priority, disposition: taskDisposition(board, task),
     parent: task.parent,
     needs: task.needs.map((need) => taskRef(board, need)),
-    blocks: [...(reverseNeeds.get(task.id) ?? [])]
-      .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)))
-      .map((id) => taskRef(board, id)),
+    blocks: relations.blocks(task.id),
     createdAt: task.createdAt, updatedAt: task.updatedAt,
   };
 }
@@ -309,13 +293,12 @@ export function projectQuery(
   expression: TaskQueryExpression,
   sort: TaskQuerySort = "priority",
   limit = DEFAULT_TASK_LIMIT,
+  relations: TaskRelationProjection = taskRelations.of(board),
 ): TaskPage<TaskQueryRow> {
-  const children = indexChildren(board);
-  const reverseNeeds = indexReverseNeeds(board);
-  const under = new Map(queryUnderTargets(expression).map((target) => [target, descendants(children, target)]));
+  const under = new Map(queryUnderTargets(expression).map((target) => [target, descendants(relations, target)]));
   const selected = sortTasks([...board.tasks.values()].filter((task) => scope === null || sameNamespace(parseTaskId(task.id).namespace, scope))
-    .filter((task) => matches(board, reverseNeeds, task, expression, under)), sort);
-  const rows = selected.slice(0, limit).map((task) => row(board, reverseNeeds, task));
+    .filter((task) => matches(board, relations, task, expression, under)), sort);
+  const rows = selected.slice(0, limit).map((task) => row(board, relations, task));
   return { rows, total: selected.length, returned: rows.length, truncated: rows.length < selected.length };
 }
 

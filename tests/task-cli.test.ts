@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -8,7 +8,9 @@ import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
+import { parseTaskQueryExpression } from "../src/cli/commands/task-query.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "../src/cli/render/task.js";
+import { TASK_RELATION_PREDICATE_FIELDS } from "../src/task/index.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import type { TaskInvocationResult } from "../src/cli/commands/task-invoke.js";
 import { makeGitRepository } from "./support/git.js";
@@ -126,6 +128,14 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
   const query = parseArgv(["task", "query", "--where", "priority <= 1 and not state = done", "--sort", "updated", "--limit", "10"]);
   assert.equal(query.command.command, "task");
   if (query.command.command === "task") assert.equal(query.command.where?.kind, "and");
+  assert.deepEqual(TASK_RELATION_PREDICATE_FIELDS, ["under", "needs", "blocks"]);
+  assert.deepEqual(parseTaskQueryExpression("blocks=task/b"), {
+    kind: "predicate", predicate: { field: "blocks", operator: "=", value: "task/b" },
+  });
+  assert.doesNotMatch(
+    readFileSync(new URL("../src/cli/commands/task-query.ts", import.meta.url), "utf8"),
+    /"under" \| "needs" \| "blocks"/u,
+  );
   assert.throws(() => parseArgv(["task", "query", "--where", "prioty = 1"]), /unknown query field/u);
   assert.throws(() => parseArgv(["task", "query", "--where", "title ~ auth"]), /double quotes/u);
   assert.throws(() => parseArgv(["task", "query", "--limit", "0"]), /--limit/u);

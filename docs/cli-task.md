@@ -93,10 +93,13 @@ at the CLI boundary into a typed AST; the Task evaluator never receives an
 unparsed shell string. Terms support `and`, `or`, `not`, and parentheses, with
 these predicates: `state`, `priority`, `title`, `id`, `parent`, `under`,
 `needs`, `blocks`, `ready`, `blocked`, `created`, and `updated`. String values
-use double quotes; TaskIds are complete coordinates. `under` selects recursive
-descendants and excludes the addressed parent. `ready` and `blocked` remain
-named high-frequency views backed by the same evaluator. With no `--where`,
-query matches active Tasks and excludes `done` and `drop`.
+use double quotes; TaskIds are complete coordinates. Relation predicate words
+are consumed from Task's canonical vocabulary; this chapter does not declare a
+parallel set. Tokenization, quoting, offsets, shorthand, diagnostics, and
+presentation stay with the CLI. `under` selects recursive descendants and
+excludes the addressed parent. `ready` and `blocked` remain named
+high-frequency views backed by the same evaluator. With no `--where`, query
+matches active Tasks and excludes `done` and `drop`.
 
 The default limit is 100; explicit limits are integers from 1 through 1000.
 The default sort is priority ascending then TaskId bytes. `created` and
