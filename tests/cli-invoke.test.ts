@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { GIT_REF, readRef, repositoryAt } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
@@ -10,6 +10,7 @@ import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import { BindDraftError, preserveBindDraft } from "../src/cli/draft.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
 import { makeGitRepository, observeContract, withGitShim } from "./support/git.js";
@@ -320,6 +321,66 @@ test("bind defaults its target to the invocation worktree's current branch", asy
     : decodeContractDocument(state.terms.document.bytes);
   assert.equal(decoded?.title, "Markdown Bind");
   assert.deepEqual(decoded?.extensions, [{ title: "Rollout Notes", content: "first\n\n- second\n" }]);
+});
+
+test("bind refusals preserve exact stdin without partial Contract or Task effects", async () => {
+  const repository = repositoryWithMain();
+  const tasks = Tasks.of(await World.at(repository.path));
+  const added = await tasks.add({ title: "Still Open" });
+  assert.equal(added.kind, "accepted");
+  if (added.kind !== "accepted") throw new Error("Task setup was refused");
+  const source = contractDocument("Refused Draft");
+
+  const result = await invokeWithDocument(repository.path, [
+    "bind",
+    "--task", added.value.id,
+    "--after", "kei/missing-prerequisite",
+    "-",
+  ], source);
+
+  assert.equal(result.kind, "refused");
+  if (result.kind !== "refused" || result.draft?.path === undefined) {
+    throw new Error("bind refusal did not return a draft path");
+  }
+  assert.equal(readFileSync(resolve(repository.path, result.draft.path), "utf8"), source);
+  assert.deepEqual((await Keiyaku.list({ repo: await Repo.at({ path: repository.path }) })).rows, []);
+  const board = await tasks.list({ selection: "all", scope: "world" });
+  assert.equal(board.kind, "accepted");
+  if (board.kind === "accepted") assert.equal(board.value.rows.find((row) => row.id === added.value.id)?.state, "open");
+});
+
+test("invalid bind Markdown preserves exact stdin while retaining the original error", async () => {
+  const repository = repositoryWithMain();
+  const source = `---\r\ninvalid: [\r\n---\r\n${contractDocument("Invalid YAML")}`;
+  let observed: BindDraftError | undefined;
+
+  await assert.rejects(
+    () => invokeWithDocument(repository.path, ["bind", "-"], source),
+    (error: unknown) => {
+      if (!(error instanceof BindDraftError)) return false;
+      observed = error;
+      return error.original instanceof TypeError;
+    },
+  );
+
+  assert.notEqual(observed, undefined);
+  if (observed?.draft.path === undefined) throw new Error("invalid document did not return a draft path");
+  assert.equal(readFileSync(resolve(repository.path, observed.draft.path), "utf8"), source);
+  assert.deepEqual((await Keiyaku.list({ repo: await Repo.at({ path: repository.path }) })).rows, []);
+});
+
+test("successful bind leaves existing draft receipts untouched", async () => {
+  const repository = repositoryWithMain();
+  const world = await World.at(repository.path);
+  const old = await preserveBindDraft(world, "old refused input\n");
+  if (old.path === undefined) throw new Error(old.warning ?? "draft setup failed");
+  const path = resolve(repository.path, old.path);
+  const before = readFileSync(path);
+
+  const result = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Successful Bind"));
+
+  assert.equal(result.kind, "accepted");
+  assert.deepEqual(readFileSync(path), before);
 });
 
 test("bind observes an explicit target rather than the checked-out branch", async () => {

@@ -47,7 +47,6 @@ test("Region accepts only its closed positive path grammar", () => {
   ] as const;
   const refused = [
     ["/src"],
-    ["src/"],
     ["src//file"],
     ["src/../file"],
     ["src/foo..bar"],
@@ -59,6 +58,7 @@ test("Region accepts only its closed positive path grammar", () => {
   ] as const;
 
   for (const patterns of accepted) assert.deepEqual(region(patterns), patterns);
+  assert.deepEqual(region(["src/"]), ["src/**"]);
   for (const patterns of refused) {
     assert.throws(() => region(patterns), RegionDocumentError);
   }

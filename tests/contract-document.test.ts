@@ -66,7 +66,23 @@ test("contract Markdown decodes core fields and retains unknown H2 bytes", () =>
   assert.deepEqual(body.verification, []);
 });
 
+test("Region directory shorthand canonicalizes without rewriting document bytes", () => {
+  const source = document().replace("src/cli/**\ntests/**", "src/\ntests/**");
+  const decoded = decodeContractDocument(source);
+
+  assert.deepEqual(decoded.region, ["src/**", "tests/**"]);
+  assert.equal(decoded.document.bytes, source);
+  assert.throws(
+    () => decodeContractDocument(source.replace("src/", "src//")),
+    (error: unknown) => error instanceof TypeError && error.message.includes("may not contain an empty segment"),
+  );
+});
+
 test("contract Markdown rejects frontmatter, duplicate sections, and missing structure", () => {
+  assert.throws(
+    () => decodeContractDocument(`---\ninvalid: [\n---\n${document()}`),
+    (error: unknown) => error instanceof TypeError && error.name === "TypeError",
+  );
   assert.throws(
     () => decodeContractDocument(`---\nkind: contract\n---\n${document()}`),
     (error: unknown) => error instanceof TypeError && error.message.includes("contract document may not contain frontmatter"),

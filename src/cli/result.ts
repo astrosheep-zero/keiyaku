@@ -14,6 +14,11 @@ import type {
 import type { KanshiReport } from "../kanshi/index.js";
 import type { Catalog } from "../index.js";
 
+export type BindDraftReceipt = Readonly<
+  | { path: string; warning?: string }
+  | { path?: never; warning: string }
+>;
+
 export type Effect = ReconcileReport["effects"][number];
 
 export type AcceptedFact = Readonly<{
@@ -56,6 +61,7 @@ export type RefusedResult = Readonly<{
   verb: string;
   contract?: ContractId;
   refusal: unknown;
+  draft?: BindDraftReceipt;
 }>;
 
 export type RetryResult = Readonly<{

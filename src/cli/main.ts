@@ -18,6 +18,8 @@ import type { InvocationResult } from "./result.js";
 import type { SettingsInvocationResult } from "./invoke.js";
 import { renderSettingsText, settingsJsonValue } from "./render/settings.js";
 import { renderCatalogText } from "./render/catalog.js";
+import { BindDraftError } from "./draft.js";
+import { renderBindDraftReceipt } from "./render/refusal.js";
 
 function writeTask(command: ParsedTaskCommand, result: TaskInvocationResult): number {
   if (command.output === "json") process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -100,7 +102,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     const result = await invoke(parsed, { cwd: process.cwd() });
     return writeResult(parsed.command, result);
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    return error instanceof CliUsageError ? 1 : 3;
+    const original = error instanceof BindDraftError ? error.original : error;
+    process.stderr.write(`${original instanceof Error ? original.message : String(original)}\n`);
+    if (error instanceof BindDraftError) process.stderr.write(`${renderBindDraftReceipt(error.draft)}\n`);
+    return original instanceof CliUsageError ? 1 : 3;
   }
 }

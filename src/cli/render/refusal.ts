@@ -1,4 +1,4 @@
-import type { RefusedResult } from "../result.js";
+import type { BindDraftReceipt, RefusedResult } from "../result.js";
 
 type DirtyWorkspaceRefusal = Readonly<{
   kind: "dirty-workspace";
@@ -16,6 +16,7 @@ function dirtyWorkspace(value: unknown): value is DirtyWorkspaceRefusal {
 
 export function renderRefusal(result: RefusedResult): string {
   const contract = result.contract === undefined ? "" : ` ${result.contract}`;
+  let output: string;
   if (dirtyWorkspace(result.refusal)) {
     const lines = [`refused ${result.verb}${contract} dirty-workspace`];
     for (const category of ["staged", "unstaged", "untracked", "submodules"] as const) {
@@ -27,7 +28,16 @@ export function renderRefusal(result: RefusedResult): string {
     if (result.refusal.option !== undefined) {
       lines.push(`option ${result.refusal.option.flag} ${result.refusal.option.available ? "available" : "unavailable"}`);
     }
-    return lines.join("\n");
+    output = lines.join("\n");
+  } else {
+    output = `refused ${result.verb}${contract} ${JSON.stringify(result.refusal)}`;
   }
-  return `refused ${result.verb}${contract} ${JSON.stringify(result.refusal)}`;
+  return result.draft === undefined ? output : `${output}\n${renderBindDraftReceipt(result.draft)}`;
+}
+
+export function renderBindDraftReceipt(receipt: BindDraftReceipt): string {
+  return [
+    ...(receipt.path === undefined ? [] : [`draft preserved: ${receipt.path}`]),
+    ...(receipt.warning === undefined ? [] : [`warning: ${receipt.warning}`]),
+  ].join("\n");
 }

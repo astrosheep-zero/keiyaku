@@ -105,7 +105,12 @@ function verification(document: DocumentNode, section: SectionNode) {
 }
 
 export function decodeContractDocument(source: string): DecodedContractDocument {
-  const document = parseToAST(source);
+  let document: DocumentNode;
+  try {
+    document = parseToAST(source);
+  } catch (error) {
+    refusal(error instanceof Error ? error.message : String(error));
+  }
   if (document.frontmatter !== undefined) refusal("contract document may not contain frontmatter");
   const titles = indexedHeadings(indexDocument(document), { level: 1 })
     .filter((node): node is SectionNode => node.type === "section");

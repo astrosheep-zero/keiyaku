@@ -14,6 +14,7 @@ import { contractFromInput, resolveContextualContract, resolveKanshiContract, ty
 import { resolveNamedAddress } from "../library/address.js";
 import type { WorldRoot } from "../world.js";
 import { assertExplicitRepoUse, resolveCliCoordinates } from "./coordinates.js";
+import { BindDraftError, preserveBindDraft } from "./draft.js";
 
 export type { AcceptedFact, DiffUnavailable, InvocationResult, Lag } from "./result.js";
 
@@ -84,34 +85,52 @@ async function selectContract(repo: Repo, selector: string | undefined, scope: s
   return contractFromInput(repo, id);
 }
 
-async function invokeBind(
-  parsed: Extract<ParsedCommand, { command: "bind" }>,
-  repo: Repo,
-  edge: InvocationEdge,
-  configuration: Settings,
-  hooks: WorktreeHooks,
-): Promise<InvocationResult> {
+type BindInvocation = Readonly<{
+  parsed: Extract<ParsedCommand, { command: "bind" }>;
+  repo: Repo;
+  edge: InvocationEdge;
+  configuration: Settings;
+  hooks: WorktreeHooks;
+  establishWorld: () => Promise<WorldRoot>;
+}>;
+
+async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdown: string) {
+  try {
+    return preserveBindDraft(await establishWorld(), markdown);
+  } catch (error) {
+    return { warning: `bind draft could not be preserved: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+async function invokeBind({ parsed, repo, edge, configuration, hooks, establishWorld }: BindInvocation): Promise<InvocationResult> {
   const markdown = await edge.readStdin();
   const gates = selectedGates(configuration, parsed.gates);
   const actor = actorFromEdge(parsed.actor, edge.environment);
-  return resultFromMutationCall(
-    "bind",
-    () => bindFromCommand({
-      command: parsed,
-      repo,
-      markdown,
-      gates,
-      ...(actor === undefined ? {} : { actor }),
-      hooks,
-    }),
-    {
-      project: (result) => {
-        const bound = result.facts.find((fact) => fact.kind === "bind");
-        if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
-        return { target: bound.data.coordinates.target ?? null };
+  try {
+    const result = await resultFromMutationCall(
+      "bind",
+      () => bindFromCommand({
+        command: parsed,
+        repo,
+        markdown,
+        gates,
+        ...(actor === undefined ? {} : { actor }),
+        hooks,
+      }),
+      {
+        project: (accepted) => {
+          const bound = accepted.facts.find((fact) => fact.kind === "bind");
+          if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
+          return { target: bound.data.coordinates.target ?? null };
+        },
       },
-    },
-  );
+    );
+    if (result.kind !== "refused") return result;
+    return { ...result, draft: await bindDraftReceipt(establishWorld, markdown) };
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    throw new BindDraftError(error, await bindDraftReceipt(establishWorld, markdown));
+  }
 }
 
 function unavailableDiff(delivery: { integration: { snapshot: SnapshotId; changeId: ChangeId } }): DiffUnavailable {
@@ -375,7 +394,7 @@ async function invokeParsed(
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
     command: invocation.command,
   });
-  const { cwd, repo, world } = coordinates;
+  const { cwd, repo, world, establishWorld } = coordinates;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
     readStdin: runtime.readStdin ?? readStdin,
@@ -426,7 +445,7 @@ async function invokeParsed(
       return { kind: "observation", command: "reconcile", ...await contract.reconcile({ hooks, retryHooks: parsed.retryHooks }) };
     }
     case "bind":
-      return invokeBind(parsed, repo, edge, configuration, hooks);
+      return invokeBind({ parsed, repo, edge, configuration, hooks, establishWorld });
     default:
       return invokeExisting({ parsed, repo, edge, scope, configuration, hooks });
   }

@@ -59,10 +59,10 @@ document field remain library methodology, not journal-model vocabulary.
 Each nonblank line in `Region` is one repository-relative positive path
 pattern. `/` separates segments. Within a segment, `*` matches any number of
 characters other than `/`, and `?` matches exactly one such character. `**`
-matches any depth and may appear only as a complete segment. A pattern may not
-contain `!`, `[`, `]`, `{`, or `}`, begin with `/`, contain `..` or an empty
-segment, or end with `/`; a directory tree is written as `dir/**`. Invalid
-patterns are typed document refusals.
+matches any depth and may appear only as a complete segment. A final `/` is
+directory shorthand and is normalized to `/**`; no other empty segment is
+valid. A pattern may not contain `!`, `[`, `]`, `{`, or `}`, begin with `/`, or
+contain `..`. Invalid patterns are typed document refusals.
 
 The dialect computes exact intersection between two patterns from this closed
 grammar. It does not use a conservative approximation. This interpretation is

@@ -1,7 +1,7 @@
 ---
 id: task/make-bind-region-directories-tolerant-and-preser
 title: Make bind Region directories tolerant and preserve failed drafts
-state: open
+state: done
 priority: 1
 needs: []
 parent: null

@@ -43,13 +43,15 @@ function compileRegionPattern(pattern: string): CompiledRegionPattern {
   if (/[\r\n]/.test(pattern)) refusal(`Region pattern '${pattern}' must occupy one line`);
   if (/[!\[\]{}]/.test(pattern)) refusal(`Region pattern '${pattern}' contains a forbidden glob form`);
   if (pattern.startsWith("/")) refusal(`Region pattern '${pattern}' must be repository-relative`);
-  if (pattern.endsWith("/")) refusal(`Region pattern '${pattern}' may not end with /`);
   if (pattern.includes("..")) refusal(`Region pattern '${pattern}' may not contain ..`);
   const segments = pattern.split("/");
-  if (segments.some((segment) => segment.length === 0)) {
+  const directory = pattern.endsWith("/");
+  if (segments.some((segment, index) => segment.length === 0 && !(directory && index === segments.length - 1))) {
     refusal(`Region pattern '${pattern}' may not contain an empty segment`);
   }
-  return { source: pattern, segments: segments.map((segment) => compileSegment(segment, pattern)) };
+  const source = directory ? `${pattern}**` : pattern;
+  const canonical = directory ? [...segments.slice(0, -1), "**"] : segments;
+  return { source, segments: canonical.map((segment) => compileSegment(segment, pattern)) };
 }
 
 function segmentTransition(characters: readonly string[], index: number): SegmentTransition | null {
@@ -134,8 +136,7 @@ export function decodeRegion(document: DocumentNode, section: SectionNode): read
   if (other.length > 0) refusal("Region may contain only its fenced declaration");
   const patterns = blocks[0]!.lines.slice(1, -1).filter((line) => line.trim().length > 0);
   if (patterns.length === 0) refusal("Region must declare at least one path pattern");
-  for (const pattern of patterns) compileRegionPattern(pattern);
-  return patterns;
+  return patterns.map((pattern) => compileRegionPattern(pattern).source);
 }
 
 export function regionsOverlap(mine: readonly string[], theirs: readonly string[]): readonly [string, string][] {

@@ -129,6 +129,20 @@ uses exit `3`; it is not converted into a usage error. A genuine
 Stdin acquisition is awaited and completes before command adaptation begins;
 no synchronous read, lazy stream wrapper, or background input queue exists.
 
+After complete bind stdin has been acquired, a bind refusal or invalid Contract
+document preserves those exact bytes as a CLI receipt at
+`.keiyaku/draft/bind-<hex64>.md`, where `hex64` is the complete hexadecimal
+SHA-256 content hash. The path is immutable for those bytes, so
+concurrent distinct failures have distinct receipts and repeated equal failures
+are idempotent. Creation or repair uses an atomic same-directory replacement;
+an equal existing receipt keeps its bytes and renews its retention age. The CLI
+prints the path only after exact bytes are present. Each successful preservation
+also removes bind drafts older than seven days; successful binds never touch the
+draft directory. Draft write or sweep failure adds one warning without changing
+the bind result or exit status. The receipt is CLI-owned transient input custody,
+not Contract or Library state; recovery submits it through the ordinary `bind -`
+entry point.
+
 `bind` maps `--target`, `--here`, repeated `--after`, `--gates`, and `--actor`
 to `Keiyaku.bind`. An explicit `--target` remains literal input for the public
 target boundary. When it is omitted, the adapter supplies
