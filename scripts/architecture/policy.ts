@@ -390,7 +390,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/akuma-creation.ts"),
         any("library/fleet.ts"),
         any("library/catalog.ts"),
-        types("library/address.ts"),
+        any("library/address.ts"),
         types("library/region.ts"),
         types("settlement/settle.ts"),
       ],
@@ -440,13 +440,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "library/catalog.ts",
       allow: [
-        any("akuma/index.ts", ["Akuma", "AkumaList", "listArchetypes"]),
+        any("akuma/akuma.ts", ["Akuma", "AkumaList"]),
+        any("akuma/archetype.ts", ["ArchetypeCatalogRow", "listArchetypeDefinitions"]),
         types("settings.ts"),
         any("task/index.ts", ["TaskRow", "Tasks"]),
         any("library/contract.ts", ["ContractBoard", "listKeiyaku"]),
         any("library/input.ts", ["requireInput"]),
-        any("library/repo.ts", ["NoGitWorldError", "Repo"]),
-        any("library/address.ts", ["resolveNamedAddress"]),
+        any("library/repo.ts", ["Repo"]),
         types("world.ts"),
       ],
     },
@@ -537,7 +537,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "cli/commands/akuma.ts",
-      allow: [any("akuma/identity.ts", ["parseAkuId", "AkuId"]), any("cli/usage.ts"), any("identity/selector.ts")],
+      allow: [any("akuma/identity.ts", ["archetypeName", "parseAkuId", "AkuId"]), any("cli/usage.ts"), any("identity/selector.ts")],
     },
     {
       source: "cli/commands/akuma-invoke.ts",
@@ -574,6 +574,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("cli/usage.ts"),
         any("identity/coordinates.ts"),
         any("kanshi/index.ts"),
+        any("library/address.ts", ["resolveNamedAddress"]),
         any("settings.ts"),
         any("task/index.ts"),
         any("world.ts"),

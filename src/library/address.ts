@@ -69,11 +69,13 @@ export type NamedAddress =
   | Readonly<{ kind: "contract"; id: string }>
   | Readonly<{ kind: "akuma"; id: AkuId }>;
 
-export function resolveNamedAddress(input: Readonly<{
+export type NamedAddressInput = Readonly<{
   path: WorldRoot | null;
   selector: string;
   contracts: readonly NamedAddressContract[];
-}>): NamedAddress {
+}>;
+
+export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   const selector = nonblank(input.selector, "selector");
   if (selector.startsWith("kei/")) return { kind: "contract", id: contractId(selector) };
   if (selector.startsWith("aku/")) return { kind: "akuma", id: parseAkuId(selector).id };

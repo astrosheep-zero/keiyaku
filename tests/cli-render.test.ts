@@ -3,6 +3,7 @@ import test from "node:test";
 import { contractId } from "../src/core/facts/types.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderText } from "../src/cli/render/text.js";
+import { renderCatalogText } from "../src/cli/render/catalog.js";
 
 test("accepted text keeps facts before observed effect facts", () => {
   const contract = contractId("kei/render-effect");
@@ -96,6 +97,23 @@ test("addressed retry text retains its caller coordinate", () => {
   };
 
   assert.equal(renderText(result), 'retry amend kei/render-retry {"kind":"exhausted"}');
+});
+
+test("catalog text renders only the selected identity layer", () => {
+  assert.equal(renderCatalogText({
+    kind: "archetypes",
+    rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
+  }), [
+    "reviewer - codex-5",
+    "  Read the complete change without truncation.",
+  ].join("\n"));
+  assert.equal(renderCatalogText({
+    kind: "akuma",
+    root: "/world",
+    archetype: "worker",
+    rows: [{ id: "aku/worker/deadbeef" as never, life: "unborn" }],
+    searched: ["/world/.keiyaku/akuma/run"],
+  }), "aku/worker/deadbeef - unborn");
 });
 
 test("accepted text preserves named obligation stops after facts", () => {

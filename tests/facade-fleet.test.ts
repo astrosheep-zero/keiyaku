@@ -9,17 +9,19 @@ import { appendActivity, initializeHeart } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { Keiyaku, Repo } from "../src/index.js";
+import { invoke } from "../src/cli/invoke.js";
+import { main } from "../src/cli/main.js";
+import { parseArgv } from "../src/cli/parse.js";
 import { settings } from "../src/settings.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 import { matchesAkumaGlob, parseAkumaGlob } from "../src/identity/selector.js";
-import { addressAkumaSet } from "../src/library/address.js";
+import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { akuId } from "../src/akuma/identity.js";
 import { contractId } from "../src/core/facts/types.js";
-import { selectCatalog, type Catalog } from "../src/library/catalog.js";
 
 const provider: ProviderAdapter = {
   confinement: () => ({ kind: "unconfined" }),
@@ -94,29 +96,105 @@ test("facade requires an explicit completion mode for a plural wait", async () =
   }
 });
 
-test("facade ls is a shallow failure-isolated four-product catalog", async () => {
+test("facade ls reads exactly one selected identity directory", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-"));
   const home = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-home-"));
   try {
     const source = await answered(root, "worker", "00000001");
-    await moveAlias({ world: root, alias: "@worker", akuId: source.id });
     const task = await Tasks.of(World.at(root)).add({ title: "Catalog task" });
     assert.equal(task.kind, "accepted");
-    const configuration = settings({ root, home });
-    const catalog = await Keiyaku.ls({ path: root, settings: configuration });
-    assert.equal(catalog.contracts.kind, "absent");
-    assert.equal(catalog.tasks.kind, "present");
-    assert.equal(catalog.archetypes.kind, "present");
-    assert.equal(catalog.akuma.kind, "present");
-    const selected = await Keiyaku.ls({ path: root, settings: configuration, selector: "@worker" });
-    assert.deepEqual(selected.akuma.kind === "present" ? selected.akuma.value.rows.map((row) => row.id) : [], [source.id]);
+    mkdirSync(join(home, "akuma"));
+    writeFileSync(join(home, "akuma", "reviewer.md"), [
+      "---", "provider: missing", "model: review-model", "description: Complete catalog description.", "---", "prompt", "",
+    ].join("\n"));
+    const tasks = await Keiyaku.ls({ query: { kind: "tasks" }, path: root });
+    assert.equal(tasks.kind, "tasks");
+    assert.deepEqual(tasks.rows, [{
+      id: task.value.id,
+      title: "Catalog task",
+      state: "open",
+      priority: 2,
+      disposition: "ready",
+    }]);
+    assert.deepEqual(await Keiyaku.ls({ query: { kind: "archetypes" }, settings: settings({ root, home }) }), {
+      kind: "archetypes",
+      rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
+    });
+    assert.deepEqual((await Keiyaku.ls({ query: { kind: "akuma", archetype: "worker" }, path: root })).rows.map((row) => row.id), [source.id]);
+    assert.deepEqual((await Keiyaku.ls({ query: { kind: "akuma", archetype: "reviewer" }, path: root })).rows, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("facade ls refuses an @name shared by a Contract short-id and Alias", async () => {
+test("CLI ls invokes each selected identity directory and emits selected JSON", async () => {
+  const repository = makeGitRepository();
+  const repo = Repo.at({ path: repository.path });
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-cli-ls-home-"));
+  try {
+    repository.run(["config", "user.name", "Test User"]);
+    repository.run(["config", "user.email", "test@example.com"]);
+    repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+    const world = World.at(repository.path);
+    const task = await Tasks.of(world).add({ title: "Listed task" });
+    assert.equal(task.kind, "accepted");
+    const bound = await Keiyaku.bind({
+      repo,
+      workspace: "here",
+      markdown: [
+        "# Listed Contract", "", "## Context", "List it.", "", "## Objective", "Expose it.", "",
+        "## Design", "Use the selected Contract board.", "", "## Region", "```", "src/**", "```", "",
+        "## Criteria", "### Visible", "The identity is listed.", "",
+      ].join("\n"),
+    });
+    const contract = (await bound.keiyaku.state()).id;
+    mkdirSync(join(home, "akuma"));
+    writeFileSync(join(home, "akuma", "reviewer.md"), [
+      "---", "provider: codex", "model: review-model", "description: Full review description.", "---", "Review.", "",
+    ].join("\n"));
+    const worker = allocateAkumaDirectory({ worldRoot: world, archetype: "worker", draw: () => "00000001" });
+    const reviewer = allocateAkumaDirectory({ worldRoot: world, archetype: "reviewer", draw: () => "00000002" });
+    initializeHeart(worker.paths);
+    initializeHeart(reviewer.paths);
+
+    const command = (path: string) => invoke(parseArgv(["-C", repository.path, "ls", path]), {
+      environment: { KEIYAKU_HOME: home },
+    });
+    const tasks = await command("task/");
+    const contracts = await command("kei/");
+    const archetypes = await command("aku/");
+    const reviewers = await command("aku/reviewer/");
+    const allAkuma = await command("aku/*/*");
+    assert.equal(tasks.kind === "catalog" && tasks.catalog.kind === "tasks" && tasks.catalog.rows[0]?.id,
+      task.kind === "accepted" ? task.value.id : null);
+    assert.equal(contracts.kind === "catalog" && contracts.catalog.kind === "contracts"
+      && contracts.catalog.rows.some((row) => row.id === contract), true);
+    assert.deepEqual(archetypes.kind === "catalog" ? archetypes.catalog : null, {
+      kind: "archetypes",
+      rows: [{ name: "reviewer", model: "review-model", description: "Full review description." }],
+    });
+    assert.deepEqual(reviewers.kind === "catalog" && reviewers.catalog.kind === "akuma"
+      ? reviewers.catalog.rows.map((row) => row.id) : [], [reviewer.id]);
+    assert.deepEqual(allAkuma.kind === "catalog" && allAkuma.catalog.kind === "akuma"
+      ? allAkuma.catalog.rows.map((row) => row.id) : [], [reviewer.id, worker.id]);
+
+    let stdout = "";
+    const writeStdout = process.stdout.write;
+    process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
+    try { assert.equal(await main(["-C", repository.path, "ls", "aku/reviewer/", "--json"]), 0); }
+    finally { process.stdout.write = writeStdout; }
+    const json = JSON.parse(stdout) as { kind: string; archetype: string | null; rows: readonly { id: string }[] };
+    assert.deepEqual({ kind: json.kind, archetype: json.archetype, rows: json.rows.map((row) => row.id) }, {
+      kind: "akuma", archetype: "reviewer", rows: [reviewer.id],
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("named Address resolution refuses a Contract short-id shared with an Alias", async () => {
   const repository = makeGitRepository();
   const repo = Repo.at({ path: repository.path });
   repository.run(["config", "user.name", "Test User"]);
@@ -133,8 +211,9 @@ test("facade ls refuses an @name shared by a Contract short-id and Alias", async
   assert.equal((await bound.keiyaku.state()).id, "kei/review");
   const source = await answered(repository.path, "worker", "00000001");
   await moveAlias({ world: repository.path, alias: "@review", akuId: source.id });
-  await assert.rejects(
-    Keiyaku.ls({ path: World.at(repository.path), repo, settings: settings({ root: repository.path }), selector: "@review" }),
+  const contracts = (await Keiyaku.list({ repo })).rows;
+  assert.throws(
+    () => resolveNamedAddress({ path: World.at(repository.path), selector: "@review", contracts }),
     /ambiguous selector matches Contract and Akuma/u,
   );
 });
@@ -178,20 +257,6 @@ test("Contract selector preserves Dispatch membership skipped by compact fleet",
     akuma: ["kei/review"],
     repo: Repo.at({ path: repository.path }),
   })).ids, [missing]);
-});
-
-test("exact AkuId catalog selection survives an unrelated Contract failure", () => {
-  const id = akuId({ archetype: "worker", suffix: "deadbeef" });
-  const catalog: Catalog = {
-    root: "/world",
-    contracts: { kind: "failed", failure: { message: "broken journal" } },
-    tasks: { kind: "absent" },
-    archetypes: { kind: "present", value: { rows: [] } },
-    akuma: { kind: "present", value: { rows: [{ id, life: "unborn" }], searched: [] } },
-  };
-  const selected = selectCatalog(catalog, id);
-  assert.deepEqual(selected.contracts, catalog.contracts);
-  assert.deepEqual(selected.akuma.kind === "present" ? selected.akuma.value.rows.map((row) => row.id) : [], [id]);
 });
 
 test("exact set selection does not read unrelated Alias authority", async () => {

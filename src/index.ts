@@ -44,7 +44,7 @@ export type {
   CallResult,
   Catalog,
   CatalogInput,
-  CatalogSection,
+  CatalogQuery,
   ChangeId,
   ContractId,
   ContractState,

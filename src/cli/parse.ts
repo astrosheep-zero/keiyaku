@@ -7,12 +7,14 @@ import {
 } from "./commands/task.js";
 import {
   isAkumaAction,
+  parseAkumaCatalogPath,
   parseAkumaCommand,
   renderAkumaRootRows,
   renderAkumaUsage,
   type AkumaAction,
   type ParsedAkumaCommand,
 } from "./commands/akuma.js";
+import type { CatalogQuery } from "../index.js";
 import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
 import { CliUsageError, usageLine } from "./usage.js";
 export { CliUsageError } from "./usage.js";
@@ -80,8 +82,8 @@ const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { json: "boolean" },
-    usage: "ls [<contract>|@name|<aku/...>] [--json]",
-    purpose: "Read the shallow Task, Contract, Archetype, and Akuma catalog.",
+    usage: "ls task/ [--json]\n       keiyaku ls kei/ [--json]\n       keiyaku ls aku/ [--json]\n       keiyaku ls aku/<archetype>/ [--json]\n       keiyaku ls aku/*/* [--json]",
+    purpose: "List one identity directory.",
   },
   audit: {
     positional: "optional",
@@ -186,7 +188,7 @@ type ParsedStatus = Output & (
   | Readonly<{ command: "status"; contract?: string; akuma?: never }>
   | Readonly<{ command: "status"; contract: string; akuma: true }>
 );
-export type ParsedLs = Output & Readonly<{ command: "ls"; selector?: string }>;
+export type ParsedLs = Output & Readonly<{ command: "ls"; query: CatalogQuery }>;
 export type ParsedAudit = Output & Readonly<{
   command: "audit";
   contract?: string;
@@ -414,6 +416,20 @@ function parseStatus(parts: ParsedParts): ParsedStatus {
   };
 }
 
+function parseLs(parts: ParsedParts): ParsedLs {
+  const path = parts.positionals[0]!;
+  if (path === "task/") return { command: "ls", query: { kind: "tasks" }, output: parts.output };
+  if (path === "kei/") return { command: "ls", query: { kind: "contracts" }, output: parts.output };
+  try {
+    const query = parseAkumaCatalogPath(path);
+    if (query === null) refuse("ls", "ls requires an identity directory with a trailing slash");
+    return { command: "ls", query, output: parts.output };
+  } catch (error) {
+    if (error instanceof CliUsageError) throw error;
+    refuse("ls", error instanceof Error ? error.message : "invalid ls directory");
+  }
+}
+
 function invocationOptions(argv: readonly string[]): Readonly<{ cwd?: string; commandArgv: readonly string[] }> {
   let cwd: string | undefined;
   let stdinSeen = false;
@@ -463,10 +479,7 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
     case "arc": return parseArc(parts);
     case "abandon": return parseAbandon(parts);
     case "status": return parseStatus(parts);
-    case "ls": {
-      const selector = parts.positionals[0];
-      return { command: "ls", ...(selector === undefined ? {} : { selector }), output: parts.output };
-    }
+    case "ls": return parseLs(parts);
     case "audit": {
       const contract = parts.positionals[0];
       return {
@@ -494,6 +507,11 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const invocation = invocationOptions(argv);
   const help = helpCoordinate(invocation.commandArgv);
   if (help !== null) return { help };
+  if (invocation.commandArgv[0] === "ls"
+    && (invocation.commandArgv.length === 1
+      || (invocation.commandArgv.length === 2 && invocation.commandArgv[1] === "--json"))) {
+    return { help: { kind: "contract", command: "ls" } };
+  }
   const task = invocation.commandArgv[0] === "task"
     ? parseTaskCommand(invocation.commandArgv.slice(1))
     : undefined;

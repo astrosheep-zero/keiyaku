@@ -137,6 +137,11 @@ Stillborn residue is visible in `list()` with its evidence. No automatic
 cleaner ships until a real reader needs one; manual removal is safe because
 a body must not outlive its heart (ENOENT -> kill own tree, exit).
 
+`list()` reads the complete compact fleet. `list({ archetype })` is the same
+Akuma-owned read with one optional Archetype selection: Akuma validates the
+name, decodes each physical identity, and includes only matching rows. The
+caller does not parse AkuIds or filter a complete result itself.
+
 ## Archetype
 
 An Archetype is the mask that combines an akuma's personality and provider
@@ -163,11 +168,18 @@ and provider-unsupported input is typed failure; a missing or malformed Archetyp
 includes the exact path searched. There is no fallback Archetype or directory
 layering.
 
-`world.listArchetypes()` is the catalog read. It enumerates canonical `.md`
-filenames in that same directory and returns their normalized names in byte
-order. It does not decode definitions, resolve providers, or duplicate call
-admission; malformed content remains the selected call's typed failure. A
-missing directory is an empty catalog, and other IO failures remain exceptions.
+`world.listArchetypes()` is the filename-only public Akuma read. It enumerates
+canonical `.md` filenames in that same directory and returns their normalized
+names in byte order. It does not decode definitions, resolve providers, or
+duplicate call admission.
+
+The package-root identity Catalog uses the separate Akuma-owned definition
+catalog read. That read decodes every canonical definition and returns its
+name, optional `model`, and complete optional `description` in byte order. It
+does not resolve the provider namespace, select an adapter, or admit provider
+options. A malformed definition fails this selected read with its exact path;
+it is not silently reduced to a filename. A missing directory is an empty
+catalog, and other IO failures remain exceptions for both reads.
 
 A provider entry is one strict object with required `kind`, optional nonblank
 `description` and `executable`, optional object `config`, and optional `env`

@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
 import { selectActivitySnapshot } from "../src/akuma/activity.js";
-import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
+import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
   appendActivity,
@@ -242,6 +242,10 @@ test("public Akuma handles separate compact list rows from full status and wait"
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
     initializeHeart(allocated.paths);
     assert.equal(world.list().rows[0]?.life, "unborn");
+    assert.equal(world.list({ archetype: "claude" }).rows[0]?.id, allocated.id);
+    assert.deepEqual(world.list({ archetype: "reviewer" }).rows, []);
+    assert.throws(() => world.list({ archetype: "not/a-name" }), /Akuma archetype/);
+    assert.throws(() => world.list({ unknown: true } as never), /unknown field: unknown/);
 
     const launch: BodyLaunch = {
       paths: allocated.paths,
@@ -557,6 +561,38 @@ test("Archetype catalog lists canonical files in byte order without admitting co
     assert.throws(
       () => loadArchetype({ name: "zeta", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError && error.kind === "akuma-archetype",
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Archetype definition catalog decodes metadata without provider admission", () => {
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-definition-catalog-"));
+  try {
+    mkdirSync(join(home, "akuma"));
+    const settingsValue = settings({ home });
+    writeFileSync(join(home, "akuma", "reviewer.md"), [
+      "---",
+      "provider: provider-that-does-not-exist",
+      "model: reviewer-model",
+      "description: A complete description that is not truncated by the owner.",
+      "---",
+      "prompt",
+      "",
+    ].join("\n"));
+    assert.deepEqual(listArchetypeDefinitions({ settings: settingsValue }), [{
+      name: "reviewer",
+      model: "reviewer-model",
+      description: "A complete description that is not truncated by the owner.",
+    }]);
+
+    writeFileSync(join(home, "akuma", "broken.md"), "not frontmatter\n");
+    assert.throws(
+      () => listArchetypeDefinitions({ settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError
+        && error.searched[0] === join(home, "akuma", "broken.md")
+        && /must begin with YAML frontmatter/u.test(error.reason),
     );
   } finally {
     rmSync(home, { recursive: true, force: true });

@@ -15,6 +15,12 @@ type DecodedArchetype = Readonly<{
   options: ProviderOptions;
 }>;
 
+export type ArchetypeCatalogRow = Readonly<{
+  name: string;
+  model?: string;
+  description?: string;
+}>;
+
 type ArchetypeDefinition = DecodedArchetype & Readonly<{ adapter: ProviderAdapter }>;
 type AdmittedArchetype = Omit<ArchetypeDefinition, "provider"> & Readonly<{ provider: ProviderExecution }>;
 
@@ -35,23 +41,26 @@ function archetypeDirectory(settings: Settings): string | null {
   return userPath === undefined ? null : join(dirname(userPath), "akuma");
 }
 
-export function listArchetypes(input: Readonly<{ settings: Settings }>): readonly string[] {
-  const directory = archetypeDirectory(input.settings);
+function archetypePaths(settings: Settings): readonly Readonly<{ name: string; path: string }>[] {
+  const directory = archetypeDirectory(settings);
   if (directory === null) return [];
   try {
     return readdirSync(directory, { withFileTypes: true })
       .flatMap((entry) => {
-        if (!entry.isFile()) return [];
-        const filename = entry.name;
-        if (!filename.endsWith(".md")) return [];
-        const name = filename.slice(0, -3);
-        try { return [archetypeName(name)]; } catch { return []; }
+        if (!entry.isFile() || !entry.name.endsWith(".md")) return [];
+        const name = entry.name.slice(0, -3);
+        try { return [{ name: archetypeName(name), path: join(directory, entry.name) }]; }
+        catch { return []; }
       })
-      .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+      .sort((left, right) => Buffer.compare(Buffer.from(left.name), Buffer.from(right.name)));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
+}
+
+export function listArchetypes(input: Readonly<{ settings: Settings }>): readonly string[] {
+  return archetypePaths(input.settings).map(({ name }) => name);
 }
 
 function archetypeField(
@@ -109,6 +118,25 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
       ...(network === undefined ? {} : { network }),
       systemPrompt,
     }),
+  });
+}
+
+export function listArchetypeDefinitions(input: Readonly<{ settings: Settings }>): readonly ArchetypeCatalogRow[] {
+  return archetypePaths(input.settings).map(({ name, path }) => {
+    try {
+      const definition = decodeArchetype(name, path, readFileSync(path, "utf8"));
+      return Object.freeze({
+        name: definition.name,
+        ...(definition.options.model === undefined ? {} : { model: definition.options.model }),
+        ...(definition.description === undefined ? {} : { description: definition.description }),
+      });
+    } catch (error) {
+      throw new AkumaArchetypeError(
+        name,
+        [path],
+        `is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   });
 }
 

@@ -169,21 +169,32 @@ Their result carries the resolved AkuId, so an adapter never resolves a movable
 Alias twice. `history({ last: true })` is the distinct last-answer arm: it reads
 only the last answered turn and never reads status or activity history.
 
-The Catalog facet owns the shallow package-root catalog:
+The Catalog facet owns one selected identity directory:
 
 ```ts
 Keiyaku.ls(input: CatalogInput): Promise<Catalog>
 ```
 
-`CatalogInput` carries `path: WorldRoot | null`, one Settings snapshot, and an
-optional already resolved Repo. A null world makes Task and Akuma sections
-absent without creating a marker; an absent Repo makes the Contract section
-absent. Catalog performs no path or Git discovery.
+`CatalogInput` is a closed union whose `query` is `tasks`, `contracts`,
+`archetypes`, or `akuma`. Task and Akuma queries carry one resolved WorldRoot;
+Contract queries carry one resolved Repo; Archetype queries carry one Settings
+snapshot. An Akuma query may select one Archetype or all instances. `Catalog`
+is the corresponding closed result arm and contains only the selected rows.
+There is no aggregate, absent section, failed-section wrapper, exact identity
+selector, Alias selector, or cross-product fallback.
 
-It independently lists the Task world, Contract board, Archetype names, and
-compact Akuma fleet. Every section is present, absent, or failed; one section
-cannot suppress another. An optional exact Contract, exact AkuId, or `@name`
-selector is adjudicated by the Address facet and filters the corresponding
-catalog. When `@name` names both an active
-Contract short reference and an Akuma Alias, selection fails explicitly as
-ambiguous. `ls` performs no Kanshi joins and no activity/history reads.
+Each query invokes only its selected owner. Task queries read the Task board,
+Contract queries read the Contract board, Archetype queries decode definition
+catalog metadata, and Akuma queries delegate to `Akuma.list({ archetype? })`.
+Akuma validates and applies the optional selection while decoding physical
+identities; Catalog does not read or filter fleet rows. A selected-owner failure fails
+the query; an unselected owner is never read and therefore cannot suppress it.
+Catalog performs no path or Git discovery, Kanshi join, provider admission, or
+activity/history read.
+
+Named `status` selection remains an Address-facet operation. CLI composition
+passes one world coordinate, selector, and already observed Contract rows to
+the Address owner. That owner is the sole judge: it resolves a complete
+Contract, complete AkuId, or `@name`, and explicitly refuses a name shared by
+an active Contract short reference and an Akuma Alias. Catalog has no role in
+this decision, and package-root callers do not receive a second selector API.

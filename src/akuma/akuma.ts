@@ -83,6 +83,10 @@ export type AkumaList = Readonly<{
   searched: readonly string[];
 }>;
 
+export type AkumaListInput = Readonly<{
+  archetype?: string;
+}>;
+
 export type TellReceipt = Readonly<{
   id: string;
   state: "recorded";
@@ -372,11 +376,15 @@ export class AkumaHandle {
 }
 
 export class Akuma {
-  private constructor(private readonly path: WorldRoot, private readonly settings: Settings) {}
+  private constructor(private readonly path: WorldRoot, private readonly configuredSettings?: Settings) {}
 
   static of(root: WorldRoot, settings?: Settings): Akuma {
     if (typeof root !== "string") throw new TypeError("Akuma.of root must be a WorldRoot");
-    return new Akuma(root, settings ?? readSettings({ root }));
+    return new Akuma(root, settings);
+  }
+
+  private settings(): Settings {
+    return this.configuredSettings ?? readSettings({ root: this.path });
   }
 
   of(input: Readonly<{ id: string }>): AkumaHandle {
@@ -384,12 +392,12 @@ export class Akuma {
   }
 
   listArchetypes(): readonly string[] {
-    return readArchetypes({ settings: this.settings });
+    return readArchetypes({ settings: this.settings() });
   }
 
   async call(input: Readonly<{ archetype: string; body: string; cwd?: string }>): Promise<AkumaHandle> {
     const name = archetypeName(input.archetype);
-    const archetype = loadArchetype({ name, settings: this.settings });
+    const archetype = loadArchetype({ name, settings: this.settings() });
     const provider = archetype.adapter;
     const cwd = resolve(input.cwd ?? this.path);
     const recipe = Object.freeze({
@@ -432,7 +440,13 @@ export class Akuma {
     return new AkumaHandle(published.id, this.path);
   }
 
-  list(): AkumaList {
+  list(input: AkumaListInput = {}): AkumaList {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) {
+      throw new TypeError("Akuma list input must be an object");
+    }
+    const unknown = Object.keys(input).find((key) => key !== "archetype");
+    if (unknown !== undefined) throw new TypeError(`Akuma list input has unknown field: ${unknown}`);
+    const selected = input.archetype === undefined ? undefined : archetypeName(input.archetype);
     const runRoot = akumaRunRoot(this.path);
     let names: string[];
     try {
@@ -447,6 +461,7 @@ export class Akuma {
     const rows: AkumaList["rows"] = names.flatMap((name): AkumaList["rows"] => {
       try {
         const physical = akuIdFromDirectoryName(name);
+        if (selected !== undefined && physical.archetype !== selected) return [];
         const paths = akumaPaths({ runRoot, archetype: physical.archetype, suffix: physical.suffix });
         const snapshot = readHeart(paths);
         if (snapshot.soul !== null) return [bornListRow(paths, physical.id, snapshot)];

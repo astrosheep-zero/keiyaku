@@ -92,6 +92,27 @@ test("status parses one folded board and preserves its optional contract filter"
   assert.throws(() => parseArgv(["status", "--fast"]), /not valid for status/);
 });
 
+test("ls parses only canonical identity directories", () => {
+  assert.deepEqual(parseArgv(["ls", "task/"]), {
+    command: { command: "ls", query: { kind: "tasks" }, output: "text" },
+  });
+  assert.deepEqual(parseArgv(["ls", "kei/", "--json"]), {
+    command: { command: "ls", query: { kind: "contracts" }, output: "json" },
+  });
+  assert.deepEqual(parseArgv(["ls", "aku/"]), {
+    command: { command: "ls", query: { kind: "archetypes" }, output: "text" },
+  });
+  assert.deepEqual(parseArgv(["ls", "aku/worker/"]), {
+    command: { command: "ls", query: { kind: "akuma", archetype: "worker" }, output: "text" },
+  });
+  assert.deepEqual(parseArgv(["ls", "aku/*/*"]), {
+    command: { command: "ls", query: { kind: "akuma" }, output: "text" },
+  });
+  for (const path of ["task", "kei", "aku", "keiy/", "@review", "kei/review", "aku/worker/1234abcd", "aku/*/"]) {
+    assert.throws(() => parseArgv(["ls", path]), CliUsageError);
+  }
+});
+
 test("bind and amend retain complete after snapshots and gate-set selectors", () => {
   assert.deepEqual(
     parseArgv(["bind", "--after", "kei/one", "--after", "kei/two", "--gates", "strict", "-"]),

@@ -109,7 +109,7 @@ export type { Dispatch, DispatchFailure } from "../dispatch/index.js";
 export type { AkumaAlias } from "../identity/selector.js";
 export type { AkumaGlob } from "../identity/selector.js";
 export type { AkuId } from "../akuma/identity.js";
-export type { Catalog, CatalogInput, CatalogSection } from "./catalog.js";
+export type { Catalog, CatalogInput, CatalogQuery } from "./catalog.js";
 export type {
   AkumaAddressInput,
   AkumaSetAddressInput,

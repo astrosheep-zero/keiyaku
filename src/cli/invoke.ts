@@ -13,6 +13,7 @@ import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js
 import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
 import type { DiffUnavailable, InvocationResult } from "./result.js";
 import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
+import { resolveNamedAddress } from "../library/address.js";
 import { World, WorldError, type WorldRoot } from "../world.js";
 
 export type { AcceptedFact, DiffUnavailable, InvocationResult, Lag } from "./result.js";
@@ -308,17 +309,21 @@ async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, path: WorldRoot, 
 
 async function invokeCatalog(parsed: Extract<ParsedCommand, { command: "ls" }>, coordinate: string | undefined, edge: InvocationEdge) {
   try {
+    if (parsed.query.kind === "contracts") {
+      return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, repo: repoAt(coordinate) }) };
+    }
+    if (parsed.query.kind === "archetypes") {
+      return {
+        kind: "catalog" as const,
+        catalog: await Keiyaku.ls({ query: parsed.query, settings: settingsAt(undefined, edge.environment) }),
+      };
+    }
     const world = locateWorld(coordinate);
-    const repo = optionalRepoAt(coordinate);
-    return {
-      kind: "catalog" as const,
-      catalog: await Keiyaku.ls({
-        path: world,
-        settings: settingsAt(world ?? undefined, edge.environment),
-        ...(repo === undefined ? {} : { repo }),
-        ...(parsed.selector === undefined ? {} : { selector: parsed.selector }),
-      }),
-    };
+    if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
+    if (parsed.query.kind === "tasks") {
+      return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, path: world }) };
+    }
+    return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, path: world }) };
   } catch (error) {
     if (error instanceof TypeError) throw new CliUsageError(error.message);
     throw error;
@@ -339,17 +344,17 @@ async function invokeStatus(parsed: Extract<ParsedCommand, { command: "status" }
   }
   if (parsed.contract.startsWith("@")) {
     try {
-      const catalog = await Keiyaku.ls({ path: world, settings: configuration, ...(repo === undefined ? {} : { repo }), selector: parsed.contract });
-      const selectedAkuma = catalog.akuma.kind === "present" ? catalog.akuma.value.rows : [];
-      if (selectedAkuma.length === 1) {
+      const address = resolveNamedAddress({
+        path: world,
+        selector: parsed.contract,
+        contracts: repo === undefined ? [] : (await Keiyaku.list({ repo })).rows,
+      });
+      if (address.kind === "akuma") {
         if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-        return invokeAkumaStatus(world, selectedAkuma[0]!.id, configuration);
+        return invokeAkumaStatus(world, address.id, configuration);
       }
-      const selectedContracts = catalog.contracts.kind === "present" ? catalog.contracts.value.rows : [];
-      if (selectedContracts.length === 1) {
-        const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
-        return { kind: "status" as const, report: selectKanshi({ report, contract: selectedContracts[0]!.id }), selection: "contract" as const };
-      }
+      const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
+      return { kind: "status" as const, report: selectKanshi({ report, contract: address.id }), selection: "contract" as const };
     } catch (error) {
       if (error instanceof TypeError) throw new CliUsageError(error.message);
       throw error;

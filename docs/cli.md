@@ -52,7 +52,7 @@ The command vocabulary is:
 | `abandon` | Calls `keiyaku.abandon`. |
 | `arc` | Calls `keiyaku.arc` with arc Markdown. |
 | `status` | Calls Kanshi or one exact Akuma status according to its selector. |
-| `ls` | Calls the package-root shallow Task, Contract, Archetype, and Akuma catalog. |
+| `ls` | Lists exactly one selected Task, Contract, Archetype, or Akuma identity directory. |
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
 | `settings` | Constructs and observes the shared read-only Settings resource. |
@@ -82,7 +82,11 @@ review [<contract>|@<contract>] (--satisfied | --unsatisfied) [--summary <text>]
 abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
 status [<contract>|@name|<aku/...>] [--json]
-ls [<contract>|@name|<aku/...>] [--json]
+ls task/ [--json]
+ls kei/ [--json]
+ls aku/ [--json]
+ls aku/<archetype>/ [--json]
+ls aku/*/* [--json]
 audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
@@ -216,9 +220,21 @@ member needs neither. Kill always applies to the complete frozen set.
 Bare `status` already exposes the Akuma fleet through Kanshi; there is no
 second raw-roster flag. Library `world.of()`
 constructs the addressed handle and has no CLI command of its own.
-Bare `ls` is the shallow four-product catalog and reads neither activity nor
-history. `status @name` and `ls @name` refuse explicitly when the spelling is
-both an active Contract short selector and an Akuma Alias.
+Bare `ls` renders the command's own help and exits successfully. It does not
+locate or create a World, construct a Repo or Settings value, or read Git,
+Task, Archetype, or Akuma state. The accepted path grammar is closed and uses
+the canonical directory spellings above; missing trailing slashes, exact
+identities, Alias selectors, and other paths are usage errors.
+
+`ls task/` lists Task rows, `ls kei/` lists Contract rows whose persisted
+identities remain `kei/...`, and `ls aku/` lists Archetype definitions with
+name, optional model, and complete description. `ls aku/<archetype>/` lists
+compact instances of that Archetype, while `ls aku/*/*` explicitly lists all
+compact instances. Each invocation reads only the selected owner and performs
+no Kanshi join or activity/history read. JSON is the selected Catalog result,
+not an aggregate envelope. `status @name` remains an Address-facet decision
+and refuses explicitly when the spelling is both an active Contract short
+selector and an Akuma Alias.
 CLI `wait` uses the public default predicate (`life !== "running"`). Its
 optional duration matches exactly `^(0|[1-9][0-9]*)(ms|s|m|h)$`: integers and
 units are required, leading zeroes are refused except for zero itself, and the
