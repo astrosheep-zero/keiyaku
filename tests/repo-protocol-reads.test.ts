@@ -23,8 +23,14 @@ import {
   reconcileAllOperation,
   scopeOperation,
 } from "../src/protocol/operations.js";
-import { entryUlid, type ContractId, type JournalEntry } from "../src/core/facts/types.js";
+import { changeId, entryUlid, snapshotId, type ContractId, type JournalEntry } from "../src/core/facts/types.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
+
+function firstJournalAt(repository: TestGitRepository, id: ContractId): string {
+  const path = contractJournalPath(id, "active");
+  const first = JSON.parse(repository.run(["show", `refs/heads/keiyaku-state:${path}`]).split("\n", 1)[0]!) as { at: string };
+  return first.at;
+}
 
 function repositoryWithMain(): TestGitRepository {
   const repository = makeGitRepository();
@@ -121,6 +127,7 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
     id: first,
     title: "First status row",
     phase: "waiting",
+    phaseAt: firstJournalAt(repository, first),
     disposition: "active",
     workspace: "here",
     worktreePath: null,
@@ -135,6 +142,7 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
     id: second,
     title: "Second status row",
     phase: "waiting",
+    phaseAt: firstJournalAt(repository, second),
     disposition: "active",
     workspace: "worktree",
     worktreePath: deliveryWorktreePath(git, second),
@@ -160,6 +168,99 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
     kind: "present",
     row: report.rows.find((contract) => contract.id === first),
   });
+});
+
+test("public Contract rows select the source entry for every phase", async () => {
+  const repository = repositoryWithMain();
+  const ids = {
+    waiting: await bind(repository, "Phase waiting", "here"),
+    bound: await bind(repository, "Phase bound", "here"),
+    pending: await bind(repository, "Phase pending", "here"),
+    claimed: await bind(repository, "Phase claimed", "here"),
+    abandoned: await bind(repository, "Phase abandoned", "here"),
+  };
+  const times = {
+    waiting: firstJournalAt(repository, ids.waiting),
+    bound: "2026-08-12T00:01:00.000Z",
+    pending: "2026-08-12T00:02:00.000Z",
+    claimed: "2026-08-12T00:03:00.000Z",
+    abandoned: "2026-08-12T00:04:00.000Z",
+  };
+  const git = await repositoryAt(repository.path);
+  const before = await readGit(git);
+  if (before.commit === null) throw new Error("Keiyaku state was not published");
+  const snapshot = snapshotId(repository.run(["rev-parse", "HEAD"]).trim());
+  const boundEntry = (id: ContractId, at: string, entry: string): JournalEntry => ({
+    v: 1, kind: "bound", contract: id, entry: entryUlid(entry), at, data: {},
+  });
+  const deliverEntry = (id: ContractId, at: string, entry: string): JournalEntry => ({
+    v: 1,
+    kind: "deliver",
+    contract: id,
+    entry: entryUlid(entry),
+    at,
+    data: {
+      tenderSnapshot: snapshot,
+      integration: { predecessor: snapshot, snapshot, changeId: changeId(`change-${id}`) },
+      method: "squash",
+      policy: { requireBranchesToBeUpToDate: false },
+    },
+  });
+  const pendingDelivery = deliverEntry(ids.pending, times.pending, "01ARZ3NDEKTSV4RRFFQ69G5FBC");
+  const claimedDelivery = deliverEntry(ids.claimed, "2026-08-12T00:02:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBD");
+  const additions = new Map<ContractId, readonly JournalEntry[]>([
+    [ids.bound, [boundEntry(ids.bound, times.bound, "01ARZ3NDEKTSV4RRFFQ69G5FBB")]],
+    [ids.pending, [boundEntry(ids.pending, "2026-08-12T00:01:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBE"), pendingDelivery]],
+    [ids.claimed, [
+      boundEntry(ids.claimed, "2026-08-12T00:01:45.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBF"),
+      claimedDelivery,
+      {
+        v: 1, kind: "claimed", contract: ids.claimed,
+        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBG"), at: times.claimed,
+        data: { delivery: claimedDelivery.entry },
+      },
+    ]],
+    [ids.abandoned, [{
+      v: 1, kind: "abandoned", contract: ids.abandoned,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBH"), at: times.abandoned, data: {},
+    }]],
+  ]);
+  const updates = new Map<string, { oid: string } | null>();
+  for (const [id, entries] of additions) {
+    const activePath = contractJournalPath(id, "active");
+    const active = before.paths.get(activePath);
+    if (active?.type !== "blob") throw new Error(`missing active journal for ${id}`);
+    const oid = await writeBlob(git, Buffer.concat([
+      await readBlob(git, active.oid),
+      ...entries.map((entry) => Buffer.from(encodeEntry(entry))),
+    ]));
+    const terminal = entries.at(-1)?.kind === "claimed" || entries.at(-1)?.kind === "abandoned";
+    if (terminal) {
+      updates.set(activePath, null);
+      updates.set(contractJournalPath(id, "terminal"), { oid });
+    } else updates.set(activePath, { oid });
+  }
+  const tree = await updateGitTree(git, before.tree, updates);
+  const commit = await writeCommit({ repository: git, tree, parent: before.commit });
+  repository.run(["update-ref", "refs/heads/keiyaku-state", commit, before.commit]);
+
+  const expected = [
+    [ids.waiting, "waiting", times.waiting],
+    [ids.bound, "bound", times.bound],
+    [ids.pending, "pending-delivery", times.pending],
+    [ids.claimed, "claimed", times.claimed],
+    [ids.abandoned, "abandoned", times.abandoned],
+  ] as const;
+  const scope = await scopeOperation({ coordinate: repository.path });
+  for (const [id, phase, phaseAt] of expected) {
+    const observed = await withGitDecodeChannel(scope, (channel) => contractObservationOperation({
+      scope, channel, contractId: id,
+    }));
+    assert.equal(observed.kind, "present");
+    if (observed.kind !== "present") continue;
+    assert.equal(observed.row.phase, phase);
+    assert.equal(observed.row.phaseAt, phaseAt);
+  }
 });
 
 test("single Contract observation never combines state and target from different epochs", async () => {
@@ -231,6 +332,7 @@ test("single Contract observation never combines state and target from different
       id,
       title: "Frozen observation",
       phase: "waiting",
+      phaseAt: firstJournalAt(repository, id),
       disposition: "active",
       workspace: "here",
       worktreePath: null,

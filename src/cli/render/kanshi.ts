@@ -46,6 +46,19 @@ function gateMark(report: ContractGateReport): string {
   return report.current.verdict === "satisfied" ? "✓" : "!";
 }
 
+function formatAge(source: string | null | undefined, observedAt: string): string {
+  if (source === null || source === undefined) return "—";
+  const sourceMs = Date.parse(source);
+  const observedMs = Date.parse(observedAt);
+  if (sourceMs > observedMs) return "future";
+  const seconds = Math.floor((observedMs - sourceMs) / 1_000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
 function isLost(life: string): boolean {
   return life === "stranded" || life === "hung" || life === "untidy";
 }
@@ -140,9 +153,16 @@ function identityLine(mark: string, identity: string, extra = ""): string {
   return extra.length === 0 ? `${mark} ${safeText(identity)}` : `${mark} ${safeText(identity)} ${safeText(extra)}`;
 }
 
-function renderGates(reports: readonly ContractGateReport[], columns: number, includeSummaries: boolean): readonly string[] {
+function renderGates(
+  reports: readonly ContractGateReport[],
+  observedAt: string,
+  columns: number,
+  includeSummaries: boolean,
+): readonly string[] {
   if (reports.length === 0) return [];
-  const lines = [...plumbFacts([`gates: ${reports.map((report) => `${gateMark(report)} ${report.gate}`).join(" · ")}`], columns)];
+  const lines = [...plumbFacts([`gates: ${reports.map((report) =>
+    `${gateMark(report)} ${report.gate} ${formatAge(report.current.kind === "attested" ? report.current.at : null, observedAt)}`
+  ).join(" · ")}`], columns)];
   if (!includeSummaries) return lines;
   for (const report of reports) {
     if (report.current.kind !== "attested" || report.current.summary === undefined) continue;
@@ -178,19 +198,20 @@ function renderContracts(report: KanshiReport, context: TextRenderContext, selec
     const hot = contractHot(row);
     const compact = !hot && selection !== "contract";
     const title = row.title ?? "title unavailable";
+    const phase = `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`;
     lines.push(identityLine(contractMark(row), row.id));
     lines.push(...plumbFacts(
       compact
-        ? [title, row.phase, ...targetFacts(row)]
+        ? [title, phase, ...targetFacts(row)]
         : [title],
       context.columns,
     ));
-    if (!compact) lines.push(...plumbFacts([row.phase, ...targetFacts(row)], context.columns));
+    if (!compact) lines.push(...plumbFacts([phase, ...targetFacts(row)], context.columns));
     lines.push(...plumbFacts([workspaceState(row)], context.columns));
     if (showWorkspacePath(row, hot || selection === "contract") && row.workspaceObservation.location.kind === "worktree") {
       lines.push(plumbPath(row.workspaceObservation.location.path));
     }
-    lines.push(...renderGates(row.gates.reports, context.columns, selection === "contract"));
+    lines.push(...renderGates(row.gates.reports, report.observedAt, context.columns, selection === "contract"));
     if (row.holder.kind === "held") lines.push(...plumbFacts([`task ${row.holder.taskId}`], context.columns));
     if (row.holder.kind === "unavailable") lines.push(...plumbFacts(["holder unavailable"], context.columns));
     for (const attached of row.fleet) {
@@ -250,9 +271,11 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
   const lines = [aperture("FLEET", context.columns)];
   for (const row of rows) {
     lines.push(identityLine(akumaMark(row.life), row.id, akumaLabel(row)));
+    const lifeAt = "lifeAt" in row ? row.lifeAt : null;
+    const life = `${row.life} · ${formatAge(lifeAt, report.observedAt)}`;
     const key = row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"
-      ? ["stranded", "resume unsupported"]
-      : [row.life];
+      ? [life, "resume unsupported"]
+      : [life];
     const relation = row.contract === undefined
       ? ["unbound"]
       : [endpointFact(row.contract.id, row.contract.observed)];

@@ -201,7 +201,7 @@ test("one currency projection distinguishes current refusal, stale testimony, an
 
   assert.deepEqual(projected, {
     reports: [
-      { gate: "reviewed", current: { kind: "attested", verdict: "unsatisfied" } },
+      { gate: "reviewed", current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-06T00:00:01Z" } },
       { gate: "verified", current: { kind: "stale", priorVerdict: "satisfied" } },
       { gate: "manual", current: { kind: "missing" } },
     ],

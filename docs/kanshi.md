@@ -45,6 +45,11 @@ for detached HEAD, or when that observation fails. The immutable
 `ContractBoard.state`, not copied into another report field. It is not the
 invocation worktree HEAD.
 
+Contract phase, current gate testimony, and born Akuma life retain their
+owners' source timestamps in the assembled rows. Kanshi does not persist or
+precompute an age. Text derives every displayed age against this report's one
+`observedAt`; JSON retains only the source timestamps.
+
 When a Repo is present, Kanshi creates one call-scoped
 `GitReadObservation` and passes it to the complete Contract, TaskHolder, and
 Dispatch readers. Kanshi only composes their returned values into sections and

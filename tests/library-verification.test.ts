@@ -58,10 +58,14 @@ test("status and audit expose only current Verification testimony", async () => 
   const observed = await Keiyaku.observe({ repo, id: state.id });
   assert.equal(observed.kind, "present");
   if (observed.kind !== "present") throw new Error("contract was not observed");
+  const verified = observed.row.gates.reports[1]?.current;
+  assert.equal(verified?.kind, "attested");
+  if (verified?.kind !== "attested") throw new Error("verification attestation was not observed");
+  assert.equal(new Date(verified.at).toISOString(), verified.at);
   assert.deepEqual(observed.row.gates, {
     reports: [
       { gate: "reviewed", current: { kind: "missing" } },
-      { gate: "verified", current: { kind: "attested", ...expected } },
+      { gate: "verified", current: { kind: "attested", ...expected, at: verified.at } },
     ],
     satisfied: false,
   });

@@ -29,6 +29,7 @@ export type ContractRow = Readonly<{
   id: ContractId;
   title: string | null;
   phase: ContractPhase;
+  phaseAt: string;
   disposition: ContractDisposition;
   workspace: "worktree" | "here";
   worktreePath: string | null;
@@ -70,9 +71,17 @@ function phaseFor(state: ContractState): ContractPhase {
   return "waiting";
 }
 
+export function phaseAtFor(
+  state: Pick<ContractState, "terminal" | "delivery" | "bound">,
+  bindAt: string,
+): string {
+  return state.terminal?.at ?? state.delivery?.at ?? state.bound?.at ?? bindAt;
+}
+
 async function rowFor(
   repository: GitRepository,
   state: ContractState,
+  bindAt: string,
   targetObservation: ContractRow["targetObservation"],
 ): Promise<ContractRow> {
   const workspace = state.coordinates.workspace;
@@ -89,6 +98,7 @@ async function rowFor(
     id: state.id,
     title: titleFor(state),
     phase: phaseFor(state),
+    phaseAt: phaseAtFor(state, bindAt),
     disposition: state.terminal === null ? "active" : "terminal",
     workspace,
     worktreePath: location.kind === "worktree" ? location.path : null,
@@ -111,8 +121,9 @@ export async function readContractBoard(observation: GitReadObservation): Promis
   for (const value of observed.contracts.values()) {
     if (value.state === null) continue;
     const state = value.state;
+    const bindAt = value.entries[0]!.at;
     rows.push(observeDeliveryTargetAt(observation, state).then((target) =>
-      rowFor(observation.repository, state, target)));
+      rowFor(observation.repository, state, bindAt, target)));
   }
   return { root: observation.repository.primaryWorktree, state: observed.snapshot, rows: await Promise.all(rows) };
 }
@@ -125,7 +136,9 @@ export async function readContractObservationAt(
 ): Promise<ContractObservation> {
   return withContractReadObservationAt(repository, channel, id, async (observation) => {
     const observed = await observeContractsForAdmissionInObservationAt(observation, [id]);
-    const state = observed.decision.get(id) ?? null;
+    const record = observed.journals.get(id);
+    if (record === undefined) throw new Error(`missing requested Contract observation: ${id}`);
+    const state = record.state;
     return state === null
       ? { kind: "missing", id }
       : {
@@ -133,6 +146,7 @@ export async function readContractObservationAt(
           row: await rowFor(
             observation.repository,
             state,
+            record.entries[0]!.at,
             await observeDeliveryTargetAt(observation, state),
           ),
         };

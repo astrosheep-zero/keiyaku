@@ -165,6 +165,19 @@ export function life(input: Readonly<{
   return input.body.end === "exited" ? "asleep" : "stranded";
 }
 
+export function lifeAt(
+  current: AkumaLife,
+  body: BodyFact | null,
+  kill: KillFact | null,
+  createdAt: string,
+): string | null {
+  if (current === "running") return body?.leashTakenAt ?? null;
+  if (current === "hung") return body?.hung?.at ?? null;
+  if (current === "killed") return kill?.at ?? null;
+  if (current === "asleep") return body?.endedAt ?? createdAt;
+  return current === "stranded" ? body?.endedAt ?? null : null;
+}
+
 export type SoulRow = Readonly<{
   soul_json: string;
 }>;

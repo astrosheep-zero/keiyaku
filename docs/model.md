@@ -28,6 +28,12 @@ Git/protocol observation used for audit and unknown-admission recovery; they
 do not enter the pact decision projection. Git snapshot identity and
 physical provenance likewise remain Git concerns.
 
+Contract board readers may project the source entry time for the displayed
+phase from that same frozen journal observation. Current gate testimony carries
+its attestation entry time; stale and missing testimony carry no time. These are
+source facts, never stored ages or eligibility times inferred from another
+Contract.
+
 `SnapshotId` names a work snapshot and `ChangeId` names integration patch
 content. Git mints both and is the sole physical Git object-ID validator; pact
 validates only their opaque nonblank values. A tender has one snapshot identity.

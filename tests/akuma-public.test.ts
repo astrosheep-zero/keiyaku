@@ -11,11 +11,15 @@ import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
   activitySlice,
   appendActivity,
+  breakBody,
+  finishBodyIfIdle,
   HeldAkumaLeash,
   initializeHeart,
+  lifeAt,
   pauseRequested,
   readHeart,
   recordTell,
+  requestStop,
   type Soul,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
@@ -45,6 +49,91 @@ test("forward history reports a pruned interval after its cursor", async () => {
 
   assert.equal(history.historyLost, true);
   assert.deepEqual(history.rows.map((row) => row.sequence), [9]);
+});
+
+test("Heart life timestamps select each reachable evidence source", () => {
+  const body = {
+    sequence: 7,
+    leashTakenAt: "2026-08-12T00:00:00.000Z",
+    hung: { diagnostic: "stuck", at: "2026-08-12T00:01:00.000Z" },
+    endedAt: "2026-08-12T00:02:00.000Z",
+  } as const;
+  const kill = { sequence: 1, bodySequence: 7, evidence: "killed" as const, at: "2026-08-12T00:03:00.000Z" };
+  const createdAt = "2026-08-11T00:00:00.000Z";
+  assert.equal(lifeAt("running", body, null, createdAt), body.leashTakenAt);
+  assert.equal(lifeAt("hung", body, null, createdAt), body.hung.at);
+  assert.equal(lifeAt("killed", body, kill, createdAt), kill.at);
+  assert.equal(lifeAt("asleep", body, null, createdAt), body.endedAt);
+  assert.equal(lifeAt("stranded", body, null, createdAt), body.endedAt);
+  assert.equal(lifeAt("untidy", body, null, createdAt), null);
+  assert.equal(lifeAt("asleep", null, null, createdAt), createdAt);
+});
+
+test("public fleet rows wire every Heart life to its source timestamp", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-life-at-"));
+  const holders: HeldAkumaLeash[] = [];
+  try {
+    const born = async (suffix: string, createdAt: string) => {
+      const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => suffix });
+      await initializeHeart(allocated.paths);
+      const holder = (await HeldAkumaLeash.try(allocated.paths))!;
+      await holder.birth(allocated.paths, {
+        id: allocated.id,
+        archetype: "claude",
+        provider: CLAUDE_EXECUTION,
+        options: {},
+        cwd: root,
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        createdAt,
+      });
+      return { allocated, holder };
+    };
+    const running = await born("f0000001", "2026-08-12T00:00:00.000Z");
+    const runningBody = await running.holder.recordBody(running.allocated.paths, { leashTakenAt: "2026-08-12T00:01:00.000Z" });
+    holders.push(running.holder);
+    const hung = await born("f0000002", "2026-08-12T00:00:00.000Z");
+    const hungBody = await hung.holder.recordBody(hung.allocated.paths, { leashTakenAt: "2026-08-12T00:02:00.000Z" });
+    await hung.holder.recordBodyHung(hung.allocated.paths, { sequence: hungBody.sequence, diagnostic: "stuck", at: "2026-08-12T00:03:00.000Z" });
+    holders.push(hung.holder);
+    const asleep = await born("f0000003", "2026-08-12T00:00:00.000Z");
+    const asleepBody = await asleep.holder.recordBody(asleep.allocated.paths, { leashTakenAt: "2026-08-12T00:04:00.000Z" });
+    await finishBodyIfIdle(asleep.allocated.paths, { sequence: asleepBody.sequence, at: "2026-08-12T00:05:00.000Z" });
+    asleep.holder.release();
+    const stranded = await born("f0000004", "2026-08-12T00:00:00.000Z");
+    const strandedBody = await stranded.holder.recordBody(stranded.allocated.paths, { leashTakenAt: "2026-08-12T00:06:00.000Z" });
+    await breakBody(stranded.allocated.paths, { sequence: strandedBody.sequence, end: "broke-off", at: "2026-08-12T00:07:00.000Z" });
+    stranded.holder.release();
+    const killed = await born("f0000005", "2026-08-12T00:00:00.000Z");
+    const killedBody = await killed.holder.recordBody(killed.allocated.paths, { leashTakenAt: "2026-08-12T00:08:00.000Z" });
+    assert.equal((await requestStop(killed.allocated.paths, "2026-08-12T00:09:00.000Z")).kind, "requested");
+    await breakBody(killed.allocated.paths, { sequence: killedBody.sequence, end: "put-down", at: "2026-08-12T00:10:00.000Z" });
+    await killed.holder.settleStop(killed.allocated.paths);
+    killed.holder.release();
+    const untidy = await born("f0000006", "2026-08-12T00:00:00.000Z");
+    await untidy.holder.recordBody(untidy.allocated.paths, { leashTakenAt: "2026-08-12T00:11:00.000Z" });
+    untidy.holder.release();
+    const unborn = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0000007" });
+    await initializeHeart(unborn.paths);
+    const stillborn = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0000008" });
+    await initializeHeart(stillborn.paths);
+    const stillbornHolder = (await HeldAkumaLeash.try(stillborn.paths))!;
+    await stillbornHolder.sealIfUnborn(stillborn.paths, { evidence: "test", at: "2026-08-12T00:12:00.000Z" });
+
+    const rows = (await (await akumaAt(root)).list()).rows;
+    const row = (id: string) => rows.find((candidate) => candidate.id === id)!;
+    assert.equal(row(running.allocated.id).lifeAt, "2026-08-12T00:01:00.000Z");
+    assert.equal(row(hung.allocated.id).lifeAt, "2026-08-12T00:03:00.000Z");
+    assert.equal(row(asleep.allocated.id).lifeAt, "2026-08-12T00:05:00.000Z");
+    assert.equal(row(stranded.allocated.id).lifeAt, "2026-08-12T00:07:00.000Z");
+    assert.equal(row(killed.allocated.id).lifeAt, "2026-08-12T00:09:00.000Z");
+    assert.equal(row(untidy.allocated.id).lifeAt, null);
+    assert.equal("lifeAt" in row(unborn.id), false);
+    assert.equal("lifeAt" in row(stillborn.id), false);
+  } finally {
+    for (const holder of holders) holder.release();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("tell refuses an unborn address without leaving durable input", async () => {
@@ -551,6 +640,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
     const handle = world.of({ id: allocated.id });
     const listed = (await world.list()).rows[0]!;
     assert.equal(listed.life, "asleep");
+    assert.equal("lifeAt" in listed && listed.lifeAt, "2026-08-08T00:00:00.000Z");
     assert.equal("history" in listed, false);
     assert.equal("answer" in listed, false);
     assert.equal(listed.archetype, "claude");

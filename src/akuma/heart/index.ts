@@ -63,7 +63,7 @@ import { isHeartAbsent, readSealFromLeash, transaction, withHeart } from "./stor
 import { soulFact } from "./soul.js";
 export { HeartAbsentError, HeldAkumaLeash, initializeHeart, isHeartAbsent, probeLeash } from "./storage.js";
 
-export { life } from "./facts.js";
+export { life, lifeAt } from "./facts.js";
 export type {
   AkumaLife,
   AkumaOrigin,

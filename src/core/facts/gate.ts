@@ -2,7 +2,7 @@ import { currentSubjectPredicate } from "../subject.js";
 import type { AttestationEntry, ContractState, Gate } from "./types.js";
 
 export type GateCurrent =
-  | Readonly<{ kind: "attested"; verdict: "satisfied" | "unsatisfied"; summary?: string }>
+  | Readonly<{ kind: "attested"; verdict: "satisfied" | "unsatisfied"; summary?: string; at: string }>
   | Readonly<{ kind: "stale"; priorVerdict: "satisfied" | "unsatisfied" }>
   | Readonly<{ kind: "missing" }>;
 
@@ -55,6 +55,7 @@ export function gateReports(state: ContractState): GateReports {
           kind: "attested",
           verdict: attestation.data.verdict,
           ...(attestation.data.summary === undefined ? {} : { summary: attestation.data.summary }),
+          at: attestation.at,
         },
       };
     }

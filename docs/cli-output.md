@@ -78,6 +78,14 @@ and ages align to the right when a surface uses columns. These rules are
 presentation laws only: they do not add facts to JSON, journal authority, or
 read models.
 
+Kanshi alone derives compact age text from each row's source timestamp and the
+report's one `observedAt`. It floors nonnegative elapsed time to `Ns` below one
+minute, `Nm` below one hour, `Nh` below one day, and `Nd` thereafter; a later
+source is `future` and lawful absence is `—`. Contract phase is
+`<phase> · <age>` before target facts, each gate token is
+`<mark> <gate> <age>`, and born Akuma life is `<life> · <age>`. JSON retains
+the source timestamps and never contains the derived age.
+
 Kanshi is the one aggregate surface with a brand signature. Its first line is
 one responsive Split Horizon geometry:
 

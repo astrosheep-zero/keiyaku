@@ -56,8 +56,12 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
   assert.equal(observed.kind, "present");
   if (observed.kind !== "present") return;
   assert.equal(observed.row.gates.satisfied, false);
+  const current = observed.row.gates.reports[0]?.current;
+  assert.equal(current?.kind, "attested");
+  if (current?.kind !== "attested") return;
+  assert.equal(new Date(current.at).toISOString(), current.at);
   assert.deepEqual(observed.row.gates.reports, [
-    { gate: "verified", current: { kind: "attested", verdict: "unsatisfied", summary: "[1 bash exit 1]" } },
+    { gate: "verified", current: { kind: "attested", verdict: "unsatisfied", summary: "[1 bash exit 1]", at: current.at } },
   ]);
 });
 

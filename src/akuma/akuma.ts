@@ -6,6 +6,7 @@ import {
   HeldAkumaLeash,
   activitySlice,
   life,
+  lifeAt,
   probeLeash,
   readHeart,
   readLastAnsweredTurn,
@@ -57,6 +58,7 @@ export type AkumaListRow = Readonly<{
   archetype: string;
   description?: string;
   life: AkumaLife;
+  lifeAt: string | null;
   confinement: Soul["confinement"];
   pending: readonly string[];
 }>;
@@ -156,15 +158,17 @@ async function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot?: HeartS
   snapshot ??= await readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   if (snapshot.soul.id !== expected) throw new Error("Akuma soul does not match its coordinate");
+  const currentLife = life({
+    leash: await probeLeash(paths),
+    body: snapshot.latestBody,
+    kill: snapshot.latestKill,
+  });
   return {
     id: snapshot.soul.id,
     archetype: snapshot.soul.archetype,
     ...(snapshot.soul.description === undefined ? {} : { description: snapshot.soul.description }),
-    life: life({
-      leash: await probeLeash(paths),
-      body: snapshot.latestBody,
-      kill: snapshot.latestKill,
-    }),
+    life: currentLife,
+    lifeAt: lifeAt(currentLife, snapshot.latestBody, snapshot.latestKill, snapshot.soul.createdAt),
     confinement: snapshot.soul.confinement,
     pending: snapshot.pending.map((tell) => tell.id),
   };

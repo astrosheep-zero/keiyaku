@@ -21,6 +21,7 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { contractJournalPath } from "../src/git/identity.js";
+import { phaseAtFor } from "../src/protocol/read/status.js";
 import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
 import { Tasks } from "../src/task/index.js";
 import { authorityPath } from "../src/task/store.js";
@@ -504,6 +505,7 @@ function contractRow(input: Partial<Extract<KanshiReport["contracts"], { kind: "
   return {
     title: input.title ?? input.id.slice("kei/".length),
     phase: "waiting" as const,
+    phaseAt: "2026-08-11T23:59:30.000Z",
     disposition: "active" as const,
     workspace,
     worktreePath: workspace === "worktree" ? path : null,
@@ -535,13 +537,14 @@ function attentionReport(): KanshiReport {
             id: "kei/terminal-contract",
             title: "Terminal Contract",
             phase: "claimed",
+            phaseAt: "2026-08-10T00:00:00.000Z",
             disposition: "terminal",
             worktreePath: "/repo/.git/keiyaku/wt/terminal-contract",
             workspaceObservation: worktreeObservation("/repo/.git/keiyaku/wt/terminal-contract"),
             gates: {
               satisfied: true,
               reports: [
-                { gate: "reviewed", current: { kind: "attested", verdict: "satisfied", summary: "terminal review summary" } },
+                { gate: "reviewed", current: { kind: "attested", verdict: "satisfied", summary: "terminal review summary", at: "2026-08-10T00:00:00.000Z" } },
               ],
             },
           }),
@@ -549,6 +552,7 @@ function attentionReport(): KanshiReport {
             id: "kei/active-contract",
             title: "Active Contract",
             phase: "pending-delivery",
+            phaseAt: "2026-08-11T23:57:00.000Z",
             worktreePath: dirtyPath,
             workspaceObservation: worktreeObservation(dirtyPath, "dirty", { staged: 1, unstaged: 3, untracked: 2, submodules: 0 }),
             targetLag: { kind: "counted", behind: 7 },
@@ -558,8 +562,8 @@ function attentionReport(): KanshiReport {
             gates: {
               satisfied: false,
               reports: [
-                { gate: "reviewed", current: { kind: "attested", verdict: "satisfied", summary: "world summary should stay hidden" } },
-                { gate: "verified", current: { kind: "attested", verdict: "unsatisfied", summary: "tests failed" } },
+                { gate: "reviewed", current: { kind: "attested", verdict: "satisfied", summary: "world summary should stay hidden", at: "2026-08-11T23:58:00.000Z" } },
+                { gate: "verified", current: { kind: "attested", verdict: "unsatisfied", summary: "tests failed", at: "2026-08-11T22:00:00.000Z" } },
                 { gate: "security", current: { kind: "stale", priorVerdict: "satisfied" } },
                 { gate: "manual", current: { kind: "missing" } },
               ],
@@ -569,10 +573,12 @@ function attentionReport(): KanshiReport {
             id: "kei/cold-contract",
             title: "Cold Contract",
             phase: "bound",
+            phaseAt: "2026-08-11T22:00:00.000Z",
           }),
           contractRow({
             id: "kei/target-unknown",
             title: "Target Unknown",
+            phaseAt: "2026-08-12T00:00:01.000Z",
             targetLag: { kind: "unknown" },
             targetObservation: { head: null, drift: true },
           }),
@@ -621,13 +627,13 @@ function attentionReport(): KanshiReport {
       value: {
         searched: ["/repo/.keiyaku/akuma/run"],
         rows: [
-          { id: "aku/worker/a0000001", archetype: "worker", life: "running", confinement: { kind: "unconfined" }, pending: [], aliases: ["@lead"], contract: { id: "kei/active-contract", observed: "active" } },
-          { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", confinement: { kind: "unconfined" }, pending: [], aliases: [] },
-          { id: "aku/worker/a0000003", archetype: "worker", life: "killed", confinement: { kind: "unconfined" }, pending: [], aliases: [] },
+          { id: "aku/worker/a0000001", archetype: "worker", life: "running", lifeAt: "2026-08-11T23:56:00.000Z", confinement: { kind: "unconfined" }, pending: [], aliases: ["@lead"], contract: { id: "kei/active-contract", observed: "active" } },
+          { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", lifeAt: "2026-08-11T00:00:00.000Z", confinement: { kind: "unconfined" }, pending: [], aliases: [] },
+          { id: "aku/worker/a0000003", archetype: "worker", life: "killed", lifeAt: "2026-08-11T23:59:30.000Z", confinement: { kind: "unconfined" }, pending: [], aliases: [] },
           { id: "aku/worker/a0000004", life: "stillborn", seal: { at: "2026-08-10T00:00:00.000Z", evidence: "stillborn" }, aliases: [] },
           { id: "aku/worker/a0000005", life: "unborn", aliases: [] },
-          { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", strandedReason: "resume-unsupported", confinement: { kind: "unconfined" }, pending: ["pending"], aliases: [], contract: { id: "kei/missing-contract", observed: "missing" } },
-          { id: "aku/worker/a0000007", archetype: "worker", life: "hung", confinement: { kind: "unconfined" }, pending: [], aliases: [] },
+          { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", lifeAt: "2026-08-11T22:00:00.000Z", strandedReason: "resume-unsupported", confinement: { kind: "unconfined" }, pending: ["pending"], aliases: [], contract: { id: "kei/missing-contract", observed: "missing" } },
+          { id: "aku/worker/a0000007", archetype: "worker", life: "hung", lifeAt: null, confinement: { kind: "unconfined" }, pending: [], aliases: [] },
         ],
       },
     },
@@ -662,6 +668,43 @@ test("Kanshi text keeps complete identities in the aperture grammar", async () =
   assert.match(text, /──\[ FLEET \]/u);
   assert.doesNotMatch(text, /\bFLEET \d/u);
   assert.doesNotMatch(signature, / fleet /u);
+  const json = JSON.stringify(report);
+  assert.match(json, /"phaseAt":/u);
+  assert.match(json, /"lifeAt":/u);
+  assert.doesNotMatch(json, /"(?:age|lifeSince)":|\u001b/u);
+});
+
+test("Contract phase timestamps select the owning journal entry", () => {
+  const bindAt = "2026-08-12T00:00:00.000Z";
+  const boundAt = "2026-08-12T00:01:00.000Z";
+  const deliveryAt = "2026-08-12T00:02:00.000Z";
+  const claimedAt = "2026-08-12T00:03:00.000Z";
+  assert.equal(phaseAtFor({ terminal: null, delivery: null, bound: null }, bindAt), bindAt);
+  assert.equal(phaseAtFor({ terminal: null, delivery: null, bound: { at: boundAt } as never }, bindAt), boundAt);
+  assert.equal(phaseAtFor({ terminal: null, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never }, bindAt), deliveryAt);
+  assert.equal(phaseAtFor({ terminal: { at: claimedAt } as never, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never }, bindAt), claimedAt);
+  assert.equal(phaseAtFor({ terminal: { at: "2026-08-12T00:04:00.000Z" } as never, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never }, bindAt), "2026-08-12T00:04:00.000Z");
+});
+
+test("Kanshi ages keep every unit boundary, future, and absent evidence distinct", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
+  const sources = [
+    ["59s", "2026-08-11T23:59:01.000Z"],
+    ["1m", "2026-08-11T23:59:00.000Z"],
+    ["59m", "2026-08-11T23:01:00.000Z"],
+    ["1h", "2026-08-11T23:00:00.000Z"],
+    ["23h", "2026-08-11T01:00:00.000Z"],
+    ["1d", "2026-08-11T00:00:00.000Z"],
+    ["future", "2026-08-12T00:00:01.000Z"],
+  ] as const;
+  const timedRows = sources.map(([label, phaseAt]) => contractRow({ id: `kei/age-${label}`, phaseAt }));
+  const text = renderKanshiText({
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows: timedRows } },
+  }, { columns: 120, color: false });
+  for (const [label] of sources) assert.match(text, new RegExp(`waiting · ${label}`, "u"));
+  assert.match(text, /stillborn · —/u);
 });
 
 test("Kanshi text retains every entity and the aperture hierarchy", () => {
@@ -704,11 +747,14 @@ test("Kanshi text retains every entity and the aperture hierarchy", () => {
   assert.match(contracts, /drift/u);
   assert.match(contracts, /worktree dirty · staged 1 · unstaged 3 · untracked 2/u);
   assert.match(contracts, /^ {2}│ ↳ \/repo\/\.git\/keiyaku\/wt\/active-contract$/mu);
-  assert.match(contracts, /gates: ✓ reviewed · ! verified · \? security · \? manual/u);
+  assert.match(contracts, /pending-delivery · 3m/u);
+  assert.match(contracts, /gates: ✓ reviewed 2m · ! verified 2h · \? security — · \? manual —/u);
   assert.match(contracts, /task task\/running/u);
   assert.match(contracts, /akuma aku\/worker\/a0000001 \(@lead\)/u);
   assert.doesNotMatch(contracts, /world summary should stay hidden/u);
-  assert.match(contracts, /Cold Contract · bound · target main · behind 0/u);
+  assert.match(contracts, /Cold Contract · bound · 2h · target main · behind 0/u);
+  assert.match(contracts, /Terminal Contract · claimed · 2d/u);
+  assert.match(contracts, /Target Unknown · waiting · future/u);
   assert.match(contracts, /target main · behind unknown · drift/u);
   assert.doesNotMatch(contracts, /target unknown/u);
   assert.match(contracts, /no target/u);
@@ -740,10 +786,12 @@ test("Kanshi text retains every entity and the aperture hierarchy", () => {
 
   const fleet = sectionBody(text, "FLEET");
   assert.match(fleet, /^● aku\/worker\/a0000001 \(@lead\)$/mu);
-  assert.match(fleet, /running/u);
-  assert.match(fleet, /stranded · resume unsupported/u);
+  assert.match(fleet, /running · 4m/u);
+  assert.match(fleet, /stranded · 2h · resume unsupported/u);
   assert.match(fleet, /-> kei\/missing-contract \(missing\)/u);
-  assert.match(fleet, /asleep · unbound/u);
+  assert.match(fleet, /asleep · 1d · unbound/u);
+  assert.match(fleet, /killed · 30s/u);
+  assert.match(fleet, /hung · —/u);
   assert.deepEqual(report, before);
 });
 
