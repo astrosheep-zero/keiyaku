@@ -189,121 +189,91 @@ object as typed lags. Text and JSON expose them without changing the Contract
 fact, command kind, or exit status. The adapter never hides the existing
 Contract or automatically abandons it.
 
-Accepted facts name at least their contract, entry, and kind. Effects render as
-Git data:
+Bind, amend, deliver, review, and abandon share one Contract mutation receipt.
+The renderer remains a pure projection over `InvocationResult`: it invents no
+fields, rereads no authorities, and does not change exit semantics. JSON is
+byte-for-byte the serialization of that same public value.
+
+The outcome header is first. An accepted receipt stays visually accepted even
+when it carries overlap warnings, stops, lags, or a long diff. A stop inside
+an accepted receipt is an indented named block; it does not replace the header.
 
 ```text
-effects: [
-  { kind: "worktree", path, action },
-  { kind: "target-checkout", path, target, action },
-  { kind: "ref", name, before, after }
-]
+✓ <verb> accepted
+└─ <complete kei/... when present>
+
+! <verb> refused
+└─ <complete kei/... when present>
+   <refusal kind and scalar facts>
+   <collection label>
+   │ <one exact member per line>
+
+? <verb> retry
+└─ <complete kei/... when present>
+   <retry kind and exact diagnostic facts>
 ```
 
-The flat `lag` array is the public `ReconcileResult` shape defined in
-[git-reconciliation.md](git-reconciliation.md); the CLI does not wrap or translate it. Its text
-form is one direct line per member:
+Bind retry has no Contract relation because no identity was admitted. After the
+hanging Contract coordinate is rendered, the same addressed `contractId` is not
+reflected again. Structured text names public fields by their typed roles and
+never prints an opaque JSON object on one line when that object contains
+multiple decision facts. Exact coordinates are opaque facts, not prose: a path
+or identity is never routed through whitespace-tokenizing wrap. When a line
+exceeds the viewport, its physical continuation hangs two spaces beneath that
+owning fact so it cannot look like a sibling. Complete coordinates remain
+copyable and byte-faithful, including consecutive spaces.
 
-```text
-lag worktree-retained <path>
-lag unsealed-bytes <path> [head=<snapshot>] [paths=<path>,...]
-lag target-checkout-retained <target> <path> <diagnostic>
-lag worktree-hook-failed <create|destroy> <path> command=<index> <failure-json>
-```
+Accepted facts, the optional bind `target`, independent obligation stops,
+cleanup, leak, and workspace disclosure hang under the Contract coordinate.
+Then only the present factual blocks follow: Region observation, audit report,
+labeled document diff, effects, lag, and settlement.
 
-JSON exposes that same `lag` array. An `unsealed-bytes` or
-`target-checkout-retained` lag does not turn an accepted result into a refusal
-or alter its exit status.
+A completed nonempty Region observation groups a repeated identical ordered
+witness set once beneath an explicit list of every participating Contract. The
+counts are derived checks: every complete Contract ID and every exact
+`mine ~ theirs` pair remains visible. Nonidentical sets remain beneath their
+own complete Contract ID. Overlap uses the neutral Region relation mark and
+never changes accepted into refused. An incomplete observation is one
+`~ overlap unavailable` block with the verbatim diagnostic. An empty completed
+observation renders no overlap block. JSON exposes the same `overlaps` or
+`overlapFailure` property.
 
-A dirty-workspace refusal uses one line per classified path, followed by the
-complete-tree short statistic and the authorization option:
+Document diff is labeled, then the exact public content, including an empty
+string. The CLI never computes another diff or makes availability a lifecycle
+decision. Audit omits diff unless `--show-diff-body` is present; a `null`
+public diff renders the typed `git-unavailable` facts. Audit also renders its
+public report, head, and facts; it does not inspect journal entries or raw
+process output.
 
-```text
-refused deliver <contract> dirty-workspace
-dirty staged <path>
-dirty unstaged <path>
-dirty untracked <path>
-dirty submodule <path>
-shortstat files=<count> insertions=<count> deletions=<count>
-option --include-dirty <available|unavailable>
-```
+Changed physical effects precede unchanged confirmations. Every effect remains
+present with its exact kind, action, coordinate, and before/after data;
+unchanged facts may share the effects block but may not collapse into a count.
+Lag, cleanup, leak, workspace, target, and obligation-stop blocks use two-space
+evidence indentation and retain exact diagnostics. Settlement is the final
+factual block and carries no Akuma-life glyph.
 
-The option is unavailable exactly when dirty submodule internals are present;
-otherwise the line exposes the flag that can authorize the listed ordinary
-workspace bytes. JSON carries the same refusal facts plus the CLI-owned option
+The flat `lag` array remains the public `ReconcileResult` shape defined in
+[git-reconciliation.md](git-reconciliation.md). JSON exposes that same array.
+An `unsealed-bytes` or `target-checkout-retained` lag does not turn an accepted
+result into a refusal or alter its exit status.
+
+A dirty-workspace refusal uses the refused header, then the refusal kind,
+classified path collections, complete-tree short statistic, and authorization
+option. The option is unavailable exactly when dirty submodule internals are
+present. JSON carries the same refusal facts plus the CLI-owned option
 projection. The renderer does not run Git or infer another path classification.
 
-An accepted review that observed ordinary dirty workspace bytes prints one
-structured disclosure line:
-
-```text
-workspace {"staged":[...],"unstaged":[...],"untracked":[...],"shortStat":{...}}
-```
-
-The line has no authorization option because review observes a projection; it
-does not authorize delivery. JSON carries the same `workspace` object. Dirty
-submodule internals still refuse before review admission.
-
-Text presents all accepted `facts`, then independent obligation stops, Region
-observation, effects, and flat lag. It does not replace observed data with a
-repair command. Each completed bind/amend overlap witness renders:
-
-```text
-overlap <contract> <mine> ~ <theirs>
-```
-
-An incomplete Region observation renders exactly one line and leaves the
-accepted exit status unchanged:
-
-```text
-overlap unavailable <verbatim-diagnostic>
-```
-
-An empty completed observation renders no overlap line. JSON exposes the same
-public `overlaps` or `overlapFailure` property without a second output schema.
-The exact obligation and residue lines are:
-
-```text
-stop verification <json>
-stop placement <json>
-leak worktree <path> <verbatim-diagnostic>
-```
+An accepted review that observed ordinary dirty workspace bytes hangs a
+structured `workspace` disclosure under the Contract coordinate. It has no
+authorization option because review observes a projection. Dirty submodule
+internals still refuse before review admission.
 
 Each stop is independent: Verification never suppresses the placement attempt,
-and one accepted invocation may render both lines. The `stop` prefix
-distinguishes an accepted verb's obligation result from a top-level
-`refused <verb>` result. JSON serializes the public value unchanged. The
-renderer never mines facts from value fields or duplicates an accepted fact.
-An environment failure renders in that same `stop verification` value with its
-command index and typed command failure. A declaration timeout is an
-unsatisfied attestation fact, not a stop.
-
-A failed scratch destroy command renders without claiming that the worktree
-remains:
-
-```text
-cleanup destroy command=<index> <failure-json>
-```
-
-The leak line reports a disposable Verification worktree that could not be
-removed after admission. It does not change the accepted exit status and is
-not a repair command, lifecycle fact, or reconcile result.
-
-For an accepted amendment, the CLI renders the returned nonoptional
-`AmendResult.documentDiff` as the presentation diff, including an empty string.
-Text and JSON use that same public value. The CLI never dereferences a
-structured body from a public outcome, computes another document diff, persists
-diff bytes, or makes diff availability a lifecycle decision.
-
-Audit omits diff content unless `--show-diff-body` is present. It obtains the
-Delivery from the public handle and renders diff text when available. A `null`
-public diff renders:
-
-```text
-{ reason: "git-unavailable", integrationSnapshot, changeId }
-```
-
-This is an observation with exit `0`, contains no raw Git error, and is not
-added to the audit report. Audit renders its public report, head, and facts; it does
-not inspect journal entries, delivery coordinates, raw process output, or
-timestamps.
+and one accepted invocation may render both named stop blocks. The `stop`
+prefix distinguishes an accepted verb's obligation result from a top-level
+refused header. An environment failure remains inside `stop verification` with
+its command index and typed command failure. A declaration timeout is an
+unsatisfied attestation fact, not a stop. A failed scratch destroy command
+renders without claiming that the worktree remains. The leak line reports a
+disposable Verification worktree that could not be removed after admission; it
+does not change the accepted exit status and is not a repair command.

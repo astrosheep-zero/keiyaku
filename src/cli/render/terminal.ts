@@ -133,6 +133,39 @@ export function renderTextBlock(value: string, indent: string, columns: number):
   return lines;
 }
 
+export function renderOpaqueBlock(value: string, indent: string, columns: number): readonly string[] {
+  let rest = safeText(value);
+  if (rest.length === 0) return [indent.trimEnd()];
+  const continuation = `${indent}  `;
+  const lines: string[] = [];
+  let prefix = indent;
+  while (rest.length > 0) {
+    const budget = columns - displayColumns(prefix);
+    if (budget <= 0) {
+      if (prefix === continuation) {
+        lines.push(`${prefix}${rest}`);
+        break;
+      }
+      lines.push(prefix.trimEnd());
+      prefix = continuation;
+      continue;
+    }
+    if (displayColumns(rest) <= budget) {
+      lines.push(`${prefix}${rest}`);
+      break;
+    }
+    const taken = takeDisplayColumns(rest, budget);
+    if (taken.text.length === 0) {
+      lines.push(`${prefix}${rest}`);
+      break;
+    }
+    lines.push(`${prefix}${taken.text}`);
+    rest = taken.rest;
+    prefix = continuation;
+  }
+  return lines;
+}
+
 export function renderVoiceRuler(left: string, right: string, columns: number): string {
   const width = Math.max(20, Math.min(80, columns));
   const occupied = displayColumns(left) + displayColumns(right) + 2;

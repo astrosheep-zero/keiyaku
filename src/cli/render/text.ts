@@ -10,8 +10,8 @@ export function renderText(result: InvocationResult, context?: TextRenderContext
   if (result.kind === "guidance") return result.guidance;
   if (result.kind === "status") return renderKanshiText(result.report, context, result.selection);
   if (result.kind === "catalog") return renderCatalogText(result.catalog);
-  if (result.kind === "accepted") return renderAccepted(result);
-  if (result.kind === "refused") return renderRefusal(result);
-  if (result.kind === "retry") return renderRetry(result);
+  if (result.kind === "accepted") return renderAccepted(result, context);
+  if (result.kind === "refused") return renderRefusal(result, context);
+  if (result.kind === "retry") return renderRetry(result, context);
   return renderObservation(result);
 }

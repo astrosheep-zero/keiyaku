@@ -5,20 +5,74 @@ import type { InvocationResult } from "../src/cli/result.js";
 import { renderText } from "../src/cli/render/text.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 
+const head = "0123456789abcdef0123456789abcdef01234567";
+const entry = "01J00000000000000000000000";
+const wide = { columns: 200, color: false } as const;
+const narrow = { columns: 36, color: false } as const;
+
+function assertJsonIdentity(result: InvocationResult): void {
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+}
+
+function reconstructOpaque(text: string): string {
+  const lines = text.split("\n");
+  const rebuilt: string[] = [];
+  for (const line of lines) {
+    if (/^\s{4,}/u.test(line) && rebuilt.length > 0) rebuilt[rebuilt.length - 1] += line.trimStart();
+    else rebuilt.push(line);
+  }
+  return rebuilt.join("\n");
+}
+
+function assertBefore(text: string, earlier: string, later: string): void {
+  const left = text.indexOf(earlier);
+  const right = text.indexOf(later);
+  assert.notEqual(left, -1, `missing ${JSON.stringify(earlier)}\n${text}`);
+  assert.notEqual(right, -1, `missing ${JSON.stringify(later)}\n${text}`);
+  assert.equal(left < right, true, `${JSON.stringify(earlier)} should precede ${JSON.stringify(later)}\n${text}`);
+}
+
 test("guidance text is the exact Markdown projection", () => {
   const guidance = "---\ncontract: kei/show\n---\n\n# Show\n";
   assert.equal(renderText({ kind: "guidance", contract: contractId("kei/show"), guidance }), guidance);
 });
 
-test("accepted text keeps facts before observed effect facts", () => {
+test("accepted mutation receipts start with outcome, verb, and the complete Contract coordinate", () => {
+  for (const verb of ["bind", "amend", "deliver", "review", "abandon"] as const) {
+    const contract = contractId(`kei/render-${verb}`);
+    const result: InvocationResult = {
+      kind: "accepted",
+      verb,
+      contract,
+      head,
+      facts: [{ contract, entry, kind: verb === "review" ? "attestation" : verb }],
+      effects: [],
+      settlement: { actions: [], lags: [] },
+    };
+    const text = renderText(result);
+    assert.equal(text.split("\n")[0], `✓ ${verb} accepted`);
+    assert.equal(text.split("\n")[1], `└─ ${contract}`);
+    assert.match(text, new RegExp(`head ${head}`));
+    assert.match(text, new RegExp(`fact ${entry}`));
+    assertJsonIdentity(result);
+  }
+});
+
+test("accepted text keeps facts before effects and changed effects before unchanged", () => {
   const contract = contractId("kei/render-effect");
   const result: InvocationResult = {
     kind: "accepted",
     verb: "deliver",
     contract,
-    head: "0123456789abcdef0123456789abcdef01234567",
-    facts: [{ contract, entry: "01J00000000000000000000000", kind: "deliver" }],
+    head,
+    facts: [{ contract, entry, kind: "deliver" }],
     effects: [{
+      kind: "ref",
+      name: "refs/heads/main",
+      action: "unchanged",
+      before: null,
+      after: null,
+    }, {
       kind: "ref",
       name: "refs/heads/main",
       action: "updated",
@@ -27,13 +81,10 @@ test("accepted text keeps facts before observed effect facts", () => {
     }],
     settlement: { actions: [], lags: [] },
   };
-
-  assert.equal(renderText(result), [
-    "accepted deliver kei/render-effect head=0123456789abcdef0123456789abcdef01234567",
-    "fact kei/render-effect 01J00000000000000000000000 deliver",
-    "effect ref updated refs/heads/main 1111111111111111111111111111111111111111 -> 2222222222222222222222222222222222222222",
-  ].join("\n"));
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+  const text = renderText(result, wide);
+  assertBefore(text, `fact ${entry} deliver`, "effects");
+  assertBefore(text, "✓ ref updated", "· ref unchanged");
+  assertJsonIdentity(result);
 });
 
 test("accepted text exposes target checkout alignment and retention", () => {
@@ -42,7 +93,7 @@ test("accepted text exposes target checkout alignment and retention", () => {
     kind: "accepted",
     verb: "deliver",
     contract,
-    head: "0123456789abcdef0123456789abcdef01234567",
+    head,
     facts: [],
     effects: [{
       kind: "target-checkout",
@@ -58,32 +109,51 @@ test("accepted text exposes target checkout alignment and retention", () => {
     }],
     settlement: { actions: [], lags: [] },
   };
-
-  assert.equal(renderText(result), [
-    "accepted deliver kei/render-target-checkout head=0123456789abcdef0123456789abcdef01234567",
-    "effect target-checkout followed refs/heads/main /repo",
-    "lag target-checkout-retained refs/heads/main /repo/peer local bytes overlap",
-  ].join("\n"));
+  const text = renderText(result, wide);
+  assertBefore(text, "effects", "lag");
+  assert.match(text, /✓ target-checkout followed refs\/heads\/main \/repo/);
+  assert.match(text, /target-checkout-retained refs\/heads\/main \/repo\/peer local bytes overlap/);
 });
 
-test("typed refusal text preserves the refusal object", () => {
+test("typed refusal and retry keep structured facts without one-line JSON", () => {
   const contract = contractId("kei/render-refusal");
-  const result: InvocationResult = {
+  const refused: InvocationResult = {
     kind: "refused",
     verb: "deliver",
     contract,
     refusal: { kind: "integration-failed", reason: "not-based-on-target", targetHead: "target-head", contractId: contract },
   };
+  const refusedText = renderText(refused, wide);
+  assert.equal(refusedText.split("\n")[0], "! deliver refused");
+  assert.equal(refusedText.split("\n")[1], `└─ ${contract}`);
+  assert.match(refusedText, /integration-failed/);
+  assert.match(refusedText, /reason=not-based-on-target/);
+  assert.match(refusedText, /targetHead=target-head/);
+  assert.equal(refusedText.split(contract).length - 1, 1);
+  assert.equal(refusedText.includes("contractId="), false);
+  assert.equal(refusedText.includes("{"), false);
+  assertJsonIdentity(refused);
 
-  assert.equal(
-    renderText(result),
-    'refused deliver kei/render-refusal {"kind":"integration-failed","reason":"not-based-on-target","targetHead":"target-head","contractId":"kei/render-refusal"}',
-  );
+  const bindRetry: InvocationResult = { kind: "retry", verb: "bind", detail: { kind: "exhausted" } };
+  assert.equal(renderText(bindRetry), ["? bind retry", "   exhausted"].join("\n"));
+  assert.equal("contract" in bindRetry, false);
+
+  const amendRetry: InvocationResult = {
+    kind: "retry",
+    verb: "amend",
+    contract: contractId("kei/render-retry"),
+    detail: { kind: "publication-failed", diagnostic: "lock held" },
+  };
+  const retryText = renderText(amendRetry, wide);
+  assert.equal(retryText.split("\n")[0], "? amend retry");
+  assert.match(retryText, /kei\/render-retry/);
+  assert.match(retryText, /publication-failed diagnostic=lock held/);
+  assert.equal(retryText.includes("{"), false);
 });
 
-test("dirty refusal text exposes classified paths, short stats, and the authorization flag", () => {
+test("dirty refusal and review workspace keep every classified path", () => {
   const contract = contractId("kei/render-dirty");
-  const result: InvocationResult = {
+  const refused: InvocationResult = {
     kind: "refused",
     verb: "deliver",
     contract,
@@ -98,26 +168,22 @@ test("dirty refusal text exposes classified paths, short stats, and the authoriz
       option: { flag: "--include-dirty", available: true },
     },
   };
+  const refusedText = renderText(refused, wide);
+  assert.equal(refusedText.split("\n")[0], "! deliver refused");
+  assert.match(refusedText, /dirty-workspace/);
+  assert.equal(refusedText.split("both.txt").length - 1, 2);
+  assert.equal(refusedText.includes("new.txt"), true);
+  assert.match(refusedText, /submodules 0/);
+  assert.match(refusedText, /shortstat files=2 insertions=3 deletions=1/);
+  assert.match(refusedText, /option --include-dirty available/);
+  assertJsonIdentity(refused);
 
-  assert.equal(renderText(result), [
-    "refused deliver kei/render-dirty dirty-workspace",
-    "dirty staged both.txt",
-    "dirty unstaged both.txt",
-    "dirty untracked new.txt",
-    "shortstat files=2 insertions=3 deletions=1",
-    "option --include-dirty available",
-  ].join("\n"));
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
-});
-
-test("accepted review text exposes dirty workspace observation without an authorization option", () => {
-  const contract = contractId("kei/render-dirty-review");
-  const result: InvocationResult = {
+  const review: InvocationResult = {
     kind: "accepted",
     verb: "review",
-    contract,
-    head: "0123456789abcdef0123456789abcdef01234567",
-    facts: [{ contract, entry: "01J00000000000000000000000", kind: "attestation" }],
+    contract: contractId("kei/render-dirty-review"),
+    head,
+    facts: [{ contract: contractId("kei/render-dirty-review"), entry, kind: "attestation" }],
     effects: [],
     settlement: { actions: [], lags: [] },
     workspace: {
@@ -127,35 +193,12 @@ test("accepted review text exposes dirty workspace observation without an author
       shortStat: { filesChanged: 2, insertions: 3, deletions: 1 },
     },
   };
-
-  assert.equal(renderText(result), [
-    "accepted review kei/render-dirty-review head=0123456789abcdef0123456789abcdef01234567",
-    "fact kei/render-dirty-review 01J00000000000000000000000 attestation",
-    'workspace {"staged":["tracked.txt"],"unstaged":[],"untracked":["new.txt"],"shortStat":{"filesChanged":2,"insertions":3,"deletions":1}}',
-  ].join("\n"));
-});
-
-test("bind retry text has no contract segment", () => {
-  const result: InvocationResult = {
-    kind: "retry",
-    verb: "bind",
-    detail: { kind: "exhausted" },
-  };
-
-  assert.equal(renderText(result), 'retry bind {"kind":"exhausted"}');
-  assert.equal("contract" in result, false);
-});
-
-test("addressed retry text retains its caller coordinate", () => {
-  const contract = contractId("kei/render-retry");
-  const result: InvocationResult = {
-    kind: "retry",
-    verb: "amend",
-    contract,
-    detail: { kind: "exhausted" },
-  };
-
-  assert.equal(renderText(result), 'retry amend kei/render-retry {"kind":"exhausted"}');
+  const reviewText = renderText(review, wide);
+  assert.equal(reviewText.split("\n")[0], "✓ review accepted");
+  assert.match(reviewText, /workspace/);
+  assert.match(reviewText, /tracked\.txt/);
+  assert.match(reviewText, /new\.txt/);
+  assert.equal(reviewText.includes("--include-dirty"), false);
 });
 
 test("catalog text renders only the selected identity layer", () => {
@@ -175,59 +218,109 @@ test("catalog text renders only the selected identity layer", () => {
   }), "aku/worker/deadbeef - unborn");
 });
 
-test("accepted text preserves named obligation stops after facts", () => {
+test("accepted text keeps named stops under an accepted header", () => {
   const contract = contractId("kei/render-steps");
   const result: InvocationResult = {
     kind: "accepted",
     verb: "deliver",
     contract,
     head: null,
-    facts: [{ contract, entry: "01J00000000000000000000000", kind: "deliver" }],
+    facts: [{ contract, entry, kind: "deliver" }],
     verification: { refusal: { kind: "terminal", contractId: contract } },
     placement: { retry: { kind: "exhausted" } },
     leak: { path: "/tmp/keiyaku-v4-verify-leak", diagnostic: "worktree remove failed" },
     effects: [{ kind: "ref", name: "refs/heads/main", action: "unchanged", before: null, after: null }],
     settlement: { actions: [], lags: [] },
   };
-
-  assert.equal(renderText(result), [
-    `accepted deliver ${contract} head=null`,
-    `fact ${contract} 01J00000000000000000000000 deliver`,
-    `stop verification {"refusal":{"kind":"terminal","contractId":"kei/render-steps"}}`,
-    `stop placement {"retry":{"kind":"exhausted"}}`,
-    "leak worktree /tmp/keiyaku-v4-verify-leak worktree remove failed",
-    "effect ref unchanged refs/heads/main null -> null",
-  ].join("\n"));
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+  const text = renderText(result, wide);
+  assert.equal(text.split("\n")[0], "✓ deliver accepted");
+  assertBefore(text, `fact ${entry} deliver`, "stop verification");
+  assertBefore(text, "stop verification", "stop placement");
+  assertBefore(text, "stop placement", "effects");
+  assert.match(text, /refusal/);
+  assert.match(text, /terminal/);
+  assert.equal(text.split(contract).length - 1, 1);
+  assert.equal(text.includes("contractId="), false);
+  assert.match(text, /retry/);
+  assert.match(text, /exhausted/);
+  assert.match(text, /leak worktree \/tmp\/keiyaku-v4-verify-leak worktree remove failed/);
+  assert.equal(text.includes("{"), false);
+  assertJsonIdentity(result);
 });
 
-test("accepted text renders Region witnesses and unavailable observations", () => {
-  const contract = contractId("kei/render-region");
-  const witnesses: InvocationResult = {
+test("repeated overlap grouping stays lossless and wraps without dropping coordinates", () => {
+  const contract = contractId("kei/preserve-failed-bind-inputs-and-normalize-region");
+  const shared = [
+    { mine: "src/body/region.ts", theirs: "src/**" },
+    { mine: "src/cli/draft.ts", theirs: "src/**" },
+    { mine: "src/cli/invoke.ts", theirs: "src/**" },
+    { mine: "src/cli/main.ts", theirs: "src/**" },
+    { mine: "src/cli/result.ts", theirs: "src/**" },
+    { mine: "src/cli/render/refusal.ts", theirs: "src/**" },
+  ] as const;
+  const unique = [
+    { mine: "docs/cli.md", theirs: "docs/cli.md" },
+    { mine: "src/cli/invoke.ts", theirs: "src/cli/invoke.ts" },
+    { mine: "tests/cli-invoke.test.ts", theirs: "tests/cli-invoke.test.ts" },
+  ] as const;
+  const peers = [
+    "kei/first-status-row",
+    "kei/second-status-row",
+    "kei/blocked-reconcile",
+    "kei/healthy-reconcile",
+  ] as const;
+  const uniqueId = "kei/enforce-exact-and-nonblank-cli-input-sources";
+  const diff = "===================================================================\n--- before\n+++ after\n@@ -1 +1,2 @@\n docs/cli.md\n+scripts/architecture/policy.ts\n";
+  const worktree = "/repo/.git/keiyaku/wt/kei-preserve-failed-bind-inputs-and-normalize-region";
+  const result: InvocationResult = {
     kind: "accepted",
-    verb: "bind",
+    verb: "amend",
     contract,
-    head: null,
-    facts: [],
-    effects: [],
-    settlement: { actions: [], lags: [] },
-    target: "refs/heads/main",
-    overlaps: [{
-      contract: contractId("kei/peer"),
-      patterns: [
-        { mine: "src/**", theirs: "src/api/**" },
-        { mine: "docs/**", theirs: "docs/**" },
-      ],
-    }],
+    head: "dc01450ebf6c758c95d834c33def7837aae6ad04",
+    facts: [{ contract, entry: "01M02EKRKQ6A2DDDNF4BGVJ753", kind: "amend" }],
+    effects: [
+      { kind: "contract-file", path: "/repo/.keiyaku/KEIYAKU.md", action: "updated" },
+      { kind: "ref", name: "refs/heads/keiyaku-delivery/kei-preserve-failed-bind-inputs-and-normalize-region", action: "unchanged", before: head, after: head },
+      { kind: "worktree", path: worktree, action: "unchanged" },
+    ],
+    settlement: { actions: [{ kind: "namespace-context", path: worktree, action: "kept" }], lags: [] },
+    overlaps: [
+      ...peers.map((id) => ({ contract: contractId(id), patterns: [...shared] })),
+      { contract: contractId(uniqueId), patterns: [...unique] },
+    ],
+    diff,
   };
-  assert.equal(renderText(witnesses), [
-    `accepted bind ${contract} head=null`,
-    "target refs/heads/main",
-    "overlap kei/peer src/** ~ src/api/**",
-    "overlap kei/peer docs/** ~ docs/**",
-  ].join("\n"));
-  assert.deepEqual(JSON.parse(JSON.stringify(witnesses)), witnesses);
 
+  const text = renderText(result, wide);
+  assert.equal(text.split("\n")[0], "✓ amend accepted");
+  assertBefore(text, "~ overlap", "document diff");
+  assertBefore(text, "document diff", "effects");
+  assertBefore(text, "✓ contract-file updated", "· ref unchanged");
+  assertBefore(text, "· worktree unchanged", "settlement");
+  assert.equal(text.includes("~ overlap · 5 contracts · 27 witnesses"), true);
+  assert.equal(text.includes("4 contracts × 6 shared witnesses"), true);
+  for (const id of peers) assert.equal(text.includes(id), true, `missing ${id}`);
+  for (const pattern of shared) {
+    assert.equal(text.includes(`${pattern.mine} ~ ${pattern.theirs}`), true, `missing ${pattern.mine}`);
+  }
+  assert.equal(text.includes(uniqueId), true);
+  for (const pattern of unique) {
+    assert.equal(text.includes(`${pattern.mine} ~ ${pattern.theirs}`), true, `missing ${pattern.mine}`);
+  }
+  assert.equal(text.includes(diff), true);
+  assert.equal(text.includes("namespace-context kept"), true);
+  assertJsonIdentity(result);
+
+  const wrapped = renderText(result, narrow);
+  assert.equal(wrapped.split("\n")[0], "✓ amend accepted");
+  const reconstructed = reconstructOpaque(wrapped);
+  for (const token of [contract, uniqueId, ...peers, ...shared.map((pattern) => pattern.mine)]) {
+    assert.equal(reconstructed.includes(token), true, `wrapped away ${token}\n${wrapped}`);
+  }
+});
+
+test("unavailable Region observation stays accepted", () => {
+  const contract = contractId("kei/render-region");
   const unavailable: InvocationResult = {
     kind: "accepted",
     verb: "amend",
@@ -238,11 +331,77 @@ test("accepted text renders Region witnesses and unavailable observations", () =
     settlement: { actions: [], lags: [] },
     overlapFailure: "kei/peer: malformed document",
   };
-  assert.equal(renderText(unavailable), [
-    `accepted amend ${contract} head=null`,
-    "overlap unavailable kei/peer: malformed document",
-  ].join("\n"));
-  assert.deepEqual(JSON.parse(JSON.stringify(unavailable)), unavailable);
+  const text = renderText(unavailable);
+  assert.equal(text.split("\n")[0], "✓ amend accepted");
+  assert.match(text, /~ overlap unavailable/);
+  assert.match(text, /kei\/peer: malformed document/);
+  assertJsonIdentity(unavailable);
+});
+
+test("document diff text is labeled and byte-faithful", () => {
+  const diff = "===================================================================\n--- before\n+++ after\n@@ -1 +1 @@\n-old\n+new\n";
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "amend",
+    contract: contractId("kei/render-diff"),
+    head: null,
+    facts: [],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+    diff,
+  };
+  const text = renderText(result);
+  assert.equal(text.includes(`document diff\n${diff}`), true);
+});
+
+test("opaque coordinates keep consecutive spaces and hang their continuation", () => {
+  const contract = contractId("kei/render-opaque-path");
+  const spaced = "/repo/a  spaced file.txt";
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "amend",
+    contract,
+    head: null,
+    facts: [],
+    effects: [{ kind: "contract-file", path: spaced, action: "updated" }],
+    settlement: { actions: [], lags: [] },
+  };
+  const wideText = renderText(result, wide);
+  assert.equal(wideText.includes(spaced), true);
+  assert.equal(wideText.includes("/repo/a spaced"), false);
+
+  const wrapped = renderText(result, narrow).split("\n");
+  const owner = wrapped.findIndex((line) => line.includes("✓ contract-file updated"));
+  assert.notEqual(owner, -1);
+  assert.equal(wrapped[owner]!.startsWith("  ✓"), true);
+  assert.equal(wrapped[owner + 1]!.startsWith("    "), true);
+  const reconstructed = [wrapped[owner]!.slice(2), ...wrapped.slice(owner + 1).map((line) => line.slice(4))].join("");
+  assert.equal(reconstructed.includes(spaced), true);
+  assertJsonIdentity(result);
+});
+
+test("addressed Contract ID appears once on a refusal receipt", () => {
+  const contract = contractId("kei/render-once");
+  const refused: InvocationResult = {
+    kind: "refused",
+    verb: "deliver",
+    contract,
+    refusal: {
+      kind: "dirty-workspace",
+      contractId: contract,
+      staged: [],
+      unstaged: ["dirty.txt"],
+      untracked: [],
+      submodules: [],
+      shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+      option: { flag: "--include-dirty", available: true },
+    },
+  };
+  const text = renderText(refused, wide);
+  assert.equal(text.split("\n")[1], `└─ ${contract}`);
+  assert.equal(text.split(contract).length - 1, 1);
+  assert.equal(text.includes("contractId="), false);
+  assertJsonIdentity(refused);
 });
 
 test("observation text keeps the command and view data together", () => {

@@ -33,6 +33,17 @@ function physicalLines(path: string): number {
   return bytes.endsWith("\n") ? bytes.split("\n").length - 1 : bytes.split("\n").length;
 }
 
+test("cli-output owns the Contract mutation receipt grammar", () => {
+  const text = readFileSync(join(docs, "cli-output.md"), "utf8");
+  assert.match(text, /✓ <verb> accepted/);
+  assert.match(text, /! <verb> refused/);
+  assert.match(text, /\? <verb> retry/);
+  assert.match(text, /mine ~ theirs/);
+  assert.match(text, /byte-for-byte the serialization of that same public value/);
+  assert.match(text, /Exact coordinates are opaque facts/);
+  assert.match(text, /same addressed `contractId` is not/);
+});
+
 type DocumentationSize = "normal" | "warning" | "error";
 
 function documentationSize(lines: number): DocumentationSize {

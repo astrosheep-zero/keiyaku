@@ -394,7 +394,9 @@ registry, or orchestrator. Package-root call and fork are not reimplemented
 through direct Akuma product calls at this edge.
 
 Contract commands accept no task coordinate and never interpret or perform a
-Task mutation; the CLI merely renders package-root results.
+Task mutation; the CLI merely renders package-root results. Bind, amend,
+deliver, review, and abandon share the mutation receipt grammar owned by
+[cli-output.md](cli-output.md).
 
 The surface has no interactive mode, input envelope, independent JSON schema,
 configurable attempt count, command alias, or `scope`/`region` command. The
