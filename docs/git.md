@@ -185,8 +185,8 @@ not persisted.
 Tender capture and materialization live in `src/git/tender.ts`, including the
 private-index workspace observation, dirty-workspace policy statistics, and
 tender commit creation. `src/git/integration.ts` owns target observation,
-ancestry and merge-tree semantics, integration snapshot and ChangeId
-materialization, review preparation, and recorded integration-pair diff reads.
+ancestry and merge-tree semantics, integration snapshot and worktree-content
+ChangeId materialization, and recorded integration-pair diff reads.
 Protocol composes those typed capabilities directly for deliver and review;
 there is no generic preparation wrapper.
 
@@ -210,11 +210,11 @@ Preparation uses the one core mechanical-result primitive. Delivery returns
 `Preparation<DeliverData, DeliveryPreparationFailure>` and review returns a
 prepared review projection; the prepared payload field is always `data`. Git
 defines neither bespoke delivery/review preparation unions nor a wrapper
-supertype. Delivery's data contains the tender snapshot, complete integration
-identity, squash method, and frozen policy; review's data contains the captured
-integration ChangeId and any dirty workspace disclosure for that observation. A
-mechanical preparation failure is data for the attempt's completed legal
-decision, not a lifecycle refusal. The tender is the selected workspace
+supertype. Delivery's data contains the tender snapshot, integration topology,
+the tender's worktree-content ChangeId, squash method, and frozen policy;
+review's data contains that same worktree-content ChangeId and any dirty
+workspace disclosure for that observation. A mechanical preparation failure is
+data for the attempt's completed legal decision, not a lifecycle refusal. The tender is the selected workspace
 content: the deterministic managed worktree in worktree mode or the pinned
 caller worktree in here mode. Clean content uses its existing `HEAD`. A dirty
 workspace refuses before delivery or Verification unless `includeDirty` is
@@ -233,13 +233,18 @@ Its commit message defaults to `<contract-id>: <title>` followed by
 message bytes only; tender tree, parent, identity rules, and lifecycle meaning
 do not change.
 
-Git uses commit identity for `SnapshotId` and one stable patch-ID
-method for `ChangeId`: `patch-id --stable` over the diff from the integration
-predecessor to the integration tree. Review runs the same integration-aware
-projection without creating a durable snapshot, running Verification, or
-changing a worktree. A pure target rebase that leaves the integration patch
-unchanged therefore preserves review testimony; a conflict resolution that
-changes integration bytes does not.
+Git uses commit identity for `SnapshotId` and one byte-sensitive stable patch
+identity as ChangeId for the immutable Contract start to captured tender tree,
+including binary, mode, path, and whitespace bytes, independent of repository
+and user diff presentation configuration. Delivery and review use that
+one worktree-content identity without creating a durable review snapshot, running
+Verification, or changing a worktree. Integration predecessor, tree, and snapshot remain
+placement topology only. The identity is therefore stable across target movement
+and changes only with reviewed worktree content. A satisfied review may then ask
+Git whether that content can integrate at the current target. An integration
+failure is returned as its trailing placement stop after the attestation has
+been admitted; it neither changes the review subject nor creates lifecycle
+authority.
 
 `requireBranchesToBeUpToDate` is a delivery-attempt policy. When true, a
 targeted tender that does not descend from the observed target head returns

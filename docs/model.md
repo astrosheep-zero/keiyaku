@@ -34,13 +34,15 @@ its attestation entry time; stale and missing testimony carry no time. These are
 source facts, never stored ages or eligibility times inferred from another
 Contract.
 
-`SnapshotId` names a work snapshot and `ChangeId` names integration patch
-content. Git mints both and is the sole physical Git object-ID validator; pact
+`SnapshotId` names a work snapshot and `ChangeId` names a byte-sensitive stable
+patch identity. Git mints both and is the sole physical Git object-ID validator; pact
 validates only their opaque nonblank values. A tender has one snapshot identity.
-Its delivery has one integration snapshot and one ChangeId computed from that
-integration's predecessor-to-tree diff. Tender content has no second ChangeId.
-A producer or operation may include either integration identity in its
-dependency-key set when its own law requires it.
+Its delivery records integration predecessor and snapshot for placement topology
+and exactly one ChangeId for the complete captured tender tree relative to the
+immutable Contract start. Review mints that same worktree-content identity.
+Neither operation mints an integration-derived ChangeId or a second tender
+identity. A producer or operation may include only the identities its owning
+law permits in its dependency-key set.
 
 ## Identity Coordinates
 

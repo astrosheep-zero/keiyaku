@@ -11,7 +11,7 @@ import {
   runGitWithEnvironment,
   type GitRepository,
 } from "./repository.js";
-import type { TenderCapture, WorkspaceDirtyDelta } from "./tender.js";
+import type { TenderCapture } from "./tender.js";
 
 const REQUIRED_GIT = "2.38" as const;
 
@@ -45,17 +45,42 @@ export type IntegrationCoordinates = Readonly<{
 export type IntegrationPlan = Readonly<{
   predecessor: SnapshotId;
   tree: GitObjectId;
-  changeId: ChangeId;
 }>;
 
-async function stablePatchId(repository: GitRepository, predecessor: SnapshotId, tree: GitObjectId): Promise<ChangeId> {
-  const diff = await runGit(repository, ["diff", "--binary", gitObjectIdForSnapshot(predecessor), tree]);
-  const output = (await runGit(repository, ["patch-id", "--stable"], diff)).toString("utf8").trim();
-  const separator = output.indexOf(" ");
-  const identity = output.length === 0
-    ? (await runGit(repository, ["hash-object", "-t", "blob", "--stdin"], diff)).toString("utf8").trim()
-    : separator < 0 ? output : output.slice(0, separator);
-  return mintChangeId(identity);
+/** Mint the one worktree-content identity shared by review and delivery. */
+export async function worktreeChangeId(
+  repository: GitRepository,
+  input: IntegrationCoordinates,
+  tender: TenderCapture,
+): Promise<ChangeId> {
+  const patch = await runGit(repository, [
+    "-c", "core.quotePath=false",
+    "-c", "core.abbrev=40",
+    "-c", "diff.algorithm=myers",
+    "-c", "diff.renames=false",
+    "-c", "diff.indentHeuristic=false",
+    "-c", "diff.suppressBlankEmpty=false",
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-indent-heuristic",
+    "--no-renames",
+    "--full-index",
+    "--binary",
+    "--no-color",
+    "--diff-algorithm=myers",
+    "--unified=3",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    "--inter-hunk-context=0",
+    "--no-relative",
+    "--ignore-submodules=none",
+    "--submodule=short",
+    gitObjectIdForSnapshot(input.coordinates.start),
+    tender.tree,
+  ]);
+  const id = (await runGit(repository, ["patch-id", "--verbatim"], patch)).toString("utf8").trim().split(/\s/, 1)[0] ?? "";
+  return mintChangeId(id === "" ? "0000000000000000000000000000000000000000" : id);
 }
 
 /** Materialize the exact integration tree against its observed predecessor. */
@@ -183,7 +208,6 @@ export async function planIntegration(
       data: {
         predecessor: input.coordinates.start,
         tree: tender.tree,
-        changeId: await stablePatchId(repository, input.coordinates.start, tender.tree),
       },
     };
   }
@@ -234,28 +258,9 @@ export async function planIntegration(
     data: {
       predecessor: targetHead,
       tree,
-      changeId: await stablePatchId(repository, targetHead, tree),
     },
   };
 }
-
-/** Prepare the integration-derived review subject from one captured tender. */
-export async function prepareReviewIntegration(
-  repository: GitRepository,
-  input: IntegrationCoordinates,
-  tender: TenderCapture,
-  workspace?: WorkspaceDirtyDelta,
-): Promise<Preparation<ReviewIntegration, Readonly<{ kind: "target-missing"; contractId: ContractId }> | IntegrationPreparationRefusal>> {
-  const integration = await planIntegration(repository, input, tender, false);
-  return integration.kind === "refused"
-    ? integration
-    : { kind: "prepared", data: { changeId: integration.data.changeId, ...(workspace === undefined ? {} : { workspace }) } };
-}
-
-export type ReviewIntegration = Readonly<{
-  changeId: ChangeId;
-  workspace?: WorkspaceDirtyDelta;
-}>;
 
 async function deliverySnapshotAvailability(
   repository: GitRepository,

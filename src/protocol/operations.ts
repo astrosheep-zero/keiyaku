@@ -1,9 +1,9 @@
 import {
   materializeIntegrationSnapshot,
   planIntegration,
-  prepareReviewIntegration,
   readDeliveryDiff,
   readDeliveryScope,
+  worktreeChangeId,
   type DeliveryDiffScope,
   type IntegrationPreparationRefusal,
 } from "../git/integration.js";
@@ -13,6 +13,7 @@ import {
   dirtyTenderRefusal,
   materializeTenderSnapshot,
   type DirtyWorkspaceRefusal,
+  type TenderCapture,
   type WorkspaceDirtyDelta,
 } from "../git/tender.js";
 import {
@@ -99,9 +100,8 @@ export type DeliveryPreparationRefusal = Readonly<{ kind: "target-missing" | "wo
   | DirtyWorkspaceRefusal
   | IntegrationPreparationRefusal
   | TargetPlacementRefusal;
-type ReviewPreparationRefusal = Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
-  | DirtyWorkspaceRefusal
-  | IntegrationPreparationRefusal;
+type ReviewPreparationRefusal = Readonly<{ kind: "worktree-missing"; contractId: ContractId }>
+  | DirtyWorkspaceRefusal;
 type DeliveryFailure = DeliveryPreparationRefusal | VerificationDeclarationRefusal | DeliverRefusal;
 
 type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
@@ -155,7 +155,7 @@ export type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: Inte
 
 export type VerificationStop = StepStop<AttestationRefusal> | VerificationRuntimeStop;
 export type PlacementStop =
-  | StepStop<PlacementRefusal | TargetPlacementRefusal>
+  | StepStop<PlacementRefusal | TargetPlacementRefusal | IntegrationPreparationRefusal>
   | Readonly<{ failure: "target-moved"; contractId: ContractId; target: string; expected: SnapshotId; observed: SnapshotId | null }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>;
 
@@ -200,7 +200,7 @@ function unpackVerificationOutcome(verification: VerificationResult): Readonly<{
   };
 }
 
-function placementStop(result: PlacementProtocolResult): PlacementStop | undefined {
+function placementStop(result: PlacementProtocolResult<IntegrationPreparationRefusal>): PlacementStop | undefined {
   if (result.kind === "accepted") return undefined;
   if (result.kind === "placement-failed") {
     return { failure: "target-placement-failed", diagnostic: result.diagnostic };
@@ -422,18 +422,25 @@ export async function prepareDelivery(
     kind: "prepared",
     data: {
       tenderSnapshot,
-      integration: { predecessor: integration.data.predecessor, snapshot: integrationSnapshot, changeId: integration.data.changeId },
+      integration: {
+        predecessor: integration.data.predecessor,
+        snapshot: integrationSnapshot,
+        changeId: await worktreeChangeId(repository, { contractId, coordinates }, tender.data),
+      },
       method: "squash",
       policy: { requireBranchesToBeUpToDate },
     },
   };
 }
 
-export async function prepareReview(
+async function captureReviewableWorktree(
   repository: GitRepository,
   stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"] }>,
-): Promise<{ kind: "prepared"; data: Readonly<{ changeId: DeliverData["integration"]["changeId"]; workspace?: WorkspaceDirtyDelta }> }
-  | { kind: "refused"; refusal: ReviewPreparationRefusal }> {
+): Promise<{ kind: "prepared"; data: Readonly<{
+  changeId: DeliverData["integration"]["changeId"];
+  tender: TenderCapture;
+  workspace?: WorkspaceDirtyDelta;
+}> } | { kind: "refused"; refusal: ReviewPreparationRefusal }> {
   const appointed = stage.coordinates.workspace === "worktree"
     ? appointmentFor(await readPlaceRegister(repository), stage.contractId)
     : undefined;
@@ -446,7 +453,33 @@ export async function prepareReview(
     return { kind: "refused", refusal: await dirtyTenderRefusal(repository, stage.contractId, tender.data) };
   }
   const workspace = await dirtyTenderDelta(repository, tender.data);
-  return await prepareReviewIntegration(repository, stage, tender.data, workspace);
+  return {
+    kind: "prepared",
+    data: {
+      changeId: await worktreeChangeId(repository, stage, tender.data),
+      tender: tender.data,
+      ...(workspace === undefined ? {} : { workspace }),
+    },
+  };
+}
+
+export async function prepareReview(
+  repository: GitRepository,
+  stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"] }>,
+): Promise<{ kind: "prepared"; data: Readonly<{
+  changeId: DeliverData["integration"]["changeId"];
+  workspace?: WorkspaceDirtyDelta;
+}> }
+  | { kind: "refused"; refusal: ReviewPreparationRefusal }> {
+  const prepared = await captureReviewableWorktree(repository, stage);
+  if (prepared.kind === "refused") return prepared;
+  return {
+    kind: "prepared",
+    data: {
+      changeId: prepared.data.changeId,
+      ...(prepared.data.workspace === undefined ? {} : { workspace: prepared.data.workspace }),
+    },
+  };
 }
 
 async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptContext): Promise<AttemptDecision<PreparedDelivery>> {
@@ -618,24 +651,26 @@ export async function arcOperation(
 type ReviewOperationInput = MutationOperationInput & Readonly<{ verdict: AttestationData["verdict"]; summary?: string }>;
 
 export type ReviewValue = Readonly<{ placement?: PlacementStop; workspace?: WorkspaceDirtyDelta }>;
+type PreparedReview = Readonly<{ workspace?: WorkspaceDirtyDelta; tender?: TenderCapture }>;
+
+function reviewValue(value: PreparedReview, placement?: PlacementStop): ReviewValue {
+  return {
+    ...(value.workspace === undefined ? {} : { workspace: value.workspace }),
+    ...(placement === undefined ? {} : { placement }),
+  };
+}
 
 async function reviewAttempt(
   input: ReviewOperationInput,
   attempt: AttemptContext,
-): Promise<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>> {
-  return await reviewAttemptObserved(input, attempt);
-}
-
-async function reviewAttemptObserved(
-  input: ReviewOperationInput,
-  attempt: AttemptContext,
-): Promise<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>> {
+): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
   const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
   let preparation: AttestationInput<ReviewRefusal>["preparation"];
   let workspace: WorkspaceDirtyDelta | undefined;
+  let tender: TenderCapture | undefined;
   if (state !== null) {
-    const prepared = await prepareReview(input.scope, { contractId: state.id, coordinates: state.coordinates });
+    const prepared = await captureReviewableWorktree(input.scope, { contractId: state.id, coordinates: state.coordinates });
     preparation = prepared.kind === "refused"
       ? { kind: "refused", refusal: prepared.refusal }
       : {
@@ -650,7 +685,10 @@ async function reviewAttemptObserved(
           ...(input.summary === undefined ? {} : { summary: input.summary }),
         },
       };
-    if (prepared.kind === "prepared") workspace = prepared.data.workspace;
+    if (prepared.kind === "prepared") {
+      workspace = prepared.data.workspace;
+      tender = prepared.data.tender;
+    }
   }
   const decisionInput: AttestationInput<ReviewRefusal> = {
     contractId: input.contractId,
@@ -670,7 +708,10 @@ async function reviewAttemptObserved(
   });
   if (admitted.kind === "accepted") return {
     ...admitted,
-    value: workspace === undefined ? {} : { workspace },
+    value: {
+      ...(workspace === undefined ? {} : { workspace }),
+      ...(tender === undefined ? {} : { tender }),
+    },
   };
   return admitted;
 }
@@ -680,7 +721,7 @@ export async function reviewOperation(
 ): Promise<IntentOutcome<ReviewValue, ReviewRefusal>> {
   const git = input.scope;
   const attempts = mintAttempts({ entryCount: 1 });
-  let review: Extract<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
+  let review: Extract<AttemptDecision<PreparedReview, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
     const result = await reviewAttempt(input, attempts[index]!);
     if (result.kind === "accepted" || result.kind === "refused") {
@@ -692,19 +733,27 @@ export async function reviewOperation(
   }
   if (review === null) return { kind: "retry", reason: { kind: "exhausted" } };
   if (review.kind !== "accepted") return review;
-  if (input.verdict !== "satisfied") return admitted(review, review.value);
+  if (input.verdict !== "satisfied") return admitted(review, reviewValue(review.value));
 
-  const placement = await admitPlacement(input.channel, git, review.state.coordinates.target, {
+  const target = review.state.coordinates.target;
+  const tender = review.value.tender;
+  const placement = await admitPlacement(input.channel, git, target, {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
+  }, tender === undefined || target === undefined ? undefined : async () => {
+    const integration = await planIntegration(git, {
+      contractId: input.contractId,
+      coordinates: review.state.coordinates,
+    }, tender, false);
+    if (integration.kind === "refused" && integration.refusal.kind !== "target-missing") {
+      return { kind: "refused" as const, refusal: integration.refusal };
+    }
+    return undefined;
   });
   const stopped = placementStop(placement);
   const admission = placement.kind === "accepted" ? mergeAdmissions(review, placement) : review;
-  return admitted(admission, {
-    ...(review.value.workspace === undefined ? {} : { workspace: review.value.workspace }),
-    ...(stopped === undefined ? {} : { placement: stopped }),
-  });
+  return admitted(admission, reviewValue(review.value, stopped));
 }
 
 type AuditOperationInput = MutationOperationInput & Readonly<{

@@ -37,9 +37,9 @@ export type TargetMovedStop = Readonly<{
   observed: SnapshotId | null;
 }>;
 
-export type PlacementProtocolResult =
+export type PlacementProtocolResult<ExtraRefusal = never> =
   | (AcceptedAdmission & Readonly<{ physical?: ReconcileResult }>)
-  | Exclude<ProtocolResult<PlacementRefusal | TargetPlacementRefusal>, AcceptedAdmission>
+  | Exclude<ProtocolResult<PlacementRefusal | TargetPlacementRefusal | ExtraRefusal>, AcceptedAdmission>
   | TargetMovedStop
   | PlacementExecutionFailure;
 
@@ -120,37 +120,25 @@ async function runFencedPlacement(
   return { kind: "exhausted" };
 }
 
-/** Run the sole placement adjudicator inside the target's physical fence. */
-export async function admitPlacement(
-  channel: GitDecodeChannel,
+/** Hold the existing target-placement fence for one owner callback. */
+async function runUnderTargetPlacementFence<T>(
   repository: GitRepository,
-  target: string | undefined,
-  input: PlacementProtocolInput,
-): Promise<PlacementProtocolResult> {
-  const attempts = mintAttempts({ entryCount: 1 });
-  const protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal> = {
-    input,
-    channel,
-    repository,
-    contracts: [input.contractId],
-    attempts,
-    decide: decidePlacement,
-    observe: (observedRepository, observedChannel, contracts) => observeGitForAdmissionAt(observedRepository, observedChannel, contracts),
-  };
-  const run = (): Promise<ProtocolResult<PlacementRefusal | TargetPlacementRefusal>> => runProtocol(protocol);
-
-  if (target === undefined) return await run();
-
+  target: string,
+  run: () => Promise<T>,
+  onReleaseFailure?: (result: T, error: unknown) => T | PlacementExecutionFailure,
+): Promise<T | PlacementExecutionFailure> {
   let held: Awaited<ReturnType<typeof acquireTargetPlacementFence>>;
   try {
     held = await acquireTargetPlacementFence(repository, target);
   } catch (error) {
     return placementFailure(error);
   }
-  let result: PlacementProtocolResult | undefined;
+  let produced: T | undefined;
+  let result: T | PlacementExecutionFailure | undefined;
   let exceptional: unknown;
   try {
-    result = await runFencedPlacement(repository, input, protocol);
+    produced = await run();
+    result = produced;
   } catch (error) {
     if (error instanceof AuthorityCorruptionError || error instanceof TypeError) exceptional = error;
     else {
@@ -168,11 +156,48 @@ export async function admitPlacement(
     releaseFailure = error;
   }
   if (exceptional !== undefined) throw exceptional;
-  if (result === undefined) throw new Error("placement produced no result");
+  if (result === undefined) throw new Error("fenced target work produced no result");
   if (releaseFailure !== undefined) {
-    return result.kind === "accepted"
-      ? { ...result, physical: reconcileEffectFailure(releaseFailure, result.physical) }
+    return produced !== undefined && onReleaseFailure !== undefined
+      ? onReleaseFailure(produced, releaseFailure)
       : placementFailure(releaseFailure);
   }
   return result;
+}
+
+function isDeliveryMissing(result: PlacementProtocolResult): boolean {
+  return result.kind === "refused" && result.refusal.kind === "delivery-missing";
+}
+
+/** Run the sole placement adjudicator inside the target's physical fence. */
+export async function admitPlacement<ExtraRefusal = never>(
+  channel: GitDecodeChannel,
+  repository: GitRepository,
+  target: string | undefined,
+  input: PlacementProtocolInput,
+  onDeliveryMissing?: () => Promise<PlacementProtocolResult<ExtraRefusal> | undefined>,
+): Promise<PlacementProtocolResult<ExtraRefusal>> {
+  const attempts = mintAttempts({ entryCount: 1 });
+  const protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal> = {
+    input,
+    channel,
+    repository,
+    contracts: [input.contractId],
+    attempts,
+    decide: decidePlacement,
+    observe: (observedRepository, observedChannel, contracts) => observeGitForAdmissionAt(observedRepository, observedChannel, contracts),
+  };
+  if (target === undefined) return await runProtocol(protocol);
+  return await runUnderTargetPlacementFence(
+    repository,
+    target,
+    async () => {
+      const result = await runFencedPlacement(repository, input, protocol);
+      if (onDeliveryMissing === undefined || !isDeliveryMissing(result)) return result;
+      return await onDeliveryMissing() ?? result;
+    },
+    (result, error) => result.kind === "accepted"
+      ? { ...result, physical: reconcileEffectFailure(error, result.physical) }
+      : placementFailure(error),
+  );
 }

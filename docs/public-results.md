@@ -186,7 +186,7 @@ type VerificationStop =
   | Readonly<{ failure: "spawn-error"; diagnostic: string }>
 
 type PlacementStop =
-  | StepStop<PlacementRefusal | CheckoutNotFollowableRefusal | DeliveryWorkspaceRefusal>
+  | StepStop<PlacementRefusal | IntegrationRefusal | CheckoutNotFollowableRefusal | DeliveryWorkspaceRefusal>
   | Readonly<{
       failure: "target-moved"
       contractId: ContractId
@@ -301,15 +301,19 @@ An unsuccessful trailing obligation does not change the successful leading act.
 The `verification` or `placement` channel contains the typed reason why that
 obligation admitted no fact. Verification process outcomes and attestation
 admission stops share `VerificationStop`; placement admission stops use
-`PlacementStop`. The obligations are independent and both channels may be
-present on one Delivery. A channel is absent exactly when its obligation was
-not applicable or admitted its fact; callers distinguish those cases through
-`facts`. These values remain process-local and non-authoritative; the journal
-is the sole lifecycle authority. `environment-failure` identifies candidate
-provisioning, never a Verification verdict; `candidate-unavailable` identifies
-materialization failure; `unknown-exit`, `spawn-error`, and admission stops
-remain execution/admission stops. A declaration-owned timeout instead admits
-an unsatisfied attestation and therefore has no stop arm.
+`PlacementStop`. In particular, a satisfied review can admit its attestation
+and then return an `IntegrationRefusal` through `placement`; that stop neither
+removes the fact nor becomes a top-level review refusal. Review and delivery
+share the delivery fact's one worktree-content ChangeId, while integration
+coordinates remain placement topology. The obligations are independent and both
+channels may be present on one Delivery. A channel is absent exactly when its
+obligation was not applicable or admitted its fact; callers distinguish those
+cases through `facts`. These values remain process-local and non-authoritative;
+the journal is the sole lifecycle authority. `environment-failure` identifies
+candidate provisioning, never a Verification verdict; `candidate-unavailable`
+identifies materialization failure; `unknown-exit`, `spawn-error`, and admission
+stops remain execution/admission stops. A declaration-owned timeout instead
+admits an unsatisfied attestation and therefore has no stop arm.
 
 `KeiyakuRefused` stores the complete structured `KeiyakuRefusal`; its `code`
 getter derives from `refusal.kind`. `KeiyakuRetry` does the same for

@@ -353,13 +353,14 @@ frozen commands. No mutation input carries `retryHooks`, so an ordinary later
 mutation cannot silently retry a failed external command.
 
 `review` is a contract operation. It does not require a Delivery handle or an
-existing delivery fact. It captures the current worktree's integration-aware
-ChangeId and the document key projected by its lifecycle observation. It
-receives no decoded-document derivation. It records the owned `reviewed`
-testimony even when that token is absent from `terms.gates`. If the observed
-projection includes ordinary dirty workspace bytes, `Review` exposes a
-`workspace` disclosure with staged, unstaged, untracked, and `shortStat` fields;
-that disclosure is not testimony and does not authorize delivery.
+existing delivery fact. Its subject is the current worktree-content ChangeId
+and the document key projected by its lifecycle observation. Review admits that
+attestation before any trailing placement. It receives no decoded-document
+derivation. It records the owned `reviewed` testimony even when that token is
+absent from `terms.gates`. If the observed worktree includes ordinary dirty
+workspace bytes, `Review` exposes a `workspace` disclosure with staged,
+unstaged, untracked, and `shortStat` fields; that disclosure is not testimony
+and does not authorize delivery.
 
 `delivery()` freshly observes the journal and returns the most recent tender.
 It returns `null` only when the contract has never tendered. A returned

@@ -1077,7 +1077,7 @@ test("a clean no-delivery abandonment releases the managed worktree from its sta
   assert.equal(repository.run(["cat-file", "-e", `${start}^{commit}`]), "");
 });
 
-test("nonempty candidates retain Git stable patch identity", async () => {
+test("nonempty candidates retain Git start-to-tender ChangeId", async () => {
   const { repository, id } = await boundContract();
   writeFileSync(join(repository.path, "candidate.txt"), "candidate\n");
   repository.run(["add", "candidate.txt"]);
@@ -1085,9 +1085,34 @@ test("nonempty candidates retain Git stable patch identity", async () => {
 
   const delivery = await preparedDelivery(repository, id);
   assert.equal(delivery.integration.snapshot, repository.run(["rev-parse", "HEAD"]).trim());
-  const diff = repository.run(["diff", "--binary", delivery.integration.predecessor, delivery.integration.snapshot]);
-  const stablePatchId = repository.run(["patch-id", "--stable"], diff).trim().split(" ")[0];
-  assert.equal(delivery.integration.changeId, stablePatchId);
+  const patch = repository.run([
+    "-c", "core.quotePath=false",
+    "-c", "core.abbrev=40",
+    "-c", "diff.algorithm=myers",
+    "-c", "diff.renames=false",
+    "-c", "diff.indentHeuristic=false",
+    "-c", "diff.suppressBlankEmpty=false",
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-indent-heuristic",
+    "--no-renames",
+    "--full-index",
+    "--binary",
+    "--no-color",
+    "--diff-algorithm=myers",
+    "--unified=3",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    "--inter-hunk-context=0",
+    "--no-relative",
+    "--ignore-submodules=none",
+    "--submodule=short",
+    `${delivery.integration.predecessor}^{tree}`,
+    `${delivery.integration.snapshot}^{tree}`,
+  ]);
+  const changeId = repository.run(["patch-id", "--verbatim"], patch).trim().split(/\s/, 1)[0];
+  assert.equal(delivery.integration.changeId, changeId);
 });
 
 test("verification materializes the protocol-selected candidate snapshot", async () => {

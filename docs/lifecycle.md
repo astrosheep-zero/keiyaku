@@ -50,7 +50,9 @@ another Contract's terminal fact while `terms.gates` remains an opaque token
 satisfied by current attestation evidence. Placement does not synthesize an
 attestation or gate token for a prerequisite.
 Admitting testimony does not itself invoke placement; `deliver` and a satisfied
-`review` explicitly request it as a later protocol step. Audit never invokes
+`review` explicitly request it as a later protocol step. That request is one
+target-fence placement attempt: a present delivery is judged as-is, and only a
+still-missing delivery may attach a typed integration stop. Audit never invokes
 placement.
 
 For a targeted offer, Git's checked-out-target preconditions are part of that
@@ -73,9 +75,9 @@ does not replace Git's dry-run judge.
 
 `deliver` tenders the selected current worktree content. Before admitting the
 fact, Git materializes the complete integration candidate that this attempt may
-verify and place. The fact records the tender snapshot, integration
-predecessor, integration snapshot, integration ChangeId, squash method, and the
-attempt's frozen up-to-date policy. A later tender replaces the current
+verify and place. The fact records the tender snapshot, integration predecessor
+and snapshot, the tender's one worktree-content ChangeId, squash method, and
+the attempt's frozen up-to-date policy. A later tender replaces the current
 delivery on the read model. After admission, deliver asks the Verification protocol owner, which
 uses the one generic currentness implementation, for latest `verified`
 evidence. If that attestation names the exact delivered snapshot and current
@@ -86,17 +88,23 @@ evidence. The
 tender and integration preparation rules live in [git.md](git.md).
 
 `review` is a contract operation and may record testimony before any `deliver`.
-It uses Git's compute-only integration projection to capture the ChangeId that
-the current target and worktree bytes produce, plus the document key projected
-by its decision observation; this is not a decoded-document derivation. Its
-subject has no snapshot identity. Ordinary dirty workspace bytes do not require
-review authorization: the reviewer observes the projection in front of it, while
-delivery authorization remains owned by `deliver`. If those bytes later become
-the delivered candidate, currentness is proven by the same ChangeId; if they
+Git captures its subject as the document key projected by the decision
+observation and the ChangeId of the complete reviewable worktree content. This
+is not a decoded-document derivation or integration identity, and target
+movement alone does not stale the testimony. Its subject has no snapshot
+identity. Ordinary dirty workspace bytes do not require review authorization:
+the reviewer observes the worktree content in front of it, while delivery
+authorization remains owned by `deliver`. If those bytes later become the
+delivered candidate, placement proves currentness by the same ChangeId; if they
 change or are cleaned away, the review is stale. The reviewed producer boundary
-owns the `reviewed` token whether or not it is listed in `terms.gates`. A
-satisfied review requests placement; an unsatisfied review records judgment only.
-Optional `summary` is opaque testimony and does not participate in a gate.
+owns the `reviewed` token whether or not it is listed in `terms.gates`.
+
+Review admission records the attestation before a satisfied verdict requests
+trailing placement. Git may find that the target cannot integrate the reviewed
+content; that is a typed placement stop on the accepted review, with no claimed
+or delivery fact, not an attestation refusal. An unsatisfied review records the
+same subject and judgment but never requests placement. Optional `summary` is
+opaque testimony and does not participate in a gate.
 
 `abandon` admits one `abandoned` terminal fact with `{ note? }`. Optional
 `note` remains opaque testimony rather than a gate input. The decision neither
@@ -164,8 +172,9 @@ same gate and subject overrides the satisfied result. Gate-specific producer
 methodology is outside core;
 [verification.md](verification.md) owns the execution-side verification case.
 The current key set always contains the current document and ordered segment
-keys; integration snapshot and ChangeId keys join it only while a delivery
-exists. Tender identity is custody and observation data, not gate currency.
+keys; the delivered tender ChangeId and integration snapshot join it only while
+a delivery exists. Tender snapshot identity is custody and observation data,
+not gate currency.
 
 Gate currency has one pure core judgment. Claimed
 admission and the public Contract status projection both call that
