@@ -15,7 +15,7 @@ import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { requestBodyCall } from "../src/akuma/requests.js";
 
 async function outcomes(paths: Parameters<typeof activitySlice>[0]) {
-  return (await activitySlice(paths, { limit: 5_000 })).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome);
+  return (await activitySlice(paths)).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome);
 }
 
 function adapter(input: Readonly<{

@@ -139,14 +139,12 @@ export async function appendActivity(
     }));
 }
 
-export type ActivitySliceInput = Readonly<{ before?: number; since?: number; limit?: number }>;
 export type ActivitySlice = ActivityFactSlice;
 export type { ActivityFact };
 export type { TimelineFact } from "./timeline.js";
 
-export async function activitySlice(paths: AkumaPaths, input: ActivitySliceInput = {}): Promise<ActivitySlice> {
-  const limit = input.limit ?? ACTIVITY_LIMIT;
-  return await withHeart(paths, (heart) => readTransaction(heart, () => activityFactSlice(heart, { ...input, limit })));
+export async function activitySlice(paths: AkumaPaths): Promise<ActivitySlice> {
+  return await withHeart(paths, (heart) => readTransaction(heart, () => activityFactSlice(heart)));
 }
 
 export async function recordTell(

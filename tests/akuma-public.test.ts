@@ -11,6 +11,7 @@ import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
   activitySlice,
   appendActivity,
+  beginTurn,
   breakBody,
   finishBodyIfIdle,
   HeldAkumaLeash,
@@ -35,8 +36,187 @@ async function akumaAt(root: string, value?: Awaited<ReturnType<typeof settings>
 }
 
 async function timeline(paths: Parameters<typeof activitySlice>[0]) {
-  return (await activitySlice(paths, { limit: 5_000 })).rows;
+  return (await activitySlice(paths)).rows;
 }
+
+async function bornHistoryHandle(root: string, suffix: string) {
+  const allocated = await allocateAkumaDirectory({
+    worldRoot: root, archetype: "claude", draw: () => suffix,
+  });
+  await initializeHeart(allocated.paths);
+  const holder = (await HeldAkumaLeash.try(allocated.paths))!;
+  await holder.birth(allocated.paths, {
+    id: allocated.id,
+    archetype: "claude",
+    provider: CLAUDE_EXECUTION,
+    options: {},
+    cwd: root,
+    origin: { kind: "direct" },
+    confinement: { kind: "unconfined" },
+    createdAt: "2026-08-10T00:00:00.000Z",
+  });
+  const body = await holder.recordBody(allocated.paths, {
+    leashTakenAt: "2026-08-10T00:00:00.000Z",
+  });
+  const turn = await beginTurn(allocated.paths, {
+    bodySequence: body.sequence,
+    startedAt: "2026-08-10T00:00:01.000Z",
+  });
+  return { allocated, holder, turn, handle: (await akumaAt(root)).of({ id: allocated.id }) };
+}
+
+function toolRow(rows: readonly { kind: string; sequence: number; state?: unknown }[]) {
+  return rows.filter((row) => row.kind === "tool");
+}
+
+test("history completion keeps the start sequence and never remints", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-remint-"));
+  const born = await bornHistoryHandle(root, "c0000001");
+  try {
+    const start = await appendActivity(born.allocated.paths, {
+      turnSequence: born.turn.sequence,
+      event: {
+        type: "tool", phase: "started", id: "bash-1", name: "Bash",
+        call: { kind: "run", command: "npm test" },
+      },
+      at: "2026-08-10T00:00:02.000Z",
+    });
+    const done = await appendActivity(born.allocated.paths, {
+      turnSequence: born.turn.sequence,
+      event: {
+        type: "tool", phase: "completed", id: "bash-1", name: "Bash",
+        call: { kind: "run", command: "npm test" }, result: { status: "ok" },
+      },
+      at: "2026-08-10T00:00:03.000Z",
+    });
+    assert.deepEqual([born.turn.sequence, start, done], [1, 2, 3]);
+
+    const pages = [
+      await born.handle.history(),
+      await born.handle.history({ before: 3 }),
+      await born.handle.history({ before: 4 }),
+      await born.handle.history({ since: 1 }),
+    ];
+    for (const page of pages) {
+      const tools = toolRow(page.rows);
+      assert.equal(tools.length, 1);
+      assert.equal(tools[0]?.sequence, 2);
+      assert.equal(tools[0] !== undefined && "state" in tools[0] && tools[0].state !== "active", true);
+      assert.equal(page.rows.some((row) => row.kind === "tool" && row.sequence === 3), false);
+    }
+    assert.equal(toolRow((await born.handle.history({ since: 2 })).rows).length, 0);
+    assert.deepEqual(toolRow((await born.handle.history({ before: 3 })).rows).map((row) => row.sequence), [2]);
+  } finally {
+    born.holder.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("history cursors do not fragment a tool across start and completion", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-boundary-"));
+  const born = await bornHistoryHandle(root, "c0000002");
+  try {
+    await appendActivity(born.allocated.paths, {
+      turnSequence: born.turn.sequence,
+      event: {
+        type: "tool", phase: "started", id: "search-1", name: "Search",
+        call: { kind: "search", query: "TODO" },
+      },
+      at: "2026-08-10T00:00:02.000Z",
+    });
+    await appendActivity(born.allocated.paths, {
+      turnSequence: born.turn.sequence,
+      event: {
+        type: "tool", phase: "completed", id: "search-1", name: "Search",
+        call: { kind: "search", query: "TODO" }, result: { status: "ok" },
+      },
+      at: "2026-08-10T00:00:03.000Z",
+    });
+
+    const sinceStart = await born.handle.history({ since: 2 });
+    assert.equal(sinceStart.rows.some((row) => row.kind === "tool"), false);
+    assert.equal(sinceStart.rows.some((row) => row.sequence === 3), false);
+
+    const beforeDone = await born.handle.history({ before: 3 });
+    assert.deepEqual(toolRow(beforeDone.rows).map((row) => row.sequence), [2]);
+    assert.equal(beforeDone.rows.filter((row) => row.kind === "tool").length, 1);
+
+    const beforeStart = await born.handle.history({ before: 2 });
+    assert.equal(toolRow(beforeStart.rows).length, 0);
+    const sinceDone = await born.handle.history({ since: 3 });
+    assert.equal(toolRow(sinceDone.rows).length, 0);
+  } finally {
+    born.holder.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("history limit counts folded semantic rows", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-limit-"));
+  const born = await bornHistoryHandle(root, "c0000003");
+  try {
+    await appendActivity(born.allocated.paths, {
+      turnSequence: born.turn.sequence,
+      event: {
+        type: "tool", phase: "started", id: "note-tool", name: "Bash",
+        call: { kind: "run", command: "echo" },
+      },
+      at: "2026-08-10T00:00:02.000Z",
+    });
+    await appendActivity(born.allocated.paths, {
+      turnSequence: born.turn.sequence,
+      event: {
+        type: "tool", phase: "completed", id: "note-tool", name: "Bash",
+        call: { kind: "run", command: "echo" }, result: { status: "ok" },
+      },
+      at: "2026-08-10T00:00:03.000Z",
+    });
+    await appendActivity(born.allocated.paths, {
+      turnSequence: born.turn.sequence,
+      event: { type: "note", text: "first" },
+      at: "2026-08-10T00:00:04.000Z",
+    });
+    await appendActivity(born.allocated.paths, {
+      turnSequence: born.turn.sequence,
+      event: { type: "note", text: "second" },
+      at: "2026-08-10T00:00:05.000Z",
+    });
+    const facts = await timeline(born.allocated.paths);
+    assert.ok(facts.length > 3);
+    const page = await born.handle.history({ limit: 3 });
+    assert.equal(page.rows.length, 3);
+    assert.deepEqual(page.rows.map((row) => row.kind), ["tool", "note", "note"]);
+    assert.equal(page.rows[0]?.sequence, 2);
+    assert.equal(page.omitted > 0, true);
+    assert.equal(page.lowestRetained, 1);
+    assert.equal(page.highest, facts.at(-1)?.sequence);
+  } finally {
+    born.holder.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Heart activity reads do not take public history cursors", async () => {
+  assert.equal(activitySlice.length, 1);
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-owner-"));
+  const born = await bornHistoryHandle(root, "c0000004");
+  try {
+    await appendActivity(born.allocated.paths, {
+      turnSequence: born.turn.sequence,
+      event: { type: "note", text: "later" },
+      at: "2026-08-10T00:00:02.000Z",
+    });
+    const retained = await activitySlice(born.allocated.paths);
+    const page = await born.handle.history({ before: 2, limit: 1 });
+    assert.deepEqual(retained.rows.map((row) => row.sequence), [1, 2]);
+    assert.deepEqual(page.rows.map((row) => row.sequence), [1]);
+    assert.equal(page.lowestRetained, retained.lowestRetained);
+    assert.equal(page.highest, retained.highest);
+  } finally {
+    born.holder.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("forward history reports a pruned interval after its cursor", async () => {
   const history = selectHistory(projectTurns([{

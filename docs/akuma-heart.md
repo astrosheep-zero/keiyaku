@@ -179,24 +179,25 @@ become told because Body recovery and status still read them. A
 settled fact may remain in the bounded buffer until a later write crosses the
 compaction threshold; no command promises an exact physical row count.
 
-`activitySlice({ before?, since?, limit? })` is the sole activity-history
-primitive. It joins provider activity and tell facts by their one shared
-timeline sequence; it does not copy tell state into activity persistence.
-`before` and `since` are mutually exclusive, exclusive sequence
-coordinates. `before` returns the newest page whose rows precede an already
-seen sequence; `since` returns rows following an already seen sequence; an
-inputless slice returns the newest page. It returns rows in ascending sequence
-order together with `lowestRetained` and `highest`. The numbers are persisted
-activity sequence coordinates, not semantic-row counts. A sequence below
+The retained activity read is the sole raw activity-history primitive. It
+returns the complete retained provider-activity and tell fact window in
+ascending timeline sequence, together with `lowestRetained` and `highest`. It
+joins those facts by their one shared timeline sequence and does not copy tell
+state into activity persistence. It does not accept or apply public history
+`before`, `since`, or the semantic-row `limit`. Those coordinates belong to
+the public Turn-ledger selector. The bound numbers are persisted timeline
+sequence coordinates, not semantic-row counts. A sequence below
 `lowestRetained` is permanently unavailable. Gaps inside the retained range
 are reported arithmetically from the rows, never by persisted marker facts.
 
 The activity fold and the snapshot selector are separate pure readers. The
 fold decodes events, pairs tool start and completion by provider id, retains
-both timestamps, derives completed duration, projects each tell as exactly one
-`pending` or `told` semantic row at its recorded sequence, and
-produces semantic rows before any budget is applied. A completed event whose
-start was pruned is a settled row without duration; a retained start without
+both timestamps, derives completed duration, and keeps a completed tool at its
+start-fact sequence. Completion enriches that row and does not mint another
+cursor coordinate. Each tell projects as exactly one `pending` or `told`
+semantic row at its recorded sequence, and semantic rows exist before any
+budget is applied. A completed event whose start was pruned is a settled row
+without duration and does not reconstruct that start; a retained start without
 completion is in flight. The snapshot selector pins every in-flight tool and
 every pending tell outside the independent tail-three and voice-three budgets.
 Tail is the newest non-pinned ordinary window rows; voice is the newest eligible

@@ -185,7 +185,7 @@ async function bornStatus(
   const resumeUnsupported = current.life === "stranded"
     && snapshot.latestSession?.provider === snapshot.soul.provider.name
     && resolveProviderExecution(snapshot.soul.provider).adapter.resume === undefined;
-  const slice = await activitySlice(paths, { limit: Number.MAX_SAFE_INTEGER });
+  const slice = await activitySlice(paths);
   return {
     id: current.id,
     life: current.life,
@@ -252,11 +252,7 @@ export class AkumaHandle {
     if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 5_000) {
       throw new TypeError("Akuma history limit must be a positive safe integer no greater than 5000");
     }
-    const slice = await activitySlice(this.paths, {
-      ...(input.before === undefined ? {} : { before: input.before }),
-      ...(input.since === undefined ? {} : { since: input.since }),
-      limit: 5_000,
-    });
+    const slice = await activitySlice(this.paths);
     return selectHistory(projectTurns(slice.rows, {
       lowestRetained: slice.lowestRetained,
       highest: slice.highest,

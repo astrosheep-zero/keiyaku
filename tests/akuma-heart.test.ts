@@ -394,7 +394,7 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
       event: { type: "note", text: "trigger compaction" },
       at: "2026-08-08T00:00:02.000Z",
     });
-    let retained = await activitySlice(value.allocated.paths, { limit: Number.MAX_SAFE_INTEGER });
+    let retained = await activitySlice(value.allocated.paths);
     assert.equal(retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"), true);
     assert.equal(retained.rows.filter((fact) => fact.kind === "activity").length, 5_000);
 
@@ -408,7 +408,7 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
         at: "2026-08-08T00:00:04.000Z",
       });
     }
-    retained = await activitySlice(value.allocated.paths, { limit: Number.MAX_SAFE_INTEGER });
+    retained = await activitySlice(value.allocated.paths);
     assert.equal(retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"), false);
     assert.ok(retained.rows.length >= 5_000 && retained.rows.length <= 5_500);
     leash.release();
@@ -496,7 +496,7 @@ test("answered Turns persist without a provider fork point", async () => {
     });
     claim.release();
 
-    assert.deepEqual((await activitySlice(value.allocated.paths, { limit: 5_000 })).rows
+    assert.deepEqual((await activitySlice(value.allocated.paths)).rows
       .filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome), [{
       kind: "answered",
       session: { sessionId: "native-session" },
@@ -577,7 +577,7 @@ test("normal body completion refuses while a tell remains pending", async () => 
       outcome: { kind: "failed", diagnostic: "later failure" },
       completedAt: "2026-08-08T00:00:03.000Z",
     });
-    assert.deepEqual((await activitySlice(value.allocated.paths, { limit: 5_000 })).rows
+    assert.deepEqual((await activitySlice(value.allocated.paths)).rows
       .filter((fact) => fact.kind === "turn-end").map((turn) => turn.outcome), [
       {
         kind: "answered",
@@ -908,9 +908,14 @@ test("Heart multi-query reads stay deferred and do not take the leash", async ()
   const index = readFileSync(new URL("../src/akuma/heart/index.ts", import.meta.url), "utf8");
   assert.match(storage, /export function readTransaction[\s\S]*database\.exec\("BEGIN DEFERRED"\)/u);
   assert.match(storage, /export function transaction[\s\S]*database\.exec\("BEGIN IMMEDIATE"\)/u);
-  assert.match(index, /readTransaction\(heart, \(\) => activityFactSlice/u);
+  assert.match(index, /readTransaction\(heart, \(\) => activityFactSlice\(heart\)/u);
   assert.match(index, /readTransaction\(heart, \(\) => \(\{/u);
-  assert.equal(/export async function activitySlice[\s\S]*?\n\}/u.exec(index)?.[0].includes("BEGIN IMMEDIATE"), false);
+  const sliceFn = /export async function activitySlice[\s\S]*?\n\}/u.exec(index)?.[0] ?? "";
+  assert.equal(sliceFn.includes("BEGIN IMMEDIATE"), false);
+  assert.equal(/\bbefore\b/.test(sliceFn) || /\bsince\b/.test(sliceFn) || /\blimit\b/.test(sliceFn), false);
+  const timeline = readFileSync(new URL("../src/akuma/heart/timeline.ts", import.meta.url), "utf8");
+  const factSlice = /export function activityFactSlice[\s\S]*?\n\}/u.exec(timeline)?.[0] ?? "";
+  assert.equal(/\bbefore\b/.test(factSlice) || /\bsince\b/.test(factSlice) || /\blimit\b/.test(factSlice), false);
   assert.equal(/export async function readHeart[\s\S]*?\n\}/u.exec(index)?.[0].includes("HeldAkumaLeash"), false);
   assert.equal(/export async function readHeart[\s\S]*?\n\}/u.exec(index)?.[0].includes("BEGIN IMMEDIATE"), false);
 

@@ -111,13 +111,20 @@ kill body and waker together and legitimately leave tells pending.
 
 `history()` is the sole public execution-history read. It pages the same
 persisted-order Turn ledger used by status; it does not join a second Turn
-projection. Cursor, retained-boundary, gap, omitted-count, and history-loss
+projection. Heart supplies the complete retained raw fact window and its
+retained bounds. The public selector folds that window once into the Turn
+ledger, then applies `before` or `since` and the requested row `limit`
+exactly once to folded semantic rows. A completed tool keeps the start fact's
+sequence; completion enriches that row and does not mint another cursor
+coordinate. Cursor, retained-boundary, gap, omitted-count, and history-loss
 metadata belong only to this history selector; snapshots carry no history
-cursor or retained-boundary fields. Cursor coordinates are timeline sequences. `before` and
-`since` are exclusive and mutually exclusive. Status and wait never carry a
-full history page. The explicit last-answer read selects the latest retained
-answered Turn by durable order and preserves its complete bytes, including an
-empty answer.
+cursor or retained-boundary fields. Cursor coordinates are those semantic-row
+sequences. `before` and `since` are exclusive and mutually exclusive.
+`before=N` selects semantic rows with sequence less than `N`; `since=N`
+selects rows with sequence greater than `N`. `limit` counts folded semantic
+rows and remains 1..5,000. Status and wait never carry a full history page.
+The explicit last-answer read selects the latest retained answered Turn by
+durable order and preserves its complete bytes, including an empty answer.
 
 An Akuma that answered and whose latest Body was later killed keeps both facts
 visible on their independent axes: life remains killed while the answered Turn

@@ -90,24 +90,14 @@ function decodeTimelineRow(database: DatabaseSync, row: TimelineRow): TimelineFa
   return decodeTellAtSequence(database, row.sequence);
 }
 
-export function activityFactSlice(
-  database: DatabaseSync,
-  input: Readonly<{ before?: number; since?: number; limit: number }>,
-): ActivityFactSlice {
+export function activityFactSlice(database: DatabaseSync): ActivityFactSlice {
   const bounds = database.prepare("SELECT MIN(sequence) AS lowest, MAX(sequence) AS highest FROM timeline")
     .get() as { lowest: number | null; highest: number | null };
-  let rows: readonly TimelineRow[];
-  if (input.before !== undefined) {
-    rows = database.prepare(`SELECT * FROM (
-      SELECT sequence, kind FROM timeline WHERE sequence < ? ORDER BY sequence DESC LIMIT ?
-    ) ORDER BY sequence`).all(input.before, input.limit) as unknown as readonly TimelineRow[];
-  } else if (input.since !== undefined) {
-    rows = database.prepare(`SELECT sequence, kind FROM timeline WHERE sequence > ? ORDER BY sequence LIMIT ?`)
-      .all(input.since, input.limit) as unknown as readonly TimelineRow[];
-  } else {
-    rows = database.prepare(`SELECT * FROM (
-      SELECT sequence, kind FROM timeline ORDER BY sequence DESC LIMIT ?
-    ) ORDER BY sequence`).all(input.limit) as unknown as readonly TimelineRow[];
-  }
-  return { rows: rows.map((row) => decodeTimelineRow(database, row)), lowestRetained: bounds.lowest, highest: bounds.highest };
+  const rows = database.prepare("SELECT sequence, kind FROM timeline ORDER BY sequence")
+    .all() as unknown as readonly TimelineRow[];
+  return {
+    rows: rows.map((row) => decodeTimelineRow(database, row)),
+    lowestRetained: bounds.lowest,
+    highest: bounds.highest,
+  };
 }
