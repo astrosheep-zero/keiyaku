@@ -22,6 +22,19 @@ modules rather than directories of tiny wrappers.
 Update the owning root document in the same coherent change as any newly
 settled law and its implementation.
 
+Owner chapters retain durable product and architecture law: product
+invariants, public semantics and grammar, persisted byte shapes,
+failure/concurrency/recovery rules, and the key ownership and dependency
+boundaries needed to prevent a second authority. Public fields and grammar
+remain when callers compile against them; persisted fields and byte layouts
+remain when stored authority depends on them. Owner chapters omit replaceable
+implementation detail: private helper or function names, mirrors of current
+source-file topology, step-by-step implementation control flow, internal field
+inventories, test inventories, and law already owned by another chapter. A
+source change that settles new durable law updates the one owner chapter in the
+same coherent change. Tasks, Contracts, skills, tests, and comments remain
+evidence or procedure, never alternate law.
+
 ## Package Manager
 
 This repository uses **npm only**. `package-lock.json` is the sole dependency
