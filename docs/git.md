@@ -270,19 +270,30 @@ refuses before publication. The private state ref assertion, target assertion,
 and target movement remain one atomic publication; no post-publication Task
 writer or bookkeeping commit follows it.
 
-When the target checkout is not the tender source, placement follows Git merge
-semantics. Before publication, each registered checkout of the target must
-admit the predecessor-to-candidate two-tree merge of its current index, have no
-worktree modification on a predecessor-to-candidate changed path, and have no
-untracked path colliding with a candidate addition. The index merge preserves
-staged entries that the candidate does not change. A staged entry that Git
-cannot carry through that merge refuses; unrelated staged, unstaged, and
-untracked paths are preserved. Every failure returns
-`checkout-not-followable` with the checkout, target, exact implicated paths,
-and reason `staged`, `conflict`, or `untracked`; neither the claimed fact nor
-target ref is written. On success Git performs that same two-tree index and
-worktree update immediately after publication and reports a followed target
-checkout effect.
+When the target checkout is not the tender source, placement follows Git merge semantics.
+Before publication, each registered checkout must admit the predecessor-to-candidate
+two-tree merge of its current index, have no worktree modification on changed paths,
+and have no untracked collision with a candidate addition. Unchanged staged, unstaged,
+and untracked paths are preserved. A refusal returns `checkout-not-followable` with
+the checkout, target, exact paths, and reason `staged`, `conflict`, or `untracked`;
+the claimed fact and target ref remain untouched. Success performs the same two-tree
+update after publication and reports its checkout effect.
+
+The dry-run is the only followability judge. After it passes, ignored-byte
+custody considers only predecessor-to-candidate
+`diff --name-only --no-renames --diff-filter=ACMRT` writes. A bounded `lstat`
+walk stops at the first local non-directory and never follows symlinks. It also
+selects a final local directory when the candidate replaces it with a blob;
+missing paths and continuing directory ancestors select nothing. The selector
+never enumerates directories or classifies Git state.
+
+Leaf scopes share one literal, candidate-scoped `ls-files --others --ignored
+--exclude-standard --directory --no-empty -z` query. Each displaced directory
+uses that query alone and streams stdout into one existence bit. Any record
+refuses the known shallow scope as `untracked`; empty output passes. Git alone
+owns the untracked-and-ignored conjunction, unrelated siblings never enter the
+query, and stream, spawn, or nonzero-exit failure is a nonpublishing
+`target-placement-failed`.
 
 When a targeted here workspace is itself the target checkout, placement
 follows Git commit semantics. Its captured dirty bytes are the verified

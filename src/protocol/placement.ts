@@ -86,7 +86,7 @@ async function runFencedPlacement(
         observed,
       };
     }
-    const physical = prepareTargetPlacement(repository, state, prepared.offer.target);
+    const physical = await prepareTargetPlacement(repository, state, prepared.offer.target);
     if (physical.kind === "refused") return physical;
     const result = await admitDecidedOffer({
       channel: protocol.channel,

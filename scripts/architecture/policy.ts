@@ -132,7 +132,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "git/identity.ts", allow: [any("core/facts/types.ts")] },
     { source: "git/tree.ts", allow: [any("git/identity.ts")] },
-    { source: "git/repository.ts", allow: [any("git/identity.ts"), any("git/tree.ts"), any("core/facts/errors.ts")] },
+    { source: "git/repository.ts", allow: [any("git/identity.ts"), any("git/tree.ts"), any("core/facts/errors.ts"), any("runtime/proc/run.ts", ["consumeProcessStdout"])] },
     {
       source: "git/read-observation.ts",
       allow: [any("core/facts/errors.ts"), any("git/identity.ts"), any("git/repository.ts"), any("git/tree.ts", ["parseTreeObject", "TreeEntry", "validPath"])],
@@ -199,7 +199,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/identity.ts"),
         any("git/observe.ts", ["currentBranch"]),
         any("git/repository.ts"),
-        any("git/workspace.ts", ["captureWorkspaceTree", "withPrivateGitIndex"]),
+        any("git/workspace.ts", ["captureWorkspaceTree"]),
       ],
     },
     {
@@ -742,6 +742,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "git/reconcile.ts", symbols: ["existsSync", "mkdirSync"] },
         { source: "git/hooks.ts", symbols: ["closeSync", "fsyncSync", "mkdirSync", "openSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"] },
         { source: "git/tender.ts", symbols: ["existsSync"] },
+        { source: "git/target-placement.ts", symbols: ["lstatSync"] },
         { source: "git/workspace.ts", symbols: ["mkdtempSync", "realpathSync", "rmSync"] },
         { source: "git/scratch.ts", symbols: ["realpathSync"] },
         { source: "task/context.ts", symbols: ["closeSync", "fsyncSync", "lstatSync", "mkdirSync", "openSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"] },

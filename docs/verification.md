@@ -138,6 +138,14 @@ candidate, Verification plan, Akuma
 projection, lease, mailbox, or public operation. Callers normalize
 paths before invoking it.
 
+The same runtime can consume stdout incrementally for a caller that needs only
+an observation fact. Its consumer receives arbitrary chunks and the runtime
+retains no complete stdout; consumer and stream failures terminate the process
+tree and return a typed stream failure. The Git placement adapter uses this
+capability only for one displaced-directory ignored-byte existence probe. The
+buffered process result and its bounded stdout/stderr semantics remain
+unchanged for every existing caller.
+
 `runProcessToExit` is the separate unbounded wait for a detached supervisor
 process whose owned operation already enforces its own finite timeout. It takes
 the same argv, cwd, and environment but no timeout and returns the same process

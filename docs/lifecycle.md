@@ -53,6 +53,14 @@ failure is returned as the recoverable physical lag defined by
 [git-reconciliation.md](git-reconciliation.md), and process death can leave
 that same recovery shape.
 
+The target fence first asks Git's `read-tree --dry-run -m -u` whether each
+ordinary checkout can follow the predecessor-to-candidate merge. It then
+protects only ignored local bytes inside the candidate's physical destruction
+scopes. A stream, spawn, or nonzero-exit failure while making that observation
+is a mechanical `target-placement-failed` stop; it cannot publish or become a
+claimed fact. The custody observation never changes lifecycle eligibility and
+does not replace Git's dry-run judge.
+
 `deliver` tenders the selected current worktree content. Before admitting the
 fact, Git materializes the complete integration candidate that this attempt may
 verify and place. The fact records the tender snapshot, integration

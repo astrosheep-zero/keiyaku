@@ -42,6 +42,16 @@ type ProcessCancelled = Readonly<{
 
 export type ProcessOutcome = ProcessTerminal | ProcessTimeout | ProcessSpawnError | ProcessUnknownExit | ProcessCancelled;
 
+type ProcessStreamError = Readonly<{
+  readonly kind: "stream-error";
+  readonly diagnostic: string;
+}>;
+
+export type ProcessConsumption = Readonly<{
+  readonly outcome: ProcessOutcome | ProcessStreamError;
+  readonly pid: number | null;
+}>;
+
 export type ProcessIdentity = Readonly<{
   pid: number;
   spawnedAt: string;
@@ -225,8 +235,27 @@ export async function putDownProcessTree(collar: ProcessCollar): Promise<PutDown
   return after.kind === "alive" ? "alive-after-sigkill" : "unavailable";
 }
 
-async function executeProcess(input: ProcessLaunch, timeoutMs: number | undefined): Promise<ProcessOutcome> {
-  if (input.signal?.aborted === true) return { kind: "cancelled" };
+function terminalOutcome(
+  code: number,
+  stdout: Readonly<{ text: string; truncated: boolean }>,
+  stderr: Readonly<{ text: string; truncated: boolean }>,
+  consuming: boolean,
+): ProcessTerminal {
+  return {
+    kind: "terminal",
+    code,
+    stdout: consuming ? "" : stdout.text,
+    stderr: stderr.text,
+    truncated: (consuming ? false : stdout.truncated) || stderr.truncated,
+  };
+}
+
+async function executeProcess(
+  input: ProcessLaunch,
+  timeoutMs: number | undefined,
+  consumeStdout?: (chunk: Buffer) => void,
+): Promise<ProcessConsumption> {
+  if (input.signal?.aborted === true) return { outcome: { kind: "cancelled" }, pid: null };
   const child = spawn(input.argv[0]!, input.argv.slice(1), {
     cwd: input.cwd,
     env: input.env,
@@ -236,16 +265,36 @@ async function executeProcess(input: ProcessLaunch, timeoutMs: number | undefine
   });
   const stdout = tailCapture(STREAM_TAIL_BYTES);
   const stderr = tailCapture(STREAM_TAIL_BYTES);
-  child.stdout.on("data", (chunk: Buffer) => stdout.append(chunk));
-  child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
 
   let stop: "timeout" | "cancelled" | undefined;
+  let streamError: unknown;
   let termination: Promise<void> | undefined;
   const requestStop = (reason: "timeout" | "cancelled"): void => {
     if (stop !== undefined) return;
     stop = reason;
     termination = terminateProcessTree(child.pid);
   };
+  const failStream = (error: unknown): void => {
+    if (streamError !== undefined) return;
+    streamError = error;
+    requestStop("cancelled");
+  };
+  child.stdout.on("data", (chunk: Buffer) => {
+    if (consumeStdout === undefined) {
+      stdout.append(chunk);
+      return;
+    }
+    try {
+      consumeStdout(chunk);
+    } catch (error) {
+      failStream(error);
+    }
+  });
+  child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
+  if (consumeStdout !== undefined) {
+    child.stdout.once("error", failStream);
+    child.stderr.once("error", failStream);
+  }
   const cancel = (): void => requestStop("cancelled");
   input.signal?.addEventListener("abort", cancel, { once: true });
   const timeout = timeoutMs === undefined ? undefined : setTimeout(() => requestStop("timeout"), timeoutMs);
@@ -261,24 +310,44 @@ async function executeProcess(input: ProcessLaunch, timeoutMs: number | undefine
   input.signal?.removeEventListener("abort", cancel);
   await termination;
 
-  if (terminal.kind === "spawn-error") return { kind: "spawn-error", diagnostic: terminal.error.message };
-  if (stop !== undefined) return { kind: stop };
-  if (terminal.code === null) return { kind: "unknown-exit" };
+  const pid = child.pid ?? null;
+  if (terminal.kind === "spawn-error") {
+    return { outcome: { kind: "spawn-error", diagnostic: terminal.error.message }, pid };
+  }
+  if (streamError !== undefined) {
+    return {
+      outcome: {
+        kind: "stream-error",
+        diagnostic: streamError instanceof Error ? streamError.message : String(streamError),
+      },
+      pid,
+    };
+  }
+  if (stop !== undefined) return { outcome: { kind: stop }, pid };
+  if (terminal.code === null) return { outcome: { kind: "unknown-exit" }, pid };
   const capturedStdout = stdout.result();
   const capturedStderr = stderr.result();
   return {
-    kind: "terminal",
-    code: terminal.code,
-    stdout: capturedStdout.text,
-    stderr: capturedStderr.text,
-    truncated: capturedStdout.truncated || capturedStderr.truncated,
+    outcome: terminalOutcome(terminal.code, capturedStdout, capturedStderr, consumeStdout !== undefined),
+    pid,
   };
 }
 
-export function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
-  return executeProcess(input, input.timeoutMs);
+export async function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
+  const result = await executeProcess(input, input.timeoutMs);
+  if (result.outcome.kind === "stream-error") throw new Error("buffered process produced a stream consumer error");
+  return result.outcome;
 }
 
-export function runProcessToExit(input: ProcessLaunch): Promise<ProcessOutcome> {
-  return executeProcess(input, undefined);
+export async function runProcessToExit(input: ProcessLaunch): Promise<ProcessOutcome> {
+  const result = await executeProcess(input, undefined);
+  if (result.outcome.kind === "stream-error") throw new Error("buffered process produced a stream consumer error");
+  return result.outcome;
+}
+
+export function consumeProcessStdout(
+  input: ProcessInput,
+  consume: (chunk: Buffer) => void,
+): Promise<ProcessConsumption> {
+  return executeProcess(input, input.timeoutMs, consume);
 }

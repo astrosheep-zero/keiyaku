@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import { consumeProcessStdout } from "../runtime/proc/run.js";
 import { gitObjectId } from "./identity.js";
 import {
   parseTreeObject,
@@ -184,6 +185,32 @@ export function runGit(repository: GitRepository, args: readonly string[], input
   } catch (error) {
     throw commandError(args, error);
   }
+}
+
+export async function consumeGitStdout(
+  repository: GitRepository,
+  args: readonly string[],
+  consume: (chunk: Buffer) => void,
+): Promise<void> {
+  const result = await consumeProcessStdout({
+    argv: ["git", ...args],
+    cwd: repository.effectiveCwd,
+  }, consume);
+  const { outcome } = result;
+  if (outcome.kind === "terminal" && outcome.code === 0) return;
+  const status = outcome.kind === "terminal" ? outcome.code : null;
+  const stderr = outcome.kind === "terminal" ? outcome.stderr : "";
+  const message = outcome.kind === "terminal"
+    ? `git exited with status ${outcome.code}`
+    : outcome.kind === "spawn-error" || outcome.kind === "stream-error"
+      ? outcome.diagnostic
+      : `git process ended with ${outcome.kind}`;
+  throw commandError(args, {
+    message,
+    stderr,
+    status,
+    pid: result.pid ?? undefined,
+  });
 }
 
 export function runGitWithEnvironment(

@@ -319,6 +319,12 @@ admitted no fact. Recoverable post-admission physical and settlement failures
 are visible in the successful result's typed lags. The facade never abandons
 an admitted Contract as error recovery.
 
+Placement's `target-placement-failed` stop includes a bounded diagnostic for a
+failed Git custody observation or target-fence command. It is a pre-publication
+mechanical failure, so the target ref, checkout, and claimed fact remain
+untouched; it is not an ignored-collision refusal and it is never interpreted
+from Git stderr prose by the lifecycle layer.
+
 Retry details are process-local and non-authoritative. Exhaustion and canonical
 entry collisions carry no admission, contract, journal, or byte payload. A
 known failed atomic transaction carries only `publication-failed` and its

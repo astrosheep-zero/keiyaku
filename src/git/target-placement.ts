@@ -1,3 +1,4 @@
+import { lstatSync } from "node:fs";
 import { resolve } from "node:path";
 import { acquireSqliteTransactionLock, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
@@ -6,13 +7,14 @@ import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, mintSnapshotId, typ
 import { currentBranch } from "./observe.js";
 import {
   commonGitDirectory,
+  consumeGitStdout,
   GitPlumbingError,
   readRef,
   registeredWorktrees,
   runGit,
   type GitRepository,
 } from "./repository.js";
-import { captureWorkspaceTree, withPrivateGitIndex } from "./workspace.js";
+import { captureWorkspaceTree } from "./workspace.js";
 
 export type WorkspaceNotOnTargetRefusal = Readonly<{
   kind: "workspace-not-on-target";
@@ -84,6 +86,10 @@ function gitPaths(repository: GitRepository, path: string, args: readonly string
   return nulPaths(runGit(repository, ["-C", path, ...args]));
 }
 
+function literalPath(path: string): string {
+  return `:(literal)${path}`;
+}
+
 function commitTree(repository: GitRepository, snapshot: SnapshotId): GitObjectId {
   return gitObjectId(
     runGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)])
@@ -93,33 +99,173 @@ function commitTree(repository: GitRepository, snapshot: SnapshotId): GitObjectI
   );
 }
 
-function pathsOverlap(left: string, right: string): boolean {
-  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
-}
-
-function intersection(left: readonly string[], right: readonly string[]): readonly string[] {
-  return left.filter((candidate) => right.some((path) => pathsOverlap(candidate, path))).sort();
-}
-
-function failurePaths(error: unknown): readonly string[] {
-  if (!(error instanceof GitPlumbingError)) return [];
-  const paths = new Set<string>();
-  for (const match of error.stderr.toString("utf8").matchAll(/(?:Entry|Untracked working tree file) '([^']+)'/gu)) {
-    paths.add(match[1]!);
-  }
-  return [...paths].sort();
-}
-
 function checkoutRefusal(
   contractId: ContractId,
   target: RefOperation,
   path: string,
   reason: CheckoutNotFollowableRefusal["reason"],
-  error: unknown,
+  paths: readonly string[],
 ): CheckoutNotFollowableRefusal {
-  const paths = failurePaths(error);
-  if (paths.length === 0) throw error;
   return { kind: "checkout-not-followable", contractId, target: target.target, path, reason, paths };
+}
+
+type CheckoutObservation = Readonly<{
+  repository: GitRepository;
+  contractId: ContractId;
+  target: RefOperation;
+  path: string;
+  predecessor: GitObjectId;
+  candidate: GitObjectId;
+}>;
+
+function changedPaths(
+  repository: GitRepository,
+  path: string,
+  predecessor: GitObjectId,
+  candidate: GitObjectId,
+  filter?: string,
+): readonly string[] {
+  return gitPaths(repository, path, [
+    "diff",
+    "--name-only",
+    "--no-renames",
+    ...(filter === undefined ? [] : [`--diff-filter=${filter}`]),
+    "-z",
+    predecessor,
+    candidate,
+  ]);
+}
+
+function dryRunRefusal(input: CheckoutObservation): CheckoutNotFollowableRefusal {
+  const { repository, contractId, target, path, predecessor, candidate } = input;
+  const changed = changedPaths(repository, path, predecessor, candidate);
+  const pathspecs = changed.map(literalPath);
+  if (pathspecs.length === 0) return checkoutRefusal(contractId, target, path, "conflict", []);
+
+  const staged = gitPaths(repository, path, [
+    "diff",
+    "--cached",
+    "--name-only",
+    "-z",
+    predecessor,
+    "--",
+    ...pathspecs,
+  ]);
+  if (staged.length > 0) return checkoutRefusal(contractId, target, path, "staged", staged);
+
+  const dirty = gitPaths(repository, path, ["diff-files", "--name-only", "-z", "--", ...pathspecs]);
+  if (dirty.length > 0) return checkoutRefusal(contractId, target, path, "conflict", dirty);
+
+  const unmerged = gitPaths(repository, path, ["diff", "--name-only", "--diff-filter=U", "-z", "--", ...pathspecs]);
+  if (unmerged.length > 0) return checkoutRefusal(contractId, target, path, "conflict", unmerged);
+
+  const untracked = boundedUntrackedPaths({ ...input, writes: changed.filter((value) => {
+    return changedPaths(repository, path, predecessor, candidate, "ACMRT").includes(value);
+  }) });
+  return checkoutRefusal(
+    contractId,
+    target,
+    path,
+    untracked.length > 0 ? "untracked" : "conflict",
+    untracked,
+  );
+}
+
+type PhysicalScope = Readonly<{
+  path: string;
+  kind: "leaf" | "directory";
+}>;
+
+function physicalScope(worktree: string, candidatePath: string): PhysicalScope | null {
+  const components = candidatePath.split("/");
+  for (let index = 0; index < components.length; index += 1) {
+    const scope = components.slice(0, index + 1).join("/");
+    let stat: ReturnType<typeof lstatSync>;
+    try {
+      stat = lstatSync(resolve(worktree, ...components.slice(0, index + 1)));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") return null;
+      throw error;
+    }
+    if (!stat.isDirectory()) return { path: scope, kind: "leaf" };
+    if (index + 1 === components.length) return { path: scope, kind: "directory" };
+  }
+  return null;
+}
+
+function candidateEntryIsBlob(
+  repository: GitRepository,
+  path: string,
+  candidate: GitObjectId,
+  candidatePath: string,
+): boolean {
+  const output = runGit(repository, ["-C", path, "ls-tree", "-z", candidate, "--", literalPath(candidatePath)]);
+  const records = output.toString("utf8").split("\0").filter((record) => record.length > 0);
+  if (records.length !== 1) throw new Error(`candidate path has no unique Git entry: ${candidatePath}`);
+  const separator = records[0]!.indexOf("\t");
+  if (separator < 0) throw new Error(`candidate path has a malformed Git entry: ${candidatePath}`);
+  const fields = records[0]!.slice(0, separator).split(" ");
+  return fields[1] === "blob";
+}
+
+function destructionScopes(
+  repository: GitRepository,
+  path: string,
+  candidate: GitObjectId,
+  writes: readonly string[],
+): readonly PhysicalScope[] {
+  const scopes = new Map<string, PhysicalScope>();
+  for (const write of writes) {
+    const scope = physicalScope(path, write);
+    if (scope === null) continue;
+    if (scope.kind === "directory" && !candidateEntryIsBlob(repository, path, candidate, write)) continue;
+    scopes.set(scope.path, scope);
+  }
+  return [...scopes.values()].sort((left, right) => left.path.localeCompare(right.path));
+}
+
+const IGNORED_UNTRACKED_ARGS = [
+  "ls-files",
+  "--others",
+  "--ignored",
+  "--exclude-standard",
+  "--directory",
+  "--no-empty",
+  "-z",
+] as const;
+
+async function ignoredCustodyRefusal(
+  input: CheckoutObservation,
+  writes: readonly string[],
+): Promise<CheckoutNotFollowableRefusal | null> {
+  const { repository, contractId, target, path, candidate } = input;
+  const scopes = destructionScopes(repository, path, candidate, writes);
+  const leaves = scopes.filter((scope) => scope.kind === "leaf");
+  if (leaves.length > 0) {
+    const collisions = gitPaths(repository, path, [
+      ...IGNORED_UNTRACKED_ARGS,
+      "--",
+      ...leaves.map((scope) => literalPath(scope.path)),
+    ]);
+    if (collisions.length > 0) return checkoutRefusal(contractId, target, path, "untracked", collisions);
+  }
+
+  for (const scope of scopes) {
+    if (scope.kind !== "directory") continue;
+    let found = false;
+    await consumeGitStdout(repository, [
+      "-C",
+      path,
+      ...IGNORED_UNTRACKED_ARGS,
+      "--",
+      literalPath(scope.path),
+    ], (chunk) => {
+      if (chunk.length > 0) found = true;
+    });
+    if (found) return checkoutRefusal(contractId, target, path, "untracked", [scope.path]);
+  }
+  return null;
 }
 
 function indexMatchesTreeOnPaths(
@@ -145,59 +291,25 @@ function sourceWorktree(repository: GitRepository): string {
   return resolve(runGit(repository, ["rev-parse", "--show-toplevel"]).toString("utf8").trim());
 }
 
-function ordinaryPrecheck(
+async function ordinaryPrecheck(
   repository: GitRepository,
   contractId: ContractId,
   target: RefOperation,
   path: string,
-): CheckoutNotFollowableRefusal | null {
+): Promise<CheckoutNotFollowableRefusal | null> {
   const predecessor = gitObjectIdForSnapshot(target.expectedOid);
   const candidate = gitObjectIdForSnapshot(target.newOid);
-  try {
-    withPrivateGitIndex((environment) => {
-      runGit(repository, ["-C", path, "read-tree", "-i", `--index-output=${environment.GIT_INDEX_FILE}`, "-m", predecessor, candidate]);
-    });
-  } catch (error) {
-    return checkoutRefusal(contractId, target, path, "staged", error);
-  }
-
-  const changed = gitPaths(repository, path, ["diff", "--name-only", "-z", predecessor, candidate]);
-  const dirty = gitPaths(repository, path, ["diff-files", "--name-only", "-z"]);
-  const conflicts = intersection(changed, dirty);
-  if (conflicts.length > 0) {
-    return {
-      kind: "checkout-not-followable",
-      contractId,
-      target: target.target,
-      path,
-      reason: "conflict",
-      paths: conflicts,
-    };
-  }
-
-  const additions = gitPaths(repository, path, ["diff", "--name-only", "--diff-filter=A", "-z", predecessor, candidate]);
-  const untracked = gitPaths(repository, path, ["ls-files", "--others", "-z"]);
-  const collisions = intersection(additions, untracked);
-  if (collisions.length > 0) {
-    return {
-      kind: "checkout-not-followable",
-      contractId,
-      target: target.target,
-      path,
-      reason: "untracked",
-      paths: collisions,
-    };
-  }
-
+  const observation = { repository, contractId, target, path, predecessor, candidate };
   try {
     runGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
   } catch (error) {
-    const reason = error instanceof GitPlumbingError && /untracked working tree file/iu.test(error.stderr.toString("utf8"))
-      ? "untracked"
-      : "conflict";
-    return checkoutRefusal(contractId, target, path, reason, error);
+    if (!(error instanceof GitPlumbingError)) throw error;
+    return dryRunRefusal(observation);
   }
-  return null;
+  return ignoredCustodyRefusal(
+    observation,
+    changedPaths(repository, path, predecessor, candidate, "ACMRT"),
+  );
 }
 
 export async function acquireTargetPlacementFence(
@@ -211,11 +323,11 @@ export async function acquireTargetPlacementFence(
   });
 }
 
-export function prepareTargetPlacement(
+export async function prepareTargetPlacement(
   repository: GitRepository,
   state: ContractState,
   target: RefOperation,
-): TargetPlacementPreparation {
+): Promise<TargetPlacementPreparation> {
   if (state.coordinates.target !== target.target || state.delivery?.data.integration.snapshot !== target.newOid) {
     throw new Error("placement state does not match its offered target movement");
   }
@@ -242,7 +354,7 @@ export function prepareTargetPlacement(
   for (const worktree of worktrees) {
     const kind = hereSource !== null && resolve(worktree.path) === hereSource ? "here" : "ordinary";
     if (kind === "ordinary") {
-      const refusal = ordinaryPrecheck(repository, state.id, target, worktree.path);
+      const refusal = await ordinaryPrecheck(repository, state.id, target, worktree.path);
       if (refusal !== null) return { kind: "refused", refusal };
     }
     arms.push({ kind, path: worktree.path });

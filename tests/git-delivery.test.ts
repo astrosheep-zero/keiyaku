@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import test from "node:test";
@@ -84,7 +84,37 @@ async function targetedContract() {
     target: "refs/heads/main",
   });
   const state = await bound.keiyaku.state();
-  return { repository, state, worktree: deliveryWorktreePath(repositoryAt(repository.path), state.id) };
+  return {
+    contract: bound.keiyaku,
+    repository,
+    state,
+    worktree: deliveryWorktreePath(repositoryAt(repository.path), state.id),
+  };
+}
+
+async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
+  mkdirSync(join(repository.path, "artifact"));
+  writeFileSync(join(repository.path, ".gitignore"), ignore);
+  writeFileSync(join(repository.path, "artifact", "tracked.txt"), "tracked\n");
+  repository.run(["add", ".gitignore", "artifact/tracked.txt"]);
+  repository.run(["commit", "--quiet", "-m", "tracked directory"]);
+  const bound = await Keiyaku.bind({
+    repo: Repo.at({ path: repository.path }),
+    markdown: contractBody(),
+    workspace: "worktree",
+    target: "refs/heads/main",
+  });
+  const state = await bound.keiyaku.state();
+  const worktree = deliveryWorktreePath(repositoryAt(repository.path), state.id);
+  repository.run(["-C", worktree, "rm", "-r", "artifact"]);
+  writeFileSync(join(worktree, "artifact"), "candidate file\n");
+  repository.run(["-C", worktree, "add", "artifact"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "replace directory"]);
+  return { contract: bound.keiyaku, repository, worktree };
 }
 
 test("permissive targeted delivery integrates tender bytes over the observed target head", async () => {
@@ -311,6 +341,168 @@ test("dirty delivery refuses classified paths unless the complete workspace is a
   assert.equal(repository.run(["rev-parse", "HEAD"]), headBefore);
   assert.equal(repository.run(["diff", "--cached", "--binary"]), indexBefore);
   assert.equal(repository.run(["status", "--porcelain=v2", "--untracked-files=all"]), statusBefore);
+});
+
+test("target placement ignores a large unrelated ignored population", async () => {
+  const { contract, repository, worktree } = await targetedContract();
+  writeFileSync(join(repository.path, ".gitignore"), "node_modules/\n");
+  repository.run(["add", ".gitignore"]);
+  repository.run(["commit", "--quiet", "-m", "ignore dependencies"]);
+  const dependencies = join(repository.path, "node_modules", "package");
+  mkdirSync(dependencies, { recursive: true });
+  for (let index = 0; index < 30_100; index += 1) {
+    writeFileSync(join(dependencies, `module-${index}.js`), "x");
+  }
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
+
+  const delivered = await contract.deliver();
+
+  assert.equal(delivered.value.placement, undefined);
+  assert.equal(readFileSync(join(repository.path, "candidate.txt"), "utf8"), "candidate\n");
+  assert.equal(readFileSync(join(dependencies, "module-30099.js"), "utf8"), "x");
+});
+
+test("a deep candidate write does not observe ignored sibling contents", async () => {
+  const { contract, repository, worktree } = await targetedContract();
+  writeFileSync(join(repository.path, ".gitignore"), "artifact/cache/\n");
+  repository.run(["add", ".gitignore"]);
+  repository.run(["commit", "--quiet", "-m", "ignore cache"]);
+  const cache = join(repository.path, "artifact", "cache");
+  mkdirSync(cache, { recursive: true });
+  for (let index = 0; index < 5_000; index += 1) {
+    writeFileSync(join(cache, `entry-${index}.tmp`), "cache");
+  }
+  mkdirSync(join(worktree, "artifact", "deep"), { recursive: true });
+  writeFileSync(join(worktree, "artifact", "deep", "result.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "artifact/deep/result.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "deep candidate"]);
+
+  const delivered = await contract.deliver();
+
+  assert.equal(delivered.value.placement, undefined);
+  assert.equal(readFileSync(join(repository.path, "artifact", "deep", "result.txt"), "utf8"), "candidate\n");
+  assert.equal(readFileSync(join(cache, "entry-4999.tmp"), "utf8"), "cache");
+});
+
+test("ignored custody treats candidate metacharacters as a literal path", async () => {
+  const { contract, repository, worktree } = await targetedContract();
+  const collision = "literal[1].tmp";
+  writeFileSync(join(repository.path, ".gitignore"), "literal*.tmp\n");
+  repository.run(["add", ".gitignore"]);
+  repository.run(["commit", "--quiet", "-m", "ignore literal candidate"]);
+  writeFileSync(join(repository.path, collision), "local\n");
+  writeFileSync(join(worktree, collision), "candidate\n");
+  repository.run(["-C", worktree, "add", collision]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "literal candidate"]);
+  const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
+
+  const delivered = await contract.deliver();
+
+  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
+  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
+  assert.equal(delivered.value.placement.refusal.reason, "untracked");
+  assert.deepEqual(delivered.value.placement.refusal.paths, [collision]);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
+  assert.equal(readFileSync(join(repository.path, collision), "utf8"), "local\n");
+});
+
+test("ignored custody stops at an ignored physical ancestor leaf", async () => {
+  const { contract, repository, worktree } = await targetedContract();
+  writeFileSync(join(repository.path, ".gitignore"), "artifact\n");
+  repository.run(["add", ".gitignore"]);
+  repository.run(["commit", "--quiet", "-m", "ignore ancestor"]);
+  writeFileSync(join(repository.path, "artifact"), "local leaf\n");
+  mkdirSync(join(worktree, "artifact"));
+  writeFileSync(join(worktree, "artifact", "result.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "artifact/result.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "replace ancestor"]);
+
+  const delivered = await contract.deliver();
+
+  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
+  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
+  assert.equal(delivered.value.placement.refusal.reason, "untracked");
+  assert.deepEqual(delivered.value.placement.refusal.paths, ["artifact"]);
+  assert.equal(readFileSync(join(repository.path, "artifact"), "utf8"), "local leaf\n");
+});
+
+test("ignored custody treats a symlink ancestor as a leaf", async () => {
+  const { contract, repository, worktree } = await targetedContract();
+  writeFileSync(join(repository.path, ".gitignore"), "link\n");
+  repository.run(["add", ".gitignore"]);
+  repository.run(["commit", "--quiet", "-m", "ignore symlink"]);
+  mkdirSync(join(repository.path, "elsewhere"));
+  writeFileSync(join(repository.path, "elsewhere", "retained.txt"), "retained\n");
+  symlinkSync("elsewhere", join(repository.path, "link"));
+  mkdirSync(join(worktree, "link"));
+  writeFileSync(join(worktree, "link", "result.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "link/result.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "replace symlink"]);
+
+  const delivered = await contract.deliver();
+
+  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
+  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
+  assert.deepEqual(delivered.value.placement.refusal.paths, ["link"]);
+  assert.equal(readFileSync(join(repository.path, "elsewhere", "retained.txt"), "utf8"), "retained\n");
+});
+
+test("a clean tracked directory may be replaced by a candidate file", async () => {
+  const { contract, repository } = await directoryReplacementContract();
+
+  const delivered = await contract.deliver();
+
+  assert.equal(delivered.value.placement, undefined);
+  assert.equal(readFileSync(join(repository.path, "artifact"), "utf8"), "candidate file\n");
+});
+
+test("a displaced directory with large ignored contents refuses at the directory", async () => {
+  const { contract, repository } = await directoryReplacementContract();
+  for (let index = 0; index < 4_400; index += 1) {
+    const name = `ignored-${String(index).padStart(4, "0")}-${"x".repeat(220)}.tmp`;
+    writeFileSync(join(repository.path, "artifact", name), "ignored\n");
+  }
+  const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
+
+  const delivered = await contract.deliver();
+
+  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
+  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
+  assert.equal(delivered.value.placement.refusal.reason, "untracked");
+  assert.deepEqual(delivered.value.placement.refusal.paths, ["artifact"]);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
+  assert.equal(readFileSync(join(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
+});
+
+test("a failed displaced-directory observation leaves the target untouched", async () => {
+  const { contract, repository } = await directoryReplacementContract();
+  writeFileSync(join(repository.path, "artifact", "ignored.tmp"), "ignored\n");
+  const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
+
+  const delivered = await withGitShim(
+    [
+      "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"ls-files\" ]; then",
+      "  for argument do",
+      "    if [ \"$argument\" = \"--ignored\" ]; then",
+      "      printf 'forced ignored observation failure\\n' >&2",
+      "      exit 9",
+      "    fi",
+      "  done",
+      "fi",
+      "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    ].join("\n"),
+    {},
+    () => contract.deliver(),
+  );
+
+  assert.equal(delivered.value.placement?.failure, "target-placement-failed");
+  if (delivered.value.placement?.failure === "target-placement-failed") {
+    assert.match(delivered.value.placement.diagnostic, /forced ignored observation failure/);
+  }
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
+  assert.equal(readFileSync(join(repository.path, "artifact", "ignored.tmp"), "utf8"), "ignored\n");
 });
 
 test("review observes dirty bytes but refuses dirty submodule internals", async () => {

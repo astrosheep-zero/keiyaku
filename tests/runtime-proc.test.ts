@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
 import {
+  consumeProcessStdout,
   probeProcessTree,
   putDownProcessTree,
   runProcess,
@@ -68,6 +69,42 @@ test("runProcess retains only the final 16 KiB of each stream", async () => {
   assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
   assert.equal(outcome.stderr.endsWith("stderr-tail"), true);
   assert.equal(outcome.truncated, true);
+});
+
+test("consumeProcessStdout drains output without retaining it", async () => {
+  let consumed = 0;
+  const result = await consumeProcessStdout(input([
+    process.execPath,
+    "-e",
+    'process.stdout.write("x".repeat(2 * 1024 * 1024));',
+  ]), (chunk) => {
+    consumed += chunk.length;
+  });
+
+  assert.equal(consumed, 2 * 1024 * 1024);
+  assert.ok(result.pid !== null && result.pid > 0);
+  assert.deepEqual(result.outcome, {
+    kind: "terminal",
+    code: 0,
+    stdout: "",
+    stderr: "",
+    truncated: false,
+  });
+});
+
+test("consumeProcessStdout terminates after a consumer failure", async () => {
+  const result = await consumeProcessStdout(input([
+    process.execPath,
+    "-e",
+    'process.stdout.write("output"); setInterval(() => {}, 1_000);',
+  ]), () => {
+    throw new Error("consumer refused output");
+  });
+
+  assert.deepEqual(result.outcome, {
+    kind: "stream-error",
+    diagnostic: "consumer refused output",
+  });
 });
 
 test("runProcess reports unknown exits", async () => {
