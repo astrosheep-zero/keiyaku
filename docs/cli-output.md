@@ -123,37 +123,59 @@ free but the latest Body has no explicit end. Both use the conservative `?`
 mark. Mutation renderers preserve `hung`, `untidy`, and `unavailable` evidence
 and return failure status without inventing an external termination attempt.
 
-Snapshot omission is positional: every typed snapshot gap renders as `  ⋮ N
-omitted` at its actual break between visible rows, and the gap counts sum to the
-typed `omitted` total. History retains its own cursor and loss metadata and does
-not reinterpret snapshot gaps. Text is clipped by terminal display width without
+Snapshot omission is positional: every typed snapshot gap renders as
+`      ⋮ N omitted` at its actual break between visible rows, with the vertical
+ellipsis in the glyph column, and the gap counts sum to the typed `omitted`
+total. History retains its own cursor and loss metadata and does not
+reinterpret snapshot gaps. Text is clipped by terminal display width without
 splitting grapheme clusters. A `run` command remains one row and preserves
 recognizable head and tail when clipped; its outcome is shown only when space
-allows. Activity rows use a fluid prefix: `<mark> [HH:MM] <label>:` when the
-displayed minute changes, otherwise `<mark> <label>:`. Wrapped continuation text
-uses a two-space hanging indent. There is no aggregate omission token on the
-first row, standalone minute divider, padded column, horizontal rule, or
-decorative grouping line.
+allows. The time gutter is five columns. The first visible event and the first
+event whose displayed minute differs from the preceding visible event print
+`HH:MM`; additional events in the same minute leave those five columns blank.
+One space follows the gutter, then the semantic glyph, one space, then a fixed
+verb field sufficient for `say`, `think`, `note`, `tell`, and tool labels; body
+text begins at one stable column. Say, think, tell, and answered-outcome bodies
+are wrapped in `U+201C`/`U+201D`; tool, note, call, and error bodies are not.
+A wrapped body line places a vertical bar in the glyph column and aligns its
+body with the first line's body. Event glyphs
+remain: ordinary voice, note, and told rows use `·`, completed success uses
+`✓`, completed failure uses `!`, active tool uses `⧖`, pending tell uses `⧗`,
+and unsettled tool uses `?`. There is no aggregate omission token on the first
+row, standalone minute divider, second rule between relation and activity, or
+changed snapshot selection.
 
 ```text
-aku/worker/1234abcd (@worker) [kei/provider-core]
-· [18:08] say: previous conclusion
-  ⋮ 18 omitted
-· [18:09] say: checking again; the projection still carries
-  activity from the current Turn
-  ⋮ 39 omitted
-· think: projection may own the bug
-⧖ run: $ npm test
+─────
+aku/expert-akuma/5659b10d (@expert)
+└─ kei/make-non-git-runtime-observation-honestly-async
+      ⋮ 171 omitted
+14:36 · say    “I’m editing the architecture allowlist to mirror the completed-”
+      │        “migration: synchronous filesystem authority remains only in the two documented…”
+      ⋮ 17 omitted
+14:46 · think  “The migrated Heart and Body slices now pass except one real-”
+      │        “async race exposed by the new boundary…”
+14:47 ✓ run    $ npm run test:focused — ok
+      ! run    $ npm test — failed
+      ⋮ 11 omitted
+14:49 ✓ run    $ npm test — ok
+      ⧗ tell   “Please also inspect the termination path.”
+14:50 ⧖ run    $ npm run test:focused
   ● running
 ```
 
-The first line is the exact physical identity and optional alias, followed by a
-single bracketed `[kei/...]` cue when associated. It never contains current
-life. Status, wait, observed call, and kill place life on one two-space-indented
-trailing line immediately after nonempty activity. Ordinary and
-interrupt tell output and history omit life. The life vocabulary remains `●
-running`, `○ asleep`, `× killed`, `? stranded`, `? hung`, and `? untidy`.
-JSON values, timeline row semantics, and history model remain unchanged.
+The first output line is the five-column `U+2500` opening stroke, exactly as
+wide as `HH:MM`. It marks the boundary of the complete snapshot and carries no
+state icon, label, or header. AkuId and optional alias occupy the next line.
+When a Contract is associated, its complete `kei/...` coordinate follows on the
+separate hanging relation line beginning with `U+2514` and `U+2500`; an
+unassociated Akuma omits that line. Identity rows never contain current life.
+Activity follows the identity and optional relation directly. Status, wait,
+observed call, and kill place life on one two-space-indented trailing line
+immediately after activity. Ordinary and interrupt tell output and history omit
+life. The life vocabulary remains `● running`, `○ asleep`, `× killed`,
+`? stranded`, `? hung`, and `? untidy`. JSON values, timeline row semantics,
+and history model remain unchanged.
 
 Post-admission physical or settlement failures remain inside the accepted
 object as typed lags. Text and JSON expose them without changing the Contract

@@ -3,9 +3,12 @@ import type { AkumaStatusView, DispatchStage } from "../../index.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
 import { toolRepr } from "./akuma-tool.js";
-import { renderBoundedTextBlock, safeText, truncateMiddleDisplayText, type TextRenderContext } from "./terminal.js";
+import { displayColumns, renderBoundedTextBlock, safeText, truncateMiddleDisplayText, type TextRenderContext } from "./terminal.js";
 
 const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
+const OPENING_STROKE = "─────";
+const TIME_WIDTH = 5;
+const VERB_WIDTH = 6;
 
 function identity(id: string, alias?: string): string {
   return `${id}${alias === undefined ? "" : ` (${alias})`}`;
@@ -13,6 +16,14 @@ function identity(id: string, alias?: string): string {
 
 function associatedIdentity(id: string, alias?: string, contractId?: string): string {
   return `${identity(id, alias)}${contractId === undefined ? "" : ` [${contractId}]`}`;
+}
+
+function snapshotHeading(id: string, alias?: string, contractId?: string): readonly string[] {
+  return [
+    OPENING_STROKE,
+    identity(id, alias),
+    ...(contractId === undefined ? [] : [`└─ ${contractId}`]),
+  ];
 }
 
 function lifeLabel(life: AkumaStatusView["status"]["life"]): string {
@@ -61,19 +72,53 @@ function rowText(row: ActivityRow | SnapshotRow): Readonly<{ text: string; lines
   return { text: repr.text, lines: 2, ...(repr.overflow === "middle-ellipsis" ? { middle: true as const } : {}), ...(repr.suffix === undefined ? {} : { suffix: repr.suffix }) };
 }
 
+function eventPrefix(glyph: string, verb: string, time?: string): string {
+  const gutter = time === undefined ? " ".repeat(TIME_WIDTH) : time.padEnd(TIME_WIDTH);
+  return `${gutter} ${glyph} ${verb.padEnd(VERB_WIDTH)} `;
+}
+
+function continuationPrefix(): string {
+  return eventPrefix("│", "");
+}
+
+function quotedBody(row: ActivityRow | SnapshotRow): boolean {
+  return row.kind === "said" || row.kind === "thought" || row.kind === "tell"
+    || (row.kind === "outcome" && row.outcome.kind === "answered");
+}
+
+function quoteLines(lines: readonly string[], prefix: string): readonly string[] {
+  const prefixWidth = prefix.length;
+  return lines.map((line) => {
+    const body = line.slice(prefixWidth);
+    if (body.length === 0) return line;
+    return `${line.slice(0, prefixWidth)}“${body}”`;
+  });
+}
+
+function renderMiddleEllipsis(first: string, text: string, suffix: string, columns: number): string {
+  const prefixWidth = displayColumns(first);
+  const remaining = columns - prefixWidth;
+  const suffixWidth = displayColumns(suffix);
+  const withSuffix = remaining - suffixWidth;
+  const showSuffix = suffix.length > 0 && withSuffix >= 3;
+  return `${first}${truncateMiddleDisplayText(text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`;
+}
+
 function renderRow(row: ActivityRow | SnapshotRow, context: TextRenderContext, history: boolean, first: string): readonly string[] {
   const value = rowText(row);
+  const quoted = quotedBody(row);
+  const quoteWidth = quoted ? 2 : 0;
   if (value.middle === true) {
-    const suffix = value.suffix ?? "";
-    return [`${first}${truncateMiddleDisplayText(value.text, Math.max(1, context.columns - first.length - suffix.length))}${suffix}`];
+    return [renderMiddleEllipsis(first, value.text, value.suffix ?? "", context.columns - quoteWidth)];
   }
-  return renderBoundedTextBlock(value.text, {
+  const lines = renderBoundedTextBlock(value.text, {
     first,
-    continuation: "  ",
-    columns: context.columns,
+    continuation: continuationPrefix(),
+    columns: context.columns - quoteWidth,
     lines: history ? Number.MAX_SAFE_INTEGER : value.lines,
     ...("truncated" in row && row.truncated === true ? { truncated: true } : {}),
   });
+  return quoted ? quoteLines(lines, first) : lines;
 }
 
 type RenderEntry = ActivitySnapshotEntry | Readonly<{ kind: "row"; row: ActivityRow }>;
@@ -83,15 +128,13 @@ function groupedEntries(entries: readonly RenderEntry[], context: TextRenderCont
   let previousClock: string | undefined;
   for (const entry of entries) {
     if (entry.kind === "gap") {
-      lines.push(`  ⋮ ${entry.count} omitted`);
-      previousClock = undefined;
+      lines.push(`${" ".repeat(TIME_WIDTH)} ⋮ ${entry.count} omitted`);
       continue;
     }
     const row = entry.row;
     const at = clock(row.at);
     const changed = previousClock === undefined || at !== previousClock;
-    const prefix = `${mark(row)}${changed ? ` [${at}]` : ""} ${label(row)}: `;
-    lines.push(...renderRow(row, context, history, prefix));
+    lines.push(...renderRow(row, context, history, eventPrefix(mark(row), label(row), changed ? at : undefined)));
     previousClock = at;
   }
   return lines;
@@ -114,14 +157,14 @@ function snapshotText(view: AkumaStatusView, context: TextRenderContext, options
     ...(options.facts ?? []),
   ];
   const footer = options.showLife === false ? [] : [`  ${lifeLabel(view.status.life)}`];
-  return [associatedIdentity(view.status.id, options.alias, view.contractId), ...facts, ...activity, ...footer].join("\n");
+  return [...snapshotHeading(view.status.id, options.alias, view.contractId), ...facts, ...activity, ...footer].join("\n");
 }
 
 function historyText(command: Extract<ParsedCommand, { command: "history" }>, result: Extract<AkumaInvocationResult, { action: "history" }>, context: TextRenderContext): string {
   if (command.last) return result.mode === "last" ? result.answer : "no answer retained";
   if (result.mode !== "page") throw new Error("history result lacks page");
   const contractId = result.historyResult.contractId;
-  return [associatedIdentity(result.akuma, result.alias, contractId), ...groupedRows(result.history.rows, context, true)].join("\n");
+  return [...snapshotHeading(result.akuma, result.alias, contractId), ...groupedRows(result.history.rows, context, true)].join("\n");
 }
 
 function tellText(result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>, context: TextRenderContext): string {
@@ -142,8 +185,8 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   const facts = [...dispatchLines(result.result.dispatch)];
   const restraint = result.result.readonly?.enforcement === "none" ? [`! ${safeText(result.result.readonly.diagnostic)}`] : [];
   if (result.result.alias.kind === "failed") facts.push(`alias failed ${result.result.alias.failure.kind} ${safeText(result.result.alias.failure.diagnostic)}`);
-  if (result.result.observation.kind === "detached") return [associatedIdentity(result.result.akuma, alias, contractId), ...restraint, ...facts].join("\n");
-  if (result.result.observation.kind === "failed") return [associatedIdentity(result.result.akuma, alias, contractId), ...restraint, ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
+  if (result.result.observation.kind === "detached") return [...snapshotHeading(result.result.akuma, alias, contractId), ...restraint, ...facts].join("\n");
+  if (result.result.observation.kind === "failed") return [...snapshotHeading(result.result.akuma, alias, contractId), ...restraint, ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
   return snapshotText({ status: result.result.observation.status, ...(contractId === undefined ? {} : { contractId }) }, context, { ...(alias === undefined ? {} : { alias }), facts });
 }
 

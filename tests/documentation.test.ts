@@ -7,6 +7,18 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const docs = join(root, "docs");
 
+test("Akuma owner law records the settled snapshot timeline", () => {
+  const output = readFileSync(join(docs, "cli-output.md"), "utf8");
+  const cli = readFileSync(join(docs, "cli.md"), "utf8");
+  assert.match(output, /snapshot/u);
+  assert.match(output, /opening stroke/u);
+  assert.match(output, /time gutter/u);
+  assert.match(output, /Event glyphs/u);
+  assert.match(output, /place life/u);
+  assert.match(output, /history omit/u);
+  assert.match(cli, /cli-output\.md/u);
+});
+
 function markdownFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);

@@ -307,20 +307,24 @@ values and no text-only time suppression.
 
 Readonly `none` renders its diagnostic as an existing `!` line; native or
 absent renders nothing. This presents the public fact and adds no CLI judgment.
-Every rendered snapshot begins with the complete AkuId and optional frozen
-Alias. When a Contract is associated, its complete `kei/...` identity is one
-bracketed cue on that same line; it is not a second metadata heading. Status,
-wait, observed call, and kill end with the public life on a subdued trailing
-line. Ordinary and interrupt tell compose the refreshed snapshot without a
-current-life claim; history does the same for its page, while `history --last`
-writes exact answer bytes. The id already contains the Archetype and the CLI
-never reverse-selects an Alias. Text never prints the storage words `retained`,
-`latest`, `body`, `heart`, or `turn`.
+Every rendered snapshot begins with the five-column `U+2500` opening stroke,
+then the complete AkuId and optional frozen Alias. When a Contract is
+associated, its complete `kei/...` identity is one hanging relation line
+beginning with `U+2514` and `U+2500`; an unassociated Akuma omits that line.
+Identity rows never contain current life, and no divider or blank line splits
+the relation from the following activity. Status, wait, observed call, and
+kill end with the public life on a subdued trailing line. Ordinary and
+interrupt tell compose the refreshed snapshot without a current-life claim;
+history does the same for its page, while `history --last` writes exact answer
+bytes. The id already contains the Archetype and the CLI never reverse-selects
+an Alias. Text never prints the storage words `retained`, `latest`, `body`,
+`heart`, or `turn`.
 
-Shared activity-row layout, snapshot budgets, clipping, inline minute tokens,
+Shared activity-row layout, snapshot budgets, clipping, time gutter, glyphs,
 and omission placement are owned by [cli-output.md](cli-output.md). This command
-chapter delegates that presentation: it adds no divider, padded column, blank
-minute grouping, or competing metadata heading.
+chapter delegates that presentation: it adds no TIMELINE or STATUS header,
+full-width decorative rule, equal-sign divider, semantic icon on the opening
+stroke, or second rule between relation and activity.
 
 Tell remains one input action. Text presents the refreshed shared snapshot;
 only a wake or interrupt failure adds an error line. The current tell appears
@@ -354,7 +358,7 @@ only when every change has a diffstat. Missing optional provider facts shorten
 the row and never produce placeholders.
 
 History pages retain the same public row order and unbounded row text, rendered
-through the shared inline-time presentation without a current-life observation.
+through the shared timeline presentation without a current-life observation.
 Answer boundaries name the complete AkuId in `keiyaku history <AkuId> --last`;
 native provider history ids never become CLI selectors. `history --last`
 bypasses the page and writes only exact answer bytes.
