@@ -1,7 +1,7 @@
 import parser from "@typescript-eslint/parser";
-import { DEFAULT_FILE_LINES, FILE_LINE_EXEMPTIONS } from "./scripts/maintainability/config.js";
+import { FILE_LINE_EXEMPTIONS, FILE_LINES } from "./scripts/maintainability/config.js";
 
-const codeLineLimit = (max) => ["error", { max, skipBlankLines: true, skipComments: true }];
+const codeLineLimit = (severity, max) => [severity, { max, skipBlankLines: true, skipComments: true }];
 
 export default [
   {
@@ -19,7 +19,7 @@ export default [
     rules: {
       complexity: ["error", { max: 20, variant: "modified" }],
       "max-depth": ["error", 4],
-      "max-lines": codeLineLimit(DEFAULT_FILE_LINES),
+      "max-lines": codeLineLimit("warn", FILE_LINES.warning),
       "max-lines-per-function": ["error", { max: 80, skipBlankLines: true, skipComments: true, IIFEs: true }],
       "max-params": ["error", 5],
     },
