@@ -35,7 +35,8 @@ async function fixture() {
     id: parent.id,
     archetype: "parent",
     provider: { name: "codex-app-server", kind: "codex-app-server" },
-    options: { access: "write" },
+    options: { readonly: true },
+    readonly: { enforcement: "native" },
     cwd: root,
     origin: { kind: "direct" },
     confinement: { kind: "declared", writableRoots: [root] },
@@ -84,7 +85,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
   const priorRequests = process.env[AKUMA_REQUESTS_ENV];
   const home = join(value.root, "home");
   mkdirSync(join(home, ".keiyaku", "akuma"), { recursive: true });
-  writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\nreadonly: true\n---\nWork.\n");
   process.env.HOME = home;
   const pump = new BodyRequestPump({
     paths: value.parent.paths,
@@ -104,9 +105,11 @@ test("a declared drive serves Body Requests through transport while Heart remain
       archetype: "worker",
       body: "build",
     })).id;
-    const origin = readSoul(pathsForAkuId(value.root, childId))?.origin;
+    const childSoul = readSoul(pathsForAkuId(value.root, childId));
+    const origin = childSoul?.origin;
     assert.equal(origin?.kind, "request");
     if (origin?.kind !== "request") return;
+    assert.deepEqual(childSoul?.readonly, { enforcement: "native" });
     const requestId = origin.requestId;
     assert.equal(readRequest(value.parent.paths, requestId)?.state, "served");
     assert.deepEqual(origin, {
@@ -144,6 +147,20 @@ test("a declared drive serves Body Requests through transport while Heart remain
       },
     }), (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "refused");
     assert.equal(readRequest(value.parent.paths, malformedId), null, "legacy association bytes must not enter Heart");
+
+    const mismatchId = "00000000-0000-4000-8000-000000000003";
+    writeFileSync(join(pump.directory, `${mismatchId}.request.json`), JSON.stringify({
+      id: mismatchId,
+      world: value.root,
+      archetype: "worker",
+      body: "restraint mismatch",
+      recipe: {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: { readonly: true, systemPrompt: "Work.\n" },
+        confinement: { kind: "unconfined" },
+      },
+    }));
+    assert.equal(readRequest(value.parent.paths, mismatchId), null, "a restraint/options mismatch must not enter Heart");
   } finally {
     await pump.close();
     value.leash.release();

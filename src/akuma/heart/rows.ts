@@ -1,39 +1,23 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AkuId } from "../identity.js";
 import type {
-  AkumaOrigin,
   BodyEnd,
   BodyFact,
   CallFact,
-  Confinement,
   KillFact,
   PauseFact,
-  ProviderExecution,
-  ProviderOptions,
   RequestFact,
   RequestInput,
   RequestRecipe,
   ResumeCoordinate,
   SessionFact,
-  Soul,
   StopFact,
   TurnFact,
   TurnStartFact,
   TurnEndFact,
 } from "./facts.js";
+import type { ProviderOptions } from "../provider-recipe.js";
 import { decodeResumeCoordinate, encodeResumeCoordinate as encodeCoordinate } from "../coordinate.js";
-
-export type SoulRow = Readonly<{
-  id: string;
-  archetype: string;
-  description: string | null;
-  provider_json: string;
-  options_json: string;
-  cwd: string;
-  origin_json: string;
-  confinement_json: string;
-  created_at: string;
-}>;
 
 export type SealRow = Readonly<{ evidence: string; at: string }>;
 
@@ -119,44 +103,6 @@ function resumeCoordinate(value: unknown): ResumeCoordinate {
   const coordinate = decodeResumeCoordinate(value);
   if (coordinate === null) throw new Error("Akuma authority contains an invalid resume coordinate");
   return coordinate;
-}
-
-export function encodeSoulRow(soul: Soul): readonly [
-  AkuId,
-  string,
-  string | null,
-  string,
-  string,
-  string,
-  string,
-  string,
-  string,
-] {
-  return [
-    soul.id,
-    soul.archetype,
-    soul.description ?? null,
-    json(soul.provider),
-    json(soul.options),
-    soul.cwd,
-    json(soul.origin),
-    json(soul.confinement),
-    soul.createdAt,
-  ];
-}
-
-export function decodeSoulRow(row: SoulRow): Soul {
-  return {
-    id: row.id as AkuId,
-    archetype: row.archetype,
-    ...(row.description === null ? {} : { description: row.description }),
-    provider: parsed<ProviderExecution>(row.provider_json),
-    options: parsed<ProviderOptions>(row.options_json),
-    cwd: row.cwd,
-    origin: parsed<AkumaOrigin>(row.origin_json),
-    confinement: parsed<Confinement>(row.confinement_json),
-    createdAt: row.created_at,
-  };
 }
 
 export function encodeSessionRow(session: Omit<SessionFact, "sequence">): readonly [string, string, string, string, string] {
@@ -249,19 +195,8 @@ export function decodeActivityRow(row: ActivityRow): ActivityFact {
   };
 }
 
-export function soulFact(database: DatabaseSync): Soul | null {
-  const row = database.prepare(`SELECT id, archetype, description, provider_json, options_json, cwd,
-    origin_json, confinement_json, created_at FROM soul WHERE singleton = 1`).get() as SoulRow | undefined;
-  return row === undefined ? null : decodeSoulRow(row);
-}
-
 export function sealExists(database: DatabaseSync): boolean {
   return database.prepare("SELECT singleton FROM seal WHERE singleton = 1").get() !== undefined;
-}
-
-export function insertSoulFact(database: DatabaseSync, soul: Soul): void {
-  database.prepare(`INSERT INTO soul(singleton, id, archetype, description, provider_json, options_json, cwd, origin_json, confinement_json, created_at)
-    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...encodeSoulRow(soul));
 }
 
 export function insertSealFact(database: DatabaseSync, input: Readonly<{ evidence: string; at: string }>): void {

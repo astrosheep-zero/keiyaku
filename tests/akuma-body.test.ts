@@ -7,7 +7,8 @@ import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-age
 import { readActionFeedbackStatus } from "../src/akuma/akuma.js";
 import { CONTROL_RESPONSE_MS } from "../src/akuma/body.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
-import { HeldAkumaLeash, activitySlice, admitRequest, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, recordSession, recordTell, requestPause, requestStop, reserveRequest, stopRequested, type AkuId, type ProviderOptions } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, activitySlice, admitRequest, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, recordSession, recordTell, requestPause, requestStop, reserveRequest, stopRequested, type AkuId } from "../src/akuma/heart/index.js";
+import type { ProviderOptions } from "../src/akuma/provider-recipe.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { AgentEvent, ProviderAdapter, TurnResult } from "../src/akuma/provider.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
@@ -719,7 +720,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
         id: allocated.id,
         archetype: "parent",
         provider: { name: "codex-app-server", kind: "codex-app-server" },
-        options: { access: "write" },
+        options: {},
         origin: { kind: "direct" },
         confinement: { kind: "declared", writableRoots: [root] },
         cwd: root,

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { abortable } from "../../abort.js";
-import { AgentEventChannel, type ProviderAdapter, type ProviderOptions, type Session, type TurnResult } from "../../provider.js";
-import type { ProviderExecution, ResumeCoordinate } from "../../heart/index.js";
+import { AgentEventChannel, type ProviderAdapter, type Session, type TurnResult } from "../../provider.js";
+import type { ResumeCoordinate } from "../../heart/index.js";
+import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import { createEventState, mapEvent } from "./events.js";
 import { coordinate, loadOpencode, OPENCODE_SDK_PROVIDER, parseModel, type OpencodeSdkLoader } from "./session.js";
 
@@ -27,7 +28,6 @@ function opencodeSessionId(coordinateValue: ResumeCoordinate): string {
   return coordinateValue.sessionId;
 }
 function admit(options: ProviderOptions): void {
-  if (options.access !== undefined) throw new Error("OpenCode does not support explicit access");
   if (options.network !== undefined) throw new Error("OpenCode does not support explicit network");
   if (options.model !== undefined) parseModel(options.model);
 }
@@ -286,7 +286,16 @@ export function createOpencodeProvider(input: ProviderExecution | OpencodeProvid
     confinement: ({ cwd }) => ({ kind: "declared", writableRoots: [cwd] }),
     admitOptions(options: ProviderOptions) {
       try { admit(options); } catch (error) { return { kind: "refused", diagnostic: diagnostic(error) }; }
-      return { kind: "admitted", options: Object.freeze({ ...options }) };
+      return {
+        kind: "admitted",
+        options: Object.freeze({ ...options }),
+        ...(options.readonly === undefined ? {} : {
+          readonly: {
+            enforcement: "none" as const,
+            diagnostic: "OpenCode V1 cannot remove task-surface mutation capabilities",
+          },
+        }),
+      };
     },
     start: (input) => drive(execution, input, loader),
     resume: (input) => drive(execution, input, loader),

@@ -1,8 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { Readable, Writable } from "node:stream";
 import { abortable } from "../../abort.js";
-import { AgentEventChannel, type ProviderAdapter, type ProviderOptionAdmission, type ProviderOptions, type Session, type TurnResult } from "../../provider.js";
-import type { ProviderExecution } from "../../heart/index.js";
+import { AgentEventChannel, type ProviderAdapter, type ProviderOptionAdmission, type Session, type TurnResult } from "../../provider.js";
+import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import { spawnStdioProcess, type StdioProcess } from "../../../runtime/proc/stdio.js";
 import { EMPTY_ACP_EVENT_STATE, flushAcpEvents, mapAcpUpdate } from "./events.js";
 type StartInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
@@ -42,12 +42,20 @@ export function decodeAcpConfig(value: unknown): AcpExecutionConfig {
   });
 }
 function optionAdmission(options: ProviderOptions, config: AcpExecutionConfig): ProviderOptionAdmission {
-  if (options.access !== undefined) return { kind: "refused", diagnostic: "ACP provider does not support the Archetype access option" };
   if (options.network !== undefined) return { kind: "refused", diagnostic: "ACP provider does not support the Archetype network option" };
   if (options.model !== undefined && config.modelArg === undefined) return { kind: "refused", diagnostic: "ACP provider has no model argument mapping" };
   if (options.effort !== undefined && config.effortArg === undefined) return { kind: "refused", diagnostic: "ACP provider has no effort argument mapping" };
   if (options.systemPrompt !== undefined && options.systemPrompt.length > 0 && config.systemPromptArg === undefined) return { kind: "refused", diagnostic: "ACP provider has no systemPrompt argument mapping" };
-  return { kind: "admitted", options };
+  return {
+    kind: "admitted",
+    options,
+    ...(options.readonly === undefined ? {} : {
+      readonly: {
+        enforcement: "none" as const,
+        diagnostic: "ACP cannot remove task-surface mutation capabilities",
+      },
+    }),
+  };
 }
 function argv(execution: ProviderExecution, config: AcpExecutionConfig, options: ProviderOptions): readonly [string, ...string[]] {
   if (execution.executable === undefined) throw new Error("ACP provider execution requires executable");

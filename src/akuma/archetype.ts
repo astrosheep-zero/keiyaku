@@ -3,9 +3,15 @@ import { dirname, join } from "node:path";
 import { parseDocument } from "yaml";
 import type { Settings } from "../settings.js";
 import { archetypeName } from "./identity.js";
-import { decodeProviderOptions, type ProviderAdapter, type ProviderOptions } from "./provider.js";
-import type { ProviderExecution } from "./heart/index.js";
-import { decodeProviderExecution, providerNamed } from "./providers/index.js";
+import type { ProviderAdapter } from "./provider.js";
+import {
+  decodeProviderOptions,
+  decodeProviderRecipe,
+  type ProviderExecution,
+  type ProviderOptions,
+  type ReadonlyRestraint,
+} from "./provider-recipe.js";
+import { resolveProviderExecution } from "./providers/index.js";
 
 type DecodedArchetype = Readonly<{
   name: string;
@@ -22,7 +28,10 @@ export type ArchetypeCatalogRow = Readonly<{
 }>;
 
 type ArchetypeDefinition = DecodedArchetype & Readonly<{ adapter: ProviderAdapter }>;
-type AdmittedArchetype = Omit<ArchetypeDefinition, "provider"> & Readonly<{ provider: ProviderExecution }>;
+type AdmittedArchetype = Omit<ArchetypeDefinition, "provider"> & Readonly<{
+  provider: ProviderExecution;
+  readonly?: ReadonlyRestraint;
+}>;
 
 export class AkumaArchetypeError extends Error {
   readonly kind = "akuma-archetype";
@@ -87,6 +96,12 @@ function archetypeEnum<T extends string>(
   return value as T;
 }
 
+function archetypeReadonly(values: Readonly<Record<string, unknown>>): true | undefined {
+  if (!("readonly" in values)) return undefined;
+  if (values.readonly !== true) throw new TypeError("Archetype readonly must be true");
+  return true;
+}
+
 function decodeArchetype(name: string, path: string, markdown: string): DecodedArchetype {
   const lines = markdown.split(/\r?\n/u);
   if (lines[0]?.trim() !== "---") throw new TypeError("Archetype must begin with YAML frontmatter");
@@ -100,9 +115,10 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
   }
   const values = decoded as Readonly<Record<string, unknown>>;
   const provider = archetypeField(values, "provider", true)!;
+  if ("access" in values) throw new TypeError("Archetype access is not supported; use readonly: true");
   const model = archetypeField(values, "model");
   const effort = archetypeField(values, "effort");
-  const access = archetypeEnum(values, "access", ["read", "write", "auto"] as const);
+  const readonly = archetypeReadonly(values);
   const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
   const description = archetypeField(values, "description");
   const systemPrompt = lines.slice(closing + 1).join("\n");
@@ -114,7 +130,7 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
     options: decodeProviderOptions({
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),
-      ...(access === undefined ? {} : { access }),
+      ...(readonly === undefined ? {} : { readonly }),
       ...(network === undefined ? {} : { network }),
       ...(systemPrompt.length === 0 ? {} : { systemPrompt }),
     }),
@@ -165,7 +181,7 @@ function configuredProvider(name: string, selected: unknown): ProviderExecution 
   const unknown = Object.keys(value).find((key) => !["kind", "description", "executable", "config", "env"].includes(key));
   if (unknown !== undefined) throw new TypeError(`provider ${name} has unknown field ${unknown}`);
   optionalProviderText(value, name, "description");
-  return decodeProviderExecution({
+  return decodeProviderRecipe({
     name,
     kind: value.kind,
     ...(value.executable === undefined ? {} : { executable: value.executable }),
@@ -197,23 +213,30 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
   const selected = view.entries.find((entry) => entry.name === name)?.value;
   if (selected !== undefined) return configuredProvider(name, selected);
   const builtin = BUILTIN_EXECUTIONS[name as keyof typeof BUILTIN_EXECUTIONS];
-  if (builtin !== undefined) return Object.freeze({ name, ...builtin });
+  if (builtin !== undefined) return decodeProviderRecipe({ name, ...builtin });
   throw new TypeError(`unknown provider ${name}`);
 }
 
 function admitArchetype(archetype: DecodedArchetype, settings: Settings): AdmittedArchetype {
-  let execution: ProviderExecution;
-  try { execution = providerExecution(settings, archetype.provider); }
+  let selected: ReturnType<typeof resolveProviderExecution>;
+  try { selected = resolveProviderExecution(providerExecution(settings, archetype.provider)); }
   catch (error) {
     if (error instanceof TypeError) throw new AkumaArchetypeError(archetype.name, [archetype.path], `uses ${error.message}`);
     throw error;
   }
-  const adapter = providerNamed(execution);
+  const execution = selected.execution;
+  const adapter = selected.adapter;
   const admission = adapter.admitOptions(archetype.options);
   if (admission.kind === "refused") {
     throw new AkumaArchetypeError(archetype.name, [archetype.path], `is unsupported: ${admission.diagnostic}`);
   }
-  return Object.freeze({ ...archetype, provider: execution, adapter, options: admission.options });
+  return Object.freeze({
+    ...archetype,
+    provider: execution,
+    adapter,
+    options: admission.options,
+    ...(admission.readonly === undefined ? {} : { readonly: admission.readonly }),
+  });
 }
 
 export async function loadArchetype(input: Readonly<{ name: string; settings: Settings }>): Promise<AdmittedArchetype> {

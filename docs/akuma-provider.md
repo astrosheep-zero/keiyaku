@@ -1,6 +1,9 @@
 # Akuma Provider Boundary
 
 This chapter owns the provider-neutral protocol and native adapter obligations.
+The shared recipe codec owns the provider-neutral execution envelope. The
+provider map applies the selected kind's config grammar before any adapter is
+constructed; Heart and callers do not repeat or bypass that judgment.
 
 ## Turn Correlation
 
@@ -31,6 +34,14 @@ type ProviderAdapter = {
   }): Promise<{ session: ResumeCoordinate }>;
 };
 
+type ReadonlyRestraint = Readonly<
+  | { enforcement: "native"; diagnostic?: never }
+  | { enforcement: "none"; diagnostic: string }
+>;
+
+type ProviderOptionAdmission =
+  | { kind: "admitted"; options: ProviderOptions; readonly?: ReadonlyRestraint }
+  | { kind: "refused"; diagnostic: string };
 type DriveInput = {
   body: string;
   launchTells: readonly { id: TellId; text: string }[];
@@ -323,13 +334,17 @@ the body, it forms the answered turn's durable fork coordinate.
 
 Provider execution and option admission are provider-owned validation at the
 public boundary, before identity allocation. `start()` and `resume()` are their effect readers.
+`admitOptions()` is the sole judge of readonly realization. A native restraint
+has no diagnostic; a `none` restraint has one concrete diagnostic naming the
+enforcement gap. Missing native enforcement remains admitted. No generic claim
+collection, warning type, capability registry, or prompt-based enforcement
+sits beside this named fact.
 The execution crosses the detached process boundary in the soul; each native
 session records the execution name and exact options. Tell, resume, recovery,
 and fork reconstruct the adapter only from those durable facts. A rerouted Body
-Request carries its already resolved recipe into the parent heart, so the body
-does not reopen Settings to birth the child. A fork inherits its parent's
-execution.
-
+Request carries its already resolved recipe and readonly restraint into the
+parent heart, so the body does not reopen Settings or rejudge realization to
+birth the child. A fork inherits its parent's execution and exact restraint.
 `executable` constrains each provider process start. Literal provider `env`
 values overlay the ambient environment at every provider interaction whose
 native boundary accepts an environment. The ambient environment remains
@@ -351,12 +366,12 @@ the body-owned request transport as one additional writable root and injects
 `acp` is one stable protocol adapter, not a product-specific provider family.
 Its execution configuration is limited to process launch data, with fixed argv
 before and after declared portable option-to-argument mappings. An option
-without such a mapping, and
-portable access or network claims ACP cannot enforce, are refused at Archetype
-admission; an empty system prompt needs no mapping because it changes no native
-input. Its process has the caller environment with the frozen execution
-overlay; ACP itself neither reads nor copies another product's credentials or
-configuration.
+without such a mapping remains provider-owned admission. ACP has no portable
+mechanism that removes task-surface mutation capability, so `readonly: true`
+is admitted with `none` enforcement and a concrete diagnostic; an empty system
+prompt needs no mapping because it changes no native input. Its process has the
+caller environment with the frozen execution overlay; ACP itself neither reads
+nor copies another product's credentials or configuration.
 
 The adapter exposes no client-side filesystem, terminal, permission, or
 elicitation capability. An ACP execution is a self-contained agent and uses its
@@ -377,10 +392,9 @@ next launch prompt and answered turns have no fork coordinate.
 
 `grok-build` is the built-in ACP execution profile for the official trusted
 noninteractive `grok agent stdio` launch. It is ordinary execution data,
-including its documented portable argument mappings and unconfined custody; it does not change ACP
-wire behavior, credentials, persistence, or Heart facts. Settings may shadow
-it with another ordinary ACP execution record.
+including its documented portable argument mappings and unconfined custody; it
+does not change ACP wire behavior, credentials, persistence, or Heart facts.
+Settings may shadow it with another ordinary ACP execution record.
 
-No `probe`, capability or plugin registry, or registration schema exists. Provider instance
-names are Settings data; built-in provider kinds remain a closed composition
-used by the public boundary and detached body.
+No `probe`, capability or plugin registry, or registration schema exists.
+Provider instance names are Settings data; built-in provider kinds stay closed.

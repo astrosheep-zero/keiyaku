@@ -7,9 +7,9 @@ import {
   type CreateAgentSessionOptions,
 } from "@earendil-works/pi-coding-agent";
 import { abortable } from "../../abort.js";
-import type { ProviderExecution } from "../../heart/index.js";
+import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import type { ResumeCoordinate } from "../../coordinate.js";
-import { AgentEventChannel, type ProviderAdapter, type ProviderOptions, type Session, type TurnResult } from "../../provider.js";
+import { AgentEventChannel, type ProviderAdapter, type Session, type TurnResult } from "../../provider.js";
 import { piTerminalFailure, translatePiEvent, type PiEventState } from "./events.js";
 
 export type PiSdk = Readonly<{
@@ -27,7 +27,6 @@ const MODEL_PATTERN = /^[^/\s]+\/[^/\s]+$/u;
 function diagnostic(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 function admitPiOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
-  if (options.access !== undefined) return { kind: "refused", diagnostic: "Pi provider does not support the Archetype access option" };
   if (options.network !== undefined) return { kind: "refused", diagnostic: "Pi provider does not support the Archetype network option" };
   if (options.model !== undefined && !MODEL_PATTERN.test(options.model)) {
     return { kind: "refused", diagnostic: "Pi provider model must use <provider>/<id>" };
@@ -35,7 +34,11 @@ function admitPiOptions(options: ProviderOptions): ReturnType<ProviderAdapter["a
   if (options.effort !== undefined && !PI_THINKING_LEVELS.has(options.effort as PiThinkingLevel)) {
     return { kind: "refused", diagnostic: "Pi provider effort must be minimal, low, medium, high, xhigh, or max" };
   }
-  return { kind: "admitted", options: Object.freeze({ ...options }) };
+  return {
+    kind: "admitted",
+    options: Object.freeze({ ...options }),
+    ...(options.readonly === undefined ? {} : { readonly: { enforcement: "native" as const } }),
+  };
 }
 
 async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateAgentSessionOptions> {
@@ -64,6 +67,7 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
     ...(model === undefined || modelRuntime === undefined ? {} : { model, modelRuntime }),
     ...(resourceLoader === undefined ? {} : { resourceLoader }),
     ...(input.options.effort === undefined ? {} : { thinkingLevel: input.options.effort as PiThinkingLevel }),
+    ...(input.options.readonly === undefined ? {} : { tools: ["read", "grep", "find", "ls"] }),
   };
 }
 
@@ -174,6 +178,12 @@ export function createPiProvider(
   execution: ProviderExecution = { name: "pi", kind: "pi" },
   load: () => Promise<PiSdk> = async () => defaultSdk,
 ): ProviderAdapter {
+  if (execution.executable !== undefined || execution.config !== undefined) {
+    throw new TypeError("Pi provider does not support executable or config");
+  }
+  if (execution.env !== undefined && Object.keys(execution.env).length > 0) {
+    throw new TypeError("env injection not supported for provider pi");
+  }
   const drive = async (input: PiDriveInput): Promise<Session> => {
     const signal = input.signal ?? new AbortController().signal;
     signal.throwIfAborted();
@@ -181,11 +191,7 @@ export function createPiProvider(
   };
   return {
     confinement: ({ cwd }) => ({ kind: "declared", writableRoots: [cwd] }),
-    admitOptions(options) {
-      if (execution.executable !== undefined || execution.config !== undefined) return { kind: "refused", diagnostic: "Pi provider does not support executable or config" };
-      if (execution.env !== undefined && Object.keys(execution.env).length > 0) return { kind: "refused", diagnostic: "env injection not supported for provider pi" };
-      return admitPiOptions(options);
-    },
+    admitOptions: admitPiOptions,
     start: drive,
     resume: async (input) => {
       piSessionFile(input.session.coordinate);

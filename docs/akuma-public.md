@@ -68,6 +68,9 @@ that its process is live. The projected ledger likewise exposes readonly
 while the closed arm requires its outcome and excludes `active` from its row
 union. Every Turn-scoped row carries its durable Turn
 coordinate; Body coordinates remain private to Body lifecycle facts.
+`AkumaStatus` also projects the Soul's optional `ReadonlyRestraint` verbatim;
+it never re-evaluates provider capability or turns that fact into a warning
+type.
 
 `tell(body)` returns one typed mutation result: the allocated TellId, its
 recorded Heart admission, and whether the level-triggered waker was spawned. It

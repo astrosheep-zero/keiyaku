@@ -43,7 +43,7 @@ export type { AkuId } from "./identity.js";
 export type {
   Confinement,
   KillEvidence,
-  ProviderOptions,
   ResumeCoordinate,
   TurnFact,
 } from "./heart/index.js";
+export type { ProviderOptions, ReadonlyRestraint } from "./provider-recipe.js";

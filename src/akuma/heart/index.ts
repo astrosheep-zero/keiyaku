@@ -40,7 +40,6 @@ import {
   pauseFact,
   requestFact,
   sessionFactForCoordinate,
-  soulFact,
   stopFact,
   updateRequestRefused,
   updateRequestReserved,
@@ -62,6 +61,7 @@ import {
   type ActivityFactSlice,
 } from "./timeline.js";
 import { readSealFromLeash, transaction, withHeart } from "./storage.js";
+import { soulFact } from "./soul.js";
 export { HeldAkumaLeash, initializeHeart, probeLeash } from "./storage.js";
 
 export { life } from "./facts.js";
@@ -76,8 +76,6 @@ export type {
   KillEvidence,
   KillFact,
   LeashProbe,
-  ProviderOptions,
-  ProviderExecution,
   PauseFact,
   RequestFact,
   RequestInput,

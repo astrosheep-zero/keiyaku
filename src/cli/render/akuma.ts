@@ -109,8 +109,12 @@ function snapshotText(view: AkumaStatusView, context: TextRenderContext, options
       snapshot.outcome,
     ].sort((left, right) => left.sequence - right.sequence), context)
     : groupedEntries(snapshot.entries, context);
+  const facts = [
+    ...(view.status.readonly?.enforcement === "none" ? [`! ${safeText(view.status.readonly.diagnostic)}`] : []),
+    ...(options.facts ?? []),
+  ];
   const footer = options.showLife === false ? [] : [`  ${lifeLabel(view.status.life)}`];
-  return [associatedIdentity(view.status.id, options.alias, view.contractId), ...(options.facts ?? []), ...activity, ...footer].join("\n");
+  return [associatedIdentity(view.status.id, options.alias, view.contractId), ...facts, ...activity, ...footer].join("\n");
 }
 
 function historyText(command: Extract<ParsedCommand, { command: "history" }>, result: Extract<AkumaInvocationResult, { action: "history" }>, context: TextRenderContext): string {
@@ -136,9 +140,10 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   const alias = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : undefined;
   const contractId = result.result.dispatch.kind === "dispatched" ? result.result.dispatch.dispatch.contractId : undefined;
   const facts = [...dispatchLines(result.result.dispatch)];
+  const restraint = result.result.readonly?.enforcement === "none" ? [`! ${safeText(result.result.readonly.diagnostic)}`] : [];
   if (result.result.alias.kind === "failed") facts.push(`alias failed ${result.result.alias.failure.kind} ${safeText(result.result.alias.failure.diagnostic)}`);
-  if (result.result.observation.kind === "detached") return [associatedIdentity(result.result.akuma, alias, contractId), ...facts].join("\n");
-  if (result.result.observation.kind === "failed") return [associatedIdentity(result.result.akuma, alias, contractId), ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
+  if (result.result.observation.kind === "detached") return [associatedIdentity(result.result.akuma, alias, contractId), ...restraint, ...facts].join("\n");
+  if (result.result.observation.kind === "failed") return [associatedIdentity(result.result.akuma, alias, contractId), ...restraint, ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
   return snapshotText({ status: result.result.observation.status, ...(contractId === undefined ? {} : { contractId }) }, context, { ...(alias === undefined ? {} : { alias }), facts });
 }
 

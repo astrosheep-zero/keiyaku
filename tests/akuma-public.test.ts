@@ -16,6 +16,7 @@ import {
   pauseRequested,
   readHeart,
   recordTell,
+  type Soul,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
@@ -93,7 +94,7 @@ const provider: ProviderAdapter = {
   },
 };
 
-async function answeredSource(root: string, suffix: string) {
+async function answeredSource(root: string, suffix: string, readonly?: Soul["readonly"]) {
   const world = await World.at(root);
   const allocated = allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
   initializeHeart(allocated.paths);
@@ -104,7 +105,8 @@ async function answeredSource(root: string, suffix: string) {
       archetype: "claude",
       description: "Fork source",
       provider: CLAUDE_EXECUTION,
-      options: { model: "fixture-model" },
+      options: { model: "fixture-model", ...(readonly === undefined ? {} : { readonly: true }) },
+      ...(readonly === undefined ? {} : { readonly }),
       origin: { kind: "direct" },
       confinement: { kind: "unconfined" },
       cwd: world,
@@ -337,6 +339,26 @@ test("fork publishes a sleeping child with lineage and its native birth session"
       admittedAt: snapshot.latestSession?.admittedAt,
     });
     assert.deepEqual(timeline(childPaths).filter((fact) => fact.kind === "turn-start"), []);
+  } finally {
+    mutable.fork = originalFork;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fork preserves the exact admitted readonly restraint byte-for-byte", async () => {
+  const root = mkdtempSync(join(process.cwd(), ".tmp-keiyaku-akuma-fork-restraint-"));
+  const mutable = claudeProvider as MutableProvider;
+  const originalFork = mutable.fork;
+  try {
+    const source = await answeredSource(root, "f0a10007", { enforcement: "native" });
+    mutable.fork = async () => ({ session: { sessionId: "fork-restraint-child" } });
+    const world = (await akumaAt(root));
+    const receipt = await world.of({ id: source.id }).fork({ at: "public-history" });
+    assert.equal(receipt.kind, "forked", JSON.stringify(receipt));
+    if (receipt.kind !== "forked") return;
+    const child = world.of({ id: receipt.child });
+    assert.deepEqual(readHeart(pathsForAkuId(root, receipt.child)).soul?.readonly, { enforcement: "native" });
+    assert.equal(child.status().readonly?.enforcement, "native");
   } finally {
     mutable.fork = originalFork;
     rmSync(root, { recursive: true, force: true });
@@ -746,7 +768,7 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
       "provider: claude",
       "model: claude-sonnet-4-5",
       "effort: high",
-      "access: read",
+      "readonly: true",
       "description: Careful reviewer",
       "editor:",
       "  theme: dark",
@@ -767,16 +789,36 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
       options: {
         model: "claude-sonnet-4-5",
         effort: "high",
-        access: "read",
+        readonly: true,
         systemPrompt: "Review the change from first principles.\n",
       },
+      readonly: { enforcement: "native" },
     });
-    writeFileSync(join(home, "akuma", "invalid.md"), "---\nprovider: claude\naccess: execute\n---\n");
+    writeFileSync(join(home, "akuma", "invalid.md"), "---\nprovider: claude\nreadonly: false\n---\n");
     await assert.rejects(
       loadArchetype({ name: "invalid", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.searched[0] === join(home, "akuma", "invalid.md"),
     );
+    writeFileSync(join(home, "akuma", "stale-access.md"), "---\nprovider: claude\naccess: read\n---\n");
+    await assert.rejects(
+      loadArchetype({ name: "stale-access", settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError
+        && error.reason.includes("access is not supported"),
+    );
+    writeFileSync(join(home, "akuma", "wordy-readonly.md"), "---\nprovider: claude\nreadonly: yes\n---\n");
+    await assert.rejects(
+      loadArchetype({ name: "wordy-readonly", settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError
+        && error.reason.includes("readonly must be true"),
+    );
+    writeFileSync(join(home, "akuma", "grok-review.md"), "---\nprovider: grok-build\nreadonly: true\n---\n");
+    const grok = await loadArchetype({ name: "grok-review", settings: settingsValue });
+    assert.deepEqual(grok.readonly, {
+      enforcement: "none",
+      diagnostic: "ACP cannot remove task-surface mutation capabilities",
+    });
+    assert.deepEqual(grok.options, { readonly: true });
     writeFileSync(join(home, "akuma", "unknown.md"), "---\nprovider: missing\n---\n");
     await assert.rejects(
       loadArchetype({ name: "unknown", settings: settingsValue }),

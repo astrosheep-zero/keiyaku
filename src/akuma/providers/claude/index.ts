@@ -4,11 +4,11 @@ import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/c
 import {
   AgentEventChannel,
   type ProviderAdapter,
-  type ProviderOptions,
   type Session,
   type TellReceipt,
   type TurnResult,
 } from "../../provider.js";
+import type { ProviderOptions } from "../../provider-recipe.js";
 import {
   emitClaudeMessage,
   type ClaudeObservationState,
@@ -66,13 +66,15 @@ function admitClaudeOptions(options: ProviderOptions): ReturnType<ProviderAdapte
   if (options.network !== undefined) {
     return { kind: "refused", diagnostic: "Claude provider does not support the Archetype network option" };
   }
-  return { kind: "admitted", options: Object.freeze({ ...options }) };
+  return {
+    kind: "admitted",
+    options: Object.freeze({ ...options }),
+    ...(options.readonly === undefined ? {} : { readonly: { enforcement: "native" as const } }),
+  };
 }
 
-function permissionMode(access: ProviderOptions["access"]): "plan" | "acceptEdits" | "bypassPermissions" {
-  if (access === "read") return "plan";
-  if (access === "write") return "acceptEdits";
-  return "bypassPermissions";
+function permissionMode(readonly: ProviderOptions["readonly"]): "plan" | "bypassPermissions" {
+  return readonly === true ? "plan" : "bypassPermissions";
 }
 
 function claudeSessionId(coordinate: ResumeCoordinate): string {
@@ -87,14 +89,14 @@ function claudeQueryOptions(
   execution: ClaudeExecution,
   abortController: AbortController,
 ): Options {
-  const access = permissionMode(input.options.access);
+  const mode = permissionMode(input.options.readonly);
   return {
     cwd: input.cwd,
     abortController,
     ...(execution.executable === undefined ? {} : { pathToClaudeCodeExecutable: execution.executable }),
     ...(execution.env === undefined ? {} : { env: { ...process.env, ...execution.env } }),
-    permissionMode: access,
-    ...(access === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
+    permissionMode: mode,
+    ...(mode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
     settingSources: ["user", "project", "local"],
     ...(input.options.model === undefined ? {} : { model: input.options.model }),
     ...(input.options.effort === undefined ? {} : { effort: input.options.effort as NonNullable<Options["effort"]> }),

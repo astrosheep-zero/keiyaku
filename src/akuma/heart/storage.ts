@@ -1,6 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 import type { AkumaPaths } from "../identity.js";
-import type { BodyFact, LeashProbe, SessionFact, Soul, StopFact, TellFact } from "./facts.js";
+import type {
+  BodyFact,
+  LeashProbe,
+  SessionFact,
+  Soul,
+  StopFact,
+  TellFact,
+} from "./facts.js";
 import { HEART_SCHEMA, LEASH_SCHEMA, assertHeartSchemaVersion, assertLeashSchemaVersion } from "./schema.js";
 import {
   deletePauseControl,
@@ -9,18 +16,17 @@ import {
   insertKillFact,
   insertSealFact,
   insertSessionFact,
-  insertSoulFact,
   killFactForBody,
   latestBodyFact,
   latestKillFact,
   markBodyHung,
   sealExists,
   sealFact,
-  soulFact,
   stopFact,
 } from "./rows.js";
 import { insertTellFact } from "./tells.js";
 import { pruneActivityFacts } from "./timeline.js";
+import { insertSoulFact, soulFact } from "./soul.js";
 
 const ACTIVITY_LIMIT = 5_000;
 

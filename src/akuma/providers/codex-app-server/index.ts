@@ -4,10 +4,9 @@ import {
   AKUMA_REQUESTS_ENV,
   type Session,
   type ProviderAdapter,
-  type ProviderOptions,
   type TurnResult,
 } from "../../provider.js";
-import type { ProviderExecution } from "../../heart/index.js";
+import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import {
   codexNotificationResult,
   codexObject,
@@ -70,6 +69,9 @@ async function steerTurn(
 }
 
 function sandbox(cwd: string, options: ProviderOptions, requests?: Readonly<{ dir: string }>): Readonly<Record<string, unknown>> {
+  if (options.readonly === true) {
+    return { type: "readOnly", networkAccess: options.network === "enabled" };
+  }
   return {
     type: "workspaceWrite",
     writableRoots: [cwd, ...(requests === undefined ? [] : [requests.dir])],
@@ -216,10 +218,11 @@ export function createCodexAppServerProvider(input: string | ProviderExecution =
   return {
     confinement: ({ cwd }) => ({ kind: "declared", writableRoots: [cwd] }),
     admitOptions(options) {
-      if (options.access !== undefined && options.access !== "write") {
-        return { kind: "refused", diagnostic: "Codex app-server supports only access: write" };
-      }
-      return { kind: "admitted", options: Object.freeze({ ...options }) };
+      return {
+        kind: "admitted",
+        options: Object.freeze({ ...options }),
+        ...(options.readonly === undefined ? {} : { readonly: { enforcement: "native" as const } }),
+      };
     },
     fork: (input) => forkCodex(execution, input),
     start: (input) => startCodex(execution, input),

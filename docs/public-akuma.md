@@ -98,6 +98,7 @@ type CallObservation =
 type CallResult = Readonly<{
   kind: "called"
   akuma: AkuId
+  readonly?: ReadonlyRestraint
   dispatch: DispatchStage
   alias: AliasStage
   observation: CallObservation
@@ -129,6 +130,9 @@ decision. `IntegrationFailure` exists only after an irreversible Akuma result:
 it preserves an owner exception's category and verbatim diagnostic so the
 already born child remains visible. The same exception before birth or native
 fork retains the ordinary package-root exception behavior.
+`CallResult.readonly` and its observed `AkumaStatus.readonly` project the same
+Soul fact. Library neither judges realization nor constructs a second warning
+or capability value.
 
 ## Akuma Address And Fleet Facets
 

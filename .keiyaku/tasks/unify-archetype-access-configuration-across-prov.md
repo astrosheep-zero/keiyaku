@@ -1,7 +1,7 @@
 ---
 id: task/unify-archetype-access-configuration-across-prov
 title: Make readonly restraint honest across providers
-state: in_progress
+state: done
 priority: 1
 needs: []
 parent: null

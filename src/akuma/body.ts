@@ -26,7 +26,7 @@ import {
   type Session,
   type TurnResult,
 } from "./provider.js";
-import { providerNamed } from "./providers/index.js";
+import { resolveProviderExecution } from "./providers/index.js";
 import {
   BodyRequestPump,
   clearBodyRequestTransport,
@@ -668,7 +668,7 @@ export async function driveAkumaBody(
   try {
     const soul = bornSoul(launch, leash, runtime.now());
     if (soul === null) return;
-    const selected = adapter ?? providerNamed(soul.provider);
+    const selected = adapter ?? resolveProviderExecution(soul.provider).adapter;
     if (!prepareBodyStart(launch.paths, leash)) return;
     const body = leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
     const supervisor = new BodySupervisor(launch.paths, body.sequence, leash);

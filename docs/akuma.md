@@ -22,7 +22,8 @@ and go; the heart stays.
   heart. Raw statements are row mechanics; they do not speak in the judge's
   transaction language.
 - **soul** — the immutable birth facts: id, archetype, description, resolved
-  provider execution, provider options, summon cwd, origin, and confinement.
+  provider execution, provider options, optional readonly restraint, summon
+  cwd, origin, and confinement.
   The cwd is the akuma's seat, not a native resume coordinate; resumability
   remains a session fact.
 - **body** — the detached, unsandboxed process currently driving the akuma.
@@ -42,14 +43,17 @@ and go; the heart stays.
 The dependency direction is fixed:
 
 ```text
-cli -> akuma -> {body, heart, identity, archetype, provider(codec), publication, requests, providers(map), settings}
-archetype -> {identity, provider, providers(map), settings}
+cli -> akuma -> {body, heart, identity, archetype, provider, publication, requests, providers(map), settings}
+archetype -> {identity, provider-recipe, provider, providers(map), settings}
 body -> {heart, provider, providers, requests, runtime/proc}
-requests -> {heart, identity, provider, providers(map), publication}
+requests -> {heart, identity, provider, provider-recipe, providers(map), publication}
 publication -> {heart, identity, runtime/proc}
-provider -> heart types
-providers/* -> {provider, runtime/proc/stdio}
-providers/codex-app-server/index -> {events, provider, heart, runtime/proc/line-rpc}
+heart/facts -> provider-recipe
+heart/soul -> {identity, provider-recipe, heart/facts}
+provider -> {heart types, provider-recipe}
+providers/map -> {provider-recipe, provider adapters}
+providers/* -> {provider, provider-recipe, runtime/proc/stdio}
+providers/codex-app-server/index -> {events, provider, provider-recipe, runtime/proc/line-rpc}
 providers/codex-app-server/events -> {provider, runtime/proc/line-rpc(type)}
 runtime/proc/line-rpc -> runtime/proc/stdio
 runtime/proc/stdio -> runtime/proc/run
@@ -148,12 +152,14 @@ configuration. It is call-time input at exactly one path:
 ```
 
 The file begins with one strict YAML mapping. `provider` is required;
-`model`, `effort`, `access`, `network`, and `description` are optional.
-`access` is `read | write | auto`; `network` is `disabled | enabled`; every
-other consumed value is a nonblank string. Additional top-level keys are
-ignored and never enter Archetype options or the soul snapshot. A nonempty
-Markdown body after frontmatter overrides the system prompt; an empty body
-leaves that option absent so the native harness keeps its default.
+`model`, `effort`, `readonly`, `network`, and `description` are optional.
+When present, `readonly` accepts only literal `true`; `false`, non-boolean
+values, and the removed `access` spelling are malformed. `network` is
+`disabled | enabled`; every other consumed value is a nonblank string.
+Additional top-level keys are ignored and never enter Archetype options or the
+soul snapshot. A nonempty Markdown body after frontmatter overrides the system
+prompt; an empty body leaves that option absent so the native harness keeps its
+default.
 
 `Akuma.of(root, settings?)` consumes one already resolved WorldRoot. All
 worktrees of one Git repository therefore share one fleet, Alias authority,
@@ -164,9 +170,10 @@ that world. `call({ archetype })` validates the name, reads this one Archetype f
 resolves its `provider` as an execution name in the Settings `providers`
 namespace, and asks the selected built-in adapter kind to admit the Archetype
 options before allocating an identity. Missing, malformed, unknown-provider,
-and provider-unsupported input is typed failure; a missing or malformed Archetype
-includes the exact path searched. There is no fallback Archetype or directory
-layering.
+and unsupported option input is typed failure; inability to enforce a requested
+readonly restraint is instead an admitted, durable fact. A missing or malformed
+Archetype includes the exact path searched. There is no fallback Archetype or
+directory layering.
 
 `world.listArchetypes()` is the filename-only public Akuma read. It enumerates
 canonical `.md` filenames in that same directory and returns their normalized
@@ -192,24 +199,22 @@ execution profile, not a provider kind or wire adapter. A configured same-name
 entry replaces that default wholly under Settings shadow law.
 
 Birth snapshots the Archetype name, optional description, complete provider
-execution, and admitted options into the soul. The body never reads Settings or
-the Archetype file. A newly admitted
+execution, admitted options, and the adapter's optional readonly restraint into
+the soul. The body never reads Settings or the Archetype file. A newly admitted
 native session snapshots the exact options used alongside its coordinate and
 cwd; resume reads that session recipe. Before admission, the body uses the
 soul's options and summon cwd. Thus later edits to Archetype Markdown affect only
 future akuma.
 
 Provider kind `claude-agent-sdk` consumes `model`, `effort`, and
-the system prompt. `access` maps `read` to plan mode, `write` to edit acceptance,
-and `auto` or absence to bypass mode. Claude cannot honestly enforce the
-portable `network` claim, so either network value is refused before birth.
+the system prompt. `readonly: true` selects plan mode and records native
+enforcement; absence selects the provider's noninteractive native default.
 
 Provider kind `codex-app-server` runs the selected executable, defaulting to
 `codex`, as `app-server --listen stdio://`. It consumes `model`, `effort`,
-and the system prompt. Missing `access` and `access: write` both select native
-workspace-write rooted exactly at the normalized call cwd; `network` selects
-that sandbox's native network flag and defaults to disabled. `read` and `auto`
-are refused because this cut has no second honest policy mapping for them. Its
+and the system prompt. `readonly: true` selects the native read-only sandbox
+and records native enforcement; absence selects the provider's native default.
+`network` selects the sandbox's native network flag and defaults to disabled. Its
 resumable coordinate is the native thread id; its answered history id is the
 completed native turn id, and native fork is `thread/fork` at that exact pair.
 The frozen `config` object is supplied to native thread start/resume.
@@ -220,19 +225,26 @@ the Body turn or leave an answered Akuma untidy.
 Provider kind `opencode-sdk` runs the selected executable, defaulting to
 `opencode`, through the official public V1 Session API. It consumes `model` and
 the system prompt. Archetype `effort` is passed as OpenCode's native model
-variant; it is not a per-call override. Explicit `access` and `network` values
-remain refused because this surface has no honest mapping for them. Fresh and
-resumed drives use the frozen session id, and native fork uses that exact
-session plus the answered assistant message id. Native admission, completion,
-event, and tell semantics belong exclusively to [akuma-provider.md](akuma-provider.md).
+variant; it is not a per-call override. V1 has no per-session permission input,
+so `readonly: true` is admitted with `none` enforcement and a concrete
+diagnostic. Fresh and resumed drives use the frozen session id, and native fork
+uses that exact session plus the answered assistant message id. Native
+admission, completion, event, and tell semantics belong exclusively to
+[akuma-provider.md](akuma-provider.md).
 
 Provider kind `pi` uses the in-process `@earendil-works/pi-coding-agent`
 SDK. Model is an exact `<provider>/<id>` lookup through `ModelRuntime`; effort
 is one native thinking level; the system prompt is supplied through the native
-resource loader. Pi refuses portable access and network claims,
-`executable`, `config`, and non-empty `env`. Its confinement is the call
-cwd. Resume and fork use the exact persisted session file. Native steer proves
-queueing only, so Pi does not expose live tell.
+resource loader. For `readonly: true`, its admitted tool set excludes `bash`,
+`edit`, and `write`, and records native enforcement. Its confinement is the
+call cwd. Resume and fork use the exact persisted session file. Native steer
+proves queueing only, so Pi does not expose live tell.
+
+`readonly: true` promises only that the Akuma cannot mutate its task surface.
+Native enforcement means the session's reachable capabilities physically lack
+every such mutation path, whether by OS sandboxing or harness-level tool
+removal; prompt instructions never qualify. Absence makes no portable
+restriction claim and leaves the provider at its native default.
 
 The pinned Pi dependency contains a broken internal transitive declaration
 path. Project compilation therefore uses `skipLibCheck`; project source and

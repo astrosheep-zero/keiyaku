@@ -66,6 +66,7 @@ async function archetypeSettings(root: string) {
   const home = join(root, ".test-settings");
   mkdirSync(join(home, "akuma"), { recursive: true });
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  writeFileSync(join(home, "akuma", "reviewer.md"), "---\nprovider: claude\nreadonly: true\n---\nReview only.\n");
   return { home, value: await settings({ root, home }) };
 }
 
@@ -76,7 +77,7 @@ function requestPump(root: string) {
     id: parent.id,
     archetype: "parent",
     provider: { name: "codex-app-server", kind: "codex-app-server" },
-    options: { access: "write" },
+    options: {},
     cwd: root,
     origin: { kind: "direct" },
     confinement: { kind: "unconfined" },
@@ -199,6 +200,35 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
   }
 });
 
+test("Keiyaku.call projects the same readonly restraint on CallResult and AkumaStatus", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await archetypeSettings(world);
+  const { pump, leash } = requestPump(world);
+  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
+  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
+  try {
+    const result = await Keiyaku.call({
+      path: world,
+      archetype: "reviewer",
+      body: "review",
+      settings: configured.value,
+    });
+    assert.deepEqual(result.readonly, { enforcement: "native" });
+    assert.equal(result.observation.kind, "observed");
+    if (result.observation.kind === "observed") {
+      assert.deepEqual(result.observation.status.readonly, result.readonly);
+    }
+    assert.deepEqual(readSoul(pathsForAkuId(world, result.akuma))?.readonly, result.readonly);
+  } finally {
+    await pump.close();
+    leash.release();
+    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
 test("Keiyaku.call observes for five minutes by default", async () => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
@@ -300,6 +330,54 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
     assert.equal(partial.dispatch.failure.kind, "authority-corruption");
   } finally {
     mutable.fork = originalFork;
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("Keiyaku.call carries the CallResult restraint on detached and failed observations", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const home = join(raw.path, ".test-settings");
+  mkdirSync(join(home, "akuma"), { recursive: true });
+  writeFileSync(join(home, "akuma", "grok-review.md"), "---\nprovider: grok-build\nreadonly: true\n---\n");
+  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  writeFileSync(join(home, "akuma", "reviewer.md"), "---\nprovider: claude\nreadonly: true\n---\nReview only.\n");
+  const configured = await settings({ root: world, home });
+  const { pump, leash } = requestPump(world);
+  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
+  const originalWait = AkumaHandle.prototype.wait;
+  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
+  try {
+    const detached = await Keiyaku.call({
+      path: world,
+      archetype: "grok-review",
+      body: "",
+      settings: configured,
+      mode: "detach",
+    });
+    assert.deepEqual(detached.readonly, {
+      enforcement: "none",
+      diagnostic: "ACP cannot remove task-surface mutation capabilities",
+    });
+    assert.deepEqual(detached.observation, { kind: "detached" });
+
+    AkumaHandle.prototype.wait = async function () {
+      throw new Error("heart unavailable");
+    };
+    const failed = await Keiyaku.call({
+      path: world,
+      archetype: "reviewer",
+      body: "fail",
+      settings: configured,
+    });
+    assert.deepEqual(failed.readonly, { enforcement: "native" });
+    assert.equal(failed.observation.kind, "failed");
+  } finally {
+    AkumaHandle.prototype.wait = originalWait;
+    await pump.close();
+    leash.release();
+    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
     rmSync(raw.path, { recursive: true, force: true });
   }
 });

@@ -1,5 +1,10 @@
 import { moveAlias, type AliasBinding } from "../alias/index.js";
-import { Akuma, type AkumaStatus, type ForkReceipt } from "../akuma/akuma.js";
+import {
+  Akuma,
+  type AkumaStatus,
+  type ForkReceipt,
+  type ReadonlyRestraint,
+} from "../akuma/akuma.js";
 import type { AkuId } from "../akuma/identity.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
@@ -54,6 +59,7 @@ export type CallObservation =
 export type CallResult = Readonly<{
   kind: "called";
   akuma: AkuId;
+  readonly?: ReadonlyRestraint;
   dispatch: DispatchStage;
   alias: AliasStage;
   observation: CallObservation;
@@ -189,6 +195,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     body,
     ...(cwd === undefined ? {} : { cwd }),
   });
+  const readonly = handle.status().readonly;
   const dispatch: DispatchStage = seat === undefined
     ? { kind: "none" }
     : await dispatchStage({ repository: seat.scope, akuId: handle.id, contractId: seat.id });
@@ -205,7 +212,14 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     }
   }
   const observation = await observeCall(handle, mode, timeoutMs);
-  return { kind: "called", akuma: handle.id, dispatch, alias: aliasStage, observation };
+  return {
+    kind: "called",
+    akuma: handle.id,
+    ...(readonly === undefined ? {} : { readonly }),
+    dispatch,
+    alias: aliasStage,
+    observation,
+  };
 }
 
 export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {

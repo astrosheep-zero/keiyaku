@@ -33,8 +33,9 @@ import {
 } from "./identity.js";
 import { BIRTH_TIMEOUT_MS, publishAkuma } from "./publication.js";
 import { abortableDelay } from "./abort.js";
-import { AKUMA_REQUESTS_ENV, decodeProviderOptions } from "./provider.js";
-import { decodeProviderExecution, providerNamed } from "./providers/index.js";
+import { AKUMA_REQUESTS_ENV } from "./provider.js";
+import { decodeProviderOptions, decodeReadonlyRestraint } from "./provider-recipe.js";
+import { resolveProviderExecution } from "./providers/index.js";
 
 const POLL_MS = 25;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -106,22 +107,25 @@ function decodeRecipe(value: unknown, cwd: string): RequestRecipe | null {
     ...(recipe.description === undefined ? [] : ["description"]),
     "options",
     "provider",
+    ...(recipe.readonly === undefined ? [] : ["readonly"]),
   ];
   if (!exactKeys(recipe, expectedKeys)) return null;
   if (recipe.description !== undefined
     && (typeof recipe.description !== "string" || recipe.description.trim().length === 0)) return null;
   try {
-    const provider = decodeProviderExecution(recipe.provider);
-    const adapter = providerNamed(provider);
+    const selected = resolveProviderExecution(recipe.provider);
+    const provider = selected.execution;
+    const adapter = selected.adapter;
     const decodedOptions = decodeProviderOptions(recipe.options);
-    const admission = adapter.admitOptions(decodedOptions);
-    if (admission.kind === "refused") return null;
-    const confinement = adapter.confinement({ cwd, options: admission.options });
+    const readonly = recipe.readonly === undefined ? undefined : decodeReadonlyRestraint(recipe.readonly);
+    if ((decodedOptions.readonly === true) !== (readonly !== undefined)) return null;
+    const confinement = adapter.confinement({ cwd, options: decodedOptions });
     if (!matchingConfinement(recipe.confinement, confinement)) return null;
     return Object.freeze({
       ...(recipe.description === undefined ? {} : { description: recipe.description }),
       provider,
-      options: admission.options,
+      options: decodedOptions,
+      ...(readonly === undefined ? {} : { readonly }),
       confinement,
     });
   } catch {
@@ -273,6 +277,7 @@ async function serveClaim(input: Readonly<{
           ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),
           provider: request.recipe.provider,
           options: request.recipe.options,
+          ...(request.recipe.readonly === undefined ? {} : { readonly: request.recipe.readonly }),
           cwd,
           origin: { kind: "request", parent: input.parent.id, requestId: request.id },
           confinement: request.recipe.confinement,

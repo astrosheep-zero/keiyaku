@@ -145,6 +145,14 @@ test("architecture policy separates Heart schema, fact statements, and SQLite co
   });
   assert.deepEqual(typedTimeline, []);
 
+  const typedSoul = check({
+    "akuma/heart/soul.ts": [
+      'import type { DatabaseSync } from "node:sqlite";',
+      "export function read(database: DatabaseSync): void { void database; }",
+    ].join("\n"),
+  });
+  assert.deepEqual(typedSoul, []);
+
   const runtimeRows = check({
     "akuma/heart/rows.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
   });
@@ -160,10 +168,30 @@ test("architecture policy separates Heart schema, fact statements, and SQLite co
   });
   assert.ok(rules(runtimeTimeline).includes("architecture/capability-import"));
 
+  const runtimeSoul = check({
+    "akuma/heart/soul.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
+  });
+  assert.ok(rules(runtimeSoul).includes("architecture/capability-import"));
+
   const statementInJudge = check({
     "akuma/heart/index.ts": 'export function judge(database: { prepare(sql: string): void }): void { database.prepare("SELECT 1"); }',
   });
   assert.equal(rules(statementInJudge).filter((rule) => rule === "architecture/forbidden-source-pattern").length, 2);
+});
+
+test("architecture policy gives provider recipe grammar one inward dependency direction", () => {
+  const accepted = check({
+    "akuma/provider-recipe.ts": "export type ProviderOptions = {};",
+    "akuma/heart/facts.ts": 'import type { ProviderOptions } from "../provider-recipe.js"; export type SoulOptions = ProviderOptions;',
+    "akuma/provider.ts": 'import type { ProviderOptions } from "./provider-recipe.js"; export type DriveOptions = ProviderOptions;',
+  });
+  assert.deepEqual(accepted, []);
+
+  const rejected = check({
+    "akuma/heart/facts.ts": "export type Soul = {};",
+    "akuma/provider-recipe.ts": 'import type { Soul } from "./heart/facts.js"; export type Recipe = Soul;',
+  });
+  assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
 });
 
 test("architecture policy gives activity codec directions exact runtime owners", () => {

@@ -35,6 +35,7 @@ import {
   voidRequest,
   type Soul,
 } from "../src/akuma/heart/index.js";
+import { decodeSoul, decodeSoulRow, encodeSoul, encodeSoulRow } from "../src/akuma/heart/soul.js";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-"));
@@ -407,17 +408,17 @@ test("Body Request facts have one idempotent monotonic authority", () => {
   } finally { value.close(); }
 });
 
-test("heart schema version 13 and leash schema version 4 hard-refuse old authority", () => {
+test("heart schema version 14 and leash schema version 4 hard-refuse old authority", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
     const heart = new DatabaseSync(allocated.paths.heart);
-    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 10)");
+    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 13)");
     heart.close();
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 13/u);
+    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 14/u);
     assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -627,4 +628,104 @@ test("Body hung custody evidence round trips through Heart", () => {
       at: "2026-08-08T00:00:02.000Z",
     }), /not owned by this leash/u);
   } finally { value.close(); }
+});
+
+function codecSoul(): Soul {
+  return {
+    id: "aku/claude/1234abcd" as Soul["id"],
+    archetype: "claude",
+    description: "Codec fixture",
+    provider: {
+      name: "codex",
+      kind: "codex-app-server",
+      executable: "codex",
+      config: { flag: true },
+      env: { HOME: "/tmp/home" },
+    },
+    options: { model: "claude-sonnet-4-5", effort: "high", readonly: true, network: "disabled", systemPrompt: "Work." },
+    readonly: { enforcement: "native" },
+    cwd: "/tmp/work",
+    origin: { kind: "request", parent: "aku/parent/1234abcd" as Soul["id"], requestId: "00000000-0000-4000-8000-000000000001" },
+    confinement: { kind: "declared", writableRoots: ["/tmp/work"] },
+    createdAt: "2026-08-15T00:00:00.000Z",
+  };
+}
+
+test("soul codec hard-fails every valid-JSON corruption shape", () => {
+  const corruptions: readonly Readonly<{ name: string; change: (soul: Soul) => unknown }>[] = [
+    { name: "unknown soul field", change: (soul) => ({ ...soul, stray: 1 }) },
+    { name: "missing required field", change: (soul) => { const copy = { ...soul }; delete (copy as Record<string, unknown>).cwd; return copy; } },
+    { name: "unknown options field", change: (soul) => ({ ...soul, options: { ...soul.options, access: "read" } }) },
+    { name: "options readonly false", change: (soul) => ({ ...soul, options: { ...soul.options, readonly: false } }) },
+    { name: "readonly option without restraint", change: (soul) => { const copy = { ...soul }; delete (copy as Record<string, unknown>).readonly; return copy; } },
+    { name: "restraint without readonly option", change: (soul) => ({ ...soul, options: { ...soul.options, readonly: undefined } }) },
+    { name: "native restraint with diagnostic", change: (soul) => ({ ...soul, readonly: { enforcement: "native", diagnostic: "extra" } }) },
+    { name: "none restraint blank diagnostic", change: (soul) => ({ ...soul, readonly: { enforcement: "none", diagnostic: " " } }) },
+    { name: "none restraint non-string diagnostic", change: (soul) => ({ ...soul, readonly: { enforcement: "none", diagnostic: 7 } }) },
+    { name: "unknown restraint enforcement", change: (soul) => ({ ...soul, readonly: { enforcement: "warn" } }) },
+    { name: "unknown provider field", change: (soul) => ({ ...soul, provider: { ...soul.provider, pid: 1 } }) },
+    { name: "unknown provider kind", change: (soul) => ({ ...soul, provider: { ...soul.provider, kind: "grok" } }) },
+    { name: "blank provider name", change: (soul) => ({ ...soul, provider: { ...soul.provider, name: " " } }) },
+    { name: "provider env non-string value", change: (soul) => ({ ...soul, provider: { ...soul.provider, env: { HOME: 9 } } }) },
+    { name: "request origin missing parent", change: (soul) => ({ ...soul, origin: { kind: "request", requestId: "00000000-0000-4000-8000-000000000001" } }) },
+    { name: "request origin parent has non-hex suffix", change: (soul) => ({ ...soul, origin: { kind: "request", parent: "aku/parent/nothex", requestId: "00000000-0000-4000-8000-000000000001" } }) },
+    { name: "fork origin parent has extra segment", change: (soul) => ({ ...soul, origin: { kind: "fork", parent: "aku/parent/1234abcd/extra", at: "history" } }) },
+    { name: "fork origin with extra field", change: (soul) => ({ ...soul, origin: { kind: "fork", parent: "aku/parent/1234abcd", at: "history", note: "extra" } }) },
+    { name: "unknown origin kind", change: (soul) => ({ ...soul, origin: { kind: "rebirth" } }) },
+    { name: "unconfined with extra field", change: (soul) => ({ ...soul, confinement: { kind: "unconfined", writableRoots: [] } }) },
+    { name: "declared non-string writableRoots", change: (soul) => ({ ...soul, confinement: { kind: "declared", writableRoots: [9] } }) },
+    { name: "id is not an Akuma coordinate", change: (soul) => ({ ...soul, id: "garbage" }) },
+    { name: "id has a single segment", change: (soul) => ({ ...soul, id: "aku/claude" }) },
+    { name: "id suffix is not lower hex8", change: (soul) => ({ ...soul, id: "aku/claude/nothex" }) },
+    { name: "id has an extra segment", change: (soul) => ({ ...soul, id: "aku/claude/1234abcd/extra" }) },
+    { name: "id archetype is not normalized", change: (soul) => ({ ...soul, id: "aku/Claude/1234abcd" }) },
+    { name: "id and archetype disagree", change: (soul) => ({ ...soul, archetype: "worker" }) },
+    { name: "blank cwd", change: (soul) => ({ ...soul, cwd: "" }) },
+    { name: "blank description", change: (soul) => ({ ...soul, description: " " }) },
+  ];
+  for (const { name, change } of corruptions) {
+    assert.throws(() => decodeSoul(change(codecSoul())), undefined, name);
+    assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify(change(codecSoul())) }), undefined, name);
+    assert.throws(() => encodeSoulRow(change(codecSoul()) as Soul), undefined, name);
+  }
+  assert.throws(() => decodeSoulRow({ soul_json: "not json" }), SyntaxError);
+  assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify("garbage") }));
+  assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify(42) }));
+});
+
+test("soul codec decodes canonically, deep-freezes, and round-trips", () => {
+  const encoded = encodeSoulRow(codecSoul());
+  assert.deepEqual(decodeSoulRow({ soul_json: encoded[0]! }), codecSoul());
+  const decoded = decodeSoulRow({ soul_json: encoded[0]! });
+  assert.equal(Object.isFrozen(decoded), true);
+  assert.equal(Object.isFrozen(decoded.options), true);
+  assert.equal(Object.isFrozen(decoded.provider), true);
+  assert.equal(Object.isFrozen(decoded.provider.config), true);
+  assert.equal(Object.isFrozen(decoded.provider.env), true);
+  assert.equal(Object.isFrozen(decoded.readonly), true);
+  assert.equal(Object.isFrozen(decoded.origin), true);
+  assert.equal(Object.isFrozen(decoded.confinement), true);
+  assert.equal(Object.isFrozen(decoded.confinement.writableRoots), true);
+  assert.equal(Object.isFrozen(decoded.provider.config!.flag), true);
+
+  const none: Soul = {
+    ...codecSoul(),
+    readonly: { enforcement: "none", diagnostic: "ACP cannot remove task-surface mutation capabilities" },
+  };
+  assert.deepEqual(decodeSoul(JSON.parse(encodeSoul(none))), none);
+
+  const reordered = JSON.parse(JSON.stringify(codecSoul())) as Record<string, unknown>;
+  const keys = Object.keys(reordered);
+  for (const key of keys.reverse()) {
+    const value = reordered[key];
+    delete reordered[key];
+    (reordered as Record<string, unknown>)[key] = value;
+  }
+  assert.deepEqual(encodeSoulRow(codecSoul()), encodeSoulRow(reordered as unknown as Soul), "canonical serialization ignores input key order");
+  assert.deepEqual(Object.keys(JSON.parse(encoded[0]!)), [
+    "id", "archetype", "description", "provider", "options", "readonly", "cwd", "origin", "confinement", "createdAt",
+  ]);
+
+  assert.throws(() => encodeSoulRow({ ...codecSoul(), options: { readonly: true }, readonly: undefined }), undefined, "encode validates the consistency rule");
+  assert.equal(encodeSoulRow(codecSoul())[0] === encodeSoulRow(codecSoul())[0], true, "canonical encoding is deterministic");
 });

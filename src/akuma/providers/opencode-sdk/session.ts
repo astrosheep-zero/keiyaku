@@ -2,7 +2,8 @@ import net from "node:net";
 import { abortable } from "../../abort.js";
 import { spawnDetachedProcess } from "../../../runtime/proc/run.js";
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
-import type { ProviderExecution, ResumeCoordinate } from "../../heart/index.js";
+import type { ResumeCoordinate } from "../../heart/index.js";
+import type { ProviderExecution } from "../../provider-recipe.js";
 
 export type OpencodeSdkSession = Pick<OpencodeClient["session"],
   "create" | "get" | "fork" | "abort" | "promptAsync" | "messages">;

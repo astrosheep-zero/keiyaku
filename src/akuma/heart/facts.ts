@@ -1,26 +1,11 @@
 import type { AkuId } from "../identity.js";
 import type { ResumeCoordinate } from "../coordinate.js";
+import type { ProviderExecution, ProviderOptions, ReadonlyRestraint } from "../provider-recipe.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
 export type Confinement =
   | Readonly<{ kind: "unconfined" }>
   | Readonly<{ kind: "declared"; writableRoots: readonly string[] }>;
-
-export type ProviderOptions = Readonly<{
-  model?: string;
-  effort?: string;
-  access?: "read" | "write" | "auto";
-  network?: "disabled" | "enabled";
-  systemPrompt?: string;
-}>;
-
-export type ProviderExecution = Readonly<{
-  name: string;
-  kind: "acp" | "claude-agent-sdk" | "codex-app-server" | "opencode-sdk" | "pi";
-  executable?: string;
-  config?: Readonly<Record<string, unknown>>;
-  env?: Readonly<Record<string, string>>;
-}>;
 
 export type AkumaOrigin =
   | Readonly<{ kind: "direct" }>
@@ -33,13 +18,14 @@ export type Soul = Readonly<{
   description?: string;
   provider: ProviderExecution;
   options: ProviderOptions;
+  readonly?: ReadonlyRestraint;
   cwd: string;
   origin: AkumaOrigin;
   confinement: Confinement;
   createdAt: string;
 }>;
 
-export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "confinement">;
+export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "readonly" | "confinement">;
 
 export type BodyEnd = "exited" | "broke-off" | "put-down";
 
@@ -178,3 +164,7 @@ export function life(input: Readonly<{
   if (input.kill?.bodySequence === input.body.sequence) return "killed";
   return input.body.end === "exited" ? "asleep" : "stranded";
 }
+
+export type SoulRow = Readonly<{
+  soul_json: string;
+}>;

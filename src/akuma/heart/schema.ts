@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 13;
+const HEART_SCHEMA_VERSION = 14;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(
@@ -30,15 +30,7 @@ export const HEART_SCHEMA = `
   INSERT OR IGNORE INTO akuma_schema(singleton, version) VALUES (1, ${HEART_SCHEMA_VERSION});
   CREATE TABLE IF NOT EXISTS soul (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    id TEXT NOT NULL UNIQUE,
-    archetype TEXT NOT NULL,
-    description TEXT,
-    provider_json TEXT NOT NULL CHECK (json_valid(provider_json)),
-    options_json TEXT NOT NULL CHECK (json_valid(options_json)),
-    cwd TEXT NOT NULL,
-    origin_json TEXT NOT NULL CHECK (json_valid(origin_json)),
-    confinement_json TEXT NOT NULL CHECK (json_valid(confinement_json)),
-    created_at TEXT NOT NULL
+    soul_json TEXT NOT NULL CHECK (json_valid(soul_json))
   ) STRICT;
   CREATE TABLE IF NOT EXISTS bodies (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,

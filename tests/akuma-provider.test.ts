@@ -14,6 +14,7 @@ import {
   type AgentEvent,
   type TurnResult,
 } from "../src/akuma/provider.js";
+import { decodeReadonlyRestraint } from "../src/akuma/provider-recipe.js";
 import {
   CLAUDE_MESSAGE_DISPOSITIONS,
   CLAUDE_SYSTEM_DISPOSITIONS,
@@ -29,6 +30,7 @@ import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/
 import type { OpencodeSdkLoader, OpencodeSdkSession } from "../src/akuma/providers/opencode-sdk/session.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
+import { resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
 
@@ -186,7 +188,11 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
     const fake = fakeAcp(root);
     const provider = createAcpProvider(fake.execution);
     assert.deepEqual(provider.confinement({ cwd: root, options: {} }), { kind: "unconfined" });
-    assert.equal(provider.admitOptions({ access: "write" }).kind, "refused");
+    assert.deepEqual(provider.admitOptions({ readonly: true }), {
+      kind: "admitted",
+      options: { readonly: true },
+      readonly: { enforcement: "none", diagnostic: "ACP cannot remove task-surface mutation capabilities" },
+    });
     assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
     const drive = await provider.start({
       body: "build", launchTells: [{ id: "tell-1", text: "then test" }], cwd: root,
@@ -540,7 +546,7 @@ function fakePiSdk(input: {
 test("OpenCode V1 adapter admits with promptAsync and completes from terminal events", async () => {
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
-  assert.equal(provider.admitOptions({ access: "write" }).kind, "refused");
+  assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
   const drive = await provider.start({ body: "build", launchTells: [{ id: "tell-1", text: "also check" }], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
   assert.equal(drive.admission.fence, "session-fresh");
   const observed = [];
@@ -663,6 +669,11 @@ test("OpenCode V1 admits native prompt options and maps archetype effort to a mo
   assert.equal(provider.admitOptions({ effort: "high" }).kind, "admitted");
   assert.equal(provider.admitOptions({ model: "not-a-provider-model" }).kind, "refused");
   assert.equal(provider.admitOptions({ model: "provider/model" }).kind, "admitted");
+  assert.deepEqual(provider.admitOptions({ readonly: true }), {
+    kind: "admitted",
+    options: { readonly: true },
+    readonly: { enforcement: "none", diagnostic: "OpenCode V1 cannot remove task-surface mutation capabilities" },
+  });
   const drive = await provider.resume!({ body: "continue", launchTells: [], cwd: "/tmp", options: { model: "provider/model", effort: "high", systemPrompt: "must enforce" }, session: { kind: "resume", coordinate: { sessionId: "session-resume" } } });
   assert.equal((await drive.completion).kind, "answered");
   const prompt = fake.prompts[0] as { body: { messageID: string } };
@@ -1034,7 +1045,11 @@ test("Pi option admission maps native terms and refuses unsupported policy", asy
     { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } },
   ] });
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
-  assert.equal(provider.admitOptions({ access: "write" }).kind, "refused");
+  assert.deepEqual(provider.admitOptions({ readonly: true }), {
+    kind: "admitted",
+    options: { readonly: true },
+    readonly: { enforcement: "native" },
+  });
   assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
   assert.equal(provider.admitOptions({ model: "bad" }).kind, "refused");
   assert.equal(provider.admitOptions({ effort: "extreme" }).kind, "refused");
@@ -1050,7 +1065,66 @@ test("Pi option admission maps native terms and refuses unsupported policy", asy
   assert.equal(fake.seen.options?.thinkingLevel, "high");
   assert.ok(fake.seen.options?.model);
   assert.ok(fake.seen.options?.resourceLoader);
-  assert.equal(createPiProvider({ name: "pi", kind: "pi", env: { A: "x" } }).admitOptions({}).kind, "refused");
+  assert.throws(
+    () => createPiProvider({ name: "pi", kind: "pi", env: { A: "x" } }),
+    /env injection not supported/u,
+  );
+});
+
+test("Pi readonly admits native enforcement and removes every task-surface mutation tool", async () => {
+  const fake = fakePiSdk({ events: [
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } },
+  ] });
+  const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
+  const drive = await provider.start({
+    body: "inspect",
+    launchTells: [],
+    cwd: "/work",
+    options: { readonly: true },
+    session: { kind: "fresh" },
+  });
+  for await (const _event of drive.events) { /* drain */ }
+  await drive.completion;
+  assert.deepEqual(fake.seen.options?.tools, ["read", "grep", "find", "ls"]);
+  assert.deepEqual(provider.admitOptions({ readonly: true }), {
+    kind: "admitted",
+    options: { readonly: true },
+    readonly: { enforcement: "native" },
+  });
+  assert.throws(
+    () => createPiProvider({ name: "pi", kind: "pi", config: { tools: ["bash"] } }),
+    /does not support executable or config/u,
+  );
+});
+
+test("readonly restraint codec admits only native or none with a concrete diagnostic", () => {
+  assert.deepEqual(decodeReadonlyRestraint({ enforcement: "native" }), { enforcement: "native" });
+  assert.deepEqual(decodeReadonlyRestraint({ enforcement: "none", diagnostic: "enforcement gap" }), {
+    enforcement: "none",
+    diagnostic: "enforcement gap",
+  });
+  assert.throws(() => decodeReadonlyRestraint({ enforcement: "none" }), /native or none with a diagnostic/u);
+  assert.throws(() => decodeReadonlyRestraint({ enforcement: "none", diagnostic: "  " }), /native or none with a diagnostic/u);
+  assert.throws(() => decodeReadonlyRestraint({ enforcement: "native", diagnostic: "extra" }), /native or none with a diagnostic/u);
+  assert.throws(() => decodeReadonlyRestraint({ enforcement: "magic" }), /native or none with a diagnostic/u);
+});
+
+test("provider resolution validates kind config before constructing an adapter", () => {
+  assert.throws(() => resolveProviderExecution({
+    name: "claude",
+    kind: "claude-agent-sdk",
+    config: { unexpected: true },
+  }), /config is unsupported by claude-agent-sdk/u);
+  assert.throws(() => resolveProviderExecution({
+    name: "opencode-sdk",
+    kind: "opencode-sdk",
+    config: { unexpected: true },
+  }), /config is unsupported by opencode-sdk/u);
+  assert.throws(() => resolveProviderExecution({
+    name: "pi",
+    kind: "pi",
+    config: { tools: ["bash"] },
+  }), /does not support executable or config/u);
 });
 
 test("provider activity codec round trips every closed event and tool-call arm", () => {
@@ -1564,11 +1638,12 @@ test("Claude adapter consumes the admitted Archetype options", async () => {
   const admitted = provider.admitOptions({
     model: "claude-sonnet-4-5",
     effort: "high",
-    access: "read",
+    readonly: true,
     systemPrompt: "Review only.",
   });
   assert.equal(admitted.kind, "admitted");
   if (admitted.kind !== "admitted") return;
+  assert.deepEqual(admitted.readonly, { enforcement: "native" });
   const drive = await provider.start({
     body: "inspect", launchTells: [], cwd: "/work", options: admitted.options, session: { kind: "fresh" },
   });
@@ -1926,14 +2001,16 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     const options = {
       model: "gpt-test",
       effort: "high",
-      access: "write" as const,
       network: "enabled" as const,
       systemPrompt: "Work precisely.",
     };
     assert.deepEqual(provider.admitOptions(options), { kind: "admitted", options });
     assert.deepEqual(provider.confinement({ cwd: root, options }), { kind: "declared", writableRoots: [root] });
-    assert.equal(provider.admitOptions({ access: "read" }).kind, "refused");
-    assert.equal(provider.admitOptions({ access: "auto" }).kind, "refused");
+    assert.deepEqual(provider.admitOptions({ readonly: true }), {
+      kind: "admitted",
+      options: { readonly: true },
+      readonly: { enforcement: "native" },
+    });
 
     const requestDirectory = join(root, "body-requests");
     mkdirSync(requestDirectory);
@@ -1976,6 +2053,32 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
       },
     });
     assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex readonly admits native enforcement and requests the native read-only sandbox", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-readonly-"));
+  try {
+    const fake = fakeCodex(root);
+    const provider = createCodexAppServerProvider(fake.executable);
+    const drive = await provider.start({
+      body: "inspect",
+      launchTells: [],
+      cwd: root,
+      options: { readonly: true, network: "enabled" },
+      session: { kind: "fresh" },
+    });
+    const events = [];
+    for await (const event of drive.events) events.push(event);
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "codex answer", historyId: "turn-1" });
+    assert.ok(events.some((event) => event.type === "assistant" && event.text === "codex answer"));
+    const turn = fake.requests().at(-1)!.params as Record<string, unknown>;
+    assert.deepEqual(turn.sandboxPolicy, { type: "readOnly", networkAccess: true });
+    assert.deepEqual(provider.admitOptions({ readonly: true }), {
+      kind: "admitted",
+      options: { readonly: true },
+      readonly: { enforcement: "native" },
+    });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

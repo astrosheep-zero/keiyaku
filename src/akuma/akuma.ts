@@ -41,7 +41,7 @@ import {
 } from "./projection.js";
 import { listArchetypes as readArchetypes, loadArchetype } from "./archetype.js";
 import { publishAkuma } from "./publication.js";
-import { providerNamed } from "./providers/index.js";
+import { resolveProviderExecution } from "./providers/index.js";
 import { injectedBodyRequests, requestBodyCall } from "./requests.js";
 import { settings as readSettings, type Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
@@ -60,9 +60,11 @@ export type AkumaListRow = Readonly<{
 export type AkumaStatus = Readonly<{
   id: AkuId;
   life: AkumaLife;
+  readonly?: Soul["readonly"];
   timeline: ActivitySnapshot;
   strandedReason?: "resume-unsupported";
 }>;
+export type { ReadonlyRestraint } from "./provider-recipe.js";
 export type * from "./projection.js";
 
 export type UnbornAkumaListRow = Readonly<{
@@ -169,10 +171,11 @@ function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
   const current = bornListRow(paths, expected, snapshot);
   const resumeUnsupported = current.life === "stranded"
     && snapshot.latestSession?.provider === snapshot.soul.provider.name
-    && providerNamed(snapshot.soul.provider).resume === undefined;
+    && resolveProviderExecution(snapshot.soul.provider).adapter.resume === undefined;
   return {
     id: current.id,
     life: current.life,
+    ...(snapshot.soul.readonly === undefined ? {} : { readonly: snapshot.soul.readonly }),
     ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
     timeline: (() => {
       const slice = activitySlice(paths, { limit: Number.MAX_SAFE_INTEGER });
@@ -297,7 +300,7 @@ export class AkumaHandle {
     const source = readSoul(this.paths);
     if (source === null) throw new AkumaNotBornError(this.id);
     if (source.id !== this.id) throw new Error("Akuma soul does not match its coordinate");
-    const adapter = providerNamed(source.provider);
+    const adapter = resolveProviderExecution(source.provider).adapter;
     if (adapter.fork === undefined) return { kind: "provider-cannot-fork", provider: source.provider.name };
     const point = readForkPoint(this.paths, input.at);
     if (point === null) return { kind: "unknown-history", at: input.at };
@@ -331,6 +334,7 @@ export class AkumaHandle {
             ...(source.description === undefined ? {} : { description: source.description }),
             provider: source.provider,
             options: source.options,
+            ...(source.readonly === undefined ? {} : { readonly: source.readonly }),
             cwd: source.cwd,
             origin: { kind: "fork", parent: this.id, at: input.at },
             confinement: source.confinement,
@@ -416,6 +420,7 @@ export class Akuma {
       ...(archetype.description === undefined ? {} : { description: archetype.description }),
       provider: archetype.provider,
       options: archetype.options,
+      ...(archetype.readonly === undefined ? {} : { readonly: archetype.readonly }),
       confinement: provider.confinement({ cwd, options: archetype.options }),
     });
     const requests = injectedBodyRequests();
@@ -442,6 +447,7 @@ export class Akuma {
           ...(archetype.description === undefined ? {} : { description: archetype.description }),
           provider: archetype.provider,
           options: archetype.options,
+          ...(archetype.readonly === undefined ? {} : { readonly: archetype.readonly }),
           cwd,
           origin: { kind: "direct" },
           confinement: recipe.confinement,

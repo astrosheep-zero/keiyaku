@@ -289,6 +289,8 @@ which public result a command presents without repairing, reselecting, or
 reinterpreting activity. JSON exposes that same value with complete ISO `at`
 values and no text-only time suppression.
 
+Readonly `none` renders its diagnostic as an existing `!` line; native or
+absent renders nothing. This presents the public fact and adds no CLI judgment.
 Every rendered snapshot begins with the complete AkuId and optional frozen
 Alias. When a Contract is associated, its complete `kei/...` identity is one
 bracketed cue on that same line; it is not a second metadata heading. Status,

@@ -451,6 +451,35 @@ test("Akuma status-oriented commands include life while tell excludes it", () =>
   }
 });
 
+test("Akuma text renders only a none readonly restraint as an existing ! line", () => {
+  const id = "aku/worker/1234abcd" as const;
+  const base = { id, life: "running" as const, timeline: { kind: "idle" as const, entries: [], omitted: 0 } };
+  const command = parseArgv(["status", id]).command;
+  const none = renderAkumaText(command, {
+    kind: "akuma" as const,
+    action: "status" as const,
+    status: {
+      status: {
+        ...base,
+        readonly: { enforcement: "none" as const, diagnostic: "ACP cannot remove task-surface mutation capabilities" },
+      },
+    },
+  });
+  assert.ok(none.includes("! ACP cannot remove task-surface mutation capabilities"));
+  const native = renderAkumaText(command, {
+    kind: "akuma" as const,
+    action: "status" as const,
+    status: { status: { ...base, readonly: { enforcement: "native" as const } } },
+  });
+  assert.ok(!native.includes("! "));
+  const absent = renderAkumaText(command, {
+    kind: "akuma" as const,
+    action: "status" as const,
+    status: { status: base },
+  });
+  assert.ok(!absent.includes("! "));
+});
+
 test("Akuma history distinguishes open active tools from closed unsettled tools", () => {
   const akuma = "aku/worker/1234abcd" as const;
   const command = parseArgv(["history", akuma]).command;
@@ -922,7 +951,7 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
     seed: {
       id: allocated.id,
       archetype: "worker",
-      provider: { name: "worker", kind: "codex-exec" },
+      provider: { name: "worker", kind: "codex-app-server" },
       options: {},
       origin: { kind: "direct" },
       confinement: { kind: "unconfined" },
@@ -1044,4 +1073,52 @@ test("history JSON preserves an associated Contract for every result mode", () =
     id: akuma,
     contractId,
   });
+});
+
+test("akuma call renders the CallResult restraint on detached and failed observations without duplication", () => {
+  const command = parseArgv(["call", "worker", "-"]).command;
+  const akuma = "aku/worker/1234abcd" as import("../src/index.js").AkuId;
+  const restraint = { enforcement: "none" as const, diagnostic: "ACP cannot remove task-surface mutation capabilities" };
+  const base = {
+    kind: "akuma" as const,
+    action: "call" as const,
+    result: {
+      kind: "called" as const,
+      akuma,
+      readonly: restraint,
+      dispatch: { kind: "none" as const },
+      alias: { kind: "none" as const },
+    },
+  };
+
+  const detached = renderAkumaText(command, { ...base, result: { ...base.result, observation: { kind: "detached" as const } } });
+  assert.equal(detached, `${akuma}\n! ACP cannot remove task-surface mutation capabilities`);
+  assert.equal((detached.match(/! ACP cannot/g) ?? []).length, 1);
+
+  const failed = renderAkumaText(command, {
+    ...base,
+    result: {
+      ...base.result,
+      observation: { kind: "failed" as const, failure: { kind: "infrastructure" as const, diagnostic: "heart unavailable" } },
+    },
+  });
+  assert.equal(failed, `${akuma}\n! ACP cannot remove task-surface mutation capabilities\n! error heart unavailable`);
+  assert.equal((failed.match(/! ACP cannot/g) ?? []).length, 1);
+
+  const observed = renderAkumaText(command, {
+    ...base,
+    result: {
+      ...base.result,
+      observation: {
+        kind: "observed" as const,
+        status: {
+          id: akuma,
+          life: "asleep" as const,
+          readonly: restraint,
+          timeline: { kind: "idle" as const, entries: [], omitted: 0 },
+        },
+      },
+    },
+  });
+  assert.equal((observed.match(/! ACP cannot/g) ?? []).length, 1, "observed status and CallResult project the same restraint once");
 });
