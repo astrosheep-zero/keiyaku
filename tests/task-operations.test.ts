@@ -45,23 +45,31 @@ test("note is replaceable authority and product timestamps advance only on chang
   assert.equal(unchanged.value.task.updatedAt, replaced.value.task.updatedAt);
 });
 
-test("drop and batch drop replace note while preserving creation time", async () => {
+test("done and drop replace note while preserving creation time", async () => {
   const { tasks } = world();
   const one = acceptedId(await tasks.add({ title: "One", note: "old" }));
   const before = await tasks.task({ id: one }).read();
-  const dropped = await tasks.task({ id: one }).drop({ note: "obsolete" });
-  assert.equal(dropped.kind, "accepted");
-  if (dropped.kind === "accepted") {
-    assert.equal(dropped.value.state, "drop");
-    assert.equal(dropped.value.note, "obsolete");
-    assert.equal(dropped.value.createdAt, before?.task.createdAt);
-    assert.ok(dropped.value.updatedAt > (before?.task.updatedAt ?? ""));
+  const done = await tasks.task({ id: one }).done({ note: "finished" });
+  assert.equal(done.kind, "accepted");
+  if (done.kind === "accepted") {
+    assert.equal(done.value.state, "done");
+    assert.equal(done.value.note, "finished");
+    assert.equal(done.value.createdAt, before?.task.createdAt);
+    assert.ok(done.value.updatedAt > (before?.task.updatedAt ?? ""));
   }
 
   const two = acceptedId(await tasks.add({ title: "Two" })), three = acceptedId(await tasks.add({ title: "Three" }));
-  const batch = await tasks.batch({ verb: "drop", ids: [two, three], note: "cancelled" });
-  assert.ok(batch.items.every((item) => item.outcome.kind === "accepted" && item.outcome.value.note === "cancelled"));
-  assert.throws(() => tasks.batch({ verb: "done", ids: [two], note: "invalid" }), /valid only for drop/u);
+  const batch = await tasks.batch({ verb: "done", ids: [two, "task/missing", three], note: "completed" });
+  assert.deepEqual(batch.items.map((item) => item.id), [two, "task/missing", three]);
+  assert.deepEqual(batch.items.map((item) => item.outcome.kind), ["accepted", "refused", "accepted"]);
+  assert.ok(batch.items.filter((item) => item.outcome.kind === "accepted").every((item) => item.outcome.value.note === "completed"));
+  assert.equal((await tasks.task({ id: three }).read())?.task.state, "done");
+  const dropped = await tasks.task({ id: two }).drop({ note: "cancelled" });
+  assert.equal(dropped.kind, "refused");
+  const afterRefusal = await tasks.task({ id: two }).read();
+  assert.equal(afterRefusal?.task.state, "done");
+  assert.equal(afterRefusal?.task.note, "completed");
+  assert.throws(() => tasks.batch({ verb: "hold", ids: [two], note: "invalid" }), /valid only for done or drop/u);
 });
 
 test("Tasks creates root and nested authority without Contract coupling", async () => {

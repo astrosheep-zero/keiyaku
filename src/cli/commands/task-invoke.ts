@@ -116,7 +116,10 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
     case "stop": return tasks.task({ id }).stop();
     case "resume": return tasks.task({ id }).resume();
     case "hold": return tasks.batch({ verb: "hold", ids: command.positionals });
-    case "done": return tasks.batch({ verb: "done", ids: command.positionals });
+    case "done": {
+      const note = value(command, "note");
+      return tasks.batch({ verb: "done", ids: command.positionals, ...(note === undefined ? {} : { note }) });
+    }
     case "drop": {
       const note = value(command, "note");
       return tasks.batch({ verb: "drop", ids: command.positionals, ...(note === undefined ? {} : { note }) });

@@ -137,7 +137,7 @@ task.start(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 task.stop(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 task.hold(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 task.resume(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
-task.done(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
+task.done(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult>
 task.drop(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult>
 ```
 
@@ -146,7 +146,8 @@ optional initial state, and signal. `addDocument` accepts
 creation-document Markdown plus an optional namespace and signal. The creation
 document cannot set identity or timestamps but may set note and any persisted
 state; omitted note is empty and omitted state defaults to `open`.
-After creation, product state changes use lifecycle methods. `update` is a
+After creation, product state changes use lifecycle methods. `done` and `drop`
+may replace the note in the same atomic lifecycle mutation. `update` is a
 field-preserving patch: title, mutually exclusive body or append-body, priority,
 relation replace/add/drop, nullable parent, and note replacement.
 
@@ -169,10 +170,9 @@ healthy. Doctor observes authority and never repairs it.
 
 Add and lifecycle acceptance return `TaskView`. Only accepted `update`, including
 a note-only replacement, returns the exact predecessor-to-successor
-whole-document diff. Batch applies IDs in
-input order, continues after failures, preserves accepted items, and returns
-every item. Cancellation stops before the next item and never interrupts an
-atomic replacement.
+whole-document diff. Batch applies IDs in input order, continues after failures,
+preserves accepted items, and returns every item. Cancellation stops before the
+next item and never interrupts an atomic replacement.
 
 ## Views
 

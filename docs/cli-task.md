@@ -33,7 +33,7 @@ task start <TaskId> [--json]
 task stop <TaskId> [--json]
 task hold <TaskId>... [--json]
 task resume <TaskId> [--json]
-task done <TaskId>... [--json]
+task done <TaskId>... [--note <text>] [--json]
 task drop <TaskId>... [--note <text>] [--json]
 task namespace [<namespace>] [--json]
 task compose [--json] -
@@ -47,8 +47,10 @@ with structured creation flags other than `--namespace`. Update requires at
 least one explicit patch.
 
 Add `--note` sets the initial note. Update `--note` replaces the note and
-returns the native document diff. Drop `--note` replaces the note for each
-addressed Task in that Task's independent atomic drop mutation.
+returns the native document diff. Done and drop `--note` replace the note for
+each addressed Task in that Task's independent atomic lifecycle mutation. Batch
+lifecycle commands preserve input order, continue after per-Task refusals, and
+do not consume stdin for notes.
 
 `ls`, `ready`, and `blocked` use current namespace unless `--world` is present.
 `show`, `tree`, update, and lifecycle use complete IDs and never infer

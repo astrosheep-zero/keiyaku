@@ -70,6 +70,18 @@ test("task drop note is passed to each independent lifecycle mutation", async ()
   }
 });
 
+test("task done note is passed to each independent lifecycle mutation", async () => {
+  const root = world();
+  await invoke(parseArgv(["-C", root, "task", "add", "First"]));
+  await invoke(parseArgv(["-C", root, "task", "add", "Second"]));
+  const result = await invoke(parseArgv(["-C", root, "task", "done", "task/first", "task/missing", "task/second", "--note", "finished"])) as TaskInvocationResult;
+  assert.equal(taskExitCode(result), 1);
+  if (!("items" in result)) throw new Error("expected batch result");
+  assert.deepEqual(result.items.map((item) => item.outcome.kind), ["accepted", "refused", "accepted"]);
+  assert.equal((await invoke(parseArgv(["-C", root, "task", "show", "task/first"])) as { task: { note: string; state: string } }).task.note, "finished");
+  assert.equal((await invoke(parseArgv(["-C", root, "task", "show", "task/second"])) as { task: { note: string; state: string } }).task.state, "done");
+});
+
 test("task compose and views flow through native results", async () => {
   const root = world();
   const composed = await invoke(parseArgv(["-C", root, "task", "compose", "-"]), { readStdin: () => "+ Parent\n  + Child\n" }) as TaskInvocationResult;

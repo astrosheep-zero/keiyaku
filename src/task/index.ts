@@ -96,15 +96,15 @@ class TaskHandle {
   }
   update(input: UpdateTaskInput): Promise<TaskUpdateResult> { return updateTask(this.world, this.id, updateInput(input)); }
   private lifecycle(verb: "start" | "stop" | "hold" | "resume" | "done" | "drop", input: unknown): Promise<TaskMutationResult> {
-    const value = record(input ?? {}, `${verb} input`); closed(value, verb === "drop" ? ["note", "signal"] : ["signal"], `${verb} input`);
-    const note = verb === "drop" ? text(value.note, "note") : undefined;
+    const value = record(input ?? {}, `${verb} input`); closed(value, verb === "drop" || verb === "done" ? ["note", "signal"] : ["signal"], `${verb} input`);
+    const note = verb === "drop" || verb === "done" ? text(value.note, "note") : undefined;
     return lifecycleTask(this.world, this.id, verb, signal(value.signal), note);
   }
   start(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("start", input); }
   stop(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("stop", input); }
   hold(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("hold", input); }
   resume(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("resume", input); }
-  done(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("done", input); }
+  done(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("done", input); }
   drop(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("drop", input); }
 }
 export type Task = TaskHandle;
@@ -121,7 +121,7 @@ class TasksHandle {
   async ready(input: Readonly<{ scope?: "namespace" | "world" }> = {}): Promise<TaskList> { const v = record(input, "ready input"); closed(v, ["scope"], "ready input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return readyTasks(this.world, v.scope as "namespace" | "world" | undefined); }
   async blocked(input: Readonly<{ scope?: "namespace" | "world" }> = {}): Promise<BlockedTaskList> { const v = record(input, "blocked input"); closed(v, ["scope"], "blocked input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return blockedTasks(this.world, v.scope as "namespace" | "world" | undefined); }
   async doctor(): Promise<TaskDoctorReport> { return { issues: diagnoseBoard(readBoard(this.world).board) }; }
-  batch(input: Readonly<{ verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }>): Promise<TaskBatchResult> { const v = record(input, "batch input"); closed(v, ["verb", "ids", "note", "signal"], "batch input"); const verb = v.verb; if (verb !== "done" && verb !== "drop" && verb !== "hold") throw new TypeError("batch verb is invalid"); const note = text(v.note, "note"); if (note !== undefined && verb !== "drop") throw new TypeError("batch note is valid only for drop"); return batchTasks(this.world, verb, taskIds(v.ids, "ids") ?? [], signal(v.signal), note); }
+  batch(input: Readonly<{ verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }>): Promise<TaskBatchResult> { const v = record(input, "batch input"); closed(v, ["verb", "ids", "note", "signal"], "batch input"); const verb = v.verb; if (verb !== "done" && verb !== "drop" && verb !== "hold") throw new TypeError("batch verb is invalid"); const note = text(v.note, "note"); if (note !== undefined && verb !== "done" && verb !== "drop") throw new TypeError("batch note is valid only for done or drop"); return batchTasks(this.world, verb, taskIds(v.ids, "ids") ?? [], signal(v.signal), note); }
   compose(input: Readonly<{ markdown: string; signal?: AbortSignal }>): Promise<TaskCompositionResult> { const v = record(input, "compose input"); closed(v, ["markdown", "signal"], "compose input"); const markdown = text(v.markdown, "markdown"); if (markdown === undefined) throw new TypeError("markdown is required"); return composeTasks(this.world, markdown, signal(v.signal)); }
 }
 export type Tasks = TasksHandle;
