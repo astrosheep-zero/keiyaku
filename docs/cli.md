@@ -284,8 +284,13 @@ aku/worker/1234abcd (@review) ────────────────�
       ● running
 ```
 
-Activity labels are display-width-aware and right-aligned in one fixed field,
-with one space before content. The spine prints the first visible row's `HH:MM`. It then suppresses a row's
+Every typed gap renders in place as `⋮ +<count>`. Activity text wraps to at
+most three terminal-width lines in snapshots and ends in `…` when display text
+remains or the persisted row carries `truncated: true`. Tool representation
+uses the same visible bound. History uses the same row renderer without that
+three-line cap. Rendering never changes the JSON fact, and copyable history
+commands remain indivisible. Activity labels are display-width-aware and
+right-aligned in one fixed field, with one space before content. The spine prints the first visible row's `HH:MM`. It then suppresses a row's
 gutter while that row is less than 60 seconds after the last timestamp actually
 printed, and prints again at 60 seconds or more. A row without `at`, such as a
 pending tell, always has an empty gutter and does not move the anchor. There
@@ -340,9 +345,11 @@ caller intent, and every recoverable omission line contains a complete command.
 A page that reaches a pruned lower boundary prints exactly `⋮ earlier history
 no longer kept`. A `--since` page with no rows prints exactly `⋮ no activity
 since <index>`. Exact status prints `⋮ +<count>` at the spine column when its
-snapshot omits semantic rows; it does not invent a history cursor. No text asks
-the caller to calculate a cursor. `history --last` bypasses this frame and
-writes only exact answer bytes.
+snapshot omits semantic rows; each typed gap stays at its actual spine
+position and does not invent a history cursor. Answer boundaries name the
+complete AkuId in `keiyaku history <AkuId> --last`; native provider history ids
+never become CLI selectors. No text asks the caller to calculate a cursor.
+`history --last` bypasses this frame and writes only exact answer bytes.
 
 ## Product Boundary
 

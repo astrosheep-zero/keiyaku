@@ -6,6 +6,7 @@ import {
   type KillEvidence,
   type TellResult,
 } from "../akuma/index.js";
+import { readActionFeedbackStatus } from "../akuma/akuma.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
@@ -22,7 +23,7 @@ export type AkumaWaitResult = Readonly<{
 }>;
 
 export type AkumaKillResult = Readonly<{
-  results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[];
+  results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence; observation: AkumaStatus }>[];
 }>;
 
 export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string }>;
@@ -53,6 +54,56 @@ function timeout(value: unknown): number | undefined {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+const PLURAL_DETAIL_LIMIT = 32;
+
+function pinned(entry: AkumaStatus["activity"]["entries"][number]): boolean {
+  return entry.kind === "row"
+    && ((entry.row.kind === "tool" && entry.row.state === "running")
+      || (entry.row.kind === "tell" && entry.row.state === "pending"));
+}
+
+function budgetStatus(status: AkumaStatus, allowance: number): Readonly<{ status: AkumaStatus; used: number }> {
+  const entries: typeof status.activity.entries[number][] = [];
+  const ordinary = status.activity.entries.filter((entry) => entry.kind === "row" && !pinned(entry));
+  const kept = new Set(allowance === 0 ? [] : ordinary.slice(-allowance));
+  const used = kept.size;
+  let hidden = 0;
+  let single: Extract<typeof status.activity.entries[number], { kind: "row" }> | undefined;
+  const flush = (): void => {
+    if (hidden === 1 && single !== undefined) entries.push(single);
+    else if (hidden > 0) entries.push({ kind: "gap", count: hidden });
+    hidden = 0;
+    single = undefined;
+  };
+  for (const entry of status.activity.entries) {
+    if (pinned(entry)) {
+      flush();
+      entries.push(entry);
+      continue;
+    }
+    if (entry.kind === "row" && kept.has(entry)) {
+      flush();
+      entries.push(entry);
+      continue;
+    }
+    const count = entry.kind === "gap" ? entry.count : 1;
+    if (hidden === 0 && count === 1 && entry.kind === "row") single = entry;
+    else single = undefined;
+    hidden += count;
+  }
+  flush();
+  return { status: { ...status, activity: { ...status.activity, entries } }, used };
+}
+
+function budgetPlural(statuses: readonly AkumaStatus[]): readonly AkumaStatus[] {
+  let remaining = PLURAL_DETAIL_LIMIT;
+  return statuses.map((status) => {
+    const budgeted = budgetStatus(status, remaining);
+    remaining -= budgeted.used;
+    return budgeted.status;
+  });
 }
 
 function directAddress(values: Record<string, unknown>): AkumaAddressInput {
@@ -99,7 +150,7 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
     const settled = statuses.map((status) => status.life !== "running");
     if ((selected === "any" ? settled.some(Boolean) : settled.every(Boolean))
       || (deadline !== undefined && performance.now() >= deadline)) {
-      return { completion: selected, statuses };
+      return { completion: selected, statuses: statuses.length > 1 ? budgetPlural(statuses) : statuses };
     }
     await delay(deadline === undefined ? 25 : Math.min(25, Math.max(0, deadline - performance.now())));
   }
@@ -109,7 +160,13 @@ export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillR
   const addressed = await addressAkumaSet(input);
   const handles = addressed.ids.map((id) => source(addressed.path, addressed.settings).of({ id }));
   const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
-  return { results: addressed.ids.map((id, index) => ({ id, evidence: evidence[index]! })) };
+  return {
+    results: addressed.ids.map((id, index) => ({
+      id,
+      evidence: evidence[index]!,
+      observation: readActionFeedbackStatus(addressed.path, id),
+    })),
+  };
 }
 
 export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult> {
@@ -121,7 +178,7 @@ export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult>
   const addressed = addressAkuma(directAddress(values));
   const handle = source(addressed.path, addressed.settings).of({ id: addressed.id });
   const tell = await handle.tell(values.body);
-  return { akuma: addressed.id, tell, observation: handle.status() };
+  return { akuma: addressed.id, tell, observation: readActionFeedbackStatus(addressed.path, addressed.id) };
 }
 
 export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { appendActivity, initializeHeart } from "../src/akuma/heart/index.js";
+import { appendActivity, initializeHeart, recordTell } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -97,6 +97,83 @@ test("facade requires an explicit completion mode for a plural wait", async () =
   }
 });
 
+test("plural wait shares one detail budget without dropping pinned rows", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-budget-"));
+  try {
+    const sources = [];
+    for (let member = 1; member <= 5; member += 1) {
+      const source = await answered(root, "worker", String(member).padStart(8, "0"));
+      for (let index = 0; index < 5; index += 1) {
+        appendActivity(source.paths, {
+          bodySequence: 1,
+          event: { type: "assistant", text: `member-${member}-voice-${index}` },
+          at: `2026-08-11T00:00:${String(index + 1).padStart(2, "0")}.000Z`,
+        });
+      }
+      for (let index = 0; index < (member === 5 ? 3 : 2); index += 1) {
+        appendActivity(source.paths, {
+          bodySequence: 1,
+          event: { type: "note", text: `member-${member}-note-${index}` },
+          at: `2026-08-11T00:00:${String(index + 6).padStart(2, "0")}.000Z`,
+        });
+      }
+      sources.push(source);
+    }
+    appendActivity(sources[4]!.paths, {
+      bodySequence: 1,
+      event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } },
+      at: "2026-08-11T00:01:00.000Z",
+    });
+    recordTell(sources[4]!.paths, { id: "pending", body: "continue", recordedAt: "2026-08-11T00:01:01.000Z" });
+    const exhausted = await answered(root, "worker", "00000006");
+    for (let index = 0; index < 2; index += 1) {
+      appendActivity(exhausted.paths, {
+        bodySequence: 1,
+        event: { type: "note", text: `exhausted-${index}` },
+        at: `2026-08-11T00:02:0${index}.000Z`,
+      });
+    }
+    appendActivity(exhausted.paths, {
+      bodySequence: 1,
+      event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } },
+      at: "2026-08-11T00:02:02.000Z",
+    });
+    sources.push(exhausted);
+
+    const waited = await Keiyaku.wait({
+      path: root,
+      akuma: sources.map((source) => source.id),
+      completion: "all",
+      timeoutMs: 0,
+    });
+    const fifth = waited.statuses[4]!;
+    const ordinary = waited.statuses.flatMap((status) => status.activity.entries.filter((entry) =>
+      entry.kind === "row"
+        && !((entry.row.kind === "tool" && entry.row.state === "running")
+          || (entry.row.kind === "tell" && entry.row.state === "pending"))));
+    assert.equal(ordinary.length, 32);
+    assert.deepEqual(fifth.activity.entries.map((entry) => entry.kind === "gap"
+      ? `gap:${entry.count}`
+      : entry.row.kind === "said" || entry.row.kind === "note" ? entry.row.text : entry.row.kind), [
+      "gap:4",
+      "member-5-voice-4",
+      "member-5-note-0",
+      "member-5-note-1",
+      "member-5-note-2",
+      "tool",
+      "tell",
+    ]);
+    assert.equal(fifth.activity.entries.some((entry) => entry.kind === "row"
+      && entry.row.kind === "tool" && entry.row.state === "running"), true);
+    assert.equal(fifth.activity.entries.some((entry) => entry.kind === "row"
+      && entry.row.kind === "tell" && entry.row.state === "pending"), true);
+    assert.deepEqual(waited.statuses[5]!.activity.entries.map((entry) =>
+      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:2", "tool"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("facade tell preserves mutation authority beside a separate observation", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-"));
   try {
@@ -106,8 +183,8 @@ test("facade tell preserves mutation authority beside a separate observation", a
     assert.equal(result.tell.admission.fact, "recorded");
     assert.equal(typeof result.tell.admission.tellId, "string");
     assert.equal(result.observation.id, source.id);
-    assert.ok(result.observation.activity.rows.some((row) =>
-      row.kind === "tell" && row.tellId === result.tell.admission.tellId));
+    assert.ok(result.observation.activity.entries.some((entry) => entry.kind === "row"
+      && entry.row.kind === "tell" && entry.row.tellId === result.tell.admission.tellId));
     assert.equal("receipt" in result, false);
     assert.equal("status" in result, false);
   } finally {

@@ -48,8 +48,10 @@ type AkumaStatus = {
 };
 
 type ActivitySnapshot = {
-  rows: readonly ActivityRow[];
-  omitted: number;
+  entries: readonly (
+    | { kind: "row"; row: ActivityRow }
+    | { kind: "gap"; count: number }
+  )[];
   lowestRetained: number | null;
   highest: number | null;
 };
@@ -76,8 +78,8 @@ type ActivityHistory = {
 };
 
 type ActivityRow =
-  | { kind: "said"; sequence: number; bodySequence: number; at: string; text: string }
-  | { kind: "thought"; sequence: number; bodySequence: number; at: string; text: string }
+  | { kind: "said"; sequence: number; bodySequence: number; at: string; text: string; truncated?: true }
+  | { kind: "thought"; sequence: number; bodySequence: number; at: string; text: string; truncated?: true }
   | {
       kind: "tool";
       sequence: number;
@@ -88,8 +90,9 @@ type ActivityRow =
       name: string;
       call: ToolCall;
       state: "running" | ToolResult;
+      truncated?: true;
     }
-  | { kind: "note"; sequence: number; bodySequence: number; at: string; text: string }
+  | { kind: "note"; sequence: number; bodySequence: number; at: string; text: string; truncated?: true }
   | {
       kind: "tell";
       sequence: number;

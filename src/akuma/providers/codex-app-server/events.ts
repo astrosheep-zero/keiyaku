@@ -1,8 +1,6 @@
 import type { LineRpcNotification } from "../../../runtime/proc/line-rpc.js";
 import {
   AgentEventChannel,
-  boundedEventText,
-  boundedThoughtText,
   noteEvent,
   unknownEvent,
   type ToolCall,
@@ -184,7 +182,7 @@ function itemChanges(item: Readonly<Record<string, unknown>>): Extract<ToolCall,
     const diffstat = typeof change?.diff === "string" ? diffstatFromUnifiedPatch(change.diff) : undefined;
     return [{
       op,
-      path: boundedEventText(path),
+      path,
       ...(diffstat === undefined ? {} : { diffstat }),
     }];
   });
@@ -202,20 +200,20 @@ function reasoningSummary(item: Readonly<Record<string, unknown>>): string | und
 
 function itemToolCall(item: Readonly<Record<string, unknown>>, kind: string): ToolCall {
   if (kind === "commandExecution") {
-    return { kind: "run", command: boundedEventText(codexText(item.command) ?? "command") };
+    return { kind: "run", command: codexText(item.command) ?? "command" };
   }
   if (kind === "imageView") {
     const path = codexText(item.path);
-    return path === undefined ? { kind: "other", display: "image view" } : { kind: "read", path: boundedEventText(path) };
+    return path === undefined ? { kind: "other", display: "image view" } : { kind: "read", path };
   }
   if (kind === "webSearch") {
-    return { kind: "search", query: boundedEventText(codexText(item.query) ?? "web search") };
+    return { kind: "search", query: codexText(item.query) ?? "web search" };
   }
   if (kind === "fileChange") {
     const changes = itemChanges(item);
     return changes.length === 0 ? { kind: "other", display: "fileChange" } : { kind: "fileChange", changes };
   }
-  return { kind: "other", display: boundedEventText(itemToolName(item, kind)) };
+  return { kind: "other", display: itemToolName(item, kind) };
 }
 
 function itemToolResult(item: Readonly<Record<string, unknown>>): ToolResult {
@@ -226,7 +224,7 @@ function itemToolResult(item: Readonly<Record<string, unknown>>): ToolResult {
   const exitCode = typeof item.exitCode === "number" && Number.isSafeInteger(item.exitCode) ? item.exitCode : undefined;
   return {
     status: failed || (exitCode !== undefined && exitCode !== 0) ? "error" : "ok",
-    ...(detail === undefined ? {} : { message: boundedEventText(detail) }),
+    ...(detail === undefined ? {} : { message: detail }),
     ...(exitCode === undefined ? {} : { exitCode }),
   };
 }
@@ -243,7 +241,7 @@ function emitItem(item: Readonly<Record<string, unknown>>, completed: boolean, e
     const message = codexText(item.text);
     if (message !== undefined) {
       state.answers.push(message);
-      events.emit({ type: "assistant", text: boundedEventText(message) });
+      events.emit({ type: "assistant", text: message });
     }
     return;
   }
@@ -254,7 +252,7 @@ function emitItem(item: Readonly<Record<string, unknown>>, completed: boolean, e
   if (disposition === "thought") {
     if (!completed) return;
     const summary = reasoningSummary(item);
-    if (summary !== undefined) events.emit({ type: "thought", text: boundedThoughtText(summary) });
+    if (summary !== undefined) events.emit({ type: "thought", text: summary });
     return;
   }
   if (disposition === "note") {

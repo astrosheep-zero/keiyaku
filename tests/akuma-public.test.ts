@@ -83,13 +83,12 @@ test("activity fold pairs tools and bounds settled rows without dropping in-flig
     { sequence: 4, bodySequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "tool", phase: "completed", id: "orphan", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } } },
     { sequence: 5, bodySequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "tool", phase: "started", id: "open", name: "Search", call: { kind: "search", query: "TODO" } } },
   ]), {
-    rows: [
-      { kind: "tool", sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z", completedAt: "2026-08-10T00:00:03.000Z", durationMs: 2_000, name: "Bash", call: { kind: "run", command: "npm test" }, state: { status: "ok" } },
-      { kind: "note", sequence: 2, bodySequence: 1, at: "2026-08-10T00:00:02.000Z", text: "checking" },
-      { kind: "tool", sequence: 4, bodySequence: 1, at: "2026-08-10T00:00:04.000Z", name: "Read", call: { kind: "read", path: "README.md" }, state: { status: "error", message: "missing" } },
-      { kind: "tool", sequence: 5, bodySequence: 1, at: "2026-08-10T00:00:05.000Z", name: "Search", call: { kind: "search", query: "TODO" }, state: "running" },
+    entries: [
+      { kind: "row", row: { kind: "tool", sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z", completedAt: "2026-08-10T00:00:03.000Z", durationMs: 2_000, name: "Bash", call: { kind: "run", command: "npm test" }, state: { status: "ok" } } },
+      { kind: "row", row: { kind: "note", sequence: 2, bodySequence: 1, at: "2026-08-10T00:00:02.000Z", text: "checking" } },
+      { kind: "row", row: { kind: "tool", sequence: 4, bodySequence: 1, at: "2026-08-10T00:00:04.000Z", name: "Read", call: { kind: "read", path: "README.md" }, state: { status: "error", message: "missing" } } },
+      { kind: "row", row: { kind: "tool", sequence: 5, bodySequence: 1, at: "2026-08-10T00:00:05.000Z", name: "Search", call: { kind: "search", query: "TODO" }, state: "running" } },
     ],
-    omitted: 0,
     lowestRetained: 1,
     highest: 5,
   });
@@ -103,10 +102,19 @@ test("activity fold pairs tools and bounds settled rows without dropping in-flig
       event: { type: "note", text: `note-${index + 1}` },
     })),
   ]);
-  assert.equal(bounded.omitted, 2);
-  assert.deepEqual(bounded.rows.map((row) => row.sequence), [1, 4, 5, 6, 7, 8, 9, 10, 11]);
-  assert.equal(bounded.rows[0]?.kind, "tool");
-  if (bounded.rows[0]?.kind === "tool") assert.equal(bounded.rows[0].state, "running");
+  assert.deepEqual(bounded.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), [1, "gap:7", 9, 10, 11]);
+  assert.equal(bounded.entries[0]?.kind, "row");
+  if (bounded.entries[0]?.kind === "row" && bounded.entries[0].row.kind === "tool") {
+    assert.equal(bounded.entries[0].row.state, "running");
+  }
+
+  const oneHidden = selectActivitySnapshot(Array.from({ length: 9 }, (_, index) => ({
+    sequence: index + 1,
+    bodySequence: 1,
+    at: `2026-08-10T00:00:${String(index + 1).padStart(2, "0")}.000Z`,
+    event: index % 2 === 0 ? { type: "assistant" as const, text: `voice-${index}` } : { type: "note" as const, text: `note-${index}` },
+  })));
+  assert.equal(oneHidden.entries.some((entry) => entry.kind === "gap" && entry.count === 1), false);
 });
 
 test("wait timeout returns the same running status carrier", async () => {
@@ -320,14 +328,13 @@ test("public Akuma handles separate compact list rows from full status and wait"
       session: { sessionId: "public-session" },
     });
     assert.deepEqual(status.activity, {
-      rows: [{
+      entries: [{ kind: "row", row: {
         kind: "said",
         sequence: 2,
         bodySequence: 1,
         at: "2026-08-08T00:00:00.000Z",
         text: "working",
-      }],
-      omitted: 0,
+      } }],
       lowestRetained: 1,
       highest: 2,
     });
@@ -412,8 +419,8 @@ test("tell after kill wakes the same Akuma through its retained session", async 
     });
     assert.equal(readHeart(allocated.paths).latestBody?.sequence, 2);
     assert.deepEqual(readHeart(allocated.paths).pending, []);
-    assert.equal(handle.status().activity.rows.some((row) =>
-      row.kind === "tell" && row.tellId === told.admission.tellId && row.state === "told"), true);
+    assert.equal(handle.status().activity.entries.some((entry) => entry.kind === "row"
+      && entry.row.kind === "tell" && entry.row.tellId === told.admission.tellId && entry.row.state === "told"), true);
     assert.equal(handle.status().life, "asleep");
     assert.equal(handle.status().answer, "continued");
   } finally {
@@ -783,8 +790,7 @@ test("activity is persistent narration and old raw events fail the public hard c
     assert.deepEqual(handle.status(), {
       ...before,
       activity: {
-        rows: [],
-        omitted: 0,
+        entries: [],
         lowestRetained: null,
         highest: null,
       },

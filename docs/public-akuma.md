@@ -152,14 +152,27 @@ type AkumaTellResult = {
   tell: TellResult;
   observation: AkumaStatus;
 };
+
+type AkumaKillResult = {
+  results: readonly {
+    id: AkuId;
+    evidence: KillEvidence;
+    observation: AkumaStatus;
+  }[];
+};
 ```
 
 Wait and kill freeze their subject set at entry. A one-member wait defaults to
 `all`; a multi-member wait requires `completion: "any" | "all"`. Any returns
 after one member satisfies the ordinary Akuma wait predicate; all returns after
 every member does. Timeout returns one complete aggregate of fresh statuses
-and is not a streaming or partial result. Kill returns one evidence member per
-selected AkuId in the same stable order. `Keiyaku.tell` composes the handle's
+and is not a streaming or partial result. A plural aggregate carries one shared
+32-row ordinary-detail budget, equal to four complete `3 + 5` snapshots. After
+that budget is spent, later members retain life, outcome, every running tool and
+pending tell while ordinary detail collapses into typed gaps. When only part of
+one member fits, its newest ordinary detail consumes the remainder. Kill returns one
+evidence and compact post-action observation per selected AkuId in stable order.
+`Keiyaku.tell` composes the handle's
 typed mutation result with one subsequent whole-Akuma status observation. The
 two fields have separate authority: `tell` alone states what this invocation
 caused; `observation` gives the flagship current life, activity, outcomes, and

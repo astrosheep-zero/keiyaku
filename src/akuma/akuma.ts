@@ -71,7 +71,7 @@ export type AkumaStatus = AkumaListRow & Readonly<{
   activity: ActivitySnapshot;
   strandedReason?: "resume-unsupported";
 }>;
-export type { ActivityHistory, ActivityRow, ActivitySnapshot } from "./activity.js";
+export type { ActivityHistory, ActivityRow, ActivitySnapshot, ActivitySnapshotEntry } from "./activity.js";
 
 export type UnbornAkumaListRow = Readonly<{
   id: AkuId;
@@ -178,7 +178,7 @@ function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot = readHeart(pa
   };
 }
 
-function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
+function bornStatus(paths: AkumaPaths, expected: AkuId, profile: "status" | "feedback" = "status"): AkumaStatus {
   const snapshot = readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const current = bornListRow(paths, expected, snapshot);
@@ -199,9 +199,15 @@ function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
       return selectActivitySnapshot(slice.rows, {
         lowestRetained: slice.lowestRetained,
         highest: slice.highest,
+        profile,
       });
     })(),
   };
+}
+
+/** Package-internal compact observation for action feedback. */
+export function readActionFeedbackStatus(worldPath: WorldRoot, id: AkuId): AkumaStatus {
+  return bornStatus(pathsForAkuId(worldPath, id), id, "feedback");
 }
 
 function diagnostic(error: unknown): string {

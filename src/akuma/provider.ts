@@ -31,6 +31,7 @@ export type ToolEvent = Readonly<{
   id: string;
   name: string;
   call: ToolCall;
+  truncated?: true;
 }> & (
   | Readonly<{ phase: "started"; result?: never }>
   | Readonly<{ phase: "completed"; result: ToolResult }>
@@ -38,11 +39,11 @@ export type ToolEvent = Readonly<{
 
 export type AgentEvent =
   | Readonly<{ type: "session"; coordinate: ResumeCoordinate }>
-  | Readonly<{ type: "assistant"; text: string }>
-  | Readonly<{ type: "thought"; text: string }>
+  | Readonly<{ type: "assistant"; text: string; truncated?: true }>
+  | Readonly<{ type: "thought"; text: string; truncated?: true }>
   | ToolEvent
-  | Readonly<{ type: "note"; text: string }>
-  | Readonly<{ type: "unknown"; kind: string }>;
+  | Readonly<{ type: "note"; text: string; truncated?: true }>
+  | Readonly<{ type: "unknown"; kind: string; truncated?: true }>;
 
 const AGENT_EVENT_TYPES = {
   session: true,
@@ -150,24 +151,29 @@ function decodeToolResult(value: unknown): ToolResult | null {
 }
 
 function decodeToolEvent(event: Readonly<Record<string, unknown>>): ToolEvent | null {
+  if (event.truncated !== undefined && event.truncated !== true) return null;
   if (typeof event.id !== "string" || typeof event.name !== "string") return null;
   const call = decodeToolCall(event.call);
   if (call !== null && event.phase === "started" && event.result === undefined) {
-    return { type: "tool", phase: "started", id: event.id, name: event.name, call };
+    return { type: "tool", phase: "started", id: event.id, name: event.name, call,
+      ...(event.truncated === true ? { truncated: true } : {}) };
   }
   const result = decodeToolResult(event.result);
   if (call !== null && event.phase === "completed" && result !== null) {
-    return { type: "tool", phase: "completed", id: event.id, name: event.name, call, result };
+    return { type: "tool", phase: "completed", id: event.id, name: event.name, call, result,
+      ...(event.truncated === true ? { truncated: true } : {}) };
   }
   return null;
 }
 
 function decodeTypedEvent(type: AgentEvent["type"], event: Readonly<Record<string, unknown>>): AgentEvent | null {
+  if (type !== "session" && event.truncated !== undefined && event.truncated !== true) return null;
+  const truncated = event.truncated === true ? { truncated: true as const } : {};
   switch (type) {
     case "assistant":
-    case "thought": return typeof event.text === "string" ? { type, text: event.text } : null;
-    case "note": return typeof event.text === "string" ? { type, text: event.text } : null;
-    case "unknown": return typeof event.kind === "string" ? { type, kind: event.kind } : null;
+    case "thought": return typeof event.text === "string" ? { type, text: event.text, ...truncated } : null;
+    case "note": return typeof event.text === "string" ? { type, text: event.text, ...truncated } : null;
+    case "unknown": return typeof event.kind === "string" ? { type, kind: event.kind, ...truncated } : null;
     case "session": {
       const coordinate = object(event.coordinate);
       return typeof coordinate?.sessionId === "string" ? { type, coordinate: { sessionId: coordinate.sessionId } } : null;
@@ -185,54 +191,65 @@ export function decodeAgentEvent(value: unknown): AgentEvent {
   return decoded;
 }
 
-function boundedToolCall(call: ToolCall): ToolCall {
+function boundedToolCall(call: ToolCall): Readonly<{ value: ToolCall; truncated: boolean }> {
   switch (call.kind) {
-    case "run": return { kind: call.kind, command: boundedEventText(call.command) };
-    case "read": return { kind: call.kind, path: boundedEventText(call.path) };
-    case "search": return { kind: call.kind, query: boundedEventText(call.query) };
+    case "run": return { value: { kind: call.kind, command: boundedEventText(call.command) }, truncated: call.command.length > AGENT_EVENT_TEXT_LIMIT };
+    case "read": return { value: { kind: call.kind, path: boundedEventText(call.path) }, truncated: call.path.length > AGENT_EVENT_TEXT_LIMIT };
+    case "search": return { value: { kind: call.kind, query: boundedEventText(call.query) }, truncated: call.query.length > AGENT_EVENT_TEXT_LIMIT };
     case "fileChange": return {
-      kind: call.kind,
-      changes: call.changes.map((change) => ({
-        ...change,
-        path: boundedEventText(change.path),
-      })),
+      value: {
+        kind: call.kind,
+        changes: call.changes.map((change) => ({ ...change, path: boundedEventText(change.path) })),
+      },
+      truncated: call.changes.some((change) => change.path.length > AGENT_EVENT_TEXT_LIMIT),
     };
-    case "other": return { kind: call.kind, display: boundedEventText(call.display) };
+    case "other": return { value: { kind: call.kind, display: boundedEventText(call.display) }, truncated: call.display.length > AGENT_EVENT_TEXT_LIMIT };
     default: return call satisfies never;
   }
 }
 
-function boundedToolResult(result: ToolResult): ToolResult {
+function boundedToolResult(result: ToolResult): Readonly<{ value: ToolResult; truncated: boolean }> {
   return {
-    status: result.status,
-    ...(result.message === undefined ? {} : { message: boundedEventText(result.message) }),
-    ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+    value: {
+      status: result.status,
+      ...(result.message === undefined ? {} : { message: boundedEventText(result.message) }),
+      ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+    },
+    truncated: result.message !== undefined && result.message.length > AGENT_EVENT_TEXT_LIMIT,
   };
 }
 
 export function encodeAgentEvent(event: AgentEvent): unknown {
+  const marked = (value: Readonly<Record<string, unknown>>, changed: boolean): unknown => ({
+    ...value,
+    ...(changed || ("truncated" in event && event.truncated === true) ? { truncated: true } : {}),
+  });
   switch (event.type) {
     case "session": return { type: event.type, coordinate: { sessionId: event.coordinate.sessionId } };
-    case "assistant": return { type: event.type, text: boundedEventText(event.text) };
-    case "thought": return { type: event.type, text: boundedThoughtText(event.text) };
-    case "note": return { type: event.type, text: boundedEventText(event.text) };
-    case "unknown": return { type: event.type, kind: boundedEventText(event.kind) };
-    case "tool": return event.phase === "started"
-      ? {
+    case "assistant": return marked({ type: event.type, text: boundedEventText(event.text) }, event.text.length > AGENT_EVENT_TEXT_LIMIT);
+    case "thought": return marked({ type: event.type, text: boundedThoughtText(event.text) }, event.text.length > AGENT_THOUGHT_TEXT_LIMIT);
+    case "note": return marked({ type: event.type, text: boundedEventText(event.text) }, event.text.length > AGENT_EVENT_TEXT_LIMIT);
+    case "unknown": return marked({ type: event.type, kind: boundedEventText(event.kind) }, event.kind.length > AGENT_EVENT_TEXT_LIMIT);
+    case "tool": {
+      const call = boundedToolCall(event.call);
+      const name = boundedEventText(event.name);
+      const result = event.phase === "completed" ? boundedToolResult(event.result) : undefined;
+      return marked(event.phase === "started" ? {
           type: event.type,
           id: event.id,
           phase: event.phase,
-          name: boundedEventText(event.name),
-          call: boundedToolCall(event.call),
+          name,
+          call: call.value,
         }
       : {
           type: event.type,
           id: event.id,
           phase: event.phase,
-          name: boundedEventText(event.name),
-          call: boundedToolCall(event.call),
-          result: boundedToolResult(event.result),
-        };
+          name,
+          call: call.value,
+          result: result!.value,
+        }, name !== event.name || call.truncated || result?.truncated === true);
+    }
     default: return event satisfies never;
   }
 }
@@ -246,7 +263,7 @@ export function boundedThoughtText(value: string): string {
 }
 
 export function noteEvent(note: string): Extract<AgentEvent, { type: "note" }> {
-  return { type: "note", text: boundedEventText(note.replace(/\s+/g, " ").trim()) };
+  return { type: "note", text: note.replace(/\s+/g, " ").trim() };
 }
 
 export function unknownEvent(kind: string): Extract<AgentEvent, { type: "unknown" }> {

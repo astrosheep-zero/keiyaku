@@ -30,7 +30,10 @@ function writeTask(command: ParsedTaskCommand, result: TaskInvocationResult): nu
 }
 
 function writeAkuma(command: Parameters<typeof renderAkumaText>[0], result: AkumaInvocationResult): number {
-  const output = command.output === "json" ? renderAkumaJson(command, result) : renderAkumaText(command, result);
+  const output = command.output === "json" ? renderAkumaJson(command, result) : renderAkumaText(command, result, {
+    columns: process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : 80,
+    color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
+  });
   const rawLast = command.command === "history" && command.last && command.output === "text";
   process.stdout.write(rawLast ? output : `${output}\n`);
   return akumaExitCode(result);

@@ -122,11 +122,15 @@ both timestamps, derives completed duration, projects each tell as exactly one
 produces semantic rows before any budget is applied. A completed event whose
 start was pruned is a settled row without duration; a retained start without
 completion is in flight. The snapshot selector pins every in-flight tool and
-every pending tell outside its budget, selects the newest eight settled
-semantic rows, and additionally
-retains the newest two `say` or `thought` rows even when they precede that tail.
-One omitted interval becomes one derived gap whose count is semantic rows, not
-stored events. `status()` and `wait()` use this one selector. Full history pages
+every pending tell outside its budget, selects the newest three settled
+semantic rows, and additionally retains the newest five `say` or `thought`
+rows even when they precede that tail. It deduplicates the union and returns
+semantic order as typed `row | gap` entries. Each hidden interval stays at its
+actual position and counts folded semantic rows, not stored events or sequence
+differences. A one-row interval is expanded as its original row; only two or
+more hidden rows become `gap`. `status()` and `wait()` use this one selector.
+Action feedback uses the same fold and selector with only the tail-three settled
+budget while retaining the same in-flight and pending pins. Full history pages
 do not apply snapshot pinning or category budgets.
 
 `readTurns()` is the sole retained completed-turn projection. Its named row

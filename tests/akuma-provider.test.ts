@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
+  AGENT_EVENT_TEXT_LIMIT,
   decodeAgentEvent,
   encodeAgentEvent,
   noteEvent,
@@ -34,6 +35,10 @@ test("provider activity codec round trips every closed event and tool-call arm",
     { type: "tool", phase: "started", id: "other", name: "MCP", call: { kind: "other", display: "server/tool" } },
   ];
   for (const event of events) assert.deepEqual(decodeAgentEvent(encodeAgentEvent(event)), event);
+  const truncated = decodeAgentEvent(encodeAgentEvent({ type: "assistant", text: "x".repeat(AGENT_EVENT_TEXT_LIMIT + 1) }));
+  assert.deepEqual(truncated, { type: "assistant", text: "x".repeat(AGENT_EVENT_TEXT_LIMIT), truncated: true });
+  const truncatedNote = decodeAgentEvent(encodeAgentEvent(noteEvent("x".repeat(AGENT_EVENT_TEXT_LIMIT + 1))));
+  assert.deepEqual(truncatedNote, { type: "note", text: "x".repeat(AGENT_EVENT_TEXT_LIMIT), truncated: true });
   assert.throws(
     () => decodeAgentEvent({ type: "tool", phase: "completed", id: "bad", name: "Bash", call: { kind: "run", command: "x" } }),
     /invalid event shape/u,

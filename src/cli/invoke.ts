@@ -351,7 +351,7 @@ async function invokeStatus(parsed: Extract<ParsedCommand, { command: "status" }
       });
       if (address.kind === "akuma") {
         if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-        return invokeAkumaStatus(world, address.id, configuration);
+        return invokeAkumaStatus(world, address.id, configuration, parsed.contract);
       }
       const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
       return { kind: "status" as const, report: selectKanshi({ report, contract: address.id }), selection: "contract" as const };

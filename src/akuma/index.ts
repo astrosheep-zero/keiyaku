@@ -11,6 +11,7 @@ export type {
   ActivityHistory,
   ActivityRow,
   ActivitySnapshot,
+  ActivitySnapshotEntry,
   ForkReceipt,
   InterruptReceipt,
   TellResult,

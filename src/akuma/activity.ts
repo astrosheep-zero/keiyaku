@@ -1,12 +1,12 @@
 import { decodeAgentEvent, type ToolCall, type ToolResult } from "./provider.js";
 import type { ActivityFact, ActivitySlice, TellFact, TimelineFact, TurnFact } from "./heart/index.js";
 
-const SETTLED_LIMIT = 8;
-const INTENT_LIMIT = 2;
+const TAIL_LIMIT = 3;
+const VOICE_LIMIT = 5;
 
 export type ActivityRow =
-  | Readonly<{ kind: "said"; sequence: number; bodySequence: number; at: string; text: string }>
-  | Readonly<{ kind: "thought"; sequence: number; bodySequence: number; at: string; text: string }>
+  | Readonly<{ kind: "said"; sequence: number; bodySequence: number; at: string; text: string; truncated?: true }>
+  | Readonly<{ kind: "thought"; sequence: number; bodySequence: number; at: string; text: string; truncated?: true }>
   | Readonly<{
       kind: "tool";
       sequence: number;
@@ -17,8 +17,9 @@ export type ActivityRow =
       name: string;
       call: ToolCall;
       state: "running" | ToolResult;
+      truncated?: true;
     }>
-  | Readonly<{ kind: "note"; sequence: number; bodySequence: number; at: string; text: string }>
+  | Readonly<{ kind: "note"; sequence: number; bodySequence: number; at: string; text: string; truncated?: true }>
   | Readonly<{
       kind: "tell";
       sequence: number;
@@ -29,11 +30,16 @@ export type ActivityRow =
     }>;
 
 export type ActivitySnapshot = Readonly<{
-  rows: readonly ActivityRow[];
-  omitted: number;
+  entries: readonly ActivitySnapshotEntry[];
   lowestRetained: number | null;
   highest: number | null;
 }>;
+
+export type ActivitySnapshotEntry =
+  | Readonly<{ kind: "row"; row: ActivityRow }>
+  | Readonly<{ kind: "gap"; count: number }>;
+
+export type ActivitySnapshotProfile = "status" | "feedback";
 
 export type ActivityHistory = Readonly<{
   rows: readonly ActivityRow[];
@@ -61,12 +67,28 @@ function toolKey(bodySequence: number, id: string): string {
 
 function narrationRow(fact: ActivityFact, event: ReturnType<typeof decodeAgentEvent>): ActivityRow | null {
   if (event.type === "assistant") {
-    return { kind: "said", sequence: fact.sequence, bodySequence: fact.bodySequence, at: fact.at, text: event.text };
+    return { kind: "said", sequence: fact.sequence, bodySequence: fact.bodySequence, at: fact.at, text: event.text,
+      ...(event.truncated === true ? { truncated: true } : {}) };
   }
   if (event.type === "thought" || event.type === "note") {
-    return { kind: event.type, sequence: fact.sequence, bodySequence: fact.bodySequence, at: fact.at, text: event.text };
+    return { kind: event.type, sequence: fact.sequence, bodySequence: fact.bodySequence, at: fact.at, text: event.text,
+      ...(event.truncated === true ? { truncated: true } : {}) };
   }
   return null;
+}
+
+function tellRow(fact: TellFact): Folded {
+  return {
+    settled: fact.state !== "pending",
+    row: {
+      kind: "tell",
+      sequence: fact.sequence,
+      at: fact.recordedAt,
+      tellId: fact.id,
+      text: fact.body,
+      state: fact.state,
+    },
+  };
 }
 
 /** Fold the complete retained typed event window before any display budget. */
@@ -75,17 +97,7 @@ export function foldActivity(facts: readonly TimelineFact[]): readonly ActivityR
   const running = new Map<string, number>();
   for (const fact of facts) {
     if (!("event" in fact)) {
-      rows.push({
-        settled: fact.state !== "pending",
-        row: {
-          kind: "tell",
-          sequence: fact.sequence,
-          at: fact.recordedAt,
-          tellId: fact.id,
-          text: fact.body,
-          state: fact.state,
-        },
-      });
+      rows.push(tellRow(fact));
       continue;
     }
     const event = decodeAgentEvent(fact.event);
@@ -108,6 +120,7 @@ export function foldActivity(facts: readonly TimelineFact[]): readonly ActivityR
           name: event.name,
           call: event.call,
           state: "running",
+          ...(event.truncated === true ? { truncated: true } : {}),
         },
       });
       running.set(key, index);
@@ -125,6 +138,7 @@ export function foldActivity(facts: readonly TimelineFact[]): readonly ActivityR
           name: event.name,
           call: event.call,
           state: event.result,
+          ...(event.truncated === true ? { truncated: true } : {}),
         },
       });
       continue;
@@ -144,6 +158,7 @@ export function foldActivity(facts: readonly TimelineFact[]): readonly ActivityR
         name: event.name,
         call: event.call,
         state: event.result,
+        ...(started.truncated === true || event.truncated === true ? { truncated: true } : {}),
       },
     };
     running.delete(key);
@@ -154,23 +169,43 @@ export function foldActivity(facts: readonly TimelineFact[]): readonly ActivityR
 /** Apply the one bounded recent selection after folding semantic rows. */
 export function selectActivitySnapshot(
   facts: readonly TimelineFact[],
-  input: Readonly<{ lowestRetained?: number | null; highest?: number | null }> = {},
+  input: Readonly<{
+    lowestRetained?: number | null;
+    highest?: number | null;
+    profile?: ActivitySnapshotProfile;
+  }> = {},
 ): ActivitySnapshot {
   const folded = foldActivity(facts);
   const settled = folded.filter((row) =>
     (row.kind !== "tool" || row.state !== "running") && (row.kind !== "tell" || row.state !== "pending"));
-  const selected = new Set<ActivityRow>(settled.slice(-SETTLED_LIMIT));
-  const intent = settled.filter((row) => row.kind === "said" || row.kind === "thought").slice(-INTENT_LIMIT);
-  for (const row of intent) selected.add(row);
+  const selected = new Set<ActivityRow>(settled.slice(-TAIL_LIMIT));
+  if ((input.profile ?? "status") === "status") {
+    const voice = settled.filter((row) => row.kind === "said" || row.kind === "thought").slice(-VOICE_LIMIT);
+    for (const row of voice) selected.add(row);
+  }
   for (const row of folded) {
     if ((row.kind === "tool" && row.state === "running") || (row.kind === "tell" && row.state === "pending")) {
       selected.add(row);
     }
   }
+  const entries: ActivitySnapshotEntry[] = [];
+  let hidden: ActivityRow[] = [];
+  const flush = (): void => {
+    if (hidden.length === 1) entries.push({ kind: "row", row: hidden[0]! });
+    else if (hidden.length > 1) entries.push({ kind: "gap", count: hidden.length });
+    hidden = [];
+  };
+  for (const row of folded) {
+    if (!selected.has(row)) {
+      hidden.push(row);
+      continue;
+    }
+    flush();
+    entries.push({ kind: "row", row });
+  }
+  flush();
   return {
-    rows: folded.filter((row) => selected.has(row)),
-    omitted: settled.length - [...selected].filter((row) =>
-      (row.kind !== "tool" || row.state !== "running") && (row.kind !== "tell" || row.state !== "pending")).length,
+    entries,
     lowestRetained: input.lowestRetained ?? (facts[0]?.sequence ?? null),
     highest: input.highest ?? (facts.at(-1)?.sequence ?? null),
   };

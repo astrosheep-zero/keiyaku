@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { initializeHeart, recordTurn } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
@@ -96,53 +97,60 @@ test("Akuma status aligns and counts omitted activity", () => {
     confinement: { kind: "unconfined" as const },
     pending: [],
     activity: {
-      rows: [{
+      entries: [{ kind: "gap" as const, count: 12 }, { kind: "row" as const, row: {
         kind: "note" as const,
         sequence: 13,
         bodySequence: 1,
         at: "2026-08-10T16:42:00.000Z",
         text: "running tests",
-      }],
-      omitted: 12,
+      } }],
       lowestRetained: 1,
       highest: 13,
     },
   };
   const result = { kind: "akuma" as const, action: "status" as const, status };
   const lines = renderAkumaText(command, result).split("\n");
+  assert.match(lines[0]!, /^aku\/worker\/1234abcd ─+$/u);
   assert.equal(lines[1], "      ⋮ +12");
   assert.equal(lines[1]!.indexOf("⋮"), lines[2]!.indexOf("│"));
-  assert.equal((akumaJsonValue(command, result) as typeof status).activity.omitted, 12);
+  assert.match(lines[2]!, /^\d{2}:42 │ {5}note running tests$/u);
+  assert.equal(lines.at(-1), "      ● running");
+  assert.deepEqual((akumaJsonValue(command, result) as typeof status).activity.entries[0], { kind: "gap", count: 12 });
 
-  const complete = { ...result, status: { ...status, activity: { ...status.activity, omitted: 0 } } };
+  const complete = { ...result, status: { ...status, activity: { ...status.activity, entries: status.activity.entries.slice(1) } } };
   assert.equal(renderAkumaText(command, complete).split("\n").length, lines.length - 1);
   assert.equal(renderAkumaText(command, {
     kind: "akuma",
     action: "wait",
     result: { completion: "all", statuses: [status] },
   }), renderAkumaText(command, result));
-  assert.equal(renderAkumaText(command, {
+  const aliasedWait = renderAkumaText(command, {
     kind: "akuma",
-    action: "tell",
-    mode: "ordinary",
+    action: "wait",
+    alias: "@review",
+    result: { completion: "all", statuses: [status] },
+  });
+  assert.match(aliasedWait.split("\n")[0]!, /^aku\/worker\/1234abcd \(@review\) ─+$/u);
+  const recorded = {
+    kind: "akuma",
+    action: "tell" as const,
+    mode: "ordinary" as const,
+    alias: "@review",
     body: "current input",
     result: {
       akuma: status.id,
       tell: { admission: { tellId: "tell-1", fact: "recorded" }, wake: "spawned" },
       observation: status,
     },
-  }), `${renderAkumaText(command, result)}\n      │ ⧗ tell   \"current input\"`);
+  };
+  const recordedText = renderAkumaText(command, recorded);
+  assert.match(recordedText.split("\n")[0]!, /^aku\/worker\/1234abcd \(@review\) ─+$/u);
+  assert.match(recordedText, /│ {3}⧗ tell “current input”\n {6}● running$/u);
+  assert.deepEqual(akumaJsonValue(command, recorded), recorded.result);
   assert.equal(renderAkumaText(command, {
-    kind: "akuma",
-    action: "tell",
-    mode: "ordinary",
-    body: "current input",
-    result: {
-      akuma: status.id,
-      tell: { admission: { tellId: "tell-1", fact: "recorded" }, wake: { kind: "failed", diagnostic: "spawn\nfailed" } },
-      observation: status,
-    },
-  }), `${renderAkumaText(command, result)}\n      │ ⧗ tell   \"current input\"\nwake failed: spawn failed`);
+    ...recorded,
+    result: { ...recorded.result, tell: { admission: { tellId: "tell-1", fact: "recorded" }, wake: { kind: "failed" as const, diagnostic: "spawn\nfailed" } } },
+  }), `${recordedText}\nwake failed: spawn failed`);
   const observedTell = {
     kind: "akuma" as const,
     action: "tell" as const,
@@ -155,14 +163,14 @@ test("Akuma status aligns and counts omitted activity", () => {
         ...status,
         activity: {
           ...status.activity,
-          rows: [...status.activity.rows, {
+          entries: [...status.activity.entries, { kind: "row" as const, row: {
             kind: "tell" as const,
             sequence: 14,
             at: "2026-08-10T16:43:00.000Z",
             tellId: "tell-1",
             text: "current input",
             state: "told" as const,
-          }],
+          } }],
         },
       },
     },
@@ -208,7 +216,7 @@ test("akuma call renders optional integration stages and maps partial success", 
       },
     },
   };
-  assert.equal(renderAkumaText(command, integrated), `${akuma}\ndispatch kei/work\nalias @worker`);
+  assert.equal(renderAkumaText(command, integrated), `${akuma} (@worker)\ndispatch kei/work`);
   assert.equal(akumaExitCode(integrated), 0);
 
   const partial = {
@@ -236,7 +244,7 @@ test("akuma call renders optional integration stages and maps partial success", 
           confinement: { kind: "unconfined" as const },
           pending: [],
           answer: "finished",
-          activity: { rows: [], omitted: 0, lowestRetained: null, highest: null },
+          activity: { entries: [], lowestRetained: null, highest: null },
         },
       },
     },
@@ -402,14 +410,13 @@ test("Akuma status, wait, and history share public observations without embeddin
     assert.equal(statusResult.status.answer, "cli answer");
     assert.equal("history" in statusResult.status, false);
     assert.deepEqual(statusResult.status.activity, {
-      rows: [{
+      entries: [{ kind: "row", row: {
         kind: "said",
         sequence: 2,
         bodySequence: 1,
         at: "2026-08-08T00:00:00.000Z",
         text: "cli activity",
-      }],
-      omitted: 0,
+      } }],
       lowestRetained: 1,
       highest: 2,
     });
@@ -420,6 +427,10 @@ test("Akuma status, wait, and history share public observations without embeddin
     assert.equal("kind" in waitResult && waitResult.kind, "akuma");
     if (!("kind" in waitResult) || waitResult.kind !== "akuma" || waitResult.action !== "wait") return;
     assert.deepEqual(waitResult.result.statuses, [statusResult.status]);
+    await moveAlias({ world: root, alias: "@review", akuId: allocated.id });
+    const aliasWait = await invoke(parseArgv(["-C", root, "wait", "@review", "--timeout", "0ms"]));
+    assert.equal("kind" in aliasWait && aliasWait.kind === "akuma" && aliasWait.action === "wait"
+      ? aliasWait.alias : undefined, "@review");
 
     recordTurn(allocated.paths, {
       bodySequence: 1,

@@ -20,6 +20,56 @@ export function displayColumns(value: string): number {
   return columns;
 }
 
+export function takeDisplayColumns(value: string, maximum: number): Readonly<{ text: string; rest: string }> {
+  const characters = [...value];
+  let columns = 0;
+  let index = 0;
+  for (; index < characters.length; index += 1) {
+    const width = characterColumns(characters[index]!);
+    if (columns + width > maximum) break;
+    columns += width;
+  }
+  return { text: characters.slice(0, index).join(""), rest: characters.slice(index).join("") };
+}
+
+export function truncateDisplayText(value: string, maximum: number): string {
+  const clean = safeText(value);
+  if (displayColumns(clean) <= maximum) return clean;
+  if (maximum <= 0) return "";
+  if (maximum === 1) return "…";
+  return `${takeDisplayColumns(clean, maximum - 1).text.replace(/…+$/u, "")}…`;
+}
+
+export function renderBoundedTextBlock(
+  value: string,
+  input: Readonly<{ first: string; continuation: string; columns: number; lines?: number; truncated?: boolean }>,
+): readonly string[] {
+  const maximumLines = input.lines ?? 3;
+  let rest = safeText(value).replace(/\s+/gu, " ").trim();
+  const lines: string[] = [];
+  for (let index = 0; index < maximumLines && rest.length > 0; index += 1) {
+    const prefix = index === 0 ? input.first : input.continuation;
+    const budget = Math.max(1, input.columns - displayColumns(prefix));
+    if (index === maximumLines - 1) {
+      const force = input.truncated === true || displayColumns(rest) > budget;
+      lines.push(`${prefix}${force ? truncateDisplayText(`${rest}…`, budget) : rest}`);
+      rest = "";
+      break;
+    }
+    if (displayColumns(rest) <= budget) {
+      lines.push(`${prefix}${input.truncated === true ? truncateDisplayText(`${rest}…`, budget) : rest}`);
+      rest = "";
+      break;
+    }
+    const taken = takeDisplayColumns(rest, budget);
+    let split = taken.text.lastIndexOf(" ");
+    if (split < Math.floor(taken.text.length / 2)) split = taken.text.length;
+    lines.push(`${prefix}${taken.text.slice(0, split).trimEnd()}`);
+    rest = `${taken.text.slice(split)}${taken.rest}`.trimStart();
+  }
+  return lines.length === 0 ? [input.first.trimEnd()] : lines;
+}
+
 export function safeText(value: string): string {
   return value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => /\s/u.test(character) ? " " : "�");
 }

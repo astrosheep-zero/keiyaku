@@ -175,6 +175,12 @@ The provider codec is the sole persistence-bound judge; session coordinates and
 tool pairing ids are never truncated. `unknown` contains only the unmapped native kind or method name
 and never carries the native payload.
 
+When that codec shortens any persisted narration, tool name, call, result, or
+unknown-kind text, the typed event carries `truncated: true`; ordinary shorter
+events omit the field. Adapters provide their complete translated value and do
+not pre-truncate it, so the codec remains the only judge and the activity fold
+can preserve exact truncation evidence for public rendering.
+
 Activity is persistent execution narration. Deleting retained activity changes
 history and recent snapshots, but never recovery, resume, fork, outcome,
 failure, or life. Complete answer bytes and fork coordinates remain
