@@ -17,9 +17,26 @@ import {
 import { deliveryWorktreePath } from "./git/workspace.js";
 
 const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
+const APPOINTMENT_DESCRIPTION = "This is a read-only projection. Do not edit manually.";
 
 function appointmentBytes(contract: ContractId): string {
-  return `---\ncontract: ${contract}\n---\n`;
+  return `---\ncontract: ${contract}\ndescription: ${APPOINTMENT_DESCRIPTION}\n---\n`;
+}
+
+function appointedContract(bytes: string): ContractId | undefined {
+  const lines = bytes.split(/\r?\n/u);
+  if (lines[0] !== "---") return undefined;
+  const close = lines.indexOf("---", 1);
+  if (close !== 2 && close !== 3) return undefined;
+  const identity = lines[1];
+  const description = lines[2];
+  if (identity === undefined || !identity.startsWith("contract: ")) return undefined;
+  if (close === 3 && (description === undefined || !description.startsWith("description: "))) return undefined;
+  try {
+    return contractId(identity.slice("contract: ".length));
+  } catch {
+    return undefined;
+  }
 }
 
 function renderArc(arc: ArcData): string {
@@ -100,13 +117,8 @@ export async function readContractAppointment(repository: GitRepository): Promis
   });
   if (stat === undefined) return { kind: "absent", path };
   if (!stat.isFile() || stat.isSymbolicLink()) return { kind: "invalid", path };
-  const match = /^---\r?\ncontract: ([^\r\n]+)\r?\n---(?:\r?\n|$)/u.exec(await readFile(path, "utf8"));
-  if (match?.[1] === undefined) return { kind: "invalid", path };
-  try {
-    return { kind: "appointed", path, contract: contractId(match[1]) };
-  } catch {
-    return { kind: "invalid", path };
-  }
+  const contract = appointedContract(await readFile(path, "utf8"));
+  return contract === undefined ? { kind: "invalid", path } : { kind: "appointed", path, contract };
 }
 
 export type ContractReservation =

@@ -293,9 +293,12 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   assert.deepEqual(state.terms.after, []);
   assert.deepEqual(state.terms.gates, []);
   const guidance = await bound.keiyaku.guidance();
-  assert.ok(guidance.startsWith("---\ncontract: kei/markdown-input\n---\n\n"));
+  assert.ok(guidance.startsWith(
+    "---\ncontract: kei/markdown-input\ndescription: This is a read-only projection. Do not edit manually.\n---\n\n",
+  ));
   assert.ok(guidance.includes(markdown("Markdown input")));
   assert.equal(guidance.match(/^## Fulfillment$/gmu)?.length, 1);
+  assert.equal(readFileSync(resolve(repo.root, ".keiyaku", "KEIYAKU.md"), "utf8"), guidance);
 
   const sameTitle = await Keiyaku.bind({ repo, markdown: markdown("Markdown input"), workspace: "worktree" });
   assert.match((await sameTitle.keiyaku.state()).id, /^kei\/markdown-input-[0-9a-f]{16}$/);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { AuthorityCorruptionError, Keiyaku, Repo } from "../src/index.js";
@@ -567,6 +567,46 @@ test("protocol bind does not own here-worktree appointment", async () => {
     workspace: "here",
   });
   assert.equal(second.kind, "accepted");
+});
+
+test("here appointment identity is the contract field and reservation cleanup is exact", async () => {
+  const repository = repositoryWithHead();
+  const git = await repositoryAt(repository.path);
+  const id = contractId("kei/appointment-identity");
+  const reserved = await reserveContractWorktree(git, id);
+  assert.equal(reserved.kind, "reserved");
+  const path = reserved.path;
+  const canonical = "---\ncontract: kei/appointment-identity\ndescription: This is a read-only projection. Do not edit manually.\n---\n";
+  assert.equal(readFileSync(path, "utf8"), canonical);
+
+  const again = await reserveContractWorktree(git, contractId("kei/other"));
+  assert.deepEqual(again, { kind: "appointed", path, contract: id });
+
+  chmodSync(path, 0o644);
+  writeFileSync(path, "---\ncontract: kei/appointment-identity\n---\n");
+  assert.deepEqual(await reserveContractWorktree(git, contractId("kei/other")), { kind: "appointed", path, contract: id });
+
+  chmodSync(path, 0o644);
+  writeFileSync(path, "---\ncontract: kei/appointment-identity\ndescription: edited by hand\n---\n");
+  assert.deepEqual(await reserveContractWorktree(git, contractId("kei/other")), { kind: "appointed", path, contract: id });
+  await releaseContractWorktree(git, id);
+  assert.equal(readFileSync(path, "utf8"), "---\ncontract: kei/appointment-identity\ndescription: edited by hand\n---\n");
+
+  chmodSync(path, 0o644);
+  writeFileSync(path, canonical);
+  await releaseContractWorktree(git, id);
+  assert.equal(existsSync(path), false);
+
+  writeFileSync(path, "---\ncontract: kei/appointment-identity\ncontract: kei/other\n---\n");
+  assert.deepEqual(await reserveContractWorktree(git, id), { kind: "invalid", path });
+
+  chmodSync(path, 0o644);
+  writeFileSync(path, "---\ndescription: This is a read-only projection. Do not edit manually.\ncontract: kei/appointment-identity\n---\n");
+  assert.deepEqual(await reserveContractWorktree(git, id), { kind: "invalid", path });
+
+  chmodSync(path, 0o644);
+  writeFileSync(path, "---\ncontract: kei/appointment-identity\ndescription: line one\n  line two\n---\n");
+  assert.deepEqual(await reserveContractWorktree(git, id), { kind: "invalid", path });
 });
 
 test("bind never restores a targeted here checkout that moved to a same-OID branch", async () => {

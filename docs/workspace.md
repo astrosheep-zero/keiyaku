@@ -9,7 +9,18 @@ terminal cleanup. The journal remains the sole Contract authority.
 
 One pure renderer consumes a current `ContractState` and emits, in order:
 
-1. YAML frontmatter containing exactly `contract: <ContractId>`.
+1. YAML frontmatter containing exactly these bytes in this order:
+
+```yaml
+---
+contract: <ContractId>
+description: This is a read-only projection. Do not edit manually.
+---
+```
+
+The description is fixed ASCII product copy, not caller input, persisted
+Contract data, lifecycle evidence, or a second appointment coordinate.
+`contract` remains the only identity read from the frontmatter.
 2. The exact admitted source Contract Markdown.
 3. The current Arc, when present.
 4. Exactly one `Fulfillment` H2 with ordered `Appointment`, `Worktree`,
@@ -22,10 +33,13 @@ file as a derived view and requires work to remain in its Contract worktree.
 lifecycle. `Reviewer` reviews the complete current worktree snapshot without
 modifying it. Candidate commits are only for historical review.
 
-The same renderer feeds `Keiyaku.guidance()`, `keiyaku show`, and worktree
-materialization. `show` text is exactly those bytes; JSON contains the Contract
+The same canonical frontmatter helper feeds initial here-worktree reservation
+and complete rendered guidance, so `Keiyaku.guidance()`, `keiyaku show`,
+managed worktree materialization, here projection, and reconciliation cannot
+diverge. `show` text is exactly those bytes; JSON contains the Contract
 identity and identical guidance. `audit` does not include guidance by default,
-and `--show-diff-body` retains its delivery-diff meaning.
+and `--show-diff-body` retains its delivery-diff meaning. The description is
+not a public result field.
 
 The source document reserves `Arc` and `Fulfillment` so caller extensions
 cannot collide with the derived sections. No harness identity, worker identity,
@@ -38,12 +52,23 @@ For a `here` Contract, the frontmatter in `.keiyaku/KEIYAKU.md` is the only
 worktree appointment. Bind reserves it atomically before admission while
 holding one lock scoped to the caller worktree. An existing valid, invalid, or
 foreign appointment refuses another here bind. A failed admission releases
-only the exact reservation it created. A terminal Contract removes its own
-appointment; it never removes a foreign or replaced file.
+only the exact reservation bytes it created. A terminal Contract removes its
+own appointment; it never removes a foreign or replaced file.
+
+Appointment reading recognizes the current canonical two-field projection. It
+also recognizes the previous derived one-field form and a one-line manually
+changed description when the first and only identity field is a valid
+`contract`. Those bytes still appoint the same Contract; the next successful
+projection restores the canonical description. Missing, duplicate, reordered,
+multiline, or additional identity fields remain invalid. This repair
+tolerance is only for derived workspace custody and creates no compatibility
+or migration path for journal facts.
 
 The file is not imported into Contract state. Editing it cannot amend,
 reappoint, or otherwise change the journal. When the intended appointment is
-known, a later workspace projection restores canonical bytes.
+known, a later workspace projection restores canonical bytes. Terminal
+cleanup and foreign-appointment refusal use the parsed Contract identity and
+never treat the description as lifecycle authority.
 
 ## Materialization And Cleanup
 

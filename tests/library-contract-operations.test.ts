@@ -1,19 +1,27 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
-function appoint(repositoryPath: string, contract: string): string {
+const CANONICAL_DESCRIPTION = "This is a read-only projection. Do not edit manually.";
+
+function appoint(repositoryPath: string, contract: string, description?: string): string {
   const root = realpathSync(repositoryPath);
   const path = resolve(root, ".keiyaku", "KEIYAKU.md");
   mkdirSync(resolve(root, ".keiyaku"), { recursive: true });
-  writeFileSync(path, `---\ncontract: ${contract}\n---\n`);
+  writeFileSync(path, description === undefined
+    ? `---\ncontract: ${contract}\n---\n`
+    : `---\ncontract: ${contract}\ndescription: ${description}\n---\n`);
   return path;
+}
+
+function appointmentPath(repositoryPath: string): string {
+  return resolve(realpathSync(repositoryPath), ".keiyaku", "KEIYAKU.md");
 }
 
 test("here bind preserves and refuses an appointment whose journal is missing", async () => {
@@ -43,6 +51,115 @@ test("here bind preserves and refuses a residual terminal appointment", async ()
     refused({ kind: "here-worktree-appointed", path, contract }),
   );
 
+  assert.equal(readFileSync(path, "utf8"), before);
+});
+
+test("here bind preserves a manually changed one-line description appointment", async () => {
+  const repository = repositoryWithMain();
+  const contract = "kei/edited-description";
+  const path = appoint(repository.path, contract, "edited by hand");
+  const before = readFileSync(path, "utf8");
+
+  await assert.rejects(
+    Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
+    refused({ kind: "here-worktree-appointed", path, contract }),
+  );
+
+  assert.equal(readFileSync(path, "utf8"), before);
+});
+
+test("here bind preserves an appointment with an additional identity field", async () => {
+  const repository = repositoryWithMain();
+  const path = appoint(repository.path, "kei/first");
+  const before = "---\ncontract: kei/first\ncontract: kei/second\n---\n";
+  writeFileSync(path, before);
+
+  await assert.rejects(
+    Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
+    refused({ kind: "here-worktree-appointed", path }),
+  );
+
+  assert.equal(readFileSync(path, "utf8"), before);
+});
+
+test("failed here bind releases only the exact reservation it created", async () => {
+  const repository = repositoryWithMain();
+  const path = appointmentPath(repository.path);
+
+  await assert.rejects(
+    Keiyaku.bind({
+      repo: await Repo.at({ path: repository.path }),
+      markdown: document(),
+      workspace: "here",
+      after: ["kei/missing-prerequisite"],
+    }),
+    (error: unknown) => error instanceof KeiyakuRefused && error.refusal.kind === "unknown-prerequisite",
+  );
+
+  assert.equal(existsSync(path), false);
+});
+
+test("here projection repairs a stale one-field appointment and a changed description", async () => {
+  const repository = repositoryWithMain();
+  const bound = await bind(repository);
+  const id = (await bound.state()).id;
+  const path = appointmentPath(repository.path);
+  const guidance = await bound.guidance();
+  assert.ok(guidance.startsWith(
+    `---\ncontract: ${id}\ndescription: ${CANONICAL_DESCRIPTION}\n---\n\n`,
+  ));
+
+  chmodSync(path, 0o644);
+  writeFileSync(path, `---\ncontract: ${id}\n---\n`);
+  const repairedStale = await bound.reconcile();
+  assert.equal(readFileSync(path, "utf8"), guidance);
+  assert.ok(repairedStale.effects.some((effect) => effect.kind === "contract-file" && effect.action === "updated"));
+
+  chmodSync(path, 0o644);
+  writeFileSync(path, guidance.replace(
+    `description: ${CANONICAL_DESCRIPTION}`,
+    "description: edited by hand",
+  ));
+  await bound.reconcile();
+  assert.equal(readFileSync(path, "utf8"), guidance);
+});
+
+test("here projection does not overwrite an additional identity field", async () => {
+  const repository = repositoryWithMain();
+  const bound = await bind(repository);
+  const id = (await bound.state()).id;
+  const path = appointmentPath(repository.path);
+  const before = `---\ncontract: ${id}\ncontract: kei/other\n---\n`;
+  chmodSync(path, 0o644);
+  writeFileSync(path, before);
+
+  const report = await bound.reconcile();
+  assert.equal(readFileSync(path, "utf8"), before);
+  assert.ok(report.lag.some((lag) => lag.kind === "contract-file-failed"));
+});
+
+test("terminal here cleanup uses appointment identity and ignores description", async () => {
+  const repository = repositoryWithMain();
+  const bound = await bind(repository);
+  const id = (await bound.state()).id;
+  const path = appointmentPath(repository.path);
+  chmodSync(path, 0o644);
+  writeFileSync(path, `---\ncontract: ${id}\ndescription: edited by hand\n---\n`);
+
+  await bound.abandon();
+  assert.equal(existsSync(path), false);
+});
+
+test("terminal here cleanup does not remove an invalid additional identity appointment", async () => {
+  const repository = repositoryWithMain();
+  const bound = await bind(repository);
+  const id = (await bound.state()).id;
+  const path = appointmentPath(repository.path);
+  const before = `---\ncontract: ${id}\ncontract: kei/other\n---\n`;
+  chmodSync(path, 0o644);
+  writeFileSync(path, before);
+
+  await bound.abandon();
   assert.equal(readFileSync(path, "utf8"), before);
 });
 

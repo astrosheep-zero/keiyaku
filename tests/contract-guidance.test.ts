@@ -34,7 +34,9 @@ function state(currentArc: ContractState["currentArc"]): ContractState {
 test("guidance preserves source bytes and appends one Fulfillment H2", () => {
   const guidance = renderContractGuidance(state(undefined));
 
-  assert.ok(guidance.startsWith("---\ncontract: kei/guidance\n---\n\n"));
+  assert.ok(guidance.startsWith(
+    "---\ncontract: kei/guidance\ndescription: This is a read-only projection. Do not edit manually.\n---\n\n",
+  ));
   assert.ok(guidance.includes(source.trimEnd()));
   assert.equal(guidance.match(/^## Fulfillment$/gm)?.length, 1);
   assert.match(guidance, /^### Appointment$/m);

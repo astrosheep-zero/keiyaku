@@ -90,12 +90,16 @@ test("show returns the canonical Contract guidance in text and JSON projections"
   const bound = await invokeWithDocument(repository.path, ["bind", "-"], source);
   const id = acceptedContract(bound);
   const expected = await Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id }).guidance();
+  assert.ok(expected.startsWith(
+    `---\ncontract: ${id}\ndescription: This is a read-only projection. Do not edit manually.\n---\n\n`,
+  ));
 
   const text = await invokeWithDocument(repository.path, ["show", id], "");
   assert.deepEqual(text, { kind: "guidance", contract: id, guidance: expected });
 
   const json = await invokeWithDocument(repository.path, ["show", `@${id.slice("kei/".length)}`, "--json"], "");
   assert.deepEqual(json, { kind: "guidance", contract: id, guidance: expected });
+  assert.deepEqual(Object.keys(json), ["kind", "contract", "guidance"]);
 
   await assert.rejects(
     () => invokeWithDocument(repository.path, ["show", "kei/missing"], ""),
