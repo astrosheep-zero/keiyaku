@@ -213,7 +213,10 @@ test("Akuma snapshot rows use fixed semantic line budgets", () => {
       ...base,
       timeline,
     };
-    return renderAkumaText(command, { kind: "akuma", action: "status", status: { status } }, { columns: 34, color: false }).split("\n").slice(2);
+    const rendered = renderAkumaText(command, { kind: "akuma", action: "status", status: { status } }, { columns: 34, color: false }).split("\n");
+    const footer = rendered.findIndex((line) => line === "● running");
+    assert.ok(footer > 2);
+    return rendered.slice(2, footer - 1);
   };
   const rows: readonly Readonly<{ kind: import("../src/akuma/index.js").ActivityRow["kind"]; lines: number; row: import("../src/akuma/index.js").ActivityRow }>[] = [
     {
@@ -300,7 +303,7 @@ test("ordinary tell leads with mutation authority before an asleep observation",
     },
   };
   const text = renderAkumaText(command, result);
-  assert.equal(text, "aku/worker/1234abcd");
+  assert.equal(text.split("\n")[0], "aku/worker/1234abcd");
   assert.deepEqual(akumaJsonValue(command, result), result.result);
 });
 
@@ -346,9 +349,96 @@ test("Akuma voice is bounded and active tools carry the live mark", () => {
   const narrowLines = narrow.split("\n");
   const voiceStart = narrowLines.findIndex((line) => line.startsWith("· say: "));
   assert.ok(voiceStart >= 0);
-  const voice = narrowLines.slice(1).join("\n");
+  const voice = narrowLines.slice(voiceStart, narrowLines.indexOf("", voiceStart)).join("\n");
   assert.match(voice, /alpha/u);
   assert.match(voice, /…$/u);
+});
+
+test("Akuma snapshot life uses the fleet vocabulary independently of activity", () => {
+  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
+  const base = {
+    id: "aku/worker/1234abcd" as const,
+    collar: { kind: "gone" as const, end: null },
+    timeline: { kind: "idle" as const, entries: [], omitted: 0 },
+  };
+  const cases = [
+    ["running", "● running"],
+    ["asleep", "○ asleep"],
+    ["killed", "× killed"],
+    ["stranded", "? stranded"],
+    ["headless", "? headless"],
+  ] as const;
+  for (const [life, expected] of cases) {
+    const text = renderAkumaText(command, {
+      kind: "akuma",
+      action: "status",
+      status: { status: { ...base, life } },
+    });
+    assert.ok(text.includes(expected));
+  }
+});
+
+test("Akuma status-oriented commands include life while tell excludes it", () => {
+  const id = "aku/worker/1234abcd" as const;
+  const status = {
+    id,
+    life: "running" as const,
+    collar: { kind: "alive" as const },
+    timeline: { kind: "idle" as const, entries: [], omitted: 0 },
+  };
+  const observation = { status };
+  const tell = { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const };
+  const cases = [
+    {
+      name: "status",
+      command: parseArgv(["status", id]).command,
+      result: { kind: "akuma" as const, action: "status" as const, status: observation },
+      hasLife: true,
+    },
+    {
+      name: "wait",
+      command: parseArgv(["wait", id]).command,
+      result: { kind: "akuma" as const, action: "wait" as const, result: { completion: "all" as const, statuses: [observation] } },
+      hasLife: true,
+    },
+    {
+      name: "observed call",
+      command: parseArgv(["call", "worker", "-"]).command,
+      result: {
+        kind: "akuma" as const,
+        action: "call" as const,
+        result: { kind: "called" as const, akuma: id, dispatch: { kind: "none" as const }, alias: { kind: "none" as const }, observation: { kind: "observed" as const, status } },
+      },
+      hasLife: true,
+    },
+    {
+      name: "kill",
+      command: parseArgv(["kill", id]).command,
+      result: { kind: "akuma" as const, action: "kill" as const, result: { results: [{ id, evidence: "alive-after-sigkill" as const, observation }] } },
+      hasLife: true,
+    },
+    {
+      name: "tell",
+      command: parseArgv(["tell", id, "-"]).command,
+      result: { kind: "akuma" as const, action: "tell" as const, mode: "ordinary" as const, body: "continue", result: { akuma: id, tell, observation } },
+      hasLife: false,
+    },
+    {
+      name: "interrupt tell",
+      command: parseArgv(["tell", id, "--interrupt", "-"]).command,
+      result: {
+        kind: "akuma" as const,
+        action: "tell" as const,
+        mode: "interrupt" as const,
+        body: "replace",
+        result: { id, receipt: { kind: "interrupted" as const, putDown: "self-aborted" as const, tell }, observation },
+      },
+      hasLife: false,
+    },
+  ];
+  for (const item of cases) {
+    assert.equal(renderAkumaText(item.command, item.result).includes("● running"), item.hasLife, item.name);
+  }
 });
 
 test("Akuma history distinguishes open active tools from closed unsettled tools", () => {
@@ -429,12 +519,15 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
     } }], omitted: 0 },
   };
   const text = renderAkumaText(command, { kind: "akuma", action: "status", status: { status } }, { columns: 42, color: false });
-  const activity = text.split("\n");
-  assert.equal(activity.length, 3);
-  assert.match(activity[2]!, /^⧖ run: \$ npm test/u);
-  assert.match(activity[2]!, /….*final\.json$/u);
+  const runLine = (rendered: string): string => {
+    const line = rendered.split("\n").find((candidate) => candidate.includes("run: "));
+    assert.ok(line !== undefined);
+    return line;
+  };
+  assert.match(runLine(text), /^⧖ run: \$ npm test/u);
+  assert.match(runLine(text), /….*final\.json$/u);
 
-  const completed = renderAkumaText(command, {
+  const completedText = renderAkumaText(command, {
     kind: "akuma",
     action: "status",
     status: { status: {
@@ -445,11 +538,14 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
         durationMs: 41_000,
       } }] },
     } },
-  }, { columns: 50, color: false }).split("\n").at(-1)!;
+  }, { columns: 50, color: false });
+  const completed = runLine(completedText);
   assert.match(completed, /\$ npm test/u);
   assert.match(completed, /….*inal\.json — 41s · exit 1$/u);
+  assert.match(completed, /^! run:/u);
+  assert.match(completedText, /● running/u);
 
-  const unicode = renderAkumaText(command, {
+  const unicode = runLine(renderAkumaText(command, {
     kind: "akuma",
     action: "status",
     status: { status: {
@@ -459,11 +555,11 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
         call: { kind: "run", command: "printf long-command-ending-in-界́" },
       } }] },
     } },
-  }, { columns: 24, color: false }).split("\n").at(-1)!;
+  }, { columns: 24, color: false }));
   assert.match(unicode, /….*界́$/u);
   assert.doesNotMatch(unicode, /…\p{Mark}/u);
 
-  const combiningHead = renderAkumaText(command, {
+  const combiningHead = runLine(renderAkumaText(command, {
     kind: "akuma",
     action: "status",
     status: { status: {
@@ -473,11 +569,11 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
         call: { kind: "run", command: "界́abcdefghijklmnopqrstuvwxyz-final.json" },
       } }] },
     } },
-  }, { columns: 24, color: false }).split("\n").at(-1)!;
+  }, { columns: 24, color: false }));
   assert.ok(displayColumns(combiningHead) <= 24);
   assert.match(combiningHead, /界́/u);
 
-  const narrowCompleted = renderAkumaText(command, {
+  const narrowCompleted = runLine(renderAkumaText(command, {
     kind: "akuma",
     action: "status",
     status: { status: {
@@ -488,7 +584,7 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
         durationMs: 41_000,
       } }] },
     } },
-  }, { columns: 30, color: false }).split("\n").at(-1)!;
+  }, { columns: 30, color: false }));
   assert.ok(displayColumns(narrowCompleted) <= 32);
   assert.match(narrowCompleted, /run: .*…/u);
   assert.match(narrowCompleted, /exit 1$/u);
@@ -658,7 +754,9 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
       }, contractId: "kei/provider-core-review" as const },
     },
   };
-  assert.equal(renderAkumaText(parsed.command, interrupted), "aku/claude/1d1e0004\ncontract kei/provider-core-review");
+  const interruptedText = renderAkumaText(parsed.command, interrupted);
+  assert.equal(interruptedText.split("\n")[0], "aku/claude/1d1e0004");
+  assert.match(interruptedText, /contract kei\/provider-core-review/u);
   assert.equal(akumaExitCode(interrupted), 0);
 
   const wakeFailed = {

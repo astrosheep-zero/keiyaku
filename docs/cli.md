@@ -289,38 +289,36 @@ lays those rows onto one ruler and spine. No CLI branch repairs, reselects, or
 reinterprets activity. JSON exposes the same public value with complete ISO
 `at` values and no text-only time suppression.
 
-The header is fixed for the complete rendering or a future stream: it carries
+The header is fixed for the complete rendering: it carries
 the complete AkuId, the optional frozen Alias in v3's `(@alias)` form, and the
 complete `kei/...` Contract ID when the Akuma has a Dispatch association. It
-never reverse-selects an Alias. Life and elapsed time cannot appear in the header
-because they may change after a stream fixes its head. The id already contains
-the Archetype, so the Archetype is never repeated. A one-member wait still
+never reverse-selects an Alias. Life and elapsed time do not appear in the
+identity header. The id already contains the Archetype, so the Archetype is
+never repeated. A one-member wait still
 writes a finished answer as exact bytes with no header. A plural wait prefixes
 each answered member with `✓ came back` and the identity header, then the exact
 answer bytes; a failed member keeps the bare identity header above `failure
 <diagnostic>`; a running member keeps the status spine. Members are blank-line
 separated, and one final `N/M` footer counts settled members over the total.
 No `came back first`, `N of M done`, or elapsed clocks. JSON remains
-`AkumaWaitResult`. The closed marks are `●` running, `○` nonterminal
-idle, `×` killed, `!` stillborn or warning, `│` spine, `⋮` omitted history,
-`⧗` pending tell, `told` effective tell, `✂` interrupted, and `✓`
-answered. Text never prints the storage words
-`retained`, `latest`, `body`, `heart`, or `turn`. A running tool replaces that
-row's spine glyph with `●`; there is no separate running footer and ordinary
-rows pay no extra prefix width. Activity labels use one fixed six-column field.
-A future longer label may extend its own row but never widens or shifts the page.
-An empty status snapshot adds no placeholder or negative historical claim; the
-header and available typed life evidence remain the complete observation.
+`AkumaWaitResult`. Status, wait, observed call, and kill text ends with the
+public Akuma life as a separate footer outside the activity minute groups: `●
+running`, `○ asleep`, `× killed`, `? stranded`, or `? headless`. This footer
+and each event row state independent facts; `! run` followed by `● running`
+means that command failed while the Akuma continues running. With activity
+present, one blank line separates the footer; with no activity, it directly
+follows the header facts. Ordinary and interrupt tell output omits the life
+footer because it is scoped to its input mutation and wake or interrupt result.
+History has no current life and therefore no footer. Text never prints the
+storage words `retained`, `latest`, `body`, `heart`, or `turn`.
 
 ```text
-aku/worker/1234abcd (@review) ───────────────────────────── kei/provider-core
-     ⋮ +12
-09:31│ say    “narrowing the failing suite”
-     │ run    $ npm test — 41s · exit 1
-09:32│ edit   src/akuma.ts — +12 -3
-     │ think  “the collar probe races the pid check”
-     ● run    $ npm test
-     │ ⧗ tell “also check the leash timeout”
+aku/worker/1234abcd (@review)
+contract kei/provider-core
+── 09:31 ──
+! run: $ npm test — 41s · exit 1
+
+● running
 ```
 
 Shared Akuma presentation and snapshot budgets are owned by

@@ -138,6 +138,25 @@ line.
 ⧖ run: $ npm test
 ```
 
+Status, wait, observed call, and kill snapshots end with the current Akuma life
+as an independent footer outside the displayed-minute groups. Nonempty activity
+and the footer have one blank line between them; with no activity, the footer
+directly follows the identity and association facts. The footer reads the public
+status life directly and uses the existing fleet vocabulary: `● running`, `○
+asleep`, `× killed`, `? stranded`, and `? headless`. A row mark remains local
+to that event, so a failed command followed by `● running` means the command
+failed while the Akuma continues running. Ordinary and interrupt tell output
+omits the footer because it is an input mutation receipt. History also has no
+life footer because it carries no current status observation. The header, JSON,
+timeline rows, and history model remain unchanged.
+
+```text
+── 18:09 ──
+! run: $ npm test
+
+● running
+```
+
 Post-admission physical or settlement failures remain inside the accepted
 object as typed lags. Text and JSON expose them without changing the Contract
 fact, command kind, or exit status. The adapter never hides the existing
