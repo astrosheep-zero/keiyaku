@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import type { AkuId, AkumaPaths } from "../identity.js";
 import type {
   BodyEnd,
@@ -60,9 +59,9 @@ import {
   pruneActivityFacts,
   type ActivityFactSlice,
 } from "./timeline.js";
-import { readSealFromLeash, transaction, withHeart } from "./storage.js";
+import { isHeartAbsent, readSealFromLeash, transaction, withHeart } from "./storage.js";
 import { soulFact } from "./soul.js";
-export { HeldAkumaLeash, initializeHeart, probeLeash } from "./storage.js";
+export { HeartAbsentError, HeldAkumaLeash, initializeHeart, isHeartAbsent, probeLeash } from "./storage.js";
 
 export { life } from "./facts.js";
 export type {
@@ -97,27 +96,42 @@ export type { ResumeCoordinate } from "../coordinate.js";
 
 const ACTIVITY_LIMIT = 5_000;
 
-export function readSoul(paths: AkumaPaths): Soul | null {
-  if (!existsSync(paths.heart)) return null;
-  return withHeart(paths, soulFact);
+export async function readSoul(paths: AkumaPaths): Promise<Soul | null> {
+  try {
+    return await withHeart(paths, soulFact);
+  } catch (error) {
+    if (isHeartAbsent(error)) return null;
+    throw error;
+  }
 }
 
-export function heartExists(paths: AkumaPaths): boolean { return existsSync(paths.heart); }
-
-export function readSeal(paths: AkumaPaths): SealFact | null {
-  if (!existsSync(paths.leash)) return null;
-  return readSealFromLeash(paths);
+export async function heartExists(paths: AkumaPaths): Promise<boolean> {
+  try {
+    return await withHeart(paths, () => true);
+  } catch (error) {
+    if (isHeartAbsent(error)) return false;
+    throw error;
+  }
 }
 
-export function recordSession(paths: AkumaPaths, input: Omit<SessionFact, "sequence">): SessionFact {
-  return withHeart(paths, (heart) => ({ sequence: insertSessionFact(heart, input), ...input }));
+export async function readSeal(paths: AkumaPaths): Promise<SealFact | null> {
+  try {
+    return await readSealFromLeash(paths);
+  } catch (error) {
+    if (isHeartAbsent(error)) return null;
+    throw error;
+  }
 }
 
-export function appendActivity(
+export async function recordSession(paths: AkumaPaths, input: Omit<SessionFact, "sequence">): Promise<SessionFact> {
+  return await withHeart(paths, (heart) => ({ sequence: insertSessionFact(heart, input), ...input }));
+}
+
+export async function appendActivity(
   paths: AkumaPaths,
   input: Readonly<{ turnSequence: number; event: unknown; at: string }>,
-): number {
-  return withHeart(paths, (heart) =>
+): Promise<number> {
+  return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const sequence = insertActivityFact(heart, input);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
@@ -130,16 +144,16 @@ export type ActivitySlice = ActivityFactSlice;
 export type { ActivityFact };
 export type { TimelineFact } from "./timeline.js";
 
-export function activitySlice(paths: AkumaPaths, input: ActivitySliceInput = {}): ActivitySlice {
+export async function activitySlice(paths: AkumaPaths, input: ActivitySliceInput = {}): Promise<ActivitySlice> {
   const limit = input.limit ?? ACTIVITY_LIMIT;
-  return withHeart(paths, (heart) => activityFactSlice(heart, { ...input, limit }));
+  return await withHeart(paths, (heart) => activityFactSlice(heart, { ...input, limit }));
 }
 
-export function recordTell(
+export async function recordTell(
   paths: AkumaPaths,
   tell: Omit<TellFact, "sequence" | "state" | "deliveries">,
-): Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }> {
-  return withHeart(paths, (heart) =>
+): Promise<Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }>> {
+  return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       if (soulFact(heart) === null) return { kind: "not-born" };
       const sequence = insertTellFact(heart, tell);
@@ -148,11 +162,11 @@ export function recordTell(
     }));
 }
 
-export function recordTellDeliveries(
+export async function recordTellDeliveries(
   paths: AkumaPaths,
   inputs: readonly TellDeliveryInput[],
-): void {
-  withHeart(paths, (heart) =>
+): Promise<void> {
+  await withHeart(paths, (heart) =>
     transaction(heart, () => {
       for (const input of inputs) {
         const current = tellFact(heart, input.tellId);
@@ -163,11 +177,11 @@ export function recordTellDeliveries(
     }));
 }
 
-export function recordTellReceipt(
+export async function recordTellReceipt(
   paths: AkumaPaths,
   input: TellReceiptInput,
-): void {
-  withHeart(paths, (heart) =>
+): Promise<void> {
+  await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const tellIds = input.evidence === "exact"
         ? [input.tellId]
@@ -187,11 +201,11 @@ function sameRequestInput(fact: RequestFact, input: RequestInput): boolean {
     && JSON.stringify(fact.recipe) === JSON.stringify(input.recipe);
 }
 
-export function admitRequest(
+export async function admitRequest(
   paths: AkumaPaths,
   input: RequestInput & Readonly<{ admittedAt: string }>,
-): RequestFact {
-  return withHeart(paths, (heart) =>
+): Promise<RequestFact> {
+  return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       insertRequestFact(heart, input);
       const fact = requestFact(heart, input.id);
@@ -201,8 +215,8 @@ export function admitRequest(
     }));
 }
 
-export function reserveRequest(paths: AkumaPaths, id: string, child: AkuId): RequestFact {
-  return withHeart(paths, (heart) =>
+export async function reserveRequest(paths: AkumaPaths, id: string, child: AkuId): Promise<RequestFact> {
+  return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
@@ -214,8 +228,8 @@ export function reserveRequest(paths: AkumaPaths, id: string, child: AkuId): Req
     }));
 }
 
-export function serveRequest(paths: AkumaPaths, id: string, child: AkuId): RequestFact {
-  return withHeart(paths, (heart) =>
+export async function serveRequest(paths: AkumaPaths, id: string, child: AkuId): Promise<RequestFact> {
+  return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
@@ -227,8 +241,8 @@ export function serveRequest(paths: AkumaPaths, id: string, child: AkuId): Reque
     }));
 }
 
-export function refuseRequest(paths: AkumaPaths, id: string, diagnostic: string): RequestFact {
-  return withHeart(paths, (heart) =>
+export async function refuseRequest(paths: AkumaPaths, id: string, diagnostic: string): Promise<RequestFact> {
+  return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
@@ -240,8 +254,8 @@ export function refuseRequest(paths: AkumaPaths, id: string, diagnostic: string)
     }));
 }
 
-export function voidRequest(paths: AkumaPaths, id: string, evidence: string): RequestFact {
-  return withHeart(paths, (heart) =>
+export async function voidRequest(paths: AkumaPaths, id: string, evidence: string): Promise<RequestFact> {
+  return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
@@ -253,24 +267,24 @@ export function voidRequest(paths: AkumaPaths, id: string, evidence: string): Re
     }));
 }
 
-export function readRequest(paths: AkumaPaths, id: string): RequestFact | null {
-  return withHeart(paths, (heart) => requestFact(heart, id));
+export async function readRequest(paths: AkumaPaths, id: string): Promise<RequestFact | null> {
+  return await withHeart(paths, (heart) => requestFact(heart, id));
 }
 
-export function readNonterminalRequests(paths: AkumaPaths): readonly RequestFact[] {
-  return withHeart(paths, nonterminalRequestFacts);
+export async function readNonterminalRequests(paths: AkumaPaths): Promise<readonly RequestFact[]> {
+  return await withHeart(paths, nonterminalRequestFacts);
 }
 
-export function readKill(paths: AkumaPaths, bodySequence: number): KillFact | null {
-  return withHeart(paths, (heart) => killFactForBody(heart, bodySequence));
+export async function readKill(paths: AkumaPaths, bodySequence: number): Promise<KillFact | null> {
+  return await withHeart(paths, (heart) => killFactForBody(heart, bodySequence));
 }
 
-export function requestStop(
+export async function requestStop(
   paths: AkumaPaths,
   at: string,
-): Readonly<{ kind: "requested"; body: BodyFact }>
-  | Readonly<{ kind: "already-killed" | "already-stopped"; body: BodyFact }> {
-  return withHeart(paths, (heart) =>
+): Promise<Readonly<{ kind: "requested"; body: BodyFact }>
+  | Readonly<{ kind: "already-killed" | "already-stopped"; body: BodyFact }>> {
+  return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       const body = latestBodyFact(heart);
       if (body === null) throw new Error("Akuma has no Body to kill");
@@ -285,11 +299,11 @@ export function requestStop(
     }));
 }
 
-export function requestPause(
+export async function requestPause(
   paths: AkumaPaths,
   at: string,
-): Readonly<{ kind: "not-born" } | { kind: "requested"; body: BodyFact }> {
-  return withHeart(paths, (heart) =>
+): Promise<Readonly<{ kind: "not-born" } | { kind: "requested"; body: BodyFact }>> {
+  return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       if (soulFact(heart) === null) return { kind: "not-born" };
       const body = latestBodyFact(heart);
@@ -299,49 +313,49 @@ export function requestPause(
     }));
 }
 
-export function stopRequested(paths: AkumaPaths, bodySequence?: number): boolean {
-  return withHeart(paths, (heart) => {
+export async function stopRequested(paths: AkumaPaths, bodySequence?: number): Promise<boolean> {
+  return await withHeart(paths, (heart) => {
     const target = stopFact(heart);
     return target !== null && (bodySequence === undefined || target.bodySequence === bodySequence);
   });
 }
 
-export function pauseRequested(paths: AkumaPaths, bodySequence?: number): boolean {
-  return withHeart(paths, (heart) => {
+export async function pauseRequested(paths: AkumaPaths, bodySequence?: number): Promise<boolean> {
+  return await withHeart(paths, (heart) => {
     const target = pauseFact(heart);
     return target !== null && (bodySequence === undefined || target.bodySequence === bodySequence);
   });
 }
 
-export function breakBody(paths: AkumaPaths, input: Readonly<{ sequence: number; end: Exclude<BodyEnd, "exited">; at: string }>): void {
-  withHeart(paths, (heart) => endBodyFact(heart, input));
+export async function breakBody(paths: AkumaPaths, input: Readonly<{ sequence: number; end: Exclude<BodyEnd, "exited">; at: string }>): Promise<void> {
+  await withHeart(paths, (heart) => endBodyFact(heart, input));
 }
 
-export function beginTurn(
+export async function beginTurn(
   paths: AkumaPaths,
   input: Readonly<{ bodySequence: number; startedAt: string; call?: string }>,
-): TurnStartFact {
-  return withHeart(paths, (heart) => transaction(heart, () => {
+): Promise<TurnStartFact> {
+  return await withHeart(paths, (heart) => transaction(heart, () => {
     const fact = insertTurnStartFact(heart, input);
     pruneActivityFacts(heart, ACTIVITY_LIMIT);
     return fact;
   }));
 }
 
-export function endTurn(
+export async function endTurn(
   paths: AkumaPaths,
   input: Readonly<{ turnSequence: number; outcome: TurnOutcome; completedAt: string }>,
-): TurnEndFact {
-  return withHeart(paths, (heart) => transaction(heart, () => {
+): Promise<TurnEndFact> {
+  return await withHeart(paths, (heart) => transaction(heart, () => {
     const fact = insertTurnEndFact(heart, { kind: "turn-end", ...input });
     pruneActivityFacts(heart, ACTIVITY_LIMIT);
     return fact;
   }));
 }
 
-export function finishBodyIfIdle(paths: AkumaPaths, input: Readonly<{ sequence: number; at: string }>):
-Readonly<{ kind: "controlled" | "finished" } | { kind: "pending"; tells: readonly string[] }> {
-  return withHeart(paths, (heart) =>
+export async function finishBodyIfIdle(paths: AkumaPaths, input: Readonly<{ sequence: number; at: string }>):
+Promise<Readonly<{ kind: "controlled" | "finished" } | { kind: "pending"; tells: readonly string[] }>> {
+  return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       if (stopFact(heart)?.bodySequence === input.sequence || pauseFact(heart)?.bodySequence === input.sequence) {
         endBodyFact(heart, { ...input, end: "put-down" });
@@ -354,42 +368,50 @@ Readonly<{ kind: "controlled" | "finished" } | { kind: "pending"; tells: readonl
     }));
 }
 
-export function readHeart(paths: AkumaPaths): HeartSnapshot {
-  if (!existsSync(paths.heart)) {
-    return { soul: null, latestBody: null, latestSession: null, pending: [], latestKill: null, stop: null, pause: null };
+export async function readHeart(paths: AkumaPaths): Promise<HeartSnapshot> {
+  try {
+    return await withHeart(paths, (heart) => ({
+        soul: soulFact(heart),
+        latestBody: latestBodyFact(heart),
+        latestSession: latestSessionFact(heart),
+        pending: pendingTellFacts(heart),
+        latestKill: latestKillFact(heart),
+        stop: stopFact(heart),
+        pause: pauseFact(heart),
+    }));
+  } catch (error) {
+    if (isHeartAbsent(error)) {
+      return { soul: null, latestBody: null, latestSession: null, pending: [], latestKill: null, stop: null, pause: null };
+    }
+    throw error;
   }
-  return withHeart(paths, (heart) => ({
-      soul: soulFact(heart),
-      latestBody: latestBodyFact(heart),
-      latestSession: latestSessionFact(heart),
-      pending: pendingTellFacts(heart),
-      latestKill: latestKillFact(heart),
-      stop: stopFact(heart),
-      pause: pauseFact(heart),
-  }));
 }
 
-export function readLastAnsweredTurn(paths: AkumaPaths): TurnFact | null {
-  return withHeart(paths, lastAnsweredTurnFact);
+export async function readLastAnsweredTurn(paths: AkumaPaths): Promise<TurnFact | null> {
+  return await withHeart(paths, lastAnsweredTurnFact);
 }
 
-export function readForkPoint(
+export async function readForkPoint(
   paths: AkumaPaths,
   historyId: string,
-): ForkPoint | null {
-  if (!existsSync(paths.heart)) return null;
-  return withHeart(paths, (heart) => {
-    const turn = answeredTurnFact(heart, historyId);
-    const outcome = turn?.end?.outcome;
-    if (outcome?.kind !== "answered" || outcome.historyId === undefined) return null;
-    const recipe = sessionFactForCoordinate(heart, outcome.session);
-    if (recipe === null) throw new Error(`Akuma fork point ${historyId} has no session recipe`);
-    return {
-      historyId: outcome.historyId,
-      session: outcome.session,
-      provider: recipe.provider,
-      cwd: recipe.cwd,
-      options: recipe.options,
-    };
-  });
+): Promise<ForkPoint | null> {
+  try {
+    return await withHeart(paths, (heart) => {
+      const turn = answeredTurnFact(heart, historyId);
+      const outcome = turn?.end?.outcome;
+      if (outcome?.kind !== "answered" || outcome.historyId === undefined) return null;
+      const recipe = sessionFactForCoordinate(heart, outcome.session);
+      if (recipe === null) throw new Error(`Akuma fork point ${historyId} has no session recipe`);
+      return {
+        historyId: outcome.historyId,
+        session: outcome.session,
+        provider: recipe.provider,
+        cwd: recipe.cwd,
+        options: recipe.options,
+      };
+    });
+  } catch (error) {
+    if (isHeartAbsent(error)) return null;
+    throw error;
+  }
 }

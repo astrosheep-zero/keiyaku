@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
 import { replaceFileDurably } from "../coordination/durable-file.js";
@@ -76,22 +76,22 @@ function decode(path: string, bytes: string): readonly AliasBinding[] {
   return bindings;
 }
 
-function read(path: string): readonly AliasBinding[] {
+async function read(path: string): Promise<readonly AliasBinding[]> {
   try {
-    return decode(path, readFileSync(path, "utf8"));
+    return decode(path, await readFile(path, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
 }
 
-export function readAliases(world: WorldRoot): readonly AliasBinding[] {
-  return read(paths(world).authority);
+export async function readAliases(world: WorldRoot): Promise<readonly AliasBinding[]> {
+  return await read(paths(world).authority);
 }
 
-export function resolveAlias(world: WorldRoot, value: AkumaAlias): AkuId | null {
+export async function resolveAlias(world: WorldRoot, value: AkumaAlias): Promise<AkuId | null> {
   const alias = parseAkumaAlias(value);
-  return readAliases(world).find((binding) => binding.alias === alias)?.akuId ?? null;
+  return (await readAliases(world)).find((binding) => binding.alias === alias)?.akuId ?? null;
 }
 
 export async function moveAlias(input: Readonly<{
@@ -104,11 +104,11 @@ export async function moveAlias(input: Readonly<{
   const location = paths(input.world);
   const held = await acquireSqliteTransactionLock({ path: location.lock, mode: "immediate" });
   try {
-    const current = read(location.authority);
+    const current = await read(location.authority);
     const previous = current.find((binding) => binding.alias === alias)?.akuId ?? null;
     const next = [...current.filter((binding) => binding.alias !== alias), { alias, akuId }];
-    mkdirSync(dirname(location.authority), { recursive: true });
-    replaceFileDurably(location.authority, canonical(next));
+    await mkdir(dirname(location.authority), { recursive: true });
+    await replaceFileDurably(location.authority, canonical(next));
     return { alias: { alias, akuId }, previous };
   } finally {
     held.close();

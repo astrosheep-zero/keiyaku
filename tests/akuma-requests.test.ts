@@ -29,8 +29,8 @@ async function akumaAt(root: string) { return Akuma.of(await World.at(root)); }
 
 async function fixture() {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-")));
-  const parent = allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
-  initializeHeart(parent.paths);
+  const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
+  await initializeHeart(parent.paths);
   const soul: Soul = {
     id: parent.id,
     archetype: "parent",
@@ -42,8 +42,8 @@ async function fixture() {
     confinement: { kind: "declared", writableRoots: [root] },
     createdAt: "2026-08-09T00:00:00.000Z",
   };
-  const leash = HeldAkumaLeash.try(parent.paths)!;
-  leash.birth(parent.paths, soul);
+  const leash = (await HeldAkumaLeash.try(parent.paths))!;
+  await leash.birth(parent.paths, soul);
   return { root, parent, soul, leash, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -54,7 +54,7 @@ test("aborted publication keeps an in-flight launch lexically owned", async () =
   const launchStarted = new Promise<void>((resolve) => { started = resolve; });
   let release!: () => void;
   const launchGate = new Promise<void>((resolve) => { release = resolve; });
-  let childPaths: ReturnType<typeof allocateAkumaDirectory>["paths"] | undefined;
+  let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   try {
     const publication = publishAkuma({
       worldPath: root,
@@ -75,7 +75,7 @@ test("aborted publication keeps an in-flight launch lexically owned", async () =
     release();
     await assert.rejects(publication, /cancelled publication/u);
     assert.equal(settled, true);
-    assert.equal(childPaths === undefined ? null : readSeal(childPaths)?.evidence, "cancelled publication");
+    assert.equal(childPaths === undefined ? null : (await readSeal(childPaths))?.evidence, "cancelled publication");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -87,15 +87,15 @@ test("a declared drive serves Body Requests through transport while Heart remain
   mkdirSync(join(home, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\nreadonly: true\n---\nWork.\n");
   process.env.HOME = home;
-  const pump = new BodyRequestPump({
+  const pump = await BodyRequestPump.open({
     paths: value.parent.paths,
     parent: value.soul,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
     signal: new AbortController().signal,
     async spawn(launch) {
-      const child = HeldAkumaLeash.try(launch.paths)!;
-      child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
+      const child = (await HeldAkumaLeash.try(launch.paths))!;
+      await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
       child.release();
     },
   });
@@ -105,13 +105,13 @@ test("a declared drive serves Body Requests through transport while Heart remain
       archetype: "worker",
       body: "build",
     })).id;
-    const childSoul = readSoul(pathsForAkuId(value.root, childId));
+    const childSoul = await readSoul(pathsForAkuId(value.root, childId));
     const origin = childSoul?.origin;
     assert.equal(origin?.kind, "request");
     if (origin?.kind !== "request") return;
     assert.deepEqual(childSoul?.readonly, { enforcement: "native" });
     const requestId = origin.requestId;
-    assert.equal(readRequest(value.parent.paths, requestId)?.state, "served");
+    assert.equal((await readRequest(value.parent.paths, requestId))?.state, "served");
     assert.deepEqual(origin, {
       kind: "request",
       parent: value.parent.id,
@@ -146,7 +146,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
         confinement: { kind: "unconfined" },
       },
     }), (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "refused");
-    assert.equal(readRequest(value.parent.paths, malformedId), null, "legacy association bytes must not enter Heart");
+    assert.equal(await readRequest(value.parent.paths, malformedId), null, "legacy association bytes must not enter Heart");
 
     const mismatchId = "00000000-0000-4000-8000-000000000003";
     writeFileSync(join(pump.directory, `${mismatchId}.request.json`), JSON.stringify({
@@ -160,7 +160,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
         confinement: { kind: "unconfined" },
       },
     }));
-    assert.equal(readRequest(value.parent.paths, mismatchId), null, "a restraint/options mismatch must not enter Heart");
+    assert.equal(await readRequest(value.parent.paths, mismatchId), null, "a restraint/options mismatch must not enter Heart");
   } finally {
     await pump.close();
     value.leash.release();
@@ -177,7 +177,7 @@ test("a new body settles old requests by observation without replay", async () =
   const value = await fixture();
   try {
     const admittedId = "00000000-0000-4000-8000-000000000011";
-    admitRequest(value.parent.paths, {
+    await admitRequest(value.parent.paths, {
       id: admittedId,
       archetype: "worker",
       body: "never spawned",
@@ -187,16 +187,16 @@ test("a new body settles old requests by observation without replay", async () =
     });
 
     const bornId = "00000000-0000-4000-8000-000000000012";
-    admitRequest(value.parent.paths, {
+    await admitRequest(value.parent.paths, {
       id: bornId, archetype: "worker", body: "born", world: value.root,
       recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
       admittedAt: "2026-08-09T00:00:02.000Z",
     });
-    const born = allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000012" });
-    initializeHeart(born.paths);
-    reserveRequest(value.parent.paths, bornId, born.id);
-    const bornLeash = HeldAkumaLeash.try(born.paths)!;
-    bornLeash.birth(born.paths, {
+    const born = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000012" });
+    await initializeHeart(born.paths);
+    await reserveRequest(value.parent.paths, bornId, born.id);
+    const bornLeash = (await HeldAkumaLeash.try(born.paths))!;
+    await bornLeash.birth(born.paths, {
       ...value.soul,
       id: born.id,
       archetype: "worker",
@@ -205,26 +205,26 @@ test("a new body settles old requests by observation without replay", async () =
     bornLeash.release();
 
     const unbornId = "00000000-0000-4000-8000-000000000013";
-    admitRequest(value.parent.paths, {
+    await admitRequest(value.parent.paths, {
       id: unbornId, archetype: "worker", body: "unborn", world: value.root,
       recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
       admittedAt: "2026-08-09T00:00:03.000Z",
     });
-    const unborn = allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000013" });
-    initializeHeart(unborn.paths);
-    reserveRequest(value.parent.paths, unbornId, unborn.id);
+    const unborn = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000013" });
+    await initializeHeart(unborn.paths);
+    await reserveRequest(value.parent.paths, unbornId, unborn.id);
 
     const mismatchId = "00000000-0000-4000-8000-000000000014";
-    admitRequest(value.parent.paths, {
+    await admitRequest(value.parent.paths, {
       id: mismatchId, archetype: "worker", body: "mismatch", world: value.root,
       recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
       admittedAt: "2026-08-09T00:00:04.000Z",
     });
-    const mismatch = allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000014" });
-    initializeHeart(mismatch.paths);
-    reserveRequest(value.parent.paths, mismatchId, mismatch.id);
-    const mismatchLeash = HeldAkumaLeash.try(mismatch.paths)!;
-    mismatchLeash.birth(mismatch.paths, {
+    const mismatch = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000014" });
+    await initializeHeart(mismatch.paths);
+    await reserveRequest(value.parent.paths, mismatchId, mismatch.id);
+    const mismatchLeash = (await HeldAkumaLeash.try(mismatch.paths))!;
+    await mismatchLeash.birth(mismatch.paths, {
       ...value.soul,
       id: mismatch.id,
       archetype: "worker",
@@ -237,11 +237,11 @@ test("a new body settles old requests by observation without replay", async () =
       value.soul,
       () => "2026-08-09T00:00:04.000Z",
     ), "settled");
-    assert.equal(readRequest(value.parent.paths, admittedId)?.state, "voided");
-    assert.equal(readRequest(value.parent.paths, bornId)?.state, "served");
-    assert.equal(readRequest(value.parent.paths, unbornId)?.state, "voided");
-    assert.equal(readRequest(value.parent.paths, mismatchId)?.state, "voided");
-    assert.equal(readSeal(unborn.paths)?.evidence, "request settlement");
+    assert.equal((await readRequest(value.parent.paths, admittedId))?.state, "voided");
+    assert.equal((await readRequest(value.parent.paths, bornId))?.state, "served");
+    assert.equal((await readRequest(value.parent.paths, unbornId))?.state, "voided");
+    assert.equal((await readRequest(value.parent.paths, mismatchId))?.state, "voided");
+    assert.equal((await readSeal(unborn.paths))?.evidence, "request settlement");
   } finally {
     value.leash.release();
     value.close();

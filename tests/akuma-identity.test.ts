@@ -11,7 +11,7 @@ import {
   parseAkuId,
 } from "../src/akuma/identity.js";
 
-test("Aku identity has one exact durable spelling", () => {
+test("Aku identity has one exact durable spelling", async () => {
   assert.equal(akuId({ archetype: "claude", suffix: "12ab34cd" }), "aku/claude/12ab34cd");
   assert.deepEqual(parseAkuId("aku/claude/12ab34cd"), {
     id: "aku/claude/12ab34cd",
@@ -27,13 +27,13 @@ test("Aku identity has one exact durable spelling", () => {
   });
 });
 
-test("directory creation is the identity allocation adjudicator", () => {
+test("directory creation is the identity allocation adjudicator", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-identity-"));
   try {
-    const runRoot = ensureAkumaRunRoot(root);
+    const runRoot = await ensureAkumaRunRoot(root);
     mkdirSync(join(runRoot, "claude-00000000"));
     const draws = ["00000000", "11111111"];
-    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => draws.shift()! });
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => draws.shift()! });
     assert.equal(allocated.id, "aku/claude/11111111");
     assert.equal(existsSync(allocated.paths.directory), true);
     assert.equal(readFileSync(join(runRoot, ".gitignore"), "utf8"), "*\n");

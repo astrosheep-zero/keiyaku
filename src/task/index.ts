@@ -93,13 +93,13 @@ function updateInput(input: unknown): UpdateTaskInput {
 class TaskHandle {
   constructor(readonly id: TaskId, private readonly world: WorldRoot) {}
   async read(): Promise<TaskDetail | null> {
-    const facts = projectDetailFacts(readBoard(this.world).board, this.id);
+    const facts = projectDetailFacts((await readBoard(this.world)).board, this.id);
     return facts === null ? null : { ...facts, task: taskView(facts.task) };
   }
   async tree(input?: Readonly<{ full?: boolean }>): Promise<TaskDependencyTree> {
     const value = record(input ?? {}, "tree input"); closed(value, ["full"], "tree input");
     if (value.full !== undefined && typeof value.full !== "boolean") throw new TypeError("full must be a boolean");
-    const node = buildTree(readBoard(this.world).board, this.id, value.full ?? false);
+    const node = buildTree((await readBoard(this.world)).board, this.id, value.full ?? false);
     return node === null ? { kind: "refused", refusal: { kind: "task-missing", taskId: this.id } } : { kind: "accepted", value: node };
   }
   update(input: UpdateTaskInput): Promise<TaskUpdateResult> { return updateTask(this.world, this.id, updateInput(input)); }
@@ -120,8 +120,8 @@ export type Task = TaskHandle;
 class TasksHandle {
   readonly root: WorldRoot;
   constructor(private readonly world: WorldRoot) { this.root = world; }
-  async namespace(): Promise<TaskNamespaceResult> { const value = currentNamespace(this.world); return "kind" in value ? { kind: "refused", refusal: value } : { kind: "accepted", value }; }
-  async setNamespace(input: Readonly<{ namespace: readonly string[] }>): Promise<void> { const v = record(input, "setNamespace input"); closed(v, ["namespace"], "setNamespace input"); const ns = namespace(v.namespace); if (ns === undefined) throw new TypeError("namespace is required"); setCurrentNamespace(this.world, ns); }
+  async namespace(): Promise<TaskNamespaceResult> { const value = await currentNamespace(this.world); return "kind" in value ? { kind: "refused", refusal: value } : { kind: "accepted", value }; }
+  async setNamespace(input: Readonly<{ namespace: readonly string[] }>): Promise<void> { const v = record(input, "setNamespace input"); closed(v, ["namespace"], "setNamespace input"); const ns = namespace(v.namespace); if (ns === undefined) throw new TypeError("namespace is required"); await setCurrentNamespace(this.world, ns); }
   task(input: Readonly<{ id: string }>): Task { const v = record(input, "task input"); closed(v, ["id"], "task input"); return new TaskHandle(id(v.id), this.world); }
   add(input: AddTaskInput): Promise<TaskMutationResult> { return addTask(this.world, addInput(input)); }
   addDocument(input: AddTaskDocumentInput): Promise<TaskMutationResult> { const v = record(input, "addDocument input"); closed(v, ["markdown", "namespace", "signal"], "addDocument input"); const markdown = text(v.markdown, "markdown"); if (markdown === undefined) throw new TypeError("markdown is required"); const ns = namespace(v.namespace), abort = signal(v.signal); return addTaskDocument(this.world, { markdown, ...(ns === undefined ? {} : { namespace: ns }), ...(abort === undefined ? {} : { signal: abort }) }); }
@@ -129,7 +129,7 @@ class TasksHandle {
   async ready(input: Readonly<{ scope?: "namespace" | "world"; parent?: string; limit?: number }> = {}): Promise<TaskList> { const v = record(input, "ready input"); closed(v, ["scope", "parent", "limit"], "ready input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); const parent = v.parent === undefined ? undefined : id(v.parent); return readyTasks(this.world, v.scope as "namespace" | "world" | undefined, parent, limit(v.limit) ?? DEFAULT_TASK_LIMIT); }
   async blocked(input: Readonly<{ scope?: "namespace" | "world"; parent?: string; limit?: number }> = {}): Promise<BlockedTaskList> { const v = record(input, "blocked input"); closed(v, ["scope", "parent", "limit"], "blocked input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); const parent = v.parent === undefined ? undefined : id(v.parent); return blockedTasks(this.world, v.scope as "namespace" | "world" | undefined, parent, limit(v.limit) ?? DEFAULT_TASK_LIMIT); }
   async query(input: Readonly<{ where?: TaskQueryExpression; scope?: "namespace" | "world"; sort?: TaskQuerySort; limit?: number }> = {}): Promise<TaskQueryResult> { const v = record(input, "query input"); closed(v, ["where", "scope", "sort", "limit"], "query input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); const expression = v.where === undefined ? { kind: "and", terms: [{ kind: "predicate", predicate: { field: "state", operator: "!=", value: "done" } }, { kind: "predicate", predicate: { field: "state", operator: "!=", value: "drop" } }] } as const : normalizeTaskQuery(v.where); return queryTasks(this.world, expression, v.scope as "namespace" | "world" | undefined, sort(v.sort) ?? "priority", limit(v.limit) ?? DEFAULT_TASK_LIMIT); }
-  async doctor(): Promise<TaskDoctorReport> { return { issues: diagnoseBoard(readBoard(this.world).board) }; }
+  async doctor(): Promise<TaskDoctorReport> { return { issues: diagnoseBoard((await readBoard(this.world)).board) }; }
   batch(input: Readonly<{ verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }>): Promise<TaskBatchResult> { const v = record(input, "batch input"); closed(v, ["verb", "ids", "note", "signal"], "batch input"); const verb = v.verb; if (verb !== "done" && verb !== "drop" && verb !== "hold") throw new TypeError("batch verb is invalid"); const note = text(v.note, "note"); if (note !== undefined && verb !== "done" && verb !== "drop") throw new TypeError("batch note is valid only for done or drop"); return batchTasks(this.world, verb, taskIds(v.ids, "ids") ?? [], signal(v.signal), note); }
   compose(input: Readonly<{ markdown: string; signal?: AbortSignal }>): Promise<TaskCompositionResult> { const v = record(input, "compose input"); closed(v, ["markdown", "signal"], "compose input"); const markdown = text(v.markdown, "markdown"); if (markdown === undefined) throw new TypeError("markdown is required"); return composeTasks(this.world, markdown, signal(v.signal)); }
 }

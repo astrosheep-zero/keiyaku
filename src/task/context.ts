@@ -1,6 +1,4 @@
-import {
-  lstatSync, mkdirSync, readFileSync,
-} from "node:fs";
+import { lstat, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { repairDerivedFile, replaceFileDurably } from "../coordination/durable-file.js";
 import { normalizeIdentityStem } from "../identity/normalize.js";
@@ -17,12 +15,12 @@ function validNamespaceSegments(value: unknown): value is readonly string[] {
     && !segment.includes("/") && segment !== "." && segment !== "..");
 }
 
-export function readNamespaceContext(root: string): NamespaceContextRead {
+export async function readNamespaceContext(root: string): Promise<NamespaceContextRead> {
   let bytes: string;
   try {
-    const path = currentPath(root), stat = lstatSync(path);
+    const path = currentPath(root), stat = await lstat(path);
     if (!stat.isFile() || stat.isSymbolicLink()) return "malformed";
-    bytes = readFileSync(path, "utf8");
+    bytes = await readFile(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent";
     throw error;
@@ -33,23 +31,24 @@ export function readNamespaceContext(root: string): NamespaceContextRead {
   return validNamespaceSegments(segments) ? segments : "malformed";
 }
 
-export function installNamespaceContext(root: string, segments: readonly string[]): void {
+export async function installNamespaceContext(root: string, segments: readonly string[]): Promise<void> {
   if (!validNamespaceSegments(segments)) throw new TypeError("namespace must contain normalized segments");
-  const parent = directory(root); mkdirSync(parent, { recursive: true });
-  installIgnore(root);
-  replaceFileDurably(currentPath(root), `${segments.join("/")}\n`);
+  const parent = directory(root);
+  await mkdir(parent, { recursive: true });
+  await installIgnore(root);
+  await replaceFileDurably(currentPath(root), `${segments.join("/")}\n`);
 }
 
-function installIgnore(root: string): void {
-  repairDerivedFile(ignorePath(root), "*\n");
+async function installIgnore(root: string): Promise<void> {
+  await repairDerivedFile(ignorePath(root), "*\n");
 }
 
-export function repairNamespaceContext(root: string, segments: readonly string[]): "kept" | "installed" {
-  const current = readNamespaceContext(root);
+export async function repairNamespaceContext(root: string, segments: readonly string[]): Promise<"kept" | "installed"> {
+  const current = await readNamespaceContext(root);
   if (Array.isArray(current)) {
-    installIgnore(root);
+    await installIgnore(root);
     return "kept";
   }
-  installNamespaceContext(root, segments);
+  await installNamespaceContext(root, segments);
   return "installed";
 }

@@ -19,13 +19,13 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function settleTimedOutBirth(paths: AkumaPaths): Soul | null {
-  const leash = HeldAkumaLeash.try(paths);
+async function settleTimedOutBirth(paths: AkumaPaths): Promise<Soul | null> {
+  const leash = await HeldAkumaLeash.try(paths);
   if (leash === null) return null;
-  const result = leash.sealIfUnborn(paths, { evidence: "call-timeout", at: new Date().toISOString() });
+  const result = await leash.sealIfUnborn(paths, { evidence: "call-timeout", at: new Date().toISOString() });
   if (result === "sealed") throw new Error("Akuma body failed before birth");
   leash.release();
-  const soul = readSoul(paths);
+  const soul = await readSoul(paths);
   if (soul === null) throw new Error("Akuma birth settled without a soul");
   return soul;
 }
@@ -34,10 +34,10 @@ async function awaitBirth(paths: AkumaPaths, signal?: AbortSignal): Promise<Soul
   const deadline = performance.now() + BIRTH_TIMEOUT_MS;
   for (;;) {
     signal?.throwIfAborted();
-    const soul = readSoul(paths);
+    const soul = await readSoul(paths);
     if (soul !== null) return soul;
     if (performance.now() >= deadline) {
-      const settled = settleTimedOutBirth(paths);
+      const settled = await settleTimedOutBirth(paths);
       if (settled !== null) return settled;
     }
     await abortableDelay(POLL_MS, signal);
@@ -46,7 +46,7 @@ async function awaitBirth(paths: AkumaPaths, signal?: AbortSignal): Promise<Soul
 
 async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<HeldAkumaLeash | null> {
   for (;;) {
-    const leash = HeldAkumaLeash.try(paths);
+    const leash = await HeldAkumaLeash.try(paths);
     if (leash !== null) return leash;
     if (performance.now() >= deadline) return null;
     await abortableDelay(POLL_MS);
@@ -57,18 +57,18 @@ async function awaitAsleepBirth(paths: AkumaPaths): Promise<void> {
   const leash = await takeLeashUntil(paths, performance.now() + BIRTH_TIMEOUT_MS);
   if (leash === null) throw new Error("Forked Akuma did not finish its birth body");
   try {
-    if (readHeart(paths).latestBody?.end !== "exited") {
+    if ((await readHeart(paths)).latestBody?.end !== "exited") {
       throw new Error("Forked Akuma birth body did not exit cleanly");
     }
   } finally { leash.release(); }
 }
 
-function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): void {
+async function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): Promise<void> {
   try {
-    const leash = HeldAkumaLeash.try(allocated.paths);
+    const leash = await HeldAkumaLeash.try(allocated.paths);
     if (leash === null) return;
     try {
-      leash.sealIfUnborn(allocated.paths, { evidence: diagnostic(error), at: new Date().toISOString() });
+      await leash.sealIfUnborn(allocated.paths, { evidence: diagnostic(error), at: new Date().toISOString() });
     } finally { leash.release(); }
   } catch { /* the original local publication failure remains authoritative */ }
 }
@@ -77,21 +77,21 @@ export async function publishAkuma(input: Readonly<{
   worldPath: string;
   archetype: string;
   awaitAsleep?: boolean;
-  reserve?(allocated: AllocatedAkuma): void;
+  reserve?(allocated: AllocatedAkuma): Promise<void>;
   launch(allocated: AllocatedAkuma): Promise<void>;
   signal?: AbortSignal;
 }>): Promise<AllocatedAkuma> {
   input.signal?.throwIfAborted();
-  const allocated = allocateAkumaDirectory({ worldRoot: input.worldPath, archetype: input.archetype });
+  const allocated = await allocateAkumaDirectory({ worldRoot: input.worldPath, archetype: input.archetype });
   try {
-    initializeHeart(allocated.paths);
+    await initializeHeart(allocated.paths);
     input.signal?.throwIfAborted();
-    input.reserve?.(allocated);
+    await input.reserve?.(allocated);
     input.signal?.throwIfAborted();
     await input.launch(allocated);
     input.signal?.throwIfAborted();
   } catch (error) {
-    sealLocalFailure(allocated, error);
+    await sealLocalFailure(allocated, error);
     throw error;
   }
   const soul = await awaitBirth(allocated.paths, input.signal);

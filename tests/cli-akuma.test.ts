@@ -824,21 +824,32 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
 test("Akuma status, wait, and history share public observations without embedding history", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-status-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
-    initializeHeart(allocated.paths);
+    const allocated = await allocateAkumaDirectory({
+      worldRoot: root,
+      archetype: "claude",
+      draw: () => "1234abcd",
+    });
+    await initializeHeart(allocated.paths);
     const provider: ProviderAdapter = {
       confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
+        let finishEvents!: () => void;
+        const eventsFinished = new Promise<void>((resolve) => { finishEvents = resolve; });
         return {
           admission: { fence: "cli-fixture-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
               yield { type: "session" as const, coordinate: { sessionId: "cli-session" } };
               yield { type: "assistant" as const, text: "cli activity" };
+              finishEvents();
             },
           },
-          completion: Promise.resolve({ kind: "answered", answer: "cli answer", historyId: "cli-history" }),
+          completion: eventsFinished.then(() => ({
+            kind: "answered" as const,
+            answer: "cli answer",
+            historyId: "cli-history",
+          })),
           async abort() {},
         };
       },
@@ -879,8 +890,15 @@ test("Akuma status, wait, and history share public observations without embeddin
     assert.equal("kind" in aliasWait && aliasWait.kind === "akuma" && aliasWait.action === "wait"
       ? aliasWait.alias : undefined, "@review");
 
-    const laterTurn = beginTurn(allocated.paths, { bodySequence: 1, startedAt: "2026-08-08T00:00:01.000Z" });
-    endTurn(allocated.paths, { turnSequence: laterTurn.sequence, outcome: { kind: "failed", diagnostic: "later failed" }, completedAt: "2026-08-08T00:00:01.000Z" });
+    const laterTurn = await beginTurn(allocated.paths, {
+      bodySequence: 1,
+      startedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await endTurn(allocated.paths, {
+      turnSequence: laterTurn.sequence,
+      outcome: { kind: "failed", diagnostic: "later failed" },
+      completedAt: "2026-08-08T00:00:01.000Z",
+    });
     const failedStatus = await invoke(parseArgv(["-C", root, "status", allocated.id]));
     if (!("kind" in failedStatus) || failedStatus.kind !== "akuma" || failedStatus.action !== "status") return;
     assert.equal(failedStatus.status.status.timeline.kind === "idle"
@@ -928,12 +946,12 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
   const linked = mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-linked-"));
   repository.run(["worktree", "add", "--quiet", "--detach", linked]);
 
-  const allocated = allocateAkumaDirectory({
+  const allocated = await allocateAkumaDirectory({
     worldRoot: repository.path,
     archetype: "worker",
     draw: () => "1357ace0",
   });
-  initializeHeart(allocated.paths);
+  await initializeHeart(allocated.paths);
   const provider: ProviderAdapter = {
     confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
@@ -969,7 +987,7 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
   await moveAlias({ world: repository.path, alias: "@shared", akuId: allocated.id });
   const fromLinkedAlias = await invoke(parseArgv(["-C", linked, "status", "@shared"]));
   assert.equal(fromLinkedAlias.kind === "akuma" ? fromLinkedAlias.status.status.id : undefined, allocated.id);
-  assert.equal(readSoul(allocated.paths)?.cwd, linked);
+  assert.equal((await readSoul(allocated.paths))?.cwd, linked);
   assert.equal(existsSync(join(linked, ".keiyaku", "akuma", "run")), false);
 });
 

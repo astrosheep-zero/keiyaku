@@ -41,6 +41,9 @@ operations (`show`, `tree`, `update`, and lifecycle) never consult it.
 The byte law and read/write primitive belong to Task. Installation in a
 managed Contract worktree is driven only by [settlement](settlement.md), which
 derives the default from Contract state and calls the Task-owned primitive.
+Namespace reads, installation, and repair are awaited filesystem operations;
+their Promises fulfill only after the complete marker observation or durable
+replacement.
 
 ## Authority And Document
 
@@ -62,6 +65,15 @@ integrity witness and contains `title`, `state`, `priority`, `needs`, `parent`,
 prose is the body. The ID must equal the path-derived coordinate.
 Unknown keys and malformed documents are authority corruption. Manual editing
 is authoritative; a manual move that breaks the witness is corruption.
+
+Board reads and every public Task operation that consumes authority are
+asynchronous and observe complete files before fulfillment. Task retains one
+synchronous filesystem exception inside its compare-and-replace commit: after
+the expected bytes are re-observed, the unique temporary file is written and
+fsynced, atomically renamed, and the parent directory is fsynced before the
+Promise fulfills. This bounded section preserves one atomic authority
+replacement; directory walks, metadata, reads, and cleanup remain asynchronous,
+and no second sync API or parallel writer exists.
 
 `priority` is `0 | 1 | 2 | 3` and defaults to `2`. Relation arrays are ordered,
 duplicate-free full TaskIds. `note` is a string and defaults to empty.
@@ -277,6 +289,11 @@ SQLite transaction primitive waits at most three seconds and propagates
 cancellation. Databases contain no Task fact, owner row, PID, lease, heartbeat,
 or stale-break policy and may be recreated when idle. Only coordination imports
 `node:sqlite`.
+
+Lock acquisition is awaited before a Task mutation enters its serial writer
+section. The bounded `DatabaseSync` transaction used by the coordination owner
+is the sole synchronous SQLite exception; it contains only one lock decision
+and custody handoff. Task file observation and cleanup remain asynchronous.
 
 Locks serialize cooperating writers; predecessor-byte comparison remains the
 sole write adjudicator against manual editors. Byte movement returns

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -14,12 +14,15 @@ import {
   breakBody,
   endTurn,
   finishBodyIfIdle,
+  heartExists,
   initializeHeart,
+  HeartAbsentError,
   life,
   probeLeash,
   pauseRequested,
   readHeart,
   readForkPoint,
+  readSoul,
   readNonterminalRequests,
   readRequest,
   recordSession,
@@ -37,10 +40,10 @@ import {
 } from "../src/akuma/heart/index.js";
 import { decodeSoul, decodeSoulRow, encodeSoul, encodeSoulRow } from "../src/akuma/heart/soul.js";
 
-function fixture() {
+async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-"));
-  const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
-  initializeHeart(allocated.paths);
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
+  await initializeHeart(allocated.paths);
   const soul: Soul = {
     id: allocated.id,
     archetype: "claude",
@@ -55,37 +58,82 @@ function fixture() {
   return { root, allocated, soul, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-test("birth and seal share the child's leash adjudicator", () => {
-  const value = fixture();
+test("existing Heart opens adjudicate absence without recreating heart.db", async () => {
+  const value = await fixture();
   try {
-    const sealer = HeldAkumaLeash.try(value.allocated.paths)!;
-    assert.equal(sealer.sealIfUnborn(value.allocated.paths, { evidence: "call-timeout", at: value.soul.createdAt }), "sealed");
-    const lateBody = HeldAkumaLeash.try(value.allocated.paths)!;
-    assert.equal(lateBody.birth(value.allocated.paths, value.soul), "sealed");
+    unlinkSync(value.allocated.paths.heart);
+    assert.equal(await heartExists(value.allocated.paths), false);
+    assert.equal(await readSoul(value.allocated.paths), null);
+    assert.deepEqual(await readHeart(value.allocated.paths), {
+      soul: null,
+      latestBody: null,
+      latestSession: null,
+      pending: [],
+      latestKill: null,
+      stop: null,
+      pause: null,
+    });
+    assert.equal(await readForkPoint(value.allocated.paths, "missing"), null);
+    await assert.rejects(
+      appendActivity(value.allocated.paths, {
+        turnSequence: 1,
+        event: { type: "note", text: "must not recreate" },
+        at: "2026-08-08T00:00:00.000Z",
+      }),
+      HeartAbsentError,
+    );
+    assert.equal(existsSync(value.allocated.paths.heart), false);
+  } finally { value.close(); }
+});
+
+test("existing non-database Heart paths preserve the SQLite open failure", async () => {
+  const value = await fixture();
+  try {
+    unlinkSync(value.allocated.paths.heart);
+    mkdirSync(value.allocated.paths.heart);
+    await assert.rejects(
+      readHeart(value.allocated.paths),
+      (error: unknown) => {
+        assert.equal(error instanceof HeartAbsentError, false);
+        assert.equal((error as { errcode?: unknown }).errcode, 14);
+        return true;
+      },
+    );
+    assert.equal(existsSync(value.allocated.paths.heart), true);
+  } finally { value.close(); }
+});
+
+test("birth and seal share the child's leash adjudicator", async () => {
+  const value = await fixture();
+  try {
+    const sealer = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    assert.equal(await sealer.sealIfUnborn(value.allocated.paths, { evidence: "call-timeout", at: value.soul.createdAt }), "sealed");
+    const lateBody = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    assert.equal(await lateBody.birth(value.allocated.paths, value.soul), "sealed");
     lateBody.release();
   } finally { value.close(); }
 });
 
-test("a born soul cannot later be sealed", () => {
-  const value = fixture();
+test("a born soul cannot later be sealed", async () => {
+  const value = await fixture();
   try {
-    const body = HeldAkumaLeash.try(value.allocated.paths)!;
-    assert.equal(body.birth(value.allocated.paths, value.soul), "born");
-    assert.deepEqual(readHeart(value.allocated.paths).soul, value.soul);
-    assert.equal(probeLeash(value.allocated.paths), "held");
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    assert.equal(await body.birth(value.allocated.paths, value.soul), "born");
+    assert.deepEqual((await readHeart(value.allocated.paths)).soul, value.soul);
+    assert.equal(await probeLeash(value.allocated.paths), "held");
     body.release();
-    const sealer = HeldAkumaLeash.try(value.allocated.paths)!;
-    assert.equal(sealer.sealIfUnborn(value.allocated.paths, { evidence: "late", at: value.soul.createdAt }), "born");
+    const sealer = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    assert.equal(await sealer.sealIfUnborn(value.allocated.paths, { evidence: "late", at: value.soul.createdAt }), "born");
     sealer.release();
   } finally { value.close(); }
 });
 
-test("session admission survives before turn completion", () => {
-  const value = fixture();
+test("session admission survives before turn completion", async () => {
+  const value = await fixture();
   try {
-    const body = HeldAkumaLeash.try(value.allocated.paths)!;
-    body.birth(value.allocated.paths, value.soul);
-    const fact = recordSession(value.allocated.paths, {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await body.birth(value.allocated.paths, value.soul);
+    const fact = await recordSession(value.allocated.paths, {
       provider: "claude",
       options: value.soul.options,
       coordinate: { sessionId: "native-session" },
@@ -93,18 +141,18 @@ test("session admission survives before turn completion", () => {
       admittedAt: "2026-08-08T00:00:01.000Z",
     });
     body.release();
-    assert.equal(readHeart(value.allocated.paths).latestSession?.sequence, fact.sequence);
-    assert.deepEqual(readHeart(value.allocated.paths).latestSession?.coordinate, { sessionId: "native-session" });
-    assert.deepEqual(readHeart(value.allocated.paths).latestSession?.options, value.soul.options);
+    assert.equal((await readHeart(value.allocated.paths)).latestSession?.sequence, fact.sequence);
+    assert.deepEqual((await readHeart(value.allocated.paths)).latestSession?.coordinate, { sessionId: "native-session" });
+    assert.deepEqual((await readHeart(value.allocated.paths)).latestSession?.options, value.soul.options);
   } finally { value.close(); }
 });
 
-test("Pi sessionFile coordinates round trip through Heart custody", () => {
-  const value = fixture();
+test("Pi sessionFile coordinates round trip through Heart custody", async () => {
+  const value = await fixture();
   try {
-    const body = HeldAkumaLeash.try(value.allocated.paths)!;
-    body.birth(value.allocated.paths, value.soul);
-    recordSession(value.allocated.paths, {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await body.birth(value.allocated.paths, value.soul);
+    await recordSession(value.allocated.paths, {
       provider: "pi",
       options: { model: "openai/gpt" },
       coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-native" },
@@ -112,42 +160,42 @@ test("Pi sessionFile coordinates round trip through Heart custody", () => {
       admittedAt: "2026-08-08T00:00:01.000Z",
     });
     body.release();
-    assert.deepEqual(readHeart(value.allocated.paths).latestSession?.coordinate, {
+    assert.deepEqual((await readHeart(value.allocated.paths)).latestSession?.coordinate, {
       sessionFile: "/sessions/pi.jsonl",
       sessionId: "pi-native",
     });
   } finally { value.close(); }
 });
 
-test("tell admission shares activity order and delivery witnesses fold without mutable stages", () => {
-  const value = fixture();
+test("tell admission shares activity order and delivery witnesses fold without mutable stages", async () => {
+  const value = await fixture();
   try {
-    const body = HeldAkumaLeash.try(value.allocated.paths)!;
-    body.birth(value.allocated.paths, value.soul);
-    const bodyFact = body.recordBody(value.allocated.paths, {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await body.birth(value.allocated.paths, value.soul);
+    const bodyFact = await body.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
-    const turn = beginTurn(value.allocated.paths, {
+    const turn = await beginTurn(value.allocated.paths, {
       bodySequence: bodyFact.sequence,
       startedAt: "2026-08-08T00:00:00.000Z",
     });
-    const firstActivity = appendActivity(value.allocated.paths, {
+    const firstActivity = await appendActivity(value.allocated.paths, {
       turnSequence: turn.sequence,
       event: { type: "note", text: "before" },
       at: "2026-08-08T00:00:00.000Z",
     });
-    const admitted = recordTell(value.allocated.paths, {
+    const admitted = await recordTell(value.allocated.paths, {
       id: "tell-1", body: "first", recordedAt: "2026-08-08T00:00:01.000Z",
     });
     assert.equal(admitted.kind, "recorded");
     if (admitted.kind !== "recorded") return;
-    const afterActivity = appendActivity(value.allocated.paths, {
+    const afterActivity = await appendActivity(value.allocated.paths, {
       turnSequence: turn.sequence,
       event: { type: "note", text: "after" },
       at: "2026-08-08T00:00:02.000Z",
     });
     assert.deepEqual([firstActivity, admitted.tell.sequence, afterActivity], [2, 3, 4]);
-    assert.deepEqual(activitySlice(value.allocated.paths).rows.map((fact) => fact.kind), [
+    assert.deepEqual((await activitySlice(value.allocated.paths)).rows.map((fact) => fact.kind), [
       "turn-start", "activity", "tell", "activity",
     ]);
 
@@ -158,47 +206,47 @@ test("tell admission shares activity order and delivery witnesses fold without m
       fence: "launch-fence",
       deliveredAt: "2026-08-08T00:00:03.000Z",
     };
-    recordTellDeliveries(value.allocated.paths, [delivery]);
-    recordTellDeliveries(value.allocated.paths, [delivery]);
-    const told = activitySlice(value.allocated.paths).rows[2];
+    await recordTellDeliveries(value.allocated.paths, [delivery]);
+    await recordTellDeliveries(value.allocated.paths, [delivery]);
+    const told = (await activitySlice(value.allocated.paths)).rows[2];
     assert.equal(told !== undefined && "id" in told ? told.state : null, "told");
-    assert.equal(readHeart(value.allocated.paths).pending.length, 0);
+    assert.equal((await readHeart(value.allocated.paths)).pending.length, 0);
     body.release();
   } finally { value.close(); }
 });
 
-test("tell admission refuses an unborn heart without writing its timeline", () => {
-  const value = fixture();
+test("tell admission refuses an unborn heart without writing its timeline", async () => {
+  const value = await fixture();
   try {
-    assert.deepEqual(recordTell(value.allocated.paths, {
+    assert.deepEqual(await recordTell(value.allocated.paths, {
       id: "tell-unborn", body: "future input", recordedAt: "2026-08-08T00:00:01.000Z",
     }), { kind: "not-born" });
-    assert.deepEqual(activitySlice(value.allocated.paths).rows, []);
-    assert.deepEqual(readHeart(value.allocated.paths).pending, []);
+    assert.deepEqual((await activitySlice(value.allocated.paths)).rows, []);
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
   } finally { value.close(); }
 });
 
-test("live receipts are terminal only under their exact Heart correlation", () => {
-  const value = fixture();
+test("live receipts are terminal only under their exact Heart correlation", async () => {
+  const value = await fixture();
   try {
-    const body = HeldAkumaLeash.try(value.allocated.paths)!;
-    body.birth(value.allocated.paths, value.soul);
-    const firstBody = body.recordBody(value.allocated.paths, {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await body.birth(value.allocated.paths, value.soul);
+    const firstBody = await body.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
-    const firstTurn = beginTurn(value.allocated.paths, {
+    const firstTurn = await beginTurn(value.allocated.paths, {
       bodySequence: firstBody.sequence,
       startedAt: "2026-08-08T00:00:00.000Z",
     });
-    const required = recordTell(value.allocated.paths, {
+    const required = await recordTell(value.allocated.paths, {
       id: "tell-required", body: "wait for receipt", recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    const unavailable = recordTell(value.allocated.paths, {
+    const unavailable = await recordTell(value.allocated.paths, {
       id: "tell-unavailable", body: "ack is terminal", recordedAt: "2026-08-08T00:00:02.000Z",
     });
     assert.equal(required.kind, "recorded");
     assert.equal(unavailable.kind, "recorded");
-    recordTellDeliveries(value.allocated.paths, [{
+    await recordTellDeliveries(value.allocated.paths, [{
       tellId: "tell-required", route: "live", receipt: "required",
       turnSequence: firstTurn.sequence,
       fence: "shared-fence", deliveredAt: "2026-08-08T00:00:03.000Z",
@@ -207,43 +255,43 @@ test("live receipts are terminal only under their exact Heart correlation", () =
       turnSequence: firstTurn.sequence,
       fence: "ack-fence", deliveredAt: "2026-08-08T00:00:03.000Z",
     }]);
-    assert.deepEqual(readHeart(value.allocated.paths).pending.map((tell) => tell.id), ["tell-required"]);
-    assert.throws(() => recordTellReceipt(value.allocated.paths, {
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-required"]);
+    await assert.rejects(recordTellReceipt(value.allocated.paths, {
       evidence: "fence", turnSequence: firstTurn.sequence + 1, fence: "shared-fence",
       kind: "accepted", receivedAt: "2026-08-08T00:00:04.000Z",
     }), /no delivery mapping/u);
-    assert.deepEqual(readHeart(value.allocated.paths).pending.map((tell) => tell.id), ["tell-required"]);
-    recordTellReceipt(value.allocated.paths, {
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-required"]);
+    await recordTellReceipt(value.allocated.paths, {
       evidence: "fence", turnSequence: firstTurn.sequence, fence: "shared-fence",
       kind: "accepted", receivedAt: "2026-08-08T00:00:05.000Z",
     });
-    assert.deepEqual(readHeart(value.allocated.paths).pending, []);
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
 
-    const exact = recordTell(value.allocated.paths, {
+    const exact = await recordTell(value.allocated.paths, {
       id: "tell-exact", body: "exact", recordedAt: "2026-08-08T00:00:06.000Z",
     });
     assert.equal(exact.kind, "recorded");
-    recordTellReceipt(value.allocated.paths, {
+    await recordTellReceipt(value.allocated.paths, {
       evidence: "exact", tellId: "tell-exact", kind: "consumed", receivedAt: "2026-08-08T00:00:07.000Z",
     });
-    assert.deepEqual(readHeart(value.allocated.paths).pending, []);
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
     body.release();
   } finally { value.close(); }
 });
 
-test("kill witnesses one stopped Body without burning pending work", () => {
-  const value = fixture();
+test("kill witnesses one stopped Body without burning pending work", async () => {
+  const value = await fixture();
   try {
-    const leash = HeldAkumaLeash.try(value.allocated.paths)!;
-    leash.birth(value.allocated.paths, value.soul);
-    const firstBody = leash.recordBody(value.allocated.paths, {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const firstBody = await leash.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
-    const pending = recordTell(value.allocated.paths, {
+    const pending = await recordTell(value.allocated.paths, {
       id: "tell-pending", body: "pending", recordedAt: "2026-08-08T00:00:01.000Z",
     });
     assert.equal(pending.kind, "recorded");
-    const request = admitRequest(value.allocated.paths, {
+    const request = await admitRequest(value.allocated.paths, {
       id: "00000000-0000-4000-8000-000000000010",
       archetype: "claude",
       body: "child work",
@@ -256,24 +304,24 @@ test("kill witnesses one stopped Body without burning pending work", () => {
       },
       admittedAt: "2026-08-08T00:00:02.000Z",
     });
-    assert.deepEqual(requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z"), {
+    assert.deepEqual(await requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z"), {
       kind: "requested",
       body: firstBody,
     });
-    breakBody(value.allocated.paths, {
+    await breakBody(value.allocated.paths, {
       sequence: firstBody.sequence,
       end: "put-down",
       at: "2026-08-08T00:00:03.500Z",
     });
-    assert.deepEqual(leash.settleStop(value.allocated.paths), {
+    assert.deepEqual(await leash.settleStop(value.allocated.paths), {
       target: { bodySequence: firstBody.sequence, requestedAt: "2026-08-08T00:00:03.000Z" },
       result: "recorded",
     });
-    assert.equal(requestStop(value.allocated.paths, "later").kind, "already-killed");
-    let snapshot = readHeart(value.allocated.paths);
+    assert.equal((await requestStop(value.allocated.paths, "later")).kind, "already-killed");
+    let snapshot = await readHeart(value.allocated.paths);
     assert.equal(snapshot.latestKill?.bodySequence, firstBody.sequence);
     assert.deepEqual(snapshot.pending.map((tell) => tell.id), ["tell-pending"]);
-    assert.equal(readRequest(value.allocated.paths, request.id)?.state, "admitted");
+    assert.equal((await readRequest(value.allocated.paths, request.id))?.state, "admitted");
     assert.equal(life({
       leash: "free",
       body: { ...firstBody, end: "put-down" },
@@ -281,46 +329,46 @@ test("kill witnesses one stopped Body without burning pending work", () => {
     }), "killed");
 
     leash.release();
-    const successor = HeldAkumaLeash.try(value.allocated.paths)!;
-    const secondBody = successor.recordBody(value.allocated.paths, {
+    const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    const secondBody = await successor.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:04.000Z",
     });
-    const secondTurn = beginTurn(value.allocated.paths, {
+    const secondTurn = await beginTurn(value.allocated.paths, {
       bodySequence: secondBody.sequence,
       startedAt: "2026-08-08T00:00:04.000Z",
     });
-    snapshot = readHeart(value.allocated.paths);
+    snapshot = await readHeart(value.allocated.paths);
     assert.equal(life({
       leash: "free",
       body: { ...secondBody, end: "exited" },
       kill: snapshot.latestKill,
     }), "asleep");
-    recordTellDeliveries(value.allocated.paths, [{
+    await recordTellDeliveries(value.allocated.paths, [{
       tellId: "tell-pending",
       route: "launch",
       turnSequence: secondTurn.sequence,
       fence: "successor",
       deliveredAt: "2026-08-08T00:00:05.000Z",
     }]);
-    assert.deepEqual(readHeart(value.allocated.paths).pending, []);
-    assert.equal(readRequest(value.allocated.paths, request.id)?.state, "admitted");
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
+    assert.equal((await readRequest(value.allocated.paths, request.id))?.state, "admitted");
     successor.release();
   } finally { value.close(); }
 });
 
-test("retention uses a bounded settled buffer while pending tells remain pinned", () => {
-  const value = fixture();
+test("retention uses a bounded settled buffer while pending tells remain pinned", async () => {
+  const value = await fixture();
   try {
-    const leash = HeldAkumaLeash.try(value.allocated.paths)!;
-    leash.birth(value.allocated.paths, value.soul);
-    const body = leash.recordBody(value.allocated.paths, {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
-    const admitted = recordTell(value.allocated.paths, {
+    const admitted = await recordTell(value.allocated.paths, {
       id: "tell-pinned", body: "keep me", recordedAt: "2026-08-08T00:00:00.000Z",
     });
     assert.equal(admitted.kind, "recorded");
-    const turn = beginTurn(value.allocated.paths, {
+    const turn = await beginTurn(value.allocated.paths, {
       bodySequence: body.sequence,
       startedAt: "2026-08-08T00:00:00.000Z",
     });
@@ -339,34 +387,34 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
       throw error;
     } finally { heart.close(); }
 
-    appendActivity(value.allocated.paths, {
+    await appendActivity(value.allocated.paths, {
     turnSequence: turn.sequence,
       event: { type: "note", text: "trigger compaction" },
       at: "2026-08-08T00:00:02.000Z",
     });
-    let retained = activitySlice(value.allocated.paths, { limit: Number.MAX_SAFE_INTEGER });
+    let retained = await activitySlice(value.allocated.paths, { limit: Number.MAX_SAFE_INTEGER });
     assert.equal(retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"), true);
     assert.equal(retained.rows.filter((fact) => fact.kind === "activity").length, 5_000);
 
-    recordTellReceipt(value.allocated.paths, {
+    await recordTellReceipt(value.allocated.paths, {
       evidence: "exact", tellId: "tell-pinned", kind: "consumed", receivedAt: "2026-08-08T00:00:03.000Z",
     });
     for (let index = 0; index < 501; index += 1) {
-      appendActivity(value.allocated.paths, {
+      await appendActivity(value.allocated.paths, {
         turnSequence: turn.sequence,
         event: { type: "note", text: `after-${index}` },
         at: "2026-08-08T00:00:04.000Z",
       });
     }
-    retained = activitySlice(value.allocated.paths, { limit: Number.MAX_SAFE_INTEGER });
+    retained = await activitySlice(value.allocated.paths, { limit: Number.MAX_SAFE_INTEGER });
     assert.equal(retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"), false);
     assert.ok(retained.rows.length >= 5_000 && retained.rows.length <= 5_500);
     leash.release();
   } finally { value.close(); }
 });
 
-test("Body Request facts have one idempotent monotonic authority", () => {
-  const value = fixture();
+test("Body Request facts have one idempotent monotonic authority", async () => {
+  const value = await fixture();
   try {
     const input = {
       id: "00000000-0000-4000-8000-000000000001",
@@ -381,36 +429,36 @@ test("Body Request facts have one idempotent monotonic authority", () => {
       },
       admittedAt: "2026-08-08T00:00:01.000Z",
     };
-    assert.equal(admitRequest(value.allocated.paths, input).state, "admitted");
-    assert.equal(admitRequest(value.allocated.paths, { ...input, admittedAt: "later" }).admittedAt, input.admittedAt);
-    assert.deepEqual(readNonterminalRequests(value.allocated.paths).map((request) => request.id), [input.id]);
+    assert.equal((await admitRequest(value.allocated.paths, input)).state, "admitted");
+    assert.equal((await admitRequest(value.allocated.paths, { ...input, admittedAt: "later" })).admittedAt, input.admittedAt);
+    assert.deepEqual((await readNonterminalRequests(value.allocated.paths)).map((request) => request.id), [input.id]);
 
-    const child = allocateAkumaDirectory({ worldRoot: value.root, archetype: "claude", draw: () => "deadbeef" });
-    assert.equal(reserveRequest(value.allocated.paths, input.id, child.id).state, "reserved");
-    assert.equal(serveRequest(value.allocated.paths, input.id, child.id).state, "served");
-    assert.equal(readRequest(value.allocated.paths, input.id)?.state, "served");
-    assert.deepEqual(readNonterminalRequests(value.allocated.paths), []);
+    const child = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "claude", draw: () => "deadbeef" });
+    assert.equal((await reserveRequest(value.allocated.paths, input.id, child.id)).state, "reserved");
+    assert.equal((await serveRequest(value.allocated.paths, input.id, child.id)).state, "served");
+    assert.equal((await readRequest(value.allocated.paths, input.id))?.state, "served");
+    assert.deepEqual(await readNonterminalRequests(value.allocated.paths), []);
 
-    const refused = admitRequest(value.allocated.paths, {
+    const refused = await admitRequest(value.allocated.paths, {
       ...input,
       id: "00000000-0000-4000-8000-000000000002",
       body: "refuse",
     });
-    assert.equal(refuseRequest(value.allocated.paths, refused.id, "unknown Archetype").state, "refused");
-    const voided = admitRequest(value.allocated.paths, {
+    assert.equal((await refuseRequest(value.allocated.paths, refused.id, "unknown Archetype")).state, "refused");
+    const voided = await admitRequest(value.allocated.paths, {
       ...input,
       id: "00000000-0000-4000-8000-000000000003",
       body: "void",
     });
-    assert.equal(voidRequest(value.allocated.paths, voided.id, "caller gone").state, "voided");
+    assert.equal((await voidRequest(value.allocated.paths, voided.id, "caller gone")).state, "voided");
 
-    assert.deepEqual(readNonterminalRequests(value.allocated.paths), []);
+    assert.deepEqual(await readNonterminalRequests(value.allocated.paths), []);
   } finally { value.close(); }
 });
 
-test("heart schema version 14 and leash schema version 4 hard-refuse old authority", () => {
+test("heart schema version 14 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
-  const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
     const heart = new DatabaseSync(allocated.paths.heart);
     heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 13)");
@@ -418,24 +466,24 @@ test("heart schema version 14 and leash schema version 4 hard-refuse old authori
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 14/u);
-    assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 14/u);
+    await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("answered Turns persist without a provider fork point", () => {
-  const value = fixture();
+test("answered Turns persist without a provider fork point", async () => {
+  const value = await fixture();
   try {
-    const claim = HeldAkumaLeash.try(value.allocated.paths)!;
-    claim.birth(value.allocated.paths, value.soul);
-    const body = claim.recordBody(value.allocated.paths, {
+    const claim = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await claim.birth(value.allocated.paths, value.soul);
+    const body = await claim.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
-    const turn = beginTurn(value.allocated.paths, {
+    const turn = await beginTurn(value.allocated.paths, {
       bodySequence: body.sequence,
       startedAt: "2026-08-08T00:00:01.000Z",
     });
-    endTurn(value.allocated.paths, {
+    await endTurn(value.allocated.paths, {
       turnSequence: turn.sequence,
       outcome: {
         kind: "answered",
@@ -446,7 +494,7 @@ test("answered Turns persist without a provider fork point", () => {
     });
     claim.release();
 
-    assert.deepEqual(activitySlice(value.allocated.paths, { limit: 5_000 }).rows
+    assert.deepEqual((await activitySlice(value.allocated.paths, { limit: 5_000 })).rows
       .filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome), [{
       kind: "answered",
       session: { sessionId: "native-session" },
@@ -455,60 +503,60 @@ test("answered Turns persist without a provider fork point", () => {
   } finally { value.close(); }
 });
 
-test("pause remains distinct from stop and can be cleared only under the leash", () => {
-  const value = fixture();
+test("pause remains distinct from stop and can be cleared only under the leash", async () => {
+  const value = await fixture();
   try {
-    const body = HeldAkumaLeash.try(value.allocated.paths)!;
-    body.birth(value.allocated.paths, value.soul);
-    const firstBody = body.recordBody(value.allocated.paths, {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await body.birth(value.allocated.paths, value.soul);
+    const firstBody = await body.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     body.release();
-    assert.deepEqual(requestStop(value.allocated.paths, "2026-08-08T00:00:01.000Z"), {
+    assert.deepEqual(await requestStop(value.allocated.paths, "2026-08-08T00:00:01.000Z"), {
       kind: "requested",
       body: firstBody,
     });
-    assert.deepEqual(requestPause(value.allocated.paths, "2026-08-08T00:00:02.000Z"), {
+    assert.deepEqual(await requestPause(value.allocated.paths, "2026-08-08T00:00:02.000Z"), {
       kind: "requested",
       body: firstBody,
     });
-    assert.equal(stopRequested(value.allocated.paths), true);
-    assert.equal(pauseRequested(value.allocated.paths), true);
+    assert.equal(await stopRequested(value.allocated.paths), true);
+    assert.equal(await pauseRequested(value.allocated.paths), true);
 
-    const interruptor = HeldAkumaLeash.try(value.allocated.paths)!;
-    interruptor.clearPause(value.allocated.paths);
+    const interruptor = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await interruptor.clearPause(value.allocated.paths);
     interruptor.release();
-    assert.equal(pauseRequested(value.allocated.paths), false);
-    assert.equal(stopRequested(value.allocated.paths), true);
+    assert.equal(await pauseRequested(value.allocated.paths), false);
+    assert.equal(await stopRequested(value.allocated.paths), true);
 
-    assert.deepEqual(requestPause(value.allocated.paths, "2026-08-08T00:00:04.000Z"), {
+    assert.deepEqual(await requestPause(value.allocated.paths, "2026-08-08T00:00:04.000Z"), {
       kind: "requested",
       body: firstBody,
     });
-    assert.equal(pauseRequested(value.allocated.paths), true);
+    assert.equal(await pauseRequested(value.allocated.paths), true);
   } finally { value.close(); }
 });
 
-test("normal body completion refuses while a tell remains pending", () => {
-  const value = fixture();
+test("normal body completion refuses while a tell remains pending", async () => {
+  const value = await fixture();
   try {
-    const claim = HeldAkumaLeash.try(value.allocated.paths)!;
-    claim.birth(value.allocated.paths, value.soul);
-    const body = claim.recordBody(value.allocated.paths, {
+    const claim = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await claim.birth(value.allocated.paths, value.soul);
+    const body = await claim.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
-    recordSession(value.allocated.paths, {
+    await recordSession(value.allocated.paths, {
       provider: "claude",
       options: value.soul.options,
       coordinate: { sessionId: "native-session" },
       cwd: value.root,
       admittedAt: "2026-08-08T00:00:00.000Z",
     });
-    recordTell(value.allocated.paths, {
+    await recordTell(value.allocated.paths, {
       id: "tell-1", body: "pending", recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    const firstTurn = beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: "2026-08-08T00:00:01.000Z" });
-    endTurn(value.allocated.paths, {
+    const firstTurn = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: "2026-08-08T00:00:01.000Z" });
+    await endTurn(value.allocated.paths, {
       turnSequence: firstTurn.sequence,
       outcome: {
         kind: "answered",
@@ -518,16 +566,16 @@ test("normal body completion refuses while a tell remains pending", () => {
       },
       completedAt: "2026-08-08T00:00:02.000Z",
     });
-    assert.deepEqual(finishBodyIfIdle(value.allocated.paths, {
+    assert.deepEqual(await finishBodyIfIdle(value.allocated.paths, {
       sequence: body.sequence, at: "2026-08-08T00:00:02.000Z",
     }), { kind: "pending", tells: ["tell-1"] });
-    const secondTurn = beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: "2026-08-08T00:00:02.000Z" });
-    endTurn(value.allocated.paths, {
+    const secondTurn = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: "2026-08-08T00:00:02.000Z" });
+    await endTurn(value.allocated.paths, {
       turnSequence: secondTurn.sequence,
       outcome: { kind: "failed", diagnostic: "later failure" },
       completedAt: "2026-08-08T00:00:03.000Z",
     });
-    assert.deepEqual(activitySlice(value.allocated.paths, { limit: 5_000 }).rows
+    assert.deepEqual((await activitySlice(value.allocated.paths, { limit: 5_000 })).rows
       .filter((fact) => fact.kind === "turn-end").map((turn) => turn.outcome), [
       {
         kind: "answered",
@@ -537,30 +585,30 @@ test("normal body completion refuses while a tell remains pending", () => {
       },
       { kind: "failed", diagnostic: "later failure" },
     ]);
-    assert.deepEqual(readForkPoint(value.allocated.paths, "turn-1"), {
+    assert.deepEqual(await readForkPoint(value.allocated.paths, "turn-1"), {
       historyId: "turn-1",
       session: { sessionId: "native-session" },
       provider: "claude",
       cwd: value.root,
       options: value.soul.options,
     });
-    assert.equal(readForkPoint(value.allocated.paths, "missing-turn"), null);
+    assert.equal(await readForkPoint(value.allocated.paths, "missing-turn"), null);
     claim.release();
   } finally { value.close(); }
 });
 
-test("fork birth admits the child session in the soul birth transaction", () => {
-  const value = fixture();
+test("fork birth admits the child session in the soul birth transaction", async () => {
+  const value = await fixture();
   try {
-    const body = HeldAkumaLeash.try(value.allocated.paths)!;
-    assert.equal(body.birth(value.allocated.paths, value.soul, {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    assert.equal(await body.birth(value.allocated.paths, value.soul, {
       provider: "claude",
       coordinate: { sessionId: "fork-child" },
       cwd: value.root,
       options: value.soul.options,
       admittedAt: "2026-08-08T00:00:00.000Z",
     }), "born");
-    assert.deepEqual(readHeart(value.allocated.paths).latestSession, {
+    assert.deepEqual((await readHeart(value.allocated.paths)).latestSession, {
       sequence: 1,
       provider: "claude",
       coordinate: { sessionId: "fork-child" },
@@ -572,23 +620,23 @@ test("fork birth admits the child session in the soul birth transaction", () => 
   } finally { value.close(); }
 });
 
-test("Body idle settlement atomically obeys current control", () => {
-  const value = fixture();
+test("Body idle settlement atomically obeys current control", async () => {
+  const value = await fixture();
   try {
-    const leash = HeldAkumaLeash.try(value.allocated.paths)!;
-    leash.birth(value.allocated.paths, value.soul);
-    const body = leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
-    requestPause(value.allocated.paths, "2026-08-08T00:00:01.000Z");
-    assert.deepEqual(finishBodyIfIdle(value.allocated.paths, {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
+    await requestPause(value.allocated.paths, "2026-08-08T00:00:01.000Z");
+    assert.deepEqual(await finishBodyIfIdle(value.allocated.paths, {
       sequence: body.sequence,
       at: "2026-08-08T00:00:02.000Z",
     }), { kind: "controlled" });
-    assert.equal(readHeart(value.allocated.paths).latestBody?.end, "put-down");
+    assert.equal((await readHeart(value.allocated.paths)).latestBody?.end, "put-down");
     leash.release();
   } finally { value.close(); }
 });
 
-test("life is the sole leash and settlement interpretation", () => {
+test("life is the sole leash and settlement interpretation", async () => {
   const body = { sequence: 1, leashTakenAt: "2026-08-08T00:00:00.000Z" };
   const kill = { sequence: 1, bodySequence: 1, evidence: "killed" as const, at: "life" };
   const project = (input: Partial<Parameters<typeof life>[0]>) => life({
@@ -606,23 +654,23 @@ test("life is the sole leash and settlement interpretation", () => {
   assert.equal(project({ body: { ...body, end: "put-down" }, kill }), "killed");
 });
 
-test("Body hung custody evidence round trips through Heart", () => {
-  const value = fixture();
+test("Body hung custody evidence round trips through Heart", async () => {
+  const value = await fixture();
   try {
-    const leash = HeldAkumaLeash.try(value.allocated.paths)!;
-    leash.birth(value.allocated.paths, value.soul);
-    const body = leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
-    leash.recordBodyHung(value.allocated.paths, {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
+    await leash.recordBodyHung(value.allocated.paths, {
       sequence: body.sequence,
       diagnostic: "provider custody remained live",
       at: "2026-08-08T00:00:01.000Z",
     });
-    assert.deepEqual(readHeart(value.allocated.paths).latestBody?.hung, {
+    assert.deepEqual((await readHeart(value.allocated.paths)).latestBody?.hung, {
       diagnostic: "provider custody remained live",
       at: "2026-08-08T00:00:01.000Z",
     });
     leash.release();
-    assert.throws(() => leash.recordBodyHung(value.allocated.paths, {
+    await assert.rejects(leash.recordBodyHung(value.allocated.paths, {
       sequence: body.sequence,
       diagnostic: "late fabricated custody",
       at: "2026-08-08T00:00:02.000Z",

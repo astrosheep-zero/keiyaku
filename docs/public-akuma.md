@@ -10,6 +10,11 @@ call, tell, interrupt, and kill use the same semantic rows. Snapshot selection
 pins the current frontier, latest outcome, open Turn, and pending tell; it does
 not add a derived lifecycle fact.
 
+Every filesystem, Alias, Dispatch, and Heart observation in these facets is
+awaited before the public Promise fulfills. Composition preserves the declared
+stage order; asynchronous observation does not introduce parallel writers,
+cached resolution, or a background integration queue.
+
 ## Akuma Creation Facet
 
 The Akuma creation facet is the package-root owner for operations that produce

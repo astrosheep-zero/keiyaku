@@ -83,7 +83,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   }
   const path = worldRoot(values.path);
   if (query.kind === "tasks") {
-    return { kind: "tasks", root: path, rows: observeTaskCatalogRows(path) };
+    return { kind: "tasks", root: path, rows: await observeTaskCatalogRows(path) };
   }
   const listed = await Akuma.of(path).list(query.archetype === undefined ? undefined : { archetype: query.archetype });
   return {

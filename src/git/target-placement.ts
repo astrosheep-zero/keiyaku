@@ -1,4 +1,4 @@
-import { lstatSync } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { acquireSqliteTransactionLock, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
@@ -171,13 +171,13 @@ type PhysicalScope = Readonly<{
   kind: "leaf" | "directory";
 }>;
 
-function physicalScope(worktree: string, candidatePath: string): PhysicalScope | null {
+async function physicalScope(worktree: string, candidatePath: string): Promise<PhysicalScope | null> {
   const components = candidatePath.split("/");
   for (let index = 0; index < components.length; index += 1) {
     const scope = components.slice(0, index + 1).join("/");
-    let stat: ReturnType<typeof lstatSync>;
+    let stat: Awaited<ReturnType<typeof lstat>>;
     try {
-      stat = lstatSync(resolve(worktree, ...components.slice(0, index + 1)));
+      stat = await lstat(resolve(worktree, ...components.slice(0, index + 1)));
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT" || code === "ENOTDIR") return null;
@@ -212,7 +212,7 @@ async function destructionScopes(
 ): Promise<readonly PhysicalScope[]> {
   const scopes = new Map<string, PhysicalScope>();
   for (const write of writes) {
-    const scope = physicalScope(path, write);
+    const scope = await physicalScope(path, write);
     if (scope === null) continue;
     if (scope.kind === "directory" && !(await candidateEntryIsBlob(repository, path, candidate, write))) continue;
     scopes.set(scope.path, scope);

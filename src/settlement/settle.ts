@@ -58,7 +58,7 @@ async function settleNamespace(state: ContractState, effects: readonly Effect[],
       actions.push({
         kind: "namespace-context",
         path: effect.path,
-        action: repairNamespaceContext(world, [contractSegment(state.id)]),
+        action: await repairNamespaceContext(world, [contractSegment(state.id)]),
       });
     } catch (error) {
       lags.push({

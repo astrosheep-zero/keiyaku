@@ -48,6 +48,10 @@ creation-owned identity, may declare its initial state, and cannot be combined
 with structured creation flags other than `--namespace`. Update requires at
 least one explicit patch.
 
+Selected stdin is acquired asynchronously and completely before the Task
+operation begins. The CLI does not expose a synchronous read or retain a
+background input queue.
+
 Add `--note` sets the initial note. Update `--note` replaces the note and
 returns the native document diff. Done and drop `--note` replace the note for
 each addressed Task in that Task's independent atomic lifecycle mutation. Batch

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { replaceFileDurably } from "../coordination/durable-file.js";
@@ -167,19 +167,19 @@ export function hookMarkerPath(administrationDirectory: string): string {
   return join(administrationDirectory, "keiyaku", "hooks.json");
 }
 
-function readMarker(administrationDirectory: string): HookMarker | null {
+async function readMarker(administrationDirectory: string): Promise<HookMarker | null> {
   try {
-    return decodeMarker(readFileSync(hookMarkerPath(administrationDirectory), "utf8"));
+    return decodeMarker(await readFile(hookMarkerPath(administrationDirectory), "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
 }
 
-function writeMarker(administrationDirectory: string, marker: HookMarker): void {
+async function writeMarker(administrationDirectory: string, marker: HookMarker): Promise<void> {
   const path = hookMarkerPath(administrationDirectory);
-  mkdirSync(dirname(path), { recursive: true });
-  replaceFileDurably(path, `${JSON.stringify(marker)}\n`);
+  await mkdir(dirname(path), { recursive: true });
+  await replaceFileDurably(path, `${JSON.stringify(marker)}\n`);
 }
 
 function freshMarker(commands: WorktreeHooks, createPending: boolean): HookMarker {
@@ -273,7 +273,7 @@ async function executePendingCommand(input: HookRunnerInput): Promise<void> {
     mode: "immediate",
   });
   try {
-    const marker = readMarker(input.administrationDirectory);
+    const marker = await readMarker(input.administrationDirectory);
     if (marker === null) throw new Error("worktree hook marker disappeared before execution");
     const progress = marker[input.phase];
     if (progress.status !== "pending" || progress.next !== input.command) return;
@@ -283,7 +283,7 @@ async function executePendingCommand(input: HookRunnerInput): Promise<void> {
     if (result.kind === "cancelled") throw new Error("managed hook runner cancelled without a signal");
     const failure = result.kind === "failed" ? result.failure : null;
     const next = input.command + 1;
-    writeMarker(input.administrationDirectory, withProgress(marker, input.phase, failure === null
+    await writeMarker(input.administrationDirectory, withProgress(marker, input.phase, failure === null
       ? next === marker.commands[input.phase].length ? { status: "ok" } : { status: "pending", next }
       : { status: "failed", command: input.command, failure }));
   } finally {
@@ -316,14 +316,14 @@ async function runPhase(
   phase: HookPhase,
   retryHooks: boolean,
 ): Promise<WorktreeHookLag | null> {
-  let marker = readMarker(administrationDirectory);
+  let marker = await readMarker(administrationDirectory);
   if (marker === null) {
     marker = freshMarker(hooks, phase === "create");
-    writeMarker(administrationDirectory, marker);
+    await writeMarker(administrationDirectory, marker);
   }
   let retryFailure = retryHooks && marker[phase].status === "failed";
   for (;;) {
-    marker = readMarker(administrationDirectory);
+    marker = await readMarker(administrationDirectory);
     if (marker === null) throw new Error("worktree hook marker disappeared during execution");
     const progress = marker[phase];
     if (progress.status === "ok") return null;
@@ -332,11 +332,11 @@ async function runPhase(
         return { kind: "worktree-hook-failed", phase, path: worktree, command: progress.command, failure: progress.failure };
       }
       retryFailure = false;
-      writeMarker(administrationDirectory, withProgress(marker, phase, { status: "pending", next: progress.command }));
+      await writeMarker(administrationDirectory, withProgress(marker, phase, { status: "pending", next: progress.command }));
       continue;
     }
     if (progress.next === marker.commands[phase].length) {
-      writeMarker(administrationDirectory, withProgress(marker, phase, { status: "ok" }));
+      await writeMarker(administrationDirectory, withProgress(marker, phase, { status: "ok" }));
       continue;
     }
     await runPendingCommand({ administrationDirectory, worktree, phase, command: progress.next });

@@ -41,11 +41,11 @@ function document(title = "Kanshi contract"): string {
   ].join("\n");
 }
 
-function bornAkuma(root: string, suffix: string) {
-  const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "watcher", draw: () => suffix });
-  initializeHeart(allocated.paths);
-  const leash = HeldAkumaLeash.try(allocated.paths)!;
-  leash.birth(allocated.paths, {
+async function bornAkuma(root: string, suffix: string) {
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "watcher", draw: () => suffix });
+  await initializeHeart(allocated.paths);
+  const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+  await leash.birth(allocated.paths, {
     id: allocated.id,
     archetype: "watcher",
     provider: { name: "claude", kind: "claude-agent-sdk" },
@@ -80,7 +80,7 @@ async function populatedWorld() {
   const renamed = await tasks.task({ id: added.value.id }).update({ title: "Investigate status rendering" });
   assert.equal(renamed.kind, "accepted");
   await tasks.task({ id: added.value.id }).start();
-  const akumaId = bornAkuma(repository.path, "a0000001");
+  const akumaId = await bornAkuma(repository.path, "a0000001");
   assert.equal((await publishDispatch({ repository: await repositoryAt(repository.path), akuId: akumaId, contractId: contract.id })).kind, "dispatched");
   await moveAlias({ world: repository.path, alias: "@watch", akuId: akumaId });
   return { repository, contract, taskId: added.value.id, akumaId };
@@ -120,7 +120,7 @@ test("one-target Kanshi observation has a seven-process Git topology", async () 
     target: "main",
   });
   const secondContract = await bound.keiyaku.state();
-  const secondAkuma = bornAkuma(repository.path, "a0000009");
+  const secondAkuma = await bornAkuma(repository.path, "a0000009");
   assert.equal((await publishDispatch({
     repository: await repositoryAt(repository.path),
     akuId: secondAkuma,
@@ -268,7 +268,7 @@ test("kanshi joins TaskHolder, Dispatch, and Alias without moving their authorit
 
 test("kanshi keeps absent Contract and Task worlds explicit", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-no-git-"));
-  const akumaId = bornAkuma(root, "a0000002");
+  const akumaId = await bornAkuma(root, "a0000002");
   const report = await observe(root);
   assert.deepEqual(report.contracts, { kind: "absent" });
   assert.equal(report.tasks.kind, "present");
@@ -411,7 +411,7 @@ test("blocked Kanshi rows preserve ordered structured Task blocker refs", async 
 
 test("malformed Alias fails only the Kanshi Akuma section", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-bad-alias-"));
-  bornAkuma(root, "a0000003");
+  await bornAkuma(root, "a0000003");
   mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "not alias authority\n");
   const report = await observe(root);

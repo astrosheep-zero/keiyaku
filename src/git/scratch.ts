@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
@@ -11,7 +11,7 @@ import { gitObjectIdForSnapshot } from "./identity.js";
 import { runGit, type GitRepository } from "./repository.js";
 
 const SCRATCH_PREFIX = "keiyaku-v4-verify-";
-const SCRATCH_ROOT = realpathSync(tmpdir());
+const SCRATCH_ROOT = await realpath(tmpdir());
 const SCRATCH_PATTERN = /^keiyaku-v4-verify-([0-9a-f]{24})$/;
 
 export type MaterializedScratchCandidate = Readonly<{
@@ -39,12 +39,12 @@ function ownershipLockPath(path: string): string | null {
   return match === null ? null : join(SCRATCH_ROOT, `.${SCRATCH_PREFIX}${match[1]}.owner.sqlite`);
 }
 
-export function collectableScratchWorktrees(paths: Iterable<string>): readonly CollectableScratchWorktree[] {
+export async function collectableScratchWorktrees(paths: Iterable<string>): Promise<readonly CollectableScratchWorktree[]> {
   const collectable: CollectableScratchWorktree[] = [];
   for (const path of paths) {
     const lockPath = ownershipLockPath(path);
     if (lockPath === null) continue;
-    const lock = tryAcquireSqliteTransactionLock({ path: lockPath, mode: "exclusive" });
+    const lock = await tryAcquireSqliteTransactionLock({ path: lockPath, mode: "exclusive" });
     if (lock !== null) collectable.push({ path, release: () => lock.close() });
   }
   return collectable;
@@ -58,7 +58,7 @@ export async function materializeScratchCandidate(
   const cwd = scratchPath();
   const lockPath = ownershipLockPath(cwd);
   if (lockPath === null) throw new Error("scratch ownership lock path is invalid");
-  const ownership: HeldSqliteTransactionLock | null = tryAcquireSqliteTransactionLock({
+  const ownership: HeldSqliteTransactionLock | null = await tryAcquireSqliteTransactionLock({
     path: lockPath,
     mode: "exclusive",
   });

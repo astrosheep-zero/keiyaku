@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { access, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { acquireSqliteTransactionLock, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -38,6 +38,10 @@ import {
 } from "./hooks.js";
 import { deliveryWorktreePath } from "./workspace.js";
 import { collectableScratchWorktrees } from "./scratch.js";
+
+async function pathExists(path: string): Promise<boolean> {
+  return await access(path).then(() => true, () => false);
+}
 import {
   terminalSealExpectations as decodeTerminalSealExpectations,
   terminalSealSnapshots,
@@ -172,13 +176,14 @@ function reconcileLockPath(repository: GitRepository, contract: ContractId): str
 
 async function worktree(repository: GitRepository, topology: WorktreeTopology, path: string, desired: SnapshotId): Promise<Effect> {
   const registered = topology.paths.has(path);
-  if (registered && existsSync(path)) return { kind: "worktree", path, action: "unchanged" };
+  if (registered && await pathExists(path)) return { kind: "worktree", path, action: "unchanged" };
   if (registered) {
     await runGit(repository, ["worktree", "remove", path]);
     topology.paths.delete(path);
   }
-  if (existsSync(path)) throw new Error(`delivery worktree path is occupied: ${path}`);
-  mkdirSync(dirname(path), { recursive: true }); await runGit(repository, ["worktree", "add", "--detach", path, gitObjectIdForSnapshot(desired)]);
+  if (await pathExists(path)) throw new Error(`delivery worktree path is occupied: ${path}`);
+  await mkdir(dirname(path), { recursive: true });
+  await runGit(repository, ["worktree", "add", "--detach", path, gitObjectIdForSnapshot(desired)]);
   topology.paths.add(path);
   return { kind: "worktree", path, action: "created" };
 }
@@ -190,7 +195,7 @@ async function removeWorktree(
 ): Promise<Readonly<{ effect: Effect; retained: boolean }>> {
   const registered = topology.paths.has(path);
   if (!registered) return { effect: { kind: "worktree", path, action: "unchanged" }, retained: false };
-  if (!existsSync(path)) {
+  if (!await pathExists(path)) {
     await runGit(repository, ["worktree", "remove", path]);
     topology.paths.delete(path);
     return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
@@ -210,7 +215,7 @@ async function removeCollectableScratch(
   effects: Effect[],
   lag: ReconcileLag[],
 ): Promise<void> {
-  for (const scratch of collectableScratchWorktrees(topology.paths)) {
+  for (const scratch of await collectableScratchWorktrees(topology.paths)) {
     try {
       const removal = await removeWorktree(repository, topology, scratch.path, true);
       effects.push(removal.effect);
@@ -323,7 +328,7 @@ async function terminalSealExpectations(
 async function removeSealedTerminalWorktree(
   { repository, topology, path, expected, hooks, retryHooks, acc }: TerminalWorktreeCleanup,
 ): Promise<ReconcileResult | null> {
-  if (topology.paths.has(path) && existsSync(path)) {
+  if (topology.paths.has(path) && await pathExists(path)) {
     const beforeHooks = await unsealedBytes(repository, path, expected);
     if (beforeHooks !== null) return retainTerminalWorktree(path, beforeHooks, acc);
     const hookLag = await runDestroyHooks(path, await worktreeGitDirectory(repository, path), hooks, retryHooks);

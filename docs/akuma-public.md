@@ -29,14 +29,19 @@ await world.listArchetypes();              // canonical names in byte order
 await world.list();                        // compact fleet rows; no history scan
 
 a.id                                       // aku/<archetype>/<hex8>
-a.status()                                 // current state + bounded activity
-a.wait(predicate?, { timeoutMs? })         // same status carrier on either outcome
-a.history({ before?, since?, limit? })      // persistent execution-history page
-a.tell(body)                               // typed mutation result
-a.interrupt(body)                         // bounded pause, leash proof, then tell
-a.fork({ at: historyId })                 // exact retained native fork point
-a.kill()                                   // typed settlement evidence
+await a.status()                           // current state + bounded activity
+await a.wait(predicate?, { timeoutMs? })   // same status carrier on either outcome
+await a.history({ before?, since?, limit? }) // persistent execution-history page
+await a.tell(body)                         // typed mutation result
+await a.interrupt(body)                    // bounded pause, leash proof, then tell
+await a.fork({ at: historyId })            // exact retained native fork point
+await a.kill()                             // typed settlement evidence
 ```
+
+Each handle operation that reads Heart, leash, or filesystem state is a
+Promise boundary and fulfills only after that observation completes. The handle
+itself and its `id` remain synchronous because they carry only resolved value
+coordinates.
 
 The public lifecycle unions are closed:
 

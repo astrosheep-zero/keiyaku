@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { access } from "node:fs/promises";
 import type { Preparation } from "../core/decide.js";
 import type { ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
@@ -40,8 +40,9 @@ export type TenderCapture = Readonly<{
 }>;
 
 async function workspaceExists(repository: GitRepository, workspace: "worktree" | "here", path: string): Promise<boolean> {
+  const exists = await access(path).then(() => true, () => false);
   return workspace === "here"
-    || (existsSync(path) && (await registeredWorktreePaths(repository)).includes(path));
+    || (exists && (await registeredWorktreePaths(repository)).includes(path));
 }
 
 function workspaceFor(repository: GitRepository, id: ContractId, workspace: "worktree" | "here"): string {

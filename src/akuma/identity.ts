@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { identityCoordinate, identitySegments } from "../identity/coordinates.js";
 import { normalizeIdentityStem } from "../identity/normalize.js";
@@ -75,29 +75,29 @@ export function akuIdFromDirectoryName(name: string): Readonly<{ id: AkuId; arch
   return { id: akuId({ archetype, suffix }), archetype, suffix };
 }
 
-export function ensureAkumaRunRoot(worldRoot: string): string {
+export async function ensureAkumaRunRoot(worldRoot: string): Promise<string> {
   const runRoot = akumaRunRoot(worldRoot);
-  mkdirSync(runRoot, { recursive: true });
+  await mkdir(runRoot, { recursive: true });
   try {
-    writeFileSync(join(runRoot, ".gitignore"), "*\n", { flag: "wx" });
+    await writeFile(join(runRoot, ".gitignore"), "*\n", { flag: "wx" });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
   return runRoot;
 }
 
-export function allocateAkumaDirectory(input: Readonly<{
+export async function allocateAkumaDirectory(input: Readonly<{
   worldRoot: string;
   archetype: string;
   draw?: () => string;
-}>): AllocatedAkuma {
+}>): Promise<AllocatedAkuma> {
   const archetype = archetypeName(input.archetype);
-  const runRoot = ensureAkumaRunRoot(input.worldRoot);
+  const runRoot = await ensureAkumaRunRoot(input.worldRoot);
   for (;;) {
     const suffix = suffixSegment(input.draw?.() ?? randomBytes(4).toString("hex"));
     const paths = akumaPaths({ runRoot, archetype, suffix });
     try {
-      mkdirSync(paths.directory);
+      await mkdir(paths.directory);
       return { id: akuId({ archetype, suffix }), archetype, suffix, paths };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;

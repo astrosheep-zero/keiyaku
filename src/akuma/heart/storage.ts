@@ -1,4 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
+import { lstat } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import type { AkumaPaths } from "../identity.js";
 import type {
   BodyFact,
@@ -29,6 +31,18 @@ import { pruneActivityFacts } from "./timeline.js";
 import { insertSoulFact, soulFact } from "./soul.js";
 
 const ACTIVITY_LIMIT = 5_000;
+const SQLITE_CANTOPEN = 14;
+
+export class HeartAbsentError extends Error {
+  constructor(readonly path: string, options?: ErrorOptions) {
+    super(`Akuma Heart database is absent: ${path}`, options);
+    this.name = "HeartAbsentError";
+  }
+}
+
+export function isHeartAbsent(error: unknown): error is HeartAbsentError {
+  return error instanceof HeartAbsentError;
+}
 
 function isBusy(error: unknown): boolean {
   const value = error as { code?: unknown; errcode?: unknown; message?: unknown };
@@ -37,15 +51,41 @@ function isBusy(error: unknown): boolean {
     || value?.errcode === 5 || message.includes("database is locked") || message.includes("database is busy");
 }
 
-export function openHeart(path: string, verify = true): DatabaseSync {
-  const database = new DatabaseSync(path);
-  database.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL");
-  if (verify) assertHeartSchemaVersion(database);
-  return database;
+async function openExistingDatabase(path: string, timeout?: number): Promise<DatabaseSync> {
+  const uri = pathToFileURL(path);
+  uri.searchParams.set("mode", "rw");
+  try {
+    return timeout === undefined
+      ? new DatabaseSync(uri.href)
+      : new DatabaseSync(uri.href, { timeout });
+  } catch (error) {
+    if ((error as { errcode?: unknown }).errcode === SQLITE_CANTOPEN) {
+      try {
+        await lstat(path);
+      } catch (metadataError) {
+        if ((metadataError as NodeJS.ErrnoException).code === "ENOENT") {
+          throw new HeartAbsentError(path, { cause: error });
+        }
+      }
+    }
+    throw error;
+  }
 }
 
-export function withHeart<T>(paths: AkumaPaths, body: (database: DatabaseSync) => T): T {
-  const database = openHeart(paths.heart);
+async function openHeart(path: string, verify = true): Promise<DatabaseSync> {
+  const database = await openExistingDatabase(path);
+  try {
+    database.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL");
+    if (verify) assertHeartSchemaVersion(database);
+    return database;
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+}
+
+export async function withHeart<T>(paths: AkumaPaths, body: (database: DatabaseSync) => T): Promise<T> {
+  const database = await openHeart(paths.heart);
   try { return body(database); } finally { database.close(); }
 }
 
@@ -61,8 +101,8 @@ export function transaction<T>(database: DatabaseSync, body: () => T): T {
   }
 }
 
-export function initializeHeart(paths: AkumaPaths): void {
-  const heart = openHeart(paths.heart, false);
+export async function initializeHeart(paths: AkumaPaths): Promise<void> {
+  const heart = new DatabaseSync(paths.heart);
   try {
     heart.exec(HEART_SCHEMA);
     assertHeartSchemaVersion(heart);
@@ -80,8 +120,8 @@ export class HeldAkumaLeash {
 
   private constructor(private readonly database: DatabaseSync) {}
 
-  static try(paths: AkumaPaths): HeldAkumaLeash | null {
-    const database = new DatabaseSync(paths.leash, { timeout: 0 });
+  static async try(paths: AkumaPaths): Promise<HeldAkumaLeash | null> {
+    const database = await openExistingDatabase(paths.leash, 0);
     try {
       assertLeashSchemaVersion(database);
       database.exec("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE");
@@ -93,9 +133,9 @@ export class HeldAkumaLeash {
     }
   }
 
-  birth(paths: AkumaPaths, soul: Soul, session?: Omit<SessionFact, "sequence">): "born" | "already-born" | "sealed" {
+  async birth(paths: AkumaPaths, soul: Soul, session?: Omit<SessionFact, "sequence">): Promise<"born" | "already-born" | "sealed"> {
     if (sealExists(this.database)) return "sealed";
-    return withHeart(paths, (heart) => transaction(heart, () => {
+    return await withHeart(paths, (heart) => transaction(heart, () => {
       if (soulFact(heart) !== null) return "already-born";
       insertSoulFact(heart, soul);
       if (session !== undefined) insertSessionFact(heart, session);
@@ -103,8 +143,8 @@ export class HeldAkumaLeash {
     }));
   }
 
-  sealIfUnborn(paths: AkumaPaths, input: Readonly<{ evidence: string; at: string }>): "born" | "sealed" {
-    if (withHeart(paths, (heart) => soulFact(heart)) !== null) return "born";
+  async sealIfUnborn(paths: AkumaPaths, input: Readonly<{ evidence: string; at: string }>): Promise<"born" | "sealed"> {
+    if (await withHeart(paths, (heart) => soulFact(heart)) !== null) return "born";
     insertSealFact(this.database, input);
     this.database.exec("COMMIT");
     this.closed = true;
@@ -112,28 +152,28 @@ export class HeldAkumaLeash {
     return "sealed";
   }
 
-  clearPause(paths: AkumaPaths): void { withHeart(paths, deletePauseControl); }
-  clearStop(paths: AkumaPaths): void { withHeart(paths, deleteStopControl); }
+  async clearPause(paths: AkumaPaths): Promise<void> { await withHeart(paths, deletePauseControl); }
+  async clearStop(paths: AkumaPaths): Promise<void> { await withHeart(paths, deleteStopControl); }
 
-  recordBody(paths: AkumaPaths, input: Readonly<{ leashTakenAt: string }>): BodyFact {
+  async recordBody(paths: AkumaPaths, input: Readonly<{ leashTakenAt: string }>): Promise<BodyFact> {
     if (this.closed || this.bodySequence !== undefined) throw new Error("Akuma leash cannot start another Body");
-    const sequence = withHeart(paths, (heart) => insertBodyFact(heart, input));
+    const sequence = await withHeart(paths, (heart) => insertBodyFact(heart, input));
     this.bodySequence = sequence;
     return { sequence, leashTakenAt: input.leashTakenAt };
   }
 
-  recordBodyHung(
+  async recordBodyHung(
     paths: AkumaPaths,
     input: Readonly<{ sequence: number; diagnostic: string; at: string }>,
-  ): void {
+  ): Promise<void> {
     if (this.closed || this.bodySequence !== input.sequence) {
       throw new Error(`Akuma Body ${input.sequence} is not owned by this leash`);
     }
-    withHeart(paths, (heart) => markBodyHung(heart, input));
+    await withHeart(paths, (heart) => markBodyHung(heart, input));
   }
 
-  settleStop(paths: AkumaPaths, expectedBodySequence?: number): Readonly<{ target: StopFact; result: "recorded" | "already-killed" }> | null {
-    return withHeart(paths, (heart) => transaction(heart, () => {
+  async settleStop(paths: AkumaPaths, expectedBodySequence?: number): Promise<Readonly<{ target: StopFact; result: "recorded" | "already-killed" }> | null> {
+    return await withHeart(paths, (heart) => transaction(heart, () => {
       const target = stopFact(heart);
       if (target === null) {
         if (expectedBodySequence === undefined) return null;
@@ -154,8 +194,8 @@ export class HeldAkumaLeash {
     }));
   }
 
-  recordInterruptTell(paths: AkumaPaths, tell: Omit<TellFact, "sequence" | "state" | "deliveries">): Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }> {
-    return withHeart(paths, (heart) => transaction(heart, () => {
+  async recordInterruptTell(paths: AkumaPaths, tell: Omit<TellFact, "sequence" | "state" | "deliveries">): Promise<Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }>> {
+    return await withHeart(paths, (heart) => transaction(heart, () => {
       deletePauseControl(heart);
       if (soulFact(heart) === null) return { kind: "not-born" };
       const sequence = insertTellFact(heart, tell);
@@ -171,15 +211,15 @@ export class HeldAkumaLeash {
   }
 }
 
-export function probeLeash(paths: AkumaPaths): LeashProbe {
-  const claim = HeldAkumaLeash.try(paths);
+export async function probeLeash(paths: AkumaPaths): Promise<LeashProbe> {
+  const claim = await HeldAkumaLeash.try(paths);
   if (claim === null) return "held";
   claim.release();
   return "free";
 }
 
-export function readSealFromLeash(paths: AkumaPaths): ReturnType<typeof sealFact> {
-  const leash = new DatabaseSync(paths.leash);
+export async function readSealFromLeash(paths: AkumaPaths): Promise<ReturnType<typeof sealFact>> {
+  const leash = await openExistingDatabase(paths.leash);
   try {
     assertLeashSchemaVersion(leash);
     return sealFact(leash);

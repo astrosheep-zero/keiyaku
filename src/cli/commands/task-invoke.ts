@@ -30,7 +30,7 @@ export type TaskWorldObservation =
   | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>;
 
 type TaskProduct = ReturnType<typeof Tasks.of>;
-type TaskInput = Readonly<{ world: WorldRoot | null; establish(): Promise<WorldRoot>; readStdin(): string }>;
+type TaskInput = Readonly<{ world: WorldRoot | null; establish(): Promise<WorldRoot>; readStdin(): Promise<string> }>;
 
 function value(command: ParsedTaskCommand, name: string): string | undefined {
   const item = command.flags[name]; return typeof item === "string" ? item : undefined;
@@ -47,9 +47,9 @@ function state(raw: string | undefined): TaskState | undefined { return raw as T
 function ids(items: readonly string[] | undefined): readonly TaskId[] | undefined { return items as readonly TaskId[] | undefined; }
 function limit(command: ParsedTaskCommand): number | undefined { const raw = value(command, "limit"); return raw === undefined ? undefined : Number(raw); }
 
-function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => string): Promise<TaskMutationResult> {
+async function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => Promise<string>): Promise<TaskMutationResult> {
   const selectedNamespace = namespace(value(command, "namespace"));
-  if (command.stdin === "document") return tasks.addDocument({ markdown: readStdin(), ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }) });
+  if (command.stdin === "document") return tasks.addDocument({ markdown: await readStdin(), ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }) });
   const body = value(command, "body"), note = value(command, "note"), initialState = state(value(command, "state")), selectedPriority = priority(value(command, "priority"));
   const needs = ids(values(command, "needs")), parent = value(command, "parent");
   const supersedes = ids(values(command, "supersedes")), relates = ids(values(command, "relates"));
@@ -61,9 +61,9 @@ function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: ()
   });
 }
 
-function invokeUpdate(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => string): Promise<TaskUpdateResult> {
-  const body = command.stdin === "body" ? readStdin() : value(command, "body"), appendBody = command.stdin === "append" ? readStdin() : value(command, "append");
-  const note = command.stdin === "note" ? readStdin() : value(command, "note");
+async function invokeUpdate(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => Promise<string>): Promise<TaskUpdateResult> {
+  const body = command.stdin === "body" ? await readStdin() : value(command, "body"), appendBody = command.stdin === "append" ? await readStdin() : value(command, "append");
+  const note = command.stdin === "note" ? await readStdin() : value(command, "note");
   const title = value(command, "title"), selectedPriority = priority(value(command, "priority"));
   const addNeeds = ids(values(command, "needs")), dropNeeds = ids(values(command, "drop-needs"));
   const parent = value(command, "parent"), addSupersedes = ids(values(command, "supersedes"));
@@ -132,8 +132,8 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
   const tasks = Tasks.of(world);
   if (isWorldObservation(command)) return observeWorldRead(tasks, command);
   if (["show", "tree"].includes(command.action)) return invokeRead(tasks, command);
-  if (command.action === "add") return invokeAdd(tasks, command, input.readStdin);
-  if (command.action === "update") return invokeUpdate(tasks, command, input.readStdin);
+  if (command.action === "add") return await invokeAdd(tasks, command, input.readStdin);
+  if (command.action === "update") return await invokeUpdate(tasks, command, input.readStdin);
   const id = command.positionals[0]!;
   switch (command.action) {
     case "start": return tasks.task({ id }).start();
@@ -153,7 +153,7 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
       if (selected !== undefined) await tasks.setNamespace({ namespace: selected });
       return tasks.namespace();
     }
-    case "compose": return tasks.compose({ markdown: input.readStdin() });
+    case "compose": return tasks.compose({ markdown: await input.readStdin() });
     default: throw new Error(`task action has no invocation: ${command.action}`);
   }
 }

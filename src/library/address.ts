@@ -49,10 +49,10 @@ function world(path: WorldRoot, settings?: Settings): Akuma {
   return Akuma.of(path, settings);
 }
 
-function directId(path: WorldRoot, selector: string): AkuId {
+async function directId(path: WorldRoot, selector: string): Promise<AkuId> {
   if (selector.startsWith("@")) {
     const alias = parseAkumaAlias(selector);
-    const resolved = readAliases(path).find((binding) => binding.alias === alias)?.akuId ?? null;
+    const resolved = (await readAliases(path)).find((binding) => binding.alias === alias)?.akuId ?? null;
     if (resolved === null) throw new TypeError(`unknown Akuma alias: ${alias}`);
     return resolved;
   }
@@ -76,7 +76,7 @@ export type NamedAddressInput = Readonly<{
   contracts: readonly NamedAddressContract[];
 }>;
 
-export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
+export async function resolveNamedAddress(input: NamedAddressInput): Promise<NamedAddress> {
   const selector = nonblank(input.selector, "selector");
   if (selector.startsWith("kei/")) return { kind: "contract", id: contractId(selector) };
   if (selector.startsWith("aku/")) return { kind: "akuma", id: parseAkuId(selector).id };
@@ -86,7 +86,7 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
     && `@${row.id.slice("kei/".length)}` === alias);
   const aliasId = input.path === null
     ? null
-    : readAliases(input.path).find((binding) => binding.alias === alias)?.akuId ?? null;
+    : (await readAliases(input.path)).find((binding) => binding.alias === alias)?.akuId ?? null;
   if (contractMatches.length > 0 && aliasId !== null) throw new TypeError(`ambiguous selector matches Contract and Akuma: ${selector}`);
   if (contractMatches.length === 1) return { kind: "contract", id: contractMatches[0]!.id };
   if (contractMatches.length > 1) throw new TypeError(`ambiguous Contract selector: ${selector}`);
@@ -94,11 +94,11 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   throw new TypeError(`unknown selector: ${selector}`);
 }
 
-export function addressAkuma(input: AkumaAddressInput): Readonly<{
+export async function addressAkuma(input: AkumaAddressInput): Promise<Readonly<{
   path: WorldRoot;
   id: AkuId;
   settings?: Settings;
-}> {
+}>> {
   const values = requireInput(input, "Akuma address input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "settings", "repo"].includes(key)) throw new TypeError(`Akuma address input has unknown field: ${key}`);
@@ -106,7 +106,7 @@ export function addressAkuma(input: AkumaAddressInput): Readonly<{
   if (values.repo !== undefined) scopeForRepo(values.repo);
   const path = nonblank(values.path, "path") as WorldRoot;
   const settings = settingsOption(values.settings);
-  return { path, id: directId(path, nonblank(values.akuma, "akuma")), ...(settings === undefined ? {} : { settings }) };
+  return { path, id: await directId(path, nonblank(values.akuma, "akuma")), ...(settings === undefined ? {} : { settings }) };
 }
 
 function idsFromFleet(fleet: AkumaList): readonly AkuId[] {
@@ -139,7 +139,7 @@ export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<Read
     ? idsFromFleet(await world(path, settings).list())
     : [];
   const aliases = selectors.some((selector) => selector.kind === "alias")
-    ? new Map(readAliases(path).map((binding) => [binding.alias, binding.akuId]))
+    ? new Map((await readAliases(path)).map((binding) => [binding.alias, binding.akuId]))
     : new Map<AkumaAlias, AkuId>();
   const dispatches = selectors.some((selector) => selector.kind === "contract")
     ? await readDispatches(scopeForRepo(values.repo as Repo))

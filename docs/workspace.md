@@ -56,6 +56,11 @@ these derived files atomically:
 .keiyaku/KEIYAKU.md
 ```
 
+Appointment reads, metadata checks, file reads, advisory chmod, and cleanup are
+awaited. Reservation and repair fulfill only after their durable-file commit
+has completed. There is no synchronous appointment API or deferred cleanup
+queue.
+
 The nested ignore file contains exactly `.gitignore` and `KEIYAKU.md`. This
 keeps both files out of ordinary Git status and delivery capture without
 centralizing unrelated ignore policy. A tracked generated path is a failure.

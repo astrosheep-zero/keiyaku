@@ -11,6 +11,13 @@ Normal completion writes exactly one Turn end with the complete answer or typed
 failure. Start failure writes a failed end. Stop, interrupt, kill, and process
 loss may leave the Turn open and do not synthesize a provider result.
 
+Body construction never hides Heart or filesystem observation. Its supervisor
+and request pump are opened asynchronously, and every control tick, Heart
+refresh, request recovery, and durable write is awaited within the existing
+serial ownership order. If the Heart disappears between an observation delay
+and the awaited refresh, the supervisor classifies that disappearance and
+aborts its owned provider custody through the same Body signal.
+
 ## The body
 
 Wake -> take the leash (checking the seal) -> judge any abandoned control ->

@@ -195,7 +195,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     body,
     ...(cwd === undefined ? {} : { cwd }),
   });
-  const readonly = handle.status().readonly;
+  const readonly = (await handle.status()).readonly;
   const dispatch: DispatchStage = seat === undefined
     ? { kind: "none" }
     : await dispatchStage({ repository: seat.scope, akuId: handle.id, contractId: seat.id });
@@ -228,11 +228,11 @@ export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
   const path = nonblank(values.path, "path") as WorldRoot;
   const at = nonblank(values.at, "at");
   const settings = settingsOption(values.settings);
-  const akuma = addressAkuma({
+  const akuma = (await addressAkuma({
     path,
     akuma: nonblank(values.akuma, "akuma"),
     ...(settings === undefined ? {} : { settings }),
-  }).id;
+  })).id;
   const repository = values.repo === undefined ? undefined : scopeForRepo(values.repo);
 
   const receipt = await Akuma.of(path, settings)

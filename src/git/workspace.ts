@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
@@ -26,11 +26,11 @@ export function deliveryWorktreePath(repository: GitRepository, contract: Contra
 }
 
 export async function withPrivateGitIndex<Value>(action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value | PromiseLike<Value>): Promise<Value> {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-index-"));
+  const directory = await mkdtemp(join(tmpdir(), "keiyaku-v4-index-"));
   try {
     return await action({ GIT_INDEX_FILE: join(directory, "index") });
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true });
   }
 }
 

@@ -91,8 +91,8 @@ function setAddress(values: Record<string, unknown>): AkumaSetAddressInput {
 }
 
 export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaStatusView> {
-  const addressed = addressAkuma(input);
-  return await statusView(source(addressed.path, addressed.settings).of({ id: addressed.id }).status(), input.repo);
+  const addressed = await addressAkuma(input);
+  return await statusView(await source(addressed.path, addressed.settings).of({ id: addressed.id }).status(), input.repo);
 }
 
 export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult> {
@@ -113,11 +113,11 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
   const handles = addressed.ids.map((id) => source(addressed.path, addressed.settings).of({ id }));
   const deadline = timeoutMs === undefined ? undefined : performance.now() + timeoutMs;
   for (;;) {
-    const statuses = handles.map((handle) => handle.status());
+    const statuses = await Promise.all(handles.map(async (handle) => await handle.status()));
     const settled = statuses.map((status) => status.life !== "running");
     if ((selected === "any" ? settled.some(Boolean) : settled.every(Boolean))
       || (deadline !== undefined && performance.now() >= deadline)) {
-      return { completion: selected, statuses: await Promise.all(statuses.map((status) => statusView(status, values.repo as Repo | undefined))) };
+      return { completion: selected, statuses: await Promise.all(statuses.map(async (status) => await statusView(status, values.repo as Repo | undefined))) };
     }
     await delay(deadline === undefined ? 25 : Math.min(25, Math.max(0, deadline - performance.now())));
   }
@@ -127,7 +127,8 @@ export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillR
   const addressed = await addressAkumaSet(input);
   const handles = addressed.ids.map((id) => source(addressed.path, addressed.settings).of({ id }));
   const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
-  const observations = await Promise.all(addressed.ids.map((id) => statusView(readActionFeedbackStatus(addressed.path, id), input.repo)));
+  const observations = await Promise.all(addressed.ids.map(async (id) =>
+    await statusView(await readActionFeedbackStatus(addressed.path, id), input.repo)));
   return {
     results: addressed.ids.map((id, index) => ({
       id,
@@ -143,10 +144,10 @@ export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult>
     if (!["path", "akuma", "settings", "body", "repo"].includes(key)) throw new TypeError(`Keiyaku.tell input has unknown field: ${key}`);
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
-  const addressed = addressAkuma(directAddress(values));
+  const addressed = await addressAkuma(directAddress(values));
   const handle = source(addressed.path, addressed.settings).of({ id: addressed.id });
   const tell = await handle.tell(values.body);
-  return { akuma: addressed.id, tell, observation: await statusView(readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
+  return { akuma: addressed.id, tell, observation: await statusView(await readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
 }
 
 export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {
@@ -155,9 +156,9 @@ export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaI
     if (!["path", "akuma", "settings", "body", "repo"].includes(key)) throw new TypeError(`Keiyaku.interrupt input has unknown field: ${key}`);
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
-  const addressed = addressAkuma(directAddress(values));
+  const addressed = await addressAkuma(directAddress(values));
   const receipt = await source(addressed.path, addressed.settings).of({ id: addressed.id }).interrupt(values.body);
-  return { id: addressed.id, receipt, observation: await statusView(readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
+  return { id: addressed.id, receipt, observation: await statusView(await readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
 }
 
 export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
@@ -168,16 +169,16 @@ export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHisto
     }
   }
   if (values.last !== undefined && typeof values.last !== "boolean") throw new TypeError("last must be a boolean");
-  const addressed = addressAkuma(directAddress(values));
+  const addressed = await addressAkuma(directAddress(values));
   const handle = source(addressed.path, addressed.settings).of({ id: addressed.id });
   if (values.last === true) {
-    const answer = handle.lastAnswer();
+    const answer = await handle.lastAnswer();
     const contractId = await contractFor(values.repo as Repo | undefined, addressed.id);
     return answer.kind === "answer"
       ? { kind: "last", id: addressed.id, answer: answer.answer, ...(contractId === undefined ? {} : { contractId }) }
       : { kind: "no-answer", id: addressed.id, ...(contractId === undefined ? {} : { contractId }) };
   }
-  const history = handle.history({
+  const history = await handle.history({
     ...(values.before === undefined ? {} : { before: values.before as number }),
     ...(values.since === undefined ? {} : { since: values.since as number }),
     ...(values.limit === undefined ? {} : { limit: values.limit as number }),

@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
@@ -142,13 +142,13 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
 }
 
 export async function spawnDetachedProcess(input: DetachedProcessInput): Promise<OwnedProcess> {
-  const log = openSync(input.log, "a");
+  const log = await open(input.log, "a");
   try {
     const child = spawn(input.argv[0]!, input.argv.slice(1), {
       cwd: input.cwd,
       env: input.env,
       detached: true,
-      stdio: ["ignore", log, log],
+      stdio: ["ignore", log.fd, log.fd],
       windowsHide: true,
     });
     await new Promise<void>((resolve, reject) => {
@@ -178,7 +178,7 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
       },
     };
   } finally {
-    closeSync(log);
+    await log.close();
   }
 }
 

@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { gatesFrom, Keiyaku, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
 import { kanshi, selectKanshi } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
@@ -21,15 +20,21 @@ export type { AcceptedFact, DiffUnavailable, InvocationResult, Lag } from "./res
 type InvokeRuntime = Readonly<{
   cwd?: string;
   environment?: NodeJS.ProcessEnv;
-  readStdin?: () => string;
+  readStdin?: () => Promise<string>;
 }>;
 
 type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "show" | "ls" | "reconcile" | "settings" | "task" | "install" }>;
 type NonInstallExecution = Readonly<{ cwd?: string; repo?: string; command: Exclude<ParsedCommand, { command: "install" }> }>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
-  readStdin: () => string;
+  readStdin: () => Promise<string>;
 }>;
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 export type SettingsInvocationResult = Readonly<{ kind: "settings"; value: Settings }>;
 export type GuidanceInvocationResult = Readonly<{ kind: "guidance"; contract: ContractId; guidance: string }>;
@@ -86,7 +91,7 @@ async function invokeBind(
   configuration: Settings,
   hooks: WorktreeHooks,
 ): Promise<InvocationResult> {
-  const markdown = edge.readStdin();
+  const markdown = await edge.readStdin();
   const gates = selectedGates(configuration, parsed.gates);
   const actor = actorFromEdge(parsed.actor, edge.environment);
   return resultFromMutationCall(
@@ -160,9 +165,9 @@ async function invokeDeliver(
 async function invokeReview(
   parsed: Extract<ExistingCommand, { command: "review" }>,
   seat: ExistingSeat,
-  readStdin: () => string,
+  readStdin: () => Promise<string>,
 ): Promise<InvocationResult> {
-  const summary = parsed.summaryFromStdin === true ? readStdin() : parsed.summary;
+  const summary = parsed.summaryFromStdin === true ? await readStdin() : parsed.summary;
   return resultFromMutationCall("review", () => seat.contract.review({
     verdict: parsed.verdict,
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
@@ -218,7 +223,7 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
 
   switch (parsed.command) {
     case "amend": {
-      const markdown = edge.readStdin();
+      const markdown = await edge.readStdin();
       const gates = parsed.gates === undefined
         ? undefined
         : selectedGates(configuration, parsed.gates);
@@ -233,7 +238,7 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
     case "review":
       return invokeReview(parsed, seat, edge.readStdin);
     case "arc": {
-      const markdown = edge.readStdin();
+      const markdown = await edge.readStdin();
       return resultFromMutationCall("arc", () => contract.arc({
           markdown,
           ...(actor === undefined ? {} : { actor }),
@@ -339,7 +344,7 @@ async function invokeStatus(
   }
   if (parsed.contract.startsWith("@")) {
     try {
-      const address = resolveNamedAddress({
+      const address = await resolveNamedAddress({
         path: world,
         selector: parsed.contract,
         contracts: repo === undefined ? [] : (await Keiyaku.list({ repo })).rows,
@@ -373,7 +378,7 @@ async function invokeParsed(
   const { cwd, repo, world } = coordinates;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
-    readStdin: runtime.readStdin ?? (() => readFileSync(0, "utf8")),
+    readStdin: runtime.readStdin ?? readStdin,
   };
   const parsed = invocation.command;
   if (parsed.command === "settings") {

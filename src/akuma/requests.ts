@@ -1,13 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import {
   HeldAkumaLeash,
@@ -185,12 +177,12 @@ function decodeReceipt(bytes: string, requestId: string): RequestReceipt | null 
   return null;
 }
 
-function atomicJson(path: string, value: unknown): void {
+async function atomicJson(path: string, value: unknown): Promise<void> {
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(temporary, `${JSON.stringify(value)}\n`, { flag: "wx" });
-    renameSync(temporary, path);
-  } finally { rmSync(temporary, { force: true }); }
+    await writeFile(temporary, `${JSON.stringify(value)}\n`, { flag: "wx" });
+    await rename(temporary, path);
+  } finally { await rm(temporary, { force: true }); }
 }
 
 function receiptFor(fact: RequestFact): RequestReceipt | null {
@@ -200,9 +192,9 @@ function receiptFor(fact: RequestFact): RequestReceipt | null {
   return null;
 }
 
-function projectReceipt(directory: string, fact: RequestFact): void {
+async function projectReceipt(directory: string, fact: RequestFact): Promise<void> {
   const receipt = receiptFor(fact);
-  if (receipt !== null) atomicJson(join(directory, `${fact.id}.receipt.json`), receipt);
+  if (receipt !== null) await atomicJson(join(directory, `${fact.id}.receipt.json`), receipt);
 }
 
 export function injectedBodyRequests(): string | null {
@@ -213,7 +205,7 @@ export function injectedBodyRequests(): string | null {
 }
 
 export async function requestBodyCall(input: RequestClaim & Readonly<{ directory: string }>): Promise<AkuId> {
-  atomicJson(join(input.directory, `${input.id}.request.json`), {
+  await atomicJson(join(input.directory, `${input.id}.request.json`), {
     id: input.id,
     world: input.world,
     archetype: input.archetype,
@@ -224,7 +216,7 @@ export async function requestBodyCall(input: RequestClaim & Readonly<{ directory
   const receiptPath = join(input.directory, `${input.id}.receipt.json`);
   for (;;) {
     try {
-      const receipt = decodeReceipt(readFileSync(receiptPath, "utf8"), input.id);
+      const receipt = decodeReceipt(await readFile(receiptPath, "utf8"), input.id);
       if (receipt === null) throw new Error(`Akuma body request ${input.id} has an invalid receipt`);
       if (receipt.state === "served") return receipt.child;
       if (receipt.state === "refused") throw new AkumaBodyRequestError("refused", receipt.diagnostic);
@@ -246,18 +238,18 @@ async function serveClaim(input: Readonly<{
   signal: AbortSignal;
 }>): Promise<void> {
   input.signal.throwIfAborted();
-  let fact = admitRequest(input.paths, { ...input.claim, admittedAt: input.now() });
+  let fact = await admitRequest(input.paths, { ...input.claim, admittedAt: input.now() });
   const existing = receiptFor(fact);
   if (existing !== null) {
-    if (!input.signal.aborted) projectReceipt(input.directory, fact);
+    if (!input.signal.aborted) await projectReceipt(input.directory, fact);
     return;
   }
   if (fact.state !== "admitted") throw new Error(`Akuma request ${fact.id} cannot be replayed from ${fact.state}`);
   const request = fact;
   const servingWorld = worldRootForAkumaPaths(input.paths);
   if (request.world !== servingWorld) {
-    fact = refuseRequest(input.paths, request.id, `request world ${request.world} does not match ${servingWorld}`);
-    projectReceipt(input.directory, fact);
+    fact = await refuseRequest(input.paths, request.id, `request world ${request.world} does not match ${servingWorld}`);
+    await projectReceipt(input.directory, fact);
     return;
   }
   const cwd = resolve(request.cwd ?? servingWorld);
@@ -267,7 +259,7 @@ async function serveClaim(input: Readonly<{
     const published = await publishAkuma({
       worldPath: servingWorld,
       archetype: request.archetype,
-      reserve: (allocated) => { fact = reserveRequest(input.paths, request.id, allocated.id); },
+      reserve: async (allocated) => { fact = await reserveRequest(input.paths, request.id, allocated.id); },
       signal: input.signal,
       launch: async (allocated) => await input.spawn({
         paths: allocated.paths,
@@ -288,21 +280,21 @@ async function serveClaim(input: Readonly<{
     child = published.id;
   } catch (error) {
     if (input.signal.aborted) return;
-    const current = readRequest(input.paths, request.id);
+    const current = await readRequest(input.paths, request.id);
     if (current === null) throw error;
     fact = current.state === "admitted" || current.state === "reserved"
-      ? voidRequest(input.paths, request.id, diagnostic(error))
+      ? await voidRequest(input.paths, request.id, diagnostic(error))
       : current;
-    projectReceipt(input.directory, fact);
+    await projectReceipt(input.directory, fact);
     return;
   }
-  fact = serveRequest(input.paths, request.id, child);
-  projectReceipt(input.directory, fact);
+  fact = await serveRequest(input.paths, request.id, child);
+  await projectReceipt(input.directory, fact);
 }
 
-function requestFiles(directory: string): readonly string[] {
+async function requestFiles(directory: string): Promise<readonly string[]> {
   try {
-    return readdirSync(directory)
+    return (await readdir(directory))
       .filter((name) => name.endsWith(".request.json"))
       .sort();
   } catch (error) {
@@ -319,7 +311,7 @@ export class BodyRequestPump {
   private readonly running: Promise<void>;
   private readonly cancelAdmission: () => void;
 
-  constructor(private readonly input: Readonly<{
+  private constructor(private readonly input: Readonly<{
     paths: AkumaPaths;
     parent: Soul;
     bodySequence: number;
@@ -328,7 +320,6 @@ export class BodyRequestPump {
     signal: AbortSignal;
   }>) {
     this.directory = join(input.paths.directory, "requests", String(input.bodySequence));
-    mkdirSync(this.directory, { recursive: true });
     this.cancelAdmission = () => this.stopAdmission();
     input.signal.addEventListener("abort", this.cancelAdmission, { once: true });
     if (input.signal.aborted) this.cancelAdmission();
@@ -339,13 +330,26 @@ export class BodyRequestPump {
     );
   }
 
+  static async open(input: Readonly<{
+    paths: AkumaPaths;
+    parent: Soul;
+    bodySequence: number;
+    now(): string;
+    spawn(launch: RequestChildLaunch): Promise<void>;
+    signal: AbortSignal;
+  }>): Promise<BodyRequestPump> {
+    const directory = join(input.paths.directory, "requests", String(input.bodySequence));
+    await mkdir(directory, { recursive: true });
+    return new BodyRequestPump(input);
+  }
+
   private async run(): Promise<void> {
     while (!this.closeSignal.signal.aborted) {
-      for (const name of requestFiles(this.directory)) {
+      for (const name of await requestFiles(this.directory)) {
         if (this.closeSignal.signal.aborted) return;
         const id = name.slice(0, -".request.json".length);
         if (this.handled.has(id)) continue;
-        const claim = decodeClaim(readFileSync(join(this.directory, name), "utf8"), id);
+        const claim = decodeClaim(await readFile(join(this.directory, name), "utf8"), id);
         if (claim === null) { this.handled.add(id); continue; }
         await serveClaim({ directory: this.directory, claim, ...this.input, signal: this.closeSignal.signal });
         this.handled.add(id);
@@ -360,7 +364,7 @@ export class BodyRequestPump {
     try { await this.running; }
     finally {
       this.input.signal.removeEventListener("abort", this.cancelAdmission);
-      rmSync(this.directory, { recursive: true, force: true });
+      await rm(this.directory, { recursive: true, force: true });
     }
   }
 
@@ -369,8 +373,8 @@ export class BodyRequestPump {
   }
 }
 
-export function clearBodyRequestTransport(paths: AkumaPaths): void {
-  rmSync(join(paths.directory, "requests"), { recursive: true, force: true });
+export async function clearBodyRequestTransport(paths: AkumaPaths): Promise<void> {
+  await rm(join(paths.directory, "requests"), { recursive: true, force: true });
 }
 
 function matchingRequestOrigin(soul: Soul, parent: AkuId, requestId: string): boolean {
@@ -379,9 +383,9 @@ function matchingRequestOrigin(soul: Soul, parent: AkuId, requestId: string): bo
     && soul.origin.requestId === requestId;
 }
 
-function settleObservedSoul(paths: AkumaPaths, parent: Soul, request: Extract<RequestFact, { state: "reserved" }>, soul: Soul): void {
-  if (matchingRequestOrigin(soul, parent.id, request.id)) serveRequest(paths, request.id, request.child);
-  else voidRequest(paths, request.id, "reserved child origin does not match the request");
+async function settleObservedSoul(paths: AkumaPaths, parent: Soul, request: Extract<RequestFact, { state: "reserved" }>, soul: Soul): Promise<void> {
+  if (matchingRequestOrigin(soul, parent.id, request.id)) await serveRequest(paths, request.id, request.child);
+  else await voidRequest(paths, request.id, "reserved child origin does not match the request");
 }
 
 async function settleReserved(
@@ -395,24 +399,24 @@ async function settleReserved(
   const deadline = performance.now() + BIRTH_TIMEOUT_MS;
   for (;;) {
     signal?.throwIfAborted();
-    if (!existsSync(childPaths.directory)) {
-      voidRequest(paths, request.id, "reserved child directory is absent");
+    if (!await access(childPaths.directory).then(() => true, () => false)) {
+      await voidRequest(paths, request.id, "reserved child directory is absent");
       return true;
     }
-    const childSoul = readSoul(childPaths);
+    const childSoul = await readSoul(childPaths);
     if (childSoul !== null) {
-      settleObservedSoul(paths, parent, request, childSoul);
+      await settleObservedSoul(paths, parent, request, childSoul);
       return true;
     }
-    const leash = HeldAkumaLeash.try(childPaths);
+    const leash = await HeldAkumaLeash.try(childPaths);
     if (leash !== null) {
       try {
-        const settledSoul = readSoul(childPaths);
+        const settledSoul = await readSoul(childPaths);
         if (settledSoul !== null) {
-          settleObservedSoul(paths, parent, request, settledSoul);
+          await settleObservedSoul(paths, parent, request, settledSoul);
         } else {
-          leash.sealIfUnborn(childPaths, { evidence: "request settlement", at: now() });
-          voidRequest(paths, request.id, "reserved child was sealed unborn");
+          await leash.sealIfUnborn(childPaths, { evidence: "request settlement", at: now() });
+          await voidRequest(paths, request.id, "reserved child was sealed unborn");
         }
       } finally { leash.release(); }
       return true;
@@ -429,10 +433,10 @@ export async function settleBodyRequests(
   signal?: AbortSignal,
 ): Promise<"settled" | "pending"> {
   let pending = false;
-  for (const request of readNonterminalRequests(paths)) {
+  for (const request of await readNonterminalRequests(paths)) {
     signal?.throwIfAborted();
     if (request.state === "admitted") {
-      voidRequest(paths, request.id, "body died before serving the request");
+      await voidRequest(paths, request.id, "body died before serving the request");
     } else if (request.state === "reserved" && !await settleReserved(paths, parent, request, now, signal)) pending = true;
   }
   return pending ? "pending" : "settled";

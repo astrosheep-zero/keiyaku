@@ -17,6 +17,7 @@ import {
   requestPause,
   requestStop,
   type AkumaLife,
+  type HeartSnapshot,
   type KillEvidence,
   type ResumeCoordinate,
   type SessionFact,
@@ -118,20 +119,20 @@ function wait(milliseconds: number): Promise<void> {
 
 async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<HeldAkumaLeash | null> {
   for (;;) {
-    const leash = HeldAkumaLeash.try(paths);
+    const leash = await HeldAkumaLeash.try(paths);
     if (leash !== null) return leash;
     if (performance.now() >= deadline) return null;
     await wait(POLL_MS);
   }
 }
 
-function recordTellBody(
+async function recordTellBody(
   paths: AkumaPaths,
   akuma: AkuId,
   body: string,
-): Readonly<{ kind: "recorded"; tellId: string }> {
+): Promise<Readonly<{ kind: "recorded"; tellId: string }>> {
   const id = randomUUID();
-  const admitted = recordTell(paths, { kind: "tell", id, body, recordedAt: new Date().toISOString() });
+  const admitted = await recordTell(paths, { kind: "tell", id, body, recordedAt: new Date().toISOString() });
   if (admitted.kind === "not-born") throw new AkumaNotBornError(akuma);
   return { kind: "recorded", tellId: admitted.tell.id };
 }
@@ -148,7 +149,8 @@ async function wakeTell(paths: AkumaPaths, tellId: string): Promise<TellResult> 
   }
 }
 
-function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot = readHeart(paths)): AkumaListRow {
+async function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot?: HeartSnapshot): Promise<AkumaListRow> {
+  snapshot ??= await readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   if (snapshot.soul.id !== expected) throw new Error("Akuma soul does not match its coordinate");
   return {
@@ -156,7 +158,7 @@ function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot = readHeart(pa
     archetype: snapshot.soul.archetype,
     ...(snapshot.soul.description === undefined ? {} : { description: snapshot.soul.description }),
     life: life({
-      leash: probeLeash(paths),
+      leash: await probeLeash(paths),
       body: snapshot.latestBody,
       kill: snapshot.latestKill,
     }),
@@ -165,28 +167,26 @@ function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot = readHeart(pa
   };
 }
 
-function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
-  const snapshot = readHeart(paths);
+async function bornStatus(paths: AkumaPaths, expected: AkuId): Promise<AkumaStatus> {
+  const snapshot = await readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
-  const current = bornListRow(paths, expected, snapshot);
+  const current = await bornListRow(paths, expected, snapshot);
   const resumeUnsupported = current.life === "stranded"
     && snapshot.latestSession?.provider === snapshot.soul.provider.name
     && resolveProviderExecution(snapshot.soul.provider).adapter.resume === undefined;
+  const slice = await activitySlice(paths, { limit: Number.MAX_SAFE_INTEGER });
   return {
     id: current.id,
     life: current.life,
     ...(snapshot.soul.readonly === undefined ? {} : { readonly: snapshot.soul.readonly }),
     ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
-    timeline: (() => {
-      const slice = activitySlice(paths, { limit: Number.MAX_SAFE_INTEGER });
-      return selectActivitySnapshot(slice.rows);
-    })(),
+    timeline: selectActivitySnapshot(slice.rows),
   };
 }
 
 /** Package-internal action observation; it uses the same snapshot selector as status. */
-export function readActionFeedbackStatus(worldPath: WorldRoot, id: AkuId): AkumaStatus {
-  return bornStatus(pathsForAkuId(worldPath, id), id);
+export async function readActionFeedbackStatus(worldPath: WorldRoot, id: AkuId): Promise<AkumaStatus> {
+  return await bornStatus(pathsForAkuId(worldPath, id), id);
 }
 
 function diagnostic(error: unknown): string {
@@ -200,11 +200,11 @@ export class AkumaHandle {
     return pathsForAkuId(this.worldPath, this.id);
   }
 
-  status(): AkumaStatus {
-    return bornStatus(this.paths, this.id);
+  async status(): Promise<AkumaStatus> {
+    return await bornStatus(this.paths, this.id);
   }
 
-  history(input: Readonly<{ before?: number; since?: number; limit?: number }> = {}): ActivityHistory {
+  async history(input: Readonly<{ before?: number; since?: number; limit?: number }> = {}): Promise<ActivityHistory> {
     if (input.before !== undefined && input.since !== undefined) {
       throw new TypeError("Akuma history before and since are mutually exclusive");
     }
@@ -217,7 +217,7 @@ export class AkumaHandle {
     if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 5_000) {
       throw new TypeError("Akuma history limit must be a positive safe integer no greater than 5000");
     }
-    const slice = activitySlice(this.paths, {
+    const slice = await activitySlice(this.paths, {
       ...(input.before === undefined ? {} : { before: input.before }),
       ...(input.since === undefined ? {} : { since: input.since }),
       limit: 5_000,
@@ -242,39 +242,39 @@ export class AkumaHandle {
     }
     const deadline = options.timeoutMs === undefined ? undefined : performance.now() + options.timeoutMs;
     for (;;) {
-      const status = this.status();
+      const status = await this.status();
       if (predicate(status) || (deadline !== undefined && performance.now() >= deadline)) return status;
       await wait(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
     }
   }
 
   async tell(body: string): Promise<TellResult> {
-    const recorded = recordTellBody(this.paths, this.id, body);
+    const recorded = await recordTellBody(this.paths, this.id, body);
     return await wakeTell(this.paths, recorded.tellId);
   }
 
   async interrupt(body: string): Promise<InterruptReceipt> {
-    const request = requestPause(this.paths, new Date().toISOString());
+    const request = await requestPause(this.paths, new Date().toISOString());
     if (request.kind === "not-born") {
       throw new AkumaNotBornError(this.id);
     }
 
     let putDown: "was-idle" | "self-aborted" = "was-idle";
-    let leash = HeldAkumaLeash.try(this.paths);
+    let leash = await HeldAkumaLeash.try(this.paths);
     if (leash === null) {
       leash = await takeLeashUntil(this.paths, performance.now() + CONTROL_RESPONSE_MS);
       putDown = "self-aborted";
     }
     if (leash === null) {
-      const body = readHeart(this.paths).latestBody;
+      const body = (await readHeart(this.paths)).latestBody;
       return { kind: "unavailable", evidence: body?.sequence === request.body.sequence && body.hung !== undefined
         ? "hung"
         : "unavailable" };
     }
 
-    const settledBody = readHeart(this.paths).latestBody;
+    const settledBody = (await readHeart(this.paths)).latestBody;
     if (settledBody?.sequence !== request.body.sequence || settledBody.end === undefined) {
-      try { leash.clearPause(this.paths); } finally { leash.release(); }
+      try { await leash.clearPause(this.paths); } finally { leash.release(); }
       return { kind: "unavailable", evidence: "untidy" };
     }
     if (request.body.end !== undefined || settledBody.end !== "put-down") putDown = "was-idle";
@@ -282,7 +282,7 @@ export class AkumaHandle {
     let recorded: Readonly<{ kind: "recorded"; tellId: string }>;
     try {
       const id = randomUUID();
-      const admitted = leash.recordInterruptTell(this.paths, {
+      const admitted = await leash.recordInterruptTell(this.paths, {
         kind: "tell",
         id,
         body,
@@ -297,12 +297,12 @@ export class AkumaHandle {
   }
 
   async fork(input: Readonly<{ at: string }>): Promise<ForkReceipt> {
-    const source = readSoul(this.paths);
+    const source = await readSoul(this.paths);
     if (source === null) throw new AkumaNotBornError(this.id);
     if (source.id !== this.id) throw new Error("Akuma soul does not match its coordinate");
     const adapter = resolveProviderExecution(source.provider).adapter;
     if (adapter.fork === undefined) return { kind: "provider-cannot-fork", provider: source.provider.name };
-    const point = readForkPoint(this.paths, input.at);
+    const point = await readForkPoint(this.paths, input.at);
     if (point === null) return { kind: "unknown-history", at: input.at };
     if (point.provider !== source.provider.name) throw new Error(`Akuma fork point ${input.at} has a mismatched provider`);
 
@@ -350,28 +350,28 @@ export class AkumaHandle {
 
   async kill(): Promise<KillEvidence> {
     const at = new Date().toISOString();
-    const request = requestStop(this.paths, at);
+    const request = await requestStop(this.paths, at);
     if (request.kind !== "requested") return request.kind;
     const target = request.body;
     const graceDeadline = performance.now() + CONTROL_RESPONSE_MS;
     const leash = await takeLeashUntil(this.paths, graceDeadline);
-    if (readKill(this.paths, target.sequence) !== null) {
+    if (await readKill(this.paths, target.sequence) !== null) {
       leash?.release();
       return "killed";
     }
     if (leash === null) {
-      if (readKill(this.paths, target.sequence) !== null) return "killed";
-      const body = readHeart(this.paths).latestBody;
+      if (await readKill(this.paths, target.sequence) !== null) return "killed";
+      const body = (await readHeart(this.paths)).latestBody;
       return body?.sequence === target.sequence && body.hung !== undefined ? "hung" : "unavailable";
     }
     try {
-      const settledBody = readHeart(this.paths).latestBody;
-      if (settledBody?.sequence !== target.sequence) return readKill(this.paths, target.sequence) === null ? "unavailable" : "killed";
+      const settledBody = (await readHeart(this.paths)).latestBody;
+      if (settledBody?.sequence !== target.sequence) return await readKill(this.paths, target.sequence) === null ? "unavailable" : "killed";
       if (settledBody.end !== "put-down") {
-        leash.clearStop(this.paths);
+        await leash.clearStop(this.paths);
         return "untidy";
       }
-      const settled = leash.settleStop(this.paths, target.sequence);
+      const settled = await leash.settleStop(this.paths, target.sequence);
       if (settled === null) return "unavailable";
       return "killed";
     } finally {
@@ -379,8 +379,8 @@ export class AkumaHandle {
     }
   }
 
-  lastAnswer(): LastAnswer {
-    const turn = readLastAnsweredTurn(this.paths);
+  async lastAnswer(): Promise<LastAnswer> {
+    const turn = await readLastAnsweredTurn(this.paths);
     return turn?.end?.outcome.kind === "answered"
       ? { kind: "answer", answer: turn.end.outcome.answer }
       : { kind: "no-answer" };
@@ -476,22 +476,29 @@ export class Akuma {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return { rows: [], searched: [runRoot] };
       throw error;
     }
-    const rows: AkumaList["rows"] = names.flatMap((name): AkumaList["rows"] => {
+    const rows: AkumaList["rows"][number][] = [];
+    for (const name of names) {
       try {
         const physical = akuIdFromDirectoryName(name);
-        if (selected !== undefined && physical.archetype !== selected) return [];
+        if (selected !== undefined && physical.archetype !== selected) continue;
         const paths = akumaPaths({ runRoot, archetype: physical.archetype, suffix: physical.suffix });
-        const snapshot = readHeart(paths);
-        if (snapshot.soul !== null) return [bornListRow(paths, physical.id, snapshot)];
-        if (probeLeash(paths) === "held") return [{ id: physical.id, life: "unborn" as const }];
-        const seal = readSeal(paths);
-        return seal === null
-          ? [{ id: physical.id, life: "unborn" as const }]
-          : [{ id: physical.id, life: "stillborn" as const, seal }];
+        const snapshot = await readHeart(paths);
+        if (snapshot.soul !== null) {
+          rows.push(await bornListRow(paths, physical.id, snapshot));
+          continue;
+        }
+        if (await probeLeash(paths) === "held") {
+          rows.push({ id: physical.id, life: "unborn" });
+          continue;
+        }
+        const seal = await readSeal(paths);
+        rows.push(seal === null
+          ? { id: physical.id, life: "unborn" }
+          : { id: physical.id, life: "stillborn", seal });
       } catch {
-        return [];
+        continue;
       }
-    });
+    }
     return {
       rows,
       searched: [runRoot],

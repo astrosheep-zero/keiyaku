@@ -15,6 +15,13 @@ in TypeScript first. The CLI is argv skin over the same surface.
 One akuma is a set of durable facts in one place — its heart. Processes come
 and go; the heart stays.
 
+Filesystem and Heart observation crosses an asynchronous boundary. Public
+initializers, roster reads, handles that read status or history, lifecycle
+verbs, and transport operations return Promises and complete their observation
+before fulfillment. Pure identity parsing, path derivation, projection of
+already-read facts, and construction of a handle over a resolved WorldRoot stay
+synchronous.
+
 - **heart** — the closed custody core in `heart/`. It privately owns `heart.db`
   and `leash.db`; typed facts cross its index boundary, SQL rows and schemas do
   not. One authority boundary does not require one source file: facts, row

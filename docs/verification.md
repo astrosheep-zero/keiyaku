@@ -67,6 +67,8 @@ scratch path: materialize a fresh detached worktree at the integration
 snapshot; decode its tracked project `.keiyaku/settings.json`; execute its
 ordered `worktree.create` commands; run Verification only after they all
 succeed; execute its `worktree.destroy` commands best-effort; then remove it.
+Scratch path resolution, materialization, and cleanup are awaited filesystem
+operations. No synchronous scratch observer or background disposer exists.
 The create/destroy command primitive is also the one used by managed worktree
 reconciliation, but scratch has no marker, progress, retry, resume, or durable
 record. Its snapshot, Settings, and lockfiles are the only provisioning

@@ -148,21 +148,21 @@ function draft(namespace: readonly string[], remaining: readonly Planned[]): str
 export async function composeTasks(world: WorldRoot, markdown: string, signal?: AbortSignal): Promise<TaskCompositionResult> {
   const sketch = parseSketch(markdown); if ("kind" in sketch) return { kind: "refused", refusal: sketch };
   const at = currentTimestamp();
-  const context = sketch.namespace ?? readNamespaceContext(world);
+  const context = sketch.namespace ?? await readNamespaceContext(world);
   if (context === "malformed") return { kind: "refused", refusal: { kind: "invalid-namespace-context", path: `${world}/.keiyaku/namespace/current` } };
   const namespace = context === "absent" ? [] : context;
-  const initial = readBoard(world); const planned = plan(sketch, initial.board, namespace, at); if ("kind" in planned) return { kind: "refused", refusal: planned };
+  const initial = await readBoard(world); const planned = plan(sketch, initial.board, namespace, at); if ("kind" in planned) return { kind: "refused", refusal: planned };
   const ordered = [...planned].sort((a, b) => Buffer.compare(Buffer.from(a.after.id), Buffer.from(b.after.id)));
   const allocation = sketch.nodes.some((node) => node.kind === "new");
   const result = await withTaskLocks({ world, allocation, ids: ordered.map((item) => item.after.id), ...(signal === undefined ? {} : { signal }) }, async (): Promise<TaskCompositionResult> => {
-    const fresh = readBoard(world); const replanned = plan(sketch, fresh.board, namespace, at); if ("kind" in replanned) return { kind: "refused", refusal: replanned };
+    const fresh = await readBoard(world); const replanned = plan(sketch, fresh.board, namespace, at); if ("kind" in replanned) return { kind: "refused", refusal: replanned };
     const queue = [...replanned].sort((a, b) => Buffer.compare(Buffer.from(a.after.id), Buffer.from(b.after.id))), changes: TaskDocumentChange[] = [];
     for (let index = 0; index < queue.length; index += 1) {
       signal?.throwIfAborted(); const item = queue[index]!, path = authorityPath(world, item.after.id);
       const beforeBytes = item.before === null ? null : fresh.bytes.get(item.after.id) ?? null; const afterBytes = serializeTaskDocument(item.after);
       const before = beforeBytes === null ? "" : Buffer.from(beforeBytes).toString("utf8"), after = Buffer.from(afterBytes).toString("utf8");
       if (before === after) continue;
-      if (replaceAuthority({ path, expected: beforeBytes, next: afterBytes }) !== "replaced") return {
+      if (await replaceAuthority({ path, expected: beforeBytes, next: afterBytes }) !== "replaced") return {
         kind: "incomplete", documentChanges: changes, stopped: { kind: "retry", reason: "concurrent-modification" }, draft: draft(namespace, queue.slice(index)),
       };
       const label = `${item.after.id}.md`;

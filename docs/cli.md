@@ -126,6 +126,8 @@ The parser decides only whether stdin is syntactically required or allowed.
 Failure while acquiring bytes from stdin is an internal invocation failure and
 uses exit `3`; it is not converted into a usage error. A genuine
 `CliUsageError` raised by syntax or edge validation remains a usage refusal.
+Stdin acquisition is awaited and completes before command adaptation begins;
+no synchronous read, lazy stream wrapper, or background input queue exists.
 
 `bind` maps `--target`, `--here`, repeated `--after`, `--gates`, and `--actor`
 to `Keiyaku.bind`. An explicit `--target` remains literal input for the public

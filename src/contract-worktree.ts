@@ -1,4 +1,4 @@
-import { chmodSync, lstatSync, readFileSync, unlinkSync } from "node:fs";
+import { chmod, lstat, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { acquireSqliteTransactionLock } from "./coordination/sqlite-transaction-lock.js";
 import {
@@ -94,10 +94,13 @@ export type ContractAppointment =
 
 export async function readContractAppointment(repository: GitRepository): Promise<ContractAppointment> {
   const path = generatedPath(await worktreeRoot(repository), "KEIYAKU.md");
-  const stat = lstatSync(path, { throwIfNoEntry: false });
+  const stat = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
   if (stat === undefined) return { kind: "absent", path };
   if (!stat.isFile() || stat.isSymbolicLink()) return { kind: "invalid", path };
-  const match = /^---\r?\ncontract: ([^\r\n]+)\r?\n---(?:\r?\n|$)/u.exec(readFileSync(path, "utf8"));
+  const match = /^---\r?\ncontract: ([^\r\n]+)\r?\n---(?:\r?\n|$)/u.exec(await readFile(path, "utf8"));
   if (match?.[1] === undefined) return { kind: "invalid", path };
   try {
     return { kind: "appointed", path, contract: contractId(match[1]) };
@@ -115,10 +118,10 @@ export async function reserveContractWorktree(repository: GitRepository, contrac
   const scoped = { ...repository, effectiveCwd: worktree };
   const ignore = generatedPath(worktree, ".gitignore");
   if (await isTracked(scoped, ".keiyaku/.gitignore")) throw new Error(`generated path is tracked by Git: ${ignore}`);
-  repairDerivedFile(ignore, IGNORE_BYTES);
+  await repairDerivedFile(ignore, IGNORE_BYTES);
   const path = generatedPath(worktree, "KEIYAKU.md");
   if (await isTracked(scoped, ".keiyaku/KEIYAKU.md")) throw new Error(`generated path is tracked by Git: ${path}`);
-  if (createFileDurablyExclusive(path, appointmentBytes(contract), 0o444)) return { kind: "reserved", path };
+  if (await createFileDurablyExclusive(path, appointmentBytes(contract), 0o444)) return { kind: "reserved", path };
   const appointment = await readContractAppointment(repository);
   return appointment.kind === "absent" ? { kind: "invalid", path } : appointment;
 }
@@ -142,28 +145,31 @@ export async function withContractWorktreeAppointment<T>(
 export async function releaseContractWorktree(repository: GitRepository, contract: ContractId): Promise<void> {
   const appointment = await readContractAppointment(repository);
   if (appointment.kind !== "appointed" || appointment.contract !== contract) return;
-  if (readFileSync(appointment.path, "utf8") !== appointmentBytes(contract)) return;
-  try { unlinkSync(appointment.path); } catch { /* reservation cleanup is best effort */ }
+  if (await readFile(appointment.path, "utf8") !== appointmentBytes(contract)) return;
+  try { await unlink(appointment.path); } catch { /* reservation cleanup is best effort */ }
 }
 
 export async function removeContractWorktreeAppointment(repository: GitRepository, contract: ContractId): Promise<void> {
   const appointment = await readContractAppointment(repository);
   if (appointment.kind !== "appointed" || appointment.contract !== contract) return;
-  unlinkSync(appointment.path);
+  await unlink(appointment.path);
 }
 
 async function repair(repository: GitRepository, worktree: string, relativePath: string, bytes: string): Promise<ContractFileEffect> {
   const path = join(worktree, relativePath);
   if (await isTracked(repository, relativePath)) throw new Error(`generated path is tracked by Git: ${path}`);
-  const action = repairDerivedFile(path, bytes);
+  const action = await repairDerivedFile(path, bytes);
   if (relativePath === ".keiyaku/KEIYAKU.md") {
-    try { chmodSync(path, 0o444); } catch { /* advisory protection only */ }
+    try { await chmod(path, 0o444); } catch { /* advisory protection only */ }
   }
   return { kind: "contract-file", path, action };
 }
 
 async function materialize(repository: GitRepository, worktree: string, guidance: string): Promise<ContractWorktreeResult> {
-  const stat = lstatSync(worktree, { throwIfNoEntry: false });
+  const stat = await lstat(worktree).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
   if (stat === undefined || !stat.isDirectory()) {
     return {
       effects: [],
@@ -223,7 +229,7 @@ async function removeHere(repository: GitRepository, contract: ContractId): Prom
     }] };
   }
   try {
-    unlinkSync(appointment.path);
+    await unlink(appointment.path);
     return { effects: [{ kind: "contract-file", path: appointment.path, action: "removed" }], lag: [] };
   } catch (error) {
     return { effects: [], lag: [{

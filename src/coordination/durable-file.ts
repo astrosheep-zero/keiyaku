@@ -2,17 +2,14 @@ import { randomBytes } from "node:crypto";
 import {
   closeSync,
   fsyncSync,
-  lstatSync,
-  mkdirSync,
   openSync,
-  readFileSync,
   renameSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
-export function replaceFileDurably(path: string, bytes: string | Uint8Array): void {
+export async function replaceFileDurably(path: string, bytes: string | Uint8Array): Promise<void> {
   const parent = dirname(path);
   for (;;) {
     const temporary = resolve(parent, `.tmp-${randomBytes(8).toString("hex")}`);
@@ -25,11 +22,15 @@ export function replaceFileDurably(path: string, bytes: string | Uint8Array): vo
       descriptor = undefined;
       renameSync(temporary, path);
       const directory = openSync(parent, "r");
-      try { fsyncSync(directory); } finally { closeSync(directory); }
+      try {
+        fsyncSync(directory);
+      } finally {
+        closeSync(directory);
+      }
       return;
     } catch (error) {
       if (descriptor !== undefined) closeSync(descriptor);
-      try { unlinkSync(temporary); } catch { /* renamed, absent, or best-effort cleanup */ }
+      try { await unlink(temporary); } catch { /* renamed, absent, or best-effort cleanup */ }
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
   }
@@ -37,9 +38,13 @@ export function replaceFileDurably(path: string, bytes: string | Uint8Array): vo
 
 export type DerivedFileAction = "created" | "updated" | "unchanged";
 
-export function createFileDurablyExclusive(path: string, bytes: string | Uint8Array, mode = 0o600): boolean {
+export async function createFileDurablyExclusive(
+  path: string,
+  bytes: string | Uint8Array,
+  mode = 0o600,
+): Promise<boolean> {
   const parent = dirname(path);
-  mkdirSync(parent, { recursive: true });
+  await mkdir(parent, { recursive: true });
   let descriptor: number | undefined;
   try {
     descriptor = openSync(path, "wx", mode);
@@ -48,24 +53,31 @@ export function createFileDurablyExclusive(path: string, bytes: string | Uint8Ar
     closeSync(descriptor);
     descriptor = undefined;
     const directory = openSync(parent, "r");
-    try { fsyncSync(directory); } finally { closeSync(directory); }
+    try {
+      fsyncSync(directory);
+    } finally {
+      closeSync(directory);
+    }
     return true;
   } catch (error) {
     if (descriptor !== undefined) closeSync(descriptor);
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    try { unlinkSync(path); } catch { /* absent or best-effort cleanup */ }
+    try { await unlink(path); } catch { /* absent or best-effort cleanup */ }
     throw error;
   }
 }
 
-export function repairDerivedFile(path: string, bytes: string | Uint8Array): DerivedFileAction {
+export async function repairDerivedFile(path: string, bytes: string | Uint8Array): Promise<DerivedFileAction> {
   const expected = Buffer.from(bytes);
-  mkdirSync(dirname(path), { recursive: true });
-  const stat = lstatSync(path, { throwIfNoEntry: false });
+  await mkdir(dirname(path), { recursive: true });
+  const stat = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
   if (stat !== undefined && (!stat.isFile() || stat.isSymbolicLink())) {
     throw new Error(`derived file is not a regular file: ${path}`);
   }
-  if (stat !== undefined && readFileSync(path).equals(expected)) return "unchanged";
-  replaceFileDurably(path, expected);
+  if (stat !== undefined && (await readFile(path)).equals(expected)) return "unchanged";
+  await replaceFileDurably(path, expected);
   return stat === undefined ? "created" : "updated";
 }

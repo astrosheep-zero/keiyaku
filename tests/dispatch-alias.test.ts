@@ -49,7 +49,7 @@ test("Alias moves are serialized, canonical, and expose the previous target", as
       moveAlias({ world, alias: beta, akuId: second }),
       moveAlias({ world, alias: alpha, akuId: first }),
     ]);
-    assert.deepEqual(readAliases(world), [
+    assert.deepEqual(await readAliases(world), [
       { alias: alpha, akuId: first },
       { alias: beta, akuId: second },
     ]);
@@ -60,24 +60,24 @@ test("Alias moves are serialized, canonical, and expose the previous target", as
       alias: { alias: alpha, akuId: second },
       previous: first,
     });
-    assert.equal(resolveAlias(world, alpha), second);
+    assert.equal(await resolveAlias(world, alpha), second);
   } finally {
     rmSync(world, { recursive: true, force: true });
   }
 });
 
-test("Alias corruption is visible instead of becoming an empty authority", () => {
+test("Alias corruption is visible instead of becoming an empty authority", async () => {
   const world = mkdtempSync(join(tmpdir(), "keiyaku-alias-corrupt-"));
   const directory = join(world, ".keiyaku", "akuma");
   try {
     mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, "alias.json"), '{"version":1,"aliases":{"@bad":"not-an-aku"}}\n');
-    assert.throws(() => readAliases(world), AuthorityCorruptionError);
+    await assert.rejects(readAliases(world), AuthorityCorruptionError);
   } finally {
     rmSync(world, { recursive: true, force: true });
   }
 });
 
-test("Alias world coordinates never fall back to process cwd", () => {
-  assert.throws(() => readAliases(""), /Alias world must be a nonblank path/u);
+test("Alias world coordinates never fall back to process cwd", async () => {
+  await assert.rejects(readAliases(""), /Alias world must be a nonblank path/u);
 });

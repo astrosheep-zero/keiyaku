@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { lstatSync, mkdirSync } from "node:fs";
+import { lstat, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -44,13 +44,16 @@ function closeDatabase(database: DatabaseSync): unknown {
   return failure;
 }
 
-function openLock(path: string, mode: SqliteTransactionLockMode): HeldSqliteTransactionLock {
+async function openLock(path: string, mode: SqliteTransactionLockMode): Promise<HeldSqliteTransactionLock> {
   try {
-    const stat = lstatSync(path, { throwIfNoEntry: false });
+    const stat = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
     if (stat && (!stat.isFile() || stat.isSymbolicLink())) {
       throw new SqliteTransactionLockError(`SQLite lock is not a regular file: ${path}`, "invalid");
     }
-    mkdirSync(dirname(path), { recursive: true });
+    await mkdir(dirname(path), { recursive: true });
   } catch (error) {
     if (error instanceof SqliteTransactionLockError) throw error;
     throw new SqliteTransactionLockError(`cannot prepare SQLite lock: ${detail(error)}`, "open-failed", { cause: error });
@@ -105,7 +108,7 @@ export async function acquireSqliteTransactionLock(input: {
   let cap = INITIAL_RETRY_MS;
   for (;;) {
     input.signal?.throwIfAborted();
-    try { return openLock(input.path, input.mode); } catch (error) {
+    try { return await openLock(input.path, input.mode); } catch (error) {
       if (!isBusy(error)) throw error;
       const elapsed = performance.now() - started;
       if (input.timeoutMs !== undefined && elapsed >= input.timeoutMs) {
@@ -119,15 +122,15 @@ export async function acquireSqliteTransactionLock(input: {
   }
 }
 
-export function tryAcquireSqliteTransactionLock(input: {
+export async function tryAcquireSqliteTransactionLock(input: {
   path: string;
   mode: SqliteTransactionLockMode;
-}): HeldSqliteTransactionLock | null {
+}): Promise<HeldSqliteTransactionLock | null> {
   if (input.path.length === 0) {
     throw new SqliteTransactionLockError("SQLite lock path must be valid", "invalid");
   }
   try {
-    return openLock(input.path, input.mode);
+    return await openLock(input.path, input.mode);
   } catch (error) {
     if (isBusy(error)) return null;
     throw error;

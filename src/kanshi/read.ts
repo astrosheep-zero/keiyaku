@@ -101,7 +101,7 @@ function contractEndpointObserver(contracts: Section<ContractKanshiBoard>): Obse
 }
 
 function joinTasks(
-  rows: ReturnType<typeof observeTaskStatusRows>,
+  rows: Awaited<ReturnType<typeof observeTaskStatusRows>>,
   holders: HolderRead,
   observeContract: ObserveContractEndpoint,
 ): readonly TaskKanshiRow[] {
@@ -119,16 +119,16 @@ function joinTasks(
   });
 }
 
-function readTasks(
+async function readTasks(
   path: WorldRoot,
   holders: HolderRead,
   observeContract: ObserveContractEndpoint,
-): Section<TaskKanshiWorld> {
+): Promise<Section<TaskKanshiWorld>> {
   if (holders.kind === "failed") return { kind: "failed", failure: holders.failure };
   try {
     return {
       kind: "present",
-      value: { root: path, rows: joinTasks(observeTaskStatusRows(path), holders, observeContract) },
+      value: { root: path, rows: joinTasks(await observeTaskStatusRows(path), holders, observeContract) },
     };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
@@ -142,7 +142,7 @@ async function joinAkuma(
 ): Promise<Section<AkumaKanshiWorld>> {
   try {
     const source = await Akuma.of(path).list();
-    const aliases = readAliases(path);
+    const aliases = await readAliases(path);
     const aliasById = new Map<string, typeof aliases>();
     for (const binding of aliases) aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
     const dispatchById = new Map(dispatches.map((dispatch) => [dispatch.akuId, dispatch]));
@@ -194,7 +194,7 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
       observedAt,
       branch,
       contracts,
-      tasks: world === null ? { kind: "absent" } : readTasks(world, holders, observeContract),
+      tasks: world === null ? { kind: "absent" } : await readTasks(world, holders, observeContract),
       akuma: world === null ? { kind: "absent" } : await joinAkuma(world, observeContract, []),
     };
   }
@@ -208,7 +208,7 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
       ]);
       const contracts = decorateContracts(contractSection, holders);
       const observeContract = contractEndpointObserver(contracts);
-      const tasks = world === null ? { kind: "absent" as const } : readTasks(world, holders, observeContract);
+      const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
       return {
         root: world,
         observedAt,

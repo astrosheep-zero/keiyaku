@@ -2,6 +2,29 @@
 
 This chapter owns Akuma durable facts, custody, schemas, and projections.
 
+## Async Boundary And Transaction Judge
+
+Every Heart operation exported through the owner index returns a Promise when
+it observes or changes the Heart or leash. Fulfillment means the requested
+observation or mutation has completed; callers do not receive lazy snapshots
+or synchronous wrappers.
+
+Inside that boundary, one `DatabaseSync` connection may remain only for a
+bounded Heart or leash section that reads, adjudicates, and writes one owner
+database transaction before closing or returning custody. The section contains
+no `await`, performs no unrelated filesystem work, and admits no parallel
+writer. This synchronous SQLite section preserves Heart's atomic row order and
+single-writer law; it is not a public synchronous API, cache, mirror, daemon,
+or queue.
+
+SQLite open is the first and sole existence attempt for an existing Heart or
+leash. Existing custody opens read-write without create; initialization is the
+only create-capable path. `CANTOPEN` alone does not prove absence: only after
+that failure may the Heart owner await filesystem metadata, and only `ENOENT`
+becomes the caller's existing null or heart-gone result. An existing path, any
+other metadata result, or a database that opens with an invalid schema
+preserves a hard failure. No filesystem precheck participates in that judgment.
+
 ## Turn Timeline
 
 The retained Heart timeline sequence is the only order visible to public Akuma

@@ -35,6 +35,13 @@ readonly object. Public operations have no positional value parameters and no
 positional-value-plus-options overloads. A genuinely inputless operation keeps
 `()`; private pure value functions are outside this package-root law.
 
+Any package-root operation that observes filesystem, SQLite, process, or Git
+state is asynchronous. Its Promise fulfills only after the owned observation
+and any ordered physical effect have completed. Pure parsing, identity math,
+value projection, and handle construction over already resolved coordinates
+remain synchronous; no constructor or getter hides external observation, and
+there is no synchronous compatibility surface.
+
 At the JavaScript boundary, validation always accepts `unknown` input and
 returns the validated domain or branded value. A caller is never required to
 pre-brand a runtime value, and an implementation does not cast an unvalidated

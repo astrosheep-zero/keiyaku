@@ -260,7 +260,7 @@ test("manual predecessor movement is refused and idle lock deletion never change
   const { tasks } = await world(), id = acceptedId(await tasks.add({ title: "Manual" }));
   const path = join(tasks.root, ".keiyaku", "tasks", "manual.md"), original = readFileSync(path), manual = Buffer.concat([original, Buffer.from("manual edit\n")]);
   writeFileSync(path, manual);
-  assert.equal(replaceAuthority({ path, expected: original, next: Buffer.from("replacement") }), "concurrent-modification");
+  assert.equal(await replaceAuthority({ path, expected: original, next: Buffer.from("replacement") }), "concurrent-modification");
   assert.deepEqual(readFileSync(path), manual);
   writeFileSync(path, original);
   assert.equal((await tasks.task({ id }).start()).kind, "accepted");

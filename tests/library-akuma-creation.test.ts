@@ -70,9 +70,9 @@ async function archetypeSettings(root: string) {
   return { home, value: await settings({ root, home }) };
 }
 
-function requestPump(root: string) {
-  const parent = allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
-  initializeHeart(parent.paths);
+async function requestPump(root: string) {
+  const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
+  await initializeHeart(parent.paths);
   const soul: Soul = {
     id: parent.id,
     archetype: "parent",
@@ -83,17 +83,17 @@ function requestPump(root: string) {
     confinement: { kind: "unconfined" },
     createdAt: "2026-08-11T00:00:00.000Z",
   };
-  const leash = HeldAkumaLeash.try(parent.paths)!;
-  leash.birth(parent.paths, soul);
-  const pump = new BodyRequestPump({
+  const leash = (await HeldAkumaLeash.try(parent.paths))!;
+  await leash.birth(parent.paths, soul);
+  const pump = await BodyRequestPump.open({
     paths: parent.paths,
     parent: soul,
     bodySequence: 1,
     now: () => "2026-08-11T00:00:01.000Z",
     signal: new AbortController().signal,
     async spawn(launch) {
-      const child = HeldAkumaLeash.try(launch.paths)!;
-      child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-11T00:00:02.000Z" });
+      const child = (await HeldAkumaLeash.try(launch.paths))!;
+      await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-11T00:00:02.000Z" });
       child.release();
     },
   });
@@ -104,7 +104,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
   const { raw, repo, git } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await archetypeSettings(world);
-  const { pump, leash } = requestPump(world);
+  const { pump, leash } = await requestPump(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   process.env[AKUMA_REQUESTS_ENV] = pump.directory;
   try {
@@ -154,7 +154,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     });
     assert.equal(associated.observation.kind, "observed");
     assert.equal(
-      readSoul(pathsForAkuId(world, associated.akuma))?.cwd,
+      (await readSoul(pathsForAkuId(world, associated.akuma)))?.cwd,
       realpathSync(executionCwd),
     );
 
@@ -204,7 +204,7 @@ test("Keiyaku.call projects the same readonly restraint on CallResult and AkumaS
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await archetypeSettings(world);
-  const { pump, leash } = requestPump(world);
+  const { pump, leash } = await requestPump(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   process.env[AKUMA_REQUESTS_ENV] = pump.directory;
   try {
@@ -219,7 +219,7 @@ test("Keiyaku.call projects the same readonly restraint on CallResult and AkumaS
     if (result.observation.kind === "observed") {
       assert.deepEqual(result.observation.status.readonly, result.readonly);
     }
-    assert.deepEqual(readSoul(pathsForAkuId(world, result.akuma))?.readonly, result.readonly);
+    assert.deepEqual((await readSoul(pathsForAkuId(world, result.akuma)))?.readonly, result.readonly);
   } finally {
     await pump.close();
     leash.release();
@@ -233,7 +233,7 @@ test("Keiyaku.call observes for five minutes by default", async () => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await archetypeSettings(world);
-  const { pump, leash } = requestPump(world);
+  const { pump, leash } = await requestPump(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   const originalWait = AkumaHandle.prototype.wait;
   let receivedTimeout: number | undefined;
@@ -268,8 +268,8 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
   const world = await World.at(raw.path);
   const bound = await Keiyaku.bind({ repo, markdown: markdown("Fork dispatch"), workspace: "here" });
   const owner = (await bound.keiyaku.state()).id;
-  const source = allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "face0001" });
-  initializeHeart(source.paths);
+  const source = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "face0001" });
+  await initializeHeart(source.paths);
   await driveAkumaBody({
     paths: source.paths,
     seed: {
@@ -286,9 +286,20 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
     confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
     async start() {
+      let finishEvents!: () => void;
+      const eventsFinished = new Promise<void>((resolve) => { finishEvents = resolve; });
       return {
-        events: { async *[Symbol.asyncIterator]() { yield { type: "session" as const, coordinate: { sessionId: "parent-session" } }; } },
-        completion: Promise.resolve({ kind: "answered", answer: "done", historyId: "history-1" }),
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "parent-session" } };
+            finishEvents();
+          },
+        },
+        completion: eventsFinished.then(() => ({
+          kind: "answered" as const,
+          answer: "done",
+          historyId: "history-1",
+        })),
         async abort() {},
       };
     },
@@ -308,7 +319,7 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
     if (result.kind !== "forked") return;
     assert.equal(result.dispatch.kind, "dispatched");
     assert.equal((await readDispatch(git, result.child))?.contractId, owner);
-    assert.equal(resolveAlias(world, alias), source.id);
+    assert.equal(await resolveAlias(world, alias), source.id);
 
     const snapshot = await readGit(git);
     const dispatchPath = `dispatch/${createHash("sha256").update(source.id).digest("hex")}.json`;
@@ -343,7 +354,7 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   writeFileSync(join(home, "akuma", "reviewer.md"), "---\nprovider: claude\nreadonly: true\n---\nReview only.\n");
   const configured = await settings({ root: world, home });
-  const { pump, leash } = requestPump(world);
+  const { pump, leash } = await requestPump(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   const originalWait = AkumaHandle.prototype.wait;
   process.env[AKUMA_REQUESTS_ENV] = pump.directory;

@@ -29,23 +29,34 @@ const provider: ProviderAdapter = {
   confinement: () => ({ kind: "unconfined" }),
   admitOptions(options) { return { kind: "admitted", options }; },
   async start() {
+    let finishEvents!: () => void;
+    const eventsFinished = new Promise<void>((resolve) => { finishEvents = resolve; });
     return {
       admission: { fence: "fleet-fixture-turn" },
-      events: { async *[Symbol.asyncIterator]() { yield { type: "session" as const, coordinate: { sessionId: "fixture" } }; } },
-      completion: Promise.resolve({ kind: "answered", answer: "done", historyId: "history" }),
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "fixture" } };
+          finishEvents();
+        },
+      },
+      completion: eventsFinished.then(() => ({
+        kind: "answered" as const,
+        answer: "done",
+        historyId: "history",
+      })),
       async abort() {},
     };
   },
 };
 
-function completeTurn(paths: Parameters<typeof beginTurn>[0], bodySequence: number, outcome: Parameters<typeof endTurn>[1]["outcome"], completedAt: string): void {
-  const turn = beginTurn(paths, { bodySequence, startedAt: completedAt });
-  endTurn(paths, { turnSequence: turn.sequence, outcome, completedAt });
+async function completeTurn(paths: Parameters<typeof beginTurn>[0], bodySequence: number, outcome: Parameters<typeof endTurn>[1]["outcome"], completedAt: string): Promise<void> {
+  const turn = await beginTurn(paths, { bodySequence, startedAt: completedAt });
+  await endTurn(paths, { turnSequence: turn.sequence, outcome, completedAt });
 }
 
 async function answered(root: string, archetype: string, suffix: string) {
-  const allocated = allocateAkumaDirectory({ worldRoot: root, archetype, draw: () => suffix });
-  initializeHeart(allocated.paths);
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype, draw: () => suffix });
+  await initializeHeart(allocated.paths);
   await driveAkumaBody({
     paths: allocated.paths,
     seed: {
@@ -109,14 +120,14 @@ test("plural wait shares one detail budget without dropping pinned rows", async 
     for (let member = 1; member <= 5; member += 1) {
       const source = await answered(root, "worker", String(member).padStart(8, "0"));
       for (let index = 0; index < 5; index += 1) {
-        appendActivity(source.paths, {
+        await appendActivity(source.paths, {
           turnSequence: 1,
           event: { type: "assistant", text: `member-${member}-voice-${index}` },
           at: `2026-08-11T00:00:${String(index + 1).padStart(2, "0")}.000Z`,
         });
       }
       for (let index = 0; index < (member === 5 ? 3 : 2); index += 1) {
-        appendActivity(source.paths, {
+        await appendActivity(source.paths, {
           turnSequence: 1,
           event: { type: "note", text: `member-${member}-note-${index}` },
           at: `2026-08-11T00:00:${String(index + 6).padStart(2, "0")}.000Z`,
@@ -124,21 +135,21 @@ test("plural wait shares one detail budget without dropping pinned rows", async 
       }
       sources.push(source);
     }
-    appendActivity(sources[4]!.paths, {
+    await appendActivity(sources[4]!.paths, {
       turnSequence: 1,
       event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } },
       at: "2026-08-11T00:01:00.000Z",
     });
-    recordTell(sources[4]!.paths, { id: "pending", body: "continue", recordedAt: "2026-08-11T00:01:01.000Z" });
+    await recordTell(sources[4]!.paths, { id: "pending", body: "continue", recordedAt: "2026-08-11T00:01:01.000Z" });
     const exhausted = await answered(root, "worker", "00000006");
     for (let index = 0; index < 2; index += 1) {
-      appendActivity(exhausted.paths, {
+      await appendActivity(exhausted.paths, {
         turnSequence: 1,
         event: { type: "note", text: `exhausted-${index}` },
         at: `2026-08-11T00:02:0${index}.000Z`,
       });
     }
-    appendActivity(exhausted.paths, {
+    await appendActivity(exhausted.paths, {
       turnSequence: 1,
       event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } },
       at: "2026-08-11T00:02:02.000Z",
@@ -283,10 +294,10 @@ test("CLI ls invokes each selected identity directory and emits selected JSON", 
     writeFileSync(join(home, "akuma", "reviewer.md"), [
       "---", "provider: codex", "model: review-model", "description: Full review description.", "---", "Review.", "",
     ].join("\n"));
-    const worker = allocateAkumaDirectory({ worldRoot: world, archetype: "worker", draw: () => "00000001" });
-    const reviewer = allocateAkumaDirectory({ worldRoot: world, archetype: "reviewer", draw: () => "00000002" });
-    initializeHeart(worker.paths);
-    initializeHeart(reviewer.paths);
+    const worker = await allocateAkumaDirectory({ worldRoot: world, archetype: "worker", draw: () => "00000001" });
+    const reviewer = await allocateAkumaDirectory({ worldRoot: world, archetype: "reviewer", draw: () => "00000002" });
+    await initializeHeart(worker.paths);
+    await initializeHeart(reviewer.paths);
 
     const command = (path: string) => invoke(parseArgv(["-C", repository.path, "ls", path]), {
       environment: { KEIYAKU_HOME: home },
@@ -342,8 +353,8 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   await moveAlias({ world: repository.path, alias: "@review", akuId: source.id });
   const contracts = (await Keiyaku.list({ repo })).rows;
   const path = await World.at(repository.path);
-  assert.throws(
-    () => resolveNamedAddress({ path, selector: "@review", contracts }),
+  await assert.rejects(
+    resolveNamedAddress({ path, selector: "@review", contracts }),
     /ambiguous selector matches Contract and Akuma/u,
   );
 });
@@ -352,7 +363,7 @@ test("history last bypasses activity and glob grammar follows normalized archety
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-last-"));
   try {
     const source = await answered(root, "worker", "00000001");
-    appendActivity(source.paths, {
+    await appendActivity(source.paths, {
       turnSequence: 1,
       event: { type: "activity", event: { provider: "legacy" } },
       at: "2026-08-11T00:00:01.000Z",
@@ -374,15 +385,15 @@ test("history last bypasses activity and glob grammar follows normalized archety
 test("history last selects exactly one latest answered TurnFact by durable sequence", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-last-sequence-"));
   try {
-    const source = allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "00000001" });
-    initializeHeart(source.paths);
-    const bodyLeash = HeldAkumaLeash.try(source.paths)!;
-    const body = bodyLeash.recordBody(source.paths, {
+    const source = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "00000001" });
+    await initializeHeart(source.paths);
+    const bodyLeash = (await HeldAkumaLeash.try(source.paths))!;
+    const body = await bodyLeash.recordBody(source.paths, {
       leashTakenAt: "2026-08-11T00:00:00.000Z",
     });
     bodyLeash.release();
     for (const sessionId of ["session-1", "session-2", "session-3"]) {
-      recordSession(source.paths, {
+      await recordSession(source.paths, {
         provider: "claude",
         coordinate: { sessionId },
         cwd: root,
@@ -393,15 +404,15 @@ test("history last selects exactly one latest answered TurnFact by durable seque
     const last = async () => Keiyaku.history({ path: root, akuma: source.id, last: true });
 
     assert.deepEqual(await last(), { kind: "no-answer", id: source.id });
-    completeTurn(source.paths, body.sequence, { kind: "failed", diagnostic: "first failure" }, "2026-08-11T00:00:01.000Z");
+    await completeTurn(source.paths, body.sequence, { kind: "failed", diagnostic: "first failure" }, "2026-08-11T00:00:01.000Z");
     assert.deepEqual(await last(), { kind: "no-answer", id: source.id });
-    completeTurn(source.paths, body.sequence, { kind: "answered", answer: "first", historyId: "history-1", session: { sessionId: "session-1" } }, "2026-08-11T00:00:02.000Z");
+    await completeTurn(source.paths, body.sequence, { kind: "answered", answer: "first", historyId: "history-1", session: { sessionId: "session-1" } }, "2026-08-11T00:00:02.000Z");
     assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "first" });
-    completeTurn(source.paths, body.sequence, { kind: "answered", answer: "second", historyId: "history-2", session: { sessionId: "session-2" } }, "2026-08-11T00:00:03.000Z");
+    await completeTurn(source.paths, body.sequence, { kind: "answered", answer: "second", historyId: "history-2", session: { sessionId: "session-2" } }, "2026-08-11T00:00:03.000Z");
     assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "second" });
-    completeTurn(source.paths, body.sequence, { kind: "failed", diagnostic: "later failure" }, "2026-08-11T00:00:04.000Z");
+    await completeTurn(source.paths, body.sequence, { kind: "failed", diagnostic: "later failure" }, "2026-08-11T00:00:04.000Z");
     assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "second" });
-    completeTurn(source.paths, body.sequence, { kind: "answered", answer: "", historyId: "history-3", session: { sessionId: "session-3" } }, "2026-08-11T00:00:05.000Z");
+    await completeTurn(source.paths, body.sequence, { kind: "answered", answer: "", historyId: "history-3", session: { sessionId: "session-3" } }, "2026-08-11T00:00:05.000Z");
     assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "" });
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -303,6 +303,6 @@ test("managed bind installs Task namespace after worktree materialization", asyn
   const action = bound.settlement.actions[0];
   assert.ok(action);
   const state = await bound.keiyaku.state();
-  assert.deepEqual(readNamespaceContext(action.path), [state.id.slice("kei/".length)]);
+  assert.deepEqual(await readNamespaceContext(action.path), [state.id.slice("kei/".length)]);
   assert.equal(bound.effects.some((effect) => effect.kind === "namespace-context"), false);
 });

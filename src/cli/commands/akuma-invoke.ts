@@ -33,7 +33,7 @@ type InvokeInput = Readonly<{
   settings: Settings;
   contract?: KeiyakuContract;
   repo?: Repo;
-  readStdin(): string;
+  readStdin(): Promise<string>;
 }>;
 
 function inputAlias(selector: string): string | undefined {
@@ -58,7 +58,7 @@ async function invokeWait(command: Extract<ParsedAkumaCommand, { command: "wait"
 }
 
 async function invokeTell(command: ParsedAkumaCommand & Readonly<{ command: "tell"; akuma: string }>, input: InvokeInput): Promise<AkumaInvocationResult> {
-  const body = input.readStdin();
+  const body = await input.readStdin();
   if (command.interrupt) {
     const result = await Keiyaku.interrupt({ path: input.path, akuma: command.akuma, settings: input.settings, body, ...(input.repo === undefined ? {} : { repo: input.repo }) });
     const alias = inputAlias(command.akuma);
@@ -131,7 +131,7 @@ export async function invokeAkuma(
       const result = await Keiyaku.call({
         path: input.path,
         archetype: command.archetype,
-        body: input.readStdin(),
+        body: await input.readStdin(),
         settings: input.settings,
         cwd: input.executionCwd,
         mode: command.mode,

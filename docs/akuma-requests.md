@@ -30,6 +30,14 @@ The body writes the receipt projection. The request id is a caller-minted UUID.
 The directory is best-effort removed after the drive drains, so bytes never
 cross drives.
 
+Transport creation, claim and receipt reads, temporary-file publication,
+directory scans, and cleanup are awaited filesystem operations. The request
+pump has an asynchronous factory because opening it creates and observes this
+transport; its constructor is not a second synchronous API. Awaiting transport
+does not alter the serial service law below: Heart admission precedes directory
+allocation, reservation precedes spawn, and terminal Heart settlement precedes
+receipt projection.
+
 Transport bytes are not facts. Before heart admission they are claims; after
 settlement receipts are projections that may be reproduced from the heart.
 Missing, malformed, or discarded transport bytes therefore do not create or

@@ -8,6 +8,7 @@ import {
   endTurn,
   finishBodyIfIdle,
   heartExists,
+  isHeartAbsent,
   readHeart,
   recordSession,
   recordTellDeliveries,
@@ -64,26 +65,31 @@ class BodySupervisor {
   private observation: HeartSnapshot;
   private stopping?: BodyStopReason;
 
-  constructor(
+  private constructor(
     private readonly paths: AkumaPaths,
     private readonly bodySequence: number,
     private readonly leash: HeldAkumaLeash,
+    observation: HeartSnapshot,
   ) {
     this.signal = this.controller.signal;
-    this.observation = readHeart(paths);
+    this.observation = observation;
     this.observer = this.observe();
+  }
+
+  static async open(paths: AkumaPaths, bodySequence: number, leash: HeldAkumaLeash): Promise<BodySupervisor> {
+    return new BodySupervisor(paths, bodySequence, leash, await readHeart(paths));
   }
 
   get reason(): BodyStopReason | undefined { return this.stopping; }
 
   current(): HeartSnapshot { return this.observation; }
 
-  recordHung(diagnostic: string, at: string): void {
-    this.leash.recordBodyHung(this.paths, { sequence: this.bodySequence, diagnostic, at });
+  async recordHung(diagnostic: string, at: string): Promise<void> {
+    await this.leash.recordBodyHung(this.paths, { sequence: this.bodySequence, diagnostic, at });
   }
 
-  refresh(): HeartSnapshot {
-    this.publish(readHeart(this.paths));
+  async refresh(): Promise<HeartSnapshot> {
+    this.publish(await readHeart(this.paths));
     return this.observation;
   }
 
@@ -117,7 +123,7 @@ class BodySupervisor {
   private async observe(): Promise<void> {
     for (;;) {
       const snapshot = this.observation;
-      if (!heartExists(this.paths)) {
+      if (!await heartExists(this.paths)) {
         this.cancel("heart-gone");
         return;
       }
@@ -127,25 +133,70 @@ class BodySupervisor {
       }
       try { await abortableDelay(BODY_CONTROL_OBSERVATION_MS, this.finished.signal); }
       catch { return; }
-      this.refresh();
+      try {
+        await this.refresh();
+      } catch (error) {
+        if (await heartExists(this.paths)) throw error;
+        this.cancel("heart-gone");
+        return;
+      }
     }
   }
 
 }
 
-function serializeEffects() {
+type EffectSerializer = {
+  <T>(effect: () => Promise<T> | T): Promise<T>;
+  drain(): Promise<void>;
+};
+
+function serializeEffects(): EffectSerializer {
   let tail = Promise.resolve();
-  return async <T>(effect: () => Promise<T> | T): Promise<T> => {
-    const before = tail;
-    let release!: () => void;
-    tail = new Promise<void>((resolve) => { release = resolve; });
-    await before;
-    try { return await effect(); } finally { release(); }
+  let failed = false;
+  let failure: unknown;
+  const serialize = async <T>(effect: () => Promise<T> | T): Promise<T> => {
+    const result = tail.then(effect);
+    tail = result.then(
+      () => undefined,
+      (error: unknown) => {
+        if (!failed) failure = error;
+        failed = true;
+      },
+    );
+    return await result;
   };
+  serialize.drain = async () => {
+    await tail;
+    if (failed) throw failure;
+  };
+  return serialize;
 }
 
 function missing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException).code === "ENOENT";
+  return isHeartAbsent(error) || (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+async function writeProviderEvent(
+  input: DriveTurnInput,
+  active: ActiveTurn,
+  event: AgentEvent,
+): Promise<void> {
+  if (input.supervisor.signal.aborted) return;
+  const at = input.now();
+  if (event.type === "session") {
+    await recordSession(input.paths, {
+      provider: input.soul.provider.name,
+      coordinate: event.coordinate,
+      cwd: active.cwd,
+      options: active.options,
+      admittedAt: at,
+    });
+  }
+  await appendActivity(input.paths, {
+    turnSequence: active.turnSequence,
+    event: encodeAgentEvent(event),
+    at,
+  });
 }
 
 function bodyControlRequested(snapshot: HeartSnapshot, bodySequence: number): boolean {
@@ -153,23 +204,23 @@ function bodyControlRequested(snapshot: HeartSnapshot, bodySequence: number): bo
     || snapshot.pause?.bodySequence === bodySequence;
 }
 
-function putDownIfControlled(
+async function putDownIfControlled(
   paths: AkumaPaths,
   supervisor: BodySupervisor,
   bodySequence: number,
   now: () => string,
-): void {
-  if (supervisor.reason === "control" && heartExists(paths)) {
-    breakBody(paths, { sequence: bodySequence, end: "put-down", at: now() });
+): Promise<void> {
+  if (supervisor.reason === "control" && await heartExists(paths)) {
+    await breakBody(paths, { sequence: bodySequence, end: "put-down", at: now() });
   }
 }
 
-function turnRecipe(paths: AkumaPaths, soul: Soul): Readonly<{
+async function turnRecipe(paths: AkumaPaths, soul: Soul): Promise<Readonly<{
   cwd: string;
   options: Soul["options"];
   session?: ResumeCoordinate;
-}> {
-  const latest = readHeart(paths).latestSession;
+}>> {
+  const latest = (await readHeart(paths)).latestSession;
   const admitted = latest?.provider === soul.provider.name ? latest : undefined;
   const session = admitted?.coordinate;
   return {
@@ -182,7 +233,7 @@ function turnRecipe(paths: AkumaPaths, soul: Soul): Readonly<{
 async function takeLeash(paths: AkumaPaths): Promise<HeldAkumaLeash | null> {
   for (;;) {
     try {
-      const leash = HeldAkumaLeash.try(paths);
+      const leash = await HeldAkumaLeash.try(paths);
       if (leash !== null) return leash;
     } catch (error) {
       if (missing(error)) return null;
@@ -236,15 +287,15 @@ type TurnDriveResult = DrivenTurn
   | Readonly<{ kind: "handoff" }>;
 
 async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
-  const { cwd, options, session } = turnRecipe(input.paths, input.soul);
+  const { cwd, options, session } = await turnRecipe(input.paths, input.soul);
   if (session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
-  const turn = beginTurn(input.paths, {
+  const turn = await beginTurn(input.paths, {
     bodySequence: input.bodySequence,
     startedAt: input.now(),
     ...(input.call === undefined ? {} : { call: input.call }),
   });
   const requests = input.soul.confinement.kind === "declared"
-    ? new BodyRequestPump({
+    ? await BodyRequestPump.open({
         paths: input.paths,
         parent: input.soul,
         bodySequence: input.bodySequence,
@@ -272,7 +323,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
       return { kind: "stopped" };
     }
     if (input.launchTells.length > 0) {
-      recordTellDeliveries(input.paths, input.launchTells.map((tell) => ({
+      await recordTellDeliveries(input.paths, input.launchTells.map((tell) => ({
         tellId: tell.id,
         route: "launch" as const,
         turnSequence: turn.sequence,
@@ -309,12 +360,12 @@ async function retireProviderCustody(input: DriveTurnInput, turnSequence: number
     })),
   ]);
   if (outcome.kind === "retired") return;
-  if (heartExists(input.paths)) {
+  if (await heartExists(input.paths)) {
     const diagnostic = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
     const at = input.now();
     try {
-      input.supervisor.recordHung(diagnostic, at);
-      appendActivity(input.paths, {
+      await input.supervisor.recordHung(diagnostic, at);
+      await appendActivity(input.paths, {
         turnSequence,
         event: encodeAgentEvent({ type: "note", text: `Provider custody was not retired: ${diagnostic}` }),
         at,
@@ -330,14 +381,21 @@ function pumpReceipts(writers: TurnWriters): Promise<void> {
     if (drive.receipts === undefined) return;
     for await (const receipt of drive.receipts) {
       if (!mayWrite()) return;
-      await writeWitness(() => {
+      await writeWitness(async () => {
         if (!mayWrite()) return;
-        recordTellReceipt(input.paths, receipt.evidence === "exact"
+        await recordTellReceipt(input.paths, receipt.evidence === "exact"
           ? { ...receipt, receivedAt: input.now() }
           : { ...receipt, turnSequence, receivedAt: input.now() });
       });
     }
   })();
+}
+
+function observeReceiptFailure(receiptPump: Promise<void>): Promise<never> {
+  return receiptPump.then(
+    () => new Promise<never>(() => {}),
+    (error: unknown) => Promise.reject(error),
+  );
 }
 
 async function submitPendingLiveTells(
@@ -354,7 +412,7 @@ async function submitPendingLiveTells(
       const submission = await tellLive({ id: tell.id, text: tell.body });
       if (!mayWrite()) return "turn-ended" as const;
       if (submission.kind === "turn-ended") return "turn-ended" as const;
-      recordTellDeliveries(input.paths, [{
+      await recordTellDeliveries(input.paths, [{
         tellId: tell.id,
         route: "live",
         turnSequence,
@@ -387,22 +445,10 @@ function hasUnattemptedTell(
 }
 
 function persistProviderEvent(
-  input: DriveTurnInput,
-  active: ActiveTurn,
+  _input: DriveTurnInput,
+  _active: ActiveTurn,
   event: AgentEvent,
 ): ResumeCoordinate | undefined {
-  if (input.supervisor.signal.aborted) return undefined;
-  const at = input.now();
-  if (event.type === "session") {
-    recordSession(input.paths, {
-      provider: input.soul.provider.name,
-      coordinate: event.coordinate,
-      cwd: active.cwd,
-      options: active.options,
-      admittedAt: at,
-    });
-  }
-  appendActivity(input.paths, { turnSequence: active.turnSequence, event: encodeAgentEvent(event), at });
   return event.type === "session" ? event.coordinate : undefined;
 }
 
@@ -428,10 +474,7 @@ async function consumeTurnDrive(
   const mayWrite = (): boolean => writesOpen && !input.supervisor.signal.aborted;
   const writers: TurnWriters = { input, turnSequence, drive, writeWitness, mayWrite };
   const receiptPump = pumpReceipts(writers);
-  const receiptFailure = receiptPump.then(
-    () => new Promise<never>(() => {}),
-    (error: unknown) => Promise.reject(error),
-  );
+  const receiptFailure = observeReceiptFailure(receiptPump);
   const iterator = drive.events[Symbol.asyncIterator]();
   let pending = iterator.next();
   let liveTells = true;
@@ -460,6 +503,9 @@ async function consumeTurnDrive(
         receiptFailure,
         ...(requests === null ? [] : [requests.failure]),
       ]);
+      if (next.kind === "event" && !next.event.done) {
+        await writeProviderEvent(input, active, next.event.value);
+      }
       if (next.kind === "heart") {
         heart = next.observation;
         continue;
@@ -475,6 +521,8 @@ async function consumeTurnDrive(
       pending = iterator.next();
     }
     const result = await drive.completion;
+    if (tellPump !== null) await tellPump;
+    await writeWitness.drain();
     writesOpen = false;
     return await settleCompletion(result, turnSession, requests);
   } catch (error) {
@@ -501,7 +549,7 @@ async function driveTurn(
     if ("kind" in started) return started;
     active = started;
   } catch (error) {
-    if (!heartExists(input.paths)) {
+    if (!await heartExists(input.paths)) {
       input.supervisor.cancel("heart-gone");
       return { kind: "stopped" };
     }
@@ -513,7 +561,7 @@ async function driveTurn(
       ? result
       : { ...result, turnSequence: active.turnSequence };
   } catch (error) {
-    if (heartExists(input.paths)) {
+    if (await heartExists(input.paths)) {
       await active.requests?.close();
       return { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error),
         turnSequence: active.turnSequence };
@@ -524,33 +572,33 @@ async function driveTurn(
   }
 }
 
-function bornSoul(launch: BodyLaunch, leash: HeldAkumaLeash, now: string): Soul | null {
-  const before = readHeart(launch.paths);
+async function bornSoul(launch: BodyLaunch, leash: HeldAkumaLeash, now: string): Promise<Soul | null> {
+  const before = await readHeart(launch.paths);
   if (before.soul !== null) return before.soul;
   if (launch.seed === undefined) throw new Error("Akuma wake has no born soul");
   const candidate: Soul = { ...launch.seed, createdAt: now };
-  if (leash.birth(launch.paths, candidate, launch.birthSession) === "sealed") return null;
-  const born = readHeart(launch.paths).soul;
+  if (await leash.birth(launch.paths, candidate, launch.birthSession) === "sealed") return null;
+  const born = (await readHeart(launch.paths)).soul;
   if (born === null || born.id !== candidate.id) {
     throw new Error("Akuma birth identity does not match its directory");
   }
   return born;
 }
 
-function launchCwd(launch: BodyLaunch): string {
+async function launchCwd(launch: BodyLaunch): Promise<string> {
   if (launch.seed !== undefined) return launch.seed.cwd;
-  const soul = readHeart(launch.paths).soul;
+  const soul = (await readHeart(launch.paths)).soul;
   if (soul === null) throw new Error("Akuma wake has no born soul");
-  return turnRecipe(launch.paths, soul).cwd;
+  return (await turnRecipe(launch.paths, soul)).cwd;
 }
 
-function persistTurn(
+async function persistTurn(
   paths: AkumaPaths,
   turnSequence: number,
   result: DrivenTurn,
   completedAt: string,
-): "answered" | "failed" {
-  endTurn(paths, {
+): Promise<"answered" | "failed"> {
+  await endTurn(paths, {
     turnSequence,
     outcome: result.kind === "answered" && result.session !== undefined
       ? {
@@ -583,14 +631,14 @@ type BodyExecution = Readonly<{
   runtime: BodyRuntime;
 }>;
 
-function prepareBodyStart(paths: AkumaPaths, leash: HeldAkumaLeash): boolean {
-  const before = readHeart(paths);
+async function prepareBodyStart(paths: AkumaPaths, leash: HeldAkumaLeash): Promise<boolean> {
+  const before = await readHeart(paths);
   if (before.pause !== null) return false;
   if (before.stop === null) return true;
   if (before.latestBody?.sequence === before.stop.bodySequence && before.latestBody.end === "put-down") {
-    leash.settleStop(paths);
+    await leash.settleStop(paths);
   } else {
-    leash.clearStop(paths);
+    await leash.clearStop(paths);
   }
   return true;
 }
@@ -599,13 +647,13 @@ async function recoverBodyRequests(input: BodyExecution): Promise<boolean> {
   const { launch, soul, bodySequence, supervisor, runtime } = input;
   try {
     const result = await settleBodyRequests(launch.paths, soul, runtime.now, supervisor.signal);
-    clearBodyRequestTransport(launch.paths);
+    await clearBodyRequestTransport(launch.paths);
     if (result === "settled") return true;
-    breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
+    await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
   } catch (error) {
     if (!supervisor.signal.aborted) throw error;
-    clearBodyRequestTransport(launch.paths);
-    putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
+    await clearBodyRequestTransport(launch.paths);
+    await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
   }
   return false;
 }
@@ -616,11 +664,11 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
   for (;;) {
     const launchTells = supervisor.current().pending;
     if (supervisor.signal.aborted) {
-      putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
+      await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
       return;
     }
     if (initial === undefined && launchTells.length === 0) {
-      const finished = finishBodyIfIdle(launch.paths, { sequence: bodySequence, at: runtime.now() });
+      const finished = await finishBodyIfIdle(launch.paths, { sequence: bodySequence, at: runtime.now() });
       if (finished.kind === "finished") return;
       if (finished.kind === "controlled") {
         supervisor.cancel("control");
@@ -641,19 +689,19 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       now: runtime.now,
     });
     if (result.kind === "stopped") {
-      putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
+      await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
       return;
     }
     if (result.kind === "handoff") {
-      breakBody(launch.paths, { sequence: bodySequence, end: "put-down", at: runtime.now() });
+      await breakBody(launch.paths, { sequence: bodySequence, end: "put-down", at: runtime.now() });
       return;
     }
     if (result.kind === "resume-unsupported"
-      || persistTurn(launch.paths, result.turnSequence, result, runtime.now()) === "failed") {
-      breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
+      || await persistTurn(launch.paths, result.turnSequence, result, runtime.now()) === "failed") {
+      await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;
     }
-    supervisor.refresh();
+    await supervisor.refresh();
     initial = undefined;
   }
 }
@@ -666,12 +714,12 @@ export async function driveAkumaBody(
   const leash = await takeLeash(launch.paths);
   if (leash === null) return;
   try {
-    const soul = bornSoul(launch, leash, runtime.now());
+    const soul = await bornSoul(launch, leash, runtime.now());
     if (soul === null) return;
     const selected = adapter ?? resolveProviderExecution(soul.provider).adapter;
-    if (!prepareBodyStart(launch.paths, leash)) return;
-    const body = leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
-    const supervisor = new BodySupervisor(launch.paths, body.sequence, leash);
+    if (!await prepareBodyStart(launch.paths, leash)) return;
+    const body = await leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
+    const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);
     const execution = { launch, soul, adapter: selected, bodySequence: body.sequence, supervisor, runtime };
     try {
       if (await recoverBodyRequests(execution)) await runBodyTurns(execution);
@@ -679,7 +727,7 @@ export async function driveAkumaBody(
       await supervisor.close();
     }
   } catch (error) {
-    if (heartExists(launch.paths)) throw error;
+    if (await heartExists(launch.paths)) throw error;
   } finally {
     leash.release();
   }
@@ -689,7 +737,7 @@ export async function spawnAkumaBody(launch: BodyLaunch): Promise<void> {
   const encoded = Buffer.from(JSON.stringify(launch), "utf8").toString("base64url");
   const owned = await spawnDetachedProcess({
     argv: [process.execPath, ...process.execArgv, fileURLToPath(import.meta.url), encoded],
-    cwd: launchCwd(launch),
+    cwd: await launchCwd(launch),
     log: launch.paths.log,
   });
   owned.release();

@@ -118,6 +118,12 @@ typed process failure, or `ok`. Every marker replacement uses a unique
 same-directory temporary file, fsyncs the file, renames it, and fsyncs the
 parent directory. Empty command arrays advance directly to `ok`.
 
+Marker reads and parent-directory preparation are awaited. The shared
+durable-file owner may retain synchronous descriptor write, file fsync, rename,
+and directory fsync only inside that atomic replacement commit section; its
+Promise fulfills after the directory fsync. Reconciliation does not expose a
+synchronous marker API or defer marker publication to a queue.
+
 An active worktree with no marker freezes the current supplied pair and runs
 create commands. A `pending` create phase resumes from its stored next index.
 An `ok` create phase never runs again. A `failed` phase reports its stored lag
