@@ -45,7 +45,7 @@ const AKUMA_COMMAND_SPECS = {
       json: "boolean",
     },
     usage: "call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -",
-    purpose: "Call an Akuma from an Archetype and stdin body.",
+    purpose: "Call an Akuma with stdin body.",
   },
   wait: {
     arity: "one-or-more",

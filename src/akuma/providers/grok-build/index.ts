@@ -14,10 +14,10 @@ type InterjectResponse = Readonly<{ status: "queued" }>;
 
 function optionAdmission(options: ProviderOptions): ProviderOptionAdmission {
   if (options.network !== undefined) {
-    return { kind: "refused", diagnostic: "Grok Build does not support the Archetype network option" };
+    return { kind: "refused", diagnostic: "Grok Build does not support the network option" };
   }
   if (options.systemPrompt !== undefined && options.systemPrompt.length > 0) {
-    return { kind: "refused", diagnostic: "Grok Build does not support the Archetype systemPrompt option" };
+    return { kind: "refused", diagnostic: "Grok Build does not support the systemPrompt option" };
   }
   return {
     kind: "admitted",

@@ -25,7 +25,7 @@ export type AllocatedAkuma = Readonly<{
 
 export function archetypeName(value: string): string {
   if (value.length === 0 || normalizeIdentityStem({ source: value }) !== value) {
-    throw new TypeError("Akuma archetype must be one normalized human identity segment");
+    throw new TypeError("Akuma name must be one normalized human identity segment");
   }
   return value;
 }
@@ -44,7 +44,7 @@ export function akuId(input: Readonly<{ archetype: string; suffix: string }>): A
 
 export function parseAkuId(value: string): Readonly<{ id: AkuId; archetype: string; suffix: string }> {
   const segments = identitySegments({ family: "aku", value });
-  if (segments.length !== 2) throw new TypeError("Akuma identity must be aku/<archetype>/<hex8>");
+  if (segments.length !== 2) throw new TypeError("Akuma identity must be aku/<akuma>/<hex8>");
   const archetype = archetypeName(segments[0]!);
   const suffix = suffixSegment(segments[1]!);
   return { id: akuId({ archetype, suffix }), archetype, suffix };

@@ -527,7 +527,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.equal((await world.list()).rows[0]?.life, "unborn");
     assert.equal((await world.list({ archetype: "claude" })).rows[0]?.id, allocated.id);
     assert.deepEqual((await world.list({ archetype: "reviewer" })).rows, []);
-    await assert.rejects(world.list({ archetype: "not/a-name" }), /Akuma archetype/);
+    await assert.rejects(world.list({ archetype: "not/a-name" }), /Akuma name/);
     await assert.rejects(world.list({ unknown: true } as never), /unknown field: unknown/);
 
     const launch: BodyLaunch = {
@@ -872,7 +872,9 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
     await assert.rejects(
       loadArchetype({ name: "invalid", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
-        && error.searched[0] === join(home, "akuma", "invalid.md"),
+        && error.searched[0] === join(home, "akuma", "invalid.md")
+        && !error.message.includes("searched")
+        && !/archetype/iu.test(error.message),
     );
     writeFileSync(join(home, "akuma", "stale-access.md"), "---\nprovider: claude\naccess: read\n---\n");
     await assert.rejects(
@@ -904,7 +906,8 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
       loadArchetype({ name: "missing", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.kind === "akuma-archetype"
-        && error.searched[0] === join(home, "akuma", "missing.md"),
+        && error.searched[0] === join(home, "akuma", "missing.md")
+        && error.message === "`missing` was not found\nuse `keiyaku ls aku/` to list available Akuma",
     );
   } finally {
     rmSync(home, { recursive: true, force: true });

@@ -109,8 +109,13 @@ Text and `--json` render this same object. Both write to stdout; JSON serializes
 it without another output schema. A corrupted authority or other exception
 writes its verbatim diagnostic to stderr and exits `3`.
 
-Akuma text has one shared snapshot presentation across status, wait, call, tell,
-interrupt, and kill; history remains the unbounded browsing surface. Snapshot
+Akuma text has one shared snapshot presentation across status, wait, unfinished
+observed call, tell, interrupt, and kill; history remains the unbounded browsing
+surface. An answered default call writes the exact answer bytes with no snapshot
+or fact prefix. A successful detached call writes its born AkuId and a final
+`$ keiyaku wait <AkuId> --timeout 5m` command without inventing life. Dispatch
+failure, alias failure, readonly-none refusal, or observation failure keeps its
+diagnostic and does not add that wait command. Snapshot
 `said` and `thought` rows occupy at most two terminal lines, including a visible
 truncation marker when clipped. Other semantic-kind budgets remain unchanged.
 Text clipping and receipt presentation never alter the public value serialized
@@ -173,11 +178,11 @@ When a Contract is associated, its complete `kei/...` coordinate follows on the
 separate hanging relation line beginning with `U+2514` and `U+2500`; an
 unassociated Akuma omits that line. Identity rows never contain current life.
 Activity follows the identity and optional relation directly. Status, wait,
-observed call, and kill place life on one two-space-indented trailing line
-immediately after activity. Ordinary and interrupt tell output and history omit
-life. The life vocabulary remains `● running`, `○ asleep`, `× killed`,
-`? stranded`, `? hung`, and `? untidy`. JSON values, timeline row semantics,
-and history model remain unchanged.
+unfinished observed call, and kill place life on one two-space-indented
+trailing line immediately after activity. Ordinary and interrupt tell output
+and history omit life. The life vocabulary remains `● running`, `○ asleep`,
+`× killed`, `? stranded`, `? hung`, and `? untidy`. JSON values, timeline row
+semantics, and history model remain unchanged.
 
 Post-admission physical or settlement failures remain inside the accepted
 object as typed lags. Text and JSON expose them without changing the Contract

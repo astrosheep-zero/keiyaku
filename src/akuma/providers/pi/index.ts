@@ -27,7 +27,7 @@ const MODEL_PATTERN = /^[^/\s]+\/[^/\s]+$/u;
 function diagnostic(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 function admitPiOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
-  if (options.network !== undefined) return { kind: "refused", diagnostic: "Pi provider does not support the Archetype network option" };
+  if (options.network !== undefined) return { kind: "refused", diagnostic: "Pi provider does not support the network option" };
   if (options.model !== undefined && !MODEL_PATTERN.test(options.model)) {
     return { kind: "refused", diagnostic: "Pi provider model must use <provider>/<id>" };
   }

@@ -64,7 +64,7 @@ class ReceiptChannel implements AsyncIterable<TellReceipt> {
 
 function admitClaudeOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
   if (options.network !== undefined) {
-    return { kind: "refused", diagnostic: "Claude provider does not support the Archetype network option" };
+    return { kind: "refused", diagnostic: "Claude provider does not support the network option" };
   }
   return {
     kind: "admitted",

@@ -52,7 +52,7 @@ export function decodeAcpConfig(value: unknown): AcpExecutionConfig {
 
 function optionAdmission(options: ProviderOptions, config: AcpExecutionConfig): ProviderOptionAdmission {
   if (options.network !== undefined) {
-    return { kind: "refused", diagnostic: "ACP provider does not support the Archetype network option" };
+    return { kind: "refused", diagnostic: "ACP provider does not support the network option" };
   }
   if (options.model !== undefined && config.modelArg === undefined) {
     return { kind: "refused", diagnostic: "ACP provider has no model argument mapping" };

@@ -2175,7 +2175,7 @@ test("Claude adapter consumes the admitted Archetype options", async () => {
   });
   assert.deepEqual(provider.admitOptions({ network: "disabled" }), {
     kind: "refused",
-    diagnostic: "Claude provider does not support the Archetype network option",
+    diagnostic: "Claude provider does not support the network option",
   });
 });
 

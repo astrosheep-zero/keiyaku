@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { beginTurn, endTurn, initializeHeart, readSoul } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, beginTurn, endTurn, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
+import { decodeSoul } from "../src/akuma/heart/soul.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
+import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
+import { BodyRequestPump } from "../src/akuma/requests.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
@@ -18,6 +24,35 @@ import { normalizeToolCommand } from "../src/cli/render/akuma-tool-command.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { makeGitRepository } from "./support/git.js";
 import type { ActivityRow } from "../src/akuma/index.js";
+
+const PACKAGED_CLI = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
+
+function packagedCliEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const next = { ...env };
+  delete next.FORCE_COLOR;
+  delete next.NO_COLOR;
+  return next;
+}
+
+function runPackagedCli(
+  args: readonly string[],
+  input: Readonly<{ cwd: string; env?: NodeJS.ProcessEnv; stdin?: string }>,
+): Promise<Readonly<{ code: number; stdout: string; stderr: string }>> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [PACKAGED_CLI, ...args], {
+      cwd: input.cwd,
+      env: packagedCliEnv(input.env ?? process.env),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer | string) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk: Buffer | string) => { stderr += String(chunk); });
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.stdin.end(input.stdin ?? "");
+  });
+}
 
 test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "-"]), {
@@ -891,7 +926,7 @@ test("akuma call renders optional integration stages and maps partial success", 
       observation: { kind: "detached" as const },
     },
   };
-  assert.equal(renderAkumaText(command, plain), `─────\n${akuma}`);
+  assert.equal(renderAkumaText(command, plain), `─────\n${akuma}\n$ keiyaku wait ${akuma} --timeout 5m`);
   assert.deepEqual(akumaJsonValue(command, plain), plain.result);
   assert.equal(akumaExitCode(plain), 0);
 
@@ -910,7 +945,7 @@ test("akuma call renders optional integration stages and maps partial success", 
       },
     },
   };
-  assert.equal(renderAkumaText(command, integrated), `─────\n${akuma} (@worker)\n└─ kei/work`);
+  assert.equal(renderAkumaText(command, integrated), `─────\n${akuma} (@worker)\n└─ kei/work\n$ keiyaku wait ${akuma} --timeout 5m`);
   assert.equal(akumaExitCode(integrated), 0);
 
   const partial = {
@@ -922,7 +957,19 @@ test("akuma call renders optional integration stages and maps partial success", 
     },
   };
   assert.equal(renderAkumaText(command, partial), `─────\n${akuma}\ndispatch failed contention`);
+  assert.doesNotMatch(renderAkumaText(command, partial), /keiyaku wait/u);
   assert.equal(akumaExitCode(partial), 2);
+
+  const aliasFailed = {
+    ...plain,
+    result: {
+      ...plain.result,
+      alias: { kind: "failed" as const, failure: { kind: "infrastructure" as const, diagnostic: "alias locked" } },
+    },
+  };
+  assert.equal(renderAkumaText(command, aliasFailed), `─────\n${akuma}\nalias failed infrastructure alias locked`);
+  assert.doesNotMatch(renderAkumaText(command, aliasFailed), /keiyaku wait/u);
+  assert.equal(akumaExitCode(aliasFailed), 2);
 
   const answered = {
     ...plain,
@@ -950,8 +997,69 @@ test("akuma call renders optional integration stages and maps partial success", 
     },
   };
   const answeredText = renderAkumaText(command, answered);
-  assert.match(answeredText, new RegExp(akuma, "u"));
-  assert.match(answeredText, /finished/u);
+  assert.equal(answeredText, "finished");
+  assert.equal(akumaExitCode(answered), 0);
+
+  const answeredAfterDispatchFailure = {
+    ...answered,
+    result: {
+      ...answered.result,
+      dispatch: { kind: "failed" as const, failure: { kind: "contention" as const } },
+    },
+  };
+  assert.match(renderAkumaText(command, answeredAfterDispatchFailure), /dispatch failed contention/u);
+  assert.notEqual(renderAkumaText(command, answeredAfterDispatchFailure), "finished");
+  assert.equal(akumaExitCode(answeredAfterDispatchFailure), 2);
+
+  const running = {
+    ...plain,
+    result: {
+      ...plain.result,
+      observation: {
+        kind: "observed" as const,
+        status: {
+          id: akuma,
+          life: "running" as const,
+          timeline: {
+            kind: "open" as const,
+            turn: { kind: "turn" as const, sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
+            entries: [],
+            omitted: 0,
+          },
+        },
+      },
+    },
+  };
+  const waitCommand = parseArgv(["wait", akuma]).command;
+  const waited = { kind: "akuma" as const, action: "wait" as const, result: { completion: "all" as const, statuses: [{ status: running.result.observation.status }] } };
+  assert.equal(renderAkumaText(command, running), renderAkumaText(waitCommand, waited));
+
+  const failedTurn = {
+    ...answered,
+    result: {
+      ...answered.result,
+      observation: {
+        kind: "observed" as const,
+        status: {
+          ...answered.result.observation.status,
+          timeline: {
+            kind: "idle" as const,
+            entries: [],
+            omitted: 0,
+            outcome: {
+              kind: "outcome" as const,
+              sequence: 1,
+              turnSequence: 1,
+              at: "2026-08-10T16:42:00.000Z",
+              outcome: { kind: "failed" as const, diagnostic: "turn failed" },
+            },
+          },
+        },
+      },
+    },
+  };
+  assert.match(renderAkumaText(command, failedTurn), /! error\s+turn failed/u);
+  assert.equal(akumaExitCode(failedTurn), 2);
 
   const observationFailed = {
     ...plain,
@@ -1358,6 +1466,7 @@ test("akuma call renders the CallResult restraint on detached and failed observa
 
   const detached = renderAkumaText(command, { ...base, result: { ...base.result, observation: { kind: "detached" as const } } });
   assert.equal(detached, `─────\n${akuma}\n! ACP cannot remove task-surface mutation capabilities`);
+  assert.doesNotMatch(detached, /keiyaku wait/u);
   assert.equal((detached.match(/! ACP cannot/g) ?? []).length, 1);
 
   const failed = renderAkumaText(command, {
@@ -1386,4 +1495,215 @@ test("akuma call renders the CallResult restraint on detached and failed observa
     },
   });
   assert.equal((observed.match(/! ACP cannot/g) ?? []).length, 1, "observed status and CallResult project the same restraint once");
+
+  const answeredRestraint = renderAkumaText(command, {
+    ...base,
+    result: {
+      ...base.result,
+      observation: {
+        kind: "observed" as const,
+        status: {
+          id: akuma,
+          life: "asleep" as const,
+          readonly: restraint,
+          timeline: {
+            kind: "idle" as const,
+            entries: [],
+            omitted: 0,
+            outcome: {
+              kind: "outcome" as const,
+              sequence: 1,
+              turnSequence: 1,
+              at: "2026-08-10T16:42:00.000Z",
+              outcome: { kind: "answered" as const, answer: "finished", historyId: "history", session: { sessionId: "session" } },
+            },
+          },
+        },
+      },
+    },
+  });
+  assert.match(answeredRestraint, /! ACP cannot remove task-surface mutation capabilities/u);
+  assert.notEqual(answeredRestraint, "finished");
+});
+
+test("packaged CLI call writes missing, detached, answered, unfinished, and failed semantics", async () => {
+  assert.equal(existsSync(PACKAGED_CLI), true, "npm run build must produce build/src/cli/index.js before this test");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-call-")));
+  const home = join(root, ".home");
+  mkdirSync(join(home, "akuma"), { recursive: true });
+  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
+  await initializeHeart(parent.paths);
+  const soul: Soul = {
+    id: parent.id,
+    archetype: "parent",
+    provider: { name: "codex-app-server", kind: "codex-app-server" },
+    options: {},
+    cwd: root,
+    origin: { kind: "direct" },
+    confinement: { kind: "unconfined" },
+    createdAt: "2026-08-15T00:00:00.000Z",
+  };
+  const leash = (await HeldAkumaLeash.try(parent.paths))!;
+  await leash.birth(parent.paths, soul);
+  const answering: ProviderAdapter = {
+    confinement: () => ({ kind: "unconfined" }),
+    admitOptions(options) { return { kind: "admitted", options }; },
+    async start() {
+      let finishEvents!: () => void;
+      const eventsFinished = new Promise<void>((resolve) => { finishEvents = resolve; });
+      return {
+        admission: { fence: "cli-call" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "cli-session" } };
+            finishEvents();
+          },
+        },
+        completion: eventsFinished.then(() => ({
+          kind: "answered" as const,
+          answer: "finished",
+          historyId: "cli-history",
+        })),
+        async abort() {},
+      };
+    },
+  };
+  const failing: ProviderAdapter = {
+    ...answering,
+    async start() {
+      return {
+        admission: { fence: "cli-fail" },
+        events: { async *[Symbol.asyncIterator]() {} },
+        completion: Promise.resolve({ kind: "failed" as const, diagnostic: "turn failed" }),
+        async abort() {},
+      };
+    },
+  };
+  const held: HeldAkumaLeash[] = [];
+  const pump = await BodyRequestPump.open({
+    paths: parent.paths,
+    parent: soul,
+    bodySequence: 1,
+    now: () => "2026-08-15T00:00:01.000Z",
+    signal: new AbortController().signal,
+    async spawn(launch) {
+      const adapter = launch.initialBody === "fail" ? failing : answering;
+      if (launch.initialBody === "hang") {
+        const child = (await HeldAkumaLeash.try(launch.paths))!;
+        await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-15T00:00:02.000Z" });
+        held.push(child);
+        return;
+      }
+      await driveAkumaBody(launch, adapter, { now: () => "2026-08-15T00:00:02.000Z" });
+    },
+  });
+  const env = { ...process.env, KEIYAKU_HOME: home, [AKUMA_REQUESTS_ENV]: pump.directory };
+  try {
+    const missing = await runPackagedCli(["-C", root, "call", "missing", "-"], { cwd: root, env, stdin: "work" });
+    assert.equal(missing.code, 3);
+    assert.equal(missing.stdout, "");
+    assert.equal(missing.stderr, "`missing` was not found\nuse `keiyaku ls aku/` to list available Akuma\n");
+    assert.doesNotMatch(missing.stderr, /archetype|searched/iu);
+
+    const invalid = await runPackagedCli(["-C", root, "call", "Not/A-Name", "-"], { cwd: root, env, stdin: "work" });
+    assert.equal(invalid.code, 1);
+    assert.match(invalid.stderr, /Akuma name must be one normalized human identity segment/u);
+    assert.doesNotMatch(invalid.stderr, /archetype/iu);
+
+    const detached = await runPackagedCli(["-C", root, "call", "worker", "--detach", "-"], { cwd: root, env, stdin: "detach" });
+    assert.equal(detached.code, 0);
+    const detachedLines = detached.stdout.trim().split("\n");
+    assert.equal(detachedLines[0], "─────");
+    const akuId = detachedLines[1]!;
+    assert.match(akuId, /^aku\/worker\/[0-9a-f]{8}$/u);
+    assert.equal(detached.stdout, `─────\n${akuId}\n$ keiyaku wait ${akuId} --timeout 5m\n`);
+    assert.doesNotMatch(detached.stdout, /● running|○ asleep|success/u);
+
+    const answered = await runPackagedCli(["-C", root, "call", "worker", "--timeout", "2s", "-"], { cwd: root, env, stdin: "answer" });
+    assert.equal(answered.code, 0);
+    assert.equal(answered.stdout, "finished");
+    assert.equal(answered.stderr, "");
+
+    const unfinished = await runPackagedCli(["-C", root, "call", "worker", "--timeout", "0ms", "-"], { cwd: root, env, stdin: "hang" });
+    assert.equal(unfinished.code, 0);
+    assert.match(unfinished.stdout, /^aku\/worker\/[0-9a-f]{8}$/mu);
+    assert.match(unfinished.stdout, / {2}● running\n$/u);
+    assert.doesNotMatch(unfinished.stdout, /keiyaku wait|finished/u);
+
+    const failed = await runPackagedCli(["-C", root, "call", "worker", "--timeout", "2s", "-"], { cwd: root, env, stdin: "fail" });
+    assert.equal(failed.code, 2);
+    assert.match(failed.stdout, /! error\s+turn failed/u);
+    assert.notEqual(failed.stdout, "turn failed\n");
+  } finally {
+    await pump.close();
+    for (const child of held) child.release();
+    leash.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function fixtureSoul(id: Soul["id"], name: string): Record<string, unknown> {
+  return {
+    id,
+    archetype: name,
+    provider: { name: "claude", kind: "claude-agent-sdk" },
+    options: {},
+    cwd: "/tmp",
+    origin: { kind: "direct" },
+    confinement: { kind: "unconfined" },
+    createdAt: "2026-08-15T00:00:00.000Z",
+  };
+}
+
+test("Soul validation diagnostics name the Akuma without the internal term", () => {
+  assert.throws(
+    () => decodeSoul(fixtureSoul("aku/claude/1234abcd" as Soul["id"], " ")),
+    (error: unknown) => error instanceof Error
+      && error.message === "Akuma soul name must be a nonblank string"
+      && !/archetype/iu.test(error.message),
+  );
+  assert.throws(
+    () => decodeSoul(fixtureSoul("aku/claude/1234abcd" as Soul["id"], "worker")),
+    (error: unknown) => error instanceof Error
+      && error.message === "Akuma soul id and name must agree"
+      && !/archetype/iu.test(error.message),
+  );
+});
+
+test("packaged CLI status writes the Soul name-agreement diagnostic", async () => {
+  assert.equal(existsSync(PACKAGED_CLI), true, "npm run build must produce build/src/cli/index.js before this test");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-soul-")));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
+    await initializeHeart(allocated.paths);
+    const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+    await leash.birth(allocated.paths, {
+      id: allocated.id,
+      archetype: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: {},
+      cwd: root,
+      origin: { kind: "direct" },
+      confinement: { kind: "unconfined" },
+      createdAt: "2026-08-15T00:00:00.000Z",
+    });
+    leash.release();
+    const heart = new DatabaseSync(allocated.paths.heart);
+    try {
+      const row = heart.prepare("SELECT soul_json FROM soul WHERE singleton = 1").get() as { soul_json: string };
+      const soul = JSON.parse(row.soul_json) as Record<string, unknown>;
+      soul.archetype = "worker";
+      heart.prepare("UPDATE soul SET soul_json = ? WHERE singleton = 1").run(JSON.stringify(soul));
+    } finally {
+      heart.close();
+    }
+    const status = await runPackagedCli(["-C", root, "status", allocated.id], { cwd: root });
+    assert.equal(status.code, 3);
+    assert.equal(status.stdout, "");
+    assert.equal(status.stderr, "Akuma soul id and name must agree\n");
+    assert.doesNotMatch(status.stderr, /archetype/iu);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

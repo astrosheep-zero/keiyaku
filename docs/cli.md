@@ -66,7 +66,7 @@ The command vocabulary is:
 | `arc` | Calls `keiyaku.arc` with arc Markdown. |
 | `status` | Calls Kanshi or one exact Akuma status according to its selector. |
 | `show` | Calls `keiyaku.guidance()` for one selected Contract. |
-| `ls` | Lists exactly one selected Task, Contract, Archetype, or Akuma identity directory. |
+| `ls` | Lists exactly one selected Task, Contract, Akuma configuration, or Akuma identity directory. |
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
 | `settings` | Constructs and observes the shared read-only Settings resource. |
@@ -98,7 +98,7 @@ show [<contract>|@<contract>] [--json]
 ls task/ [--json]
 ls kei/ [--json]
 ls aku/ [--json]
-ls aku/<archetype>/ [--json]
+ls aku/<akuma>/ [--json]
 ls aku/*/* [--json]
 audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
@@ -234,25 +234,35 @@ rollback occurs. Text prints one result per harness. JSON returns
 `1`; successful installation exits `0`.
 
 `call` and `tell` require the final `-` and pass those bytes
-as the public body input. The `call` positional is the Archetype name and names
+as the public body input. The `call` positional is the Akuma name and names
 `~/.keiyaku/akuma/<name>.md`; its provider must resolve through the
 Settings-backed provider interpretation. When no same-name Settings entry
 exists, the built-in fallback execution names are `claude` and
-`codex-app-server`. Missing or malformed configuration prints the exact path
-searched. `--contract` accepts one complete `kei/...` identity, constructs its
+`codex-app-server`. A missing name prints exactly `` `<name>` was not found ``
+and `` use `keiyaku ls aku/` to list available Akuma ``. Its typed error retains
+the searched coordinate, but text does not print that path. `--contract`
+accepts one complete `kei/...` identity, constructs its
 handle from the selected Contract Repo, and asks the package-root call to publish
 Dispatch after birth. It is not a lifecycle gate and does not accept an
 omitted or `@` Contract selector. `--alias` accepts the sole `@name` grammar and
 asks that same call to move the world-local Alias after any Dispatch succeeds.
 Both flags are optional. The canonical invocation cwd is the immutable execution
 cwd supplied to the public call; the CLI has no separate execution-cwd option.
-Call waits on the born Akuma by default and returns the public
-status carrier when it stops running or after five minutes. `--wait` explicitly
+Call waits on the born Akuma by default and consumes the same public status
+carrier as `wait` when it stops running or after five minutes. An answered
+terminal observation writes the exact answer bytes and nothing else. An open
+observation uses the shared snapshot text. A terminal failed outcome, typed
+Dispatch or Alias failure, or readonly-none refusal remains a visible
+diagnostic rather than an answer. `--wait` explicitly
 selects that default mode, while `--timeout` replaces the five-minute duration.
 `-d` and `--detach` are identical and return after birth plus Dispatch and Alias
-integration. Detach is mutually exclusive with `--wait` and `--timeout`.
+integration. A successful detach prints `$ keiyaku wait <AkuId> --timeout 5m`
+with the complete born identity. Dispatch failure, Alias failure, or a
+readonly-none refusal keeps its existing factual lines and does not add that
+command. Detach does not fabricate a current life. It is mutually exclusive
+with `--wait` and `--timeout`.
 `tell`, `history`, `fork`, and exact `status` accept a complete
-`aku/<archetype>/<hex8>` or world-local `@alias`. `wait` and `kill` additionally
+`aku/<akuma>/<hex8>` or world-local `@alias`. `wait` and `kill` additionally
 accept Akuma globs and complete `kei/...` worker selectors. Their positional
 set is expanded once, deduplicated, and byte-sorted before the operation.
 Multiple wait members require exactly one of `--any` or `--all`; a single
@@ -262,14 +272,14 @@ second raw-roster flag. Library `world.of()`
 constructs the addressed handle and has no CLI command of its own.
 Bare `ls` renders the command's own help and exits successfully. It does not
 locate or create a World, construct a Repo or Settings value, or read Git,
-Task, Archetype, or Akuma state. The accepted path grammar is closed and uses
+Task, Akuma configuration, or Akuma state. The accepted path grammar is closed and uses
 the canonical directory spellings above; missing trailing slashes, exact
 identities, Alias selectors, and other paths are usage errors.
 
 `ls task/` lists Task rows from one complete Task-owned catalog snapshot. `ls kei/` lists Contract rows whose persisted
-identities remain `kei/...`, and `ls aku/` lists Archetype definitions with
-name, optional model, and complete description. `ls aku/<archetype>/` lists
-compact instances of that Archetype, while `ls aku/*/*` explicitly lists all
+identities remain `kei/...`, and `ls aku/` lists Akuma configurations with
+name, optional model, and complete description. `ls aku/<akuma>/` lists
+compact instances of that named Akuma, while `ls aku/*/*` explicitly lists all
 compact instances. Each invocation reads only the selected owner and performs
 no Kanshi join or activity/history read. JSON is the selected Catalog result,
 not an aggregate envelope. `status @name` remains an Address-facet decision
@@ -312,13 +322,15 @@ then the complete AkuId and optional frozen Alias. When a Contract is
 associated, its complete `kei/...` identity is one hanging relation line
 beginning with `U+2514` and `U+2500`; an unassociated Akuma omits that line.
 Identity rows never contain current life, and no divider or blank line splits
-the relation from the following activity. Status, wait, observed call, and
-kill end with the public life on a subdued trailing line. Ordinary and
-interrupt tell compose the refreshed snapshot without a current-life claim;
-history does the same for its page, while `history --last` writes exact answer
-bytes. The id already contains the Archetype and the CLI never reverse-selects
-an Alias. Text never prints the storage words `retained`, `latest`, `body`,
-`heart`, or `turn`.
+the relation from the following activity. Status, wait, unfinished observed
+call, and kill end with the public life on a subdued trailing line. Ordinary
+and interrupt tell compose the refreshed snapshot without a current-life
+claim; history does the same for its page, while `history --last` writes exact
+answer bytes. An answered default call likewise writes only those answer
+bytes; a successful detached call prints its born identity and
+`$ keiyaku wait <AkuId> --timeout 5m`. The id already contains the Akuma name
+and the CLI never reverse-selects an Alias. Text never prints the storage
+words `retained`, `latest`, `body`, `heart`, or `turn`.
 
 Shared activity-row layout, snapshot budgets, clipping, time gutter, glyphs,
 and omission placement are owned by [cli-output.md](cli-output.md). This command

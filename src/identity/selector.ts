@@ -21,7 +21,7 @@ export function parseAkumaGlob(value: string): AkumaGlob {
   if (segments.length !== 3 || segments[0] !== "aku" || !value.includes("*")
     || archetype.length === 0 || normalizeIdentityStem({ source: archetypeProbe }) !== archetypeProbe
     || !AKUMA_GLOB_SUFFIX.test(segments[2] ?? "")) {
-    throw new TypeError("Akuma glob must be aku/<archetype-pattern>/<hex-pattern> and contain *");
+    throw new TypeError("Akuma glob must be aku/<akuma-pattern>/<hex-pattern> and contain *");
   }
   return value as AkumaGlob;
 }

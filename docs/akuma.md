@@ -181,8 +181,11 @@ namespace, and asks the selected built-in adapter kind to admit the Archetype
 options before allocating an identity. Missing, malformed, unknown-provider,
 and unsupported option input is typed failure; inability to enforce a requested
 readonly restraint is instead an admitted, durable fact. A missing or malformed
-Archetype includes the exact path searched. There is no fallback Archetype or
-directory layering.
+Archetype retains the exact path searched as typed evidence. User-facing text
+does not expose the internal term or print that path. A missing name renders
+`` `<name>` was not found `` followed by
+`` use `keiyaku ls aku/` to list available Akuma ``. There is no fallback
+Archetype or directory layering.
 
 `world.listArchetypes()` is the filename-only public Akuma read. It enumerates
 canonical `.md` filenames in that same directory and returns their normalized

@@ -36,8 +36,13 @@ function writeAkuma(command: Parameters<typeof renderAkumaText>[0], result: Akum
     columns: process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : 80,
     color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
   });
-  const rawLast = command.command === "history" && command.last && command.output === "text";
-  process.stdout.write(rawLast ? output : `${output}\n`);
+  const callOutcome = result.action === "call" && result.result.observation.kind === "observed"
+    && result.result.observation.status.timeline.kind === "idle"
+    ? result.result.observation.status.timeline.outcome?.outcome : undefined;
+  const rawAnswer = callOutcome?.kind === "answered" && output === callOutcome.answer;
+  const raw = command.output === "text"
+    && ((command.command === "history" && command.last) || rawAnswer);
+  process.stdout.write(raw ? output : `${output}\n`);
   return akumaExitCode(result);
 }
 

@@ -90,8 +90,8 @@ function validateSoul(value: unknown): Soul {
   }
   const identity = soulAkuIdentity(soul.id, "id");
   const id: AkuId = identity.id;
-  const archetype = nonblank(soul.archetype, "archetype");
-  if (identity.archetype !== archetype) throw new Error("Akuma soul id and archetype must agree");
+  const archetype = nonblank(soul.archetype, "name");
+  if (identity.archetype !== archetype) throw new Error("Akuma soul id and name must agree");
   const description = soul.description === undefined ? undefined : nonblank(soul.description, "description");
   const provider = decodeProviderRecipe(soul.provider);
   const options = decodeProviderOptions(soul.options);

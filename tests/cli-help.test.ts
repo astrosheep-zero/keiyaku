@@ -44,7 +44,7 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     "usage: keiyaku ls task/ [--json]",
     "       keiyaku ls kei/ [--json]",
     "       keiyaku ls aku/ [--json]",
-    "       keiyaku ls aku/<archetype>/ [--json]",
+    "       keiyaku ls aku/<akuma>/ [--json]",
     "       keiyaku ls aku/*/* [--json]",
   ].join("\n"));
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
@@ -53,10 +53,14 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.doesNotMatch(renderRootHelp(), /^  interrupt /mu);
   assert.match(renderRootHelp(), /tell <aku\/\.\.\.> \[--interrupt\]/u);
   assert.equal(renderAkumaHelp("call"), [
-    "Call an Akuma from an Archetype and stdin body.",
+    "Call an Akuma with stdin body.",
     "",
     "usage: keiyaku call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -",
   ].join("\n"));
+  assert.doesNotMatch(
+    [renderRootHelp(), renderContractHelp("ls"), renderAkumaHelp("call"), renderAkumaHelp("wait")].join("\n"),
+    /archetype/iu,
+  );
 });
 
 test("syntax refusal retains the deepest reached grammar", () => {

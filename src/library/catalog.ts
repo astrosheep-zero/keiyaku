@@ -60,7 +60,7 @@ function queryValue(value: unknown): CatalogQuery {
   }
   if (query.kind !== "akuma") return { kind: query.kind };
   if (query.archetype !== undefined && typeof query.archetype !== "string") {
-    throw new TypeError("Keiyaku.ls Akuma archetype must be a string");
+    throw new TypeError("Keiyaku.ls Akuma name must be a string");
   }
   return { kind: "akuma", ...(query.archetype === undefined ? {} : { archetype: query.archetype }) };
 }

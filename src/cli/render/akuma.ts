@@ -180,14 +180,30 @@ function dispatchLines(stage: DispatchStage): readonly string[] {
   return [`dispatch failed ${stage.failure.kind} ${safeText(stage.failure.diagnostic)}`];
 }
 
+function callFailed(result: Extract<AkumaInvocationResult, { action: "call" }>["result"]): boolean {
+  return result.dispatch.kind === "failed"
+    || result.alias.kind === "failed"
+    || result.readonly?.enforcement === "none";
+}
+
 function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, context: TextRenderContext): string {
   const alias = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : undefined;
   const contractId = result.result.dispatch.kind === "dispatched" ? result.result.dispatch.dispatch.contractId : undefined;
   const facts = [...dispatchLines(result.result.dispatch)];
   const restraint = result.result.readonly?.enforcement === "none" ? [`! ${safeText(result.result.readonly.diagnostic)}`] : [];
   if (result.result.alias.kind === "failed") facts.push(`alias failed ${result.result.alias.failure.kind} ${safeText(result.result.alias.failure.diagnostic)}`);
-  if (result.result.observation.kind === "detached") return [...snapshotHeading(result.result.akuma, alias, contractId), ...restraint, ...facts].join("\n");
-  if (result.result.observation.kind === "failed") return [...snapshotHeading(result.result.akuma, alias, contractId), ...restraint, ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
+  if (result.result.observation.kind === "detached") {
+    const lines = [...snapshotHeading(result.result.akuma, alias, contractId), ...restraint, ...facts];
+    if (!callFailed(result.result)) lines.push(`$ keiyaku wait ${result.result.akuma} --timeout 5m`);
+    return lines.join("\n");
+  }
+  if (result.result.observation.kind === "failed") {
+    return [...snapshotHeading(result.result.akuma, alias, contractId), ...restraint, ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
+  }
+  const timeline = result.result.observation.status.timeline;
+  if (!callFailed(result.result) && timeline.kind === "idle" && timeline.outcome?.outcome.kind === "answered") {
+    return timeline.outcome.outcome.answer;
+  }
   return snapshotText({ status: result.result.observation.status, ...(contractId === undefined ? {} : { contractId }) }, context, { ...(alias === undefined ? {} : { alias }), facts });
 }
 
@@ -209,6 +225,10 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
 
 export function akumaExitCode(result: AkumaInvocationResult): number {
   if (result.action === "call" && (result.result.dispatch.kind === "failed" || result.result.alias.kind === "failed" || result.result.observation.kind === "failed")) return 2;
+  if (result.action === "call" && result.result.observation.kind === "observed") {
+    const timeline = result.result.observation.status.timeline;
+    if (timeline.kind === "idle" && timeline.outcome?.outcome.kind === "failed") return 2;
+  }
   if (result.action === "kill" && result.result.results.some((member) =>
     member.evidence === "unavailable" || member.evidence === "hung" || member.evidence === "untidy")) return 1;
   if (result.action === "tell" && result.mode === "ordinary" && typeof result.result.tell.wake !== "string") return 2;

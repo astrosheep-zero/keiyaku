@@ -39,8 +39,9 @@ export class AkumaArchetypeError extends Error {
     readonly archetype: string,
     readonly searched: readonly string[],
     readonly reason: string,
+    guidance?: string,
   ) {
-    super(`Akuma archetype ${archetype} ${reason}\n${searched.map((path) => `searched ${path}`).join("\n")}`);
+    super([`\`${archetype}\` ${reason}`, ...(guidance === undefined ? [] : [guidance])].join("\n"));
     this.name = "AkumaArchetypeError";
   }
 }
@@ -80,7 +81,7 @@ function archetypeField(
   const value = values[key];
   if (value === undefined && !required) return undefined;
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`Archetype ${key} must be a nonblank string`);
+    throw new TypeError(`Akuma ${key} must be a nonblank string`);
   }
   return value;
 }
@@ -92,30 +93,30 @@ function archetypeEnum<T extends string>(
 ): T | undefined {
   const value = archetypeField(values, key);
   if (value === undefined) return undefined;
-  if (!allowed.includes(value as T)) throw new TypeError(`Archetype ${key} must be one of ${allowed.join(", ")}`);
+  if (!allowed.includes(value as T)) throw new TypeError(`Akuma ${key} must be one of ${allowed.join(", ")}`);
   return value as T;
 }
 
 function archetypeReadonly(values: Readonly<Record<string, unknown>>): true | undefined {
   if (!("readonly" in values)) return undefined;
-  if (values.readonly !== true) throw new TypeError("Archetype readonly must be true");
+  if (values.readonly !== true) throw new TypeError("Akuma readonly must be true");
   return true;
 }
 
 function decodeArchetype(name: string, path: string, markdown: string): DecodedArchetype {
   const lines = markdown.split(/\r?\n/u);
-  if (lines[0]?.trim() !== "---") throw new TypeError("Archetype must begin with YAML frontmatter");
+  if (lines[0]?.trim() !== "---") throw new TypeError("Akuma configuration must begin with YAML frontmatter");
   const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
-  if (closing < 0) throw new TypeError("Archetype frontmatter is not closed");
+  if (closing < 0) throw new TypeError("Akuma frontmatter is not closed");
   const document = parseDocument(lines.slice(1, closing).join("\n"), { uniqueKeys: true });
-  if (document.errors.length > 0) throw new TypeError(`Archetype frontmatter is invalid: ${document.errors[0]!.message}`);
+  if (document.errors.length > 0) throw new TypeError(`Akuma frontmatter is invalid: ${document.errors[0]!.message}`);
   const decoded = document.toJS() as unknown;
   if (decoded === null || typeof decoded !== "object" || Array.isArray(decoded)) {
-    throw new TypeError("Archetype frontmatter must be one mapping");
+    throw new TypeError("Akuma frontmatter must be one mapping");
   }
   const values = decoded as Readonly<Record<string, unknown>>;
   const provider = archetypeField(values, "provider", true)!;
-  if ("access" in values) throw new TypeError("Archetype access is not supported; use readonly: true");
+  if ("access" in values) throw new TypeError("Akuma access is not supported; use readonly: true");
   const model = archetypeField(values, "model");
   const effort = archetypeField(values, "effort");
   const readonly = archetypeReadonly(values);
@@ -236,15 +237,19 @@ function admitArchetype(archetype: DecodedArchetype, settings: Settings): Admitt
 export async function loadArchetype(input: Readonly<{ name: string; settings: Settings }>): Promise<AdmittedArchetype> {
   const name = archetypeName(input.name);
   const directory = archetypeDirectory(input.settings);
-  if (directory === null) throw new AkumaArchetypeError(name, [], "has no user Settings coordinate");
+  const missing = () => new AkumaArchetypeError(
+    name,
+    directory === null ? [] : [join(directory, `${name}.md`)],
+    "was not found",
+    "use `keiyaku ls aku/` to list available Akuma",
+  );
+  if (directory === null) throw missing();
   const path = join(directory, `${name}.md`);
   let markdown: string;
   try {
     markdown = await readFile(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new AkumaArchetypeError(name, [path], "was not found");
-    }
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw missing();
     throw new AkumaArchetypeError(name, [path], `could not be read: ${error instanceof Error ? error.message : String(error)}`);
   }
   try {
