@@ -19,10 +19,13 @@ contract document -> bind -> work in the Contract worktree -> deliver
 ```
 
 The lifecycle is `waiting -> bound -> pending-delivery -> claimed | abandoned`;
-the last two are terminal. `--after` prerequisites hold a Contract at
-`waiting`; it becomes `bound` automatically once they are satisfied. You never
-push it through states by hand: `deliver` and satisfied reviews request
-placement, and placement claims when the gates allow it.
+the last two are terminal. `--after` prerequisites are placement obligations,
+not a delivery admission gate: a Contract may record `bound` and deliver before
+they claim, while placement waits for the current prerequisites and declared
+gates. Active terms may amend `--after` after `bound` or `deliver`; terminal
+Contracts remain immutable. You never push it through states by hand: `deliver`
+and satisfied reviews request placement, and placement claims when every
+placement obligation allows it.
 
 ## Bind
 

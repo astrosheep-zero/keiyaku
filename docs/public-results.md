@@ -94,14 +94,18 @@ type AmendRefusal = Readonly<{
     | "contract-missing"
     | "terminal"
     | "terms-moved"
-    | "prerequisites-already-consumed"
     | "unknown-prerequisite"
     | "cyclic-prerequisite"
   contractId: ContractId
 }>
 
 type PlacementRefusal = Readonly<{
-  kind: "contract-missing" | "delivery-missing" | "terminal" | "gates-unsatisfied"
+  kind:
+    | "contract-missing"
+    | "delivery-missing"
+    | "terminal"
+    | "prerequisites-unsatisfied"
+    | "gates-unsatisfied"
   contractId: ContractId
 }>
 

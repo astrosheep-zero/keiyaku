@@ -117,7 +117,7 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
   assert.equal(report.state, readGit(git).commit);
   assert.deepEqual(report.rows.find((contract) => contract.id === first), {
     id: first,
-    phase: "bound",
+    phase: "waiting",
     disposition: "active",
     workspace: "here",
     worktreePath: null,
@@ -128,7 +128,7 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
   });
   assert.deepEqual(report.rows.find((contract) => contract.id === second), {
     id: second,
-    phase: "bound",
+    phase: "waiting",
     disposition: "active",
     workspace: "worktree",
     worktreePath: deliveryWorktreePath(git, second),
@@ -218,7 +218,7 @@ test("single Contract observation never combines state and target from different
     kind: "present",
     row: {
       id,
-      phase: "bound",
+      phase: "waiting",
       disposition: "active",
       workspace: "here",
       worktreePath: null,

@@ -1,5 +1,5 @@
 import type { DecideInput, OfferDecision, StampedPreparation } from "../decide.js";
-import { activeContract, documentIsCurrent, prerequisiteStatus } from "../facts/observation.js";
+import { activeContract, documentIsCurrent } from "../facts/observation.js";
 import type { ActorId, ContractId, DeliverData, JournalEntry } from "../facts/types.js";
 
 export type DeliverInput<Failure = never> = Readonly<{
@@ -10,7 +10,7 @@ export type DeliverInput<Failure = never> = Readonly<{
 }>;
 
 export type DeliverRefusal = Readonly<{
-  kind: "contract-missing" | "not-bound" | "terminal" | "document-moved";
+  kind: "contract-missing" | "terminal" | "document-moved";
   contractId: ContractId;
 }>;
 
@@ -21,12 +21,6 @@ export function decideDeliver<Failure>({
 }: DecideInput<DeliverInput<Failure>>): OfferDecision<DeliverRefusal | Failure> {
   const state = activeContract(observation, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
-  const prerequisites = state.bound === null
-    ? prerequisiteStatus(state.terms.after, observation)
-    : "claimed";
-  if (prerequisites !== "claimed") {
-    return { kind: "refused", refusal: { kind: "not-bound", contractId: input.contractId } };
-  }
   if (input.preparation.kind === "unavailable") {
     throw new Error("existing contract requires a stamped delivery preparation");
   }

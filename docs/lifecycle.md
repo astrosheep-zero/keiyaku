@@ -10,22 +10,19 @@ library edge by [document.md](document.md).
 The folded lifecycle is:
 
 ```text
-no journal -> waiting for bound -> eligible -> pending delivery -> claimed
-                                      \-> abandoned
+no journal -> waiting -> bound -> pending delivery -> claimed
+                      \-> abandoned
 ```
 
 `claimed` and `abandoned` are terminal. The phase is a derived read model over
 facts, never another persisted authority.
 
 A bind records immutable coordinates and the initial opaque contract terms. It
-may admit `bound` in the same offer when every declared prerequisite is already
-claimed; otherwise the contract is waiting. A contract's `after` list is an
-ordered prerequisite snapshot. It cannot contain the contract itself. An amend
-replaces the complete opaque terms and may change `after` only while those
-prerequisites remain unsatisfied. Once every prerequisite is claimed,
-eligibility is monotonic and `after` is frozen whether or not a `bound` fact has
-yet materialized; an attempted change receives the typed
-`prerequisites-already-consumed` refusal. Coordinates never change.
+does not admit `bound`; the contract waits for the first operation whose fact
+requires boundness. A contract's `after` list is an ordered placement
+prerequisite snapshot and cannot contain the contract itself. An amend replaces
+the complete opaque terms and may change `after` at any point before a terminal
+fact, including after `bound` or `deliver`. Coordinates never change.
 
 The prerequisite graph is acyclic by construction. An amend whose resulting
 `after` would make the contract reachable from its own transitive prerequisite
@@ -38,10 +35,17 @@ nor a full-world observation. Protocol assembles that closure, while
 acyclicity.
 
 An explicit placement request uses one placement adjudicator. The adjudicator
-admits `claimed` only when every declared gate passes its generic currentness
-check. Admitting testimony does not itself invoke placement; `deliver` and a
-satisfied `review` explicitly request it as a later protocol step. Audit never
-invokes placement.
+admits `claimed` only when every ContractId in the current `after` snapshot is
+claimed and every declared gate passes its generic currentness check. A missing
+delivery receives `delivery-missing`; an unclaimed prerequisite receives
+`prerequisites-unsatisfied`; an unsatisfied gate receives `gates-unsatisfied`.
+Both are placement obligations, but `after` remains an identity edge that reads
+another Contract's terminal fact while `terms.gates` remains an opaque token
+satisfied by current attestation evidence. Placement does not synthesize an
+attestation or gate token for a prerequisite.
+Admitting testimony does not itself invoke placement; `deliver` and a satisfied
+`review` explicitly request it as a later protocol step. Audit never invokes
+placement.
 
 For a targeted offer, Git's checked-out-target preconditions are part of that
 same placement attempt. `checkout-not-followable` is a typed mechanical
@@ -174,12 +178,13 @@ no generic attest operation or gate registry.
 
 ## Eligibility
 
-Eligibility is a Contract-local projection of that Contract's current `after`
-and the terminal state of the ContractIds it names. Bind and amend observe only
-their addressed Contract and the finite prerequisite closure needed by their
-own decision. Claim concerns only the claimed Contract; it neither discovers
-dependents nor broadcasts `bound` facts. Attestation does not change
-eligibility.
+Placement eligibility is a Contract-local projection of that Contract's current
+`after` and the terminal state of the ContractIds it names. Bind and amend
+observe only their addressed Contract and the finite prerequisite closure
+needed to validate identities and acyclicity. Placement observes the addressed
+Contract and its current direct prerequisites. Claim concerns only the claimed
+Contract; it neither discovers dependents nor broadcasts `bound` facts.
+Attestation does not change prerequisite eligibility.
 
 Every `after` coordinate must resolve to an existing contract in the decision
 snapshot. An unresolved coordinate is a typed `unknown-prerequisite` refusal;
@@ -189,20 +194,23 @@ coordinate.
 
 Bind observes its new identity and direct `after` contracts. Amend observes its
 identity plus the transitive prerequisite closure of its resulting `after`.
-No lifecycle decision performs a full-world Contract observation.
+Placement observes its identity plus its current direct `after` contracts.
+Deliver does not observe prerequisites. No lifecycle decision performs a
+full-world Contract observation.
 
-Eligibility becoming true does not itself publish a fact. Claimed terminality
-cannot revert, so the truth remains available for a later targeted decision.
-`bound` is the durable record that the prerequisite snapshot was consumed. It
-is materialized only by the first operation whose fact requires boundness, in
-the same Offer and immediately before that dependent fact. Bind and amend never
-eagerly append it, even when their resulting terms are already eligible.
-`bound` is never offered or repaired independently, and no dependent fact may
-precede it.
+Prerequisite eligibility becoming true does not itself publish a fact. Claimed
+terminality cannot revert, so the truth remains available for a later placement
+attempt. `bound` is the durable delivery-phase milestone and does not record
+consumption of an `after` snapshot. It is materialized only by the first
+operation whose fact requires boundness, currently `deliver`, in the same Offer
+and immediately before that dependent fact. Bind and amend never eagerly append
+it. Future bound gates may be judged at that transition without changing
+placement prerequisites. `bound` is never offered or repaired independently,
+and no dependent fact may precede it.
 
 The kernel neither sorts, queues, nor automatically reorders contracts.
-Eligibility observes the declared prerequisite identities and their terminal
-facts.
+Placement eligibility observes the declared prerequisite identities and their
+terminal facts.
 
 ## Pact Decisions
 
@@ -317,8 +325,7 @@ authority.
 After a known rejected transaction, protocol compares the Git and optional
 target ref with the coordinates asserted by that attempt. Any movement discards
 the offer; the next bounded semantic attempt observes, folds, and decides
-afresh. A newly
-ineligible state returns that decision's typed refusal. Three
+afresh. A newly ineligible placement returns that decision's typed refusal. Three
 unsuccessful semantic attempts return `exhausted`; a rejection with no asserted
 coordinate movement remains `publication-failed` with its diagnostic. This
 classification reads no Git prose and never turns a failed CAS into acceptance.
@@ -366,9 +373,9 @@ through admitted facts. A trailing fact joins the accepted outcome's `facts`;
 a trailing refusal, retry, or nonterminal process result appears on that
 obligation's own presence-discriminated stop channel. The channels are
 independent, so one invocation may expose both Verification and placement
-stops. Placement reads only declared gates against admitted attestations:
-whether `verified` is declared decides what placement waits for, never whether
-the producer runs. The exact public shapes are owned by
+stops. Placement reads the current `after` snapshot and declared gates against
+admitted facts: whether `verified` is declared decides what placement waits for,
+never whether the producer runs. The exact public shapes are owned by
 [public-results.md](public-results.md).
 
 Admission alone controls a composed operation's outer outcome. Physical

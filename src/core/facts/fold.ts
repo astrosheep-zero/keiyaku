@@ -7,7 +7,6 @@ import type {
   BindEntry,
   JournalEntry,
 } from "./types.js";
-import { samePrerequisites } from "./eligibility.js";
 import { gatesSatisfied } from "./gate.js";
 import { AuthorityCorruptionError } from "./errors.js";
 
@@ -70,12 +69,8 @@ function foldEntry(
   switch (entry.kind) {
     case "bind":
       foldError("bind may appear only once");
-    case "amend": {
-      if (state.bound !== null && !samePrerequisites(state.terms.after, entry.data.after)) {
-        foldError("cannot change after once prerequisites are consumed");
-      }
+    case "amend":
       return { ...state, terms: cloneTerms(entry.data) };
-    }
     case "bound":
       if (state.bound !== null) foldError("bound may appear only once");
       return { ...state, bound: entry };

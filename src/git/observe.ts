@@ -353,6 +353,18 @@ export async function observeContractsForAdmissionAt(
   }, (observation) => observeContractsForAdmissionInObservationAt(observation, ids));
 }
 
+/** Observe selected Contract journals and their current direct prerequisites in one Git epoch. */
+export async function observeGitForAdmissionAt(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+  ids: readonly ContractId[],
+  selection: GitTreeSelection = {},
+): Promise<GitDecisionObservation> {
+  const observation = await observeContractsForAdmissionAt(repository, channel, ids, selection);
+  const prerequisites = [...new Set(ids.flatMap((id) => observation.decision.get(id)?.terms.after ?? []))];
+  return extendContractsForAdmissionAt(channel, observation, prerequisites);
+}
+
 export function withContractReadObservationAt<Value>(
   repository: GitRepository,
   channel: GitDecodeChannel,

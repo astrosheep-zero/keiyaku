@@ -21,6 +21,7 @@ import {
   observeContractAt,
   observeContractWorld,
   observeContractsForAdmissionAt,
+  type GitDecisionObservation,
 } from "../git/observe.js";
 import {
   reconcile,
@@ -217,6 +218,28 @@ type AmendOperationInput = MutationOperationInput & Readonly<{
 
 type Amendment = Readonly<{ source: ContractTerms }> & ReturnType<NonNullable<AmendOperationInput["deriveAmendment"]>>;
 
+async function extendPrerequisiteClosureAt(
+  channel: GitDecodeChannel,
+  observation: GitDecisionObservation,
+  seeds: readonly ContractId[],
+): Promise<GitDecisionObservation> {
+  let current = observation;
+  const visited = new Set<ContractId>();
+  let pending = [...seeds];
+  while (pending.length > 0) {
+    const batch = [...new Set(pending.filter((id) => !visited.has(id)))];
+    pending = [];
+    if (batch.length === 0) break;
+    current = await extendContractsForAdmissionAt(channel, current, batch);
+    for (const id of batch) {
+      visited.add(id);
+      const state = contractState(current.decision, id);
+      if (state !== null) pending.push(...state.terms.after);
+    }
+  }
+  return current;
+}
+
 export async function amendOperation(
   input: AmendOperationInput,
 ): Promise<IntentOutcome<Amendment, AmendRefusal | VerificationDeclarationRefusal>> {
@@ -230,7 +253,7 @@ export async function amendOperation(
       ? undefined
       : { source, ...input.deriveAmendment(source) };
     if (amendment !== undefined) {
-      observation = await extendContractsForAdmissionAt(
+      observation = await extendPrerequisiteClosureAt(
         input.channel,
         observation,
         [...new Set([...(state?.terms.after ?? []), ...amendment.terms.after])],
@@ -403,16 +426,13 @@ export function prepareReview(
 }
 
 async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptContext): Promise<AttemptDecision<PreparedDelivery>> {
-  let decisionObservation = await observeContractsForAdmissionAt(
+  const decisionObservation = await observeContractsForAdmissionAt(
     input.scope,
     input.channel,
     [input.contractId],
     taskHolderObservationSelection(),
   );
   const state = contractState(decisionObservation.decision, input.contractId);
-  if (state !== null) {
-    decisionObservation = await extendContractsForAdmissionAt(input.channel, decisionObservation, state.terms.after);
-  }
   const taskId = state === null ? undefined : await heldTaskId(input.channel, decisionObservation, state.id);
   const derivation = state === null || input.deriveDocument === undefined
     ? undefined

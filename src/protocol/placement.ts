@@ -3,6 +3,7 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ChangeId, ContractId, SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
+import { observeGitForAdmissionAt } from "../git/observe.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
 import { GitPlumbingError, type GitRepository } from "../git/repository.js";
@@ -120,7 +121,12 @@ export async function admitPlacement(
     contracts: [input.contractId],
     attempts,
     decide: decidePlacement,
-    observationSelection: taskHolderObservationSelection(),
+    observe: (observedRepository, observedChannel, contracts) => observeGitForAdmissionAt(
+      observedRepository,
+      observedChannel,
+      contracts,
+      taskHolderObservationSelection(),
+    ),
     prepareInput: async (observation, original) => {
       const state = contractState(observation.decision, original.contractId);
       if (

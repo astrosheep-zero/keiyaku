@@ -401,29 +401,32 @@ test("amend applies H2 operations into a complete Markdown replacement", async (
   );
 });
 
-test("amend refuses changed prerequisites after bound without appending", async () => {
+test("amend accepts changed prerequisites after delivery and still rejects cycles", async () => {
   const repository = repositoryWithMain();
+  const prerequisite = await invokeWithDocument(
+    repository.path,
+    ["bind", "--actor", "external-test", "-"],
+    contractDocument("Placement prerequisite"),
+  );
+  const prerequisiteId = acceptedContract(prerequisite);
   const bound = await invokeWithDocument(
     repository.path,
     ["bind", "--actor", "external-test", "-"],
-    contractDocument("Consumed prerequisites"),
+    contractDocument("Amendable prerequisites"),
   );
   const id = acceptedContract(bound);
-  const before = readRef(repositoryAt(repository.path), GIT_REF);
+  const contract = Keiyaku.of({ repo: Repo.at({ path: repository.path }), id });
+  const delivered = await contract.deliver();
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver"]);
 
   const amended = await invokeWithDocument(
     repository.path,
-    ["amend", id, "--after", "kei/unclaimed", "--actor", "external-test", "-"],
-    "## Append: Context\nMust refuse.\n",
+    ["amend", id, "--after", prerequisiteId, "--actor", "external-test", "-"],
+    "## Append: Context\nPlacement now waits for the prerequisite.\n",
   );
-
-  assert.deepEqual(amended, {
-    kind: "refused",
-    verb: "amend",
-    contract: id,
-    refusal: { kind: "prerequisites-already-consumed", contractId: id },
-  });
-  assert.equal(readRef(repositoryAt(repository.path), GIT_REF), before);
+  assert.equal(amended.kind, "accepted");
+  assert.deepEqual((await contract.state()).terms.after, [prerequisiteId]);
+  const beforeCycle = readRef(repositoryAt(repository.path), GIT_REF);
 
   const selfDependent = await invokeWithDocument(
     repository.path,
@@ -434,9 +437,9 @@ test("amend refuses changed prerequisites after bound without appending", async 
     kind: "refused",
     verb: "amend",
     contract: id,
-    refusal: { kind: "prerequisites-already-consumed", contractId: id },
+    refusal: { kind: "cyclic-prerequisite", contractId: id },
   });
-  assert.equal(readRef(repositoryAt(repository.path), GIT_REF), before);
+  assert.equal(readRef(repositoryAt(repository.path), GIT_REF), beforeCycle);
 });
 
 test("concurrent amend diff uses the accepted predecessor after a competing amend", async () => {

@@ -121,3 +121,33 @@ test("foldJournal materializes its total state from the first bind", () => {
   assert.deepEqual(state.coordinates, bind.data.coordinates);
   assert.deepEqual(state.terms, bind.data.terms);
 });
+
+test("foldJournal accepts an after replacement after bound and delivery", () => {
+  const prerequisite = contractId("kei/replacement-prerequisite");
+  const bind = entry("bind", {
+    coordinates: { start: snapshotId("initial"), workspace: "here" },
+    terms: {
+      document: { bytes: "# Initial\n", key: documentKey("initial") },
+      segments: [],
+      gates: [],
+      after: [],
+    },
+  }, 0);
+  const delivery = entry("deliver", {
+    tenderSnapshot: snapshotId("tender"),
+    integration: {
+      predecessor: snapshotId("predecessor"),
+      snapshot: snapshotId("candidate"),
+      changeId: changeId("patch"),
+    },
+    method: "squash",
+    policy: { requireBranchesToBeUpToDate: false },
+  }, 2);
+  const amend = entry("amend", { ...bind.data.terms, after: [prerequisite] }, 3);
+
+  const state = foldJournal(id, [bind, entry("bound", {}, 1), delivery, amend]);
+
+  assert.deepEqual(state.terms.after, [prerequisite]);
+  assert.strictEqual(state.bound?.kind, "bound");
+  assert.strictEqual(state.delivery, delivery);
+});

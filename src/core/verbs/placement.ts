@@ -1,5 +1,5 @@
 import { gatesSatisfied } from "../facts/gate.js";
-import { activeContract } from "../facts/observation.js";
+import { activeContract, prerequisiteStatus } from "../facts/observation.js";
 import type { ActorId, ContractId, JournalEntry } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
 
@@ -10,7 +10,7 @@ type PlacementInput = Readonly<{
 }>;
 
 export type PlacementRefusal = Readonly<{
-  kind: "contract-missing" | "delivery-missing" | "terminal" | "gates-unsatisfied";
+  kind: "contract-missing" | "delivery-missing" | "terminal" | "prerequisites-unsatisfied" | "gates-unsatisfied";
   contractId: ContractId;
 }>;
 
@@ -21,6 +21,9 @@ export function decidePlacement({ input, attempt, observation }: DecideInput<Pla
   const delivery = current.delivery;
   if (!delivery) {
     return { kind: "refused", refusal: { kind: "delivery-missing", contractId: id } };
+  }
+  if (prerequisiteStatus(current.terms.after, observation) !== "claimed") {
+    return { kind: "refused", refusal: { kind: "prerequisites-unsatisfied", contractId: id } };
   }
   if (!gatesSatisfied(current)) {
     return { kind: "refused", refusal: { kind: "gates-unsatisfied", contractId: id } };

@@ -854,7 +854,7 @@ test("amend refuses a stale complete-terms replacement when document bytes did n
   });
 });
 
-test("bind rejects unresolved after and bound amend prioritizes consumed prerequisites", async () => {
+test("bind and amend reject unresolved after", async () => {
   const repository = repositoryWithHead();
   const git = repositoryAt(repository.path);
   const missing = contractId("kei/missing-prerequisite");
@@ -884,7 +884,142 @@ test("bind rejects unresolved after and bound amend prioritizes consumed prerequ
   });
   assert.deepEqual(amended, {
     kind: "refused",
-    refusal: { kind: "prerequisites-already-consumed", contractId: existing.value.contractId },
+    refusal: { kind: "unknown-prerequisite", contractId: existing.value.contractId },
+  });
+});
+
+test("amend observes the transitive prerequisite closure before judging cycles", async () => {
+  const repository = repositoryWithHead();
+  const git = repositoryAt(repository.path);
+  const a = await bindOperation({ scope: git, terms: terms([]), workspace: "here", title: "A" });
+  assert.equal(a.kind, "accepted");
+  if (a.kind !== "accepted") throw new Error("A bind was not accepted");
+  const c = await bindOperation({ scope: git, terms: terms([a.value.contractId]), workspace: "here", title: "C" });
+  assert.equal(c.kind, "accepted");
+  if (c.kind !== "accepted") throw new Error("C bind was not accepted");
+  const b = await bindOperation({ scope: git, terms: terms([c.value.contractId]), workspace: "here", title: "B" });
+  assert.equal(b.kind, "accepted");
+  if (b.kind !== "accepted") throw new Error("B bind was not accepted");
+
+  const aState = (await observeContract(git, a.value.contractId)).state;
+  if (aState === null) throw new Error("A state was not observed");
+  const amended = await amendOperation({
+    scope: git,
+    contractId: a.value.contractId,
+    source: aState.terms,
+    terms: terms([b.value.contractId]),
+  });
+
+  assert.deepEqual(amended, {
+    kind: "refused",
+    refusal: { kind: "cyclic-prerequisite", contractId: a.value.contractId },
+  });
+});
+
+test("delivery binds before after and placement reads amended prerequisites", async () => {
+  const repository = repositoryWithHead();
+  const git = repositoryAt(repository.path);
+  const originalPrerequisite = await bindOperation({ scope: git, terms: terms([]), workspace: "here" });
+  const replacementPrerequisite = await bindOperation({ scope: git, terms: terms([]), workspace: "here" });
+  assert.equal(originalPrerequisite.kind, "accepted");
+  assert.equal(replacementPrerequisite.kind, "accepted");
+  if (originalPrerequisite.kind !== "accepted" || replacementPrerequisite.kind !== "accepted") {
+    throw new Error("prerequisite bind was not accepted");
+  }
+  const dependent = await bindOperation({
+    scope: git,
+    terms: terms([originalPrerequisite.value.contractId]),
+    workspace: "here",
+  });
+  assert.equal(dependent.kind, "accepted");
+  if (dependent.kind !== "accepted") throw new Error("dependent bind was not accepted");
+
+  const dependentState = (await observeContract(git, dependent.value.contractId)).state;
+  if (dependentState === null) throw new Error("dependent state was not observed");
+  const dependentDelivery = prepareDelivery(git, preparationCoordinates(dependentState), { title: "Dependent" });
+  assert.equal(dependentDelivery.kind, "prepared");
+  if (dependentDelivery.kind !== "prepared") throw new Error("dependent delivery was not prepared");
+  const delivered = await withGitDecodeChannel(git, (channel) => admitIntent(channel, git, {
+    contractId: dependent.value.contractId,
+    at: "2026-08-07T00:00:00Z",
+    preparation: {
+      kind: "prepared",
+      document: dependentState.terms.document.key,
+      data: dependentDelivery.data,
+    },
+  }, decideDeliver));
+  assert.equal(delivered.kind, "accepted");
+  if (delivered.kind !== "accepted") throw new Error("dependent delivery was not accepted");
+  assert.deepEqual(delivered.facts.map((entry) => entry.kind), ["bound", "deliver"]);
+
+  const waitingPlacement = await withGitDecodeChannel(git, (channel) => admitPlacement(
+    channel,
+    git,
+    dependentState.coordinates.target,
+    { contractId: dependent.value.contractId, at: "2026-08-07T00:00:01Z" },
+  ));
+  assert.deepEqual(waitingPlacement, {
+    kind: "refused",
+    refusal: { kind: "prerequisites-unsatisfied", contractId: dependent.value.contractId },
+  });
+
+  const deliveredState = (await observeContract(git, dependent.value.contractId)).state;
+  if (deliveredState === null) throw new Error("delivered state was not observed");
+  const amended = await amendOperation({
+    scope: git,
+    contractId: dependent.value.contractId,
+    source: deliveredState.terms,
+    terms: terms([replacementPrerequisite.value.contractId]),
+  });
+  assert.equal(amended.kind, "accepted");
+  if (amended.kind !== "accepted") throw new Error("post-delivery after amendment was not accepted");
+  assert.deepEqual(amended.facts.map((entry) => entry.kind), ["amend"]);
+
+  const prerequisiteState = (await observeContract(git, replacementPrerequisite.value.contractId)).state;
+  if (prerequisiteState === null) throw new Error("replacement prerequisite state was not observed");
+  const prerequisiteDelivery = prepareDelivery(git, preparationCoordinates(prerequisiteState), { title: "Prerequisite" });
+  assert.equal(prerequisiteDelivery.kind, "prepared");
+  if (prerequisiteDelivery.kind !== "prepared") throw new Error("prerequisite delivery was not prepared");
+  const prerequisiteDelivered = await withGitDecodeChannel(git, (channel) => admitIntent(channel, git, {
+    contractId: replacementPrerequisite.value.contractId,
+    at: "2026-08-07T00:00:02Z",
+    preparation: {
+      kind: "prepared",
+      document: prerequisiteState.terms.document.key,
+      data: prerequisiteDelivery.data,
+    },
+  }, decideDeliver));
+  assert.equal(prerequisiteDelivered.kind, "accepted");
+  const prerequisiteClaimed = await withGitDecodeChannel(git, (channel) => admitPlacement(
+    channel,
+    git,
+    prerequisiteState.coordinates.target,
+    { contractId: replacementPrerequisite.value.contractId, at: "2026-08-07T00:00:03Z" },
+  ));
+  assert.equal(prerequisiteClaimed.kind, "accepted");
+
+  const claimed = await withGitDecodeChannel(git, (channel) => admitPlacement(
+    channel,
+    git,
+    dependentState.coordinates.target,
+    { contractId: dependent.value.contractId, at: "2026-08-07T00:00:04Z" },
+  ));
+  assert.equal(claimed.kind, "accepted");
+  if (claimed.kind !== "accepted") throw new Error("dependent placement was not accepted");
+  assert.deepEqual(claimed.facts.map((entry) => entry.kind), ["claimed"]);
+  assert.equal((await observeContract(git, originalPrerequisite.value.contractId)).state?.terminal, null);
+
+  const terminalState = (await observeContract(git, dependent.value.contractId)).state;
+  if (terminalState === null) throw new Error("terminal dependent state was not observed");
+  const lateAmendment = await amendOperation({
+    scope: git,
+    contractId: dependent.value.contractId,
+    source: terminalState.terms,
+    terms: terms([]),
+  });
+  assert.deepEqual(lateAmendment, {
+    kind: "refused",
+    refusal: { kind: "terminal", contractId: dependent.value.contractId },
   });
 });
 
