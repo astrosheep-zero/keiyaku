@@ -35,8 +35,9 @@ import {
   type AkumaPaths,
 } from "./identity.js";
 import {
-  projectActivityHistory,
+  projectTurns,
   selectActivitySnapshot,
+  selectHistory,
   type ActivityHistory,
   type ActivitySnapshot,
 } from "./projection.js";
@@ -68,7 +69,7 @@ export type AkumaStatus = Readonly<{
   timeline: ActivitySnapshot;
   strandedReason?: "resume-unsupported";
 }>;
-export type { ActivityHistory, ActivityRow, ActivitySnapshot, ActivitySnapshotEntry } from "./projection.js";
+export type * from "./projection.js";
 
 export type UnbornAkumaListRow = Readonly<{
   id: AkuId;
@@ -178,7 +179,7 @@ function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot = readHeart(pa
   };
 }
 
-function bornStatus(paths: AkumaPaths, expected: AkuId, profile: "status" | "feedback" = "status"): AkumaStatus {
+function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
   const snapshot = readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const current = bornListRow(paths, expected, snapshot);
@@ -192,18 +193,14 @@ function bornStatus(paths: AkumaPaths, expected: AkuId, profile: "status" | "fee
     ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
     timeline: (() => {
       const slice = activitySlice(paths, { limit: Number.MAX_SAFE_INTEGER });
-      return selectActivitySnapshot(slice.rows, {
-        lowestRetained: slice.lowestRetained,
-        highest: slice.highest,
-        profile,
-      });
+      return selectActivitySnapshot(slice.rows);
     })(),
   };
 }
 
-/** Package-internal compact observation for action feedback. */
+/** Package-internal action observation; it uses the same snapshot selector as status. */
 export function readActionFeedbackStatus(worldPath: WorldRoot, id: AkuId): AkumaStatus {
-  return bornStatus(pathsForAkuId(worldPath, id), id, "feedback");
+  return bornStatus(pathsForAkuId(worldPath, id), id);
 }
 
 function diagnostic(error: unknown): string {
@@ -239,7 +236,10 @@ export class AkumaHandle {
       ...(input.since === undefined ? {} : { since: input.since }),
       limit: 5_000,
     });
-    return projectActivityHistory(slice, {
+    return selectHistory(projectTurns(slice.rows, {
+      lowestRetained: slice.lowestRetained,
+      highest: slice.highest,
+    }), {
       ...(input.before === undefined ? {} : { before: input.before }),
       ...(input.since === undefined ? {} : { since: input.since }),
       limit,

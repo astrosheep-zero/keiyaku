@@ -17,6 +17,27 @@ export type {
   TellResult,
   UnbornAkumaListRow,
 } from "./akuma.js";
+export type {
+  ActiveToolRow,
+  ClosedTurn,
+  ClosedTurnRow,
+  CompletedToolRow,
+  HistoryCursor,
+  HistoryPage,
+  IdleSnapshotRow,
+  OpenSnapshotRow,
+  OpenTurn,
+  OpenTurnRow,
+  OutcomeRow,
+  RetainedWindow,
+  Snapshot,
+  SnapshotRow,
+  TellRow,
+  TurnLedger,
+  TurnOutcome,
+  TurnStartRow,
+  UnsettledToolRow,
+} from "./akuma.js";
 export type { AgentEvent, ToolCall, ToolEvent, ToolResult } from "./provider.js";
 export type { AkuId } from "./identity.js";
 export type {

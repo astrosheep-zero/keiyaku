@@ -116,6 +116,10 @@ provider event or completed turn.
 `tell()` records one TellId and wakes level-triggered. Soul existence and Tell
 insertion are one Heart transaction: an unborn address is refused without a
 Tell fact, and no orchestration-layer born pre-check duplicates that judge.
+Tell admission belongs to the Body timeline, not to a provider Turn, and never
+implies that the tell entered the current Turn. Consequently an actionable
+pending tell remains in every current snapshot at its original global timeline
+position even when it lies outside the open-Turn tail or no Turn is open.
 While a Body holds the
 leash, wake nudges it to read pending tells at its checkpoint. When its current
 Session supports live tell, Body submits pending tells in recorded order and

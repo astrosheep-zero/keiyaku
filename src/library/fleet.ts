@@ -71,56 +71,6 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-const PLURAL_DETAIL_LIMIT = 32;
-
-function pinned(entry: AkumaStatus["timeline"]["entries"][number]): boolean {
-  return entry.kind === "row"
-    && ((entry.row.kind === "tool" && entry.row.state === "running")
-      || (entry.row.kind === "tell" && entry.row.state === "pending"));
-}
-
-function budgetStatus(status: AkumaStatus, allowance: number): Readonly<{ status: AkumaStatus; used: number }> {
-  const entries: typeof status.timeline.entries[number][] = [];
-  const ordinary = status.timeline.entries.filter((entry) => entry.kind === "row" && !pinned(entry));
-  const kept = new Set(allowance === 0 ? [] : ordinary.slice(-allowance));
-  const used = kept.size;
-  let hidden = 0;
-  let single: Extract<typeof status.timeline.entries[number], { kind: "row" }> | undefined;
-  const flush = (): void => {
-    if (hidden === 1 && single !== undefined) entries.push(single);
-    else if (hidden > 0) entries.push({ kind: "gap", count: hidden });
-    hidden = 0;
-    single = undefined;
-  };
-  for (const entry of status.timeline.entries) {
-    if (pinned(entry)) {
-      flush();
-      entries.push(entry);
-      continue;
-    }
-    if (entry.kind === "row" && kept.has(entry)) {
-      flush();
-      entries.push(entry);
-      continue;
-    }
-    const count = entry.kind === "gap" ? entry.count : 1;
-    if (hidden === 0 && count === 1 && entry.kind === "row") single = entry;
-    else single = undefined;
-    hidden += count;
-  }
-  flush();
-  return { status: { ...status, timeline: { ...status.timeline, entries } }, used };
-}
-
-function budgetPlural(statuses: readonly AkumaStatus[]): readonly AkumaStatus[] {
-  let remaining = PLURAL_DETAIL_LIMIT;
-  return statuses.map((status) => {
-    const budgeted = budgetStatus(status, remaining);
-    remaining -= budgeted.used;
-    return budgeted.status;
-  });
-}
-
 function directAddress(values: Record<string, unknown>): AkumaAddressInput {
   return {
     path: values.path as WorldRoot,
@@ -166,8 +116,7 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
     const settled = statuses.map((status) => status.life !== "running");
     if ((selected === "any" ? settled.some(Boolean) : settled.every(Boolean))
       || (deadline !== undefined && performance.now() >= deadline)) {
-      const observed = statuses.length > 1 ? budgetPlural(statuses) : statuses;
-      return { completion: selected, statuses: observed.map((status) => statusView(status, values.repo as Repo | undefined)) };
+      return { completion: selected, statuses: statuses.map((status) => statusView(status, values.repo as Repo | undefined)) };
     }
     await delay(deadline === undefined ? 25 : Math.min(25, Math.max(0, deadline - performance.now())));
   }

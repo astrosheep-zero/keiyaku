@@ -228,6 +228,14 @@ the existing abort terminal path settles. Only a real native `item/completed`
 produces a completed tool event and typed `ToolResult`; terminal observation
 never repairs or synthesizes a completion for an unmatched start.
 
+The public projector inserts an unmatched start as `active` in its owning open
+Turn. On that Turn's end it converts each remaining active row to `unsettled`
+while constructing the typed closed Turn. This revokes current-running
+qualification but does not fabricate a tool completion or terminate a process.
+History flattens an open Turn's tool as `active` and a closed unmatched tool as
+`unsettled`. Snapshot and history lifecycle are derived from the typed start,
+completion, and Turn facts, never from renderer inference.
+
 Claude's terminal answer is exactly `result.result`. Codex emits every completed
 `agentMessage` as assistant activity, while its terminal answer is exactly the
 last completed `agentMessage` text. A failed Codex turn preserves

@@ -7,7 +7,7 @@ This chapter owns help, rendering, and exit status.
 Status, wait, call, tell, interrupt, and kill share one snapshot renderer, and
 history uses the same row vocabulary without snapshot budgets. The renderer
 consumes typed public values only; it does not mine Heart facts or reconstruct
-outcomes. Full answer bytes remain available through `history --last` and are
+outcomes or tool lifecycle. Full answer bytes remain available through `history --last` and are
 never clipped in JSON.
 
 `show` is a raw Contract read. Text writes the exact guidance Markdown with no
@@ -115,14 +115,27 @@ budgets are fixed by semantic kind: `say` at most three lines, `tell` one, and
 every other activity row two. Text clipping and receipt presentation never alter
 the public value serialized by `--json`.
 
-Gaps remain at their activity position and report their hidden-row count. Text
-is clipped by terminal display width without splitting grapheme clusters; quoted
+Snapshot omission is reported by the typed snapshot count; history retains its
+own cursor, gap, and loss metadata. Text is clipped by terminal display width without splitting grapheme clusters; quoted
 voice keeps balanced delimiters. A `run` command remains one row and preserves
 recognizable head and tail when clipped; its outcome is shown only when space
 allows. History uses the same presentation vocabulary without snapshot budgets.
-The first visible activity prints `HH:MM`; timestamps within 60 seconds are
-omitted, while rows without a timestamp do not move that anchor. There is no
-derived silence or date line.
+Each distinct activity timestamp starts a group with a standalone `HH:MM`
+heading. Every event row beneath it is indented by two spaces, and adjacent
+groups are separated by one blank line. Distinct timestamps in the same minute
+repeat the same readable heading. The heading and whitespace are the only
+group boundary: Akuma output has no equals-sign divider, horizontal rule, box,
+or decorative status column. There is no derived silence or date line.
+
+```text
+18:08
+  ✓ say: previous conclusion
+
+18:09
+  · say: checking again
+  · think: projection may own the bug
+  ⧖ run: $ npm test
+```
 
 Post-admission physical or settlement failures remain inside the accepted
 object as typed lags. Text and JSON expose them without changing the Contract

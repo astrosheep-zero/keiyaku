@@ -4,10 +4,14 @@ This chapter owns Akuma public handles, status, wait, history, and fleet values.
 
 ## One Timeline Projection
 
-Status and history read the retained Heart timeline once, project typed rows in
-persisted sequence order, then apply their cursor or snapshot policy. They do
-not join outcomes by timestamp or read a second Turn projection. Status exposes
-one timeline snapshot; `history` exposes pages of that same projection.
+Status and history read the retained Heart timeline once, project one typed
+Turn ledger in persisted sequence order, then apply their snapshot or cursor
+policy. They do not join outcomes by timestamp or read a second Turn
+projection. A snapshot is current actionable observation: an open Turn exposes
+only that Turn's bounded tail, active tools, and actionable pending tells; with
+no open Turn it exposes only the latest outcome and actionable pending tells.
+It never samples activity across closed Turns. `history` exposes pages of the
+complete retained ledger in global order.
 `history --last` is the exact full-answer read for the latest retained answered
 Turn.
 
@@ -39,17 +43,25 @@ heart admission.
 
 `status()` watches one Akuma through fresh life evidence and one bounded
 timeline snapshot. It is not a fleet row and does not extend or embed the fleet
-projection. Outcome belongs to the timeline rather than duplicate top-level
-answer or failure fields. Every Turn-scoped row carries its durable Turn
+projection. `status`, `wait`, `call`, `tell`, `interrupt`, and `kill` use the
+same readonly snapshot union and selector policy. An open snapshot may contain
+an `active` tool; an idle or unborn snapshot cannot represent one. A closed
+Turn's unmatched tool start remains `unsettled` in history and is not a claim
+that its process is live. The projected ledger likewise exposes readonly
+`open` and `closed` Turn arms: only the open arm admits an `active` tool row,
+while the closed arm requires its outcome and excludes `active` from its row
+union. Every Turn-scoped row carries its durable Turn
 coordinate; Body coordinates remain private to Body lifecycle facts.
 
 `tell(body)` returns one typed mutation result: the allocated TellId, its
 recorded Heart admission, and whether the level-triggered waker was spawned. It
 does not imply delivery, provider observation, or turn entry. Delivery and
 provider receipts fold into ordinary Akuma observation as one `pending` or
-`told` tell row at the admission's original timeline position. Pending tell
-rows are pinned outside snapshot budgets because they can still change the
-caller's action; settled tell rows share the ordinary activity budget. Text and
+`told` tell row at the admission's original timeline position. Tell admission
+is Body-scoped and does not imply entry into a Turn. Pending tell rows therefore
+remain visible outside the open-Turn tail because they can still change the
+caller's action; settled tell rows are visible through the current Turn or
+history like other settled activity. Text and
 JSON expose the same two-state row and no provider fence, five-stage
 lifecycle, or stage timeline. Tell
 rows are the sole detailed public tell projection; `AkumaStatus` carries no
@@ -73,8 +85,10 @@ timeout result assembled from separate liveness and snapshot observations.
 kill body and waker together and legitimately leave tells pending.
 
 `history()` is the sole public execution-history read. It pages the same
-persisted-order timeline projection used by status; it does not join a second
-Turn projection. Cursor coordinates are timeline sequences. `before` and
+persisted-order Turn ledger used by status; it does not join a second Turn
+projection. Cursor, retained-boundary, gap, omitted-count, and history-loss
+metadata belong only to this history selector; snapshots carry no history
+cursor or retained-boundary fields. Cursor coordinates are timeline sequences. `before` and
 `since` are exclusive and mutually exclusive. Status and wait never carry a
 full history page. The explicit last-answer read selects the latest retained
 answered Turn by durable order and preserves its complete bytes, including an

@@ -20,6 +20,18 @@ Retention removes old closed Turn groups as a bounded dependency closure. It
 keeps pending tells, open Turns, and the Turn structure required by retained
 rows. Cursors, gaps, and history loss refer to persisted timeline sequence.
 
+The pure public projector folds that one retained sequence into a Turn ledger.
+Each ledger Turn is a readonly `open` or `closed` arm. An unmatched tool start
+enters an open Turn as `active`; admitting that Turn's end purely rewrites any
+remaining active rows to `unsettled` in the closed arm, without adding a
+completion fact or `ToolResult`.
+Its snapshot frontier is one open Turn, otherwise the latest closed outcome,
+or unborn. Pending tells are the body-scoped actionable exception to that Turn
+frontier. Snapshot omission is a read-time tail count; history alone applies
+cursors and owns retained-boundary, gap, and loss interpretation. The projector
+may fold a final assistant row whose complete bytes exactly equal its answered
+Turn outcome, but it never changes or creates Heart facts.
+
 ## The heart
 
 Row kinds and their atomic order are law. Table layout is implementation

@@ -1,6 +1,6 @@
-import type { ActivityRow } from "../../akuma/index.js";
+import type { ActivityRow, SnapshotRow } from "../../akuma/index.js";
 
-type ToolRow = Extract<ActivityRow, { kind: "tool" }>;
+type ToolRow = Extract<ActivityRow | SnapshotRow, { kind: "tool" }>;
 
 export type ToolRepr = Readonly<{
   label: string;
@@ -23,7 +23,7 @@ function duration(milliseconds: number): string {
 }
 
 function result(row: ToolRow): string | undefined {
-  if (row.state === "running") return undefined;
+  if (row.state === "active" || row.state === "unsettled") return undefined;
   const disposition = row.state.exitCode !== undefined
     ? row.state.exitCode === 0 ? "ok" : `exit ${row.state.exitCode}`
     : row.state.status;
