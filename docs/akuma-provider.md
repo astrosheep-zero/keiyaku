@@ -322,11 +322,15 @@ tell and receives pending text in the next launch input.
 
 File-change adapters preserve every available native operation, path, and
 per-change diffstat. Missing optional facts make the public row shorter; an
-adapter never invents a diffstat. Claude, Pi, and OpenCode capture only known native names and those fields.
+adapter never invents a diffstat. Diffstat may be derived from a provider-native
+unified patch, never from workspace observation or prose. Claude, Pi, and
+OpenCode capture only known native names and those fields.
 A similarly named unknown tool stays `other`; a missing read path or search
-query omits the fact. Codex web search keeps only query and drops fuzzy search. Codex derives diffstat only from a native unified patch.
-Claude derives add/update from write/edit and omits missing diffstat. A
-multi-file public summary aggregates only when every change has a diffstat. No
+query omits the fact. Codex web search keeps only query and drops fuzzy search.
+Claude derives add/update from write/edit and omits missing diffstat. Pi edit
+keeps update and may add patch-derived counts; Pi write stays `other` until a
+native result establishes add or update. A multi-file public summary aggregates
+only when every change has a diffstat. No
 terminal file ledger, event bus, usage or cost arm, raw-provider passthrough,
 or native output body belongs in this boundary.
 

@@ -1,5 +1,6 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { noteEvent, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
+import { diffstatFromUnifiedPatch } from "../unified-patch.js";
 
 type Disposition = "drop" | "message" | "note" | "tool-end" | "tool-start";
 
@@ -89,8 +90,18 @@ function searchCall(name: string, value: Readonly<Record<string, unknown>>): Too
 }
 
 function fileChangeCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  if ((name !== "edit" && name !== "write") || typeof value.path !== "string") return undefined;
-  return { kind: "fileChange", changes: [{ op: name === "write" ? "add" : "update", path: value.path }] };
+  if (name !== "edit" || typeof value.path !== "string") return undefined;
+  return { kind: "fileChange", changes: [{ op: "update", path: value.path }] };
+}
+
+function refineEditCall(call: ToolCall, result: unknown): ToolCall {
+  if (call.kind !== "fileChange") return call;
+  const details = record(record(result)?.details);
+  if (typeof details?.patch !== "string") return call;
+  const diffstat = diffstatFromUnifiedPatch(details.patch);
+  const change = call.changes[0];
+  if (diffstat === undefined || change === undefined) return call;
+  return { kind: "fileChange", changes: [{ ...change, diffstat }] };
 }
 
 function toolCall(name: string, args: unknown): ToolCall {
@@ -119,13 +130,17 @@ function translateToolStart(event: Extract<AgentSessionEvent, { type: "tool_exec
   return [{ type: "tool", phase: "started", id: event.toolCallId, name: event.toolName, call }];
 }
 
-function translateToolEnd(event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>, state: PiEventState): readonly AgentEvent[] {
+function translateToolEnd(
+  event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>,
+  state: PiEventState,
+): readonly AgentEvent[] {
   const started = state.tools.get(event.toolCallId);
   state.tools.delete(event.toolCallId);
   const name = started?.name ?? event.toolName;
+  const call = started?.call ?? { kind: "other", display: name };
   return [{
     type: "tool", phase: "completed", id: event.toolCallId, name,
-    call: started?.call ?? { kind: "other", display: name },
+    call: event.isError ? call : refineEditCall(call, event.result),
     result: { status: event.isError ? "error" : "ok" },
   }];
 }

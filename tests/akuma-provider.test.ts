@@ -1546,6 +1546,17 @@ function piToolCall(name: string, args: unknown): Extract<AgentEvent, { type: "t
   return event.type === "tool" ? event.call : { kind: "other", display: "missing" };
 }
 
+function translatePiTools(events: readonly unknown[]): readonly Extract<AgentEvent, { type: "tool" }>[] {
+  const state = { answer: "", assistantSeen: false, tools: new Map() };
+  return events.flatMap((event) => translatePiEvent(event as never, state)).flatMap((event) => (
+    event.type === "tool" ? [event] : []
+  ));
+}
+
+function piEditPatch(path: string, body: string): string {
+  return `--- a/${path}\n+++ b/${path}\n${body}`;
+}
+
 function opencodeToolEvent(name: string, input: unknown): Extract<AgentEvent, { type: "tool" }> | undefined {
   const observed: AgentEvent[] = [];
   mapEvent({
@@ -1685,7 +1696,7 @@ test("Claude, Pi, and OpenCode keep native fallbacks and name precedence", () =>
     { name: "bash", args: { command: 1 }, call: { kind: "other", display: "bash" } },
     { name: "grep", args: { query: "TODO", path: "src" }, call: { kind: "search", query: "TODO", scope: "content", path: "src" } },
     { name: "find", args: { query: "*.md" }, call: { kind: "search", query: "*.md", scope: "files" } },
-    { name: "write", args: { path: "src/a.ts" }, call: { kind: "fileChange", changes: [{ op: "add", path: "src/a.ts" }] } },
+    { name: "write", args: { path: "src/a.ts" }, call: { kind: "other", display: "write" } },
     { name: "edit", args: { path: "src/a.ts" }, call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] } },
     { name: "edit", args: {}, call: { kind: "other", display: "edit" } },
   ];
@@ -1838,6 +1849,85 @@ test("Claude file tools preserve native start paths and structured results", () 
     call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] },
     result: { status: "ok" },
   });
+});
+
+test("Pi edit keeps native update plus patch diffstat and write stays other", () => {
+  const hunk = piEditPatch("src/a.ts", "@@ -1,1 +1,2 @@\n line\n+added\n");
+  const noHunk = piEditPatch("src/a.ts", "");
+  const editStart = {
+    type: "tool_execution_start", toolCallId: "edit-1", toolName: "edit", args: { path: "src/a.ts" },
+  };
+  const [begun, done] = translatePiTools([
+    editStart,
+    { type: "tool_execution_update", toolCallId: "edit-1", toolName: "edit", partialResult: "Edited" },
+    {
+      type: "tool_execution_end", toolCallId: "edit-1", toolName: "edit", isError: false,
+      result: { details: { patch: hunk }, content: [{ type: "text", text: "+added" }] },
+    },
+  ]);
+  assert.deepEqual(begun, {
+    type: "tool", phase: "started", id: "edit-1", name: "edit",
+    call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] },
+  });
+  assert.deepEqual(done, {
+    type: "tool", phase: "completed", id: "edit-1", name: "edit",
+    call: { kind: "fileChange", changes: [{
+      op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 0 },
+    }] },
+    result: { status: "ok" },
+  });
+  for (const patch of [noHunk, "not a unified patch"]) {
+    const [completed] = translatePiTools([
+      editStart,
+      { type: "tool_execution_end", toolCallId: "edit-1", toolName: "edit", isError: false,
+        result: { details: { patch } } },
+    ]).filter((event) => event.phase === "completed");
+    assert.deepEqual(completed?.call, { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] });
+  }
+  const [failed] = translatePiTools([
+    editStart,
+    { type: "tool_execution_end", toolCallId: "edit-1", toolName: "edit", isError: true,
+      result: { details: { patch: hunk } } },
+  ]).filter((event) => event.phase === "completed");
+  assert.deepEqual(failed, {
+    type: "tool", phase: "completed", id: "edit-1", name: "edit",
+    call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] },
+    result: { status: "error" },
+  });
+  const write = translatePiTools([
+    { type: "tool_execution_start", toolCallId: "write-1", toolName: "write", args: { path: "src/b.ts" } },
+    { type: "tool_execution_end", toolCallId: "write-1", toolName: "write", isError: false,
+      result: { content: [{ type: "text", text: "Wrote src/b.ts" }] } },
+  ]);
+  assert.deepEqual(write, [
+    { type: "tool", phase: "started", id: "write-1", name: "write", call: { kind: "other", display: "write" } },
+    {
+      type: "tool", phase: "completed", id: "write-1", name: "write",
+      call: { kind: "other", display: "write" }, result: { status: "ok" },
+    },
+  ]);
+  const concurrent = translatePiTools([
+    { type: "tool_execution_start", toolCallId: "left", toolName: "edit", args: { path: "left.ts" } },
+    { type: "tool_execution_start", toolCallId: "right", toolName: "edit", args: { path: "right.ts" } },
+    {
+      type: "tool_execution_end", toolCallId: "right", toolName: "edit", isError: false,
+      result: { details: { patch: piEditPatch("right.ts", "@@ -1,1 +1,1 @@\n-old\n+new\n") } },
+    },
+    {
+      type: "tool_execution_end", toolCallId: "left", toolName: "edit", isError: false,
+      result: { details: { patch: piEditPatch("left.ts", "@@ -1,0 +1,1 @@\n+left\n") } },
+    },
+  ]);
+  assert.deepEqual(concurrent.map((event) => [event.phase, event.id, event.call]), [
+    ["started", "left", { kind: "fileChange", changes: [{ op: "update", path: "left.ts" }] }],
+    ["started", "right", { kind: "fileChange", changes: [{ op: "update", path: "right.ts" }] }],
+    ["completed", "right", { kind: "fileChange",
+      changes: [{ op: "update", path: "right.ts", diffstat: { added: 1, removed: 1 } }] }],
+    ["completed", "left", { kind: "fileChange",
+      changes: [{ op: "update", path: "left.ts", diffstat: { added: 1, removed: 0 } }] }],
+  ]);
+  assert.equal(concurrent.filter((event) => event.id === "left").length, 2);
+  assert.equal(concurrent.filter((event) => event.id === "right").length, 2);
 });
 
 function fakeCodex(
