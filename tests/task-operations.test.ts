@@ -7,6 +7,7 @@ import { Tasks, type TaskId, type TaskTreeNode } from "../src/task/index.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskDocument, serializeTaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
+import { settleTask } from "../src/task/operations.js";
 import { replaceAuthority, withTaskLocks } from "../src/task/store.js";
 import { World } from "../src/world.js";
 
@@ -347,6 +348,94 @@ test("task tree renders a parent cycle as a terminal cycle node", async () => {
   }]);
   assert.equal("reference" in (tree.value.children[0]?.children[0] ?? {}), false);
   assert.deepEqual((await tasks.doctor()).issues, [{ kind: "cycle", relation: "parent", tasks: [first, second] }]);
+});
+
+test("creation actor persists as createdBy and later mutations leave it unchanged", async () => {
+  const { root, tasks } = await world();
+  const envKey = "KEIYAKU_ACTOR_ID";
+  const previous = process.env[envKey];
+  process.env[envKey] = "env-must-not-leak";
+  try {
+    const unsigned = await tasks.add({ title: "Unsigned" });
+    assert.equal(unsigned.kind, "accepted");
+    if (unsigned.kind === "accepted") assert.equal("createdBy" in unsigned.value, false);
+
+    const added = await tasks.add({ title: "Authored", actor: "flagship" });
+    assert.equal(added.kind, "accepted");
+    if (added.kind !== "accepted") return;
+    assert.equal(added.value.createdBy, "flagship");
+    const addedPath = join(root, ".keiyaku", "tasks", "authored.md");
+    assert.match(readFileSync(addedPath, "utf8"), /^createdBy: flagship$/mu);
+
+    const fromDocument = await tasks.addDocument({
+      markdown: "---\ntitle: From document\n---\n",
+      actor: "document-actor",
+    });
+    assert.equal(fromDocument.kind, "accepted");
+    if (fromDocument.kind === "accepted") assert.equal(fromDocument.value.createdBy, "document-actor");
+    await assert.rejects(
+      tasks.addDocument({ markdown: "---\ntitle: Illegal\ncreatedBy: sneaky\n---\n" }),
+      /unknown task front matter key/u,
+    );
+    assert.equal((await tasks.task({ id: "task/illegal" }).read()), null);
+
+    const composed = await tasks.compose({ markdown: "+ Composed\n@task/authored pri=1\n", actor: "composer" });
+    assert.equal(composed.kind, "accepted");
+    const composedTask = await tasks.task({ id: "task/composed" }).read();
+    const updatedExisting = await tasks.task({ id: added.value.id }).read();
+    assert.equal(composedTask?.task.createdBy, "composer");
+    assert.equal(updatedExisting?.task.createdBy, "flagship");
+    assert.equal(updatedExisting?.task.priority, 1);
+
+    const mutated = await tasks.task({ id: added.value.id }).update({ note: "changed" });
+    assert.equal(mutated.kind, "accepted");
+    if (mutated.kind === "accepted") assert.equal(mutated.value.task.createdBy, "flagship");
+    for (const verb of ["start", "stop", "hold", "resume", "done"] as const) {
+      const next = await tasks.task({ id: added.value.id })[verb]();
+      assert.equal(next.kind, "accepted");
+      if (next.kind === "accepted") assert.equal(next.value.createdBy, "flagship");
+    }
+    const dropped = acceptedId(await tasks.add({ title: "Drop me", actor: "flagship" }));
+    const drop = await tasks.task({ id: dropped }).drop();
+    assert.equal(drop.kind, "accepted");
+    if (drop.kind === "accepted") assert.equal(drop.value.createdBy, "flagship");
+    const batchId = acceptedId(await tasks.add({ title: "Batch me", actor: "flagship" }));
+    const batch = await tasks.batch({ verb: "hold", ids: [batchId] });
+    assert.equal(batch.items[0]?.outcome.kind, "accepted");
+    if (batch.items[0]?.outcome.kind === "accepted") assert.equal(batch.items[0].outcome.value.createdBy, "flagship");
+    const settledId = acceptedId(await tasks.add({ title: "Settle me", actor: "flagship" }));
+    const settled = await settleTask(tasks.root, settledId);
+    assert.equal(settled.kind, "changed");
+    if (settled.kind === "changed") assert.equal(settled.task.createdBy, "flagship");
+    assert.equal((await tasks.task({ id: added.value.id }).read())?.task.createdBy, "flagship");
+
+    const legacyPath = join(root, ".keiyaku", "tasks", "legacy.md");
+    writeFileSync(legacyPath, serializeTaskDocument({
+      id: "task/legacy" as TaskId,
+      title: "Legacy",
+      state: "open",
+      priority: 2,
+      needs: [],
+      parent: null,
+      supersedes: [],
+      relates: [],
+      note: "",
+      createdAt: "2026-08-07T01:02:03.004Z",
+      updatedAt: "2026-08-07T01:02:03.004Z",
+      body: "",
+    }));
+    const legacy = await tasks.task({ id: "task/legacy" }).read();
+    assert.equal("createdBy" in (legacy?.task ?? {}), false);
+    assert.equal((await tasks.task({ id: "task/legacy" }).update({ note: "still unsigned" })).kind, "accepted");
+    assert.equal((await tasks.task({ id: "task/legacy" }).start()).kind, "accepted");
+    assert.equal("createdBy" in ((await tasks.task({ id: "task/legacy" }).read())?.task ?? {}), false);
+    assert.throws(() => tasks.add({ title: "Blank", actor: "  " }), /actor must be a nonblank string/u);
+    assert.throws(() => tasks.task({ id: added.value.id }).update({ actor: "nope" } as never), /unknown field/u);
+    assert.throws(() => tasks.task({ id: added.value.id }).start({ actor: "nope" } as never), /unknown field/u);
+  } finally {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  }
 });
 
 test("public inputs reject unknown fields before observing authority", async () => {

@@ -61,6 +61,7 @@ function renderShow(result: TaskDetail | TaskMutationResult): string {
   if ("kind" in result) return result.kind === "accepted" ? row(result.value) : failure(result);
   const task = result.task, lines = [
     row(task), `namespace: ${task.namespace.join("/") || "root"}`,
+    ...(task.createdBy === undefined ? [] : [`createdBy: ${task.createdBy}`]),
     `createdAt: ${task.createdAt}`, `updatedAt: ${task.updatedAt}`, `note: ${task.note}`,
   ];
   for (const [label, values] of [

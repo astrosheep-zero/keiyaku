@@ -72,6 +72,21 @@ test("Task tree law is parent decomposition without DAG residue", () => {
   assert.doesNotMatch(cli, /task tree <TaskId> \[--full\]/u);
 });
 
+test("Task creation actor is optional createdBy with CLI resolveActor precedence", () => {
+  const task = readFileSync(join(docs, "task.md"), "utf8");
+  const cli = readFileSync(join(docs, "cli-task.md"), "utf8");
+  assert.match(task, /optional `createdBy` when present, `createdAt`/u);
+  assert.match(task, /Product creation writes it only from caller `actor`/u);
+  assert.match(task, /latest-actor field/u);
+  assert.match(task, /tasks\.compose\(input: \{ markdown: string; actor\?: string; signal\?: AbortSignal \}\)/u);
+  assert.match(cli, /task add <TITLE>.*\[--actor <actor>\]/su);
+  assert.match(cli, /task compose \[--actor <actor>\] \[--json\] -/u);
+  assert.match(cli, /KEIYAKU_ACTOR_ID/u);
+  assert.match(cli, /Update, lifecycle, and settlement commands\ndo not accept `--actor`/u);
+  assert.doesNotMatch(cli, /KEIYAKU_PROJECTION_ID/u);
+  assert.doesNotMatch(task, /KEIYAKU_PROJECTION_ID/u);
+});
+
 test("formal documentation line thresholds are exact", () => {
   assert.deepEqual(
     [400, 401, 500, 501].map(documentationSize),

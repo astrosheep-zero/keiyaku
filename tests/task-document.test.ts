@@ -22,6 +22,25 @@ test("creation and authority documents contain no Contract association", () => {
   assert.deepEqual({ state: defaults.state, note: defaults.note }, { state: "open", note: "" });
   assert.throws(() => parseTaskCreationDocument("---\ntitle: Bad\ncontractId: null\n---\n"), /unknown task front matter key/u);
   assert.throws(() => parseTaskCreationDocument("---\ntitle: Bad\ncreatedAt: 2026-08-07T01:02:03.004Z\n---\n"), /unknown task front matter key/u);
+  assert.throws(() => parseTaskCreationDocument("---\ntitle: Bad\ncreatedBy: someone\n---\n"), /unknown task front matter key/u);
+});
+
+test("optional createdBy is stored before timestamps and rejects blank values", () => {
+  const coordinate = { namespace: [], localId: "authored" } as const;
+  const document = {
+    ...parseTaskCreationDocument("---\ntitle: Authored\n---\n"),
+    id: formatTaskId(coordinate),
+    createdBy: "aku/worker/deadbeef",
+    createdAt: "2026-08-07T01:02:03.004Z",
+    updatedAt: "2026-08-07T02:03:04.005Z",
+  };
+  const bytes = serializeTaskDocument(document);
+  const text = Buffer.from(bytes).toString("utf8");
+  assert.match(text, /note: ""\ncreatedBy: aku\/worker\/deadbeef\ncreatedAt: /u);
+  assert.deepEqual(parseTaskDocument(bytes, coordinate), document);
+  const blank = text.replace("aku/worker/deadbeef", "  ");
+  assert.throws(() => parseTaskDocument(Buffer.from(blank), coordinate), /createdBy must be a nonblank string/u);
+  assert.throws(() => parseTaskDocument(Buffer.from(text.replace("createdBy: aku/worker/deadbeef\n", "latestActor: someone\n")), coordinate), /unknown task front matter key/u);
 });
 
 test("task authority is closed and the path owns identity", () => {

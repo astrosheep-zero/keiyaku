@@ -32,9 +32,9 @@ export type SettledTaskResult =
   | Readonly<{ kind: "retry"; reason: TaskRetry }>;
 export type AddTaskInput = Readonly<{
   title: string; namespace?: readonly string[]; body?: string; note?: string; state?: TaskState; priority?: TaskPriority; needs?: readonly TaskId[];
-  parent?: TaskId | null; supersedes?: readonly TaskId[]; relates?: readonly TaskId[]; signal?: AbortSignal;
+  parent?: TaskId | null; supersedes?: readonly TaskId[]; relates?: readonly TaskId[]; actor?: string; signal?: AbortSignal;
 }>;
-export type AddTaskDocumentInput = Readonly<{ markdown: string; namespace?: readonly string[]; signal?: AbortSignal }>;
+export type AddTaskDocumentInput = Readonly<{ markdown: string; namespace?: readonly string[]; actor?: string; signal?: AbortSignal }>;
 export type UpdateTaskInput = Readonly<{
   title?: string; body?: string; appendBody?: string; note?: string; priority?: TaskPriority;
   needs?: readonly TaskId[]; addNeeds?: readonly TaskId[]; dropNeeds?: readonly TaskId[];
@@ -64,16 +64,20 @@ function currentTimestamp(): string { return new Date().toISOString(); }
 function advancedTimestamp(previous: string): string {
   const current = currentTimestamp(); return current > previous ? current : new Date(Date.parse(previous) + 1).toISOString();
 }
-function addDocument(base: TaskCreationDocument, namespace: readonly string[], board: TaskBoard, at: string): TaskDocument {
+function addDocument(base: TaskCreationDocument, namespace: readonly string[], board: TaskBoard, at: string, actor?: string): TaskDocument {
   const localId = allocateLocalId(deriveLocalStem(base.title), occupied(board, namespace));
-  return { ...base, id: formatTaskId({ namespace, localId }), createdAt: at, updatedAt: at };
+  return {
+    ...base, id: formatTaskId({ namespace, localId }),
+    ...(actor === undefined ? {} : { createdBy: actor }),
+    createdAt: at, updatedAt: at,
+  };
 }
 function boardWith(board: TaskBoard, document: TaskDocument): TaskBoard {
   const tasks = new Map(board.tasks); tasks.set(document.id, document); return { tasks };
 }
-async function create(world: WorldRoot, base: TaskCreationDocument, namespace: readonly string[], signal?: AbortSignal): Promise<TaskMutationResult> {
+async function create(world: WorldRoot, base: TaskCreationDocument, namespace: readonly string[], signal?: AbortSignal, actor?: string): Promise<TaskMutationResult> {
   const result = await withTaskLocks({ world, allocation: true, ids: [], ...(signal === undefined ? {} : { signal }) }, async () => {
-    const snapshot = await readBoard(world), next = addDocument(base, namespace, snapshot.board, currentTimestamp()); const problem = relationProblem(boardWith(snapshot.board, next), null, next);
+    const snapshot = await readBoard(world), next = addDocument(base, namespace, snapshot.board, currentTimestamp(), actor); const problem = relationProblem(boardWith(snapshot.board, next), null, next);
     if (problem !== null) return refused({ kind: "invalid-graph", diagnostic: problem });
     const replaced = await replaceAuthority({ path: authorityPath(world, next.id), expected: null, next: serializeTaskDocument(next) });
     return replaced === "replaced" ? { kind: "accepted", value: taskView(next) } as const : retry("concurrent-modification");
@@ -86,11 +90,11 @@ export async function addTask(world: WorldRoot, input: AddTaskInput): Promise<Ta
   return create(world, {
     title: input.title, body: input.body ?? "", note: input.note ?? "", state: input.state ?? "open", priority: input.priority ?? 2, needs: input.needs ?? [], parent: input.parent ?? null,
     supersedes: input.supersedes ?? [], relates: input.relates ?? [],
-  }, namespace, input.signal);
+  }, namespace, input.signal, input.actor);
 }
 export async function addTaskDocument(world: WorldRoot, input: AddTaskDocumentInput): Promise<TaskMutationResult> {
   const namespace = await context(world, input.namespace); if (!Array.isArray(namespace)) return refused(namespace as TaskRefusal);
-  return create(world, parseTaskCreationDocument(input.markdown), namespace, input.signal);
+  return create(world, parseTaskCreationDocument(input.markdown), namespace, input.signal, input.actor);
 }
 
 function listChange(current: readonly TaskId[], replacement: readonly TaskId[] | undefined, additions: readonly TaskId[] | undefined, removals: readonly TaskId[] | undefined): readonly TaskId[] {

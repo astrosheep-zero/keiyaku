@@ -13,18 +13,20 @@ export type TaskDocument = Readonly<{
   supersedes: readonly TaskId[];
   relates: readonly TaskId[];
   note: string;
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
   body: string;
 }>;
-export type TaskCreationDocument = Omit<TaskDocument, "id" | "createdAt" | "updatedAt">;
+export type TaskCreationDocument = Omit<TaskDocument, "id" | "createdBy" | "createdAt" | "updatedAt">;
 
 export class TaskAuthorityCorruptionError extends Error {
   constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "TaskAuthorityCorruptionError"; }
 }
 
 const STATES = new Set<TaskState>(["open", "in_progress", "on_hold", "done", "drop"]);
-const STORED_KEYS = ["id", "title", "state", "priority", "needs", "parent", "supersedes", "relates", "note", "createdAt", "updatedAt"] as const;
+const REQUIRED_STORED_KEYS = ["id", "title", "state", "priority", "needs", "parent", "supersedes", "relates", "note", "createdAt", "updatedAt"] as const;
+const STORED_KEYS = [...REQUIRED_STORED_KEYS, "createdBy"] as const;
 const CREATION_KEYS = ["title", "state", "priority", "needs", "parent", "supersedes", "relates", "note"] as const;
 
 function frontMatter(markdown: string, fail: (message: string, cause?: unknown) => never): Readonly<{ value: Record<string, unknown>; body: string }> {
@@ -75,6 +77,10 @@ function taskIds(value: unknown, field: string, fail: (message: string) => never
 function nullableTaskId(value: unknown, field: string, fail: (message: string) => never): TaskId | null {
   return value === null ? null : taskId(value, field, fail);
 }
+function createdBy(value: unknown, fail: (message: string) => never): string {
+  if (typeof value !== "string" || value.trim().length === 0) fail("createdBy must be a nonblank string");
+  return value;
+}
 function fields(value: Record<string, unknown>, body: string, fail: (message: string) => never): Omit<TaskCreationDocument, "state"> {
   return {
     title: title(value.title, fail),
@@ -91,12 +97,15 @@ function fields(value: Record<string, unknown>, body: string, fail: (message: st
 export function parseTaskDocument(bytes: Uint8Array, expected: TaskCoordinate): TaskDocument {
   const fail = (message: string, cause?: unknown): never => { throw new TaskAuthorityCorruptionError(message, cause === undefined ? {} : { cause }); };
   const { value, body } = frontMatter(Buffer.from(bytes).toString("utf8"), fail);
-  closed(value, STORED_KEYS, STORED_KEYS, fail);
+  closed(value, STORED_KEYS, REQUIRED_STORED_KEYS, fail);
   const id = taskId(value.id, "id", fail);
   if (id !== formatTaskId(expected)) fail(`task document ID ${id} does not match its authority path`);
   const createdAt = timestamp(value.createdAt, "createdAt", fail), updatedAt = timestamp(value.updatedAt, "updatedAt", fail);
   if (Date.parse(updatedAt) < Date.parse(createdAt)) fail("updatedAt must not precede createdAt");
-  return { id, state: state(value.state, fail), createdAt, updatedAt, ...fields(value, body, fail) };
+  return {
+    id, state: state(value.state, fail), createdAt, updatedAt, ...fields(value, body, fail),
+    ...(Object.hasOwn(value, "createdBy") ? { createdBy: createdBy(value.createdBy, fail) } : {}),
+  };
 }
 
 export function parseTaskCreationDocument(markdown: string): TaskCreationDocument {
@@ -114,8 +123,9 @@ export function serializeTaskDocument(document: TaskDocument): Uint8Array {
   const value = {
     id: document.id, title: document.title, state: document.state, priority: document.priority,
     needs: [...document.needs], parent: document.parent, supersedes: [...document.supersedes],
-    relates: [...document.relates], note: document.note, createdAt: document.createdAt,
-    updatedAt: document.updatedAt,
+    relates: [...document.relates], note: document.note,
+    ...(document.createdBy === undefined ? {} : { createdBy: document.createdBy }),
+    createdAt: document.createdAt, updatedAt: document.updatedAt,
   };
   return Buffer.from(`---\n${stringify(value, { lineWidth: 0 })}---\n${document.body}`);
 }

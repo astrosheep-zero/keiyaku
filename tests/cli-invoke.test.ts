@@ -326,6 +326,29 @@ test("journal-writing commands preserve optional actor testimony", async () => {
   assert.equal(await readRef(await repositoryAt(repository.path), GIT_REF), beforeBlank);
 });
 
+test("task creation resolves actor before applying the selected input", async () => {
+  const repository = repositoryWithMain();
+  const inherited = await invoke(parseArgv(["-C", repository.path, "task", "add", "Inherited"]), {
+    environment: { KEIYAKU_ACTOR_ID: "env-actor" },
+  }) as { value: { createdBy?: string } };
+  assert.equal(inherited.value.createdBy, "env-actor");
+  const explicit = await invoke(parseArgv(["-C", repository.path, "task", "add", "Explicit", "--actor", "flag"]), {
+    environment: { KEIYAKU_ACTOR_ID: "env-actor" },
+  }) as { value: { createdBy?: string } };
+  assert.equal(explicit.value.createdBy, "flag");
+  const composed = await invoke(parseArgv(["-C", repository.path, "task", "compose", "-"]), {
+    environment: { KEIYAKU_ACTOR_ID: "env-actor" },
+    readStdin: () => "+ Composed\n",
+  }) as { kind: string };
+  assert.equal(composed.kind, "accepted");
+  const shown = await invoke(parseArgv(["-C", repository.path, "task", "show", "task/composed"])) as { task: { createdBy?: string } };
+  assert.equal(shown.task.createdBy, "env-actor");
+  const blankEnv = await invoke(parseArgv(["-C", repository.path, "task", "add", "Blank Env"]), {
+    environment: { KEIYAKU_ACTOR_ID: "  " },
+  }) as { value: { createdBy?: string } };
+  assert.equal("createdBy" in blankEnv.value, false);
+});
+
 test("bind defaults its target to the invocation worktree's current branch", async () => {
   const repository = repositoryWithMain();
   const start = repository.run(["rev-parse", "refs/heads/main"]).trim();

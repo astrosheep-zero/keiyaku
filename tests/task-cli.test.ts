@@ -79,6 +79,18 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
   assert.deepEqual(parseArgv(["task", "update", "task/a", "--note", "-"]), {
     command: { command: "task", action: "update", output: "text", positionals: ["task/a"], flags: { note: "" }, stdin: "note" },
   });
+  assert.deepEqual(parseArgv(["task", "add", "Ship task", "--actor", "flagship"]).command, {
+    command: "task", action: "add", output: "text", positionals: ["Ship task"], flags: { actor: "flagship" },
+  });
+  assert.deepEqual(parseArgv(["task", "add", "--actor", "flagship", "-"]).command, {
+    command: "task", action: "add", output: "text", positionals: [], flags: { actor: "flagship" }, stdin: "document",
+  });
+  assert.deepEqual(parseArgv(["task", "compose", "--actor", "flagship", "-"]).command, {
+    command: "task", action: "compose", output: "text", positionals: [], flags: { actor: "flagship" }, stdin: "compose",
+  });
+  assert.throws(() => parseArgv(["task", "update", "task/a", "--title", "X", "--actor", "flagship"]), /option --actor is not valid for task update/u);
+  assert.throws(() => parseArgv(["task", "start", "task/a", "--actor", "flagship"]), /option --actor is not valid for task start/u);
+  assert.throws(() => parseArgv(["task", "done", "task/a", "--actor", "flagship"]), /option --actor is not valid for task done/u);
   assert.equal(parseArgv(["task", "compose", "-"]).command.command, "task");
   assert.throws(() => parseArgv(["task", "add", "Title", "-"]), CliUsageError);
   assert.throws(() => parseArgv(["task", "add", "--state", "done", "-"]), CliUsageError);
@@ -249,6 +261,51 @@ test("task done note is passed to each independent lifecycle mutation", async ()
   assert.deepEqual(result.items.map((item) => item.outcome.kind), ["accepted", "refused", "accepted"]);
   assert.equal((await invoke(parseArgv(["-C", root, "task", "show", "task/first"])) as { task: { note: string; state: string } }).task.note, "finished");
   assert.equal((await invoke(parseArgv(["-C", root, "task", "show", "task/second"])) as { task: { note: string; state: string } }).task.state, "done");
+});
+
+test("task add and compose persist resolved actor only on new documents", async () => {
+  const root = world();
+  const environment = { KEIYAKU_ACTOR_ID: "env-actor" };
+  const unsigned = await invoke(parseArgv(["-C", root, "task", "add", "Unsigned"]), { environment: {} }) as { value: { createdBy?: string } };
+  assert.equal("createdBy" in unsigned.value, false);
+  const unsignedShown = await invoke(parseArgv(["-C", root, "task", "show", "task/unsigned"])) as { task: { createdBy?: string } };
+  assert.equal(unsignedShown.task.createdBy, undefined);
+
+  const added = await invoke(parseArgv(["-C", root, "task", "add", "Authored", "--actor", "explicit-actor"]), {
+    environment,
+  }) as { value: { createdBy: string } };
+  assert.equal(added.value.createdBy, "explicit-actor");
+  const inherited = await invoke(parseArgv(["-C", root, "task", "add", "Inherited"]), { environment }) as { value: { createdBy: string } };
+  assert.equal(inherited.value.createdBy, "env-actor");
+  const fromDocument = await invoke(parseArgv(["-C", root, "task", "add", "--actor", "document-actor", "-"]), {
+    environment,
+    readStdin: () => "---\ntitle: From stdin\n---\n",
+  }) as { value: { createdBy: string } };
+  assert.equal(fromDocument.value.createdBy, "document-actor");
+  await assert.rejects(
+    () => invoke(parseArgv(["-C", root, "task", "add", "-"]), {
+      environment,
+      readStdin: () => "---\ntitle: Illegal\ncreatedBy: sneaky\n---\n",
+    }),
+    /unknown task front matter key/u,
+  );
+  const composed = await invoke(parseArgv(["-C", root, "task", "compose", "-"]), {
+    environment,
+    readStdin: () => "+ Composed\n@task/authored pri=0\n",
+  }) as { kind: string };
+  assert.equal(composed.kind, "accepted");
+  const composedShown = await invoke(parseArgv(["-C", root, "task", "show", "task/composed"])) as { task: { createdBy?: string } };
+  const authoredShown = await invoke(parseArgv(["-C", root, "task", "show", "task/authored"])) as { task: { createdBy?: string; priority: number } };
+  assert.equal(composedShown.task.createdBy, "env-actor");
+  assert.equal(authoredShown.task.createdBy, "explicit-actor");
+  const showCommand = parseArgv(["task", "show", "task/authored"]).command;
+  if (showCommand.command !== "task") throw new Error("not a task command");
+  assert.match(renderTaskText(showCommand, authoredShown), /createdBy: explicit-actor\ncreatedAt: /u);
+  await invoke(parseArgv(["-C", root, "task", "update", "task/authored", "--note", "later"]));
+  await invoke(parseArgv(["-C", root, "task", "start", "task/authored"]));
+  const afterLifecycle = await invoke(parseArgv(["-C", root, "task", "show", "task/authored"])) as { task: { createdBy?: string } };
+  assert.equal(afterLifecycle.task.createdBy, "explicit-actor");
+  assert.throws(() => parseArgv(["task", "add", "Blank", "--actor", " "]), /--actor requires a nonblank value/u);
 });
 
 test("task compose and views flow through native results", async () => {

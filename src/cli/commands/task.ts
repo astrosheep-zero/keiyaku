@@ -32,14 +32,14 @@ type TaskCommandSpec = Readonly<{
 const COMMON = { json: "boolean" } as const;
 const TASK_COMMAND_SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
   add: {
-    arity: [0, 1], stdin: "document", flags: { ...COMMON, namespace: "value", state: "value", priority: "value", needs: "repeat", parent: "value", supersedes: "repeat", relates: "repeat", body: "value", note: "value" },
+    arity: [0, 1], stdin: "document", flags: { ...COMMON, namespace: "value", state: "value", priority: "value", needs: "repeat", parent: "value", supersedes: "repeat", relates: "repeat", body: "value", note: "value", actor: "value" },
     usage: `task add <TITLE> [--namespace <ns>] [--priority 0..3]
   [--state open|in_progress|on_hold|done|drop]
-  [--note <text>]
+  [--note <text>] [--actor <actor>]
   [--needs <TaskId>]... [--parent <TaskId>]
   [--supersedes <TaskId>]... [--relates <TaskId>]...
   [--body <text>] [--json]
-task add [--namespace <ns>] [--json] -`,
+task add [--namespace <ns>] [--actor <actor>] [--json] -`,
     purpose: "Create one Task from flags or a canonical stdin document.",
   },
   show: { arity: [1, 1], flags: COMMON, usage: "task show <TaskId> [--json]", purpose: "Read one Task and its relationships." },
@@ -67,7 +67,7 @@ task add [--namespace <ns>] [--json] -`,
   done: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" }, usage: "task done <TaskId>... [--note <text>] [--json]", purpose: "Mark one or more Tasks done." },
   drop: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" }, usage: "task drop <TaskId>... [--note <text>] [--json]", purpose: "Drop one or more Tasks." },
   namespace: { arity: [0, 1], flags: COMMON, usage: "task namespace [<namespace>] [--json]", purpose: "Read or replace the current Task namespace." },
-  compose: { arity: [0, 0], stdin: "compose", flags: COMMON, usage: "task compose [--json] -", purpose: "Admit Task documents independently; partial admission has no cross-file atomicity or rollback." },
+  compose: { arity: [0, 0], stdin: "compose", flags: { ...COMMON, actor: "value" }, usage: "task compose [--actor <actor>] [--json] -", purpose: "Admit Task documents independently; partial admission has no cross-file atomicity or rollback." },
 };
 
 export function isTaskAction(value: string | undefined): value is TaskAction {
@@ -175,7 +175,7 @@ function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (messa
   const spec = TASK_COMMAND_SPECS[action], { positionals, flags, stdin } = scanned;
   if (positionals.length < spec.arity[0] || positionals.length > spec.arity[1]) fail(`task ${action} has invalid positional arguments`);
   if (action === "add" && (stdin === "document") === (positionals.length === 1)) fail("task add requires either TITLE or final '-' input");
-  if (action === "add" && stdin === "document" && Object.keys(flags).some((name) => name !== "json" && name !== "namespace")) fail("task add document input owns its creation fields");
+  if (action === "add" && stdin === "document" && Object.keys(flags).some((name) => name !== "json" && name !== "namespace" && name !== "actor")) fail("task add document input owns its creation fields");
   if (action === "compose" && stdin !== "compose") fail("task compose requires final '-' input");
   validateTaskReadFlags(action, flags, fail);
   if (action === "update") validateUpdate(scanned, fail);

@@ -61,10 +61,11 @@ changes Git refs.
 
 The path owns identity. Closed front matter repeats the full `id` as an
 integrity witness and contains `title`, `state`, `priority`, `needs`, `parent`,
-`supersedes`, `relates`, `note`, `createdAt`, `updatedAt`, and optional
-prose is the body. The ID must equal the path-derived coordinate.
-Unknown keys and malformed documents are authority corruption. Manual editing
-is authoritative; a manual move that breaks the witness is corruption.
+`supersedes`, `relates`, `note`, optional `createdBy` when present, `createdAt`,
+and `updatedAt` in that stored order. Optional prose is the body. The ID must
+equal the path-derived coordinate. Unknown keys and malformed documents are
+authority corruption. Manual editing is authoritative; a manual move that
+breaks the witness is corruption.
 
 Board reads and every public Task operation that consumes authority are
 asynchronous and observe complete files before fulfillment. Task retains one
@@ -83,11 +84,18 @@ duplicate-free full TaskIds. `note` is a string and defaults to empty.
 timestamps. Product creation sets both to one captured time. A product mutation
 that changes Task authority preserves `createdAt` and advances `updatedAt` once;
 a no-op update preserves both. Manual writers own the truth of both timestamps
-when they edit authority. `parent` is nullable. V1 has no
-cached readiness, counters, task log, NDJSON trace, private history ref, or
-`history <TaskId>`. Because manual, uncommitted Markdown edits remain
-authoritative, Task does not promise complete change-since-observation,
-history, or event-log reads; a partial journal would be dishonest.
+when they edit authority. `createdBy` is an optional opaque nonblank actor
+string: no registry, AkuId grammar, normalization, or Contract association.
+Product creation writes it only from caller `actor`; later product mutations
+and settlement preserve the existing field and never invent one. A creation
+document supplied to `addDocument` may not declare `createdBy`. Documents
+without it remain valid. Manual writers may edit it because Markdown remains
+authority. `parent` is nullable. V1 has no
+cached readiness, counters, task log, NDJSON trace, private history ref,
+`history <TaskId>`, or latest-actor field. Because manual, uncommitted
+Markdown edits remain authoritative, Task does not promise complete
+change-since-observation, history, or event-log reads; a partial journal
+would be dishonest.
 
 ## Lifecycle And Graph
 
@@ -150,7 +158,7 @@ tasks.blocked(input?: { scope?: "namespace" | "world"; parent?: string; limit?: 
 tasks.query(input?: { where?: TaskQueryExpression; scope?: "namespace" | "world"; sort?: "priority" | "created" | "updated" | "id"; limit?: number }): Promise<TaskQueryResult>
 tasks.doctor(): Promise<TaskDoctorReport>
 tasks.batch(input: { verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }): Promise<TaskBatchResult>
-tasks.compose(input: { markdown: string; signal?: AbortSignal }): Promise<TaskCompositionResult>
+tasks.compose(input: { markdown: string; actor?: string; signal?: AbortSignal }): Promise<TaskCompositionResult>
 
 task.read(): Promise<TaskDetail | null>
 task.tree(): Promise<TaskDecompositionTree>
@@ -184,14 +192,20 @@ one observed board snapshot; Task owns no continuation cursor or observer
 session.
 
 `add` accepts structured title, namespace, body, note, priority, relations,
-optional initial state, and signal. `addDocument` accepts
-creation-document Markdown plus an optional namespace and signal. The creation
-document cannot set identity or timestamps but may set note and any persisted
-state; omitted note is empty and omitted state defaults to `open`.
-After creation, product state changes use lifecycle methods. `done` and `drop`
-may replace the note in the same atomic lifecycle mutation. `update` is a
-field-preserving patch: title, mutually exclusive body or append-body, priority,
-relation replace/add/drop, nullable parent, and note replacement.
+optional initial state, optional actor, and signal. `addDocument` accepts
+creation-document Markdown plus an optional namespace, actor, and signal. The
+creation document cannot set identity, timestamps, or `createdBy` but may set
+note and any persisted state; omitted note is empty and omitted state defaults
+to `open`. `Tasks.compose` accepts the same optional actor and applies it only
+to newly allocated nodes. `add`, `addDocument`, and `compose` validate actor as
+optional nonblank bytes and persist it as `createdBy` when present. `update`,
+start, stop, hold, resume, done, drop, batch, and settlement preserve existing
+`createdBy` and do not accept actor. After creation, product state changes use
+lifecycle methods. `done` and `drop` may replace the note in the same atomic
+lifecycle mutation. `update` is a field-preserving patch: title, mutually
+exclusive body or append-body, priority, relation replace/add/drop, nullable
+parent, and note replacement. `TaskView` and full Task detail expose optional
+`createdBy`; compact list and query rows do not.
 
 Shape errors throw `TypeError` before world observation. Malformed persisted
 authority throws `TaskAuthorityCorruptionError`. Infrastructure failures stay
@@ -319,7 +333,9 @@ sole write adjudicator against manual editors. Byte movement returns
 ## Contract Boundary
 
 Task Markdown has no Contract association field and Task operations expose no
-association mutation. The current cross-product relationship is the
-TaskHolder authority defined by [settlement.md](settlement.md). Task contributes
-only its complete identity and the Task-owned state transition primitive used
-after settlement has judged that holder.
+association mutation. Creation never infers actor from Contract state, current
+namespace, Git author, Akuma dispatch, or TaskHolder settlement. The current
+cross-product relationship is the TaskHolder authority defined by
+[settlement.md](settlement.md). Task contributes only its complete identity
+and the Task-owned state transition primitive used after settlement has judged
+that holder.

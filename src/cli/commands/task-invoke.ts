@@ -30,7 +30,7 @@ export type TaskWorldObservation =
   | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>;
 
 type TaskProduct = ReturnType<typeof Tasks.of>;
-type TaskInput = Readonly<{ world: WorldRoot | null; establish(): Promise<WorldRoot>; readStdin(): Promise<string> }>;
+type TaskInput = Readonly<{ world: WorldRoot | null; establish(): Promise<WorldRoot>; readStdin(): Promise<string>; actor?: string }>;
 
 function value(command: ParsedTaskCommand, name: string): string | undefined {
   const item = command.flags[name]; return typeof item === "string" ? item : undefined;
@@ -47,9 +47,16 @@ function state(raw: string | undefined): TaskState | undefined { return raw as T
 function ids(items: readonly string[] | undefined): readonly TaskId[] | undefined { return items as readonly TaskId[] | undefined; }
 function limit(command: ParsedTaskCommand): number | undefined { const raw = value(command, "limit"); return raw === undefined ? undefined : Number(raw); }
 
-async function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => Promise<string>): Promise<TaskMutationResult> {
+async function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, input: TaskInput): Promise<TaskMutationResult> {
   const selectedNamespace = namespace(value(command, "namespace"));
-  if (command.stdin === "document") return tasks.addDocument({ markdown: await readStdin(), ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }) });
+  const actor = input.actor;
+  if (command.stdin === "document") {
+    return tasks.addDocument({
+      markdown: await input.readStdin(),
+      ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }),
+      ...(actor === undefined ? {} : { actor }),
+    });
+  }
   const body = value(command, "body"), note = value(command, "note"), initialState = state(value(command, "state")), selectedPriority = priority(value(command, "priority"));
   const needs = ids(values(command, "needs")), parent = value(command, "parent");
   const supersedes = ids(values(command, "supersedes")), relates = ids(values(command, "relates"));
@@ -58,6 +65,7 @@ async function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStd
     ...(body === undefined ? {} : { body }), ...(note === undefined ? {} : { note }), ...(initialState === undefined ? {} : { state: initialState }), ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
     ...(needs === undefined ? {} : { needs }), ...(parent === undefined ? {} : { parent: parent as TaskId }),
     ...(supersedes === undefined ? {} : { supersedes }), ...(relates === undefined ? {} : { relates }),
+    ...(actor === undefined ? {} : { actor }),
   });
 }
 
@@ -132,7 +140,7 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
   const tasks = Tasks.of(world);
   if (isWorldObservation(command)) return observeWorldRead(tasks, command);
   if (command.action === "show" || command.action === "tree") return invokeRead(tasks, command);
-  if (command.action === "add") return await invokeAdd(tasks, command, input.readStdin);
+  if (command.action === "add") return await invokeAdd(tasks, command, input);
   if (command.action === "update") return await invokeUpdate(tasks, command, input.readStdin);
   const id = command.positionals[0]!;
   switch (command.action) {
@@ -153,7 +161,7 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
       if (selected !== undefined) await tasks.setNamespace({ namespace: selected });
       return tasks.namespace();
     }
-    case "compose": return tasks.compose({ markdown: await input.readStdin() });
+    case "compose": return tasks.compose({ markdown: await input.readStdin(), ...(input.actor === undefined ? {} : { actor: input.actor }) });
     default: throw new Error(`task action has no invocation: ${command.action}`);
   }
 }

@@ -53,7 +53,12 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId> \[--json\]/u);
   assert.doesNotMatch(renderTaskHelp(), /--full/u);
   assert.doesNotMatch(renderTaskHelp(), /--contract|--no-contract/u);
-  assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--json\] -/u);
+  assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--actor <actor>\] \[--json\] -/u);
+  assert.match(renderTaskHelp("add"), /--actor <actor>/u);
+  assert.doesNotMatch(renderTaskHelp("update"), /--actor/u);
+  assert.doesNotMatch(renderTaskHelp("start"), /--actor/u);
+  assert.doesNotMatch(renderTaskHelp("done"), /--actor/u);
+  assert.doesNotMatch(renderTaskHelp(), /KEIYAKU_PROJECTION_ID/u);
   assert.match(renderTaskHelp("compose"), /documents independently; partial admission has no cross-file atomicity or rollback/u);
   assert.match(renderTaskHelp("ready"), /open Tasks whose every need is terminal/u);
   assert.doesNotMatch(renderRootHelp(), /^  interrupt /mu);

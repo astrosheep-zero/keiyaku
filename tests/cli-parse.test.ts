@@ -229,6 +229,8 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["task", "add", "  "], /task add requires a nonblank value/],
     [["task", "add", "Title", "--body", ""], /--body requires a nonblank value/],
     [["task", "add", "Title", "--note", "\t"], /--note requires a nonblank value/],
+    [["task", "add", "Title", "--actor", " "], /--actor requires a nonblank value/],
+    [["task", "compose", "--actor", "\t", "-"], /--actor requires a nonblank value/],
     [["task", "update", "task/a", "--title", " "], /--title requires a nonblank value/],
     [["task", "done", "task/a", "--note", ""], /--note requires a nonblank value/],
     [["bind", "--after", "   ", "-"], /--after requires a nonblank value/],

@@ -32,6 +32,7 @@ type InvokeRuntime = Readonly<{
   cwd?: string;
   environment?: NodeJS.ProcessEnv;
   readStdin?: () => Promise<string>;
+  actor?: ActorId;
 }>;
 
 type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "show" | "ls" | "reconcile" | "settings" | "region" | "task" | "install" }>;
@@ -464,6 +465,7 @@ async function invokeParsed(
         world,
         establish: coordinates.establishWorld,
         readStdin: edge.readStdin,
+        ...(runtime.actor === undefined ? {} : { actor: runtime.actor }),
       });
     }
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
@@ -512,6 +514,12 @@ async function invokeInstall(command: Extract<ParsedCommand, { command: "install
   return installHarnesses(command.harnesses, runtime.environment ?? process.env);
 }
 
+function withResolvedTaskActor(command: ParsedCommand, runtime: InvokeRuntime): InvokeRuntime {
+  if (command.command !== "task" || (command.action !== "add" && command.action !== "compose")) return runtime;
+  const actor = actorFromEdge(typeof command.flags.actor === "string" ? command.flags.actor : undefined, runtime.environment ?? process.env);
+  return actor === undefined ? runtime : { ...runtime, actor };
+}
+
 export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult | InstallInvocationResult> {
   try {
     const command = invocation.command;
@@ -521,7 +529,7 @@ export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime
       ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
       command,
-    }, await withAcquiredStdin(command, runtime));
+    }, await withAcquiredStdin(command, withResolvedTaskActor(command, runtime)));
   } catch (error) {
     if (error instanceof CliUsageError && error.projection === undefined) {
       throw new CliUsageError(error.diagnostic, renderCommandUsage(invocation.command));

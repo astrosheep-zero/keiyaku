@@ -12,11 +12,11 @@ decisions remain in the native Task surface.
 ```text
 task add <TITLE> [--namespace <ns>] [--priority 0..3]
   [--state open|in_progress|on_hold|done|drop]
-  [--note <text>]
+  [--note <text>] [--actor <actor>]
   [--needs <TaskId>]... [--parent <TaskId>]
   [--supersedes <TaskId>]... [--relates <TaskId>]...
   [--body <text>] [--json]
-task add [--namespace <ns>] [--json] -
+task add [--namespace <ns>] [--actor <actor>] [--json] -
 task show <TaskId> [--json]
 task ls [--closed | --all] [--world] [--limit <n>] [--json]
 task ready [--world] [--parent <TaskId>] [--limit <n>] [--json]
@@ -38,7 +38,7 @@ task resume <TaskId> [--json]
 task done <TaskId>... [--note <text>] [--json]
 task drop <TaskId>... [--note <text>] [--json]
 task namespace [<namespace>] [--json]
-task compose [--json] -
+task compose [--actor <actor>] [--json] -
 ```
 
 Literal `-` selects creation-document input for add, body or note input only
@@ -46,7 +46,7 @@ after `--body`, `--append`, or `--note` for update, and composition input for
 compose. Unselected piped stdin is not consumed. Add requires exactly one
 source: a nonblank TITLE or final `-`. Add document input rejects
 creation-owned identity, may declare its initial state, and cannot be combined
-with structured creation flags other than `--namespace`. Update requires at
+with structured creation flags other than `--namespace` and `--actor`. Update requires at
 least one explicit patch and remains legal when it changes only non-body
 fields. Selected update `--body`, `--append`, `--note`, and `--title` values,
 and selected add TITLE, `--body`, and `--note`, must be nonblank. Done and
@@ -63,6 +63,13 @@ returns the native document diff. Done and drop `--note` replace the note for
 each addressed Task in that Task's independent atomic lifecycle mutation. Batch
 lifecycle commands preserve input order, continue after per-Task refusals, and
 do not consume stdin for notes.
+
+`--actor` is legal only on `task add` (structured and final `-` forms) and
+`task compose`. The invocation edge resolves actor once before reading or
+applying the selected creation input: explicit nonblank `--actor`, then
+nonblank `KEIYAKU_ACTOR_ID`, then unsigned. A blank explicit value is usage; a
+blank environment value is absent. Update, lifecycle, and settlement commands
+do not accept `--actor`. Task code never reads `process.env`.
 
 Omitted namespace keeps the current or default namespace. A nonblank
 namespace path selects that namespace. Literal `/` as `task namespace` or add
