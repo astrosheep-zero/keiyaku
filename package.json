@@ -34,10 +34,11 @@
   "scripts": {
     "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.json && node scripts/copy-integrations.js && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('build/src/cli/index.js', 0o755)\"",
     "review:model-impact": "node --import tsx scripts/model-change-impact.ts",
-    "test": "npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx --test --test-reporter=dot",
+    "test": "npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx --test --test-reporter=dot tests/**/*.test.ts tests/maintainability.test.js",
     "test:architecture": "node --import tsx scripts/check-architecture.ts",
     "test:e2e": "npm run build && node --import tsx --test tests/packaged-cli.e2e.ts",
     "test:maintainability": "node scripts/check-maintainability.js",
+    "test:focused": "node --import tsx --test --test-reporter=dot",
     "test:reachability": "knip --include files,dependencies,unlisted,unresolved,duplicates",
     "test:typecheck": "tsc -p tsconfig.json --noEmit"
   },
