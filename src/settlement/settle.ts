@@ -1,10 +1,17 @@
 import { contractSegment, type ContractId, type ContractState } from "../core/facts/types.js";
+import { observeContractWorld } from "../git/observe.js";
+import { withGitReadObservation } from "../git/read-observation.js";
 import type { Effect } from "../git/reconcile.js";
 import type { GitRepository } from "../git/repository.js";
 import { repairNamespaceContext } from "../task/context.js";
 import { settleTask } from "../task/operations.js";
 import type { TaskId } from "../task/identity.js";
-import { readTaskHolderProjection, type TaskHolderProjection } from "./holder.js";
+import {
+  readTaskHolderProjection,
+  readTaskHolderProjectionAt,
+  type TaskHolderProjection,
+} from "./holder.js";
+import { withTaskSettlementFence } from "./fence.js";
 import { World, type WorldRoot } from "../world.js";
 
 export type SettlementAction =
@@ -24,6 +31,14 @@ export type SettlementReport = Readonly<{
   actions: readonly SettlementAction[];
   lags: readonly SettlementLag[];
 }>;
+
+export function deferredTaskHolderSettlement(input: Readonly<{
+  contractId: ContractId;
+  taskId: TaskId;
+  diagnostic: string;
+}>): SettlementReport {
+  return { actions: [], lags: [{ kind: "settlement-failed", surface: "task-holder", ...input }] };
+}
 
 export type SettlementInput = Readonly<{
   repository: GitRepository;
@@ -50,35 +65,73 @@ function taskFailure(result: Exclude<Awaited<ReturnType<typeof settleTask>>, { k
     : `Task settlement refused: ${JSON.stringify(result.refusal)}`;
 }
 
-async function settleTasks(
-  observation: SettlementObservation,
-  world: WorldRoot,
-  state: ContractState,
-  actions: SettlementAction[],
-  lags: SettlementLag[],
-): Promise<void> {
-  const terminal = state.terminal?.kind;
+type SettleTasksInput = Readonly<{
+  observation: SettlementObservation;
+  repository: GitRepository;
+  world: WorldRoot;
+  candidate: ContractState;
+  actions: SettlementAction[];
+  lags: SettlementLag[];
+}>;
+
+async function settleTasks(input: SettleTasksInput): Promise<void> {
+  const { observation, repository, world, candidate, actions, lags } = input;
+  const terminal = candidate.terminal?.kind;
   if (terminal !== "claimed" && terminal !== "abandoned") return;
   if (observation.kind === "failed") {
-    lags.push({ kind: "settlement-failed", surface: "task-holder", contractId: state.id, diagnostic: observation.diagnostic });
+    lags.push({ kind: "settlement-failed", surface: "task-holder", contractId: candidate.id, diagnostic: observation.diagnostic });
     return;
   }
-  const holder = observation.holders.get(state.id) ?? null;
+  const holder = observation.holders.get(candidate.id) ?? null;
   const expectedDisposition = terminal === "claimed" ? "held" : "released";
   if (holder === null || holder.disposition !== expectedDisposition) return;
   const taskId = holder.taskId;
+
   try {
-    const result = await settleTask(world, taskId, terminal === "claimed" ? "done" : "open-from-done");
-    if (result.kind === "changed") actions.push({ kind: "task", taskId, action: result.action });
-    else if (result.kind !== "unchanged") lags.push({
-      kind: "settlement-failed",
-      surface: "task",
-      contractId: state.id,
-      taskId,
-      diagnostic: taskFailure(result),
+    await withTaskSettlementFence({ repository, taskId }, async () => {
+      let current: Readonly<{ state: ContractState | null; holders: TaskHolderProjection }>;
+      try {
+        current = await withGitReadObservation(repository, async (read) => {
+          const [contracts, holders] = await Promise.all([
+            observeContractWorld(read, [candidate.id]),
+            readTaskHolderProjectionAt(read),
+          ]);
+          return { state: contracts.contracts.get(candidate.id)?.state ?? null, holders };
+        });
+      } catch (error) {
+        lags.push({
+          kind: "settlement-failed",
+          surface: "task-holder",
+          contractId: candidate.id,
+          taskId,
+          diagnostic: diagnostic(error),
+        });
+        return;
+      }
+
+      const state = current.state;
+      const currentTerminal = state?.terminal?.kind;
+      if (state === null || (currentTerminal !== "claimed" && currentTerminal !== "abandoned")) return;
+      const currentHolder = current.holders.get(state.id) ?? null;
+      const disposition = currentTerminal === "claimed" ? "held" : "released";
+      if (currentHolder === null || currentHolder.taskId !== taskId || currentHolder.disposition !== disposition) return;
+
+      try {
+        const result = await settleTask(world, taskId, currentTerminal === "claimed" ? "done" : "open-from-done");
+        if (result.kind === "changed") actions.push({ kind: "task", taskId, action: result.action });
+        else if (result.kind !== "unchanged") lags.push({
+          kind: "settlement-failed",
+          surface: "task",
+          contractId: state.id,
+          taskId,
+          diagnostic: taskFailure(result),
+        });
+      } catch (error) {
+        lags.push({ kind: "settlement-failed", surface: "task", contractId: state.id, taskId, diagnostic: diagnostic(error) });
+      }
     });
   } catch (error) {
-    lags.push({ kind: "settlement-failed", surface: "task", contractId: state.id, taskId, diagnostic: diagnostic(error) });
+    lags.push({ kind: "settlement-failed", surface: "task-holder", contractId: candidate.id, taskId, diagnostic: diagnostic(error) });
   }
 }
 
@@ -118,7 +171,14 @@ async function settleObserved(input: SettlementInput, observation: SettlementObs
   if (input.state === null) return { actions: [], lags: [] };
   const actions: SettlementAction[] = [], lags: SettlementLag[] = [];
   try {
-    await settleTasks(observation, World.at(input.repository.primaryWorktree), input.state, actions, lags);
+    await settleTasks({
+      observation,
+      repository: input.repository,
+      world: World.at(input.repository.primaryWorktree),
+      candidate: input.state,
+      actions,
+      lags,
+    });
   } catch (error) {
     lags.push({ kind: "settlement-failed", surface: "task", contractId: input.state.id, diagnostic: diagnostic(error) });
   }
@@ -132,8 +192,9 @@ export async function settle(input: SettlementInput): Promise<SettlementReport> 
 
 export async function settleAll(input: SettlementBatchInput): Promise<readonly SettlementReport[]> {
   const observation = await observeSettlement(input.repository);
-  return Promise.all(input.contracts.map((contract) => settleObserved({
-    repository: input.repository,
-    ...contract,
-  }, observation)));
+  const reports: SettlementReport[] = [];
+  for (const contract of input.contracts) {
+    reports.push(await settleObserved({ repository: input.repository, ...contract }, observation));
+  }
+  return reports;
 }

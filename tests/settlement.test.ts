@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError, Keiyaku, Repo } from "../src/index.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import {
@@ -14,8 +15,13 @@ import {
   writeBlob,
   writeCommit,
 } from "../src/git/repository.js";
-import { readTaskHolders } from "../src/settlement/holder.js";
-import { settleAll } from "../src/settlement/settle.js";
+import {
+  claimTaskHolderWithFence,
+  finishTaskHolderAdmission,
+  readTaskHolders,
+} from "../src/settlement/holder.js";
+import { settle, settleAll } from "../src/settlement/settle.js";
+import { settlementFencePath } from "../src/settlement/fence.js";
 import { readNamespaceContext } from "../src/task/context.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
@@ -132,7 +138,7 @@ test("contract and world reconcile replay settlement from current authority", as
   assert.equal(await taskState(world.path, secondTask), "done");
 });
 
-test("batch settlement reads one holder projection for multiple Contracts", async () => {
+test("batch settlement reads one locator and one fenced snapshot per Contract", async () => {
   const world = repository(), repo = Repo.at({ path: world.path });
   const firstTask = await task(world.path, "First batch holder");
   const secondTask = await task(world.path, "Second batch holder");
@@ -158,13 +164,43 @@ test("batch settlement reads one holder projection for multiple Contracts", asyn
   );
 
   assert.equal(reports.length, 2);
-  const fullTreeReads = readFileSync(log, "utf8").trim().split("\n")
-    .filter((command) => {
-      const args = command.split(" ");
-      return args.includes("ls-tree") && args.includes("-z") && args.includes("-r")
-        && args.includes("--full-tree") && !args.includes("--");
-    });
-  assert.equal(fullTreeReads.length, 1);
+  const stateReads = readFileSync(log, "utf8").trim().split("\n")
+    .filter((command) => command === "rev-parse --verify --quiet refs/heads/keiyaku-state");
+  assert.equal(stateReads.length, 3);
+});
+
+test("accepted holder admission survives a fence release failure", () => {
+  const accepted = { kind: "accepted" } as const;
+  assert.deepEqual(
+    finishTaskHolderAdmission("task/example" as const, accepted, () => { throw new Error("release failed"); }),
+    {
+      kind: "accepted-release-failed",
+      result: accepted,
+      taskId: "task/example",
+      diagnostic: "release failed",
+    },
+  );
+  assert.throws(
+    () => finishTaskHolderAdmission("task/example" as const, { kind: "refused" } as const, () => { throw new Error("release failed"); }),
+    /release failed/u,
+  );
+});
+
+test("holder admission runs inside the Task fence", async () => {
+  const world = repository();
+  const taskId = await task(world.path, "Fenced admission");
+  const git = repositoryAt(world.path);
+  const fence = settlementFencePath(git, taskId);
+  const held = await acquireSqliteTransactionLock({ path: fence, mode: "immediate", timeoutMs: 100 });
+  let ran = false;
+  const admission = claimTaskHolderWithFence(git, taskId, () => {
+    ran = true;
+    return { kind: "accepted" } as const;
+  });
+  assert.equal(ran, false);
+  held.close();
+  assert.equal((await admission).result.kind, "accepted");
+  assert.equal(ran, true);
 });
 
 test("a superseded Contract cannot release or settle a newer holder", async () => {
@@ -209,6 +245,50 @@ test("abandon refuses corrupted authority that assigns one Contract multiple Tas
       && error.message === `Contract has multiple current TaskHolders: ${firstId}`,
   );
   assert.equal((await first.keiyaku.state()).terminal, null);
+});
+
+test("fenced settlement validates the complete current holder projection", async () => {
+  const world = repository(), repo = Repo.at({ path: world.path });
+  const firstTask = await task(world.path, "Fenced holder");
+  const secondTask = await task(world.path, "Conflicting holder");
+  const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("Fenced holder"), workspace: "here", gates: [] });
+  await Keiyaku.bind({ repo, task: secondTask, markdown: document("Conflicting holder"), workspace: "here" });
+  writeFileSync(`${world.path}/fenced.txt`, "fenced\n");
+  await first.keiyaku.deliver();
+  replaceTaskState(world.path, firstTask, "done", "open");
+
+  const git = repositoryAt(world.path);
+  const state = await first.keiyaku.state();
+  const snapshot = readGit(git);
+  const secondPath = `settlement/task-holders/${createHash("sha256").update(secondTask).digest("hex")}.json`;
+  const duplicate = Buffer.from(`${JSON.stringify({
+    version: 1,
+    taskId: secondTask,
+    contractId: state.id,
+    disposition: "held",
+  })}\n`);
+  const tree = updateGitTree(git, snapshot.tree, new Map([[secondPath, { oid: writeBlob(git, duplicate) }]]));
+  const corrupt = writeCommit({ repository: git, tree, parent: snapshot.commit });
+  const marker = join(world.path, "move-state-once");
+
+  const report = await withGitShim([
+    'if [ "$*" = "rev-parse --verify --quiet refs/heads/keiyaku-state" ] && [ ! -e "$KEIYAKU_MOVE_MARKER" ]; then',
+    '  "$KEIYAKU_REAL_GIT" "$@" || exit $?',
+    '  : > "$KEIYAKU_MOVE_MARKER"',
+    '  "$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$KEIYAKU_CORRUPT_STATE" "$KEIYAKU_ORIGINAL_STATE"',
+    '  exit 0',
+    'fi',
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n"), {
+    KEIYAKU_MOVE_MARKER: marker,
+    KEIYAKU_CORRUPT_STATE: corrupt,
+    KEIYAKU_ORIGINAL_STATE: snapshot.commit!,
+  }, () => settle({ repository: git, state, effects: [] }));
+
+  assert.deepEqual(report.actions, []);
+  assert.equal(report.lags[0]?.surface, "task-holder");
+  assert.match(report.lags[0]?.diagnostic ?? "", /multiple current TaskHolders/u);
+  assert.equal(await taskState(world.path, firstTask), "open");
 });
 
 test("TaskHolder reads reject unexpected paths in their authority namespace", async () => {

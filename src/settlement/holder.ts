@@ -5,11 +5,13 @@ import { contractId, type ContractId } from "../core/facts/types.js";
 import {
   expandGitSnapshot,
   readBlob,
+  readGit,
   type GitRepository,
   type GitSnapshot,
 } from "../git/repository.js";
 import { withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
+import { acquireTaskSettlementFence } from "./fence.js";
 
 const HOLDER_ROOT = "settlement/task-holders";
 const HOLDER_PREFIX = `${HOLDER_ROOT}/`;
@@ -114,6 +116,59 @@ export function claimTaskHolder(taskId: TaskId, owner: ContractId): TreeUpdate {
   return update({ version: 1, taskId, contractId: owner, disposition: "held" });
 }
 
+type AdmissionOutcome = Readonly<{ kind: string }>;
+
+export type TaskHolderAdmission<T extends AdmissionOutcome> =
+  | Readonly<{ kind: "completed"; result: T }>
+  | Readonly<{
+      kind: "accepted-release-failed";
+      result: T;
+      taskId: TaskId;
+      diagnostic: string;
+    }>;
+
+function detail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function finishTaskHolderAdmission<T extends AdmissionOutcome>(
+  taskId: TaskId,
+  result: T,
+  close: () => void,
+): TaskHolderAdmission<T> {
+  try {
+    close();
+    return { kind: "completed", result };
+  } catch (error) {
+    if (result.kind !== "accepted") throw error;
+    return { kind: "accepted-release-failed", result, taskId, diagnostic: detail(error) };
+  }
+}
+
+async function admitWithTaskHolderFence<T extends AdmissionOutcome>(
+  repository: GitRepository,
+  taskId: TaskId,
+  action: () => T | Promise<T>,
+): Promise<TaskHolderAdmission<T>> {
+  const held = await acquireTaskSettlementFence(repository, taskId);
+  let result: T;
+  try {
+    result = await action();
+  } catch (error) {
+    try { held.close(); } catch { /* The operation failure remains decisive before admission. */ }
+    throw error;
+  }
+  return finishTaskHolderAdmission(taskId, result, () => held.close());
+}
+
+export function claimTaskHolderWithFence<T extends AdmissionOutcome>(
+  repository: GitRepository,
+  taskId: TaskId,
+  action: () => T | Promise<T>,
+): Promise<TaskHolderAdmission<T>> {
+  return admitWithTaskHolderFence(repository, taskId, action);
+}
+
 export function releaseTaskHolder(
   repository: GitRepository,
   snapshot: GitSnapshot,
@@ -123,6 +178,22 @@ export function releaseTaskHolder(
   return current === null || current.disposition !== "held"
     ? null
     : update({ ...current, disposition: "released" });
+}
+
+function heldTaskForContract(repository: GitRepository, owner: ContractId): TaskId | null {
+  const holder = projectTaskHolders(holderEntries(repository, readGit(repository), "complete")).get(owner) ?? null;
+  return holder?.disposition === "held" ? holder.taskId : null;
+}
+
+export async function releaseTaskHolderWithFence<T extends AdmissionOutcome>(
+  repository: GitRepository,
+  owner: ContractId,
+  action: () => T | Promise<T>,
+): Promise<TaskHolderAdmission<T>> {
+  const taskId = heldTaskForContract(repository, owner);
+  return taskId === null
+    ? { kind: "completed", result: await action() }
+    : admitWithTaskHolderFence(repository, taskId, action);
 }
 
 export async function readTaskHoldersAt(observation: GitReadObservation): Promise<readonly TaskHolder[]> {

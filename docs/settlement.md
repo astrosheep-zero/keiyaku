@@ -45,6 +45,29 @@ than represented by absence because post-abandon settlement and replay must
 still know which Task to reopen. There is no reverse index, Task-side copy,
 delete operation, compatibility decoder, or independent holder writer.
 
+## Settlement Fence
+
+Settlement owns one private coordination fence per complete `TaskId`. Its path
+is derived beneath the repository common Git directory and uses the repository's
+single SQLite transaction-lock primitive. The fence stores no product facts;
+TaskHolder and Task Markdown remain the durable authorities. Process death
+releases it with the SQLite connection. There is no flock, PID, lease,
+heartbeat, stale-break record, or second lock implementation.
+
+A bind claim holds that Task's fence across every holder-mutating admission
+attempt. Abandon first locates its possible held Task, then holds that fence
+while a fresh admission observation decides whether to publish the release.
+The fenced observation is decisive; the locator never is. Fence acquisition or
+release failure before admission admits no Contract or holder fact.
+
+Settlement uses an initial holder projection only to locate the possible Task
+fence. Inside the fence it reads current Contract state and the complete current
+TaskHolder projection from one frozen state snapshot, judges currentness, then
+calls Task's existing locked predecessor-CAS transition. The only lock order is
+`settlement fence(Task) -> Task lock(Task)`. Reconcile releases its effect lock
+before Settlement starts, and world settlement finishes one Task fence before
+acquiring another.
+
 A complete holder read consumes one call-scoped `GitReadObservation` from the
 Git owner. Settlement selects TaskHolder paths and object IDs from its
 immutable snapshot, requests those blobs once, and exclusively performs path,
@@ -123,6 +146,9 @@ an accepted fact, creates `abandoned`, or rejects the public mutation. The
 result returns admitted facts and head, observed Git effects and lags, and the
 complete `SettlementReport`. Settlement is synchronous in that public Promise;
 a lag reports incomplete follow-up without hiding the admitted Contract.
+If a holder mutation admits but releasing its fence fails, the public result
+preserves the admitted facts and reports a `task-holder` Settlement lag. It
+does not begin reconcile or settlement while fence release remains uncertain.
 
 Settlement derives desired work from current Contract state, current
 TaskHolder authority, current Task Markdown, and the current Git report on every
@@ -130,10 +156,10 @@ invocation. It records no completion bit. Re-running Contract or world
 reconciliation repeats Git reconciliation and the same settlement rules. Task
 predecessor-byte comparison remains the Task write adjudicator; concurrent
 movement becomes a lag and is reconsidered later.
-World reconciliation reads and validates one immutable TaskHolder projection,
-then reuses it across every Contract settlement in that invocation; it does not
-rescan the private Git tree per Contract or retain the observation across
-invocations.
+World reconciliation reads and validates one immutable TaskHolder projection
+as a locator, then settles Contracts sequentially. Each possible Task write is
+decided again from one complete frozen projection inside that Task's fence; the
+locator never authorizes a write and is not retained across invocations.
 
 ## Hook Boundary
 

@@ -14,11 +14,7 @@ import {
   requireMarkdown,
 } from "./input.js";
 import { observeRegion, type RegionObservation, type RegionOverlap } from "./region.js";
-import {
-  type Gate,
-  type WorktreeHooks,
-  worktreeHooksOption,
-} from "./configuration.js";
+import { type Gate, type WorktreeHooks, worktreeHooksOption } from "./configuration.js";
 import {
   contractId,
   type ChangeId,
@@ -64,8 +60,14 @@ import {
   type TimelineEntry,
   type VerificationStop,
 } from "../protocol/operations.js";
-import { settle, type SettlementReport } from "../settlement/settle.js";
-import { claimTaskHolder, releaseTaskHolder } from "../settlement/holder.js";
+import { deferredTaskHolderSettlement, settle, type SettlementReport } from "../settlement/settle.js";
+import {
+  claimTaskHolder,
+  claimTaskHolderWithFence,
+  releaseTaskHolder,
+  releaseTaskHolderWithFence,
+  type TaskHolderAdmission,
+} from "../settlement/holder.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
@@ -213,6 +215,24 @@ async function mutationResult<Value, PublicValue>(
     effects: [...(accepted.physical?.effects ?? []), ...reconciled.report.effects],
     lags: [...(accepted.physical?.lag ?? []), ...reconciled.report.lag],
     settlement,
+  };
+}
+async function holderMutationResult<Value, PublicValue, Refusal extends KeiyakuRefusal>(
+  scope: RepositoryScope,
+  id: ContractId,
+  admission: TaskHolderAdmission<IntentOutcome<Value, Refusal>>,
+  value: (result: Value) => PublicValue,
+  hooks: WorktreeHooks,
+): Promise<MutationResult<PublicValue>> {
+  const accepted = requireAccepted(admission.result);
+  if (admission.kind === "completed") return mutationResult(scope, id, accepted, value, hooks);
+  return {
+    facts: accepted.facts,
+    head: accepted.head,
+    value: value(accepted.value),
+    effects: [...(accepted.physical?.effects ?? [])],
+    lags: [...(accepted.physical?.lag ?? [])],
+    settlement: deferredTaskHolderSettlement({ contractId: id, taskId: admission.taskId, diagnostic: admission.diagnostic }),
   };
 }
 
@@ -363,7 +383,7 @@ export class KeiyakuHandle {
     const values = input === undefined ? undefined : requireInput(input, "abandon input");
     const hooks = worktreeHooksOption(values?.hooks);
     const note = optionalNonblank(values?.note, "abandon note");
-    const accepted = requireAccepted(abandonOperation({
+    const admission = await releaseTaskHolderWithFence(this.scope, this.id, () => abandonOperation({
       scope: this.scope,
       contractId: this.id,
       ...actorOption(values?.actor),
@@ -373,7 +393,7 @@ export class KeiyakuHandle {
         return companion === null ? [] : [companion];
       },
     }));
-    return mutationResult(this.scope, this.id, accepted, () => undefined, hooks);
+    return holderMutationResult(this.scope, this.id, admission, () => undefined, hooks);
   }
 
   async arc(input: ArcInput): Promise<MutationResult<void>> {
@@ -487,7 +507,7 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     normalizedGates(values.gates),
     normalizedList(values.after, "after", contractId),
   );
-  const admitted = bindOperation({
+  const bind = () => bindOperation({
     scope,
     title: document.title,
     terms,
@@ -499,9 +519,13 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     }),
     ...actor,
   });
-  const accepted = requireAccepted(admitted);
+  const admission = task === undefined ? null : await claimTaskHolderWithFence(scope, task, bind);
+  const accepted = requireAccepted(admission === null ? bind() : admission.result);
   const id = accepted.value.contractId;
-  const result = await mutationResult(scope, id, accepted, ({ contractId: contract }) => new KeiyakuHandle(contract, scope), hooks);
+  const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku => new KeiyakuHandle(contract, scope);
+  const result = admission === null
+    ? await mutationResult(scope, id, accepted, toHandle, hooks)
+    : await holderMutationResult(scope, id, admission, toHandle, hooks);
   return {
     facts: result.facts,
     head: result.head,

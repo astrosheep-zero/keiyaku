@@ -483,6 +483,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "task/compose.ts", allow: [types("world.ts"), any("markdown/diff.ts"), any("task/context.ts"), any("task/board.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/operations.ts"), any("task/store.ts")] },
     { source: "task/index.ts", allow: [types("world.ts"), any("task/board.ts"), any("task/compose.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/operations.ts"), any("task/store.ts")] },
     {
+      source: "settlement/fence.ts",
+      allow: [any("coordination/sqlite-transaction-lock.ts"), any("git/repository.ts"), types("task/identity.ts")],
+    },
+    {
       source: "settlement/holder.ts",
       allow: [
         any("core/facts/errors.ts"),
@@ -490,10 +494,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/types.ts"),
         any("git/read-observation.ts"),
         any("git/repository.ts"),
+        any("settlement/fence.ts"),
         any("task/identity.ts"),
       ],
     },
-    { source: "settlement/settle.ts", allow: [any("world.ts"), types("git/reconcile.ts"), types("git/repository.ts"), any("core/facts/types.ts"), any("settlement/holder.ts"), any("task/context.ts"), any("task/operations.ts"), types("task/identity.ts"), types("task/store.ts")] },
+    { source: "settlement/settle.ts", allow: [any("world.ts"), any("git/observe.ts"), any("git/read-observation.ts"), types("git/reconcile.ts"), types("git/repository.ts"), any("core/facts/types.ts"), any("settlement/fence.ts"), any("settlement/holder.ts"), any("task/context.ts"), any("task/operations.ts"), types("task/identity.ts"), types("task/store.ts")] },
     {
       source: "kanshi/read.ts",
       allow: [
@@ -638,6 +643,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "coordination/durable-file.ts", symbols: ["randomBytes"] }, { source: "git/verification.ts", symbols: ["randomBytes"] },
         { source: "git/identity.ts", symbols: ["createHash"] },
         { source: "git/tree.ts", symbols: ["createHash"] },
+        { source: "settlement/fence.ts", symbols: ["createHash"] },
         { source: "settlement/holder.ts", symbols: ["createHash"] },
         { source: "protocol/bind.ts", symbols: ["randomBytes"] },
         { source: "protocol/attempt.ts", symbols: ["randomBytes"] },
