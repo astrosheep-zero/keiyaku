@@ -47,6 +47,8 @@ test("cli-output owns the Contract mutation receipt grammar", () => {
   assert.match(text, /label `claim`/);
   assert.match(text, /mine ~ theirs/);
   assert.match(text, /byte-for-byte the serialization of that same public value/);
+  assert.match(text, /closed union discriminated by the\nliteral verbs `bind`, `amend`, `deliver`, `review`, `arc`, `abandon`, and\n`audit`/);
+  assert.match(text, /exhaustive on `verb`/);
   assert.match(text, /opaque Contract ID/);
   assert.match(text, /addressed Contract coordinate appears once/);
 });

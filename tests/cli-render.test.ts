@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
-import { contractId } from "../src/core/facts/types.js";
+import { contractHead, contractId } from "../src/core/facts/types.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderText } from "../src/cli/render/text.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 
-const head = "0123456789abcdef0123456789abcdef01234567";
+const root = resolve(import.meta.dirname, "..");
+const tsc = join(root, "node_modules", "typescript", "bin", "tsc");
+
+const head = contractHead("0123456789abcdef0123456789abcdef01234567");
 const entry = "01J00000000000000000000000";
 const wide = { columns: 200, color: false } as const;
 const narrow = { columns: 36, color: false } as const;
@@ -37,24 +44,90 @@ test("guidance text is the exact Markdown projection", () => {
   assert.equal(renderText({ kind: "guidance", contract: contractId("kei/show"), guidance }), guidance);
 });
 
-test("accepted mutation receipts start with outcome, verb, and the complete Contract coordinate", () => {
-  for (const verb of ["bind", "amend", "deliver", "review", "abandon"] as const) {
-    const contract = contractId(`kei/render-${verb}`);
-    const result: InvocationResult = {
+const blockedAuditReport = {
+  candidate: { kind: "blocked" as const, refusal: { kind: "worktree-missing" as const, contractId: contractId("kei/render-audit") } },
+  verification: { kind: "not-run" as const },
+  target: { kind: "not-observed" as const },
+};
+
+function acceptedMutation(
+  verb: "bind" | "amend" | "deliver" | "review" | "arc" | "abandon" | "audit",
+  contract = contractId(`kei/render-${verb}`),
+): InvocationResult {
+  const facts = [{
+    contract,
+    entry,
+    kind: verb === "review" || verb === "audit" ? "attestation" as const : verb,
+  }];
+  if (verb === "bind") {
+    return {
       kind: "accepted",
       verb,
       contract,
       head,
-      facts: [{ contract, entry, kind: verb === "review" ? "attestation" : verb }],
+      facts,
       effects: [],
       settlement: { actions: [], lags: [] },
+      target: null,
+      overlaps: [],
     };
+  }
+  if (verb === "amend") {
+    return {
+      kind: "accepted",
+      verb,
+      contract,
+      head,
+      facts,
+      effects: [],
+      settlement: { actions: [], lags: [] },
+      diff: "",
+      overlaps: [],
+    };
+  }
+  if (verb === "audit") {
+    return {
+      kind: "accepted",
+      verb,
+      contract,
+      head,
+      facts,
+      effects: [],
+      settlement: { actions: [], lags: [] },
+      report: blockedAuditReport,
+    };
+  }
+  return {
+    kind: "accepted",
+    verb,
+    contract,
+    head,
+    facts,
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+}
+
+test("accepted mutation receipts start with outcome, verb, and the complete Contract coordinate", () => {
+  for (const verb of ["bind", "amend", "deliver", "review", "arc", "abandon", "audit"] as const) {
+    const result = acceptedMutation(verb);
     const text = renderText(result);
-    assert.equal(text.split("\n")[0], `✓ ${verb} accepted — ${contract}`);
-    assert.match(text, new RegExp(`head ${head}`));
-    assert.match(text, new RegExp(`journal ${entry}`));
+    assert.equal(text.split("\n")[0], `✓ ${verb} accepted — ${result.contract}`);
+    if (verb !== "audit") {
+      assert.match(text, new RegExp(`head ${head}`));
+      assert.match(text, new RegExp(`journal ${entry}`));
+    }
     assertJsonIdentity(result);
   }
+});
+
+test("accepted audit dispatch is selected by verb", () => {
+  const result = acceptedMutation("audit", contractId("kei/render-audit-verb"));
+  const text = renderText(result, wide);
+  assert.match(text, /! candidate blocked/);
+  assert.doesNotMatch(text, /head /);
+  assert.doesNotMatch(text, /journal /);
+  assert.equal(result.kind === "accepted" && result.verb === "audit", true);
 });
 
 test("accepted text keeps facts before effects and changed effects before unchanged", () => {
@@ -264,7 +337,7 @@ test("accepted text keeps named stops under an accepted header", () => {
     kind: "accepted",
     verb: "deliver",
     contract,
-    head: null,
+    head,
     facts: [{ contract, entry, kind: "deliver" }],
     verificationReuse: { entry: "01J00000000000000000000001" as never, verdict: "satisfied" },
     verification: { refusal: { kind: "terminal", contractId: contract } },
@@ -295,7 +368,7 @@ test("accepted text keeps named stops under an accepted header", () => {
     kind: "accepted",
     verb: "review",
     contract,
-    head: null,
+    head,
     facts: [{ contract, entry, kind: "attestation" }],
     placement: { refusal: { kind: "delivery-missing", contractId: contract } },
     effects: [],
@@ -310,7 +383,7 @@ test("accepted text keeps named stops under an accepted header", () => {
     kind: "accepted",
     verb: "deliver",
     contract,
-    head: null,
+    head,
     facts: [],
     placement: {
       failure: "target-moved",
@@ -456,10 +529,11 @@ test("unavailable Region observation stays accepted", () => {
     kind: "accepted",
     verb: "amend",
     contract,
-    head: null,
+    head,
     facts: [],
     effects: [],
     settlement: { actions: [], lags: [] },
+    diff: "",
     overlapFailure: "kei/peer: malformed document",
   };
   const text = renderText(unavailable);
@@ -475,10 +549,11 @@ test("document diff text is labeled and byte-faithful", () => {
     kind: "accepted",
     verb: "amend",
     contract: contractId("kei/render-diff"),
-    head: null,
+    head,
     facts: [],
     effects: [],
     settlement: { actions: [], lags: [] },
+    overlaps: [],
     diff,
   };
   const text = renderText(result);
@@ -492,10 +567,12 @@ test("opaque coordinates keep consecutive spaces and hang their continuation", (
     kind: "accepted",
     verb: "amend",
     contract,
-    head: null,
+    head,
     facts: [],
     effects: [{ kind: "contract-file", path: spaced, action: "updated" }],
     settlement: { actions: [], lags: [] },
+    overlaps: [],
+    diff: "",
   };
   const wideText = renderText(result, wide);
   assert.equal(wideText.includes(spaced), true);
@@ -554,7 +631,7 @@ test("audit text emits a requested diff body once and omits it without the prese
     kind: "accepted",
     verb: "audit",
     contract,
-    head: null,
+    head,
     facts: [],
     effects: [],
     settlement: { actions: [], lags: [] },
@@ -591,7 +668,7 @@ test("audit text emits a requested diff body once and omits it without the prese
     kind: "accepted",
     verb: "audit",
     contract,
-    head: null,
+    head,
     facts: [],
     effects: [],
     settlement: { actions: [], lags: [] },
@@ -616,7 +693,7 @@ test("audit text emits a requested diff body once and omits it without the prese
     kind: "accepted",
     verb: "audit",
     contract,
-    head: null,
+    head,
     facts: [],
     effects: [],
     settlement: { actions: [], lags: [] },
@@ -640,4 +717,80 @@ test("audit text emits a requested diff body once and omits it without the prese
 test("observation text keeps the command and view data together", () => {
   const result: InvocationResult = { kind: "observation", command: "status", contracts: [] };
   assert.equal(renderText(result), 'observation status\n{\n  "contracts": []\n}');
+});
+
+test("impossible accepted combinations fail compilation", () => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-accepted-result-"));
+  const resultModule = join(root, "src/cli/result.js");
+  const indexModule = join(root, "src/index.js");
+  writeFileSync(join(directory, "consumer.ts"), `
+import { resultFromMutationCall } from ${JSON.stringify(join(root, "src/cli/accepted.js"))};
+import type { AcceptedResult } from ${JSON.stringify(resultModule)};
+import type { ContractId, MutationResult } from ${JSON.stringify(indexModule)};
+
+const contract = "kei/legal" as ContractId;
+const head = "0123456789abcdef0123456789abcdef01234567" as AcceptedResult["head"];
+const envelope = {
+  kind: "accepted" as const,
+  contract,
+  head,
+  facts: [] as const,
+  effects: [] as const,
+  settlement: { actions: [] as const, lags: [] as const },
+};
+const report = {
+  candidate: { kind: "blocked" as const, refusal: { kind: "worktree-missing" as const, contractId: contract } },
+  verification: { kind: "not-run" as const },
+  target: { kind: "not-observed" as const },
+};
+
+export const legal: readonly AcceptedResult[] = [
+  { ...envelope, verb: "bind", target: null, overlaps: [] },
+  { ...envelope, verb: "bind", target: "refs/heads/main", overlapFailure: "region failed" },
+  { ...envelope, verb: "amend", diff: "", overlaps: [] },
+  { ...envelope, verb: "amend", diff: "changed", overlapFailure: "region failed" },
+  { ...envelope, verb: "deliver" },
+  { ...envelope, verb: "review" },
+  { ...envelope, verb: "arc" },
+  { ...envelope, verb: "abandon" },
+  { ...envelope, verb: "audit", report },
+];
+
+const empty = { kind: "accepted" as const, contract, head, facts: [] as const, effects: [] as const, settlement: { actions: [] as const, lags: [] as const } };
+// @ts-expect-error deliver cannot carry an audit report
+export const deliverReport: AcceptedResult = { ...empty, verb: "deliver", report };
+// @ts-expect-error audit without report is invalid
+export const auditMissing: AcceptedResult = { ...empty, verb: "audit" };
+// @ts-expect-error review cannot carry a document diff
+export const reviewDiff: AcceptedResult = { ...empty, verb: "review", diff: "" };
+// @ts-expect-error bind without target is invalid
+export const bindNoTarget: AcceptedResult = { ...empty, verb: "bind", overlaps: [] };
+// @ts-expect-error bind without a Region answer is invalid
+export const bindNoRegion: AcceptedResult = { ...empty, verb: "bind", target: null };
+// @ts-expect-error amend without diff is invalid
+export const amendNoDiff: AcceptedResult = { ...empty, verb: "amend", overlaps: [] };
+// @ts-expect-error amend without a Region answer is invalid
+export const amendNoRegion: AcceptedResult = { ...empty, verb: "amend", diff: "" };
+// @ts-expect-error accepted head cannot be null
+export const nullHead: AcceptedResult = { ...empty, verb: "abandon", head: null };
+// @ts-expect-error accepted lag cannot be empty
+export const emptyLag: AcceptedResult = { ...empty, verb: "abandon", lag: [] };
+declare function mutationCall(): Promise<MutationResult<void>>;
+// @ts-expect-error accepted projection cannot disagree with the call verb
+export const mismatchedVerb = resultFromMutationCall("bind", mutationCall, () => ({ ...empty, verb: "deliver" }));
+`);
+  execFileSync(process.execPath, [
+    tsc,
+    "--noEmit",
+    "--strict",
+    "--exactOptionalPropertyTypes",
+    "--target",
+    "ES2023",
+    "--module",
+    "NodeNext",
+    "--moduleResolution",
+    "NodeNext",
+    "--skipLibCheck",
+    "consumer.ts",
+  ], { cwd: directory, stdio: "pipe" });
 });

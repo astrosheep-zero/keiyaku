@@ -1,5 +1,5 @@
 import type { AuditReport } from "../../index.js";
-import type { AcceptedResult } from "../result.js";
+import type { AcceptedAuditResult } from "../result.js";
 import {
   cleanupLines,
   leakLines,
@@ -119,16 +119,15 @@ function targetLines(target: AuditReport["target"], columns: number, addressed: 
   return lines;
 }
 
-function obligationLines(result: AcceptedResult, columns: number): readonly string[] {
+function obligationLines(result: AcceptedAuditResult, columns: number): readonly string[] {
   return [
     ...(result.cleanup === undefined ? [] : cleanupLines(result.cleanup, columns)),
     ...(result.leak === undefined ? [] : leakLines(result.leak, columns)),
   ];
 }
 
-export function renderAcceptedAudit(result: AcceptedResult, context?: TextRenderContext): string {
+export function renderAcceptedAudit(result: AcceptedAuditResult, context?: TextRenderContext): string {
   const report = result.report;
-  if (report === undefined) throw new Error("accepted audit is missing its report");
   const columns = context?.columns ?? 80;
   return [
     ...outcomeLines("✓", result.verb, "accepted", result.contract, columns),

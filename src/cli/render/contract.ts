@@ -2,7 +2,19 @@ import type {
   KeiyakuRetryReason,
   RegionOverlap,
 } from "../../index.js";
-import type { AcceptedResult, Effect, Lag, RetryResult } from "../result.js";
+import type {
+  AcceptedAbandonResult,
+  AcceptedAmendResult,
+  AcceptedArcResult,
+  AcceptedBindResult,
+  AcceptedDeliverResult,
+  AcceptedEnvelope,
+  AcceptedResult,
+  AcceptedReviewResult,
+  Effect,
+  Lag,
+  RetryResult,
+} from "../result.js";
 import { renderAcceptedAudit } from "./audit.js";
 import {
   appendHookPayload,
@@ -79,7 +91,7 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
   return lines;
 }
 
-function settlementLagRows(lag: AcceptedResult["settlement"]["lags"][number], columns: number): readonly string[] {
+function settlementLagRows(lag: AcceptedEnvelope["settlement"]["lags"][number], columns: number): readonly string[] {
   const lines: string[] = [];
   receiptRow(lines, "!", "settlement", [{ text: [
     `surface=${lag.surface}`,
@@ -91,7 +103,7 @@ function settlementLagRows(lag: AcceptedResult["settlement"]["lags"][number], co
 }
 
 function workspaceRows(
-  workspace: NonNullable<AcceptedResult["workspace"]>,
+  workspace: NonNullable<AcceptedReviewResult["workspace"]>,
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
@@ -122,9 +134,12 @@ function pushBlock(lines: string[], block: readonly string[]): void {
   lines.push(...block);
 }
 
-function acceptedRecord(result: AcceptedResult, columns: number): readonly string[] {
+function acceptedRecord(
+  result: AcceptedBindResult | AcceptedAmendResult | AcceptedDeliverResult | AcceptedReviewResult | AcceptedArcResult | AcceptedAbandonResult,
+  columns: number,
+): readonly string[] {
   const record: string[] = [];
-  receiptRow(record, " ", "head", [{ text: result.head ?? "null", opaque: true }], columns);
+  receiptRow(record, " ", "head", [{ text: result.head, opaque: true }], columns);
   for (const fact of result.facts) {
     const contract = fact.contract === result.contract ? [] : [{ text: fact.contract, opaque: true }];
     receiptRow(record, " ", "journal", [
@@ -133,13 +148,14 @@ function acceptedRecord(result: AcceptedResult, columns: number): readonly strin
       { text: `· ${fact.kind}` },
     ], columns);
   }
-  if (result.target !== undefined) {
+  if (result.verb === "bind") {
     receiptRow(record, " ", "target", [{ text: result.target ?? "null", opaque: true }], columns);
   }
-  pushBlock(record, reuseLines(result.verificationReuse, columns));
-  if (result.diff !== undefined) {
-    if (typeof result.diff === "string") receiptPayload(record, "diff", result.diff);
-    else receiptRow(record, " ", "diff", [{ text: `git-unavailable integrationSnapshot=${result.diff.integrationSnapshot} changeId=${result.diff.changeId}`, opaque: true }], columns);
+  if (result.verb === "deliver") {
+    pushBlock(record, reuseLines(result.verificationReuse, columns));
+  }
+  if (result.verb === "amend") {
+    receiptPayload(record, "diff", result.diff);
   }
   const changed = result.effects.filter(changedEffect);
   const unchanged = result.effects.filter((effect) => !changedEffect(effect));
@@ -154,16 +170,8 @@ function acceptedRecord(result: AcceptedResult, columns: number): readonly strin
   return record;
 }
 
-function acceptedObligations(result: AcceptedResult, columns: number): readonly string[] {
+function acceptedLagRows(result: AcceptedEnvelope, columns: number): readonly string[] {
   const obligations: string[] = [];
-  for (const name of ["verification", "placement"] as const) {
-    const stop = result[name];
-    if (stop !== undefined) {
-      obligations.push(...stopLines(name === "placement" ? "claim" : "verification", stop, columns, result.contract));
-    }
-  }
-  if (result.cleanup !== undefined) pushBlock(obligations, cleanupLines(result.cleanup, columns));
-  if (result.leak !== undefined) pushBlock(obligations, leakLines(result.leak, columns));
   if (result.lag !== undefined) {
     for (const lag of result.lag) pushBlock(obligations, lagRows(lag, columns));
   }
@@ -173,9 +181,34 @@ function acceptedObligations(result: AcceptedResult, columns: number): readonly 
   return obligations;
 }
 
-function acceptedDeviations(result: AcceptedResult, columns: number): readonly string[] {
+function acceptedObligations(
+  result: AcceptedDeliverResult | AcceptedReviewResult,
+  columns: number,
+): readonly string[] {
+  const obligations: string[] = [];
+  if (result.verb === "deliver" && result.verification !== undefined) {
+    obligations.push(...stopLines("verification", result.verification, columns, result.contract));
+  }
+  if (result.placement !== undefined) {
+    obligations.push(...stopLines("claim", result.placement, columns, result.contract));
+  }
+  if (result.verb === "deliver") {
+    if (result.cleanup !== undefined) pushBlock(obligations, cleanupLines(result.cleanup, columns));
+    if (result.leak !== undefined) pushBlock(obligations, leakLines(result.leak, columns));
+  }
+  obligations.push(...acceptedLagRows(result, columns));
+  return obligations;
+}
+
+function acceptedDeviations(
+  result: AcceptedBindResult | AcceptedAmendResult | AcceptedReviewResult,
+  columns: number,
+): readonly string[] {
   const deviations: string[] = [];
-  if (result.workspace !== undefined) pushBlock(deviations, workspaceRows(result.workspace, columns));
+  if (result.verb === "review") {
+    if (result.workspace !== undefined) pushBlock(deviations, workspaceRows(result.workspace, columns));
+    return deviations;
+  }
   if (result.overlaps !== undefined) pushBlock(deviations, overlapRows(result.overlaps, columns));
   if (result.overlapFailure !== undefined) {
     receiptRow(deviations, "~", "overlap", [{ text: "unavailable" }], columns);
@@ -184,15 +217,36 @@ function acceptedDeviations(result: AcceptedResult, columns: number): readonly s
   return deviations;
 }
 
-export function renderAccepted(result: AcceptedResult, context?: TextRenderContext): string {
-  if (result.report !== undefined) return renderAcceptedAudit(result, context);
+function renderAcceptedReceipt(
+  result: AcceptedBindResult | AcceptedAmendResult | AcceptedDeliverResult | AcceptedReviewResult | AcceptedArcResult | AcceptedAbandonResult,
+  context?: TextRenderContext,
+): string {
   const columns = context?.columns ?? 80;
   const lines = outcomeLines("✓", result.verb, "accepted", result.contract, columns);
-  const obligations = acceptedObligations(result, columns);
-  const deviations = acceptedDeviations(result, columns);
-  const record = acceptedRecord(result, columns);
-  lines.push(...obligations, ...deviations, ...record);
+  if (result.verb === "deliver" || result.verb === "review") {
+    lines.push(...acceptedObligations(result, columns));
+  } else {
+    lines.push(...acceptedLagRows(result, columns));
+  }
+  if (result.verb === "bind" || result.verb === "amend" || result.verb === "review") {
+    lines.push(...acceptedDeviations(result, columns));
+  }
+  lines.push(...acceptedRecord(result, columns));
   return lines.join("\n");
+}
+
+export function renderAccepted(result: AcceptedResult, context?: TextRenderContext): string {
+  switch (result.verb) {
+    case "audit":
+      return renderAcceptedAudit(result, context);
+    case "bind":
+    case "amend":
+    case "deliver":
+    case "review":
+    case "arc":
+    case "abandon":
+      return renderAcceptedReceipt(result, context);
+  }
 }
 
 export function renderRetry(result: RetryResult, context?: TextRenderContext): string {

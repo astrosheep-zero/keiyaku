@@ -3,7 +3,7 @@ import type {
   VerificationReuse,
   VerificationStop,
 } from "../../index.js";
-import type { AcceptedResult, Lag } from "../result.js";
+import type { AcceptedDeliverResult, Lag } from "../result.js";
 import { displayColumns, renderOpaqueBlock, safeText } from "./terminal.js";
 
 export type ReceiptSegment = Readonly<{ text: string; opaque?: boolean }>;
@@ -108,7 +108,7 @@ export function stopLines(
 }
 
 export function cleanupLines(
-  cleanup: NonNullable<AcceptedResult["cleanup"]>,
+  cleanup: NonNullable<AcceptedDeliverResult["cleanup"]>,
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
@@ -122,7 +122,7 @@ export function cleanupLines(
 }
 
 export function leakLines(
-  leak: NonNullable<AcceptedResult["leak"]>,
+  leak: NonNullable<AcceptedDeliverResult["leak"]>,
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];

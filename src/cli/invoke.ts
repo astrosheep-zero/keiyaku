@@ -1,7 +1,16 @@
 import { AkumaWorldScopeError, gatesFrom, Keiyaku, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type WorktreeHooks } from "../index.js";
 import { kanshi, selectKanshi, selectRegion, type KanshiRegionSelection } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
-import { resultFromMutationCall } from "./accepted.js";
+import {
+  acceptedAbandon,
+  acceptedAmend,
+  acceptedArc,
+  acceptedAudit,
+  acceptedBind,
+  acceptedDeliver,
+  acceptedReview,
+  resultFromMutationCall,
+} from "./accepted.js";
 import { amendFromCommand } from "./commands/amend.js";
 import { invokeAkuma, invokeAkumaStatus, type AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import { isParsedAkumaCommand, type ParsedAkumaCommand } from "./commands/akuma.js";
@@ -17,7 +26,7 @@ import type { WorldRoot } from "../world.js";
 import { assertExplicitRepoUse, resolveCliCoordinates } from "./coordinates.js";
 import { BindDraftError, preserveBindDraft } from "./draft.js";
 
-export type { AcceptedFact, DiffUnavailable, InvocationResult, Lag } from "./result.js";
+export type { AcceptedFact, InvocationResult, Lag } from "./result.js";
 
 type InvokeRuntime = Readonly<{
   cwd?: string;
@@ -154,12 +163,10 @@ async function invokeBind({ parsed, repo, edge, configuration, hooks, establishW
         ...(actor === undefined ? {} : { actor }),
         hooks,
       }),
-      {
-        project: (accepted) => {
-          const bound = accepted.facts.find((fact) => fact.kind === "bind");
-          if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
-          return { target: bound.data.coordinates.target ?? null };
-        },
+      (accepted) => {
+        const bound = accepted.facts.find((fact) => fact.kind === "bind");
+        if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
+        return acceptedBind(accepted, bound.data.coordinates.target ?? null);
       },
     );
     if (result.kind !== "refused") return result;
@@ -196,18 +203,9 @@ async function invokeDeliver(
     requireBranchesToBeUpToDate,
     includeDirty: parsed.includeDirty,
     hooks: seat.hooks,
-  }), {
+  }), (result) => acceptedDeliver(result, seat.id), {
     coordinate: seat.id,
     projectRefusal: deliverRefusal,
-    project: (result) => ({
-      obligations: {
-        ...(result.value.verification === undefined ? {} : { verification: result.value.verification }),
-        ...(result.value.verificationReuse === undefined ? {} : { verificationReuse: result.value.verificationReuse }),
-        ...(result.value.placement === undefined ? {} : { placement: result.value.placement }),
-        ...(result.value.cleanup === undefined ? {} : { cleanup: result.value.cleanup }),
-        ...(result.value.leak === undefined ? {} : { leak: result.value.leak }),
-      },
-    }),
   });
 }
 
@@ -222,13 +220,7 @@ async function invokeReview(
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
     ...(summary === undefined ? {} : { summary }),
     hooks: seat.hooks,
-  }), {
-    coordinate: seat.id,
-    project: (result) => ({
-      obligations: result.value.placement === undefined ? {} : { placement: result.value.placement },
-      workspace: result.value.workspace,
-    }),
-  });
+  }), (result) => acceptedReview(result, seat.id), { coordinate: seat.id });
 }
 
 async function invokeAudit(
@@ -245,16 +237,8 @@ async function invokeAudit(
       requireBranchesToBeUpToDate,
       hooks: seat.hooks,
     }),
-    {
-      coordinate: seat.id,
-      project: (result) => ({
-        report: result.value,
-        obligations: {
-          ...(result.cleanup === undefined ? {} : { cleanup: result.cleanup }),
-          ...(result.leak === undefined ? {} : { leak: result.leak }),
-        },
-      }),
-    },
+    (result) => acceptedAudit(result, seat.id),
+    { coordinate: seat.id },
   );
 }
 
@@ -281,6 +265,7 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
       return resultFromMutationCall(
         "amend",
         () => amendFromCommand({ command: parsed, repo, contract, markdown, gates, ...(actor === undefined ? {} : { actor }), hooks }),
+        (result) => acceptedAmend(result, id),
         { coordinate: id },
       );
     }
@@ -294,14 +279,14 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
           markdown,
           ...(actor === undefined ? {} : { actor }),
           hooks,
-        }), { coordinate: id });
+        }), (result) => acceptedArc(result, id), { coordinate: id });
     }
     case "abandon":
       return resultFromMutationCall("abandon", () => contract.abandon({
         ...(actor === undefined ? {} : { actor }),
         ...(parsed.note === undefined ? {} : { note: parsed.note }),
         hooks,
-      }), { coordinate: id });
+      }), (result) => acceptedAbandon(result, id), { coordinate: id });
     case "audit":
       return invokeAudit(parsed, seat, selectedGitPolicy(configuration));
     default:

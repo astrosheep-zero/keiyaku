@@ -1,21 +1,18 @@
 import type {
   AuditReport,
-  ChangeId,
   ContractId,
   Fact,
   MutationResult,
   PlacementStop,
   ReconcileReport,
-  RegionOverlap,
   Review,
-  SettlementReport,
-  SnapshotId,
   VerificationReuse,
   VerificationStop,
 } from "../index.js";
 import type { KanshiReport } from "../kanshi/index.js";
 import type { RegionRead, Section } from "../kanshi/index.js";
 import type { Catalog } from "../index.js";
+import type { RegionObservation } from "../library/region.js";
 
 export type BindDraftReceipt = Readonly<
   | { path: string; warning?: string }
@@ -32,33 +29,127 @@ export type AcceptedFact = Readonly<{
 
 export type Lag = ReconcileReport["lag"][number];
 
-export type DiffUnavailable = Readonly<{
-  reason: "git-unavailable";
-  integrationSnapshot: SnapshotId;
-  changeId: ChangeId;
+type MutationEnvelope = Pick<MutationResult<unknown>, "head" | "effects" | "settlement">;
+
+export type AcceptedEnvelope = Readonly<{
+  kind: "accepted";
+  contract: ContractId;
+  head: MutationEnvelope["head"];
+  facts: readonly AcceptedFact[];
+  effects: MutationEnvelope["effects"];
+  settlement: MutationEnvelope["settlement"];
+  lag?: readonly [Lag, ...Lag[]];
 }>;
 
-export type AcceptedResult = Readonly<{
-  kind: "accepted";
-  verb: string;
-  contract: ContractId;
-  head: string | null;
-  facts: readonly AcceptedFact[];
-  effects: readonly Effect[];
-  settlement: SettlementReport;
-  target?: string | null;
+export type AcceptedBindResult = AcceptedEnvelope & Readonly<{
+  verb: "bind";
+  target: string | null;
+  verification?: never;
+  verificationReuse?: never;
+  placement?: never;
+  cleanup?: never;
+  leak?: never;
+  report?: never;
+  workspace?: never;
+  diff?: never;
+}> & RegionObservation;
+
+export type AcceptedAmendResult = AcceptedEnvelope & Readonly<{
+  verb: "amend";
+  diff: string;
+  target?: never;
+  verification?: never;
+  verificationReuse?: never;
+  placement?: never;
+  cleanup?: never;
+  leak?: never;
+  report?: never;
+  workspace?: never;
+}> & RegionObservation;
+
+export type AcceptedDeliverResult = AcceptedEnvelope & Readonly<{
+  verb: "deliver";
   verification?: VerificationStop;
   verificationReuse?: VerificationReuse;
   placement?: PlacementStop;
   cleanup?: MutationResult<unknown>["cleanup"];
   leak?: MutationResult<unknown>["leak"];
-  overlaps?: readonly RegionOverlap[];
-  overlapFailure?: string;
-  report?: AuditReport;
-  workspace?: Review["workspace"];
-  diff?: string | DiffUnavailable;
-  lag?: readonly Lag[];
+  target?: never;
+  overlaps?: never;
+  overlapFailure?: never;
+  report?: never;
+  workspace?: never;
+  diff?: never;
 }>;
+
+export type AcceptedReviewResult = AcceptedEnvelope & Readonly<{
+  verb: "review";
+  placement?: PlacementStop;
+  workspace?: Review["workspace"];
+  target?: never;
+  verification?: never;
+  verificationReuse?: never;
+  cleanup?: never;
+  leak?: never;
+  overlaps?: never;
+  overlapFailure?: never;
+  report?: never;
+  diff?: never;
+}>;
+
+export type AcceptedArcResult = AcceptedEnvelope & Readonly<{
+  verb: "arc";
+  target?: never;
+  verification?: never;
+  verificationReuse?: never;
+  placement?: never;
+  cleanup?: never;
+  leak?: never;
+  overlaps?: never;
+  overlapFailure?: never;
+  report?: never;
+  workspace?: never;
+  diff?: never;
+}>;
+
+export type AcceptedAbandonResult = AcceptedEnvelope & Readonly<{
+  verb: "abandon";
+  target?: never;
+  verification?: never;
+  verificationReuse?: never;
+  placement?: never;
+  cleanup?: never;
+  leak?: never;
+  overlaps?: never;
+  overlapFailure?: never;
+  report?: never;
+  workspace?: never;
+  diff?: never;
+}>;
+
+export type AcceptedAuditResult = AcceptedEnvelope & Readonly<{
+  verb: "audit";
+  report: AuditReport;
+  cleanup?: MutationResult<unknown>["cleanup"];
+  leak?: MutationResult<unknown>["leak"];
+  target?: never;
+  verification?: never;
+  verificationReuse?: never;
+  placement?: never;
+  overlaps?: never;
+  overlapFailure?: never;
+  workspace?: never;
+  diff?: never;
+}>;
+
+export type AcceptedResult =
+  | AcceptedBindResult
+  | AcceptedAmendResult
+  | AcceptedDeliverResult
+  | AcceptedReviewResult
+  | AcceptedArcResult
+  | AcceptedAbandonResult
+  | AcceptedAuditResult;
 
 export type RefusedResult = Readonly<{
   kind: "refused";

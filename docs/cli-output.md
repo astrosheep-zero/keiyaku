@@ -117,7 +117,7 @@ Every invocation renders exactly one plain result object:
 
 | Kind | Product content | Exit |
 | --- | --- | --- |
-| `accepted` | `verb`, `contract`, public `head` and `facts`, observed `effects`, flat physical `lag`, `settlement`, optional independent obligation stops, presentation diff, and audit `report` when applicable | 0 |
+| `accepted` | closed Contract-mutation union discriminated by literal `bind` \| `amend` \| `deliver` \| `review` \| `arc` \| `abandon` \| `audit`; common envelope plus that verb's flat fields | 0 |
 | `refused` | typed refusal and observed grounds | 1 |
 | `retry` | exhausted, collision, or publication-failed detail; caller-addressed verbs use the caller's contract coordinate, while bind has no contract segment | 2 |
 | `observation` | view data, including observed effects when present | 0 |
@@ -218,10 +218,28 @@ object as typed lags. Text and JSON expose them without changing the Contract
 fact, command kind, or exit status. The adapter never hides the existing
 Contract or automatically abandons it.
 
-Bind, amend, deliver, review, and abandon share one Contract mutation receipt.
-The renderer remains a pure projection over `InvocationResult`: it invents no
-fields, rereads no authorities, and does not change exit semantics. JSON is
-byte-for-byte the serialization of that same public value.
+Accepted Contract mutation results are one closed union discriminated by the
+literal verbs `bind`, `amend`, `deliver`, `review`, `arc`, `abandon`, and
+`audit`. Reconcile remains an observation and is outside this union. The
+common envelope is `kind: "accepted"`, that literal `verb`, `contract`, the
+non-null mutation `head`, `facts`, `effects`, `settlement`, and optional
+nonempty reconciliation `lag`. Verb payloads stay flat on that object: bind
+requires `target` and exactly one Region answer (`overlaps` or
+`overlapFailure`); amend requires `diff`, including the empty string, and
+that same Region answer; deliver alone may carry `verification`,
+`verificationReuse`, `placement`, `cleanup`, and `leak`; review alone may
+carry `placement` and `workspace`; arc and abandon carry no verb-specific
+field; audit requires `report` and alone may carry its top-level `cleanup`
+and `leak`. An arm cannot carry another arm's fields. JSON remains that same
+flat value; there is no payload envelope, second schema, or compatibility
+arm.
+
+Bind, amend, deliver, review, arc, and abandon share one Contract mutation
+receipt. The renderer remains a pure projection over `InvocationResult`: it
+invents no fields, rereads no authorities, and does not change exit
+semantics. JSON is byte-for-byte the serialization of that same public value.
+Accepted renderer dispatch is exhaustive on `verb`; audit text is selected
+only by `verb: "audit"`.
 
 The receipt answers four things in a fixed order: the invocation verdict, the
 Contract identity, unresolved obligations, then deviations and the exact record.

@@ -834,6 +834,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("identity/coordinates.ts"),
         any("kanshi/index.ts"),
         any("library/address.ts", ["resolveNamedAddress"]),
+        types("library/region.ts", ["RegionObservation"]),
         any("settings.ts"),
         any("task/index.ts"),
         any("world.ts"),
