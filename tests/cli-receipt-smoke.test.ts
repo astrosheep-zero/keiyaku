@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -9,13 +9,23 @@ import test from "node:test";
 const root = resolve(import.meta.dirname, "..");
 const packagedCli = join(root, "build", "src", "cli", "index.js");
 
+if (!existsSync(packagedCli)) {
+  execFileSync("npm", ["run", "build"], { cwd: root, stdio: "inherit" });
+}
+
 type RunResult = Readonly<{ code: number; stdout: string; stderr: string }>;
+
+function cliEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env, NO_COLOR: "1" };
+  delete env.FORCE_COLOR;
+  return env;
+}
 
 function runCli(args: readonly string[], cwd: string, stdin = ""): Promise<RunResult> {
   return new Promise((resolveRun, reject) => {
     const child = spawn(process.execPath, [packagedCli, ...args], {
       cwd,
-      env: { ...process.env, NO_COLOR: "1" },
+      env: cliEnv(),
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -41,7 +51,7 @@ function runNarrowCli(args: readonly string[], cwd: string, stdin: string): Prom
   return new Promise((resolveRun, reject) => {
     const child = spawn("script", scriptArgs, {
       cwd,
-      env: { ...process.env, NO_COLOR: "1" },
+      env: cliEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -99,7 +109,32 @@ function repository(settings: Readonly<Record<string, unknown>>): string {
   return path;
 }
 
-test("built CLI renders bind, trailing-gate, complete, and narrow receipts", async () => {
+function assertAcceptedVocabulary(text: string): void {
+  assert.doesNotMatch(text, /! gate /u);
+  assert.doesNotMatch(text, /! gate placement|! gate verification/u);
+  assert.doesNotMatch(text, /refusal=|retry=|failure=/u);
+  assert.doesNotMatch(text, /files=|insertions=|deletions=/u);
+}
+
+function dirtiedWorkspace(path: string): void {
+  writeFileSync(join(path, "both.txt"), "staged\n");
+  git(path, ["add", "both.txt"]);
+  writeFileSync(join(path, "both.txt"), "unstaged\n");
+  writeFileSync(join(path, "new.txt"), "untracked\n");
+}
+
+function assertFitsOrOverflowsLawfully(text: string, columns: number): void {
+  for (const line of text.split("\n")) {
+    if ([...line].length <= columns) continue;
+    const lawful = line.startsWith("  ")
+      || /kei\/[a-z0-9-]+/u.test(line)
+      || /\/\S+/u.test(line)
+      || /\b[0-9a-f]{40}\b/u.test(line);
+    assert.equal(lawful, true, `incoherent overflow:\n${line}\n${text}`);
+  }
+}
+
+test("built CLI renders claim stop, dirty review, dirty refuse, clean review, and narrow receipts", async () => {
   const gatedRepo = repository({ gates: { default: ["reviewed"], empty: [] } });
   const bound = await runCli(["-C", gatedRepo, "bind", "--here", "--gates", "default", "-"], gatedRepo, document("Gated receipt smoke"));
   assert.equal(bound.code, 0, bound.stderr);
@@ -110,12 +145,51 @@ test("built CLI renders bind, trailing-gate, complete, and narrow receipts", asy
   const trailing = await runCli(["-C", gatedRepo, "deliver", contract], gatedRepo);
   assert.equal(trailing.code, 0, trailing.stderr);
   assert.match(trailing.stdout, /^✓ deliver accepted — /u);
-  assert.match(trailing.stdout, /! gate placement/u);
+  assert.match(trailing.stdout, /! claim gates-unsatisfied/u);
+  assertAcceptedVocabulary(trailing.stdout);
 
-  const reviewed = await runCli(["-C", gatedRepo, "review", contract, "--satisfied", "--summary", "packaged smoke"], gatedRepo);
+  const trailingJson = await runCli(["-C", gatedRepo, "deliver", contract, "--json"], gatedRepo);
+  assert.equal(trailingJson.code, 0, trailingJson.stderr);
+  const trailingValue = JSON.parse(trailingJson.stdout) as { placement?: { refusal?: { kind?: string } } };
+  assert.equal(trailingValue.placement?.refusal?.kind, "gates-unsatisfied");
+
+  const cleanReviewRepo = repository({ gates: { default: ["reviewed"], empty: [] } });
+  const cleanBound = await runCli(["-C", cleanReviewRepo, "bind", "--here", "--gates", "default", "-"], cleanReviewRepo, document("Clean review receipt smoke"));
+  assert.equal(cleanBound.code, 0, cleanBound.stderr);
+  const cleanContract = cleanBound.stdout.match(/kei\/[a-z0-9-]+/u)?.[0];
+  assert.ok(cleanContract, cleanBound.stdout);
+  const reviewed = await runCli(["-C", cleanReviewRepo, "review", cleanContract, "--satisfied", "--summary", "packaged smoke"], cleanReviewRepo);
   assert.equal(reviewed.code, 0, reviewed.stderr);
   assert.match(reviewed.stdout, /^✓ review accepted — /u);
-  assert.match(reviewed.stdout, /claimed|placement/u);
+  assert.match(reviewed.stdout, /! claim delivery-missing/u);
+  assert.doesNotMatch(reviewed.stdout, /~ workspace/u);
+  assertAcceptedVocabulary(reviewed.stdout);
+
+  const dirtyRepo = repository({ gates: { default: ["reviewed"], empty: [] } });
+  const dirtyBound = await runCli(["-C", dirtyRepo, "bind", "--here", "--gates", "default", "-"], dirtyRepo, document("Dirty receipt smoke"));
+  assert.equal(dirtyBound.code, 0, dirtyBound.stderr);
+  const dirtyContract = dirtyBound.stdout.match(/kei\/[a-z0-9-]+/u)?.[0];
+  assert.ok(dirtyContract, dirtyBound.stdout);
+  dirtiedWorkspace(dirtyRepo);
+
+  const dirtyReview = await runCli(["-C", dirtyRepo, "review", dirtyContract, "--satisfied", "--summary", "dirty packaged smoke"], dirtyRepo);
+  assert.equal(dirtyReview.code, 0, dirtyReview.stderr);
+  assert.match(dirtyReview.stdout, /^✓ review accepted — /u);
+  assert.match(dirtyReview.stdout, /~ workspace \d+ files? changed/u);
+  assert.match(dirtyReview.stdout, /  staged both\.txt/u);
+  assert.match(dirtyReview.stdout, /  unstaged both\.txt/u);
+  assert.match(dirtyReview.stdout, /  untracked new\.txt/u);
+  assert.doesNotMatch(dirtyReview.stdout, /staged=0|unstaged=0|untracked=0/u);
+  assertAcceptedVocabulary(dirtyReview.stdout);
+
+  const dirtyRefuse = await runCli(["-C", dirtyRepo, "deliver", dirtyContract], dirtyRepo);
+  assert.equal(dirtyRefuse.code, 1, dirtyRefuse.stderr);
+  assert.match(dirtyRefuse.stdout, /^! deliver refused — /u);
+  assert.match(dirtyRefuse.stdout, /dirty-workspace/u);
+  assert.match(dirtyRefuse.stdout, /\d+ files? changed/u);
+  assert.match(dirtyRefuse.stdout, /both\.txt/u);
+  assert.match(dirtyRefuse.stdout, /new\.txt/u);
+  assert.doesNotMatch(dirtyRefuse.stdout, /files=|insertions=|deletions=/u);
 
   const completeRepo = repository({ gates: { empty: [] } });
   const completeBind = await runCli(["-C", completeRepo, "bind", "--here", "--gates", "empty", "-"], completeRepo, document("Complete receipt smoke"));
@@ -125,10 +199,13 @@ test("built CLI renders bind, trailing-gate, complete, and narrow receipts", asy
   const complete = await runCli(["-C", completeRepo, "deliver", completeContract], completeRepo);
   assert.equal(complete.code, 0, complete.stderr);
   assert.match(complete.stdout, /^✓ deliver accepted — /u);
-  assert.doesNotMatch(complete.stdout, /! gate/u);
+  assert.doesNotMatch(complete.stdout, /! claim /u);
+  assertAcceptedVocabulary(complete.stdout);
 
   const narrowRepo = repository({ gates: { empty: [] } });
   const narrow = await runNarrowCli(["-C", narrowRepo, "bind", "--here", "--gates", "empty", "-"], narrowRepo, document("Narrow receipt smoke with a deliberately long title"));
   assert.equal(narrow.code, 0, narrow.stderr);
-  assert.match(narrow.stdout, /^✓ bind accepted —\n  kei\//u);
+  assert.match(narrow.stdout, /✓ bind accepted —/u);
+  assert.match(narrow.stdout, /kei\/[a-z0-9-]+/u);
+  assertFitsOrOverflowsLawfully(narrow.stdout, 36);
 });

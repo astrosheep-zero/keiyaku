@@ -1,5 +1,21 @@
 export type TextRenderContext = Readonly<{ columns: number; color: boolean }>;
 
+export type GitShortStat = Readonly<{
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}>;
+
+export function gitShortStat(stat: GitShortStat): string {
+  const files = stat.filesChanged === 1 ? "1 file changed" : `${stat.filesChanged} files changed`;
+  const parts = [files];
+  if (stat.insertions === 1) parts.push("1 insertion(+)");
+  else if (stat.insertions !== 0) parts.push(`${stat.insertions} insertions(+)`);
+  if (stat.deletions === 1) parts.push("1 deletion(-)");
+  else if (stat.deletions !== 0) parts.push(`${stat.deletions} deletions(-)`);
+  return parts.join(", ");
+}
+
 const GRAPHEMES = new Intl.Segmenter("und", { granularity: "grapheme" });
 
 const WIDE_RANGES = [

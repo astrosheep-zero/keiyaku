@@ -215,7 +215,10 @@ The public result taxonomy is not a visual section taxonomy. There are no
 
 ```text
 ✓ <verb> accepted — <complete kei/...>
-! gate <phase> · <unresolved public reason>
+! verification <typed stop kind and exact scalar facts>
+! claim <typed stop kind and exact scalar facts>
+~ workspace <N files changed, N insertions(+), N deletions(-)>
+  staged <complete path>
 ~ overlap <warning or witness>
 journal <entry> · <kind>
 ✓ ref <action> · <exact ref> · <before> -> <after>
@@ -240,12 +243,21 @@ trailing obligations never change the accepted verdict or exit status. The
 outcome glyphs and lowercase vocabulary remain the shared scanner vocabulary.
 
 Obligation rows come first and contain only unresolved verification or
-placement stops, lags, cleanup failures, and leaks. Deviation rows contain
-Region warnings, accepted review workspace bytes, and typed audit drift. The
-record tail contains admitted journal facts, head, bind `target`, deliver
-`verificationReuse`, normal Git effects, normal settlement actions, reports,
-and the document diff. Changed effects precede unchanged confirmations;
-unchanged effects remain visible.
+placement stops, lags, cleanup failures, and leaks. The public `placement`
+channel keeps that lifecycle and JSON name; text projects it to the lowercase
+label `claim`. Every obligation row uses its product subject as the label:
+`verification`, `claim`, `cleanup`, `leak`, `lag`, or `settlement`. Audit
+`report.attempt` is a verification attempt and renders as `verification`.
+Never render `gate` as the label for verification or claim, and never render
+the stop-union prefixes `refusal=`, `retry=`, or `failure=` inside an accepted
+receipt. The typed reason word is followed only by existing public scalar
+evidence. A foreign refusal coordinate appears only when it differs from the
+addressed Contract. `target-moved` uses `<expected> -> <observed>`. Deviation
+rows contain Region warnings, accepted review workspace bytes, and typed audit
+drift. The record tail contains admitted journal facts, head, bind `target`,
+deliver `verificationReuse`, normal Git effects, normal settlement actions,
+reports, and the document diff. Changed effects precede unchanged
+confirmations; unchanged effects remain visible.
 
 An opaque Contract ID, entry, ref, path, hash, diagnostic, or diff coordinate
 is indivisible. The renderer never inserts bytes, whitespace, ellipses, or a
@@ -284,18 +296,30 @@ An `unsealed-bytes` or `target-checkout-retained` lag does not turn an accepted
 result into a refusal or alter its exit status.
 
 A dirty-workspace refusal uses the refused header, then the refusal kind,
-classified path collections, complete-tree short statistic, and authorization
-option. The option is unavailable exactly when dirty submodule internals are
-present. JSON carries the same refusal facts plus the CLI-owned option
-projection. The renderer does not run Git or infer another path classification.
+classified path collections, Git shortstat wording from the public counts, and
+authorization option. The option is unavailable exactly when dirty submodule
+internals are present. JSON carries the same refusal facts plus the CLI-owned
+option projection. The renderer does not run Git or infer another path
+classification.
 
-An accepted review that observed ordinary dirty workspace bytes hangs a
-structured `workspace` disclosure under the Contract coordinate. It has no
+An accepted review that observed ordinary dirty workspace bytes hangs one
+`~ workspace` shortstat line and one evidence row per nonempty classification
+in public collection order. Empty classifications are omitted. A path present
+in staged and unstaged appears in both. A clean review has no workspace block.
+The block names uncommitted bytes sealed into the review ChangeId. It has no
 authorization option because review observes a projection. Dirty submodule
-internals still refuse before review admission.
+internals still refuse before review admission. The same shortstat wording is
+used in dirty-workspace refused text. Neither surface uses `files=`,
+`insertions=`, `deletions=`, or invented porcelain XY codes.
+
+The glyph column is the only lightweight grouping: `!` is an unresolved
+obligation, `~` is a neutral deviation, and record rows keep their existing
+low-weight, changed, and unchanged marks. There are no section headings or
+decorative blank-line groups.
 
 Each stop is independent: Verification never suppresses the placement attempt,
-and one accepted invocation may render both `! gate` rows. An environment
+and one accepted invocation may render both a `! verification` row and a
+`! claim` row. An environment
 failure keeps its command index and typed command failure in the obligation row.
 A declaration timeout is an unsatisfied attestation fact, not a stop. A failed
 scratch destroy command renders as an unresolved cleanup obligation without

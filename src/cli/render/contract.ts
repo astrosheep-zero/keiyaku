@@ -6,7 +6,7 @@ import type {
 } from "../../index.js";
 import type { AcceptedResult, Effect, Lag, RetryResult } from "../result.js";
 import { previewLines, reuseLines } from "./audit.js";
-import { displayColumns, renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
+import { displayColumns, gitShortStat, renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 type HookFailure = Extract<Lag, { kind: "worktree-hook-failed" }>["failure"];
 const HANG = "   ";
@@ -68,32 +68,29 @@ function retryLines(detail: KeiyakuRetryReason, indent: string, columns: number)
 }
 
 function stopLines(
-  name: string,
+  label: "verification" | "claim",
   stop: VerificationStop | PlacementStop | NonNullable<NonNullable<AcceptedResult["report"]>["attempt"]>,
   columns: number,
   addressed: string,
 ): readonly string[] {
-  const detail: string[] = [];
+  const detail: ReceiptSegment[] = [];
   if ("refusal" in stop && stop.refusal !== undefined) {
-    detail.push(`refusal=${stop.refusal.kind}`);
+    detail.push({ text: stop.refusal.kind });
     if ("contractId" in stop.refusal && stop.refusal.contractId !== addressed) {
-      detail.push(`contract=${stop.refusal.contractId}`);
+      detail.push({ text: `contract=${stop.refusal.contractId}`, opaque: true });
     }
   } else if ("retry" in stop && stop.retry !== undefined) {
-    detail.push(`retry=${stop.retry.kind}`);
+    detail.push({ text: stop.retry.kind });
   } else if ("failure" in stop) {
-    detail.push(`failure=${stop.failure}`);
+    detail.push({ text: stop.failure });
     if (stop.failure === "environment-failure" && "command" in stop) {
-      detail.push(`command=${stop.command}`, hookFailureSummary(stop.detail));
+      detail.push({ text: `command=${stop.command}` }, { text: hookFailureSummary(stop.detail), opaque: true });
     } else if (stop.failure === "target-moved") {
-      detail.push(`target=${stop.target}`, `expected=${stop.expected}`, `observed=${stop.observed}`);
+      detail.push({ text: stop.target, opaque: true }, { text: `${stop.expected} -> ${stop.observed}`, opaque: true });
     }
   }
   const lines: string[] = [];
-  receiptRow(lines, "!", "gate", [
-    { text: name },
-    { text: detail.join(" · "), opaque: true },
-  ], columns);
+  receiptRow(lines, "!", label, detail, columns);
   if ("failure" in stop && stop.failure === "environment-failure" && "command" in stop) {
     appendHookPayload(lines, stop.detail);
   }
@@ -184,12 +181,12 @@ function workspaceRows(
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
+  receiptRow(lines, "~", "workspace", [{ text: gitShortStat(workspace.shortStat) }], columns);
   for (const name of ["staged", "unstaged", "untracked"] as const) {
-    if (workspace[name].length === 0) receiptRow(lines, "!", "workspace", [{ text: `${name}=0` }], columns);
-    else for (const path of workspace[name]) receiptRow(lines, "!", "workspace", [{ text: name }, { text: path, opaque: true }], columns);
+    for (const path of workspace[name]) {
+      receiptRow(lines, " ", name, [{ text: path, opaque: true }], columns);
+    }
   }
-  const { filesChanged, insertions, deletions } = workspace.shortStat;
-  receiptRow(lines, "!", "workspace", [{ text: `files=${filesChanged} insertions=${insertions} deletions=${deletions}`, opaque: true }], columns);
   return lines;
 }
 
@@ -273,7 +270,9 @@ function acceptedObligations(result: AcceptedResult, columns: number): readonly 
   const leak = result.leak ?? result.report?.leak;
   for (const name of ["verification", "placement"] as const) {
     const stop = result[name];
-    if (stop !== undefined) obligations.push(...stopLines(name, stop, columns, result.contract));
+    if (stop !== undefined) {
+      obligations.push(...stopLines(name === "placement" ? "claim" : "verification", stop, columns, result.contract));
+    }
   }
   if (cleanup !== undefined) {
     receiptRow(obligations, "!", "cleanup", [
@@ -297,7 +296,7 @@ function acceptedObligations(result: AcceptedResult, columns: number): readonly 
     pushBlock(obligations, settlementLagRows(lag, columns));
   }
   if (result.report?.attempt !== undefined) {
-    obligations.push(...stopLines("audit", result.report.attempt, columns, result.contract));
+    obligations.push(...stopLines("verification", result.report.attempt, columns, result.contract));
   }
   return obligations;
 }
@@ -305,7 +304,7 @@ function acceptedObligations(result: AcceptedResult, columns: number): readonly 
 function acceptedDeviations(result: AcceptedResult, columns: number): readonly string[] {
   const deviations: string[] = [];
   if (result.report?.targetObservation?.drift === true) {
-    receiptRow(deviations, "!", "target", [{ text: `head=${result.report.targetObservation.head ?? "null"} drift=true`, opaque: true }], columns);
+    receiptRow(deviations, "~", "target", [{ text: `head=${result.report.targetObservation.head ?? "null"} drift=true`, opaque: true }], columns);
   }
   if (result.workspace !== undefined) pushBlock(deviations, workspaceRows(result.workspace, columns));
   if (result.overlaps !== undefined) pushBlock(deviations, overlapRows(result.overlaps, columns));

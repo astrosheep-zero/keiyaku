@@ -38,6 +38,9 @@ test("cli-output owns the Contract mutation receipt grammar", () => {
   assert.match(text, /✓ <verb> accepted/);
   assert.match(text, /! <verb> refused/);
   assert.match(text, /\? <verb> retry/);
+  assert.match(text, /! claim <typed stop kind and exact scalar facts>/);
+  assert.match(text, /~ workspace <N files changed, N insertions\(\+\), N deletions\(-\)>/);
+  assert.match(text, /label `claim`/);
   assert.match(text, /mine ~ theirs/);
   assert.match(text, /byte-for-byte the serialization of that same public value/);
   assert.match(text, /opaque Contract ID/);

@@ -174,7 +174,9 @@ test("dirty refusal and review workspace keep every classified path", () => {
   assert.equal(refusedText.split("both.txt").length - 1, 2);
   assert.equal(refusedText.includes("new.txt"), true);
   assert.match(refusedText, /submodules 0/);
-  assert.match(refusedText, /shortstat files=2 insertions=3 deletions=1/);
+  assert.match(refusedText, /2 files changed, 3 insertions\(\+\), 1 deletion\(-\)/);
+  assert.doesNotMatch(refusedText, /files=|insertions=|deletions=/);
+  assert.doesNotMatch(refusedText, /\b[MADCU ]{1,2}\b both\.txt/);
   assert.match(refusedText, /option --include-dirty available/);
   assertJsonIdentity(refused);
 
@@ -187,18 +189,56 @@ test("dirty refusal and review workspace keep every classified path", () => {
     effects: [],
     settlement: { actions: [], lags: [] },
     workspace: {
-      staged: ["tracked.txt"],
-      unstaged: [],
+      staged: ["both.txt", "tracked.txt"],
+      unstaged: ["both.txt"],
       untracked: ["new.txt"],
       shortStat: { filesChanged: 2, insertions: 3, deletions: 1 },
     },
   };
   const reviewText = renderText(review, wide);
   assert.equal(reviewText.split("\n")[0], `✓ review accepted — ${review.contract}`);
-  assert.match(reviewText, /workspace/);
-  assert.match(reviewText, /tracked\.txt/);
-  assert.match(reviewText, /new\.txt/);
+  assertBefore(reviewText, `✓ review accepted — ${review.contract}`, "~ workspace 2 files changed, 3 insertions(+), 1 deletion(-)");
+  assertBefore(reviewText, "~ workspace 2 files changed, 3 insertions(+), 1 deletion(-)", "  staged both.txt");
+  assertBefore(reviewText, "  staged both.txt", "  staged tracked.txt");
+  assertBefore(reviewText, "  staged tracked.txt", "  unstaged both.txt");
+  assertBefore(reviewText, "  unstaged both.txt", "  untracked new.txt");
+  assertBefore(reviewText, "  untracked new.txt", `journal ${entry}`);
+  assert.equal(reviewText.split("both.txt").length - 1, 2);
+  assert.doesNotMatch(reviewText, /unstaged=0|staged=0|untracked=0|files=|insertions=|deletions=/);
   assert.equal(reviewText.includes("--include-dirty"), false);
+  assert.doesNotMatch(reviewText, /! gate /);
+  assertJsonIdentity(review);
+
+  const singular: InvocationResult = {
+    kind: "accepted",
+    verb: "review",
+    contract: contractId("kei/render-singular-workspace"),
+    head,
+    facts: [{ contract: contractId("kei/render-singular-workspace"), entry, kind: "attestation" }],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+    workspace: {
+      staged: ["one.txt"],
+      unstaged: [],
+      untracked: [],
+      shortStat: { filesChanged: 1, insertions: 1, deletions: 1 },
+    },
+  };
+  const singularText = renderText(singular, wide);
+  assert.match(singularText, /~ workspace 1 file changed, 1 insertion\(\+\), 1 deletion\(-\)/);
+  assert.match(singularText, /  staged one\.txt/);
+  assert.doesNotMatch(singularText, /unstaged|untracked=0|files=/);
+
+  const clean: InvocationResult = {
+    kind: "accepted",
+    verb: "review",
+    contract: contractId("kei/render-clean-review"),
+    head,
+    facts: [{ contract: contractId("kei/render-clean-review"), entry, kind: "attestation" }],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+  assert.doesNotMatch(renderText(clean, wide), /~ workspace/);
 });
 
 test("catalog text renders only the selected identity layer", () => {
@@ -235,20 +275,57 @@ test("accepted text keeps named stops under an accepted header", () => {
   };
   const text = renderText(result, wide);
   assert.equal(text.split("\n")[0], `✓ deliver accepted — ${contract}`);
-  assertBefore(text, "! gate verification", "! gate placement");
-  assertBefore(text, "! gate placement", "· ref unchanged");
+  assertBefore(text, "! verification terminal", "! claim exhausted");
+  assertBefore(text, "! claim exhausted", "! leak");
+  assertBefore(text, "! leak", `journal ${entry} · deliver`);
   assertBefore(text, `journal ${entry} · deliver`, "reuse verification");
   assertBefore(text, "reuse verification 01J00000000000000000000001 satisfied", "· ref unchanged");
-  assert.match(text, /refusal=terminal/);
+  assert.doesNotMatch(text, /! gate /);
+  assert.doesNotMatch(text, /refusal=|retry=|failure=/);
   assert.match(text, /terminal/);
   assert.equal(text.split(contract).length - 1, 1);
   assert.equal(text.includes("contractId="), false);
-  assert.match(text, /retry/);
   assert.match(text, /exhausted/);
   assert.match(text, /! leak worktree \/tmp\/keiyaku-v4-verify-leak/u);
   assert.match(text, /diagnostic\n\nworktree remove failed/u);
   assert.equal(text.includes("{"), false);
   assertJsonIdentity(result);
+
+  const claimStops: InvocationResult = {
+    kind: "accepted",
+    verb: "review",
+    contract,
+    head: null,
+    facts: [{ contract, entry, kind: "attestation" }],
+    placement: { refusal: { kind: "delivery-missing", contractId: contract } },
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+  const claimText = renderText(claimStops, wide);
+  assert.match(claimText, /! claim delivery-missing/);
+  assert.doesNotMatch(claimText, /! gate |refusal=/);
+  assert.equal("placement" in claimStops, true);
+
+  const moved: InvocationResult = {
+    kind: "accepted",
+    verb: "deliver",
+    contract,
+    head: null,
+    facts: [],
+    placement: {
+      failure: "target-moved",
+      contractId: contract,
+      target: "refs/heads/main",
+      expected: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      observed: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    },
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+  const movedText = renderText(moved, wide);
+  assert.match(movedText, /! claim target-moved/);
+  assert.match(movedText, /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -> bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/);
+  assert.doesNotMatch(movedText, /failure=|expected=|observed=/);
 });
 
 test("accepted audit deviations and diagnostics keep their slots and bytes", () => {
@@ -279,9 +356,10 @@ test("accepted audit deviations and diagnostics keep their slots and bytes", () 
     settlement: { actions: [], lags: [] },
   };
   const text = renderText(result, wide);
-  assertBefore(text, "! gate placement", "! target");
-  assertBefore(text, "! target", "head");
-  assertBefore(text, "! cleanup", "head");
+  assertBefore(text, "! claim target-placement-failed", "! cleanup");
+  assertBefore(text, "! cleanup", "~ target");
+  assertBefore(text, "~ target", "head");
+  assert.doesNotMatch(text, /! gate |failure=/);
   assert.equal(text.split("report cleanup").length, 1);
   assert.equal(text.split("report leak").length, 1);
   for (const payload of ["stop first\nstop second", "cleanup first\ncleanup second", "leak first\nleak second"]) {
@@ -441,6 +519,8 @@ test("addressed Contract ID appears once on a refusal receipt", () => {
   assert.equal(text.split("\n")[0], `! deliver refused — ${contract}`);
   assert.equal(text.split(contract).length - 1, 1);
   assert.equal(text.includes("contractId="), false);
+  assert.match(text, /1 file changed, 1 insertion\(\+\)/);
+  assert.doesNotMatch(text, /files=|insertions=|deletions=/);
   assertJsonIdentity(refused);
 });
 

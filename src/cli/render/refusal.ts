@@ -1,6 +1,6 @@
 import type { BindDraftReceipt, RefusedResult } from "../result.js";
 import type { KeiyakuRefusal } from "../../index.js";
-import { displayColumns, renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
+import { displayColumns, gitShortStat, renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 type DirtyWithOption = Extract<KeiyakuRefusal, { kind: "dirty-workspace" }> & {
   option?: Readonly<{ flag: string; available: boolean }>;
@@ -53,8 +53,7 @@ function renderDirtyRefusal(
   for (const name of ["staged", "unstaged", "untracked", "submodules"] as const) {
     lines.push(...collectionLines(name, refusal[name], indent, columns));
   }
-  const { filesChanged, insertions, deletions } = refusal.shortStat;
-  wrap(lines, `shortstat files=${filesChanged} insertions=${insertions} deletions=${deletions}`, indent, columns);
+  wrap(lines, gitShortStat(refusal.shortStat), indent, columns);
   if (refusal.option !== undefined) {
     wrap(lines, `option ${refusal.option.flag} ${refusal.option.available ? "available" : "unavailable"}`, indent, columns);
   }
