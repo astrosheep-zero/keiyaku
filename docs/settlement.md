@@ -95,6 +95,13 @@ Settlement has exactly these rules:
    namespace context installed or repaired. The default namespace is the
    ContractId's human contract segment. A valid local override is kept.
 
+Settlement observes TaskHolder authority only when at least one candidate is
+terminal, because only `claimed` and `abandoned` candidates can reach a Task
+rule. A call with no applicable Task rule performs no TaskHolder observation;
+namespace settlement still runs from the supplied Contract state and Git
+effects. A terminal candidate still uses the initial locator and the fresh
+fenced observation defined above.
+
 It has no Akuma rule. New rules require an owner-law change here; there is no
 event bus, registry, provider interface, or generic lifecycle-hook vocabulary.
 
@@ -158,9 +165,11 @@ reconciliation repeats Git reconciliation and the same settlement rules. Task
 predecessor-byte comparison remains the Task write adjudicator; concurrent
 movement becomes a lag and is reconsidered later.
 World reconciliation reads and validates one immutable TaskHolder projection
-as a locator, then settles Contracts sequentially. Each possible Task write is
-decided again from one complete frozen projection inside that Task's fence; the
-locator never authorizes a write and is not retained across invocations.
+as a locator when at least one terminal candidate can reach a Task rule, then
+settles Contracts sequentially. When no Task rule can apply, it skips that
+projection. Each possible Task write is decided again from one complete frozen
+projection inside that Task's fence; the locator never authorizes a write and
+is not retained across invocations.
 
 ## Hook Boundary
 
