@@ -168,11 +168,66 @@ function fileChangeCall(name: string, path: string | undefined): ToolCall | unde
   return undefined;
 }
 
+function startedPath(name: string, value: Readonly<Record<string, unknown>>): string | undefined {
+  if (name === "NotebookEdit") return nonblank(value.notebook_path);
+  return nonblank(value.file_path) ?? (name === "Read" ? nonblank(value.path) : undefined);
+}
+
+function nonnegativeInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function fileChange(
+  op: "add" | "update",
+  path: string,
+  gitDiff: unknown,
+): Extract<ToolCall, { kind: "fileChange" }> {
+  const diff = object(gitDiff);
+  const added = nonnegativeInt(diff?.additions);
+  const removed = nonnegativeInt(diff?.deletions);
+  const diffstat = added === undefined || removed === undefined ? undefined : { added, removed };
+  return {
+    kind: "fileChange",
+    changes: [{ op, path, ...(diffstat === undefined ? {} : { diffstat }) }],
+  };
+}
+
+function writeResult(result: unknown): ToolCall | undefined {
+  const value = object(result);
+  if (value === undefined || (value.type !== "create" && value.type !== "update")) return undefined;
+  const path = nonblank(value.filePath);
+  if (path === undefined) return undefined;
+  const op = value.type === "create" ? "add" : "update";
+  return fileChange(op, path, value.gitDiff);
+}
+
+function editResult(result: unknown): ToolCall | undefined {
+  const value = object(result);
+  if (value === undefined || value.type === "create" || value.type === "update") return undefined;
+  const path = nonblank(value.filePath);
+  if (path === undefined) return undefined;
+  const status = object(value.gitDiff)?.status;
+  return fileChange(status === "added" ? "add" : "update", path, value.gitDiff);
+}
+
+function notebookResult(result: unknown): ToolCall | undefined {
+  const path = nonblank(object(result)?.notebook_path);
+  return path === undefined
+    ? undefined
+    : { kind: "fileChange", changes: [{ op: "update", path }] };
+}
+
+function structuredFileChange(name: string, result: unknown): ToolCall | undefined {
+  if (name === "Write") return writeResult(result);
+  if (name === "Edit") return editResult(result);
+  return name === "NotebookEdit" ? notebookResult(result) : undefined;
+}
+
 function toolCall(name: string, input: unknown): ToolCall {
   const value = object(input) ?? {};
   const run = runCall(name, value);
   if (run !== undefined) return run;
-  const path = nonblank(value.file_path) ?? (name === "Read" ? nonblank(value.path) : undefined);
+  const path = startedPath(name, value);
   return readCall(name, path, value)
     ?? searchCall(name, value)
     ?? fileChangeCall(name, path)
@@ -221,9 +276,17 @@ function toolResultEvents(
     const observed = state.tools.get(id);
     if (observed === undefined) continue;
     state.tools.delete(id);
+    const failed = value.is_error === true;
+    const structured = failed
+      ? undefined
+      : structuredFileChange(observed.name, message.tool_use_result);
     events.emit({
-      type: "tool", phase: "completed", id, name: observed.name, call: observed.call,
-      result: { status: value.is_error === true ? "error" : "ok" },
+      type: "tool",
+      phase: "completed",
+      id,
+      name: observed.name,
+      call: structured ?? observed.call,
+      result: { status: failed ? "error" : "ok" },
     });
   }
 }

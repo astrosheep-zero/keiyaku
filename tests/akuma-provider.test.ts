@@ -1501,6 +1501,40 @@ function claudeToolCall(name: string, input: unknown): Extract<AgentEvent, { typ
   return event.type === "tool" ? event.call : { kind: "other", display: "missing" };
 }
 
+function claudeToolLifecycle(
+  name: string,
+  input: unknown,
+  result: Readonly<{
+    is_error?: boolean;
+    tool_use_id?: string;
+    tool_use_result?: unknown;
+  }> = {},
+): readonly Extract<AgentEvent, { type: "tool" }>[] {
+  const events = new CollectingChannel();
+  const state = { tools: new Map() };
+  emitClaudeMessage({
+    type: "assistant",
+    uuid: "assistant-tools",
+    session_id: "session-tools",
+    parent_tool_use_id: null,
+    message: { content: [{ type: "tool_use", id: "tool-1", name, input }] },
+  } as unknown as SDKMessage, events, state);
+  emitClaudeMessage({
+    type: "user",
+    session_id: "session-tools",
+    parent_tool_use_id: null,
+    message: {
+      content: [{
+        type: "tool_result",
+        tool_use_id: result.tool_use_id ?? "tool-1",
+        is_error: result.is_error,
+      }],
+    },
+    ...(result.tool_use_result === undefined ? {} : { tool_use_result: result.tool_use_result }),
+  } as unknown as SDKMessage, events, state);
+  return events.collected.flatMap((event) => event.type === "tool" ? [event] : []);
+}
+
 function piToolCall(name: string, args: unknown): Extract<AgentEvent, { type: "tool" }>["call"] {
   const [event] = translatePiEvent({
     type: "tool_execution_start",
@@ -1636,7 +1670,12 @@ test("Claude, Pi, and OpenCode keep native fallbacks and name precedence", () =>
     { name: "WebSearch", input: { path: "ignored" }, call: { kind: "other", display: "WebSearch" } },
     { name: "Write", input: { file_path: "src/a.ts" }, call: { kind: "fileChange", changes: [{ op: "add", path: "src/a.ts" }] } },
     { name: "Edit", input: { file_path: "src/a.ts" }, call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] } },
-    { name: "NotebookEdit", input: { file_path: "n.ipynb" }, call: { kind: "fileChange", changes: [{ op: "update", path: "n.ipynb" }] } },
+    {
+      name: "NotebookEdit",
+      input: { notebook_path: "n.ipynb" },
+      call: { kind: "fileChange", changes: [{ op: "update", path: "n.ipynb" }] },
+    },
+    { name: "NotebookEdit", input: { file_path: "n.ipynb" }, call: { kind: "other", display: "NotebookEdit" } },
     { name: "Write", input: {}, call: { kind: "other", display: "Write" } },
   ];
   for (const { name, input, call } of claude) assert.deepEqual(claudeToolCall(name, input), call);
@@ -1672,6 +1711,133 @@ test("Claude, Pi, and OpenCode keep native fallbacks and name precedence", () =>
     if (call === undefined) assert.equal(opencodeToolEvent(name, input), undefined);
     else assert.deepEqual(opencodeToolCall(name, input), call);
   }
+});
+
+test("Claude file tools preserve native start paths and structured results", () => {
+  const started = claudeToolLifecycle("Write", { file_path: "src/a.ts" })[0];
+  assert.deepEqual(started, {
+    type: "tool",
+    phase: "started",
+    id: "tool-1",
+    name: "Write",
+    call: { kind: "fileChange", changes: [{ op: "add", path: "src/a.ts" }] },
+  });
+
+  const create = claudeToolLifecycle("Write", { file_path: "src/a.ts" }, {
+    tool_use_result: {
+      type: "create",
+      filePath: "src/created.ts",
+      gitDiff: { additions: 3, deletions: 0 },
+    },
+  });
+  assert.deepEqual(create[1], {
+    type: "tool",
+    phase: "completed",
+    id: "tool-1",
+    name: "Write",
+    call: {
+      kind: "fileChange",
+      changes: [{ op: "add", path: "src/created.ts", diffstat: { added: 3, removed: 0 } }],
+    },
+    result: { status: "ok" },
+  });
+
+  const writeUpdate = claudeToolLifecycle("Write", { file_path: "src/a.ts" }, {
+    tool_use_result: { type: "update", filePath: "src/updated.ts" },
+  });
+  assert.deepEqual(writeUpdate[1]?.call, {
+    kind: "fileChange",
+    changes: [{ op: "update", path: "src/updated.ts" }],
+  });
+
+  const invalidCounts = claudeToolLifecycle("Write", { file_path: "src/a.ts" }, {
+    tool_use_result: {
+      type: "update",
+      filePath: "src/a.ts",
+      gitDiff: { additions: 1.5, deletions: 2 },
+    },
+  });
+  assert.deepEqual(invalidCounts[1]?.call, {
+    kind: "fileChange",
+    changes: [{ op: "update", path: "src/a.ts" }],
+  });
+
+  const addedEdit = claudeToolLifecycle("Edit", { file_path: "src/a.ts" }, {
+    tool_use_result: {
+      filePath: "src/new.ts",
+      gitDiff: { status: "added", additions: 4, deletions: 0 },
+    },
+  });
+  assert.deepEqual(addedEdit[1]?.call, {
+    kind: "fileChange",
+    changes: [{ op: "add", path: "src/new.ts", diffstat: { added: 4, removed: 0 } }],
+  });
+
+  const modifiedEdit = claudeToolLifecycle("Edit", { file_path: "src/a.ts" }, {
+    tool_use_result: {
+      filePath: "src/a.ts",
+      gitDiff: { status: "modified", additions: 1, deletions: 2 },
+    },
+  });
+  assert.deepEqual(modifiedEdit[1]?.call, {
+    kind: "fileChange",
+    changes: [{ op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 2 } }],
+  });
+
+  const notebook = claudeToolLifecycle("NotebookEdit", { notebook_path: "n.ipynb" }, {
+    tool_use_result: { notebook_path: "renamed.ipynb" },
+  });
+  assert.deepEqual(notebook[0]?.call, {
+    kind: "fileChange",
+    changes: [{ op: "update", path: "n.ipynb" }],
+  });
+  assert.deepEqual(notebook[1]?.call, {
+    kind: "fileChange",
+    changes: [{ op: "update", path: "renamed.ipynb" }],
+  });
+
+  const failed = claudeToolLifecycle("Write", { file_path: "src/a.ts" }, {
+    is_error: true,
+    tool_use_result: {
+      type: "create",
+      filePath: "src/created.ts",
+      gitDiff: { additions: 9, deletions: 0 },
+    },
+  });
+  assert.deepEqual(failed[1], {
+    type: "tool",
+    phase: "completed",
+    id: "tool-1",
+    name: "Write",
+    call: { kind: "fileChange", changes: [{ op: "add", path: "src/a.ts" }] },
+    result: { status: "error" },
+  });
+
+  const missing = claudeToolLifecycle("Write", { file_path: "src/a.ts" });
+  assert.deepEqual(missing[1]?.call, {
+    kind: "fileChange",
+    changes: [{ op: "add", path: "src/a.ts" }],
+  });
+  assert.equal(missing[1]?.result?.status, "ok");
+
+  const mismatched = claudeToolLifecycle("Write", { file_path: "src/a.ts" }, {
+    tool_use_id: "other-tool",
+    tool_use_result: { type: "create", filePath: "src/created.ts" },
+  });
+  assert.equal(mismatched.length, 1);
+  assert.equal(mismatched[0]?.phase, "started");
+
+  const malformed = claudeToolLifecycle("Edit", { file_path: "src/a.ts" }, {
+    tool_use_result: { type: "create", filePath: "src/created.ts", gitDiff: { additions: 1, deletions: 0 } },
+  });
+  assert.deepEqual(malformed[1], {
+    type: "tool",
+    phase: "completed",
+    id: "tool-1",
+    name: "Edit",
+    call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] },
+    result: { status: "ok" },
+  });
 });
 
 function fakeCodex(
