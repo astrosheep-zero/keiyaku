@@ -203,9 +203,9 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
   if (acceptedAudit.kind !== "accepted") return;
   assert.deepEqual(acceptedAudit.facts.map((fact) => fact.kind), ["attestation"]);
   assert.match(acceptedAudit.report?.leak?.diagnostic ?? "", /forced verification cleanup failure/);
-  assert.equal(renderText(acceptedAudit, { columns: 400, color: false }).includes(
-    `leak worktree ${acceptedAudit.report!.leak!.path} ${acceptedAudit.report!.leak!.diagnostic.trimEnd()}`,
-  ), true);
+  const acceptedText = renderText(acceptedAudit, { columns: 400, color: false });
+  assert.equal(acceptedText.includes(acceptedAudit.report!.leak!.path), true);
+  assert.equal(acceptedText.includes(acceptedAudit.report!.leak!.diagnostic.trimEnd()), true);
   accepted.raw.run(["worktree", "remove", "--force", acceptedAudit.report!.leak!.path]);
 
   const observed = await bindAndDeliver("kill -TERM $$");
@@ -221,9 +221,8 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
   assert.match(leak?.diagnostic ?? "", /forced verification cleanup failure/);
   const observedText = renderText(observationAudit, { columns: 400, color: false });
   assert.match(observedText, /unknown-exit/);
-  assert.equal(observedText.includes(
-    `leak worktree ${leak!.path} ${leak!.diagnostic.trimEnd()}`,
-  ), true);
+  assert.equal(observedText.includes(leak!.path), true);
+  assert.equal(observedText.includes(leak!.diagnostic.trimEnd()), true);
   observed.raw.run(["worktree", "remove", "--force", leak!.path]);
 });
 

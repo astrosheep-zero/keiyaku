@@ -40,8 +40,8 @@ test("cli-output owns the Contract mutation receipt grammar", () => {
   assert.match(text, /\? <verb> retry/);
   assert.match(text, /mine ~ theirs/);
   assert.match(text, /byte-for-byte the serialization of that same public value/);
-  assert.match(text, /Exact coordinates are opaque facts/);
-  assert.match(text, /same addressed `contractId` is not/);
+  assert.match(text, /opaque Contract ID/);
+  assert.match(text, /addressed Contract coordinate appears once/);
 });
 
 type DocumentationSize = "normal" | "warning" | "error";

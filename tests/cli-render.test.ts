@@ -50,10 +50,9 @@ test("accepted mutation receipts start with outcome, verb, and the complete Cont
       settlement: { actions: [], lags: [] },
     };
     const text = renderText(result);
-    assert.equal(text.split("\n")[0], `✓ ${verb} accepted`);
-    assert.equal(text.split("\n")[1], `└─ ${contract}`);
+    assert.equal(text.split("\n")[0], `✓ ${verb} accepted — ${contract}`);
     assert.match(text, new RegExp(`head ${head}`));
-    assert.match(text, new RegExp(`fact ${entry}`));
+    assert.match(text, new RegExp(`journal ${entry}`));
     assertJsonIdentity(result);
   }
 });
@@ -82,7 +81,7 @@ test("accepted text keeps facts before effects and changed effects before unchan
     settlement: { actions: [], lags: [] },
   };
   const text = renderText(result, wide);
-  assertBefore(text, `fact ${entry} deliver`, "effects");
+  assertBefore(text, `journal ${entry} · deliver`, "✓ ref updated");
   assertBefore(text, "✓ ref updated", "· ref unchanged");
   assertJsonIdentity(result);
 });
@@ -110,9 +109,10 @@ test("accepted text exposes target checkout alignment and retention", () => {
     settlement: { actions: [], lags: [] },
   };
   const text = renderText(result, wide);
-  assertBefore(text, "effects", "lag");
+  assertBefore(text, "! lag target-checkout-retained", "✓ target-checkout followed");
   assert.match(text, /✓ target-checkout followed refs\/heads\/main \/repo/);
-  assert.match(text, /target-checkout-retained refs\/heads\/main \/repo\/peer local bytes overlap/);
+  assert.match(text, /target-checkout-retained refs\/heads\/main \/repo\/peer/);
+  assert.match(text, /diagnostic\n\nlocal bytes overlap/u);
 });
 
 test("typed refusal and retry keep structured facts without one-line JSON", () => {
@@ -124,8 +124,7 @@ test("typed refusal and retry keep structured facts without one-line JSON", () =
     refusal: { kind: "integration-failed", reason: "not-based-on-target", targetHead: "target-head", contractId: contract },
   };
   const refusedText = renderText(refused, wide);
-  assert.equal(refusedText.split("\n")[0], "! deliver refused");
-  assert.equal(refusedText.split("\n")[1], `└─ ${contract}`);
+  assert.equal(refusedText.split("\n")[0], `! deliver refused — ${contract}`);
   assert.match(refusedText, /integration-failed/);
   assert.match(refusedText, /reason=not-based-on-target/);
   assert.match(refusedText, /targetHead=target-head/);
@@ -145,9 +144,10 @@ test("typed refusal and retry keep structured facts without one-line JSON", () =
     detail: { kind: "publication-failed", diagnostic: "lock held" },
   };
   const retryText = renderText(amendRetry, wide);
-  assert.equal(retryText.split("\n")[0], "? amend retry");
+  assert.equal(retryText.split("\n")[0], `? amend retry — ${amendRetry.contract}`);
   assert.match(retryText, /kei\/render-retry/);
-  assert.match(retryText, /publication-failed diagnostic=lock held/);
+  assert.match(retryText, /publication-failed/u);
+  assert.match(retryText, /diagnostic\n\nlock held/u);
   assert.equal(retryText.includes("{"), false);
 });
 
@@ -169,7 +169,7 @@ test("dirty refusal and review workspace keep every classified path", () => {
     },
   };
   const refusedText = renderText(refused, wide);
-  assert.equal(refusedText.split("\n")[0], "! deliver refused");
+  assert.equal(refusedText.split("\n")[0], `! deliver refused — ${contract}`);
   assert.match(refusedText, /dirty-workspace/);
   assert.equal(refusedText.split("both.txt").length - 1, 2);
   assert.equal(refusedText.includes("new.txt"), true);
@@ -194,7 +194,7 @@ test("dirty refusal and review workspace keep every classified path", () => {
     },
   };
   const reviewText = renderText(review, wide);
-  assert.equal(reviewText.split("\n")[0], "✓ review accepted");
+  assert.equal(reviewText.split("\n")[0], `✓ review accepted — ${review.contract}`);
   assert.match(reviewText, /workspace/);
   assert.match(reviewText, /tracked\.txt/);
   assert.match(reviewText, /new\.txt/);
@@ -233,18 +233,57 @@ test("accepted text keeps named stops under an accepted header", () => {
     settlement: { actions: [], lags: [] },
   };
   const text = renderText(result, wide);
-  assert.equal(text.split("\n")[0], "✓ deliver accepted");
-  assertBefore(text, `fact ${entry} deliver`, "stop verification");
-  assertBefore(text, "stop verification", "stop placement");
-  assertBefore(text, "stop placement", "effects");
-  assert.match(text, /refusal/);
+  assert.equal(text.split("\n")[0], `✓ deliver accepted — ${contract}`);
+  assertBefore(text, "! gate verification", "! gate placement");
+  assertBefore(text, "! gate placement", "· ref unchanged");
+  assert.match(text, /refusal=terminal/);
   assert.match(text, /terminal/);
   assert.equal(text.split(contract).length - 1, 1);
   assert.equal(text.includes("contractId="), false);
   assert.match(text, /retry/);
   assert.match(text, /exhausted/);
-  assert.match(text, /leak worktree \/tmp\/keiyaku-v4-verify-leak worktree remove failed/);
+  assert.match(text, /! leak worktree \/tmp\/keiyaku-v4-verify-leak/u);
+  assert.match(text, /diagnostic\n\nworktree remove failed/u);
   assert.equal(text.includes("{"), false);
+  assertJsonIdentity(result);
+});
+
+test("accepted audit deviations and diagnostics keep their slots and bytes", () => {
+  const contract = contractId("kei/render-audit-payloads");
+  const cleanup = {
+    phase: "destroy",
+    command: 2,
+    detail: { kind: "spawn-error", diagnostic: "cleanup first\ncleanup second" },
+  } as const;
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "audit",
+    contract,
+    head,
+    facts: [{ contract, entry, kind: "attestation" }],
+    placement: { failure: "target-placement-failed", diagnostic: "stop first\nstop second" },
+    cleanup,
+    leak: { path: "/tmp/leaked", diagnostic: "leak first\nleak second" },
+    report: {
+      reworks: 0,
+      reviews: 0,
+      timeline: [],
+      targetObservation: { head, drift: true },
+      cleanup,
+      leak: { path: "/tmp/leaked", diagnostic: "leak first\nleak second" },
+    },
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+  const text = renderText(result, wide);
+  assertBefore(text, "! gate placement", "! target");
+  assertBefore(text, "! target", "head");
+  assertBefore(text, "! cleanup", "head");
+  assert.equal(text.split("report cleanup").length, 1);
+  assert.equal(text.split("report leak").length, 1);
+  for (const payload of ["stop first\nstop second", "cleanup first\ncleanup second", "leak first\nleak second"]) {
+    assert.equal(text.includes(`diagnostic\n\n${payload}\n`), true, payload);
+  }
   assertJsonIdentity(result);
 });
 
@@ -292,13 +331,11 @@ test("repeated overlap grouping stays lossless and wraps without dropping coordi
   };
 
   const text = renderText(result, wide);
-  assert.equal(text.split("\n")[0], "✓ amend accepted");
-  assertBefore(text, "~ overlap", "document diff");
-  assertBefore(text, "document diff", "effects");
+  assert.equal(text.split("\n")[0], `✓ amend accepted — ${contract}`);
+  assertBefore(text, "~ overlap", "diff");
+  assertBefore(text, "diff", "✓ contract-file updated");
   assertBefore(text, "✓ contract-file updated", "· ref unchanged");
-  assertBefore(text, "· worktree unchanged", "settlement");
-  assert.equal(text.includes("~ overlap · 5 contracts · 27 witnesses"), true);
-  assert.equal(text.includes("4 contracts × 6 shared witnesses"), true);
+  assertBefore(text, "· worktree unchanged", "· settle namespace-context");
   for (const id of peers) assert.equal(text.includes(id), true, `missing ${id}`);
   for (const pattern of shared) {
     assert.equal(text.includes(`${pattern.mine} ~ ${pattern.theirs}`), true, `missing ${pattern.mine}`);
@@ -312,7 +349,7 @@ test("repeated overlap grouping stays lossless and wraps without dropping coordi
   assertJsonIdentity(result);
 
   const wrapped = renderText(result, narrow);
-  assert.equal(wrapped.split("\n")[0], "✓ amend accepted");
+  assert.equal(wrapped.split("\n")[0], "✓ amend accepted —");
   const reconstructed = reconstructOpaque(wrapped);
   for (const token of [contract, uniqueId, ...peers, ...shared.map((pattern) => pattern.mine)]) {
     assert.equal(reconstructed.includes(token), true, `wrapped away ${token}\n${wrapped}`);
@@ -332,7 +369,7 @@ test("unavailable Region observation stays accepted", () => {
     overlapFailure: "kei/peer: malformed document",
   };
   const text = renderText(unavailable);
-  assert.equal(text.split("\n")[0], "✓ amend accepted");
+  assert.equal(text.split("\n")[0], `✓ amend accepted — ${contract}`);
   assert.match(text, /~ overlap unavailable/);
   assert.match(text, /kei\/peer: malformed document/);
   assertJsonIdentity(unavailable);
@@ -351,7 +388,7 @@ test("document diff text is labeled and byte-faithful", () => {
     diff,
   };
   const text = renderText(result);
-  assert.equal(text.includes(`document diff\n${diff}`), true);
+  assert.equal(text.includes(`diff\n\n${diff}\n`), true);
 });
 
 test("opaque coordinates keep consecutive spaces and hang their continuation", () => {
@@ -373,9 +410,9 @@ test("opaque coordinates keep consecutive spaces and hang their continuation", (
   const wrapped = renderText(result, narrow).split("\n");
   const owner = wrapped.findIndex((line) => line.includes("✓ contract-file updated"));
   assert.notEqual(owner, -1);
-  assert.equal(wrapped[owner]!.startsWith("  ✓"), true);
-  assert.equal(wrapped[owner + 1]!.startsWith("    "), true);
-  const reconstructed = [wrapped[owner]!.slice(2), ...wrapped.slice(owner + 1).map((line) => line.slice(4))].join("");
+  assert.equal(wrapped[owner]!.startsWith("✓"), true);
+  assert.equal(wrapped[owner + 1]!.startsWith("  "), true);
+  const reconstructed = [wrapped[owner]!.slice(2), ...wrapped.slice(owner + 1).map((line) => line.slice(2))].join("");
   assert.equal(reconstructed.includes(spaced), true);
   assertJsonIdentity(result);
 });
@@ -398,7 +435,7 @@ test("addressed Contract ID appears once on a refusal receipt", () => {
     },
   };
   const text = renderText(refused, wide);
-  assert.equal(text.split("\n")[1], `└─ ${contract}`);
+  assert.equal(text.split("\n")[0], `! deliver refused — ${contract}`);
   assert.equal(text.split(contract).length - 1, 1);
   assert.equal(text.includes("contractId="), false);
   assertJsonIdentity(refused);

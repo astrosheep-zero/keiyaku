@@ -5,17 +5,43 @@ import type {
   RegionOverlap,
   VerificationStop,
 } from "../../index.js";
-import type { AcceptedResult, DiffUnavailable, Effect, Lag, RetryResult } from "../result.js";
-import { renderOpaqueBlock, type TextRenderContext } from "./terminal.js";
+import type { AcceptedResult, Effect, Lag, RetryResult } from "../result.js";
+import { displayColumns, renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 type HookFailure = Extract<Lag, { kind: "worktree-hook-failed" }>["failure"];
-type DirtyWithOption = Extract<KeiyakuRefusal, { kind: "dirty-workspace" }> & {
-  option?: Readonly<{ flag: string; available: boolean }>;
-};
-
 const HANG = "   ";
-const EVIDENCE = "  ";
-const CHILD = "  ";
+
+type ReceiptSegment = Readonly<{ text: string; opaque?: boolean }>;
+
+function receiptRow(
+  lines: string[],
+  mark: string,
+  label: string,
+  segments: readonly ReceiptSegment[],
+  columns: number,
+): void {
+  let current = `${mark} ${label}`;
+  for (const segment of segments) {
+    const text = segment.opaque === true ? safeText(segment.text) : segment.text;
+    const candidate = `${current} ${text}`;
+    if (displayColumns(candidate) <= columns) {
+      current = candidate;
+      continue;
+    }
+    if (current === `${mark} ${label}` && segment.opaque === true) {
+      lines.push(current);
+      current = `  ${text}`;
+      continue;
+    }
+    lines.push(current);
+    current = `  ${text}`;
+  }
+  lines.push(current);
+}
+
+function receiptPayload(lines: string[], label: string, payload: string): void {
+  lines.push(label, "", payload, "");
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -38,26 +64,22 @@ function collectionLines(
   ];
 }
 
-function hookFailureLines(failure: HookFailure, indent: string, columns: number): readonly string[] {
-  if (failure.kind === "timeout" || failure.kind === "unknown-exit") {
-    return renderOpaqueBlock(failure.kind, indent, columns);
-  }
-  if (failure.kind === "spawn-error") {
-    return renderOpaqueBlock(`spawn-error diagnostic=${failure.diagnostic}`, indent, columns);
-  }
-  const lines = [...renderOpaqueBlock(
-    `exit code=${failure.code} truncated=${failure.truncated}`,
-    indent,
-    columns,
-  )];
-  if (failure.stdout.length > 0) lines.push(...collectionLines("stdout", [failure.stdout], indent, columns));
-  if (failure.stderr.length > 0) lines.push(...collectionLines("stderr", [failure.stderr], indent, columns));
-  return lines;
+function hookFailureSummary(failure: HookFailure): string {
+  if (failure.kind === "timeout" || failure.kind === "unknown-exit") return failure.kind;
+  if (failure.kind === "spawn-error") return failure.kind;
+  return `exit=${failure.code} · truncated=${failure.truncated}`;
+}
+
+function appendHookPayload(lines: string[], failure: HookFailure): void {
+  if (failure.kind === "spawn-error") receiptPayload(lines, "diagnostic", failure.diagnostic);
+  if (!("stdout" in failure)) return;
+  if (failure.stdout.length > 0) receiptPayload(lines, "stdout", failure.stdout);
+  if (failure.stderr.length > 0) receiptPayload(lines, "stderr", failure.stderr);
 }
 
 function retryLines(detail: KeiyakuRetryReason, indent: string, columns: number): readonly string[] {
   if (detail.kind === "publication-failed") {
-    return renderOpaqueBlock(`publication-failed diagnostic=${detail.diagnostic}`, indent, columns);
+    return [...renderOpaqueBlock("publication-failed", indent, columns), ...["diagnostic", "", detail.diagnostic, ""]];
   }
   return renderOpaqueBlock(detail.kind, indent, columns);
 }
@@ -66,168 +88,97 @@ function skipAddressedContract(addressed: string | undefined, contractId: string
   return addressed !== undefined && contractId === addressed;
 }
 
+type RefusalWithOption = KeiyakuRefusal & { option?: Readonly<{ flag: string; available: boolean }> };
+
+function refusalIdentity(refusal: KeiyakuRefusal, addressed?: string): string | undefined {
+  const contractId = "contractId" in refusal ? refusal.contractId : undefined;
+  return skipAddressedContract(addressed, contractId) ? undefined : contractId;
+}
+
+function refusalHead(kind: string, identity: string | undefined, details: readonly string[]): string {
+  return [kind, identity === undefined ? undefined : `contractId=${identity}`, ...details]
+    .filter((part): part is string => part !== undefined).join(" ");
+}
+
+function renderDirtyRefusal(
+  refusal: Extract<KeiyakuRefusal, { kind: "dirty-workspace" }>,
+  indent: string,
+  columns: number,
+  identity: string | undefined,
+): readonly string[] {
+  const lines: string[] = [];
+  wrap(lines, refusalHead(refusal.kind, identity, []), indent, columns);
+  for (const name of ["staged", "unstaged", "untracked", "submodules"] as const) lines.push(...collectionLines(name, refusal[name], indent, columns));
+  const { filesChanged, insertions, deletions } = refusal.shortStat;
+  wrap(lines, `shortstat files=${filesChanged} insertions=${insertions} deletions=${deletions}`, indent, columns);
+  const option = (refusal as RefusalWithOption).option;
+  if (option !== undefined) wrap(lines, `option ${option.flag} ${option.available ? "available" : "unavailable"}`, indent, columns);
+  return lines;
+}
+
 export function renderRefusalFacts(
   refusal: KeiyakuRefusal | (KeiyakuRefusal & { option?: Readonly<{ flag: string; available: boolean }> }),
   indent: string,
   columns: number,
   addressed?: string,
 ): readonly string[] {
-  const lines: string[] = [];
-  const contractId = "contractId" in refusal ? refusal.contractId : undefined;
-  const identity = skipAddressedContract(addressed, contractId) ? undefined : contractId;
-  if (refusal.kind === "dirty-workspace") {
-    wrap(lines, identity === undefined ? "dirty-workspace" : `dirty-workspace contractId=${identity}`, indent, columns);
-    for (const name of ["staged", "unstaged", "untracked", "submodules"] as const) {
-      lines.push(...collectionLines(name, refusal[name], indent, columns));
-    }
-    const { filesChanged, insertions, deletions } = refusal.shortStat;
-    wrap(lines, `shortstat files=${filesChanged} insertions=${insertions} deletions=${deletions}`, indent, columns);
-    const option = "option" in refusal ? (refusal as DirtyWithOption).option : undefined;
-    if (option !== undefined) {
-      wrap(
-        lines,
-        `option ${option.flag} ${option.available ? "available" : "unavailable"}`,
-        indent,
-        columns,
-      );
-    }
-    return lines;
-  }
+  const identity = refusalIdentity(refusal, addressed);
+  if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
   if (refusal.kind === "integration-failed") {
-    const head = [
-      "integration-failed",
-      identity === undefined ? undefined : `contractId=${identity}`,
-      `reason=${refusal.reason}`,
-      `targetHead=${refusal.targetHead}`,
-    ].filter((part) => part !== undefined).join(" ");
-    wrap(lines, head, indent, columns);
-    if (refusal.conflictPaths !== undefined) {
-      lines.push(...collectionLines("conflictPaths", refusal.conflictPaths, indent, columns));
-    }
+    const lines = [
+      ...renderOpaqueBlock(refusalHead(refusal.kind, identity, [`reason=${refusal.reason}`, `targetHead=${refusal.targetHead}`]), indent, columns),
+    ];
+    if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflictPaths", refusal.conflictPaths, indent, columns));
     return lines;
   }
-  if (refusal.kind === "integration-unsupported") {
-    wrap(
-      lines,
-      [
-        "integration-unsupported",
-        identity === undefined ? undefined : `contractId=${identity}`,
-        `requiredGit=${refusal.requiredGit}`,
-      ].filter((part) => part !== undefined).join(" "),
-      indent,
-      columns,
-    );
-    return lines;
-  }
+  if (refusal.kind === "integration-unsupported") return renderOpaqueBlock(refusalHead(refusal.kind, identity, [`requiredGit=${refusal.requiredGit}`]), indent, columns);
   if (refusal.kind === "checkout-not-followable") {
-    wrap(
-      lines,
-      [
-        "checkout-not-followable",
-        identity === undefined ? undefined : `contractId=${identity}`,
-        `target=${refusal.target}`,
-        `path=${refusal.path}`,
-        `reason=${refusal.reason}`,
-      ].filter((part) => part !== undefined).join(" "),
-      indent,
-      columns,
-    );
+    const lines = [...renderOpaqueBlock(refusalHead(refusal.kind, identity, [`target=${refusal.target}`, `path=${refusal.path}`, `reason=${refusal.reason}`]), indent, columns)];
     lines.push(...collectionLines("paths", refusal.paths, indent, columns));
     return lines;
   }
-  if (refusal.kind === "workspace-not-on-target") {
-    wrap(
-      lines,
-      [
-        "workspace-not-on-target",
-        identity === undefined ? undefined : `contractId=${identity}`,
-        `target=${refusal.target}`,
-        `branch=${refusal.branch}`,
-      ].filter((part) => part !== undefined).join(" "),
-      indent,
-      columns,
-    );
-    return lines;
-  }
-  if (refusal.kind === "here-target-mismatch") {
-    wrap(lines, `here-target-mismatch target=${refusal.target} branch=${refusal.branch}`, indent, columns);
-    return lines;
-  }
-  if (refusal.kind === "here-worktree-appointed") {
-    const appointed = refusal.contract === undefined ? undefined : `contract=${refusal.contract}`;
-    wrap(
-      lines,
-      ["here-worktree-appointed", appointed, `path=${refusal.path}`].filter((part) => part !== undefined).join(" "),
-      indent,
-      columns,
-    );
-    return lines;
-  }
-  wrap(
-    lines,
-    [refusal.kind, identity === undefined ? undefined : `contractId=${identity}`]
-      .filter((part) => part !== undefined)
-      .join(" "),
-    indent,
-    columns,
-  );
-  return lines;
-}
-
-function obligationBody(
-  stop: VerificationStop | PlacementStop,
-  indent: string,
-  columns: number,
-  addressed: string,
-): readonly string[] {
-  const lines: string[] = [];
-  if ("refusal" in stop && stop.refusal !== undefined) {
-    wrap(lines, "refusal", indent, columns);
-    lines.push(...renderRefusalFacts(stop.refusal, `${indent}${CHILD}`, columns, addressed));
-    return lines;
-  }
-  if ("retry" in stop && stop.retry !== undefined) {
-    wrap(lines, "retry", indent, columns);
-    lines.push(...retryLines(stop.retry, `${indent}${CHILD}`, columns));
-    return lines;
-  }
-  if (!("failure" in stop)) return lines;
-  if (stop.failure === "environment-failure" && "command" in stop) {
-    wrap(lines, `environment-failure command=${stop.command}`, indent, columns);
-    lines.push(...hookFailureLines(stop.detail, `${indent}${CHILD}`, columns));
-    return lines;
-  }
-  if (stop.failure === "target-moved") {
-    const identity = skipAddressedContract(addressed, stop.contractId) ? undefined : `contractId=${stop.contractId}`;
-    wrap(
-      lines,
-      [
-        "target-moved",
-        identity,
-        `target=${stop.target}`,
-        `expected=${stop.expected}`,
-        `observed=${stop.observed}`,
-      ].filter((part) => part !== undefined).join(" "),
-      indent,
-      columns,
-    );
-    return lines;
-  }
-  if ("diagnostic" in stop) {
-    wrap(lines, `${stop.failure} diagnostic=${stop.diagnostic}`, indent, columns);
-    return lines;
-  }
-  wrap(lines, stop.failure, indent, columns);
-  return lines;
+  if (refusal.kind === "workspace-not-on-target") return renderOpaqueBlock(refusalHead(refusal.kind, identity, [`target=${refusal.target}`, `branch=${refusal.branch}`]), indent, columns);
+  if (refusal.kind === "here-target-mismatch") return renderOpaqueBlock(`here-target-mismatch target=${refusal.target} branch=${refusal.branch}`, indent, columns);
+  if (refusal.kind === "here-worktree-appointed") return renderOpaqueBlock(refusalHead(refusal.kind, undefined, [refusal.contract === undefined ? "" : `contract=${refusal.contract}`, `path=${refusal.path}`]), indent, columns);
+  return renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns);
 }
 
 function stopLines(
-  name: "verification" | "placement",
-  stop: VerificationStop | PlacementStop,
+  name: string,
+  stop: VerificationStop | PlacementStop | NonNullable<NonNullable<AcceptedResult["report"]>["attempt"]>,
   columns: number,
   addressed: string,
 ): readonly string[] {
-  return [`${HANG}stop ${name}`, ...obligationBody(stop, `${HANG}${CHILD}`, columns, addressed)];
+  const detail: string[] = [];
+  if ("refusal" in stop && stop.refusal !== undefined) {
+    detail.push(`refusal=${stop.refusal.kind}`);
+    if ("contractId" in stop.refusal && stop.refusal.contractId !== addressed) {
+      detail.push(`contract=${stop.refusal.contractId}`);
+    }
+  } else if ("retry" in stop && stop.retry !== undefined) {
+    detail.push(`retry=${stop.retry.kind}`);
+  } else if ("failure" in stop) {
+    detail.push(`failure=${stop.failure}`);
+    if (stop.failure === "environment-failure" && "command" in stop) {
+      detail.push(`command=${stop.command}`, hookFailureSummary(stop.detail));
+    } else if (stop.failure === "target-moved") {
+      detail.push(`target=${stop.target}`, `expected=${stop.expected}`, `observed=${stop.observed}`);
+    }
+  }
+  const lines: string[] = [];
+  receiptRow(lines, "!", "gate", [
+    { text: name },
+    { text: detail.join(" · "), opaque: true },
+  ], columns);
+  if ("failure" in stop && stop.failure === "environment-failure" && "command" in stop) {
+    appendHookPayload(lines, stop.detail);
+  }
+  if ("retry" in stop && stop.retry?.kind === "publication-failed") {
+    receiptPayload(lines, "diagnostic", stop.retry.diagnostic);
+  } else if ("failure" in stop && "diagnostic" in stop) {
+    receiptPayload(lines, "diagnostic", stop.diagnostic);
+  }
+  return lines;
 }
 
 function outcomeLines(
@@ -235,244 +186,216 @@ function outcomeLines(
   verb: string,
   word: "accepted" | "refused" | "retry",
   contract: string | undefined,
+  columns = 80,
 ): string[] {
-  const lines = [`${mark} ${verb} ${word}`];
-  if (contract !== undefined) lines.push(`└─ ${contract}`);
-  return lines;
+  const base = `${mark} ${verb} ${word}`;
+  if (contract === undefined) return [base];
+  const inline = `${base} — ${contract}`;
+  if (displayColumns(inline) <= columns) return [inline];
+  return [`${base} —`, `  ${safeText(contract)}`];
 }
 
 function changedEffect(effect: Effect): boolean {
   return effect.action !== "unchanged";
 }
 
-function effectBody(effect: Effect): string {
+function effectRows(effect: Effect, columns: number): readonly string[] {
   const mark = changedEffect(effect) ? "✓" : "·";
-  if (effect.kind === "worktree") return `${mark} worktree ${effect.action} ${effect.path}`;
-  if (effect.kind === "contract-file") return `${mark} contract-file ${effect.action} ${effect.path}`;
-  if (effect.kind === "target-checkout") {
-    return `${mark} target-checkout ${effect.action} ${effect.target} ${effect.path}`;
-  }
-  return `${mark} ref ${effect.action} ${effect.name} ${effect.before ?? "null"} -> ${effect.after ?? "null"}`;
-}
-
-function lagLines(lag: Lag, columns: number): readonly string[] {
-  if (lag.kind === "worktree-retained") return renderOpaqueBlock(`worktree-retained ${lag.path}`, EVIDENCE, columns);
-  if (lag.kind === "unsealed-bytes") {
-    const head = lag.head === undefined ? "" : ` head=${lag.head}`;
-    const paths = lag.paths.length === 0 ? "" : ` paths=${lag.paths.join(",")}`;
-    return renderOpaqueBlock(`unsealed-bytes ${lag.path}${head}${paths}`, EVIDENCE, columns);
-  }
-  if (lag.kind === "target-checkout-retained") {
-    return renderOpaqueBlock(`target-checkout-retained ${lag.target} ${lag.path} ${lag.diagnostic}`, EVIDENCE, columns);
-  }
-  if (lag.kind === "worktree-hook-failed") {
-    return [
-      ...renderOpaqueBlock(`worktree-hook-failed ${lag.phase} ${lag.path} command=${lag.command}`, EVIDENCE, columns),
-      ...hookFailureLines(lag.failure, `${EVIDENCE}${CHILD}`, columns),
-    ];
-  }
-  if (lag.kind === "contract-file-failed") {
-    return renderOpaqueBlock(`contract-file-failed ${lag.worktree} ${lag.path} ${lag.diagnostic}`, EVIDENCE, columns);
-  }
-  return renderOpaqueBlock(`reconcile-failed ${lag.stage} ${lag.diagnostic}`, EVIDENCE, columns);
-}
-
-function witnessKey(patterns: RegionOverlap["patterns"]): string {
-  return patterns.map((pattern) => `${pattern.mine}\0${pattern.theirs}`).join("\n");
-}
-
-function overlapGroups(overlaps: readonly RegionOverlap[]): readonly (readonly RegionOverlap[])[] {
-  const groups: RegionOverlap[][] = [];
-  const indexByKey = new Map<string, number>();
-  for (const overlap of overlaps) {
-    const key = witnessKey(overlap.patterns);
-    const existing = indexByKey.get(key);
-    if (existing === undefined) {
-      indexByKey.set(key, groups.length);
-      groups.push([overlap]);
-    } else groups[existing]!.push(overlap);
-  }
-  return groups;
-}
-
-function overlapLines(overlaps: readonly RegionOverlap[], columns: number): readonly string[] {
-  if (overlaps.length === 0) return [];
-  const witnesses = overlaps.reduce((count, overlap) => count + overlap.patterns.length, 0);
-  const lines = [...renderOpaqueBlock(
-    `~ overlap · ${overlaps.length} contracts · ${witnesses} witnesses`,
-    "",
-    columns,
-  )];
-  for (const [index, group] of overlapGroups(overlaps).entries()) {
-    if (index > 0) lines.push("");
-    const patterns = group[0]!.patterns;
-    if (group.length > 1) {
-      wrap(lines, `${group.length} contracts × ${patterns.length} shared witnesses`, EVIDENCE, columns);
-      wrap(lines, "│ contracts", EVIDENCE, columns);
-      for (const overlap of group) wrap(lines, overlap.contract, `${EVIDENCE}│   `, columns);
-      wrap(lines, "│ witnesses", EVIDENCE, columns);
-      for (const pattern of patterns) {
-        wrap(lines, `${pattern.mine} ~ ${pattern.theirs}`, `${EVIDENCE}│   `, columns);
-      }
-      continue;
-    }
-    wrap(lines, group[0]!.contract, EVIDENCE, columns);
-    for (const pattern of patterns) wrap(lines, `${pattern.mine} ~ ${pattern.theirs}`, `${EVIDENCE}│ `, columns);
+  const lines: string[] = [];
+  if (effect.kind === "worktree") {
+    receiptRow(lines, mark, "worktree", [{ text: effect.action }, { text: effect.path, opaque: true }], columns);
+  } else if (effect.kind === "contract-file") {
+    receiptRow(lines, mark, "contract-file", [{ text: effect.action }, { text: effect.path, opaque: true }], columns);
+  } else if (effect.kind === "target-checkout") {
+    receiptRow(lines, mark, "target-checkout", [
+      { text: effect.action },
+      { text: effect.target, opaque: true },
+      { text: effect.path, opaque: true },
+    ], columns);
+  } else {
+    receiptRow(lines, mark, "ref", [
+      { text: effect.action },
+      { text: effect.name, opaque: true },
+      { text: `${effect.before ?? "null"} -> ${effect.after ?? "null"}`, opaque: true },
+    ], columns);
   }
   return lines;
 }
 
-function cleanupLines(cleanup: NonNullable<AcceptedResult["cleanup"]>, columns: number): readonly string[] {
-  return [
-    ...renderOpaqueBlock(`cleanup ${cleanup.phase} command=${cleanup.command}`, HANG, columns),
-    ...hookFailureLines(cleanup.detail, `${HANG}${CHILD}`, columns),
-  ];
+function lagRows(lag: Lag, columns: number): readonly string[] {
+  const lines: string[] = [];
+  if (lag.kind === "worktree-retained") {
+    receiptRow(lines, "!", "lag", [{ text: `worktree-retained ${lag.path}`, opaque: true }], columns);
+  } else if (lag.kind === "unsealed-bytes") {
+    receiptRow(lines, "!", "lag", [{ text: `unsealed-bytes ${lag.path}${lag.head === undefined ? "" : ` head=${lag.head}`}${lag.paths.length === 0 ? "" : ` paths=${lag.paths.join(",")}`}`, opaque: true }], columns);
+  } else if (lag.kind === "target-checkout-retained") {
+    receiptRow(lines, "!", "lag", [{ text: `target-checkout-retained ${lag.target} ${lag.path}`, opaque: true }], columns);
+    receiptPayload(lines, "diagnostic", lag.diagnostic);
+  } else if (lag.kind === "worktree-hook-failed") {
+    receiptRow(lines, "!", "lag", [{ text: `worktree-hook-failed ${lag.phase} ${lag.path} command=${lag.command} ${hookFailureSummary(lag.failure)}`, opaque: true }], columns);
+    appendHookPayload(lines, lag.failure);
+  } else if (lag.kind === "contract-file-failed") {
+    receiptRow(lines, "!", "lag", [{ text: `contract-file-failed ${lag.worktree} ${lag.path}`, opaque: true }], columns);
+    receiptPayload(lines, "diagnostic", lag.diagnostic);
+  } else {
+    receiptRow(lines, "!", "lag", [{ text: `reconcile-failed ${lag.stage}`, opaque: true }], columns);
+    receiptPayload(lines, "diagnostic", lag.diagnostic);
+  }
+  return lines;
 }
 
-function leakLines(leak: NonNullable<AcceptedResult["leak"]>, indent: string, columns: number): readonly string[] {
-  return renderOpaqueBlock(`leak worktree ${leak.path} ${leak.diagnostic}`, indent, columns);
+function settlementLagRows(lag: AcceptedResult["settlement"]["lags"][number], columns: number): readonly string[] {
+  const lines: string[] = [];
+  receiptRow(lines, "!", "settlement", [{ text: [
+    `surface=${lag.surface}`,
+    lag.taskId === undefined ? undefined : `task=${lag.taskId}`,
+    lag.path === undefined ? undefined : `path=${lag.path}`,
+  ].filter((part): part is string => part !== undefined).join(" "), opaque: true }], columns);
+  receiptPayload(lines, "diagnostic", lag.diagnostic);
+  return lines;
 }
 
-function workspaceLines(
+function workspaceRows(
   workspace: NonNullable<AcceptedResult["workspace"]>,
   columns: number,
 ): readonly string[] {
-  const lines = [`${HANG}workspace`];
+  const lines: string[] = [];
   for (const name of ["staged", "unstaged", "untracked"] as const) {
-    const paths = workspace[name];
-    if (paths.length === 0) {
-      wrap(lines, `${name} 0`, `${HANG}  `, columns);
-      continue;
-    }
-    wrap(lines, name, `${HANG}  `, columns);
-    for (const path of paths) wrap(lines, path, `${HANG}  │ `, columns);
+    if (workspace[name].length === 0) receiptRow(lines, "!", "workspace", [{ text: `${name}=0` }], columns);
+    else for (const path of workspace[name]) receiptRow(lines, "!", "workspace", [{ text: name }, { text: path, opaque: true }], columns);
   }
   const { filesChanged, insertions, deletions } = workspace.shortStat;
-  wrap(lines, `files=${filesChanged} insertions=${insertions} deletions=${deletions}`, `${HANG}  `, columns);
+  receiptRow(lines, "!", "workspace", [{ text: `files=${filesChanged} insertions=${insertions} deletions=${deletions}`, opaque: true }], columns);
   return lines;
 }
 
-function reportLines(
+function overlapRows(overlaps: readonly RegionOverlap[], columns: number): readonly string[] {
+  const lines: string[] = [];
+  for (const overlap of overlaps) {
+    for (const pattern of overlap.patterns) {
+      receiptRow(lines, "~", "overlap", [
+        { text: overlap.contract, opaque: true },
+        { text: `${pattern.mine} ~ ${pattern.theirs}`, opaque: true },
+      ], columns);
+    }
+  }
+  return lines;
+}
+
+function reportRows(
   report: NonNullable<AcceptedResult["report"]>,
   columns: number,
-  addressed: string,
 ): readonly string[] {
-  const lines = ["report"];
-  wrap(lines, `reworks ${report.reworks} · reviews ${report.reviews}`, EVIDENCE, columns);
+  const lines: string[] = [];
+  receiptRow(lines, " ", "report", [{ text: `reworks=${report.reworks} reviews=${report.reviews}` }], columns);
   for (const entry of report.timeline) {
-    wrap(lines, `${entry.kind} ${entry.at} sincePrior=${entry.sincePrior ?? "null"}`, EVIDENCE, columns);
+    receiptRow(lines, " ", "report", [{ text: `${entry.kind} ${entry.at} sincePrior=${entry.sincePrior ?? "null"}`, opaque: true }], columns);
     if (entry.attestation !== undefined) {
-      const summary = entry.attestation.summary === undefined ? "" : ` ${entry.attestation.summary}`;
-      wrap(lines, `${entry.attestation.gate} ${entry.attestation.verdict}${summary}`, `${EVIDENCE}  `, columns);
+      receiptRow(lines, " ", "report", [{ text: `${entry.attestation.gate} ${entry.attestation.verdict}${entry.attestation.summary === undefined ? "" : ` ${entry.attestation.summary}`}`, opaque: true }], columns);
     }
   }
   if (report.delivery !== undefined) {
-    const delivery = report.delivery;
-    wrap(lines, [
-      "delivery",
-      delivery.tenderSnapshot,
-      delivery.integration.snapshot,
-      delivery.integration.changeId,
-    ].join(" "), EVIDENCE, columns);
+    receiptRow(lines, " ", "report", [{ text: [report.delivery.tenderSnapshot, report.delivery.integration.snapshot, report.delivery.integration.changeId].join(" "), opaque: true }], columns);
   }
-  if (report.targetObservation !== undefined) {
-    wrap(lines, `target head=${report.targetObservation.head ?? "null"} drift=${report.targetObservation.drift}`, EVIDENCE, columns);
-  }
-  if (report.attempt !== undefined) {
-    wrap(lines, "attempt", EVIDENCE, columns);
-    lines.push(...obligationBody(report.attempt, `${EVIDENCE}${CHILD}`, columns, addressed));
-  }
-  if (report.cleanup !== undefined) {
-    wrap(lines, `cleanup ${report.cleanup.phase} command=${report.cleanup.command}`, EVIDENCE, columns);
-    lines.push(...hookFailureLines(report.cleanup.detail, `${EVIDENCE}${CHILD}`, columns));
-  }
-  if (report.leak !== undefined) lines.push(...leakLines(report.leak, EVIDENCE, columns));
-  return lines;
-}
-
-function diffLines(diff: string | DiffUnavailable, columns: number): readonly string[] {
-  if (typeof diff === "string") return diff.length === 0 ? ["document diff"] : ["document diff", diff];
-  return [
-    "document diff",
-    ...renderOpaqueBlock(
-      `git-unavailable integrationSnapshot=${diff.integrationSnapshot} changeId=${diff.changeId}`,
-      EVIDENCE,
-      columns,
-    ),
-  ];
-}
-
-function settlementLines(
-  settlement: AcceptedResult["settlement"],
-  columns: number,
-  addressed: string,
-): readonly string[] {
-  if (settlement.actions.length === 0 && settlement.lags.length === 0) return [];
-  const lines = ["settlement"];
-  for (const action of settlement.actions) {
-    wrap(
-      lines,
-      action.kind === "task"
-        ? `· task ${action.action} ${action.taskId}`
-        : `· namespace-context ${action.action} ${action.path}`,
-      EVIDENCE,
-      columns,
-    );
-  }
-  for (const lag of settlement.lags) {
-    const identity = skipAddressedContract(addressed, lag.contractId) ? "" : ` contractId=${lag.contractId}`;
-    const task = lag.taskId === undefined ? "" : ` taskId=${lag.taskId}`;
-    const path = lag.path === undefined ? "" : ` path=${lag.path}`;
-    wrap(
-      lines,
-      `settlement-failed surface=${lag.surface}${identity}${task}${path} ${lag.diagnostic}`,
-      EVIDENCE,
-      columns,
-    );
+  if (report.targetObservation?.drift !== true && report.targetObservation !== undefined) {
+    receiptRow(lines, " ", "report", [{ text: `target head=${report.targetObservation.head ?? "null"} drift=false`, opaque: true }], columns);
   }
   return lines;
 }
 
 function pushBlock(lines: string[], block: readonly string[]): void {
   if (block.length === 0) return;
-  if (lines.length > 0) lines.push("");
   lines.push(...block);
+}
+
+function acceptedRecord(result: AcceptedResult, columns: number): readonly string[] {
+  const record: string[] = [];
+  receiptRow(record, " ", "head", [{ text: result.head ?? "null", opaque: true }], columns);
+  for (const fact of result.facts) {
+    const contract = fact.contract === result.contract ? [] : [{ text: fact.contract, opaque: true }];
+    receiptRow(record, " ", "journal", [
+      ...contract,
+      { text: fact.entry, opaque: true },
+      { text: `· ${fact.kind}` },
+    ], columns);
+  }
+  if (result.target !== undefined) {
+    receiptRow(record, " ", "target", [{ text: result.target ?? "null", opaque: true }], columns);
+  }
+  if (result.report !== undefined) pushBlock(record, reportRows(result.report, columns));
+  if (result.diff !== undefined) {
+    if (typeof result.diff === "string") receiptPayload(record, "diff", result.diff);
+    else receiptRow(record, " ", "diff", [{ text: `git-unavailable integrationSnapshot=${result.diff.integrationSnapshot} changeId=${result.diff.changeId}`, opaque: true }], columns);
+  }
+  const changed = result.effects.filter(changedEffect);
+  const unchanged = result.effects.filter((effect) => !changedEffect(effect));
+  for (const effect of [...changed, ...unchanged]) pushBlock(record, effectRows(effect, columns));
+  for (const action of result.settlement.actions) {
+    receiptRow(record, "·", "settle", [
+      { text: action.kind },
+      { text: action.action },
+      { text: action.kind === "task" ? action.taskId : action.path, opaque: true },
+    ], columns);
+  }
+  return record;
+}
+
+function acceptedObligations(result: AcceptedResult, columns: number): readonly string[] {
+  const obligations: string[] = [];
+  const cleanup = result.cleanup ?? result.report?.cleanup;
+  const leak = result.leak ?? result.report?.leak;
+  for (const name of ["verification", "placement"] as const) {
+    const stop = result[name];
+    if (stop !== undefined) obligations.push(...stopLines(name, stop, columns, result.contract));
+  }
+  if (cleanup !== undefined) {
+    receiptRow(obligations, "!", "cleanup", [
+      { text: cleanup.phase },
+      { text: `command=${cleanup.command}` },
+      { text: hookFailureSummary(cleanup.detail), opaque: true },
+    ], columns);
+    appendHookPayload(obligations, cleanup.detail);
+  }
+  if (leak !== undefined) {
+    receiptRow(obligations, "!", "leak", [
+      { text: "worktree" },
+      { text: leak.path, opaque: true },
+    ], columns);
+    receiptPayload(obligations, "diagnostic", leak.diagnostic);
+  }
+  if (result.lag !== undefined) {
+    for (const lag of result.lag) pushBlock(obligations, lagRows(lag, columns));
+  }
+  for (const lag of result.settlement.lags) {
+    pushBlock(obligations, settlementLagRows(lag, columns));
+  }
+  if (result.report?.attempt !== undefined) {
+    obligations.push(...stopLines("audit", result.report.attempt, columns, result.contract));
+  }
+  return obligations;
+}
+
+function acceptedDeviations(result: AcceptedResult, columns: number): readonly string[] {
+  const deviations: string[] = [];
+  if (result.report?.targetObservation?.drift === true) {
+    receiptRow(deviations, "!", "target", [{ text: `head=${result.report.targetObservation.head ?? "null"} drift=true`, opaque: true }], columns);
+  }
+  if (result.workspace !== undefined) pushBlock(deviations, workspaceRows(result.workspace, columns));
+  if (result.overlaps !== undefined) pushBlock(deviations, overlapRows(result.overlaps, columns));
+  if (result.overlapFailure !== undefined) {
+    receiptRow(deviations, "~", "overlap", [{ text: "unavailable" }], columns);
+    receiptPayload(deviations, "diagnostic", result.overlapFailure);
+  }
+  return deviations;
 }
 
 export function renderAccepted(result: AcceptedResult, context?: TextRenderContext): string {
   const columns = context?.columns ?? 80;
-  const lines = outcomeLines("✓", result.verb, "accepted", result.contract);
-  wrap(lines, `head ${result.head ?? "null"}`, HANG, columns);
-  for (const fact of result.facts) {
-    const contract = fact.contract === result.contract ? "" : `${fact.contract} `;
-    wrap(lines, `fact ${contract}${fact.entry} ${fact.kind}`, HANG, columns);
-  }
-  if (result.target !== undefined) wrap(lines, `target ${result.target ?? "null"}`, HANG, columns);
-  for (const name of ["verification", "placement"] as const) {
-    const stop = result[name];
-    if (stop !== undefined) lines.push(...stopLines(name, stop, columns, result.contract));
-  }
-  if (result.cleanup !== undefined) lines.push(...cleanupLines(result.cleanup, columns));
-  if (result.leak !== undefined) lines.push(...leakLines(result.leak, HANG, columns));
-  if (result.workspace !== undefined) lines.push(...workspaceLines(result.workspace, columns));
-  if (result.overlaps !== undefined) pushBlock(lines, overlapLines(result.overlaps, columns));
-  if (result.overlapFailure !== undefined) {
-    pushBlock(lines, ["~ overlap unavailable", ...renderOpaqueBlock(result.overlapFailure, EVIDENCE, columns)]);
-  }
-  if (result.report !== undefined) pushBlock(lines, reportLines(result.report, columns, result.contract));
-  if (result.diff !== undefined) pushBlock(lines, diffLines(result.diff, columns));
-  if (result.effects.length > 0) {
-    const changed = result.effects.filter(changedEffect);
-    const unchanged = result.effects.filter((effect) => !changedEffect(effect));
-    pushBlock(lines, [
-      "effects",
-      ...[...changed, ...unchanged].flatMap((effect) => renderOpaqueBlock(effectBody(effect), EVIDENCE, columns)),
-    ]);
-  }
-  if (result.lag !== undefined && result.lag.length > 0) {
-    pushBlock(lines, ["lag", ...result.lag.flatMap((item) => lagLines(item, columns))]);
-  }
-  pushBlock(lines, settlementLines(result.settlement, columns, result.contract));
+  const lines = outcomeLines("✓", result.verb, "accepted", result.contract, columns);
+  const obligations = acceptedObligations(result, columns);
+  const deviations = acceptedDeviations(result, columns);
+  const record = acceptedRecord(result, columns);
+  lines.push(...obligations, ...deviations, ...record);
   return lines.join("\n");
 }
 
@@ -481,5 +404,5 @@ export function renderRetry(result: RetryResult, context?: TextRenderContext): s
   const detail = isRecord(result.detail) && typeof result.detail.kind === "string"
     ? retryLines(result.detail as KeiyakuRetryReason, HANG, columns)
     : [];
-  return [...outcomeLines("?", result.verb, "retry", result.contract), ...detail].join("\n");
+  return [...outcomeLines("?", result.verb, "retry", result.contract, columns), ...detail].join("\n");
 }

@@ -136,7 +136,9 @@ reinterpret snapshot gaps. Text is clipped by terminal display width without
 splitting grapheme clusters. A `run` command remains one row and preserves
 recognizable head and tail when clipped; the completed outcome is omitted
 before the command subject is lost. A cue and ellipsis alone are not a
-subject. Every rendered line fits the requested display width. Display-only transport unwrapping does not change persisted command
+subject. Every timeline rendered line fits the requested display width. Mutation
+receipt opaque tokens may physically exceed it when indivisibility requires.
+Display-only transport unwrapping does not change persisted command
 bytes or timeline layout. The time gutter is five columns. The first visible event and the first
 event whose displayed minute differs from the preceding visible event print
 `HH:MM`; additional events in the same minute leave those five columns blank.
@@ -194,39 +196,53 @@ The renderer remains a pure projection over `InvocationResult`: it invents no
 fields, rereads no authorities, and does not change exit semantics. JSON is
 byte-for-byte the serialization of that same public value.
 
-The outcome header is first. An accepted receipt stays visually accepted even
-when it carries overlap warnings, stops, lags, or a long diff. A stop inside
-an accepted receipt is an indented named block; it does not replace the header.
+The receipt answers four things in a fixed order: the invocation verdict, the
+Contract identity, unresolved obligations, then deviations and the exact record.
+The public result taxonomy is not a visual section taxonomy. There are no
+`facts`, `effects`, `stops`, or `settlement` section headings, and no nested
+`stop` -> `refusal`/`retry` tree. A lowercase label names one row only.
 
 ```text
-✓ <verb> accepted
-└─ <complete kei/... when present>
+✓ <verb> accepted — <complete kei/...>
+! gate <phase> · <unresolved public reason>
+~ overlap <warning or witness>
+journal <entry> · <kind>
+✓ ref <action> · <exact ref> · <before> -> <after>
+· worktree <action> · <exact path>
+· settle <action> · <exact task or namespace path>
+diff
+
+<exact diff bytes>
+
 
 ! <verb> refused
-└─ <complete kei/... when present>
-   <refusal kind and scalar facts>
-   <collection label>
-   │ <one exact member per line>
+! <refusal kind and exact scalar facts>
+! <one exact collection member per row>
 
-? <verb> retry
-└─ <complete kei/... when present>
-   <retry kind and exact diagnostic facts>
+? <verb> retry — <complete kei/... when present>
+? <retry kind and exact diagnostic facts>
 ```
 
-Bind retry has no Contract relation because no identity was admitted. After the
-hanging Contract coordinate is rendered, the same addressed `contractId` is not
-reflected again. Structured text names public fields by their typed roles and
-never prints an opaque JSON object on one line when that object contains
-multiple decision facts. Exact coordinates are opaque facts, not prose: a path
-or identity is never routed through whitespace-tokenizing wrap. When a line
-exceeds the viewport, its physical continuation hangs two spaces beneath that
-owning fact so it cannot look like a sibling. Complete coordinates remain
-copyable and byte-faithful, including consecutive spaces.
+Bind retry has no Contract relation because no identity was admitted. The
+addressed Contract coordinate appears once on the verdict line. Accepted
+trailing obligations never change the accepted verdict or exit status. The
+outcome glyphs and lowercase vocabulary remain the shared scanner vocabulary.
 
-Accepted facts, the optional bind `target`, independent obligation stops,
-cleanup, leak, and workspace disclosure hang under the Contract coordinate.
-Then only the present factual blocks follow: Region observation, audit report,
-labeled document diff, effects, lag, and settlement.
+Obligation rows come first and contain only unresolved verification or
+placement stops, lags, cleanup failures, and leaks. Deviation rows contain
+Region warnings, accepted review workspace bytes, and typed audit drift. The
+record tail contains admitted journal facts, head, bind `target`, normal Git
+effects, normal settlement actions, reports, and the document diff. Changed
+effects precede unchanged confirmations; unchanged effects remain visible.
+
+An opaque Contract ID, entry, ref, path, hash, diagnostic, or diff coordinate
+is indivisible. The renderer never inserts bytes, whitespace, ellipses, or a
+line break inside it. If a token does not fit after its row label, it is emitted
+complete on its own continuation line; if that token itself exceeds the
+terminal width, physical overflow is accepted rather than splitting it. A
+multi-line opaque payload is introduced by one row label, followed by one blank
+line, the exact original bytes, and one blank line. No fence glyph, indentation,
+trimming, or normalization is added to the payload.
 
 A completed nonempty Region observation groups a repeated identical ordered
 witness set once beneath an explicit list of every participating Contract. The
@@ -245,13 +261,6 @@ public diff renders the typed `git-unavailable` facts. Audit also renders its
 public report, head, and facts; it does not inspect journal entries or raw
 process output.
 
-Changed physical effects precede unchanged confirmations. Every effect remains
-present with its exact kind, action, coordinate, and before/after data;
-unchanged facts may share the effects block but may not collapse into a count.
-Lag, cleanup, leak, workspace, target, and obligation-stop blocks use two-space
-evidence indentation and retain exact diagnostics. Settlement is the final
-factual block and carries no Akuma-life glyph.
-
 The flat `lag` array remains the public `ReconcileResult` shape defined in
 [git-reconciliation.md](git-reconciliation.md). JSON exposes that same array.
 An `unsealed-bytes` or `target-checkout-retained` lag does not turn an accepted
@@ -269,14 +278,13 @@ authorization option because review observes a projection. Dirty submodule
 internals still refuse before review admission.
 
 Each stop is independent: Verification never suppresses the placement attempt,
-and one accepted invocation may render both named stop blocks. The `stop`
-prefix distinguishes an accepted verb's obligation result from a top-level
-refused header. An environment failure remains inside `stop verification` with
-its command index and typed command failure. A declaration timeout is an
-unsatisfied attestation fact, not a stop. A failed scratch destroy command
-renders without claiming that the worktree remains. The leak line reports a
-disposable Verification worktree that could not be removed after admission; it
-does not change the accepted exit status and is not a repair command.
+and one accepted invocation may render both `! gate` rows. An environment
+failure keeps its command index and typed command failure in the obligation row.
+A declaration timeout is an unsatisfied attestation fact, not a stop. A failed
+scratch destroy command renders as an unresolved cleanup obligation without
+claiming that the worktree remains. A leak row reports a disposable Verification
+worktree that could not be removed after admission; it does not change the
+accepted exit status and is not a repair command.
 Region reads render one row per declaration, decisive overlap pair, or path
 match. Empty arrays render no rows; a failed Region section renders one
 `region failed <diagnostic>` row. JSON carries the same Kanshi `Section` value,
