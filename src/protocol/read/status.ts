@@ -4,7 +4,13 @@ import {
   observeDeliveryTargetAt,
   withContractReadObservationAt,
 } from "../../git/observe.js";
-import { deliveryWorktreePath } from "../../git/workspace.js";
+import { decodeContractDocument } from "../../body/decode.js";
+import {
+  deliveryWorktreePath,
+  observeTargetLag,
+  observeWorkspace,
+} from "../../git/workspace.js";
+import type { ContractTargetLag, ContractWorkspaceObservation } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/repository.js";
 import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
@@ -17,13 +23,18 @@ export type ContractGateCurrent = GateCurrent;
 
 export type ContractGateReport = Readonly<{ gate: string; current: ContractGateCurrent }>;
 
+export type { ContractTargetLag, ContractWorkspaceObservation };
+
 export type ContractRow = Readonly<{
   id: ContractId;
+  title: string | null;
   phase: ContractPhase;
   disposition: ContractDisposition;
   workspace: "worktree" | "here";
   worktreePath: string | null;
+  workspaceObservation: ContractWorkspaceObservation;
   target: string | null;
+  targetLag: ContractTargetLag;
   delivery: DeliverData | null;
   targetObservation: Readonly<{ head: SnapshotId | null; drift: boolean }> | null;
   gates: Readonly<{
@@ -42,6 +53,15 @@ export type ContractObservation =
   | Readonly<{ kind: "missing"; id: ContractId }>
   | Readonly<{ kind: "present"; row: ContractRow }>;
 
+function titleFor(state: ContractState): string | null {
+  try {
+    return decodeContractDocument(state.terms.document.bytes).title;
+  } catch (error) {
+    if (error instanceof TypeError) return null;
+    throw error;
+  }
+}
+
 function phaseFor(state: ContractState): ContractPhase {
   if (state.terminal?.kind === "claimed") return "claimed";
   if (state.terminal?.kind === "abandoned") return "abandoned";
@@ -50,20 +70,31 @@ function phaseFor(state: ContractState): ContractPhase {
   return "waiting";
 }
 
-function rowFor(
+async function rowFor(
   repository: GitRepository,
   state: ContractState,
   targetObservation: ContractRow["targetObservation"],
-): ContractRow {
+): Promise<ContractRow> {
   const workspace = state.coordinates.workspace;
   const gates = gateReports(state);
+  const location = workspace === "worktree"
+    ? { kind: "worktree" as const, path: deliveryWorktreePath(repository, state.id) }
+    : { kind: "here" as const };
+  const workspacePath = location.kind === "worktree" ? location.path : repository.effectiveCwd;
+  const [workspaceObservation, targetLag] = await Promise.all([
+    observeWorkspace(repository, location, workspacePath),
+    observeTargetLag(repository, workspacePath, targetObservation?.head),
+  ]);
   return {
     id: state.id,
+    title: titleFor(state),
     phase: phaseFor(state),
     disposition: state.terminal === null ? "active" : "terminal",
     workspace,
-    worktreePath: workspace === "worktree" ? deliveryWorktreePath(repository, state.id) : null,
+    worktreePath: location.kind === "worktree" ? location.path : null,
+    workspaceObservation,
     target: state.coordinates.target ?? null,
+    targetLag,
     delivery: state.delivery?.data ?? null,
     targetObservation,
     gates: {
@@ -99,7 +130,7 @@ export async function readContractObservationAt(
       ? { kind: "missing", id }
       : {
           kind: "present",
-          row: rowFor(
+          row: await rowFor(
             observation.repository,
             state,
             await observeDeliveryTargetAt(observation, state),

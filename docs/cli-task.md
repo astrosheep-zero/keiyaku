@@ -121,75 +121,19 @@ without probing, reading history, or reclassifying them.
 JSON serializes that complete report without a text-specific projection or
 shortened value. Text chooses density without hiding a product identity that
 has no other text discovery surface. For a present world its first line is the
-one-line Split Horizon signature defined by [cli-output.md](cli-output.md),
-followed by the fixed `keiyaku`, `akuma`, and `task` sections. Aggregate counts
-are derived from the assembled public sections; they are not persisted
-counters. The world side carries the real project/branch/head coordinate
-available to the report. Absent and failed sections remain explicit and are
-never rendered as zero. The signature is Kanshi-owned; ordinary commands have
-no global ruler.
+one-line Split Horizon signature defined by [cli-output.md](cli-output.md).
+The KEIYAKU, TASK, and FLEET apertures, plumb-line grammar, complete-entity
+retention, and Human/Flagship projection are owned by [kanshi.md](kanshi.md).
+This chapter does not keep a second status board grammar. Aggregate counts
+come from the assembled public sections; they are not persisted counters.
+Absent and failed sections remain explicit and are never rendered as zero.
+The signature is Kanshi-owned; ordinary commands have no global ruler.
+Complete board glyphs are owned only by [kanshi.md](kanshi.md).
 
-Bare status renders every Contract row. Waiting and pending-delivery rows come
-before other Contracts, with source order stable inside each class. A row starts
-with its mark, complete ContractId, and adjacent phase word. Incremental facts
-continue beneath it: workspace, an eight-character textual integration
-snapshot, and a
-target expressed as `-> <ref>`. Every rendered Contract copies all of its
-declared gates in declaration order as one compact icon-and-name chain. The
-gate marks are `✓` for a current satisfied attestation, `!` for a current
-unsatisfied attestation, and `?` when there is no current verdict, including
-stale and missing reports. Bare status omits opaque gate summaries so testimony
-prose cannot drown the world board; exact Contract status renders each
-available current summary beneath the chain and names its gate.
-After these facts, a current reverse holder renders as `held by <TaskId>`.
-An unavailable holder observation renders `holder unavailable`; a confirmed
-absence adds no line. Contracts needing attention are ordered before other
-Contracts: unavailable holder evidence first, then waiting or
-pending-delivery, with source order stable inside each class.
-
-The Task heading block counts only nonterminal Tasks and carries the exact
-`ready` and `on_hold` counts; at narrow widths those counts continue on an
-indented heading line rather than becoming a separate inventory summary. Text
-expands `in_progress` and `blocked` rows, with blocked rows first and source
-order stable inside each class.
-Terminal `done` and `drop` Tasks contribute neither rows nor counts; their
-complete inventory belongs to `task ls --closed` and `task ls --all`. A visible
-row starts with its mark, complete TaskId, and adjacent disposition word, then
-prints the current title, priority, and optional Contract endpoint as
-incremental facts. Identity and description stay distinct: a title update does
-not move the immutable TaskId, so the coordinate cannot stand in for the
-current title.
-Each blocked row then renders every structured blocker in Task-owner order as
-`blocked by <TaskId> (<state>)`; missing targets retain the literal `missing`
-state. Nonblocked rows render no blocker evidence.
-
-The Akuma section renders every public fleet row because bare status is its text
-discovery surface in this cut. Lost and failed rows come first, running rows
-next, and idle or terminal rows last, with source order stable inside each
-class. Each row starts with its mark, complete AkuId, and adjacent life word:
-`running` is active, `asleep` and `killed` are idle, `stranded`, `hung`, and
-`untidy` are lost, `unborn` is unknown, and `stillborn` is failed. Running and lost rows may
-continue with pending count and confinement. `asleep` and `killed` rows are
-always single-line. A stillborn row may continue with its
-public seal evidence after
-control-character neutralization, first-line extraction, and display-width
-truncation. Future Akuma facts may extend this presentation only after the
-Akuma public row owns them; Kanshi and CLI never infer activity age, answer
-availability, or attention from the current fields. Empty fleet search
-coordinates remain in the report and JSON but do not turn normal text absence
-into a diagnostic.
-
-Status keeps one stable visual grammar, with adjacent words remaining the
-authoritative state: `●` active, `○` idle or ready, `⧗` waiting or blocked,
-`‖` held, `✓` satisfied, `!` failed or unsatisfied, `?` without a current
-verdict, lost, or unknown, and `×` ended. Marks accelerate scanning; they never
-replace the copied lifecycle, gate, Task, or Akuma discriminant. Text wraps at
-semantic or prose-word boundaries according to display columns at both narrow
-and wide terminal widths. A scan head containing a mark, complete identity,
-and state stays indivisible, as do copyable refs, paths, and gate names; one of
-these units may exceed the requested width rather than being split or
-truncated. Divisible headings, prose, and fact chains do not use that exception.
-The renderer applies no arbitrary line cap, does not truncate a
-Contract-and-gates block, and does not truncate a complete identity or current
-Task title. Historical Task inventory and opaque testimony stay on their
-owning detail surfaces.
+Text wraps at semantic or prose-word boundaries according to display
+columns. A scan head containing a mark, complete identity, and state stays
+indivisible, as do copyable refs, paths, and gate names; one of these units
+may exceed the requested width rather than being split or truncated. The
+renderer applies no arbitrary line cap and does not truncate a complete
+identity, title, path, gate, or relation. Opaque testimony stays on owning
+detail surfaces.

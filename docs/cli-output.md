@@ -87,14 +87,15 @@ kanshi ─── <keiyaku-count> keiyaku · <akuma-count> akuma · <task-count> 
 
 The left word identifies the observer, the middle is the aggregate fact, and the
 right side is the observed world coordinate. The two horizontal segments use
-`U+2500` and flex to the available display width, with at least one character
+`U+2500` and flex to the available display width, with at least three characters
 on each side; they never hide or shorten the facts. When the complete coordinate
 makes the minimum signature wider than the viewport, the signature remains one
 scan line and exceeds the viewport rather than folding or truncating. A present
-empty board keeps
-all three zero counts. An absent world has no signature because there is no
-observed world to frame. Other commands start directly with their operation
-identity and do not receive a global banner.
+empty board keeps all three zero counts. An absent world has no signature
+because there is no observed world to frame. After the signature, Kanshi uses
+the KEIYAKU, TASK, and FLEET apertures and plumb-line hierarchy owned by
+[kanshi.md](kanshi.md). FLEET is never an akuma count unit. Other commands
+start with their operation identity and do not receive a banner.
 
 Every invocation renders exactly one plain result object:
 

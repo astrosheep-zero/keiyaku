@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
@@ -93,7 +94,7 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
   const first = await bind(repository, "First status row", "here");
   const second = await bind(repository, "Second status row", "worktree");
   const scope = await scopeOperation({ coordinate: repository.path });
-  const log = resolve(repository.path, "status-blob-reads.log");
+  const log = resolve(tmpdir(), `keiyaku-status-blob-reads-${process.pid}.log`);
   writeFileSync(log, "");
 
   const report = await withGitShim(
@@ -115,24 +116,34 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
   assert.equal(git.effectiveCwd, resolve(repository.path));
   assert.equal(report.root, git.primaryWorktree);
   assert.equal(report.state, (await readGit(git)).commit);
+  const zeros = { staged: 0, unstaged: 0, untracked: 0, submodules: 0 };
   assert.deepEqual(report.rows.find((contract) => contract.id === first), {
     id: first,
+    title: "First status row",
     phase: "waiting",
     disposition: "active",
     workspace: "here",
     worktreePath: null,
+    workspaceObservation: { kind: "clean", location: { kind: "here" }, counts: zeros },
     target: null,
+    targetLag: { kind: "none" },
     delivery: null,
     targetObservation: null,
     gates: { reports: [], satisfied: true },
   });
   assert.deepEqual(report.rows.find((contract) => contract.id === second), {
     id: second,
+    title: "Second status row",
     phase: "waiting",
     disposition: "active",
     workspace: "worktree",
     worktreePath: deliveryWorktreePath(git, second),
+    workspaceObservation: {
+      kind: "unavailable",
+      location: { kind: "worktree", path: deliveryWorktreePath(git, second) },
+    },
     target: null,
+    targetLag: { kind: "none" },
     delivery: null,
     targetObservation: null,
     gates: { reports: [], satisfied: true },
@@ -190,8 +201,8 @@ test("single Contract observation never combines state and target from different
   const terminalCommit = await writeCommit({ repository: git, tree: terminalTree, parent: before.commit });
   const targetTree = repository.run(["rev-parse", `${targetBefore}^{tree}`]).trim();
   const movedTarget = await writeCommit({ repository: git, tree: targetTree, parent: targetBefore });
-  const firstRead = join(repository.path, "first-state-read");
-  const moved = join(repository.path, "moved-state");
+  const firstRead = join(tmpdir(), `keiyaku-first-state-read-${process.pid}`);
+  const moved = join(tmpdir(), `keiyaku-moved-state-${process.pid}`);
   const result = await withGitShim([
     'if [ "$1" = "rev-parse" ] && [ "$2" = "--verify" ] && [ "$4" = "refs/heads/keiyaku-state" ]; then',
     '  if [ -e "$KEIYAKU_FIRST_READ" ] && [ ! -e "$KEIYAKU_MOVED" ]; then',
@@ -218,11 +229,18 @@ test("single Contract observation never combines state and target from different
     kind: "present",
     row: {
       id,
+      title: "Frozen observation",
       phase: "waiting",
       disposition: "active",
       workspace: "here",
       worktreePath: null,
+      workspaceObservation: {
+        kind: "clean",
+        location: { kind: "here" },
+        counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
+      },
       target: "refs/heads/target",
+      targetLag: { kind: "counted", behind: 0 },
       delivery: null,
       targetObservation: { head: targetBefore, drift: false },
       gates: { reports: [], satisfied: true },

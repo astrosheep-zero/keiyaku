@@ -92,6 +92,67 @@ async function workspaceChanges(repository: GitRepository, workspace: string): P
   };
 }
 
+export type WorkspaceChangeCounts = Readonly<{
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  submodules: number;
+}>;
+
+export type ContractWorkspaceLocation =
+  | Readonly<{ kind: "worktree"; path: string }>
+  | Readonly<{ kind: "here" }>;
+
+export type ContractWorkspaceObservation =
+  | Readonly<{ kind: "clean" | "dirty"; location: ContractWorkspaceLocation; counts: WorkspaceChangeCounts }>
+  | Readonly<{ kind: "unavailable"; location: ContractWorkspaceLocation }>;
+
+export type ContractTargetLag =
+  | Readonly<{ kind: "counted"; behind: number }>
+  | Readonly<{ kind: "unknown" }>
+  | Readonly<{ kind: "none" }>;
+
+function countsOf(changes: WorkspaceChanges): WorkspaceChangeCounts {
+  return {
+    staged: changes.staged.length,
+    unstaged: changes.unstaged.length,
+    untracked: changes.untracked.length,
+    submodules: changes.submodules.length,
+  };
+}
+
+export async function observeWorkspace(
+  repository: GitRepository,
+  location: ContractWorkspaceLocation,
+  workspace: string,
+): Promise<ContractWorkspaceObservation> {
+  try {
+    const counts = countsOf(await workspaceChanges(repository, workspace));
+    const dirty = counts.staged > 0 || counts.unstaged > 0 || counts.untracked > 0 || counts.submodules > 0;
+    return { kind: dirty ? "dirty" : "clean", location, counts };
+  } catch {
+    return { kind: "unavailable", location };
+  }
+}
+
+export async function observeTargetLag(
+  repository: GitRepository,
+  workspace: string,
+  head: SnapshotId | null | undefined,
+): Promise<ContractTargetLag> {
+  if (head === undefined) return { kind: "none" };
+  if (head === null) return { kind: "unknown" };
+  try {
+    const text = (await runGit(repository, ["-C", workspace, "rev-list", "--count", `HEAD..${head}`]))
+      .toString("utf8")
+      .trim();
+    if (!/^[0-9]+$/u.test(text)) return { kind: "unknown" };
+    return { kind: "counted", behind: Number(text) };
+  } catch {
+    return { kind: "unknown" };
+  }
+}
+
 /** Capture tracked and untracked workspace bytes without changing its real index. */
 export async function captureWorkspaceTree(repository: GitRepository, workspace: string): Promise<WorkspaceTree> {
   const identities = (await runGit(repository, ["-C", workspace, "show", "-s", "--format=%H%n%T", "HEAD"]))

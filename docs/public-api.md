@@ -216,22 +216,30 @@ type DeliveryIdentity = Readonly<{
   policy: Readonly<{ requireBranchesToBeUpToDate: boolean }>
 }>
 
+type ContractTargetLag =
+  | Readonly<{ kind: "counted"; behind: number }>
+  | Readonly<{ kind: "unknown" }>
+  | Readonly<{ kind: "none" }>
+type ContractWorkspaceLocation =
+  | Readonly<{ kind: "worktree"; path: string }>
+  | Readonly<{ kind: "here" }>
+type ContractWorkspaceObservation =
+  | Readonly<{ kind: "clean" | "dirty"; location: ContractWorkspaceLocation; counts: Readonly<{ staged: number; unstaged: number; untracked: number; submodules: number }> }>
+  | Readonly<{ kind: "unavailable"; location: ContractWorkspaceLocation }>
+
 type ContractRow = Readonly<{
   id: ContractId
+  title: string | null
   phase: "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned"
   disposition: "active" | "terminal"
   workspace: "worktree" | "here"
   worktreePath: string | null
+  workspaceObservation: ContractWorkspaceObservation
   target: string | null
+  targetLag: ContractTargetLag
   delivery: DeliveryIdentity | null
-  targetObservation: Readonly<{
-    head: SnapshotId | null
-    drift: boolean
-  }> | null
-  gates: Readonly<{
-    reports: readonly ContractGateReport[]
-    satisfied: boolean
-  }>
+  targetObservation: Readonly<{ head: SnapshotId | null; drift: boolean }> | null
+  gates: Readonly<{ reports: readonly ContractGateReport[]; satisfied: boolean }>
 }>
 
 type ContractBoard = Readonly<{
@@ -245,13 +253,14 @@ type ContractObservation =
   | Readonly<{ kind: "present"; row: ContractRow }>
 ```
 
-`state` is the immutable commit observed from `refs/heads/keiyaku-state` in the
-same Git read that produced the rows. It is `null` when that ref is absent.
-Lifecycle phase, disposition, candidate currency, every gate report, and the
-aggregate `gates.satisfied` are interpreted only by the Contract read surface.
-The aggregate calls the same core judgment as claimed admission. A stale prior
-attestation and a never-attested gate remain distinct. Downstream boards and
-renderers may present these discriminants but never re-evaluate them.
+`state` is the same-read `refs/heads/keiyaku-state` commit, or `null` when
+absent. Title is the current document H1. `targetLag` counts workspace `HEAD`
+against the same-epoch `targetObservation.head` and never rereads a live
+target ref. `workspaceObservation` is a Git read-time fact, not a journal
+field. Phase,
+disposition, candidate currency, every gate report, and `gates.satisfied` use
+the claimed-admission judgment. Downstream boards copy them and never
+re-evaluate them.
 
 ## Contract Operations
 

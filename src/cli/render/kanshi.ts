@@ -1,20 +1,36 @@
-import type { ContractGateReport, ContractPhase } from "../../index.js";
-import type { AkumaKanshiRow, KanshiReport, Section, TaskKanshiRow } from "../../kanshi/index.js";
+import type { ContractGateReport } from "../../index.js";
+import type {
+  AkumaKanshiRow,
+  ContractKanshiRow,
+  KanshiReport,
+  Section,
+  TaskKanshiRow,
+} from "../../kanshi/index.js";
 import { displayColumns, renderTextBlock, safeText, tone, type TextRenderContext } from "./terminal.js";
 
-function contractMark(phase: ContractPhase): string {
-  if (phase === "claimed") return "✓";
-  if (phase === "abandoned") return "×";
-  if (phase === "waiting" || phase === "pending-delivery") return "⧗";
+const RULE = "─";
+const HORIZON = "───";
+const PLUMB = "  │ ";
+const PATH_PREFIX = `${PLUMB}↳ `;
+
+function contractMark(row: ContractKanshiRow): string {
+  if (row.phase === "claimed") return "✓";
+  if (row.phase === "abandoned") return "×";
+  if (row.title === null) return "?";
+  if (row.gates.reports.some((report) => report.current.kind === "attested" && report.current.verdict === "unsatisfied")) {
+    return "!";
+  }
+  if (row.targetLag.kind === "unknown") return "?";
+  if (row.phase === "waiting") return "○";
   return "●";
 }
 
 function taskMark(row: TaskKanshiRow): string {
   if (row.disposition === "done") return "✓";
   if (row.disposition === "drop") return "×";
-  if (row.disposition === "on_hold") return "‖";
+  if (row.disposition === "on_hold") return "⧗";
   if (row.disposition === "in_progress") return "●";
-  return row.disposition === "blocked" ? "⧗" : "○";
+  return row.disposition === "blocked" ? "‖" : "○";
 }
 
 function akumaMark(life: string): string {
@@ -30,200 +46,225 @@ function gateMark(report: ContractGateReport): string {
   return report.current.verdict === "satisfied" ? "✓" : "!";
 }
 
-function hotFirst<Row>(rows: readonly Row[], hot: (row: Row) => boolean): readonly Row[] {
-  return [...rows.filter(hot), ...rows.filter((row) => !hot(row))];
-}
-
-function stablePriority<Row>(rows: readonly Row[], priority: (row: Row) => number): readonly Row[] {
-  const priorities = [...new Set(rows.map(priority))].sort((left, right) => left - right);
-  return priorities.flatMap((value) => rows.filter((row) => priority(row) === value));
-}
-
-function wrapChain(parts: readonly string[], columns: number): readonly string[] {
-  if (parts.length === 0) return [];
-  const lines: string[] = [];
-  let current = "  ";
-  for (const part of parts.map(safeText)) {
-    const candidate = current === "  " ? `${current}${part}` : `${current} · ${part}`;
-    if (current !== "  " && displayColumns(candidate) > columns) {
-      lines.push(current);
-      current = `  ${part}`;
-    } else current = candidate;
-  }
-  lines.push(current);
-  return lines;
-}
-
-function wrapHeading(primary: string, facts: readonly string[], columns: number): readonly string[] {
-  const head = safeText(primary);
-  const lines: string[] = [];
-  let current = head;
-  for (const fact of facts.map(safeText)) {
-    const candidate = `${current} · ${fact}`;
-    if (displayColumns(candidate) > columns) {
-      lines.push(current);
-      current = `  ${fact}`;
-    } else current = candidate;
-  }
-  lines.push(current);
-  return lines;
-}
-
-function renderGates(
-  reports: readonly ContractGateReport[],
-  context: TextRenderContext,
-  includeSummaries: boolean,
-): readonly string[] {
-  const lines = [...wrapChain(reports.map((report) => `${gateMark(report)} ${safeText(report.gate)}`), context.columns)];
-  if (!includeSummaries) return lines;
-  for (const report of reports) {
-    if (report.current.kind !== "attested" || report.current.summary === undefined) continue;
-    lines.push(...renderTextBlock(`${safeText(report.gate)}: ${report.current.summary}`, "  ", context.columns)
-      .map((line) => tone(line, "dim", context.color)));
-  }
-  return lines;
-}
-
-function failure(name: string, section: Extract<Section<unknown>, { kind: "failed" }>, context: TextRenderContext): string {
-  return `${name} failed\n${tone(`! ${safeText(section.failure.message)}`, "alert", context.color)}`;
-}
-
-function renderContracts(report: KanshiReport, context: TextRenderContext, selection: "world" | "contract"): string {
-  const section = report.contracts;
-  if (section.kind === "absent") return "keiyaku absent";
-  if (section.kind === "failed") return failure("keiyaku", section, context);
-  const rows = stablePriority(section.value.rows, (row) => {
-    if (row.holder.kind === "unavailable") return 0;
-    if (row.phase === "waiting" || row.phase === "pending-delivery") return 1;
-    return 2;
-  });
-  const lines = [`keiyaku ${rows.length}`];
-  for (const row of rows) {
-    const deliveryFacts = row.delivery === null
-      ? []
-      : selection === "world"
-        ? [`integration ${safeText(row.delivery.integration.snapshot).slice(0, 8)}`]
-        : [
-            `tender ${row.delivery.tenderSnapshot}`,
-            `predecessor ${row.delivery.integration.predecessor}`,
-            `integration ${row.delivery.integration.snapshot}`,
-            `change ${row.delivery.integration.changeId}`,
-          ];
-    const targetFacts = selection !== "contract" || row.targetObservation === null
-      ? []
-      : [
-          `target head ${row.targetObservation.head ?? "missing"}`,
-          `target ${row.targetObservation.drift ? "drifted" : "current"}`,
-        ];
-    const facts = [
-      row.workspace,
-      ...deliveryFacts,
-      ...(row.target === null ? [] : [`-> ${row.target}`]),
-      ...targetFacts,
-    ];
-    lines.push(`${contractMark(row.phase)} ${safeText(row.id)} ${row.phase}`);
-    lines.push(...wrapChain(facts, context.columns));
-    lines.push(...renderGates(row.gates.reports, context, selection === "contract"));
-    if (row.holder.kind === "held") lines.push(...wrapChain([`held by ${row.holder.taskId}`], context.columns));
-    if (row.holder.kind === "unavailable") lines.push(...wrapChain(["holder unavailable"], context.columns));
-  }
-  return lines.join("\n");
-}
-
-function renderTasks(report: KanshiReport, context: TextRenderContext): string {
-  const section = report.tasks;
-  if (section.kind === "absent") return "task absent";
-  if (section.kind === "failed") return failure("task", section, context);
-  const active = section.value.rows.filter((row) => row.disposition !== "done" && row.disposition !== "drop");
-  const ready = active.filter((row) => row.disposition === "ready").length;
-  const onHold = active.filter((row) => row.disposition === "on_hold").length;
-  const visible = hotFirst(
-    active.filter((row) => row.disposition === "in_progress" || row.disposition === "blocked"),
-    (row) => row.disposition === "blocked",
-  );
-  const lines = [...wrapHeading(`task ${active.length}`, [`${ready} ready`, `${onHold} held`], context.columns)];
-  for (const row of visible) {
-    const contract = row.contract === undefined ? [] : [`keiyaku ${row.contract.id} (${row.contract.observed})`];
-    lines.push(`${taskMark(row)} ${safeText(row.id)} ${row.disposition}`);
-    lines.push(...renderTextBlock(row.title, "  ", context.columns));
-    lines.push(...wrapChain([`P${row.priority}`, ...contract], context.columns));
-    for (const blocker of row.blockers ?? []) {
-      lines.push(...wrapChain([`blocked by ${blocker.id} (${blocker.state})`], context.columns));
-    }
-  }
-  return lines.join("\n");
-}
-
 function isLost(life: string): boolean {
   return life === "stranded" || life === "hung" || life === "untidy";
 }
 
-function akumaPriority(row: AkumaKanshiRow): number {
-  if (isLost(row.life) || row.life === "stillborn") return 0;
-  return row.life === "running" ? 1 : 2;
+function branchName(target: string | null): string | null {
+  if (target === null) return null;
+  return target.startsWith("refs/heads/") ? target.slice("refs/heads/".length) : target;
 }
 
-function firstLine(value: string): string {
-  return value.split(/[\r\n\u2028\u2029]/u, 1)[0] ?? "";
+function targetFacts(row: ContractKanshiRow): readonly string[] {
+  const name = branchName(row.target);
+  if (name === null) return ["no target"];
+  const facts = [`target ${name}`];
+  if (row.targetLag.kind === "unknown") facts.push("behind unknown");
+  if (row.targetLag.kind === "counted") facts.push(`behind ${row.targetLag.behind}`);
+  if (row.targetObservation?.drift === true) facts.push("drift");
+  return facts;
 }
 
-function truncateDisplay(value: string, columns: number): string {
-  if (displayColumns(value) <= columns) return value;
-  if (columns <= 0) return "";
-  const ellipsis = "…";
-  if (columns <= displayColumns(ellipsis)) return ellipsis;
-  let result = "";
-  let used = 0;
-  for (const character of value) {
-    const width = displayColumns(character);
-    if (used + width + displayColumns(ellipsis) > columns) break;
-    result += character;
-    used += width;
+function workspaceState(row: ContractKanshiRow): string {
+  const observation = row.workspaceObservation;
+  if (row.workspace === "here") return `workspace here · ${observation.kind}`;
+  if (observation.kind === "unavailable") return "worktree unavailable";
+  if (observation.kind === "clean") return "worktree clean";
+  const counts = [
+    ...(observation.counts.staged > 0 ? [`staged ${observation.counts.staged}`] : []),
+    ...(observation.counts.unstaged > 0 ? [`unstaged ${observation.counts.unstaged}`] : []),
+    ...(observation.counts.untracked > 0 ? [`untracked ${observation.counts.untracked}`] : []),
+    ...(observation.counts.submodules > 0 ? [`submodules ${observation.counts.submodules}`] : []),
+  ];
+  return counts.length === 0 ? "worktree dirty" : `worktree dirty · ${counts.join(" · ")}`;
+}
+
+function showWorkspacePath(row: ContractKanshiRow, hot: boolean): boolean {
+  if (row.workspace !== "worktree") return false;
+  if (row.workspaceObservation.kind !== "clean") return true;
+  return hot;
+}
+
+function contractHot(row: ContractKanshiRow): boolean {
+  if (row.title === null) return true;
+  if (row.phase === "pending-delivery") return true;
+  if (row.holder.kind === "unavailable" || row.holder.kind === "held") return true;
+  if (row.fleet.length > 0) return true;
+  if (row.targetLag.kind === "counted" && row.targetLag.behind > 0) return true;
+  if (row.workspaceObservation.kind !== "clean") return true;
+  return row.gates.reports.some((report) =>
+    report.current.kind === "stale"
+    || (report.current.kind === "attested" && report.current.verdict === "unsatisfied"));
+}
+
+function taskHot(row: TaskKanshiRow): boolean {
+  return row.disposition === "blocked" || row.disposition === "in_progress";
+}
+
+function akumaHot(row: AkumaKanshiRow): boolean {
+  if (row.life === "running" || row.life === "stillborn" || isLost(row.life)) return true;
+  return row.contract?.observed === "missing" || row.contract?.observed === "unavailable";
+}
+
+function aperture(label: string, columns: number): string {
+  const prefix = `──[ ${label} ]`;
+  const fill = Math.max(1, columns - displayColumns(prefix));
+  return `${prefix}${RULE.repeat(fill)}`;
+}
+
+function plumbFacts(facts: readonly string[], columns: number): readonly string[] {
+  const clean = facts.map(safeText).filter((fact) => fact.length > 0);
+  if (clean.length === 0) return [];
+  const lines: string[] = [];
+  let current = PLUMB;
+  for (const fact of clean) {
+    const candidate = current === PLUMB ? `${PLUMB}${fact}` : `${current} · ${fact}`;
+    if (current !== PLUMB && displayColumns(candidate) > columns) {
+      lines.push(current);
+      current = `${PLUMB}${fact}`;
+    } else current = candidate;
   }
-  return `${result}${ellipsis}`;
+  lines.push(current);
+  return lines;
 }
 
-function bornFacts(row: AkumaKanshiRow): readonly string[] {
-  const association = [
-    ...(row.aliases ?? []).map((alias) => `alias ${alias}`),
-    ...(row.contract === undefined ? [] : [`keiyaku ${row.contract.id} (${row.contract.observed})`]),
-  ];
-  if (!("pending" in row) || (row.life !== "running" && !isLost(row.life))) return association;
-  const confinement = row.confinement.kind === "unconfined"
-    ? ["unconfined"]
-    : row.confinement.writableRoots.map((root, index) => index === 0 ? `writes ${root}` : root);
-  return [
-    ...association,
-    ...(row.pending.length === 0 ? [] : [`pending ${row.pending.length}`]),
-    ...confinement,
-  ];
+function plumbBlock(value: string, columns: number): readonly string[] {
+  return renderTextBlock(value, PLUMB, columns);
 }
 
-function stillbornEvidence(row: AkumaKanshiRow, columns: number): string | null {
-  if (row.life !== "stillborn" || !("seal" in row) || row.seal === undefined) return null;
-  const prefix = "  seal ";
-  const evidence = safeText(firstLine(row.seal.evidence)).trim();
-  if (evidence.length === 0) return null;
-  return `${prefix}${truncateDisplay(evidence, Math.max(0, columns - displayColumns(prefix)))}`;
+function plumbPath(path: string): string {
+  return `${PATH_PREFIX}${safeText(path)}`;
 }
 
-function renderAkuma(report: KanshiReport, context: TextRenderContext): string {
-  const section = report.akuma;
-  if (section.kind === "absent") return "akuma absent";
-  if (section.kind === "failed") return failure("akuma", section, context);
+function identityLine(mark: string, identity: string, extra = ""): string {
+  return extra.length === 0 ? `${mark} ${safeText(identity)}` : `${mark} ${safeText(identity)} ${safeText(extra)}`;
+}
+
+function renderGates(reports: readonly ContractGateReport[], columns: number, includeSummaries: boolean): readonly string[] {
+  if (reports.length === 0) return [];
+  const lines = [...plumbFacts([`gates: ${reports.map((report) => `${gateMark(report)} ${report.gate}`).join(" · ")}`], columns)];
+  if (!includeSummaries) return lines;
+  for (const report of reports) {
+    if (report.current.kind !== "attested" || report.current.summary === undefined) continue;
+    lines.push(...plumbBlock(`${report.gate}: ${report.current.summary}`, columns));
+  }
+  return lines;
+}
+
+function failure(name: string, section: Extract<Section<unknown>, { kind: "failed" }>, context: TextRenderContext): readonly string[] {
+  return [aperture(name, context.columns), `${tone(`! ${safeText(section.failure.message)}`, "alert", context.color)}`];
+}
+
+function sectionAbsent(name: string, columns: number): readonly string[] {
+  return [aperture(name, columns), `${PLUMB}${name.toLowerCase()} absent`];
+}
+
+function endpointFact(id: string, observed: string | undefined): string {
+  if (observed === "missing") return `-> ${id} (missing)`;
+  if (observed === "unavailable") return `-> ${id} (unavailable)`;
+  return `-> ${id}`;
+}
+
+function renderContracts(report: KanshiReport, context: TextRenderContext, selection: "world" | "contract"): readonly string[] {
+  const section = report.contracts;
+  if (section.kind === "absent") return sectionAbsent("KEIYAKU", context.columns);
+  if (section.kind === "failed") return failure("KEIYAKU", section, context);
   const rows = [
-    ...section.value.rows.filter((row) => akumaPriority(row) === 0),
-    ...section.value.rows.filter((row) => akumaPriority(row) === 1),
-    ...section.value.rows.filter((row) => akumaPriority(row) === 2),
+    ...section.value.rows.filter(contractHot),
+    ...section.value.rows.filter((row) => !contractHot(row)),
   ];
-  const lines = [`akuma ${rows.length}`];
+  const lines = [aperture("KEIYAKU", context.columns)];
   for (const row of rows) {
-    lines.push(`${akumaMark(row.life)} ${safeText(row.id)} ${row.life}`);
-    lines.push(...wrapChain(bornFacts(row), context.columns));
-    const evidence = stillbornEvidence(row, context.columns);
-    if (evidence !== null) lines.push(evidence);
+    const hot = contractHot(row);
+    const compact = !hot && selection !== "contract";
+    const title = row.title ?? "title unavailable";
+    lines.push(identityLine(contractMark(row), row.id));
+    lines.push(...plumbFacts(
+      compact
+        ? [title, row.phase, ...targetFacts(row)]
+        : [title],
+      context.columns,
+    ));
+    if (!compact) lines.push(...plumbFacts([row.phase, ...targetFacts(row)], context.columns));
+    lines.push(...plumbFacts([workspaceState(row)], context.columns));
+    if (showWorkspacePath(row, hot || selection === "contract") && row.workspaceObservation.location.kind === "worktree") {
+      lines.push(plumbPath(row.workspaceObservation.location.path));
+    }
+    lines.push(...renderGates(row.gates.reports, context.columns, selection === "contract"));
+    if (row.holder.kind === "held") lines.push(...plumbFacts([`task ${row.holder.taskId}`], context.columns));
+    if (row.holder.kind === "unavailable") lines.push(...plumbFacts(["holder unavailable"], context.columns));
+    for (const attached of row.fleet) {
+      const aliases = attached.aliases.length === 0 ? "" : ` (${attached.aliases.join(" ")})`;
+      lines.push(...plumbFacts([`akuma ${attached.id}${aliases}`], context.columns));
+    }
   }
-  return lines.join("\n");
+  const attention = rows.filter(contractHot).length;
+  lines.push(aperture(`${rows.length} keiyaku · ${attention} attention`, context.columns));
+  return lines;
+}
+
+function renderTasks(report: KanshiReport, context: TextRenderContext): readonly string[] {
+  const section = report.tasks;
+  if (section.kind === "absent") return sectionAbsent("TASK", context.columns);
+  if (section.kind === "failed") return failure("TASK", section, context);
+  const rows = [
+    ...section.value.rows.filter(taskHot),
+    ...section.value.rows.filter((row) => !taskHot(row)),
+  ];
+  const lines = [aperture("TASK", context.columns)];
+  for (const row of rows) {
+    const compact = !taskHot(row);
+    lines.push(identityLine(taskMark(row), row.id));
+    const relation = row.contract === undefined
+      ? ["unbound"]
+      : [endpointFact(row.contract.id, row.contract.observed)];
+    const facts = [row.title, row.disposition, `P${row.priority}`, ...relation];
+    if (compact) lines.push(...plumbFacts(facts, context.columns));
+    else {
+      lines.push(...plumbBlock(row.title, context.columns));
+      lines.push(...plumbFacts([row.disposition, `P${row.priority}`], context.columns));
+      for (const blocker of row.blockers ?? []) {
+        lines.push(...plumbFacts([`blocked by ${blocker.id}`], context.columns));
+      }
+      lines.push(...plumbFacts(relation, context.columns));
+    }
+  }
+  const attention = rows.filter(taskHot).length;
+  lines.push(aperture(`${rows.length} task · ${attention} attention`, context.columns));
+  return lines;
+}
+
+function akumaLabel(row: AkumaKanshiRow): string {
+  const aliases = row.aliases ?? [];
+  return aliases.length === 0 ? "" : `(${aliases.join(" ")})`;
+}
+
+function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {
+  const section = report.akuma;
+  if (section.kind === "absent") return sectionAbsent("FLEET", context.columns);
+  if (section.kind === "failed") return failure("FLEET", section, context);
+  const rows = [
+    ...section.value.rows.filter(akumaHot),
+    ...section.value.rows.filter((row) => !akumaHot(row)),
+  ];
+  const lines = [aperture("FLEET", context.columns)];
+  for (const row of rows) {
+    lines.push(identityLine(akumaMark(row.life), row.id, akumaLabel(row)));
+    const key = row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"
+      ? ["stranded", "resume unsupported"]
+      : [row.life];
+    const relation = row.contract === undefined
+      ? ["unbound"]
+      : [endpointFact(row.contract.id, row.contract.observed)];
+    if (!akumaHot(row)) lines.push(...plumbFacts([...key, ...relation], context.columns));
+    else {
+      lines.push(...plumbFacts(key, context.columns));
+      lines.push(...plumbFacts(relation, context.columns));
+    }
+  }
+  const attention = rows.filter(akumaHot).length;
+  lines.push(aperture(`${rows.length} akuma · ${attention} attention`, context.columns));
+  return lines;
 }
 
 function sectionCount(name: string, section: Section<{ rows: readonly unknown[] }>): string {
@@ -248,11 +289,12 @@ function splitHorizon(report: KanshiReport, columns: number): readonly string[] 
     sectionCount("task", report.tasks),
   ].join(" · ");
   const world = worldCoordinate(report);
-  const minimum = `kanshi ─ ${aggregate} ─ ${world}`;
-  if (displayColumns(minimum) > columns) return [`kanshi ─ ${aggregate} ─ ${world}`];
+  const minimum = `kanshi ${HORIZON} ${aggregate} ${HORIZON} ${world}`;
+  if (displayColumns(minimum) > columns) return [minimum];
   const fill = columns - displayColumns(minimum);
-  const left = 1 + Math.floor(fill / 2), right = 1 + Math.ceil(fill / 2);
-  return [`kanshi ${"─".repeat(left)} ${aggregate} ${"─".repeat(right)} ${world}`];
+  const left = Math.floor(fill / 2);
+  const right = Math.ceil(fill / 2);
+  return [`kanshi ${HORIZON}${RULE.repeat(left)} ${aggregate} ${HORIZON}${RULE.repeat(right)} ${world}`];
 }
 
 export function renderKanshiText(
@@ -261,9 +303,12 @@ export function renderKanshiText(
   selection: "world" | "contract" = "world",
 ): string {
   return [
-    splitHorizon(report, context.columns).join("\n"),
-    renderContracts(report, context, selection),
-    renderAkuma(report, context),
-    renderTasks(report, context),
-  ].join("\n\n");
+    ...splitHorizon(report, context.columns),
+    "",
+    ...renderContracts(report, context, selection),
+    "",
+    ...renderTasks(report, context),
+    "",
+    ...renderAkuma(report, context),
+  ].join("\n");
 }

@@ -2,9 +2,9 @@
 
 Git owns the Git world that carries contract journals, candidate bytes,
 target refs, managed worktrees, and Keiyaku-owned pins. Keiyaku owns the
-deterministic managed path, ref, and pin topology; the agent owns the working
-content; and the journal owns only the tendered candidate. Git is the
-custody layer for physical object availability and the sole owner of
+deterministic managed path, ref, and pin topology; the agent owns the
+working content; and the journal owns only the tendered candidate. Git is
+the custody layer for physical object availability and the sole owner of
 reconciliation behavior.
 
 ## Git World
@@ -22,14 +22,12 @@ per Contract.
 Targeted observation and admission are
 `O(touched journal size + bounded ancestor depth)`, never `O(world)`. A
 full-world observation is `O(N)`. The private Git map has no independently
-updated cache, current-state snapshot, second or per-contract Git ref, or fact
-index. The prohibition is against a second update timeline and second
-authority, not against organizing the one atomically updated state-tree value.
-The deterministic managed refs and pins are topology and reachability only;
-they are not a Git-state index or a second fact store.
-Git also owns observation of the invocation worktree's current branch. It
-returns the canonical `refs/heads/...` symbolic `HEAD`, or absence when that
-worktree is detached; no higher layer runs or interprets Git for this fact.
+updated cache, current-state snapshot, second or per-contract Git ref, or
+fact index: the prohibition is a second update timeline, not organizing the
+one atomically updated state-tree. Managed refs and pins are topology only.
+Git also owns the invocation worktree's current branch: the canonical
+`refs/heads/...` symbolic `HEAD`, or absence when detached. No higher layer
+runs or interprets Git for this fact.
 Variable-length public identities do not determine Git depth. A journal
 locator uses an `active` or `terminal` class followed by a fixed-width strong
 digest of the complete ContractId as a bounded-fanout Git tree path, while the
@@ -60,10 +58,14 @@ owner. Git does not know any product path or codec.
 The observation memoizes completed object results by object ID and target
 resolution by refname. A missing requested object is a typed per-object result;
 the product owner decides how that absence affects its read. Repeated rows that
-name one target cause one target-ref read. The complete read therefore uses
+name one target cause one target-ref read. That shared observation is
 `O(1) + O(distinct target refs)` Git processes, independent of owner count,
-row count, and blob count. An empty private state needs no batch process unless
-a consumer explicitly requests an object.
+row count, and blob count. Workspace cleanliness and target lag are not that
+shared observation: they use the existing workspace owner once per observable
+Contract workspace and count that workspace `HEAD` against the already-frozen
+`targetObservation.head`. They do not reread a target ref or open another
+ref epoch. An empty private state needs no batch process unless a consumer
+explicitly requests an object.
 
 Only Git creates a decode channel or a read observation. A package-root public
 call may own one channel and pass that read-only capability through protocol,
@@ -103,11 +105,11 @@ protocol, owner-created Git process, cross-call cache, cross-epoch ref cache,
 synchronous Contract-reader fallback, or product-named Git reader. This leaves
 subprocess custody, process identity, Git decision order, and bounded walks unchanged.
 
-Git mints `ContractCoordinates.start` at bind. With a target it is
-the resolved target head; without a target it is the caller worktree's current
+Git mints `ContractCoordinates.start` at bind. With a target it is the
+resolved target head; without a target it is the caller worktree's current
 `HEAD`. It is the initial managed-worktree commit and the original comparison
-point for a `here` workspace. A targeted here contract is legal only while the
-caller's symbolic `HEAD` is that target.
+point for a `here` workspace. A targeted here contract is legal only while
+the caller's symbolic `HEAD` is that target.
 
 Bind derives those coordinates anew inside every semantic attempt. The same
 atomic admission transaction asserts only the ref fact sealed into
@@ -124,8 +126,8 @@ does not assert or persist them. Moving to another branch at the same OID
 between observation and admission is therefore legal and invisible; Git must
 not change the caller's checkout to restore the earlier observation.
 
-An explicit target must exist at bind observation. Absence is returned to the
-library as `target-missing` before any journal or ref publication. Git
+An explicit target must exist at bind observation. Absence is returned to
+the library as `target-missing` before any journal or ref publication. Git
 never creates the target branch and never substitutes another ref or the
 caller's current `HEAD` for it.
 
@@ -157,7 +159,9 @@ A managed worktree has exactly one deterministic physical path:
 `<git-common-dir>/keiyaku/wt/<contract-physical-name>`. Primary and linked
 worktrees therefore derive the same path for one Contract. The path is a
 read-time projection from the pinned common Git directory and ContractId; it is
-not stored in the Contract journal, and there is no legacy-path fallback.
+not stored in the Contract journal, and there is no legacy-path fallback. Git
+owns workspace cleanliness and target lag there, or at the pinned caller
+worktree for `here`, counting workspace `HEAD` against the same-epoch frozen `targetObservation.head` and never a live target ref. A named target with a missing frozen head is unknown. Clean means empty staged, unstaged, untracked, and submodule sets; otherwise dirty; unavailable when unobservable. Here never fabricates a managed path. These facts are not persisted.
 
 ## Tender, Integration, And Diff Ownership
 

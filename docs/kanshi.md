@@ -125,6 +125,12 @@ Contract. Section presence, absence, and
 failure remain unchanged. The text renderer consumes only this public report
 and renders each present endpoint as `keiyaku <id> (<observed>)`.
 
+Kanshi joins each present Contract row with the already-read Task holder and
+Akuma Dispatch facts as typed attachments. It does not invent a second
+association or persist those joins. A held Task is `task <id>`; each Dispatch
+is `akuma <id>` with that Akuma's current Alias list. Missing or failed
+sections stay typed and remain distinct from an observed empty section.
+
 ## Read-Time Region
 
 `KanshiInput.region` is optional. Omitted input leaves `KanshiReport` without a
@@ -163,3 +169,90 @@ The public input validates this exact discriminated union, rejects unknown
 fields, and validates ContractId/path values before any repository observation.
 This planning read uses the document Region owner and never reports actual
 touched paths, Git conflicts, ownership, gates, or serialization advice.
+
+## Text board
+
+Human and Flagship share one text projection. The renderer consumes the typed
+report only; it does not reread product authorities or infer associations. The
+signature owned by [cli-output.md](cli-output.md) always says keiyaku, akuma,
+and task as count units. FLEET is only the section name.
+
+The normative layout is three apertures after the signature:
+
+```text
+kanshi ─── 1 keiyaku · 1 akuma · 1 task ─── /repo main <state>
+
+──[ KEIYAKU ]────────────────────────────────────────────────────
+! kei/example
+  │ Title · waiting · target main · behind 7 · drift
+  │ worktree dirty · staged 1 · unstaged 3 · untracked 2
+  │ ↳ /absolute/managed/path
+  │ gates: ✓ build · ! tests
+  │ task task/example
+  │ akuma aku/worker/abcd1234 (@lead)
+──[ 1 keiyaku · 1 attention ]───────────────────────────────────
+
+──[ TASK ]───────────────────────────────────────────────────────
+● task/example
+  │ Title · in_progress · P0
+  │ -> kei/example
+──[ 1 task · 1 attention ]──────────────────────────────────────
+
+──[ FLEET ]──────────────────────────────────────────────────────
+● aku/worker/abcd1234 (@lead)
+  │ running
+  │ -> kei/example
+──[ 1 akuma · 1 attention ]─────────────────────────────────────
+```
+
+Every observed entity repeats its row grammar between the section boundaries.
+No entity may be replaced by an omission line, aggregate, dormant bucket,
+placeholder, or shortened coordinate. Complete coordinates remain present in
+output bytes even when the terminal wraps them. Hot or anomalous entities use
+additional plumb-line rows for decision facts; cold entities retain at least
+one plumb-line row with title, state, and key fact. Section summaries report
+totals and attention counts only after every entity has appeared.
+
+A Contract is hot when it is pending-delivery, has failed or stale gate
+testimony, is behind its target, has a dirty or unavailable worktree, has an
+unavailable holder, has an attached Task or Akuma, or its current opaque
+document cannot yield a title. Waiting, drift, unknown target, and no-target
+stay on the compact row and are not themselves attention. A Task is hot when
+blocked or in progress. An Akuma is hot when running, lost, stillborn, or its
+Dispatch endpoint is missing or unavailable. Attention counts those hot rows.
+
+Contract rows retain complete `kei/...` identity, read-time title, phase, target,
+numeric behind when known, `behind unknown` beside a known target name when
+lag is unknown, explicit no-target when none, independent drift, gate
+testimony, and exact attached Task/Akuma coordinates. Task and Akuma rows
+retain complete identities, state or key facts, and exact `-> kei/...`
+associations where present. A missing endpoint is `-> kei/... (missing)`; an
+unavailable board is `-> kei/... (unavailable)`. An unbound Task or Akuma
+renders `unbound` instead of a relation. Title is `null` when the current opaque
+Contract document cannot be decoded; this does not remove the Contract row or
+fail another section, and text renders `title unavailable`.
+
+This chapter is the sole complete board glyph owner. Marks accelerate
+scanning and never replace a copied discriminant. Reachable Task
+dispositions use `●` in_progress, `○` ready or open, `⧗` on_hold, `‖`
+blocked, `✓` done, and `×` drop. Contract and Akuma marks reuse that
+vocabulary: `●` live, `○` waiting or idle, `✓` claimed or satisfied, `×`
+abandoned, killed, or dropped, `!` unsatisfied or stillborn, and `?`
+unknown, stale, or lost. There is no invented `=` mark.
+
+Worktree facts use this exact Contract plumb-line order after the title/state
+line:
+
+```text
+  │ worktree dirty · staged 1 · unstaged 3 · untracked 2
+  │ ↳ /absolute/managed/path
+  │ gates: ✓ build · ! tests
+```
+
+The worktree state line is always visible. The complete path line expands for
+an active/hot Contract or any dirty or unavailable observation; a cold clean
+Contract may omit the path while retaining `worktree clean`. A here Contract
+renders `workspace here · clean|dirty|unavailable` and never fabricates a
+managed path. A path is always one complete coordinate; renderer truncation
+or an ellipsis is forbidden. The path line is subordinate fact syntax, not a
+cross-product relation, and does not use the entity attachment relation.

@@ -125,6 +125,29 @@ async function readHolders(observation: GitReadObservation): Promise<HolderRead>
   }
 }
 
+function attachFleet(
+  contracts: Section<ContractKanshiBoard>,
+  akuma: Section<AkumaKanshiWorld>,
+): Section<ContractKanshiBoard> {
+  if (contracts.kind !== "present") return contracts;
+  const attachments = new Map<string, ContractKanshiBoard["rows"][number]["fleet"][number][]>();
+  if (akuma.kind === "present") {
+    for (const row of akuma.value.rows) {
+      if (row.contract === undefined) continue;
+      const current = attachments.get(row.contract.id) ?? [];
+      current.push({ id: row.id, aliases: row.aliases });
+      attachments.set(row.contract.id, current);
+    }
+  }
+  return {
+    kind: "present",
+    value: {
+      ...contracts.value,
+      rows: contracts.value.rows.map((row) => ({ ...row, fleet: attachments.get(row.id) ?? [] })),
+    },
+  };
+}
+
 function decorateContracts(
   contracts: Section<ContractBoard>,
   holders: HolderRead,
@@ -135,11 +158,15 @@ function decorateContracts(
     value: {
       ...contracts.value,
       rows: contracts.value.rows.map((row) => {
-        if (holders.kind === "failed") return { ...row, holder: { kind: "unavailable" as const } };
+        if (holders.kind === "failed") return { ...row, holder: { kind: "unavailable" as const }, fleet: [] };
         const holder = holders.kind === "present" ? holders.value.get(row.id) : undefined;
-        return holder?.disposition === "held"
-          ? { ...row, holder: { kind: "held" as const, taskId: holder.taskId } }
-          : { ...row, holder: { kind: "none" as const } };
+        return {
+          ...row,
+          fleet: [],
+          holder: holder?.disposition === "held"
+            ? { kind: "held" as const, taskId: holder.taskId }
+            : { kind: "none" as const },
+        };
       }),
     },
   };
@@ -243,15 +270,9 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
     const contracts = { kind: "absent" as const };
     const holders = { kind: "absent" as const };
     const observeContract = contractEndpointObserver(contracts);
-    return {
-      root: world,
-      observedAt,
-      branch,
-      contracts,
-      tasks: world === null ? { kind: "absent" } : await readTasks(world, holders, observeContract),
-      akuma: world === null ? { kind: "absent" } : await joinAkuma(world, observeContract, []),
-      ...(input.region === undefined ? {} : { region: { kind: "absent" as const } }),
-    };
+    const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
+    const akuma = world === null ? { kind: "absent" as const } : await joinAkuma(world, observeContract, []);
+    return { root: world, observedAt, branch, contracts, tasks, akuma, ...(input.region === undefined ? {} : { region: { kind: "absent" as const } }) };
   }
   try {
     const repository = scopeForRepo(repo);
@@ -265,17 +286,18 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
       const contracts = decorateContracts(contractSection, holders);
       const observeContract = contractEndpointObserver(contracts);
       const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
+      const akuma = world === null
+        ? { kind: "absent" as const }
+        : dispatches.kind === "failed"
+          ? dispatches
+          : await joinAkuma(world, observeContract, dispatches.value);
       return {
         root: world,
         observedAt,
         branch,
-        contracts,
+        contracts: attachFleet(contracts, akuma),
         tasks,
-        akuma: world === null
-          ? { kind: "absent" as const }
-          : dispatches.kind === "failed"
-            ? dispatches
-            : await joinAkuma(world, observeContract, dispatches.value),
+        akuma,
         ...(region === undefined ? {} : { region }),
       };
     }));

@@ -169,5 +169,7 @@ test("a malformed active document fails only the selected Region section", async
   assert.equal((await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
   const report = await read(repository, { kind: "declarations" });
   assert.equal(report.contracts.kind, "present");
+  if (report.contracts.kind !== "present") return;
+  assert.equal(report.contracts.value.rows.find((row) => row.id === id)?.title, null);
   assert.equal(report.region?.kind, "failed");
 });
