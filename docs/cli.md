@@ -13,33 +13,30 @@ The canonical spelling is:
 keiyaku [-C <path>] [--repo <path>] <command> [<contract>|@<contract>] [--flag ...] [-]
 ```
 
-`-C <path>` and `--cwd <path>` are two spellings of the one global invocation
-cwd and are never persisted as a product coordinate. The canonical examples
-use `-C`. Either spelling may appear before or after the command, but the two
-spellings may not be combined or repeated in one invocation. The value is
-resolved against the process cwd; omission means the process cwd. The resulting
-canonical invocation cwd is the sole input to `World.locate`, the base for every
-relative argv path, the fallback Repo-discovery input, and the Akuma execution
-cwd supplied by the CLI.
+`-C <path>` and `--cwd <path>` are two spellings of the global invocation cwd;
+canonical examples use `-C`. Either spelling may appear before or after the
+command, but they may not be combined or repeated. The value is resolved
+against the process cwd; omission means the process cwd. This canonical cwd is
+the base for relative argv paths, invocation Repo discovery, and Akuma
+execution. Together with the discovered Repo's primary worktree, it feeds
+World resolution; the cwd itself is never product identity.
 
-`--repo <path>` is the one explicit Git coordinate. Its value is resolved
-against the invocation cwd and supplied to `Repo.at`; it may name any path
-inside the intended repository because it uses the same discovery operation as
-the cwd fallback. It replaces that fallback input and does not change World,
-Task, Settings, or Akuma execution cwd.
+`--repo <path>` is the explicit Contract Git coordinate. It resolves against
+the invocation cwd and may name any path inside the intended repository. It
+does not replace the invocation Repo used for World resolution or change Task,
+Settings, or Akuma execution cwd.
 
-The edge calls `World.locate` once and reuses the resulting `WorldRoot` across
-every reader in the invocation. A Task or Akuma creation command may call
-`World.at` after that observation when no marker exists; it never locates a
-second time. The edge likewise constructs at most one `Repo` and reuses it for
-selector reads, Contract handles, verbs, reconciliation, Dispatch, and composite
-observation. All Contract verbs and `reconcile` require that Repo. Composite
-`status` and `ls` consume an optional Repo and retain typed-absent Git sections
-when discovery finds none. `call --contract`, `fork` Dispatch inheritance, and
-`wait` or `kill` with a complete `kei/...` selector require Repo. Fleet reads
-may consume the optional Repo only for public Dispatch association. Task,
-Settings, install, Contract-free call, and non-Contract catalogs do not consume
-Repo. An unused explicit `--repo` is a typed usage refusal.
+The edge discovers the optional invocation Repo once, calls `World.resolve`
+once, and reuses that resolution across every reader and creating operation.
+Without `--repo`, the invocation Repo also serves Contract selectors, verbs,
+reconciliation, Dispatch, and composite observation. Explicit `--repo` adds a
+separate Contract Repo consumed by Contract verbs, `reconcile`, `call
+--contract`, fork inheritance, and `wait` or `kill` with a complete `kei/...`
+selector. Composite `status` and every `ls` projection use only the invocation
+Repo so a report cannot join two Worlds. Fleet reads use it only for public
+Dispatch association. Task, Settings, install, Contract-free call, and
+non-Contract catalogs do not consume Repo. Any unused explicit `--repo` is a
+typed usage refusal.
 
 The CLI uses only public `Repo`, `Keiyaku`, and `Delivery` values. No package
 operation resolves a path or reads the working directory again.
@@ -227,7 +224,7 @@ Settings-backed provider interpretation. When no same-name Settings entry
 exists, the built-in fallback execution names are `claude` and
 `codex-app-server`. Missing or malformed configuration prints the exact path
 searched. `--contract` accepts one complete `kei/...` identity, constructs its
-handle from the invocation Repo, and asks the package-root call to publish
+handle from the selected Contract Repo, and asks the package-root call to publish
 Dispatch after birth. It is not a lifecycle gate and does not accept an
 omitted or `@` Contract selector. `--alias` accepts the sole `@name` grammar and
 asks that same call to move the world-local Alias after any Dispatch succeeds.
@@ -279,9 +276,10 @@ no answered turn, text writes `no answer retained` and JSON exposes the typed
 an answer and writes zero bytes in text mode. Both last-answer arms exit zero
 because each is a successful read result.
 `fork` requires one nonblank `--at` history id and has no stdin body.
-The adapter supplies the invocation Repo to package-root fork when `-C` is
-inside a Git world and supplies no Repo outside Git. The facade alone reads and
-propagates a parent Dispatch; CLI never reads Dispatch or Alias files.
+The adapter supplies an explicit Contract Repo when selected, otherwise the
+invocation Repo when `-C` is inside Git, and no Repo outside Git. The facade
+alone reads and propagates a parent Dispatch; CLI never reads Dispatch or Alias
+files.
 
 ## Akuma Text Surface
 

@@ -158,7 +158,10 @@ other consumed value is a nonblank string. Additional top-level keys are
 ignored and never enter Archetype options or the soul snapshot. The Markdown body
 after frontmatter is the system prompt, including an empty one.
 
-`Akuma.of(root, settings?)` consumes one already resolved WorldRoot. It uses the injected
+`Akuma.of(root, settings?)` consumes one already resolved WorldRoot. All
+worktrees of one Git repository therefore share one fleet, Alias authority,
+and Heart storage. The Soul's execution cwd remains the actual invocation
+worktree or subdirectory and does not participate in World identity. Akuma uses the injected
 Settings snapshot when present and otherwise constructs one Settings value for
 that world. `call({ archetype })` validates the name, reads this one Archetype file,
 resolves its `provider` as an execution name in the Settings `providers`

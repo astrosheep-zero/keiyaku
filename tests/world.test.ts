@@ -3,7 +3,9 @@ import { existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 
 import { homedir, tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import test from "node:test";
+import { repositoryAt } from "../src/git/repository.js";
 import { World, WorldError } from "../src/world.js";
+import { makeGitRepository } from "./support/git.js";
 
 function temporary(): string { return mkdtempSync(join(tmpdir(), "keiyaku-world-")); }
 
@@ -18,11 +20,55 @@ test("World.locate selects the nearest marker without creating one", () => {
   assert.equal(existsSync(join(bare, ".keiyaku")), false);
 });
 
-test("World.at establishes only the exact directory", () => {
+test("World resolution reuses a non-Git ancestor marker while World.at remains exact", () => {
+  const marked = temporary(), nested = join(marked, "a", "b");
+  mkdirSync(join(marked, ".keiyaku"));
+  mkdirSync(nested, { recursive: true });
+  const resolution = World.resolve(nested);
+  assert.equal(resolution.root, realpathSync(marked));
+  assert.equal(resolution.establish(), realpathSync(marked));
+
   const root = temporary(), leaf = join(root, "a", "b"); mkdirSync(leaf, { recursive: true });
   assert.equal(World.at(leaf), realpathSync(leaf));
   assert.equal(existsSync(join(leaf, ".keiyaku")), true);
   assert.equal(existsSync(join(root, ".keiyaku")), false);
+});
+
+test("one Git repository resolves one WorldRoot from primary, subdirectory, and linked worktree", () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Keiyaku Test"]);
+  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
+  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
+  const nested = join(repository.path, "a", "b");
+  const linked = temporary();
+  mkdirSync(nested, { recursive: true });
+  repository.run(["worktree", "add", "--quiet", "--detach", linked]);
+  mkdirSync(join(linked, ".keiyaku"));
+
+  const primary = repositoryAt(repository.path);
+  const secondary = repositoryAt(linked);
+  assert.equal(World.locate({ cwd: repository.path, repositoryRoot: primary.primaryWorktree }), realpathSync(repository.path));
+  assert.equal(World.locate({ cwd: nested, repositoryRoot: primary.primaryWorktree }), realpathSync(repository.path));
+  assert.equal(World.locate({ cwd: linked, repositoryRoot: secondary.primaryWorktree }), realpathSync(repository.path));
+});
+
+test("Git reads do not create a marker and Git creation establishes only the primary WorldRoot", () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Keiyaku Test"]);
+  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
+  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
+  const linked = temporary();
+  repository.run(["worktree", "add", "--quiet", "--detach", linked]);
+  const scope = repositoryAt(linked);
+
+  const world = World.resolve({ cwd: linked, repositoryRoot: scope.primaryWorktree });
+  assert.equal(world.root, realpathSync(repository.path));
+  assert.equal(existsSync(join(repository.path, ".keiyaku")), false);
+  assert.equal(existsSync(join(linked, ".keiyaku")), false);
+
+  assert.equal(world.establish(), realpathSync(repository.path));
+  assert.equal(existsSync(join(repository.path, ".keiyaku")), true);
+  assert.equal(existsSync(join(linked, ".keiyaku")), false);
 });
 
 test("World excludes the user home from locate and exact construction", () => {

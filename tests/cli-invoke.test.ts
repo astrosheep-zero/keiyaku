@@ -127,6 +127,56 @@ test("one CLI invocation reuses its Repo for selector, settings, and contract lo
   }
 });
 
+test("explicit Repo selects Contract storage without replacing the invocation World", async () => {
+  const invocationRepository = repositoryWithMain();
+  const contractRepository = repositoryWithMain();
+  writeFileSync(
+    resolve(contractRepository.path, ".keiyaku", "settings.json"),
+    JSON.stringify({ gates: { default: ["verified"] } }),
+  );
+  contractRepository.run(["add", ".keiyaku/settings.json"]);
+  contractRepository.run(["commit", "--quiet", "-m", "distinct contract settings"]);
+
+  const result = await invoke(parseArgv([
+    "-C", invocationRepository.path,
+    "--repo", contractRepository.path,
+    "bind", "-",
+  ]), {
+    environment: {},
+    readStdin: () => contractDocument("Orthogonal coordinates"),
+  });
+  const id = acceptedContract(result);
+  const invocationRepo = Repo.at({ path: invocationRepository.path });
+  const contractRepo = Repo.at({ path: contractRepository.path });
+
+  assert.deepEqual((await Keiyaku.list({ repo: invocationRepo })).rows, []);
+  assert.deepEqual((await Keiyaku.list({ repo: contractRepo })).rows.map((row) => row.id), [id]);
+  assert.deepEqual((await observeContract(repositoryAt(contractRepository.path), id)).state?.terms.gates, ["reviewed"]);
+});
+
+test("composite status refuses an explicit Repo that could create a mixed-World report", async () => {
+  const invocationRepository = repositoryWithMain();
+  const contractRepository = repositoryWithMain();
+  await assert.rejects(
+    () => invoke(parseArgv([
+      "-C", invocationRepository.path,
+      "--repo", contractRepository.path,
+      "status",
+    ])),
+    (error: unknown) => error instanceof CliUsageError
+      && /--repo has no consumer for status/u.test(error.message),
+  );
+  await assert.rejects(
+    () => invoke(parseArgv([
+      "-C", invocationRepository.path,
+      "--repo", contractRepository.path,
+      "ls", "kei/",
+    ])),
+    (error: unknown) => error instanceof CliUsageError
+      && /--repo has no consumer for ls/u.test(error.message),
+  );
+});
+
 test("an explicit status selector projects one Kanshi report without changing section shape", async () => {
   const repository = repositoryWithMain();
   const tasks = Tasks.of(World.at(repository.path));

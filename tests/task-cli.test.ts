@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,7 @@ import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "../src/cli/render/task.js";
 import type { TaskInvocationResult } from "../src/cli/commands/task-invoke.js";
+import { makeGitRepository } from "./support/git.js";
 
 function world(): string { const root = mkdtempSync(join(tmpdir(), "keiyaku-task-cli-")); mkdirSync(join(root, ".keiyaku")); return root; }
 
@@ -73,6 +74,36 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   assert.equal((documentAdd as { kind: string }).kind, "accepted");
   const documentShown = await invoke(parseArgv(["-C", root, "task", "show", "task/from-document"])) as TaskInvocationResult;
   assert.equal((documentShown as { task: { state: string } }).task.state, "done");
+});
+
+test("Task, Settings, and Kanshi share the primary WorldRoot across Git worktrees", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Keiyaku Test"]);
+  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
+  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
+  const linked = mkdtempSync(join(tmpdir(), "keiyaku-task-linked-"));
+  repository.run(["worktree", "add", "--quiet", "--detach", linked]);
+
+  const added = await invoke(parseArgv(["-C", linked, "task", "add", "Shared worktree task"])) as TaskInvocationResult;
+  assert.equal((added as { kind: string }).kind, "accepted");
+  const shown = await invoke(parseArgv(["-C", repository.path, "task", "show", "task/shared-worktree-task"])) as TaskInvocationResult;
+  assert.equal((shown as { task: { title: string } }).task.title, "Shared worktree task");
+  assert.equal(existsSync(join(linked, ".keiyaku", "tasks")), false);
+  await invoke(parseArgv(["-C", linked, "task", "namespace", "contract/shared"]));
+  const namespace = await invoke(parseArgv(["-C", repository.path, "task", "namespace"]));
+  assert.deepEqual(namespace, { kind: "accepted", value: ["contract", "shared"] });
+
+  const settings = await invoke(parseArgv(["-C", linked, "settings"]));
+  if (settings.kind !== "settings") throw new Error("expected settings result");
+  const primary = realpathSync(repository.path);
+  assert.equal(settings.value.scopes.project.path, join(primary, ".keiyaku", "settings.json"));
+
+  const status = await invoke(parseArgv(["-C", linked, "status"]));
+  if (status.kind !== "status") throw new Error("expected status result");
+  assert.equal(status.report.root, primary);
+  assert.equal(status.report.tasks.kind, "present");
+  if (status.report.tasks.kind !== "present") throw new Error("expected Task section");
+  assert.equal(status.report.tasks.value.rows.some((row) => row.id === "task/shared-worktree-task"), true);
 });
 
 test("task drop note is passed to each independent lifecycle mutation", async () => {

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { beginTurn, endTurn, initializeHeart } from "../src/akuma/heart/index.js";
+import { beginTurn, endTurn, initializeHeart, readSoul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { invoke } from "../src/cli/invoke.js";
@@ -13,6 +13,7 @@ import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { akumaExitCode, akumaJsonValue, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
+import { makeGitRepository } from "./support/git.js";
 
 test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "-"]), {
@@ -736,6 +737,61 @@ test("Akuma status, wait, and history share public observations without embeddin
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("linked and primary worktrees observe one Akuma World while Soul retains its execution cwd", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Keiyaku Test"]);
+  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
+  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
+  const linked = mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-linked-"));
+  repository.run(["worktree", "add", "--quiet", "--detach", linked]);
+
+  const allocated = allocateAkumaDirectory({
+    worldRoot: repository.path,
+    archetype: "worker",
+    draw: () => "1357ace0",
+  });
+  initializeHeart(allocated.paths);
+  const provider: ProviderAdapter = {
+    confinement: () => ({ kind: "unconfined" }),
+    admitOptions(options) { return { kind: "admitted", options }; },
+    async start() {
+      return {
+        admission: { fence: "shared-world" },
+        events: { async *[Symbol.asyncIterator]() {} },
+        completion: Promise.resolve({ kind: "answered", answer: "shared", historyId: "shared-world" }),
+        async abort() {},
+      };
+    },
+  };
+  await driveAkumaBody({
+    paths: allocated.paths,
+    seed: {
+      id: allocated.id,
+      archetype: "worker",
+      provider: { name: "worker", kind: "codex-exec" },
+      options: {},
+      origin: { kind: "direct" },
+      confinement: { kind: "unconfined" },
+      cwd: linked,
+    },
+    initialBody: "work",
+  }, provider, {
+    collar: { pid: 999_991, processGroup: 999_991, spawnedAt: "shared-world" },
+    now: () => "2026-08-14T00:00:00.000Z",
+    async putDownOwnTree() {},
+  });
+
+  const fromLinked = await invoke(parseArgv(["-C", linked, "status", allocated.id]));
+  const fromPrimary = await invoke(parseArgv(["-C", repository.path, "status", allocated.id]));
+  assert.equal(fromLinked.kind, "akuma");
+  assert.deepEqual(fromLinked, fromPrimary);
+  await moveAlias({ world: repository.path, alias: "@shared", akuId: allocated.id });
+  const fromLinkedAlias = await invoke(parseArgv(["-C", linked, "status", "@shared"]));
+  assert.equal(fromLinkedAlias.kind === "akuma" ? fromLinkedAlias.status.status.id : undefined, allocated.id);
+  assert.equal(readSoul(allocated.paths)?.cwd, linked);
+  assert.equal(existsSync(join(linked, ".keiyaku", "akuma", "run")), false);
 });
 
 test("history --last renders typed no-answer and preserves answered empty bytes", () => {

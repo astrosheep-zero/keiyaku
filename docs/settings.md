@@ -20,7 +20,9 @@ type Settings = Readonly<{
 ```
 
 `root`, when present, is one absolute WorldRoot supplied by the process edge
-and selects `<root>/.keiyaku/settings.json`. An omitted root means there is no
+and selects `<root>/.keiyaku/settings.json`. Git worktrees of one repository
+receive the same primary-worktree root; Settings never treats a managed
+worktree marker as a separate project scope. An omitted root means there is no
 project scope; Settings never reads `process.cwd()` or discovers a world.
 `home` selects
 `<home>/settings.json`; it defaults to `~/.keiyaku`. A caller-supplied home

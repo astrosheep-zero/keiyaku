@@ -8,10 +8,12 @@ Contract authority, or interpret a retained contract association.
 
 ## World, Context, And Identity
 
-A Task world is a directory context. The CLI resolves it with `World.locate`
-or `World.at`; the Task product receives the resulting `WorldRoot` directly.
+A Task world is one product World. The CLI supplies the `WorldRoot` from its
+single `World.resolve` result; the Task product receives that root directly.
 `Tasks.of(root)` never searches upward, reads Git state, or inspects the process
-cwd. A nearer nested marker deliberately starts another Task world.
+cwd. In a Git repository every worktree uses the primary worktree WorldRoot;
+a worktree marker cannot split Task authority. Outside Git, a nearer nested
+marker deliberately starts another Task world.
 
 A `TaskId` is `task/<local-id>` at the root or
 `task/<namespace...>/<local-id>` in a nested namespace. Every segment uses the

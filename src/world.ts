@@ -5,6 +5,14 @@ import { dirname, join, parse, resolve } from "node:path";
 const WORLD_BRAND: unique symbol = Symbol("keiyaku.world");
 
 export type WorldRoot = string & { readonly [WORLD_BRAND]: true };
+export type WorldResolutionInput = Readonly<{
+  cwd: string;
+  repositoryRoot?: string;
+}>;
+export type WorldResolution = Readonly<{
+  root: WorldRoot | null;
+  establish: () => WorldRoot;
+}>;
 
 export class WorldError extends Error {
   readonly kind: "invalid-world" | "home-world" | "root-world";
@@ -58,6 +66,38 @@ function ensureMarker(root: string): void {
   mkdirSync(path, { recursive: true });
 }
 
+type WorldInput = string | WorldResolutionInput;
+
+function inputValues(input: WorldInput, label: string): Readonly<{ cwd: string; repositoryRoot?: string }> {
+  if (typeof input === "string") return { cwd: directory(input, label) };
+  if (input === null || typeof input !== "object") throw new TypeError(`${label} must be a path or resolution input`);
+  const cwd = directory(input.cwd, `${label} cwd`);
+  if (input.repositoryRoot === undefined) return { cwd };
+  return { cwd, repositoryRoot: directory(input.repositoryRoot, `${label} repository root`) };
+}
+
+function locateMarker(input: string): WorldRoot | null {
+  let candidate = input;
+  const home = homeRoot();
+  for (;;) {
+    const filesystemRoot = parse(candidate).root;
+    if (candidate !== home && candidate !== filesystemRoot && existsSync(marker(candidate))) {
+      try {
+        if (!statSync(marker(candidate)).isDirectory()) {
+          throw new WorldError("invalid-world", `world marker is not a directory: ${marker(candidate)}`);
+        }
+      } catch (error) {
+        if (error instanceof WorldError) throw error;
+        throw new WorldError("invalid-world", `world marker is not a directory: ${marker(candidate)}`);
+      }
+      return brand(candidate);
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate || candidate === filesystemRoot) return null;
+    candidate = parent;
+  }
+}
+
 function exact(input: string): WorldRoot {
   const root = directory(input, "world");
   rejectReservedRoot(root);
@@ -65,33 +105,23 @@ function exact(input: string): WorldRoot {
   return brand(root);
 }
 
-function locateInput(input: string): string {
-  return directory(input, "world location");
+function resolved(input: WorldInput): WorldResolution {
+  const values = inputValues(input, "world location");
+  const root = values.repositoryRoot === undefined ? locateMarker(values.cwd) : brand(values.repositoryRoot);
+  if (root !== null) rejectReservedRoot(root);
+  return Object.freeze({
+    root,
+    establish(): WorldRoot {
+      const established = root ?? brand(values.cwd);
+      rejectReservedRoot(established);
+      ensureMarker(established);
+      return established;
+    },
+  });
 }
 
 export const World = Object.freeze({
-  locate(input: string): WorldRoot | null {
-    let candidate = locateInput(input);
-    const home = homeRoot();
-    for (;;) {
-      const filesystemRoot = parse(candidate).root;
-      if (candidate !== home && candidate !== filesystemRoot && existsSync(marker(candidate))) {
-        try {
-          if (!statSync(marker(candidate)).isDirectory()) {
-            throw new WorldError("invalid-world", `world marker is not a directory: ${marker(candidate)}`);
-          }
-        } catch (error) {
-          if (error instanceof WorldError) throw error;
-          throw new WorldError("invalid-world", `world marker is not a directory: ${marker(candidate)}`);
-        }
-        return brand(candidate);
-      }
-      const parent = dirname(candidate);
-      if (parent === candidate || candidate === filesystemRoot) return null;
-      candidate = parent;
-    }
-  },
-  at(input: string): WorldRoot {
-    return exact(input);
-  },
+  resolve(input: WorldInput): WorldResolution { return resolved(input); },
+  locate(input: WorldInput): WorldRoot | null { return resolved(input).root; },
+  at(input: string): WorldRoot { return exact(input); },
 });

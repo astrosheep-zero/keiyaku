@@ -684,6 +684,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("index.ts"),
         any("cli/accepted.ts"),
         any("cli/actor.ts"),
+        any("cli/coordinates.ts"),
         any("cli/commands/**"),
         any("cli/invoke.ts"),
         any("cli/main.ts"),
@@ -729,7 +730,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       owners: [
         { source: "scripts/check-architecture.ts", symbols: ["readFileSync", "readdirSync"] },
         { source: "scripts/model-change-impact.ts", symbols: ["readFileSync", "readdirSync"] },
-        { source: "cli/invoke.ts", symbols: ["readFileSync", "realpathSync"] },
+        { source: "cli/invoke.ts", symbols: ["readFileSync"] },
+        { source: "cli/coordinates.ts", symbols: ["realpathSync"] },
         { source: "settings.ts", symbols: ["readFileSync"] },
         { source: "git/reconcile.ts", symbols: ["existsSync", "mkdirSync"] },
         { source: "git/hooks.ts", symbols: ["closeSync", "fsyncSync", "mkdirSync", "openSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"] },

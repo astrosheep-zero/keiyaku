@@ -1,6 +1,5 @@
-import { readFileSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
-import { gatesFrom, Keiyaku, NoGitWorldError, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
+import { readFileSync } from "node:fs";
+import { gatesFrom, Keiyaku, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
 import { kanshi, selectKanshi } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromMutationCall } from "./accepted.js";
@@ -14,7 +13,8 @@ import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecu
 import type { DiffUnavailable, InvocationResult } from "./result.js";
 import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
 import { resolveNamedAddress } from "../library/address.js";
-import { World, WorldError, type WorldRoot } from "../world.js";
+import type { WorldRoot } from "../world.js";
+import { assertExplicitRepoUse, resolveCliCoordinates } from "./coordinates.js";
 
 export type { AcceptedFact, DiffUnavailable, InvocationResult, Lag } from "./result.js";
 
@@ -37,28 +37,6 @@ export type GuidanceInvocationResult = Readonly<{ kind: "guidance"; contract: Co
 function settingsAt(root: WorldRoot | undefined, environment: NodeJS.ProcessEnv): Settings {
   const home = environment.KEIYAKU_HOME?.trim();
   return settings({ ...(root === undefined ? {} : { root }), ...(home === undefined || home.length === 0 ? {} : { home }) });
-}
-
-function locateWorld(coordinate: string): WorldRoot | null {
-  try { return World.locate(coordinate); }
-  catch (error) {
-    if (error instanceof WorldError) throw new CliUsageError(error.message);
-    throw error;
-  }
-}
-
-function canonicalInvocationCwd(input: string): string {
-  try { return realpathSync(input); }
-  catch { throw new CliUsageError(`invocation cwd is not an existing directory: ${input}`); }
-}
-
-function establishWorld(coordinate: string, located: WorldRoot | null): WorldRoot {
-  if (located !== null) return located;
-  try { return World.at(coordinate); }
-  catch (error) {
-    if (error instanceof WorldError) throw new CliUsageError(error.message);
-    throw error;
-  }
 }
 
 function selectedGates(value: Settings, name?: string) {
@@ -93,64 +71,6 @@ function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv
     throw new CliUsageError(error instanceof Error ? error.message : String(error));
   }
   return resolved;
-}
-
-function repoAt(coordinate: string): Repo {
-  return Repo.at({ path: coordinate });
-}
-
-function optionalRepoAt(coordinate: string): Repo | undefined {
-  try { return repoAt(coordinate); }
-  catch (error) {
-    if (error instanceof NoGitWorldError) return undefined;
-    throw error;
-  }
-}
-
-type RepoUse = "none" | "optional" | "required";
-
-function repoUse(command: ParsedCommand): RepoUse {
-  switch (command.command) {
-    case "bind":
-    case "amend":
-    case "deliver":
-    case "review":
-    case "arc":
-    case "abandon":
-    case "audit":
-    case "reconcile":
-    case "show":
-      return "required";
-    case "ls":
-      return command.query.kind === "contracts" ? "required" : "none";
-    case "status":
-    case "tell":
-    case "history":
-    case "fork":
-      return "optional";
-    case "wait":
-    case "kill":
-      return command.akuma.some((selector) => selector.startsWith("kei/")) ? "required" : "optional";
-    case "call":
-      return command.contract === undefined ? "none" : "required";
-    case "settings":
-    case "task":
-    case "install":
-      return "none";
-  }
-}
-
-function refuseUnusedRepo(command: ParsedCommand): never {
-  if (command.command === "call") throw new CliUsageError("--repo has no consumer without --contract");
-  throw new CliUsageError(`--repo has no consumer for ${command.command}`);
-}
-
-function repoFor(use: RepoUse, coordinate: string): Repo | undefined {
-  switch (use) {
-    case "none": return undefined;
-    case "optional": return optionalRepoAt(coordinate);
-    case "required": return repoAt(coordinate);
-  }
 }
 
 async function selectContract(repo: Repo, selector: string | undefined, scope: string): Promise<SelectedContract> {
@@ -368,8 +288,8 @@ async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, input: AkumaEdgeI
   catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
 }
 
-function akumaWorldFor(parsed: ParsedAkumaCommand, cwd: string, located: WorldRoot | null): WorldRoot {
-  const world = parsed.command === "call" ? establishWorld(cwd, located) : located;
+function akumaWorldFor(parsed: ParsedAkumaCommand, located: WorldRoot | null, establish: () => WorldRoot): WorldRoot {
+  const world = parsed.command === "call" ? establish() : located;
   if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
   return world;
 }
@@ -443,18 +363,19 @@ async function invokeStatus(
 async function invokeParsed(
   invocation: NonInstallExecution,
   runtime: InvokeRuntime,
-  use: RepoUse,
 ): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
-  const processCwd = resolve(runtime.cwd ?? ".");
-  const cwd = canonicalInvocationCwd(resolve(processCwd, invocation.cwd ?? "."));
+  const coordinates = resolveCliCoordinates({
+    ...(runtime.cwd === undefined ? {} : { processCwd: runtime.cwd }),
+    ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+    ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
+    command: invocation.command,
+  });
+  const { cwd, repo, world } = coordinates;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
     readStdin: runtime.readStdin ?? (() => readFileSync(0, "utf8")),
   };
   const parsed = invocation.command;
-  const repoCoordinate = resolve(cwd, invocation.repo ?? ".");
-  const repo = repoFor(use, repoCoordinate);
-  const world = locateWorld(cwd);
   if (parsed.command === "settings") {
     return { kind: "settings", value: settingsAt(world ?? undefined, edge.environment) };
   }
@@ -462,14 +383,14 @@ async function invokeParsed(
     try {
       return await invokeTask(parsed, {
         world,
-        establish: () => establishWorld(cwd, world),
+        establish: coordinates.establishWorld,
         readStdin: edge.readStdin,
       });
     }
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
   }
   if (isParsedAkumaCommand(parsed)) {
-    const akumaWorld = akumaWorldFor(parsed, cwd, world);
+    const akumaWorld = akumaWorldFor(parsed, world, coordinates.establishWorld);
     const configuration = settingsAt(akumaWorld, edge.environment);
     return await invokeAkumaFromEdge(parsed, {
       path: akumaWorld,
@@ -513,14 +434,13 @@ async function invokeInstall(command: Extract<ParsedCommand, { command: "install
 export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult | InstallInvocationResult> {
   try {
     const command = invocation.command;
-    const use = repoUse(command);
-    if (invocation.repo !== undefined && use === "none") refuseUnusedRepo(command);
+    assertExplicitRepoUse(command, invocation.repo);
     if (command.command === "install") return await invokeInstall(command, runtime);
     return await invokeParsed({
       ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
       command,
-    }, runtime, use);
+    }, runtime);
   } catch (error) {
     if (error instanceof CliUsageError && error.projection === undefined) {
       throw new CliUsageError(error.diagnostic, renderCommandUsage(invocation.command));

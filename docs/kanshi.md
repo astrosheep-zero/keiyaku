@@ -21,6 +21,8 @@ Contract board, complete Task world, and Akuma fleet. Every product remains a
 public source value. A section is `present`, `absent`, or `failed`; absence is a
 lawful missing product world, while corruption and IO are failures with a
 bounded diagnostic. One section's failure does not suppress another section.
+The WorldRoot is shared by every worktree in one Git repository; Kanshi never
+re-resolves it from cwd or a worktree marker.
 
 The report is:
 
@@ -36,7 +38,8 @@ type KanshiReport = {
 ```
 
 `observedAt` is one canonical ISO timestamp sampled before any section read.
-`branch` is the invocation Repo's attached branch, or `null` without a Repo,
+One report observes exactly one World. `branch` is the attached branch of the
+Repo whose primary worktree is `root`, or `null` without a Repo,
 for detached HEAD, or when that observation fails. The immutable
 `refs/heads/keiyaku-state` commit remains represented once as
 `ContractBoard.state`, not copied into another report field. It is not the
@@ -62,7 +65,8 @@ reader. Task files, Alias files, branch metadata, and the compact Akuma fleet
 retain their existing independent failure boundaries.
 
 The observation exists only for this report call. Kanshi keeps no cross-report
-cache and has no prepare/finish exchange with the product owners.
+cache and has no prepare/finish exchange with the product owners. It never
+combines a WorldRoot with a Repo from another repository.
 
 ## Contract endpoints
 
