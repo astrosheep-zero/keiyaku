@@ -45,8 +45,8 @@ test("one Git repository resolves one WorldRoot from primary, subdirectory, and 
   repository.run(["worktree", "add", "--quiet", "--detach", linked]);
   mkdirSync(join(linked, ".keiyaku"));
 
-  const primary = repositoryAt(repository.path);
-  const secondary = repositoryAt(linked);
+  const primary = await repositoryAt(repository.path);
+  const secondary = await repositoryAt(linked);
   assert.equal(await World.locate({ cwd: repository.path, repositoryRoot: primary.primaryWorktree }), realpathSync(repository.path));
   assert.equal(await World.locate({ cwd: nested, repositoryRoot: primary.primaryWorktree }), realpathSync(repository.path));
   assert.equal(await World.locate({ cwd: linked, repositoryRoot: secondary.primaryWorktree }), realpathSync(repository.path));
@@ -59,7 +59,7 @@ test("Git reads do not create a marker and Git creation establishes only the pri
   repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
   const linked = temporary();
   repository.run(["worktree", "add", "--quiet", "--detach", linked]);
-  const scope = repositoryAt(linked);
+  const scope = await repositoryAt(linked);
 
   const world = await World.resolve({ cwd: linked, repositoryRoot: scope.primaryWorktree });
   assert.equal(world.root, realpathSync(repository.path));

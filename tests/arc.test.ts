@@ -173,13 +173,13 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   const admitted = await command(["arc", contract, "-"], arcDocument("CLI Chapter"));
   assert.equal(admitted.kind, "accepted");
   assert.deepEqual(admitted.facts.map((fact) => fact.kind), ["arc"]);
-  const state = (await observeContract(repositoryAt(repository.path), contract)).state;
+  const state = (await observeContract(await repositoryAt(repository.path), contract)).state;
   assert.equal(state?.currentArc?.data.seq, 1);
   assert.equal(state?.currentArc?.data.title, "CLI Chapter");
 
   const second = await command(["arc", contract, "-"], arcDocument("CLI Chapter Two"));
   assert.equal(second.kind, "accepted");
-  const secondState = (await observeContract(repositoryAt(repository.path), contract)).state;
+  const secondState = (await observeContract(await repositoryAt(repository.path), contract)).state;
   assert.equal(secondState?.currentArc?.data.seq, 2);
   assert.equal(secondState?.currentArc?.data.title, "CLI Chapter Two");
 

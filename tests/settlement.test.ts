@@ -83,14 +83,14 @@ function commitTasks(world: ReturnType<typeof repository>, message = "track Task
 }
 
 test("targetless delivery materializes held completion without mutating the Task checkout", async () => {
-  const world = repository(), repo = Repo.at({ path: world.path });
+  const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Targetless completion");
   commitTasks(world);
   const before = await taskState(world.path, taskId);
   const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Targetless completion"), workspace: "here", gates: [] });
   const state = await bound.keiyaku.state();
-  const git = repositoryAt(world.path);
-  assert.equal(readGit(git).paths.has(contractJournalPath(state.id)), true);
+  const git = await repositoryAt(world.path);
+  assert.equal((await readGit(git)).paths.has(contractJournalPath(state.id)), true);
   assert.deepEqual(await withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, readTaskHoldersAt)), [{
     version: 1,
     taskId,
@@ -111,7 +111,7 @@ test("targetless delivery materializes held completion without mutating the Task
 });
 
 test("targeted claim publishes implementation and done Task bytes together", async () => {
-  const world = repository(), repo = Repo.at({ path: world.path });
+  const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Atomic target completion");
   commitTasks(world);
   const before = await taskState(world.path, taskId);
@@ -124,8 +124,8 @@ test("targeted claim publishes implementation and done Task bytes together", asy
     gates: ["reviewed"],
   });
   const state = await bound.keiyaku.state();
-  const worktree = deliveryWorktreePath(repositoryAt(world.path), state.id);
-  const handle = Keiyaku.of({ repo: Repo.at({ path: worktree }), id: state.id });
+  const worktree = deliveryWorktreePath(await repositoryAt(world.path), state.id);
+  const handle = Keiyaku.of({ repo: await Repo.at({ path: worktree }), id: state.id });
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
 
   const reviewed = await handle.review({ verdict: "satisfied", summary: "complete reviewed integration" });
@@ -145,7 +145,7 @@ test("targeted claim publishes implementation and done Task bytes together", asy
 });
 
 test("abandon releases the holder without reopening Task authority", async () => {
-  const world = repository(), repo = Repo.at({ path: world.path });
+  const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Abandoned Task", "done");
   commitTasks(world);
   const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("No reopen"), workspace: "here" });
@@ -168,7 +168,7 @@ test("abandon releases the holder without reopening Task authority", async () =>
 });
 
 test("missing and terminal held Task authority refuse before delivery admission", async () => {
-  const world = repository(), repo = Repo.at({ path: world.path });
+  const world = repository(), repo = await Repo.at({ path: world.path });
   const missing = "task/missing" as const;
   const missingBound = await Keiyaku.bind({ repo, task: missing, markdown: document("Missing Task"), workspace: "here", gates: [] });
   await assert.rejects(
@@ -193,7 +193,7 @@ test("missing and terminal held Task authority refuse before delivery admission"
 });
 
 test("a held Task is exclusive until its Contract releases it", async () => {
-  const world = repository(), repo = Repo.at({ path: world.path });
+  const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Exclusive holder");
   commitTasks(world);
   const first = await Keiyaku.bind({
@@ -213,8 +213,8 @@ test("a held Task is exclusive until its Contract releases it", async () => {
       && error.refusal.holder === firstState.id,
   );
 
-  const firstWorktree = deliveryWorktreePath(repositoryAt(world.path), firstState.id);
-  const firstHandle = Keiyaku.of({ repo: Repo.at({ path: firstWorktree }), id: firstState.id });
+  const firstWorktree = deliveryWorktreePath(await repositoryAt(world.path), firstState.id);
+  const firstHandle = Keiyaku.of({ repo: await Repo.at({ path: firstWorktree }), id: firstState.id });
   const delivered = await firstHandle.deliver();
 
   assert.equal((await first.keiyaku.state()).terminal?.kind, "claimed");
@@ -223,14 +223,14 @@ test("a held Task is exclusive until its Contract releases it", async () => {
 });
 
 test("abandon rejects corrupt authority assigning one Contract multiple holders", async () => {
-  const world = repository(), repo = Repo.at({ path: world.path });
+  const world = repository(), repo = await Repo.at({ path: world.path });
   const firstTask = await task(world.path, "First holder");
   const secondTask = await task(world.path, "Second holder");
   const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("First holder"), workspace: "here" });
   await Keiyaku.bind({ repo, task: secondTask, markdown: document("Second holder"), workspace: "worktree" });
   const firstId = (await first.keiyaku.state()).id;
-  const git = repositoryAt(world.path);
-  const snapshot = readGit(git);
+  const git = await repositoryAt(world.path);
+  const snapshot = await readGit(git);
   const secondPath = `settlement/task-holders/${createHash("sha256").update(secondTask).digest("hex")}.json`;
   const duplicate = Buffer.from(`${JSON.stringify({
     version: 1,
@@ -238,9 +238,9 @@ test("abandon rejects corrupt authority assigning one Contract multiple holders"
     contractId: firstId,
     disposition: "held",
   })}\n`);
-  const tree = updateGitTree(git, snapshot.tree, new Map([[secondPath, { oid: writeBlob(git, duplicate) }]]));
-  const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
+  const tree = await updateGitTree(git, snapshot.tree, new Map([[secondPath, { oid: await writeBlob(git, duplicate) }]]));
+  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal((await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
 
   await assert.rejects(
     () => first.keiyaku.abandon(),
@@ -252,14 +252,14 @@ test("abandon rejects corrupt authority assigning one Contract multiple holders"
 
 test("TaskHolder reads reject unexpected authority paths", async () => {
   const world = repository();
-  await Keiyaku.bind({ repo: Repo.at({ path: world.path }), markdown: document("Initialize authority"), workspace: "here" });
-  const git = repositoryAt(world.path);
-  const snapshot = readGit(git);
-  const tree = updateGitTree(git, snapshot.tree, new Map([
-    ["settlement/task-holders", { oid: writeBlob(git, "not holder authority\n") }],
+  await Keiyaku.bind({ repo: await Repo.at({ path: world.path }), markdown: document("Initialize authority"), workspace: "here" });
+  const git = await repositoryAt(world.path);
+  const snapshot = await readGit(git);
+  const tree = await updateGitTree(git, snapshot.tree, new Map([
+    ["settlement/task-holders", { oid: await writeBlob(git, "not holder authority\n") }],
   ]));
-  const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
-  assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
+  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal((await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
 
   await assert.rejects(
     withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, readTaskHoldersAt)),
@@ -287,7 +287,7 @@ test("holder fence release failures preserve accepted admission", async () => {
 
 test("holder claim executes inside the Task settlement fence", async () => {
   const world = repository();
-  const git = repositoryAt(world.path);
+  const git = await repositoryAt(world.path);
   let entered = false;
   const admission = await withGitDecodeChannel(git, (channel) => claimTaskHolderWithFence(git, channel, "task/fenced" as const, () => {
     entered = true;
@@ -298,7 +298,7 @@ test("holder claim executes inside the Task settlement fence", async () => {
 });
 
 test("managed bind installs Task namespace after worktree materialization", async () => {
-  const world = repository(), repo = Repo.at({ path: world.path });
+  const world = repository(), repo = await Repo.at({ path: world.path });
   const bound = await Keiyaku.bind({ repo, markdown: document("Namespace settlement"), workspace: "worktree" });
   const action = bound.settlement.actions[0];
   assert.ok(action);

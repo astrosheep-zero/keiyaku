@@ -67,8 +67,8 @@ export type TargetPlacementPreparation =
   | Readonly<{ kind: "prepared"; placement: PreparedTargetPlacement }>
   | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>;
 
-export function observeTargetHead(repository: GitRepository, target: string): SnapshotId | null {
-  const value = readRef(repository, target);
+export async function observeTargetHead(repository: GitRepository, target: string): Promise<SnapshotId | null> {
+  const value = await readRef(repository, target);
   return value === null ? null : mintSnapshotId(value);
 }
 
@@ -82,17 +82,17 @@ function nulPaths(bytes: Buffer): readonly string[] {
   return [...new Set(fields.slice(0, -1))].sort();
 }
 
-function gitPaths(repository: GitRepository, path: string, args: readonly string[]): readonly string[] {
-  return nulPaths(runGit(repository, ["-C", path, ...args]));
+async function gitPaths(repository: GitRepository, path: string, args: readonly string[]): Promise<readonly string[]> {
+  return nulPaths(await runGit(repository, ["-C", path, ...args]));
 }
 
 function literalPath(path: string): string {
   return `:(literal)${path}`;
 }
 
-function commitTree(repository: GitRepository, snapshot: SnapshotId): GitObjectId {
+async function commitTree(repository: GitRepository, snapshot: SnapshotId): Promise<GitObjectId> {
   return gitObjectId(
-    runGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)])
+    (await runGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)]))
       .toString("utf8")
       .trim(),
     "commit tree",
@@ -118,14 +118,14 @@ type CheckoutObservation = Readonly<{
   candidate: GitObjectId;
 }>;
 
-function changedPaths(
+async function changedPaths(
   repository: GitRepository,
   path: string,
   predecessor: GitObjectId,
   candidate: GitObjectId,
   filter?: string,
-): readonly string[] {
-  return gitPaths(repository, path, [
+): Promise<readonly string[]> {
+  return await gitPaths(repository, path, [
     "diff",
     "--name-only",
     "--no-renames",
@@ -141,11 +141,11 @@ async function dryRunRefusal(
   scopes: readonly PhysicalScope[],
 ): Promise<CheckoutNotFollowableRefusal> {
   const { repository, contractId, target, path, predecessor, candidate } = input;
-  const changed = changedPaths(repository, path, predecessor, candidate);
+  const changed = await changedPaths(repository, path, predecessor, candidate);
   const pathspecs = changed.map(literalPath);
   if (pathspecs.length === 0) return checkoutRefusal(contractId, target, path, "conflict", []);
 
-  const staged = gitPaths(repository, path, [
+  const staged = await gitPaths(repository, path, [
     "diff",
     "--cached",
     "--name-only",
@@ -156,10 +156,10 @@ async function dryRunRefusal(
   ]);
   if (staged.length > 0) return checkoutRefusal(contractId, target, path, "staged", staged);
 
-  const dirty = gitPaths(repository, path, ["diff-files", "--name-only", "-z", "--", ...pathspecs]);
+  const dirty = await gitPaths(repository, path, ["diff-files", "--name-only", "-z", "--", ...pathspecs]);
   if (dirty.length > 0) return checkoutRefusal(contractId, target, path, "conflict", dirty);
 
-  const unmerged = gitPaths(repository, path, ["diff", "--name-only", "--diff-filter=U", "-z", "--", ...pathspecs]);
+  const unmerged = await gitPaths(repository, path, ["diff", "--name-only", "--diff-filter=U", "-z", "--", ...pathspecs]);
   if (unmerged.length > 0) return checkoutRefusal(contractId, target, path, "conflict", unmerged);
 
   return await untrackedRefusalWithinScopes(input, scopes, false)
@@ -189,13 +189,13 @@ function physicalScope(worktree: string, candidatePath: string): PhysicalScope |
   return null;
 }
 
-function candidateEntryIsBlob(
+async function candidateEntryIsBlob(
   repository: GitRepository,
   path: string,
   candidate: GitObjectId,
   candidatePath: string,
-): boolean {
-  const output = runGit(repository, ["-C", path, "ls-tree", "-z", candidate, "--", literalPath(candidatePath)]);
+): Promise<boolean> {
+  const output = await runGit(repository, ["-C", path, "ls-tree", "-z", candidate, "--", literalPath(candidatePath)]);
   const records = output.toString("utf8").split("\0").filter((record) => record.length > 0);
   if (records.length !== 1) throw new Error(`candidate path has no unique Git entry: ${candidatePath}`);
   const separator = records[0]!.indexOf("\t");
@@ -204,17 +204,17 @@ function candidateEntryIsBlob(
   return fields[1] === "blob";
 }
 
-function destructionScopes(
+async function destructionScopes(
   repository: GitRepository,
   path: string,
   candidate: GitObjectId,
   writes: readonly string[],
-): readonly PhysicalScope[] {
+): Promise<readonly PhysicalScope[]> {
   const scopes = new Map<string, PhysicalScope>();
   for (const write of writes) {
     const scope = physicalScope(path, write);
     if (scope === null) continue;
-    if (scope.kind === "directory" && !candidateEntryIsBlob(repository, path, candidate, write)) continue;
+    if (scope.kind === "directory" && !(await candidateEntryIsBlob(repository, path, candidate, write))) continue;
     scopes.set(scope.path, scope);
   }
   return [...scopes.values()].sort((left, right) => left.path.localeCompare(right.path));
@@ -241,7 +241,7 @@ async function untrackedRefusalWithinScopes(
   const args = untrackedArgs(ignored);
   const leaves = scopes.filter((scope) => scope.kind === "leaf");
   if (leaves.length > 0) {
-    const collisions = gitPaths(repository, path, [
+    const collisions = await gitPaths(repository, path, [
       ...args,
       "--",
       ...leaves.map((scope) => literalPath(scope.path)),
@@ -266,27 +266,27 @@ async function untrackedRefusalWithinScopes(
   return null;
 }
 
-function indexMatchesTreeOnPaths(
+async function indexMatchesTreeOnPaths(
   repository: GitRepository,
   path: string,
   tree: GitObjectId,
   paths: readonly string[],
-): boolean {
-  return gitPaths(repository, path, ["diff-index", "--cached", "--name-only", "-z", tree, "--", ...paths]).length === 0;
+): Promise<boolean> {
+  return (await gitPaths(repository, path, ["diff-index", "--cached", "--name-only", "-z", tree, "--", ...paths])).length === 0;
 }
 
-function workspaceMatchesTreeOnPaths(
+async function workspaceMatchesTreeOnPaths(
   repository: GitRepository,
   path: string,
   tree: GitObjectId,
   workspaceTree: GitObjectId,
   paths: readonly string[],
-): boolean {
-  return gitPaths(repository, path, ["diff", "--name-only", "-z", tree, workspaceTree, "--", ...paths]).length === 0;
+): Promise<boolean> {
+  return (await gitPaths(repository, path, ["diff", "--name-only", "-z", tree, workspaceTree, "--", ...paths])).length === 0;
 }
 
-function sourceWorktree(repository: GitRepository): string {
-  return resolve(runGit(repository, ["rev-parse", "--show-toplevel"]).toString("utf8").trim());
+async function sourceWorktree(repository: GitRepository): Promise<string> {
+  return resolve((await runGit(repository, ["rev-parse", "--show-toplevel"])).toString("utf8").trim());
 }
 
 async function ordinaryPrecheck(
@@ -300,15 +300,15 @@ async function ordinaryPrecheck(
   const observation = { repository, contractId, target, path, predecessor, candidate };
   let dryRunFailed = false;
   try {
-    runGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
+    await runGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
   } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;
     dryRunFailed = true;
   }
-  const writes = changedPaths(repository, path, predecessor, candidate, "ACMRT");
-  const scopes = destructionScopes(repository, path, candidate, writes);
-  if (dryRunFailed) return dryRunRefusal(observation, scopes);
-  return untrackedRefusalWithinScopes(observation, scopes, true);
+  const writes = await changedPaths(repository, path, predecessor, candidate, "ACMRT");
+  const scopes = await destructionScopes(repository, path, candidate, writes);
+  if (dryRunFailed) return await dryRunRefusal(observation, scopes);
+  return await untrackedRefusalWithinScopes(observation, scopes, true);
 }
 
 export async function acquireTargetPlacementFence(
@@ -316,7 +316,7 @@ export async function acquireTargetPlacementFence(
   target: string,
 ): Promise<HeldSqliteTransactionLock> {
   const locator = gitRefLocator(target);
-  return acquireSqliteTransactionLock({
+  return await acquireSqliteTransactionLock({
     path: resolve(commonGitDirectory(repository), "keiyaku", "locks", "target-placement", `${locator}.sqlite`),
     mode: "immediate",
   });
@@ -330,12 +330,12 @@ export async function prepareTargetPlacement(
   if (state.coordinates.target !== target.target || state.delivery?.data.integration.snapshot !== target.newOid) {
     throw new Error("placement state does not match its offered target movement");
   }
-  const worktrees = registeredWorktrees(repository)
+  const worktrees = (await registeredWorktrees(repository))
     .filter((worktree) => worktree.branch === target.target)
     .sort((left, right) => left.path.localeCompare(right.path));
-  const hereSource = state.coordinates.workspace === "here" ? sourceWorktree(repository) : null;
+  const hereSource = state.coordinates.workspace === "here" ? await sourceWorktree(repository) : null;
   if (hereSource !== null) {
-    const branch = currentBranch(repository, hereSource);
+    const branch = await currentBranch(repository, hereSource);
     if (branch !== target.target) {
       return {
         kind: "refused",
@@ -364,18 +364,18 @@ export async function prepareTargetPlacement(
   return { kind: "prepared", placement: { target, arms } };
 }
 
-export function followTargetPlacement(
+export async function followTargetPlacement(
   repository: GitRepository,
   prepared: PreparedTargetPlacement,
-): TargetPlacementPhysicalResult {
+): Promise<TargetPlacementPhysicalResult> {
   const effects: TargetCheckoutEffect[] = [];
   const lag: TargetCheckoutLag[] = [];
   const predecessor = gitObjectIdForSnapshot(prepared.target.expectedOid);
   const candidate = gitObjectIdForSnapshot(prepared.target.newOid);
   for (const arm of prepared.arms) {
     try {
-      if (arm.kind === "here") runGit(repository, ["-C", arm.path, "read-tree", candidate]);
-      else runGit(repository, ["-C", arm.path, "read-tree", "-m", "-u", predecessor, candidate]);
+      if (arm.kind === "here") await runGit(repository, ["-C", arm.path, "read-tree", candidate]);
+      else await runGit(repository, ["-C", arm.path, "read-tree", "-m", "-u", predecessor, candidate]);
       effects.push({ kind: "target-checkout", path: arm.path, target: prepared.target.target, action: "followed" });
     } catch (error) {
       lag.push({
@@ -393,30 +393,30 @@ function recoveryLag(path: string, target: string, detail: string): TargetChecko
   return { kind: "target-checkout-retained", path, target, diagnostic: detail };
 }
 
-function recoverCheckout(input: Readonly<{
+async function recoverCheckout(input: Readonly<{
   repository: GitRepository;
   path: string;
   predecessor: SnapshotId;
   candidate: SnapshotId;
   predecessorTree: GitObjectId;
   candidateTree: GitObjectId;
-}>): "complete" | "recovered" | "retained" {
+}>): Promise<"complete" | "recovered" | "retained"> {
   const { repository, path, predecessor, candidate, predecessorTree, candidateTree } = input;
-  const changedPaths = gitPaths(repository, path, ["diff", "--name-only", "-z", predecessorTree, candidateTree]);
+  const changedPaths = await gitPaths(repository, path, ["diff", "--name-only", "-z", predecessorTree, candidateTree]);
   if (changedPaths.length === 0) return "complete";
-  const workspaceTree = captureWorkspaceTree(repository, path).tree;
-  const candidateIndex = indexMatchesTreeOnPaths(repository, path, candidateTree, changedPaths);
-  const candidateWorkspace = workspaceMatchesTreeOnPaths(repository, path, candidateTree, workspaceTree, changedPaths);
+  const workspaceTree = (await captureWorkspaceTree(repository, path)).tree;
+  const candidateIndex = await indexMatchesTreeOnPaths(repository, path, candidateTree, changedPaths);
+  const candidateWorkspace = await workspaceMatchesTreeOnPaths(repository, path, candidateTree, workspaceTree, changedPaths);
   if (candidateIndex && candidateWorkspace) return "complete";
 
   if (workspaceTree === candidateTree) {
-    runGit(repository, ["-C", path, "read-tree", gitObjectIdForSnapshot(candidate)]);
+    await runGit(repository, ["-C", path, "read-tree", gitObjectIdForSnapshot(candidate)]);
     return "recovered";
   }
 
-  const predecessorIndex = indexMatchesTreeOnPaths(repository, path, predecessorTree, changedPaths);
+  const predecessorIndex = await indexMatchesTreeOnPaths(repository, path, predecessorTree, changedPaths);
   if (predecessorIndex && candidateWorkspace) {
-    runGit(repository, [
+    await runGit(repository, [
       "-C",
       path,
       "read-tree",
@@ -428,9 +428,9 @@ function recoverCheckout(input: Readonly<{
     return "recovered";
   }
 
-  const predecessorWorkspace = workspaceMatchesTreeOnPaths(repository, path, predecessorTree, workspaceTree, changedPaths);
+  const predecessorWorkspace = await workspaceMatchesTreeOnPaths(repository, path, predecessorTree, workspaceTree, changedPaths);
   if (!predecessorIndex || !predecessorWorkspace) return "retained";
-  runGit(repository, [
+  await runGit(repository, [
     "-C",
     path,
     "read-tree",
@@ -442,25 +442,25 @@ function recoverCheckout(input: Readonly<{
   return "recovered";
 }
 
-export function recoverTargetPlacement(
+export async function recoverTargetPlacement(
   repository: GitRepository,
   state: ContractState,
-): TargetPlacementPhysicalResult {
+): Promise<TargetPlacementPhysicalResult> {
   const target = state.coordinates.target;
   const delivery = state.delivery;
   if (state.terminal?.kind !== "claimed" || target === undefined || delivery === null) return { effects: [], lag: [] };
-  if (readRef(repository, target) !== delivery.data.integration.snapshot) return { effects: [], lag: [] };
+  if (await readRef(repository, target) !== delivery.data.integration.snapshot) return { effects: [], lag: [] };
 
-  const candidateTree = commitTree(repository, delivery.data.integration.snapshot);
-  const predecessorTree = commitTree(repository, delivery.data.integration.predecessor);
-  const worktrees = registeredWorktrees(repository)
+  const candidateTree = await commitTree(repository, delivery.data.integration.snapshot);
+  const predecessorTree = await commitTree(repository, delivery.data.integration.predecessor);
+  const worktrees = (await registeredWorktrees(repository))
     .filter((worktree) => worktree.branch === target)
     .sort((left, right) => left.path.localeCompare(right.path));
   const effects: TargetCheckoutEffect[] = [];
   const lag: TargetCheckoutLag[] = [];
   for (const worktree of worktrees) {
     try {
-      const recovery = recoverCheckout({
+      const recovery = await recoverCheckout({
         repository,
         path: worktree.path,
         predecessor: delivery.data.integration.predecessor,

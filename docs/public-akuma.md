@@ -149,10 +149,10 @@ Repo.
 The Fleet facet composes only public Akuma handles after that expansion:
 
 ```ts
-Keiyaku.status(input: AkumaAddressInput): AkumaStatusView
+Keiyaku.status(input: AkumaAddressInput): Promise<AkumaStatusView>
 Keiyaku.tell(input: AkumaTellInput): Promise<AkumaTellResult>
 Keiyaku.interrupt(input: AkumaInterruptInput): Promise<AkumaInterruptResult>
-Keiyaku.history(input: AkumaHistoryInput): AkumaHistoryResult
+Keiyaku.history(input: AkumaHistoryInput): Promise<AkumaHistoryResult>
 Keiyaku.wait(input: AkumaWaitInput): Promise<AkumaWaitResult>
 Keiyaku.kill(input: AkumaSetAddressInput): Promise<AkumaKillResult>
 ```

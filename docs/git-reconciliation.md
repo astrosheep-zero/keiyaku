@@ -143,8 +143,8 @@ Contract's lock until the command returns.
 
 `src/git/scratch.ts` owns Verification scratch physical lifecycle. Verification
 scratch is not a managed worktree effect and has none of this
-marker, retry, or resume state. Its disposable path is materialized and
-disposed by Verification in one invocation. The shared ordered command
+marker, retry, or resume state. Its disposable path is asynchronously
+materialized and disposed by Verification in one awaited invocation. The shared ordered command
 primitive executes managed commands under this marker policy and scratch
 commands without it; there is no mode switch or second recovery loop.
 Reconciliation never resumes scratch provisioning or runs its repository

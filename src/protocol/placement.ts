@@ -77,7 +77,7 @@ async function runFencedPlacement(
     const state = contractState(prepared.observation.decision, input.contractId);
     if (state === null) throw new Error("placement offer has no contract state");
     if (prepared.offer.target === undefined) throw new Error("targeted placement offer is missing its target movement");
-    const observed = observeTargetHead(repository, prepared.offer.target.target);
+    const observed = await observeTargetHead(repository, prepared.offer.target.target);
     if (observed !== prepared.offer.target.expectedOid) {
       return {
         kind: "target-moved",
@@ -98,7 +98,7 @@ async function runFencedPlacement(
       primaryContract: input.contractId,
     });
     if (result.kind === "accepted") {
-      return { ...result, physical: followTargetPlacement(repository, physical.placement) };
+      return { ...result, physical: await followTargetPlacement(repository, physical.placement) };
     }
     if (result.kind === "publication-failed") return result;
     if (result.kind === "collision" && index + 1 === protocol.attempts.length) return result;

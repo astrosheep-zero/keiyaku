@@ -134,7 +134,7 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
   const object = (oid: GitOid): Promise<GitObjectResult> => {
     const cached = cache.get(oid);
     if (cached !== undefined) return cached;
-    const requested = tail.then(() => read(oid));
+    const requested = tail.then(async () => await read(oid));
     tail = requested.then(() => undefined, () => undefined);
     cache.set(oid, requested);
     return requested;
@@ -326,7 +326,7 @@ async function observeEpoch<Value>(
   selection: GitTreeSelection | null,
   consume: (observation: GitReadObservation) => Value | PromiseLike<Value>,
 ): Promise<Value> {
-  const commit = readRef(repository, GIT_REF);
+  const commit = await readRef(repository, GIT_REF);
   let active = true;
   const refs = new Map<string, Promise<GitOid | null>>();
   const assertActive = (): void => {
@@ -336,10 +336,10 @@ async function observeEpoch<Value>(
     assertActive();
     let resolved = refs.get(ref);
     if (resolved === undefined) {
-      resolved = Promise.resolve().then(() => readRef(repository, ref));
+      resolved = readRef(repository, ref);
       refs.set(ref, resolved);
     }
-    return resolved;
+    return await resolved;
   };
   const readBlobResults = async (oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitBlobResult>> => {
     assertActive();
@@ -367,7 +367,7 @@ async function observeEpoch<Value>(
     } else {
       const commitObject = (await channel.readObjects([commit])).get(commit);
       if (commitObject === undefined) throw new Error(`missing state commit result: ${commit}`);
-      const tree = commitTree(commitObject, commit);
+      const tree = await commitTree(commitObject, commit);
       const observed = selection === null
         ? await completeTree(channel, tree)
         : await readGitTreeSelection(channel, tree, selection);
@@ -392,19 +392,19 @@ async function observeEpoch<Value>(
   return result as Value;
 }
 
-export function withGitReadObservation<Value>(
+export async function withGitReadObservation<Value>(
   repository: GitRepository,
   channel: GitDecodeChannel,
   consume: (observation: GitReadObservation) => Value | PromiseLike<Value>,
 ): Promise<Value> {
-  return observeEpoch(repository, channel, null, consume);
+  return await observeEpoch(repository, channel, null, consume);
 }
 
-export function withGitTargetedReadObservation<Value>(
+export async function withGitTargetedReadObservation<Value>(
   repository: GitRepository,
   channel: GitDecodeChannel,
   selection: GitTreeSelection,
   consume: (observation: GitReadObservation) => Value | PromiseLike<Value>,
 ): Promise<Value> {
-  return observeEpoch(repository, channel, selection, consume);
+  return await observeEpoch(repository, channel, selection, consume);
 }

@@ -108,30 +108,30 @@ type TerminalCustody = Readonly<{
 
 function deliveryRefFor(contract: ContractId): string { return `${DELIVERY_REF_NAMESPACE}/${contractPhysicalName(contract)}`; }
 function candidatePinRefFor(contract: ContractId): string { return `${CANDIDATE_PIN_REF_NAMESPACE}/${contractPhysicalName(contract)}`; }
-function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Effect {
-  const before = readRef(repository, ref);
+async function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Promise<Effect> {
+  const before = await readRef(repository, ref);
   if (before === desired) return { kind: "ref", name: ref, action: "unchanged", before, after: desired };
-  runGit(repository, ["update-ref", "--no-deref", ref, gitObjectIdForSnapshot(desired), before ?? "0".repeat(desired.length)]);
+  await runGit(repository, ["update-ref", "--no-deref", ref, gitObjectIdForSnapshot(desired), before ?? "0".repeat(desired.length)]);
   return { kind: "ref", name: ref, action: before === null ? "created" : "updated", before, after: desired };
 }
-function removeRef(repository: GitRepository, ref: string): Effect {
-  const before = readRef(repository, ref);
+async function removeRef(repository: GitRepository, ref: string): Promise<Effect> {
+  const before = await readRef(repository, ref);
   if (before === null) return { kind: "ref", name: ref, action: "unchanged", before: null, after: null };
-  runGit(repository, ["update-ref", "--no-deref", "-d", ref, before]);
+  await runGit(repository, ["update-ref", "--no-deref", "-d", ref, before]);
   return { kind: "ref", name: ref, action: "removed", before, after: null };
 }
-function removeRefWithCustody(
+async function removeRefWithCustody(
   repository: GitRepository,
   ref: string,
   custodian: string,
   expectedCustodian: SnapshotId,
-): Effect {
-  const before = readRef(repository, ref);
+): Promise<Effect> {
+  const before = await readRef(repository, ref);
   if (before === null) return { kind: "ref", name: ref, action: "unchanged", before: null, after: null };
-  if (readRef(repository, custodian) !== expectedCustodian) {
+  if (await readRef(repository, custodian) !== expectedCustodian) {
     return { kind: "ref", name: ref, action: "unchanged", before, after: before };
   }
-  runGit(repository, ["update-ref", "--stdin", "--no-deref"], [
+  await runGit(repository, ["update-ref", "--stdin", "--no-deref"], [
     "start",
     `verify ${custodian} ${gitObjectIdForSnapshot(expectedCustodian)}`,
     `delete ${ref} ${before}`,
@@ -141,8 +141,8 @@ function removeRefWithCustody(
   ].join("\n"));
   return { kind: "ref", name: ref, action: "removed", before, after: null };
 }
-function acquireWorktreeTopology(repository: GitRepository): WorktreeTopology {
-  return { paths: new Set(registeredWorktreePaths(repository)) };
+async function acquireWorktreeTopology(repository: GitRepository): Promise<WorktreeTopology> {
+  return { paths: new Set(await registeredWorktreePaths(repository)) };
 }
 function fromPrimaryWorktree(repository: GitRepository): GitRepository {
   return { ...repository, effectiveCwd: repository.primaryWorktree };
@@ -170,33 +170,33 @@ function reconcileLockPath(repository: GitRepository, contract: ContractId): str
   return join(commonGitDirectory(repository), "keiyaku", "locks", "reconcile", locator.slice(0, 2), `${locator.slice(2)}.sqlite`);
 }
 
-function worktree(repository: GitRepository, topology: WorktreeTopology, path: string, desired: SnapshotId): Effect {
+async function worktree(repository: GitRepository, topology: WorktreeTopology, path: string, desired: SnapshotId): Promise<Effect> {
   const registered = topology.paths.has(path);
   if (registered && existsSync(path)) return { kind: "worktree", path, action: "unchanged" };
   if (registered) {
-    runGit(repository, ["worktree", "remove", path]);
+    await runGit(repository, ["worktree", "remove", path]);
     topology.paths.delete(path);
   }
   if (existsSync(path)) throw new Error(`delivery worktree path is occupied: ${path}`);
-  mkdirSync(dirname(path), { recursive: true }); runGit(repository, ["worktree", "add", "--detach", path, gitObjectIdForSnapshot(desired)]);
+  mkdirSync(dirname(path), { recursive: true }); await runGit(repository, ["worktree", "add", "--detach", path, gitObjectIdForSnapshot(desired)]);
   topology.paths.add(path);
   return { kind: "worktree", path, action: "created" };
 }
-function removeWorktree(
+async function removeWorktree(
   repository: GitRepository,
   topology: WorktreeTopology,
   path: string,
   force = false,
-): Readonly<{ effect: Effect; retained: boolean }> {
+): Promise<Readonly<{ effect: Effect; retained: boolean }>> {
   const registered = topology.paths.has(path);
   if (!registered) return { effect: { kind: "worktree", path, action: "unchanged" }, retained: false };
   if (!existsSync(path)) {
-    runGit(repository, ["worktree", "remove", path]);
+    await runGit(repository, ["worktree", "remove", path]);
     topology.paths.delete(path);
     return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
   }
   try {
-    runGit(repository, ["worktree", "remove", ...(force ? ["--force"] : []), path]);
+    await runGit(repository, ["worktree", "remove", ...(force ? ["--force"] : []), path]);
   } catch {
     return { effect: { kind: "worktree", path, action: "unchanged" }, retained: true };
   }
@@ -204,15 +204,15 @@ function removeWorktree(
   return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
 }
 
-function removeCollectableScratch(
+async function removeCollectableScratch(
   repository: GitRepository,
   topology: WorktreeTopology,
   effects: Effect[],
   lag: ReconcileLag[],
-): void {
+): Promise<void> {
   for (const scratch of collectableScratchWorktrees(topology.paths)) {
     try {
-      const removal = removeWorktree(repository, topology, scratch.path, true);
+      const removal = await removeWorktree(repository, topology, scratch.path, true);
       effects.push(removal.effect);
       if (removal.retained) lag.push({ kind: "worktree-retained", path: scratch.path });
     } finally {
@@ -221,11 +221,11 @@ function removeCollectableScratch(
   }
 }
 
-function refRows(repository: GitRepository): readonly Readonly<{ ref: string; oid: string }>[] {
-  const output = runGit(repository, [
+async function refRows(repository: GitRepository): Promise<readonly Readonly<{ ref: string; oid: string }>[]> {
+  const output = (await runGit(repository, [
     "for-each-ref",
     "--format=%(refname)%00%(objectname)",
-  ]).toString("utf8");
+  ])).toString("utf8");
   if (output.length === 0) return [];
   return output.trimEnd().split("\n").map((row) => {
     const [ref, oid, extra] = row.split("\0");
@@ -233,11 +233,11 @@ function refRows(repository: GitRepository): readonly Readonly<{ ref: string; oi
     return { ref, oid };
   });
 }
-function snapshotCustodian(repository: GitRepository, snapshot: SnapshotId): Readonly<{ ref: string; oid: SnapshotId }> | null {
-  for (const row of refRows(repository)) {
+async function snapshotCustodian(repository: GitRepository, snapshot: SnapshotId): Promise<Readonly<{ ref: string; oid: SnapshotId }> | null> {
+  for (const row of await refRows(repository)) {
     if (isKeiyakuOwnedRef(row.ref)) continue;
     try {
-      runGit(repository, ["merge-base", "--is-ancestor", gitObjectIdForSnapshot(snapshot), row.oid]);
+      await runGit(repository, ["merge-base", "--is-ancestor", gitObjectIdForSnapshot(snapshot), row.oid]);
       return { ref: row.ref, oid: mintSnapshotId(row.oid) };
     } catch (error) {
       if (error instanceof GitPlumbingError && error.status === 1) continue;
@@ -260,7 +260,7 @@ async function reconcileTargetCheckouts(repository: GitRepository, state: Contra
   let result: ReconcileResult | undefined;
   let exceptional: unknown;
   try {
-    const recovered = recoverTargetPlacement(repository, state);
+    const recovered = await recoverTargetPlacement(repository, state);
     result = complete(recovered.effects, recovered.lag);
   } catch (error) {
     if (error instanceof AuthorityCorruptionError || error instanceof TypeError) exceptional = error;
@@ -278,25 +278,25 @@ async function reconcileTargetCheckouts(repository: GitRepository, state: Contra
   return result;
 }
 
-function reconcileHereWorkspaceRefs(
+async function reconcileHereWorkspaceRefs(
   { repository }: ReconcileEffectsInput,
   state: ContractState,
   { effects, lag }: ReconcileAccumulation,
-): ReconcileResult {
+): Promise<ReconcileResult> {
   const pin = candidatePinRefFor(state.id);
   if (state.terminal) {
-    if (state.delivery === null) effects.push(removeRef(repository, pin));
+    if (state.delivery === null) effects.push(await removeRef(repository, pin));
     else {
       const integration = state.delivery.data.integration.snapshot;
-      const custodian = snapshotCustodian(repository, integration);
-      effects.push(custodian === null
-        ? updateRef(repository, pin, integration)
-        : removeRefWithCustody(repository, pin, custodian.ref, custodian.oid));
+      const custodian = await snapshotCustodian(repository, integration);
+      effects.push(await (custodian === null
+        ? await updateRef(repository, pin, integration)
+        : await removeRefWithCustody(repository, pin, custodian.ref, custodian.oid)));
     }
   } else if (state.bound) {
-    effects.push(state.delivery === null
-      ? removeRef(repository, pin)
-      : updateRef(repository, pin, state.delivery.data.integration.snapshot));
+    effects.push(await (state.delivery === null
+      ? await removeRef(repository, pin)
+      : await updateRef(repository, pin, state.delivery.data.integration.snapshot)));
   }
   return complete(effects, lag);
 }
@@ -324,26 +324,26 @@ async function removeSealedTerminalWorktree(
   { repository, topology, path, expected, hooks, retryHooks, acc }: TerminalWorktreeCleanup,
 ): Promise<ReconcileResult | null> {
   if (topology.paths.has(path) && existsSync(path)) {
-    const beforeHooks = unsealedBytes(repository, path, expected);
+    const beforeHooks = await unsealedBytes(repository, path, expected);
     if (beforeHooks !== null) return retainTerminalWorktree(path, beforeHooks, acc);
-    const hookLag = await runDestroyHooks(path, worktreeGitDirectory(repository, path), hooks, retryHooks);
+    const hookLag = await runDestroyHooks(path, await worktreeGitDirectory(repository, path), hooks, retryHooks);
     if (hookLag !== null) return retainTerminalWorktree(path, hookLag, acc);
-    const afterHooks = unsealedBytes(repository, path, expected);
+    const afterHooks = await unsealedBytes(repository, path, expected);
     if (afterHooks !== null) return retainTerminalWorktree(path, afterHooks, acc);
   }
-  const removal = removeWorktree(repository, topology, path, true);
+  const removal = await removeWorktree(repository, topology, path, true);
   if (removal.retained) return retainTerminalWorktree(path, { kind: "worktree-retained", path }, acc);
   acc.effects.push(removal.effect);
   return null;
 }
 
-function targetCustodyForClaimedIntegration(
+async function targetCustodyForClaimedIntegration(
   repository: GitRepository,
   state: ContractState,
   integration: SnapshotId,
-): Readonly<{ ref: string; oid: SnapshotId }> | null {
+): Promise<Readonly<{ ref: string; oid: SnapshotId }> | null> {
   return state.terminal?.kind === "claimed" && state.coordinates.target !== undefined
-    && readRef(repository, state.coordinates.target) === integration
+    && await readRef(repository, state.coordinates.target) === integration
     ? { ref: state.coordinates.target, oid: integration }
     : null;
 }
@@ -354,25 +354,25 @@ function sealedTree(expected: TerminalSealExpectations, snapshot: SnapshotId): G
   return tree;
 }
 
-function releaseTerminalCustody(
+async function releaseTerminalCustody(
   { repository, state, expected, ref, pin, acc: { effects } }: TerminalCustody,
-): void {
+): Promise<void> {
   if (state.delivery === null) {
-    const custodian = snapshotCustodian(repository, state.coordinates.start);
-    if (custodian !== null) effects.push(removeRefWithCustody(repository, ref, custodian.ref, custodian.oid));
-    effects.push(removeRef(repository, pin));
+    const custodian = await snapshotCustodian(repository, state.coordinates.start);
+    if (custodian !== null) effects.push(await removeRefWithCustody(repository, ref, custodian.ref, custodian.oid));
+    effects.push(await removeRef(repository, pin));
     return;
   }
   const tender = state.delivery.data.tenderSnapshot;
   const integration = state.delivery.data.integration.snapshot;
-  const target = targetCustodyForClaimedIntegration(repository, state, integration);
+  const target = await targetCustodyForClaimedIntegration(repository, state, integration);
   if (sealedTree(expected, tender) === sealedTree(expected, integration) && target !== null) {
-    effects.push(removeRefWithCustody(repository, ref, target.ref, target.oid));
-    effects.push(removeRefWithCustody(repository, pin, target.ref, target.oid));
+    effects.push(await removeRefWithCustody(repository, ref, target.ref, target.oid));
+    effects.push(await removeRefWithCustody(repository, pin, target.ref, target.oid));
   } else if (tender === integration) {
-    effects.push(removeRefWithCustody(repository, pin, ref, tender));
+    effects.push(await removeRefWithCustody(repository, pin, ref, tender));
   } else if (target !== null) {
-    effects.push(removeRefWithCustody(repository, pin, target.ref, target.oid));
+    effects.push(await removeRefWithCustody(repository, pin, target.ref, target.oid));
   }
 }
 
@@ -387,13 +387,13 @@ async function reconcileTerminalManagedWorktree(
   const pin = candidatePinRefFor(state.id);
   const path = deliveryWorktreePath(repository, state.id);
   const expected = await terminalSealExpectations(channel, state);
-  acc.effects.push(updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
-  if (state.delivery !== null) acc.effects.push(updateRef(primary, pin, state.delivery.data.integration.snapshot));
+  acc.effects.push(await updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
+  if (state.delivery !== null) acc.effects.push(await updateRef(primary, pin, state.delivery.data.integration.snapshot));
   if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag);
 
   const retained = await removeSealedTerminalWorktree({ repository: primary, topology, path, expected, hooks, retryHooks, acc });
   if (retained !== null) return retained;
-  releaseTerminalCustody({ repository: primary, state, expected, ref, pin, acc });
+  await releaseTerminalCustody({ repository: primary, state, expected, ref, pin, acc });
   return complete(acc.effects, acc.lag);
 }
 
@@ -405,13 +405,13 @@ async function reconcileActiveManagedWorktree(
 ): Promise<ReconcileResult> {
   const path = deliveryWorktreePath(repository, state.id);
   const desired = state.delivery?.data.tenderSnapshot ?? state.coordinates.start;
-  effects.push(updateRef(repository, deliveryRefFor(state.id), desired));
-  effects.push(worktree(repository, topology, path, desired));
-  const hookLag = await runCreateHooks(path, worktreeGitDirectory(repository, path), hooks, retryHooks);
+  effects.push(await updateRef(repository, deliveryRefFor(state.id), desired));
+  effects.push(await worktree(repository, topology, path, desired));
+  const hookLag = await runCreateHooks(path, await worktreeGitDirectory(repository, path), hooks, retryHooks);
   if (hookLag !== null) lag.push(hookLag);
-  effects.push(state.delivery
-    ? updateRef(repository, candidatePinRefFor(state.id), state.delivery.data.integration.snapshot)
-    : removeRef(repository, candidatePinRefFor(state.id)));
+  effects.push(await (state.delivery
+    ? await updateRef(repository, candidatePinRefFor(state.id), state.delivery.data.integration.snapshot)
+    : await removeRef(repository, candidatePinRefFor(state.id))));
   return complete(effects, lag);
 }
 
@@ -424,12 +424,12 @@ async function reconcileWithTopology(
   const effects: Effect[] = [];
   const lag: ReconcileLag[] = [];
   try {
-    removeCollectableScratch(repository, topology, effects, lag);
+    await removeCollectableScratch(repository, topology, effects, lag);
     if (!state) return complete(effects, lag);
     const targetCheckouts = await reconcileTargetCheckouts(repository, state);
     effects.push(...targetCheckouts.effects);
     lag.push(...targetCheckouts.lag);
-    if (state.coordinates.workspace === "here") return reconcileHereWorkspaceRefs(input, state, { effects, lag });
+    if (state.coordinates.workspace === "here") return await reconcileHereWorkspaceRefs(input, state, { effects, lag });
     if (state.terminal) return await reconcileTerminalManagedWorktree(input, state, topology, { effects, lag });
     return await reconcileActiveManagedWorktree(input, state, topology, { effects, lag });
   } catch (error) {
@@ -468,7 +468,7 @@ export async function reconcile(input: ReconcileInput): Promise<GitReconcileObse
   let exceptional: unknown;
   try {
     const state = (await observeContractAt(input.repository, input.channel, input.contractId)).state;
-    const topology = acquireWorktreeTopology(input.repository);
+    const topology = await acquireWorktreeTopology(input.repository);
     observation = {
       state,
       result: await reconcileWithTopology(input, state, topology),

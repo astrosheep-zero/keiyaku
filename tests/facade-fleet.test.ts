@@ -71,7 +71,7 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
     const reviewer = await answered(root, "reviewer", "00000001");
     await moveAlias({ world: root, alias: "@review", akuId: reviewer.id });
 
-    assert.equal(Keiyaku.status({ path: root, akuma: "@review" }).status.id, reviewer.id);
+    assert.equal((await Keiyaku.status({ path: root, akuma: "@review" })).status.id, reviewer.id);
     const waited = await Keiyaku.wait({
       path: root,
       akuma: ["aku/*/*", "@review", worker.id],
@@ -259,7 +259,7 @@ test("Task catalog does not inherit the Task list default page limit", async () 
 
 test("CLI ls invokes each selected identity directory and emits selected JSON", async () => {
   const repository = makeGitRepository();
-  const repo = Repo.at({ path: repository.path });
+  const repo = await Repo.at({ path: repository.path });
   const home = mkdtempSync(join(tmpdir(), "keiyaku-cli-ls-home-"));
   try {
     repository.run(["config", "user.name", "Test User"]);
@@ -325,7 +325,7 @@ test("CLI ls invokes each selected identity directory and emits selected JSON", 
 
 test("named Address resolution refuses a Contract short-id shared with an Alias", async () => {
   const repository = makeGitRepository();
-  const repo = Repo.at({ path: repository.path });
+  const repo = await Repo.at({ path: repository.path });
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -357,12 +357,12 @@ test("history last bypasses activity and glob grammar follows normalized archety
       event: { type: "activity", event: { provider: "legacy" } },
       at: "2026-08-11T00:00:01.000Z",
     });
-    assert.deepEqual(Keiyaku.history({ path: root, akuma: source.id, last: true }), {
+    assert.deepEqual(await Keiyaku.history({ path: root, akuma: source.id, last: true }), {
       kind: "last",
       id: source.id,
       answer: "done",
     });
-    assert.throws(() => Keiyaku.history({ path: root, akuma: source.id }), /invalid event shape/u);
+    await assert.rejects(() => Keiyaku.history({ path: root, akuma: source.id }), /invalid event shape/u);
 
     const glob = parseAkumaGlob("aku/审查-👁️*/1234*");
     assert.equal(matchesAkumaGlob(glob, "aku/审查-👁️/1234abcd"), true);
@@ -371,7 +371,7 @@ test("history last bypasses activity and glob grammar follows normalized archety
   }
 });
 
-test("history last selects exactly one latest answered TurnFact by durable sequence", () => {
+test("history last selects exactly one latest answered TurnFact by durable sequence", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-last-sequence-"));
   try {
     const source = allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "00000001" });
@@ -390,19 +390,19 @@ test("history last selects exactly one latest answered TurnFact by durable seque
         admittedAt: "2026-08-11T00:00:00.000Z",
       });
     }
-    const last = () => Keiyaku.history({ path: root, akuma: source.id, last: true });
+    const last = async () => Keiyaku.history({ path: root, akuma: source.id, last: true });
 
-    assert.deepEqual(last(), { kind: "no-answer", id: source.id });
+    assert.deepEqual(await last(), { kind: "no-answer", id: source.id });
     completeTurn(source.paths, body.sequence, { kind: "failed", diagnostic: "first failure" }, "2026-08-11T00:00:01.000Z");
-    assert.deepEqual(last(), { kind: "no-answer", id: source.id });
+    assert.deepEqual(await last(), { kind: "no-answer", id: source.id });
     completeTurn(source.paths, body.sequence, { kind: "answered", answer: "first", historyId: "history-1", session: { sessionId: "session-1" } }, "2026-08-11T00:00:02.000Z");
-    assert.deepEqual(last(), { kind: "last", id: source.id, answer: "first" });
+    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "first" });
     completeTurn(source.paths, body.sequence, { kind: "answered", answer: "second", historyId: "history-2", session: { sessionId: "session-2" } }, "2026-08-11T00:00:03.000Z");
-    assert.deepEqual(last(), { kind: "last", id: source.id, answer: "second" });
+    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "second" });
     completeTurn(source.paths, body.sequence, { kind: "failed", diagnostic: "later failure" }, "2026-08-11T00:00:04.000Z");
-    assert.deepEqual(last(), { kind: "last", id: source.id, answer: "second" });
+    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "second" });
     completeTurn(source.paths, body.sequence, { kind: "answered", answer: "", historyId: "history-3", session: { sessionId: "session-3" } }, "2026-08-11T00:00:05.000Z");
-    assert.deepEqual(last(), { kind: "last", id: source.id, answer: "" });
+    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "" });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -414,15 +414,15 @@ test("Contract selector preserves Dispatch membership skipped by compact fleet",
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const missing = akuId({ archetype: "worker", suffix: "deadbeef" });
-  assert.equal(publishDispatch({
-    repository: repositoryAt(repository.path),
+  assert.equal((await publishDispatch({
+    repository: await repositoryAt(repository.path),
     akuId: missing,
     contractId: contractId("kei/review"),
-  }).kind, "dispatched");
+  })).kind, "dispatched");
   assert.deepEqual((await addressAkumaSet({
     path: repository.path,
     akuma: ["kei/review"],
-    repo: Repo.at({ path: repository.path }),
+    repo: await Repo.at({ path: repository.path }),
   })).ids, [missing]);
 });
 
@@ -433,18 +433,18 @@ test("fleet status projects Dispatch association without changing Akuma core", a
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const source = await answered(repository.path, "worker", "deadbeef");
   const owner = contractId("kei/provider-core");
-  assert.equal(publishDispatch({ repository: repositoryAt(repository.path), akuId: source.id, contractId: owner }).kind, "dispatched");
+  assert.equal((await publishDispatch({ repository: await repositoryAt(repository.path), akuId: source.id, contractId: owner })).kind, "dispatched");
 
-  const plain = Keiyaku.status({ path: repository.path, akuma: source.id });
+  const plain = await Keiyaku.status({ path: repository.path, akuma: source.id });
   assert.equal("contractId" in plain, false);
   assert.equal(plain.status.id, source.id);
-  const projected = Keiyaku.status({ path: repository.path, akuma: source.id, repo: Repo.at({ path: repository.path }) });
+  const projected = await Keiyaku.status({ path: repository.path, akuma: source.id, repo: await Repo.at({ path: repository.path }) });
   assert.equal(projected.contractId, owner);
   assert.equal(projected.status.id, source.id);
   const waited = await Keiyaku.wait({
     path: repository.path,
     akuma: [source.id],
-    repo: Repo.at({ path: repository.path }),
+    repo: await Repo.at({ path: repository.path }),
     timeoutMs: 0,
   });
   assert.equal(waited.statuses[0]!.contractId, owner);

@@ -14,20 +14,20 @@ import { makeGitRepository } from "./support/git.js";
 
 test("Dispatch publishes one immutable association and preserves its first timestamp", async () => {
   const raw = makeGitRepository();
-  const repository = repositoryAt(raw.path);
+  const repository = await repositoryAt(raw.path);
   const akuma = parseAkuId("aku/worker/1234abcd").id;
   const owner = contractId("kei/dispatch-owner");
 
-  assert.equal(readDispatch(repository, akuma), null);
-  const first = publishDispatch({ repository, akuId: akuma, contractId: owner });
+  assert.equal(await readDispatch(repository, akuma), null);
+  const first = await publishDispatch({ repository, akuId: akuma, contractId: owner });
   assert.equal(first.kind, "dispatched");
   if (first.kind !== "dispatched") return;
-  assert.deepEqual(readDispatch(repository, akuma), first.dispatch);
+  assert.deepEqual(await readDispatch(repository, akuma), first.dispatch);
   assert.deepEqual(await readDispatches(repository), [first.dispatch]);
 
-  const repeated = publishDispatch({ repository, akuId: akuma, contractId: owner });
+  const repeated = await publishDispatch({ repository, akuId: akuma, contractId: owner });
   assert.deepEqual(repeated, first);
-  const conflict = publishDispatch({
+  const conflict = await publishDispatch({
     repository,
     akuId: akuma,
     contractId: contractId("kei/other-owner"),

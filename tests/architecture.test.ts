@@ -273,8 +273,8 @@ test("architecture policy permits the aggregate status read path", () => {
 
 test("architecture policy limits publication retry observation to asserted refs", () => {
   const accepted = check({
-    "git/repository.ts": "export const GIT_REF = ''; export function readRef(): void {} export function runGit(): void {} export type GitRepository = {};",
-    "protocol/attempt.ts": 'import { GIT_REF, readRef, type GitRepository } from "../git/repository.js"; export function classify(repository: GitRepository): void { void GIT_REF; readRef(); void repository; }',
+    "git/repository.ts": "export const GIT_REF = ''; export async function readRef(): Promise<void> {} export function runGit(): void {} export type GitRepository = {};",
+    "protocol/attempt.ts": 'import { GIT_REF, readRef, type GitRepository } from "../git/repository.js"; export async function classify(repository: GitRepository): Promise<void> { void GIT_REF; await readRef(); void repository; }',
   });
   assert.deepEqual(accepted, []);
 

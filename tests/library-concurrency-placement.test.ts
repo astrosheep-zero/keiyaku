@@ -86,7 +86,7 @@ test("a concurrent amend redecides and returns terms-moved without replaying old
       [
       "if [ \"$1\" = \"update-ref\" ] && [ ! -e \"$KEIYAKU_AMEND_RACE_MARKER\" ]; then",
       "  touch \"$KEIYAKU_AMEND_RACE_MARKER\"",
-      "  node --import \"$KEIYAKU_AMEND_RACE_LOADER\" --input-type=module -e 'const { Keiyaku, Repo } = await import(process.env.KEIYAKU_AMEND_RACE_MODULE); await Keiyaku.of({ repo: Repo.at({ path: process.env.KEIYAKU_AMEND_RACE_REPO }), id: process.env.KEIYAKU_AMEND_RACE_ID }).amend({ markdown: process.env.KEIYAKU_AMEND_RACE_MARKDOWN });' || exit $?",
+      "  node --import \"$KEIYAKU_AMEND_RACE_LOADER\" --input-type=module -e 'const { Keiyaku, Repo } = await import(process.env.KEIYAKU_AMEND_RACE_MODULE); await Keiyaku.of({ repo: await Repo.at({ path: process.env.KEIYAKU_AMEND_RACE_REPO }), id: process.env.KEIYAKU_AMEND_RACE_ID }).amend({ markdown: process.env.KEIYAKU_AMEND_RACE_MARKDOWN });' || exit $?",
       "fi",
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
@@ -193,7 +193,7 @@ test("accepted head excludes an append made after admission", async () => {
 
 test("claim does not mutate eligible dependents", async () => {
   const repository = repositoryWithMain();
-  const sourceResult = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+  const sourceResult = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: document(),
     workspace: "here",
     gates: ["reviewed"],
@@ -204,7 +204,7 @@ test("claim does not mutate eligible dependents", async () => {
 
   const dependents: Keiyaku[] = [];
   for (let index = 0; index < 4; index += 1) {
-    const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+    const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
       markdown: document(),
       workspace: "worktree",
       after: [(await source.state()).id],
@@ -224,13 +224,13 @@ test("claim does not mutate eligible dependents", async () => {
 test("review stops placement when its verified target premise moves", async () => {
   const repository = repositoryWithMain();
   repository.run(["branch", "release"]);
-  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: document(),
     target: "refs/heads/release",
     workspace: "worktree",
     gates: ["reviewed"],
   });
-  const worktree = deliveryWorktreePath(repositoryAt(repository.path), result.keiyaku.id);
+  const worktree = deliveryWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
   writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);

@@ -89,7 +89,7 @@ export type BindCoordinatesObservation = Readonly<{
 
 const TARGET_COORDINATES_FORMAT = "%(refname)%00%(objectname)%00";
 
-export function normalizeTargetBranch(repository: GitRepository, input: string): string | null {
+export async function normalizeTargetBranch(repository: GitRepository, input: string): Promise<string | null> {
   if (input.includes("\0")) return null;
   const prefix = "refs/heads/";
   if (input.startsWith("refs/") && !input.startsWith(prefix)) return null;
@@ -97,7 +97,7 @@ export function normalizeTargetBranch(repository: GitRepository, input: string):
   const target = `${prefix}${branch}`;
   if (branch.length === 0 || branch.startsWith("-") || isKeiyakuOwnedRef(target)) return null;
   try {
-    const checked = runGit(repository, ["check-ref-format", "--branch", branch]).toString("utf8").trim();
+    const checked = (await runGit(repository, ["check-ref-format", "--branch", branch])).toString("utf8").trim();
     return checked === branch ? target : null;
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status !== null) return null;
@@ -106,14 +106,14 @@ export function normalizeTargetBranch(repository: GitRepository, input: string):
 }
 
 /** Read one worktree's attached branch, or null for detached HEAD. */
-export function currentBranch(repository: GitRepository, path?: string): string | null {
+export async function currentBranch(repository: GitRepository, path?: string): Promise<string | null> {
   try {
-    const ref = runGit(repository, [
+    const ref = (await runGit(repository, [
       ...(path === undefined ? [] : ["-C", path]),
       "symbolic-ref",
       "--quiet",
       "HEAD",
-    ]).toString("utf8").trim();
+    ])).toString("utf8").trim();
     return ref.startsWith("refs/heads/") ? ref : null;
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 1) return null;
@@ -132,15 +132,15 @@ function structuredFields(output: Buffer, fieldCount: number): readonly string[]
 }
 
 /** Observe bind's tender start and optional reward target without creating persistent state. */
-export function observeBindCoordinates(
+export async function observeBindCoordinates(
   repository: GitRepository,
   requestedTarget?: string,
-): BindCoordinatesObservation | null {
+): Promise<BindCoordinatesObservation | null> {
   if (requestedTarget === undefined) {
     try {
       return {
-        start: mintSnapshotId(runGit(repository, ["rev-parse", "--verify", "HEAD"]).toString("utf8").trim()),
-        branch: currentBranch(repository),
+        start: mintSnapshotId((await runGit(repository, ["rev-parse", "--verify", "HEAD"])).toString("utf8").trim()),
+        branch: await currentBranch(repository),
       };
     } catch {
       malformedBindCoordinatesOutput();
@@ -151,7 +151,7 @@ export function observeBindCoordinates(
     throw new Error(`bind target names a Keiyaku-owned ref: ${requestedTarget}`);
   }
 
-  const output = runGit(repository, [
+  const output = await runGit(repository, [
     "for-each-ref",
     `--format=${TARGET_COORDINATES_FORMAT}`,
     "--",
@@ -161,7 +161,7 @@ export function observeBindCoordinates(
   const [target, start] = structuredFields(output, 2);
   if (target !== requestedTarget || start === undefined) malformedBindCoordinatesOutput();
   try {
-    return { target, start: mintSnapshotId(start), branch: currentBranch(repository) };
+    return { target, start: mintSnapshotId(start), branch: await currentBranch(repository) };
   } catch {
     malformedBindCoordinatesOutput();
   }
@@ -312,7 +312,7 @@ async function observeTargetedContractsAt(
   observation: GitReadObservation,
   ids: readonly ContractId[],
 ): Promise<FrozenGitObservation> {
-  return observeTargetedContractsFromSnapshotAt(
+  return await observeTargetedContractsFromSnapshotAt(
     observation.snapshot,
     observation.readBlobs,
     ids,
@@ -350,7 +350,7 @@ export async function observeContractsForAdmissionAt(
   return withGitTargetedReadObservation(repository, channel, {
     paths: [...ids.flatMap(contractJournalPaths), ...(selection.paths ?? [])],
     ...(selection.subtrees === undefined ? {} : { subtrees: selection.subtrees }),
-  }, (observation) => observeContractsForAdmissionInObservationAt(observation, ids));
+  }, async (observation) => await observeContractsForAdmissionInObservationAt(observation, ids));
 }
 
 /** Observe selected Contract journals and their current direct prerequisites in one Git epoch. */
@@ -362,7 +362,7 @@ export async function observeGitForAdmissionAt(
 ): Promise<GitDecisionObservation> {
   const observation = await observeContractsForAdmissionAt(repository, channel, ids, selection);
   const prerequisites = [...new Set(ids.flatMap((id) => observation.decision.get(id)?.terms.after ?? []))];
-  return extendContractsForAdmissionAt(channel, observation, prerequisites);
+  return await extendContractsForAdmissionAt(channel, observation, prerequisites);
 }
 
 export function withContractReadObservationAt<Value>(

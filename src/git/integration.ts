@@ -17,8 +17,8 @@ import type { TenderCapture } from "./tender.js";
 
 const REQUIRED_GIT = "2.38" as const;
 
-function runAllowingNonzero(repository: GitRepository, args: readonly string[], input?: string): Readonly<{ stdout: Buffer; stderr: Buffer; status: number | null }> {
-  try { return { stdout: runGit(repository, args, input), stderr: Buffer.alloc(0), status: 0 }; }
+async function runAllowingNonzero(repository: GitRepository, args: readonly string[], input?: string): Promise<Readonly<{ stdout: Buffer; stderr: Buffer; status: number | null }>> {
+  try { return { stdout: await runGit(repository, args, input), stderr: Buffer.alloc(0), status: 0 }; }
   catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;
     return { stdout: error.stdout, stderr: error.stderr, status: error.status };
@@ -52,45 +52,45 @@ export type IntegrationPlan = Readonly<{
 
 export type IntegrationBlob = Readonly<{ bytes: Uint8Array; mode: string }>;
 
-export function readIntegrationBlob(
+export async function readIntegrationBlob(
   repository: GitRepository,
   tree: GitObjectId,
   path: string,
-): Readonly<{ kind: "present"; data: IntegrationBlob } | { kind: "missing" | "not-a-blob" }> {
-  const entry = readTreeEntries(repository, tree).get(path);
+): Promise<Readonly<{ kind: "present"; data: IntegrationBlob } | { kind: "missing" | "not-a-blob" }>> {
+  const entry = (await readTreeEntries(repository, tree)).get(path);
   if (entry === undefined) return { kind: "missing" };
   if (entry.type !== "blob") return { kind: "not-a-blob" };
-  return { kind: "present", data: { bytes: readBlob(repository, entry.oid), mode: entry.mode } };
+  return { kind: "present", data: { bytes: await readBlob(repository, entry.oid), mode: entry.mode } };
 }
 
-export function updateIntegrationPlan(
+export async function updateIntegrationPlan(
   repository: GitRepository,
   plan: IntegrationPlan,
   update: Readonly<{ path: string; bytes: Uint8Array; mode: string }>,
-): IntegrationPlan {
-  const blob = writeBlob(repository, update.bytes);
-  const tree = gitObjectId(updateGitTree(repository, plan.tree, new Map([[update.path, { oid: blob, mode: update.mode, type: "blob" }]])), "updated integration tree");
-  return { ...plan, tree, changeId: stablePatchId(repository, plan.predecessor, tree) };
+): Promise<IntegrationPlan> {
+  const blob = await writeBlob(repository, update.bytes);
+  const tree = gitObjectId(await updateGitTree(repository, plan.tree, new Map([[update.path, { oid: blob, mode: update.mode, type: "blob" }]])), "updated integration tree");
+  return { ...plan, tree, changeId: await stablePatchId(repository, plan.predecessor, tree) };
 }
 
-function stablePatchId(repository: GitRepository, predecessor: SnapshotId, tree: GitObjectId): ChangeId {
-  const diff = runGit(repository, ["diff", "--binary", gitObjectIdForSnapshot(predecessor), tree]);
-  const output = runGit(repository, ["patch-id", "--stable"], diff).toString("utf8").trim();
+async function stablePatchId(repository: GitRepository, predecessor: SnapshotId, tree: GitObjectId): Promise<ChangeId> {
+  const diff = await runGit(repository, ["diff", "--binary", gitObjectIdForSnapshot(predecessor), tree]);
+  const output = (await runGit(repository, ["patch-id", "--stable"], diff)).toString("utf8").trim();
   const separator = output.indexOf(" ");
   const identity = output.length === 0
-    ? runGit(repository, ["hash-object", "-t", "blob", "--stdin"], diff).toString("utf8").trim()
+    ? (await runGit(repository, ["hash-object", "-t", "blob", "--stdin"], diff)).toString("utf8").trim()
     : separator < 0 ? output : output.slice(0, separator);
   return mintChangeId(identity);
 }
 
 /** Materialize the exact integration tree against its observed predecessor. */
-export function materializeIntegrationSnapshot(
+export async function materializeIntegrationSnapshot(
   repository: GitRepository,
   tree: GitObjectId,
   parent: SnapshotId,
   input: Readonly<{ contractId: ContractId; title: string; message?: string }>,
-): SnapshotId {
-  const commit = runGitWithEnvironment(
+): Promise<SnapshotId> {
+  const commit = (await runGitWithEnvironment(
     repository,
     ["commit-tree", tree, "-p", gitObjectIdForSnapshot(parent)],
     `${input.message ?? `${input.contractId}: ${input.title}`}\n\nKeiyaku-Contract: ${input.contractId}\n`,
@@ -102,12 +102,12 @@ export function materializeIntegrationSnapshot(
       GIT_AUTHOR_DATE: "Thu, 01 Jan 1970 00:00:00 +0000",
       GIT_COMMITTER_DATE: "Thu, 01 Jan 1970 00:00:00 +0000",
     },
-  ).toString("utf8").trim();
+  )).toString("utf8").trim();
   return mintSnapshotId(commit);
 }
 
-function isAncestor(repository: GitRepository, ancestor: SnapshotId, descendant: SnapshotId): boolean {
-  const result = runAllowingNonzero(repository, [
+async function isAncestor(repository: GitRepository, ancestor: SnapshotId, descendant: SnapshotId): Promise<boolean> {
+  const result = await runAllowingNonzero(repository, [
     "merge-base",
     "--is-ancestor",
     gitObjectIdForSnapshot(ancestor),
@@ -122,8 +122,8 @@ function isAncestor(repository: GitRepository, ancestor: SnapshotId, descendant:
   });
 }
 
-function commonAncestor(repository: GitRepository, left: SnapshotId, right: SnapshotId): SnapshotId | null {
-  const result = runAllowingNonzero(repository, [
+async function commonAncestor(repository: GitRepository, left: SnapshotId, right: SnapshotId): Promise<SnapshotId | null> {
+  const result = await runAllowingNonzero(repository, [
     "merge-base",
     gitObjectIdForSnapshot(left),
     gitObjectIdForSnapshot(right),
@@ -139,8 +139,8 @@ function commonAncestor(repository: GitRepository, left: SnapshotId, right: Snap
   return mintSnapshotId(result.stdout.toString("utf8").trim());
 }
 
-function supportsMergeTree(repository: GitRepository): boolean {
-  return runAllowingNonzero(repository, ["merge-tree", "--write-tree", "--stdin"], "").status === 0;
+async function supportsMergeTree(repository: GitRepository): Promise<boolean> {
+  return (await runAllowingNonzero(repository, ["merge-tree", "--write-tree", "--stdin"], "")).status === 0;
 }
 
 function nulFields(output: Buffer): readonly string[] {
@@ -149,17 +149,17 @@ function nulFields(output: Buffer): readonly string[] {
   return fields.slice(0, -1);
 }
 
-function mergedTree(
+async function mergedTree(
   repository: GitRepository,
   contractId: ContractId,
   base: SnapshotId,
   targetHead: SnapshotId,
   tenderTree: GitObjectId,
-): Preparation<GitObjectId, IntegrationPreparationRefusal> {
-  if (!supportsMergeTree(repository)) {
+): Promise<Preparation<GitObjectId, IntegrationPreparationRefusal>> {
+  if (!(await supportsMergeTree(repository))) {
     return { kind: "refused", refusal: { kind: "integration-unsupported", contractId, requiredGit: REQUIRED_GIT } };
   }
-  const result = runAllowingNonzero(repository, [
+  const result = await runAllowingNonzero(repository, [
     "merge-tree",
     "--write-tree",
     "--no-messages",
@@ -195,12 +195,12 @@ function mergedTree(
   });
 }
 
-export function planIntegration(
+export async function planIntegration(
   repository: GitRepository,
   input: IntegrationCoordinates,
   tender: TenderCapture,
   requireBranchesToBeUpToDate: boolean,
-): Preparation<IntegrationPlan, Readonly<{ kind: "target-missing"; contractId: ContractId }> | IntegrationPreparationRefusal> {
+): Promise<Preparation<IntegrationPlan, Readonly<{ kind: "target-missing"; contractId: ContractId }> | IntegrationPreparationRefusal>> {
   const target = input.coordinates.target;
   if (target === undefined) {
     return {
@@ -208,18 +208,18 @@ export function planIntegration(
       data: {
         predecessor: input.coordinates.start,
         tree: tender.tree,
-        changeId: stablePatchId(repository, input.coordinates.start, tender.tree),
+        changeId: await stablePatchId(repository, input.coordinates.start, tender.tree),
       },
     };
   }
-  const observed = readRef(repository, target);
+  const observed = await readRef(repository, target);
   if (observed === null) {
     return { kind: "refused", refusal: { kind: "target-missing", contractId: input.contractId } };
   }
   const targetHead = mintSnapshotId(observed);
   let tree: GitObjectId;
   if (requireBranchesToBeUpToDate) {
-    if (!isAncestor(repository, targetHead, tender.head)) {
+    if (!(await isAncestor(repository, targetHead, tender.head))) {
       return {
         kind: "refused",
         refusal: {
@@ -232,7 +232,7 @@ export function planIntegration(
     }
     tree = tender.tree;
   } else {
-    const base = commonAncestor(repository, tender.head, targetHead);
+    const base = await commonAncestor(repository, tender.head, targetHead);
     if (base === null) {
       return {
         kind: "refused",
@@ -244,7 +244,7 @@ export function planIntegration(
         },
       };
     }
-    const merged = mergedTree(
+    const merged = await mergedTree(
       repository,
       input.contractId,
       base,
@@ -259,22 +259,22 @@ export function planIntegration(
     data: {
       predecessor: targetHead,
       tree,
-      changeId: stablePatchId(repository, targetHead, tree),
+      changeId: await stablePatchId(repository, targetHead, tree),
     },
   };
 }
 
-function deliverySnapshotAvailability(
+async function deliverySnapshotAvailability(
   repository: GitRepository,
   predecessor: SnapshotId,
   candidate: SnapshotId,
-): "available" | "unavailable" {
+): Promise<"available" | "unavailable"> {
   const objects = [gitObjectIdForSnapshot(predecessor), gitObjectIdForSnapshot(candidate)] as const;
-  const types = runGit(
+  const types = (await runGit(
     repository,
     ["cat-file", "--batch-check=%(objectname) %(objecttype)"],
     `${objects.join("\n")}\n`,
-  ).toString("ascii").trimEnd().split("\n").map((record) => record.split(" ")[1]);
+  )).toString("ascii").trimEnd().split("\n").map((record) => record.split(" ")[1]);
   if (types.includes("missing")) return "unavailable";
   if (types.some((type) => type !== "commit")) {
     throw new AuthorityCorruptionError("recorded delivery snapshot is not a Git commit");
@@ -283,18 +283,18 @@ function deliverySnapshotAvailability(
 }
 
 /** Read a recorded integration pair's patch, or null when Git no longer has it. */
-export function readDeliveryDiff(repository: GitRepository, predecessor: SnapshotId, candidate: SnapshotId): string | null {
-  if (deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
+export async function readDeliveryDiff(repository: GitRepository, predecessor: SnapshotId, candidate: SnapshotId): Promise<string | null> {
+  if (await deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
   try {
-    return runGit(repository, [
+    return (await runGit(repository, [
       "diff",
       "--no-ext-diff",
       "--no-color",
       gitObjectIdForSnapshot(predecessor),
       gitObjectIdForSnapshot(candidate),
-    ]).toString("utf8");
+    ])).toString("utf8");
   } catch (error) {
-    if (deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
+    if (await deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
     throw error;
   }
 }

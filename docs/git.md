@@ -96,7 +96,9 @@ that path from the same frozen tree before object construction; it does not
 reread the state ref or discard untouched siblings.
 
 `Keiyaku.list`, each public single-Contract read, a complete Dispatch read, and
-Kanshi own their call boundary. There is no all-tree blob prefetch, owner
+Kanshi own their call boundary. Git process invocation is asynchronous at every
+repository capability boundary; callers await the typed result instead of
+blocking on a synchronous child-process reader. There is no all-tree blob prefetch, owner
 prepare/finish protocol, owner-created Git process, cross-call cache,
 cross-epoch ref cache, synchronous Contract-reader fallback, or product-named
 Git reader.

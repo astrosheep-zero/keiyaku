@@ -50,12 +50,13 @@ function source(path: WorldRoot, settings?: Settings): Akuma {
   return Akuma.of(path, settings);
 }
 
-function contractFor(repo: Repo | undefined, id: AkumaStatus["id"]): ContractId | undefined {
-  return repo === undefined ? undefined : readDispatch(scopeForRepo(repo), id)?.contractId;
+async function contractFor(repo: Repo | undefined, id: AkumaStatus["id"]): Promise<ContractId | undefined> {
+  const dispatch = repo === undefined ? null : await readDispatch(scopeForRepo(repo), id);
+  return dispatch?.contractId;
 }
 
-function statusView(status: AkumaStatus, repo?: Repo): AkumaStatusView {
-  const contractId = contractFor(repo, status.id);
+async function statusView(status: AkumaStatus, repo?: Repo): Promise<AkumaStatusView> {
+  const contractId = await contractFor(repo, status.id);
   return contractId === undefined ? { status } : { status, contractId };
 }
 
@@ -89,9 +90,9 @@ function setAddress(values: Record<string, unknown>): AkumaSetAddressInput {
   };
 }
 
-export function statusAkuma(input: AkumaAddressInput): AkumaStatusView {
+export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaStatusView> {
   const addressed = addressAkuma(input);
-  return statusView(source(addressed.path, addressed.settings).of({ id: addressed.id }).status(), input.repo);
+  return await statusView(source(addressed.path, addressed.settings).of({ id: addressed.id }).status(), input.repo);
 }
 
 export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult> {
@@ -116,7 +117,7 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
     const settled = statuses.map((status) => status.life !== "running");
     if ((selected === "any" ? settled.some(Boolean) : settled.every(Boolean))
       || (deadline !== undefined && performance.now() >= deadline)) {
-      return { completion: selected, statuses: statuses.map((status) => statusView(status, values.repo as Repo | undefined)) };
+      return { completion: selected, statuses: await Promise.all(statuses.map((status) => statusView(status, values.repo as Repo | undefined))) };
     }
     await delay(deadline === undefined ? 25 : Math.min(25, Math.max(0, deadline - performance.now())));
   }
@@ -126,11 +127,12 @@ export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillR
   const addressed = await addressAkumaSet(input);
   const handles = addressed.ids.map((id) => source(addressed.path, addressed.settings).of({ id }));
   const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
+  const observations = await Promise.all(addressed.ids.map((id) => statusView(readActionFeedbackStatus(addressed.path, id), input.repo)));
   return {
     results: addressed.ids.map((id, index) => ({
       id,
       evidence: evidence[index]!,
-      observation: statusView(readActionFeedbackStatus(addressed.path, id), input.repo),
+      observation: observations[index]!,
     })),
   };
 }
@@ -144,7 +146,7 @@ export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult>
   const addressed = addressAkuma(directAddress(values));
   const handle = source(addressed.path, addressed.settings).of({ id: addressed.id });
   const tell = await handle.tell(values.body);
-  return { akuma: addressed.id, tell, observation: statusView(readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
+  return { akuma: addressed.id, tell, observation: await statusView(readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
 }
 
 export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {
@@ -155,10 +157,10 @@ export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaI
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const addressed = addressAkuma(directAddress(values));
   const receipt = await source(addressed.path, addressed.settings).of({ id: addressed.id }).interrupt(values.body);
-  return { id: addressed.id, receipt, observation: statusView(readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
+  return { id: addressed.id, receipt, observation: await statusView(readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
 }
 
-export function historyAkuma(input: AkumaHistoryInput): AkumaHistoryResult {
+export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
   const values = requireInput(input, "Keiyaku.history input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "settings", "before", "since", "limit", "last", "repo"].includes(key)) {
@@ -170,7 +172,7 @@ export function historyAkuma(input: AkumaHistoryInput): AkumaHistoryResult {
   const handle = source(addressed.path, addressed.settings).of({ id: addressed.id });
   if (values.last === true) {
     const answer = handle.lastAnswer();
-    const contractId = contractFor(values.repo as Repo | undefined, addressed.id);
+    const contractId = await contractFor(values.repo as Repo | undefined, addressed.id);
     return answer.kind === "answer"
       ? { kind: "last", id: addressed.id, answer: answer.answer, ...(contractId === undefined ? {} : { contractId }) }
       : { kind: "no-answer", id: addressed.id, ...(contractId === undefined ? {} : { contractId }) };
@@ -180,6 +182,6 @@ export function historyAkuma(input: AkumaHistoryInput): AkumaHistoryResult {
     ...(values.since === undefined ? {} : { since: values.since as number }),
     ...(values.limit === undefined ? {} : { limit: values.limit as number }),
   });
-  const contractId = contractFor(values.repo as Repo | undefined, addressed.id);
+  const contractId = await contractFor(values.repo as Repo | undefined, addressed.id);
   return { kind: "history", id: addressed.id, history, ...(contractId === undefined ? {} : { contractId }) };
 }

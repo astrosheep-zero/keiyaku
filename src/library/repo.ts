@@ -28,8 +28,8 @@ export type RepoReconcileReport = Readonly<{
 
 const REPO_SCOPES = new WeakMap<object, RepositoryScope>();
 
-function resolvePinnedScope(path?: string): RepositoryScope {
-  return scopeOperation({ coordinate: path === undefined ? process.cwd() : path });
+async function resolvePinnedScope(path?: string): Promise<RepositoryScope> {
+  return await scopeOperation({ coordinate: path === undefined ? process.cwd() : path });
 }
 
 export function reconcileInput(input: ReconcileInput | undefined): Readonly<{
@@ -54,18 +54,18 @@ export class Repo {
     REPO_SCOPES.set(this, scope);
   }
 
-  static at(input?: RepoAtInput): Repo {
+  static async at(input?: RepoAtInput): Promise<Repo> {
     const values = input === undefined ? undefined : requireInput(input, "Repo.at input");
-    return new Repo(resolvePinnedScope(optionalNonblank(values?.path, "repository path")));
+    return new Repo(await resolvePinnedScope(optionalNonblank(values?.path, "repository path")));
   }
 
   async currentBranch(): Promise<string | null> {
-    return currentBranchOperation({ scope: scopeForRepo(this) });
+    return await currentBranchOperation({ scope: scopeForRepo(this) });
   }
 
   async reconcile(input?: ReconcileInput): Promise<RepoReconcileReport> {
     const scope = scopeForRepo(this);
-    return withGitDecodeChannel(scope, async (channel) => {
+    return await withGitDecodeChannel(scope, async (channel) => {
       const options = reconcileInput(input);
       const retained = await reconcileAllOperation({ scope, channel, ...options, retainTerminalWorktree: true });
       const settlements = await settleAll({
@@ -81,20 +81,20 @@ export class Repo {
         && contract.state.coordinates.workspace === "worktree");
       const cleanup = deferRemoval ? await reconcileAllOperation({ scope, channel, ...options }) : null;
       const later = cleanup === null ? null : new Map(cleanup.contracts.map((contract) => [contract.contractId, contract.report]));
-      return {
-        contracts: retained.contracts.map((contract, index) => {
-          const report = later?.get(contract.contractId);
-          const projection = projectContractWorktree(scope, contract.state);
-          return {
-            contractId: contract.contractId,
-            report: {
-              effects: [...contract.report.effects, ...projection.effects, ...(report?.effects ?? [])],
-              lag: [...contract.report.lag, ...projection.lag, ...(report?.lag ?? [])],
-              settlement: settlements[index]!,
-            },
-          };
-        }),
-      };
+      const contracts: RepoReconcileReport["contracts"][number][] = [];
+      for (const [index, contract] of retained.contracts.entries()) {
+        const report = later?.get(contract.contractId);
+        const projection = await projectContractWorktree(scope, contract.state);
+        contracts.push({
+          contractId: contract.contractId,
+          report: {
+            effects: [...contract.report.effects, ...projection.effects, ...(report?.effects ?? [])],
+            lag: [...contract.report.lag, ...projection.lag, ...(report?.lag ?? [])],
+            settlement: settlements[index]!,
+          },
+        });
+      }
+      return { contracts };
     });
   }
 }

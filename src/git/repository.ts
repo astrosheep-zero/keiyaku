@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { consumeProcessStdout } from "../runtime/proc/run.js";
@@ -75,6 +75,7 @@ export class GitPlumbingError extends Error {
   }
 }
 export type RegisteredWorktree = Readonly<{ path: string; branch: string | null }>;
+const GIT_STDERR_BYTES = 16 * 1024;
 
 function worktreesFromPorcelain(output: Buffer): readonly RegisteredWorktree[] {
   const fields = output.toString("utf8").split("\0");
@@ -106,12 +107,14 @@ function worktreesFromPorcelain(output: Buffer): readonly RegisteredWorktree[] {
   return worktrees;
 }
 
-export function registeredWorktrees(repository: GitRepository): readonly RegisteredWorktree[] {
-  return worktreesFromPorcelain(runGit(repository, ["worktree", "list", "--porcelain", "-z"]));
+export async function registeredWorktrees(repository: GitRepository): Promise<readonly RegisteredWorktree[]> {
+  return worktreesFromPorcelain(await runGit(repository, ["worktree", "list", "--porcelain", "-z"]));
 }
 
-export function registeredWorktreePaths(repository: GitRepository): readonly string[] { return registeredWorktrees(repository).map((worktree) => worktree.path); }
-export function repositoryAt(cwd: string): GitRepository {
+export async function registeredWorktreePaths(repository: GitRepository): Promise<readonly string[]> {
+  return (await registeredWorktrees(repository)).map((worktree) => worktree.path);
+}
+export async function repositoryAt(cwd: string): Promise<GitRepository> {
   if (typeof cwd !== "string" || cwd.length === 0) {
     throw new Error("repository path must be a nonempty string");
   }
@@ -124,8 +127,8 @@ export function repositoryAt(cwd: string): GitRepository {
   let primaryWorktree: string;
   let commonDirectory: string;
   try {
-    primaryWorktree = registeredWorktreePaths(provisional)[0]!;
-    commonDirectory = absoluteGitPath(provisional, ["--git-common-dir"], "common Git directory");
+    primaryWorktree = (await registeredWorktreePaths(provisional))[0]!;
+    commonDirectory = await absoluteGitPath(provisional, ["--git-common-dir"], "common Git directory");
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 128) {
       throw new NoGitWorldError(effectiveCwd);
@@ -135,8 +138,8 @@ export function repositoryAt(cwd: string): GitRepository {
   return { effectiveCwd, primaryWorktree, commonDirectory };
 }
 
-function absoluteGitPath(repository: GitRepository, args: readonly string[], label: string): string {
-  const value = runGit(repository, ["rev-parse", "--path-format=absolute", ...args]).toString("utf8").trim();
+async function absoluteGitPath(repository: GitRepository, args: readonly string[], label: string): Promise<string> {
+  const value = (await runGit(repository, ["rev-parse", "--path-format=absolute", ...args])).toString("utf8").trim();
   if (value.length === 0) throw new Error(`${label} is empty`);
   return resolve(isAbsolute(value) ? value : resolve(repository.effectiveCwd, value));
 }
@@ -145,13 +148,13 @@ export function commonGitDirectory(repository: GitRepository): string {
   return repository.commonDirectory;
 }
 
-export function worktreeGitDirectory(repository: GitRepository, worktree: string): string {
+export async function worktreeGitDirectory(repository: GitRepository, worktree: string): Promise<string> {
   const scoped = { ...repository, effectiveCwd: worktree };
-  return absoluteGitPath(scoped, ["--git-dir"], "worktree Git directory");
+  return await absoluteGitPath(scoped, ["--git-dir"], "worktree Git directory");
 }
 
-export function worktreeRoot(repository: GitRepository): string {
-  return absoluteGitPath(repository, ["--show-toplevel"], "worktree root");
+export async function worktreeRoot(repository: GitRepository): Promise<string> {
+  return await absoluteGitPath(repository, ["--show-toplevel"], "worktree root");
 }
 
 function commandError(command: readonly string[], error: unknown): GitPlumbingError {
@@ -174,17 +177,52 @@ function commandError(command: readonly string[], error: unknown): GitPlumbingEr
   });
 }
 
-export function runGit(repository: GitRepository, args: readonly string[], input?: string | Uint8Array): Buffer {
-  try {
-    const output = execFileSync("git", [...args], {
-      cwd: repository.effectiveCwd,
-      input,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return Buffer.isBuffer(output) ? output : Buffer.from(output);
-  } catch (error) {
-    throw commandError(args, error);
-  }
+async function executeGit(
+  repository: GitRepository,
+  args: readonly string[],
+  input: string | Uint8Array | undefined,
+  environment?: NodeJS.ProcessEnv,
+): Promise<Buffer> {
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  let stderrBytes = 0;
+  let inputError: Error | undefined;
+  const child = spawn("git", [...args], {
+    cwd: repository.effectiveCwd,
+    ...(environment === undefined ? {} : { env: { ...process.env, ...environment } }),
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+  child.stderr.on("data", (chunk: Buffer) => {
+    if (stderrBytes >= GIT_STDERR_BYTES) return;
+    const retained = chunk.subarray(0, GIT_STDERR_BYTES - stderrBytes);
+    stderr.push(retained);
+    stderrBytes += retained.length;
+  });
+  child.stdin.on("error", (error: Error) => { inputError = error; });
+  child.stdin.end(input);
+  const terminal = await new Promise<Readonly<{ code: number | null; error?: Error }>>((resolveTerminal) => {
+    child.once("error", (error) => resolveTerminal({ code: null, error }));
+    child.once("close", (code) => resolveTerminal({ code }));
+  });
+  const output = Buffer.concat(stdout);
+  if (terminal.code === 0 && inputError === undefined) return output;
+  throw commandError(args, {
+    message: terminal.error?.message ?? inputError?.message ?? `git exited with status ${terminal.code ?? "unknown"}`,
+    stdout: output,
+    stderr: Buffer.concat(stderr),
+    status: terminal.code,
+    pid: child.pid,
+  });
+}
+
+export async function runGit(
+  repository: GitRepository,
+  args: readonly string[],
+  input?: string | Uint8Array,
+): Promise<Buffer> {
+  return await executeGit(repository, args, input);
 }
 
 export async function consumeGitStdout(
@@ -213,23 +251,13 @@ export async function consumeGitStdout(
   });
 }
 
-export function runGitWithEnvironment(
+export async function runGitWithEnvironment(
   repository: GitRepository,
   args: readonly string[],
   input: string | Uint8Array | undefined,
   environment: NodeJS.ProcessEnv,
-): Buffer {
-  try {
-    const output = execFileSync("git", [...args], {
-      cwd: repository.effectiveCwd,
-      input,
-      env: { ...process.env, ...environment },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return Buffer.isBuffer(output) ? output : Buffer.from(output);
-  } catch (error) {
-    throw commandError(args, error);
-  }
+): Promise<Buffer> {
+  return await executeGit(repository, args, input, environment);
 }
 function assertOid(oid: string, label: string): void {
   gitObjectId(oid, label);
@@ -242,10 +270,10 @@ function assertRef(ref: string): void {
 function assertAssertionRef(ref: string): void {
   if (ref !== "HEAD") assertRef(ref);
 }
-export function readRef(repository: GitRepository, ref: string): GitOid | null {
+export async function readRef(repository: GitRepository, ref: string): Promise<GitOid | null> {
   assertAssertionRef(ref);
   try {
-    const oid = runGit(repository, ["rev-parse", "--verify", "--quiet", ref]).toString("utf8").trim();
+    const oid = (await runGit(repository, ["rev-parse", "--verify", "--quiet", ref])).toString("utf8").trim();
     if (oid.length === 0) return null;
     assertOid(oid, `ref ${ref}`);
     return oid;
@@ -255,9 +283,9 @@ export function readRef(repository: GitRepository, ref: string): GitOid | null {
   }
 }
 
-function readTreeForCommit(repository: GitRepository, commit: GitOid): GitOid {
+async function readTreeForCommit(repository: GitRepository, commit: GitOid): Promise<GitOid> {
   assertOid(commit, "Git commit");
-  const tree = runGit(repository, ["show", "-s", "--format=%T", commit]).toString("utf8").trim();
+  const tree = (await runGit(repository, ["show", "-s", "--format=%T", commit])).toString("utf8").trim();
   assertOid(tree, "Git tree");
   return tree;
 }
@@ -279,34 +307,34 @@ function parseTreeEntries(output: Buffer): Map<string, TreeEntry> {
   return entries;
 }
 
-export function readTreeEntries(repository: GitRepository, tree: GitOid): Map<string, TreeEntry> {
+export async function readTreeEntries(repository: GitRepository, tree: GitOid): Promise<Map<string, TreeEntry>> {
   assertOid(tree, "tree");
-  const output = runGit(repository, ["ls-tree", "-r", "-z", "--full-tree", tree]);
+  const output = await runGit(repository, ["ls-tree", "-r", "-z", "--full-tree", tree]);
   return parseTreeEntries(output);
 }
 
-export function readGit(repository: GitRepository): GitSnapshot {
-  const commit = readRef(repository, GIT_REF);
+export async function readGit(repository: GitRepository): Promise<GitSnapshot> {
+  const commit = await readRef(repository, GIT_REF);
   if (commit === null) {
     return { commit: null, tree: null, paths: new Map() };
   }
-  const tree = readTreeForCommit(repository, commit);
-  const paths = readTreeEntries(repository, tree);
-  validateGitFormat(repository, paths);
+  const tree = await readTreeForCommit(repository, commit);
+  const paths = await readTreeEntries(repository, tree);
+  await validateGitFormat(repository, paths);
   return { commit, tree, paths };
 }
 
 /** Read only the requested private Git paths from one immutable Git tree. */
-export function readGitPaths(
+export async function readGitPaths(
   repository: GitRepository,
   requestedPaths: readonly string[],
-): GitSnapshot {
+): Promise<GitSnapshot> {
   for (const path of requestedPaths) validPath(path);
-  const commit = readRef(repository, GIT_REF);
+  const commit = await readRef(repository, GIT_REF);
   if (commit === null) return { commit: null, tree: null, paths: new Map() };
 
-  const tree = readTreeForCommit(repository, commit);
-  const paths = parseTreeEntries(runGit(repository, [
+  const tree = await readTreeForCommit(repository, commit);
+  const paths = parseTreeEntries(await runGit(repository, [
     "ls-tree",
     "-z",
     "--full-tree",
@@ -315,19 +343,19 @@ export function readGitPaths(
     GIT_FORMAT_PATH,
     ...requestedPaths,
   ]));
-  validateGitFormat(repository, paths);
+  await validateGitFormat(repository, paths);
   return { commit, tree, paths };
 }
 
 /** Add paths from the same immutable Git tree without rereading its ref. */
-export function extendGitPaths(
+export async function extendGitPaths(
   repository: GitRepository,
   snapshot: GitSnapshot,
   requestedPaths: readonly string[],
-): GitSnapshot {
+): Promise<GitSnapshot> {
   for (const path of requestedPaths) validPath(path);
   if (snapshot.tree === null || requestedPaths.length === 0) return snapshot;
-  const additions = parseTreeEntries(runGit(repository, [
+  const additions = parseTreeEntries(await runGit(repository, [
     "ls-tree",
     "-z",
     "--full-tree",
@@ -339,20 +367,20 @@ export function extendGitPaths(
 }
 
 /** Expand a targeted immutable snapshot to its complete already-pinned tree. */
-export function expandGitSnapshot(repository: GitRepository, snapshot: GitSnapshot): GitSnapshot {
+export async function expandGitSnapshot(repository: GitRepository, snapshot: GitSnapshot): Promise<GitSnapshot> {
   if (snapshot.tree === null) return snapshot;
-  return { ...snapshot, paths: readTreeEntries(repository, snapshot.tree) };
+  return { ...snapshot, paths: await readTreeEntries(repository, snapshot.tree) };
 }
 
-export function writeBlob(repository: GitRepository, bytes: string | Uint8Array): GitOid {
-  const oid = runGit(repository, ["hash-object", "-w", "--stdin"], bytes).toString("utf8").trim();
+export async function writeBlob(repository: GitRepository, bytes: string | Uint8Array): Promise<GitOid> {
+  const oid = (await runGit(repository, ["hash-object", "-w", "--stdin"], bytes)).toString("utf8").trim();
   assertOid(oid, "written blob");
   return oid;
 }
 
-export function readBlob(repository: GitRepository, oid: GitOid): Buffer {
+export async function readBlob(repository: GitRepository, oid: GitOid): Promise<Buffer> {
   assertOid(oid, "blob");
-  return runGit(repository, ["cat-file", "blob", oid]);
+  return await runGit(repository, ["cat-file", "blob", oid]);
 }
 
 function malformedBatchOutput(detail: string): never {
@@ -365,12 +393,12 @@ function malformedBatchOutput(detail: string): never {
 
 type GitObject = Readonly<{ type: string; bytes: Buffer }>;
 
-function readObjects(repository: GitRepository, oids: readonly GitOid[]): ReadonlyMap<GitOid, GitObject> {
+async function readObjects(repository: GitRepository, oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObject>> {
   const unique = [...new Set(oids)];
   for (const oid of unique) assertOid(oid, "Git object");
   if (unique.length === 0) return new Map();
 
-  const output = runGit(repository, ["cat-file", "--batch"], `${unique.join("\n")}\n`);
+  const output = await runGit(repository, ["cat-file", "--batch"], `${unique.join("\n")}\n`);
   const objects = new Map<GitOid, GitObject>();
   let offset = 0;
   for (const oid of unique) {
@@ -403,26 +431,26 @@ function readObjects(repository: GitRepository, oids: readonly GitOid[]): Readon
   return objects;
 }
 
-function validateGitFormat(repository: GitRepository, paths: ReadonlyMap<string, TreeEntry>): void {
+async function validateGitFormat(repository: GitRepository, paths: ReadonlyMap<string, TreeEntry>): Promise<void> {
   const format = paths.get(GIT_FORMAT_PATH);
   if (format === undefined) throw new AuthorityCorruptionError(`Git is missing ${GIT_FORMAT_PATH}`);
   if (format.type !== "blob") throw new AuthorityCorruptionError(`Git format is not a blob: ${GIT_FORMAT_PATH}`);
-  const bytes = readBlob(repository, format.oid);
+  const bytes = await readBlob(repository, format.oid);
   if (bytes.toString("utf8") !== GIT_FORMAT_BYTES) {
     throw new AuthorityCorruptionError(`Git format is not current: ${GIT_FORMAT_PATH}`);
   }
 }
 
-function baseTreeEntries(
+async function baseTreeEntries(
   repository: GitRepository,
   baseTree: GitOid | null,
   changedPaths: readonly string[],
   nodePaths: readonly string[],
-): ReadonlyMap<string, Map<string, TreeEntry>> {
+): Promise<ReadonlyMap<string, Map<string, TreeEntry>>> {
   const byPath = new Map<string, Map<string, TreeEntry>>();
   if (baseTree === null) return byPath;
 
-  const ancestry = parseTreeEntries(runGit(repository, [
+  const ancestry = parseTreeEntries(await runGit(repository, [
     "ls-tree",
     "-z",
     "-t",
@@ -441,7 +469,7 @@ function baseTreeEntries(
     treeByPath.set(path, entry.oid);
   }
 
-  const objects = readObjects(repository, [...treeByPath.values()]);
+  const objects = await readObjects(repository, [...treeByPath.values()]);
   const oidBytes = baseTree.length / 2;
   for (const [path, oid] of treeByPath) {
     const object = objects.get(oid);
@@ -453,8 +481,8 @@ function baseTreeEntries(
   return byPath;
 }
 
-function writePreparedTrees(repository: GitRepository, prepared: readonly PreparedTree[]): void {
-  const output = runGit(repository, ["mktree", "--batch"], prepared.map(({ records }) => `${records}\n`).join(""));
+async function writePreparedTrees(repository: GitRepository, prepared: readonly PreparedTree[]): Promise<void> {
+  const output = await runGit(repository, ["mktree", "--batch"], prepared.map(({ records }) => `${records}\n`).join(""));
   const written = output.toString("ascii").trimEnd().split("\n");
   if (written.length !== prepared.length) {
     throw new GitPlumbingError({ stderr: output, status: null, message: "malformed mktree --batch output" });
@@ -470,27 +498,27 @@ function writePreparedTrees(repository: GitRepository, prepared: readonly Prepar
 }
 
 /** Copy only the changed paths' tree ancestors, preserving untouched subtrees by object ID. */
-export function updateGitTree(
+export async function updateGitTree(
   repository: GitRepository,
   baseTree: GitOid | null,
   changes: ReadonlyMap<string, TreeChange>,
-): GitOid {
+): Promise<GitOid> {
   const update = treeUpdate(changes);
-  const bases = baseTreeEntries(repository, baseTree, [...changes.keys()], update.nodePaths);
+  const bases = await baseTreeEntries(repository, baseTree, [...changes.keys()], update.nodePaths);
   const representativeOid = baseTree ?? [...changes.values()].find((change) => change !== null)?.oid;
   if (representativeOid === undefined) throw new Error("cannot write an empty Git tree without an object format");
   const prepared = prepareTreeUpdate({ update, bases, oidBytes: representativeOid.length / 2 });
-  writePreparedTrees(repository, prepared.trees);
+  await writePreparedTrees(repository, prepared.trees);
   return prepared.root;
 }
 
 /** Write a tree update from directory entries frozen with the admitted base tree. */
-export function updateGitTreeFromFrozenDirectories(
+export async function updateGitTreeFromFrozenDirectories(
   repository: GitRepository,
   baseTree: GitOid | null,
   directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>,
   changes: ReadonlyMap<string, TreeChange>,
-): GitOid {
+): Promise<GitOid> {
   const update = treeUpdate(changes);
   const representativeOid = baseTree ?? [...changes.values()].find((change) => change !== null)?.oid;
   if (representativeOid === undefined) throw new Error("cannot write an empty Git tree without an object format");
@@ -499,11 +527,11 @@ export function updateGitTreeFromFrozenDirectories(
     bases: directories,
     oidBytes: representativeOid.length / 2,
   });
-  writePreparedTrees(repository, prepared.trees);
+  await writePreparedTrees(repository, prepared.trees);
   return prepared.root;
 }
 
-function writeCommitObject(input: Readonly<{
+async function writeCommitObject(input: Readonly<{
   repository: GitRepository;
   tree: GitOid;
   parents: readonly GitOid[];
@@ -511,13 +539,13 @@ function writeCommitObject(input: Readonly<{
   actor: string;
   email: string;
   at?: string;
-}>): GitOid {
+}>): Promise<GitOid> {
   const { repository, tree, parents, message, actor, email, at } = input;
   assertOid(tree, "commit tree");
   for (const parent of parents) assertOid(parent, "commit parent");
   const args = ["commit-tree", tree];
   for (const parent of parents) args.push("-p", parent);
-  const commit = runGitWithEnvironment(
+  const commit = (await runGitWithEnvironment(
     repository,
     args,
     `${message}\n`,
@@ -528,22 +556,22 @@ function writeCommitObject(input: Readonly<{
       GIT_COMMITTER_EMAIL: email,
       ...(at === undefined ? {} : { GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at }),
     },
-  )
+  ))
     .toString("utf8")
     .trim();
   assertOid(commit, "written Git commit");
   return commit;
 }
 
-export function writeCommit(input: Readonly<{
+export async function writeCommit(input: Readonly<{
   repository: GitRepository;
   tree: GitOid;
   parent: GitOid | null;
   message?: string;
   actor?: string;
   at?: string;
-}>): GitOid {
-  return writeCommitObject({
+}>): Promise<GitOid> {
+  return await writeCommitObject({
     repository: input.repository,
     tree: input.tree,
     parents: input.parent === null ? [] : [input.parent],
@@ -572,14 +600,14 @@ function refUpdateLine(
   return `option no-deref\nupdate ${update.ref} ${update.newOid} ${update.expectedOid ?? "0".repeat(update.newOid.length)}`;
 }
 
-export function updateRefsAtomically(
+export async function updateRefsAtomically(
   repository: GitRepository,
   updates: readonly (
     | { readonly ref: typeof GIT_REF; readonly newOid: GitOid; readonly expectedOid: GitOid | null }
     | { readonly ref: string; readonly newOid: GitOid; readonly expectedOid: GitOid }
   )[],
   assertions: readonly GitRefAssertion[] = [],
-): RefPublication {
+): Promise<RefPublication> {
   if (updates.length === 0) throw new Error("an atomic ref transaction needs a Git update");
   if (updates.length > 2) throw new Error("an atomic ref transaction accepts at most one target ref update");
   const git = updates[0];
@@ -595,7 +623,7 @@ export function updateRefsAtomically(
     "",
   ];
   try {
-    runGit(repository, ["update-ref", "--stdin"], lines.join("\n"));
+    await runGit(repository, ["update-ref", "--stdin"], lines.join("\n"));
     return { kind: "published" };
   } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;

@@ -25,10 +25,10 @@ export function deliveryWorktreePath(repository: GitRepository, contract: Contra
   return resolve(repository.commonDirectory, ...WORKTREE_DIRECTORY, contractPhysicalName(contract));
 }
 
-export function withPrivateGitIndex<Value>(action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value): Value {
+export async function withPrivateGitIndex<Value>(action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value | PromiseLike<Value>): Promise<Value> {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-index-"));
   try {
-    return action({ GIT_INDEX_FILE: join(directory, "index") });
+    return await action({ GIT_INDEX_FILE: join(directory, "index") });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -47,11 +47,11 @@ function fields(record: string, count: number): readonly string[] {
   return result;
 }
 
-function workspaceChanges(repository: GitRepository, workspace: string): WorkspaceChanges {
-  const records = runGit(repository, [
+async function workspaceChanges(repository: GitRepository, workspace: string): Promise<WorkspaceChanges> {
+  const records = (await runGit(repository, [
     "-C", workspace,
     "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=none",
-  ]).toString("utf8").split("\0");
+  ])).toString("utf8").split("\0");
   const staged = new Set<string>();
   const unstaged = new Set<string>();
   const untracked = new Set<string>();
@@ -93,8 +93,8 @@ function workspaceChanges(repository: GitRepository, workspace: string): Workspa
 }
 
 /** Capture tracked and untracked workspace bytes without changing its real index. */
-export function captureWorkspaceTree(repository: GitRepository, workspace: string): WorkspaceTree {
-  const identities = runGit(repository, ["-C", workspace, "show", "-s", "--format=%H%n%T", "HEAD"])
+export async function captureWorkspaceTree(repository: GitRepository, workspace: string): Promise<WorkspaceTree> {
+  const identities = (await runGit(repository, ["-C", workspace, "show", "-s", "--format=%H%n%T", "HEAD"]))
     .toString("utf8")
     .split("\n");
   if (identities.length !== 3 || identities[0] === undefined || identities[1] === undefined || identities[2] !== "") {
@@ -102,16 +102,16 @@ export function captureWorkspaceTree(repository: GitRepository, workspace: strin
   }
   const head = mintSnapshotId(identities[0]);
   const tree = gitObjectId(identities[1], "workspace tree");
-  const changes = workspaceChanges(repository, workspace);
+  const changes = await workspaceChanges(repository, workspace);
   const dirty = changes.staged.length > 0 || changes.unstaged.length > 0 || changes.untracked.length > 0;
   if (!dirty) return { tree, head, dirty, changes };
 
-  return withPrivateGitIndex((environment) => {
-    runGitWithEnvironment(repository, ["-C", workspace, "read-tree", "HEAD"], undefined, environment);
-    runGitWithEnvironment(repository, ["-C", workspace, "add", "--all"], undefined, environment);
+  return await withPrivateGitIndex(async (environment) => {
+    await runGitWithEnvironment(repository, ["-C", workspace, "read-tree", "HEAD"], undefined, environment);
+    await runGitWithEnvironment(repository, ["-C", workspace, "add", "--all"], undefined, environment);
     return {
       tree: gitObjectId(
-        runGitWithEnvironment(repository, ["-C", workspace, "write-tree"], undefined, environment).toString("utf8").trim(),
+        (await runGitWithEnvironment(repository, ["-C", workspace, "write-tree"], undefined, environment)).toString("utf8").trim(),
         "workspace tree",
       ),
       head,

@@ -729,7 +729,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       module: "node:child_process",
       owners: [
-        { source: "git/repository.ts", symbols: ["execFileSync"] },
+        { source: "git/repository.ts", symbols: ["spawn"] },
         { source: "git/read-observation.ts", symbols: ["ChildProcessWithoutNullStreams", "spawn"] },
         { source: "runtime/proc/**", symbols: ["ChildProcess", "ChildProcessWithoutNullStreams", "execFile", "spawn"] },
         { source: "scripts/model-change-impact.ts", symbols: ["execFileSync"] },

@@ -21,13 +21,13 @@ function command(program: string): string {
 }
 
 function input(root: string, declarations: readonly VerificationDeclaration[], overrides: Partial<ExecuteVerificationInput> = {}): ExecuteVerificationInput {
-  const scratch: MaterializedScratchCandidate = { cwd: root, dispose: () => null };
+  const scratch: MaterializedScratchCandidate = { cwd: root, dispose: async () => null };
   return {
     repository: {} as ExecuteVerificationInput["repository"],
     candidate: "snapshot" as ExecuteVerificationInput["candidate"],
     declarations,
     environment: process.env,
-    materializeScratchCandidate: () => scratch,
+    materializeScratchCandidate: async () => scratch,
     projectSettings: async () => await settings({ root }),
     ...overrides,
   };

@@ -44,16 +44,18 @@ function contractIdFor(title: string, suffix?: string): ContractId {
 type BindRefusalUnion = BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal;
 type BindSeed = Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
 
-function bindPreparation(
+async function bindPreparation(
   input: BindOperationInput,
   target: string | undefined,
   seed: BindSeed,
-): Readonly<{ kind: "prepared"; input: BindInput<VerificationDeclarationRefusal>; assertions?: readonly GitRefAssertion[] }>
-  | Readonly<{ kind: "refused"; refusal: BindRefusalUnion }> {
+): Promise<
+  Readonly<{ kind: "prepared"; input: BindInput<VerificationDeclarationRefusal>; assertions?: readonly GitRefAssertion[] }>
+  | Readonly<{ kind: "refused"; refusal: BindRefusalUnion }>
+> {
   if (input.verification.kind === "refused") {
     return { kind: "prepared", input: { ...seed, preparation: input.verification } };
   }
-  const observed = observeBindCoordinates(input.scope, target);
+  const observed = await observeBindCoordinates(input.scope, target);
   if (observed === null) return { kind: "refused", refusal: { kind: "target-missing" } };
   if (input.workspace === "here" && target !== undefined && observed.branch !== target) {
     return { kind: "refused", refusal: { kind: "here-target-mismatch", target, branch: observed.branch } };
@@ -85,7 +87,7 @@ export async function bindOperation(
 ): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal>> {
   let target: string | undefined;
   if (input.target !== undefined) {
-    const normalized = normalizeTargetBranch(input.scope, input.target);
+    const normalized = await normalizeTargetBranch(input.scope, input.target);
     if (normalized === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
     target = normalized;
   }
@@ -102,7 +104,7 @@ export async function bindOperation(
           decideBind,
           {
             observedContracts: [id, ...input.terms.after],
-            prepareInput: (_observation, original) => bindPreparation(input, target, original),
+            prepareInput: async (_observation, original) => bindPreparation(input, target, original),
             ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
           },
         ),

@@ -8,7 +8,7 @@ import { parseArgv } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
 import { makeGitRepository, observeContract, withGitShim } from "./support/git.js";
 
-function repositoryWithCandidate() {
+async function repositoryWithCandidate() {
   const raw = makeGitRepository();
   raw.run(["config", "user.name", "Test User"]);
   raw.run(["config", "user.email", "test@example.com"]);
@@ -18,7 +18,7 @@ function repositoryWithCandidate() {
   raw.run(["checkout", "--quiet", "-b", "feature"]);
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "candidate"]);
   const candidate = raw.run(["rev-parse", "HEAD"]).trim();
-  return { raw, repository: repositoryAt(raw.path), target, candidate };
+  return { raw, repository: await repositoryAt(raw.path), target, candidate };
 }
 
 function document(script?: string): string {
@@ -48,7 +48,7 @@ function document(script?: string): string {
 }
 
 async function bindAndDeliver(script?: string, gates: readonly string[] = ["verified"]) {
-  const setup = repositoryWithCandidate();
+  const setup = await repositoryWithCandidate();
   mkdirSync(resolve(setup.raw.path, ".keiyaku"), { recursive: true });
   writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: gates } }));
   const bound = await invoke(parseArgv([
@@ -98,7 +98,7 @@ test("deliver adapts a failing Verification without a private producer injection
 });
 
 test("dirty --here delivery materializes and lands the verified candidate cleanly", async () => {
-  const setup = repositoryWithCandidate();
+  const setup = await repositoryWithCandidate();
   setup.raw.run(["checkout", "--quiet", "main"]);
   writeFileSync(resolve(setup.raw.path, "candidate.txt"), "failing\n");
   setup.raw.run(["add", "candidate.txt"]);
@@ -227,7 +227,7 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
 });
 
 test("audit renders a missing contract as a typed refusal", async () => {
-  const repository = repositoryWithCandidate().raw;
+  const repository = (await repositoryWithCandidate()).raw;
   const result = await invoke(parseArgv(["audit", "kei/missing"]), {
     cwd: repository.path,
     environment: {},

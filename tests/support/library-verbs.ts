@@ -58,7 +58,7 @@ export function document(verification?: string): string {
 }
 
 export async function bind(repository: TestGitRepository, verification?: string) {
-  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: document(verification),
     workspace: "here",
     gates: verification === undefined ? ["reviewed"] : ["verified"],

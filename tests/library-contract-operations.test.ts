@@ -23,7 +23,7 @@ test("here bind preserves and refuses an appointment whose journal is missing", 
   const before = readFileSync(path, "utf8");
 
   await assert.rejects(
-    Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
+    Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
     refused({ kind: "here-worktree-appointed", path, contract }),
   );
 
@@ -39,7 +39,7 @@ test("here bind preserves and refuses a residual terminal appointment", async ()
   const before = readFileSync(path, "utf8");
 
   await assert.rejects(
-    Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
+    Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
     refused({ kind: "here-worktree-appointed", path, contract }),
   );
 
@@ -72,7 +72,7 @@ test("one public handle reuses its resolved repository scope", async () => {
   const log = resolve(repository.path, ".git", "scope-discovery.log");
   writeFileSync(log, "");
 
-  const operations = withGitShim(
+  const operations = await withGitShim(
     [
       "if [ \"$1\" = \"worktree\" ] && [ \"$2\" = \"list\" ]; then",
       "  printf 'discovery\\n' >> \"$KEIYAKU_SCOPE_DISCOVERY_LOG\"",
@@ -80,8 +80,8 @@ test("one public handle reuses its resolved repository scope", async () => {
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_SCOPE_DISCOVERY_LOG: log },
-    () => {
-      const contract = Keiyaku.of({ repo: Repo.at({ path: repository.path }), id });
+    async () => {
+      const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id });
       return [contract.state(), contract.deliver(), contract.reconcile()] as const;
     },
   );
@@ -154,7 +154,7 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
   const repository = repositoryWithMain();
   const prerequisite = await bind(repository);
   const prerequisiteId = (await prerequisite.state()).id;
-  const dependent = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+  const dependent = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: document(),
     workspace: "worktree",
     gates: ["reviewed"],
@@ -162,7 +162,7 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
   });
   assert.equal((await dependent.keiyaku.state()).bound, null);
   const dependentId = (await dependent.keiyaku.state()).id;
-  const path = deliveryWorktreePath(repositoryAt(repository.path), dependentId);
+  const path = deliveryWorktreePath(await repositoryAt(repository.path), dependentId);
   await dependent.keiyaku.abandon();
   assert.equal(existsSync(path), false);
 
@@ -175,7 +175,7 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
 
 test("review records before delivery and the same patch can be placed", async () => {
   const repository = repositoryWithMain();
-  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
 
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
@@ -200,7 +200,7 @@ test("review records before delivery and the same patch can be placed", async ()
 
 test("a changed worktree patch leaves the reviewed placement pending", async () => {
   const repository = repositoryWithMain();
-  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
   writeFileSync(`${repository.path}/candidate.txt`, "first\n");
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
   assert.deepEqual(reviewed.value.workspace?.untracked, ["candidate.txt"]);
@@ -214,7 +214,7 @@ test("a changed worktree patch leaves the reviewed placement pending", async () 
 
 test("a changed document leaves an otherwise unchanged reviewed patch pending", async () => {
   const repository = repositoryWithMain();
-  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
 
@@ -230,7 +230,7 @@ test("a changed document leaves an otherwise unchanged reviewed patch pending", 
 
 test("review testimony is recorded when reviewed is not a placement gate", async () => {
   const repository = repositoryWithMain();
-  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: [] });
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: [] });
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
 
   const reviewed = await result.keiyaku.review({ verdict: "unsatisfied" });

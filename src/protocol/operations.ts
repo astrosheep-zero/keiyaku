@@ -168,18 +168,20 @@ function placementStop(result: PlacementProtocolResult): PlacementStop | undefin
 type ScopeOperationInput = Readonly<{ coordinate: string }>;
 export type RepositoryScope = GitRepository;
 export { NoGitWorldError };
-export function scopeOperation(input: ScopeOperationInput): RepositoryScope { return repositoryAt(input.coordinate); }
+export async function scopeOperation(input: ScopeOperationInput): Promise<RepositoryScope> {
+  return await repositoryAt(input.coordinate);
+}
 
-export function currentBranchOperation(input: Readonly<{ scope: RepositoryScope }>): string | null {
-  return currentBranch(input.scope);
+export async function currentBranchOperation(input: Readonly<{ scope: RepositoryScope }>): Promise<string | null> {
+  return await currentBranch(input.scope);
 }
 
 export async function contractsOperation(input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }>): Promise<ContractBoard> {
   return withGitReadObservation(input.scope, input.channel, readContractBoard);
 }
 
-export function contractObservationOperation(input: MutationOperationInput): Promise<ContractObservation> {
-  return readContractObservationAt(input.scope, input.channel, input.contractId);
+export async function contractObservationOperation(input: MutationOperationInput): Promise<ContractObservation> {
+  return await readContractObservationAt(input.scope, input.channel, input.contractId);
 }
 
 export type { ContractBoard, ContractDisposition, ContractGateCurrent, ContractGateReport, ContractObservation, ContractPhase, ContractRow };
@@ -206,7 +208,7 @@ export async function deliveryOperation(input: MutationOperationInput): Promise<
 
 type DeliveryDiffOperationInput = Readonly<{ scope: RepositoryScope; integrationPredecessor: SnapshotId; integrationSnapshot: SnapshotId }>;
 
-export async function deliveryDiffOperation(input: DeliveryDiffOperationInput): Promise<string | null> { return readDeliveryDiff(input.scope, input.integrationPredecessor, input.integrationSnapshot); }
+export async function deliveryDiffOperation(input: DeliveryDiffOperationInput): Promise<string | null> { return await readDeliveryDiff(input.scope, input.integrationPredecessor, input.integrationSnapshot); }
 
 type AmendOperationInput = MutationOperationInput & Readonly<{
   source?: ContractTerms;
@@ -322,14 +324,14 @@ async function heldTaskId(
   return holder?.disposition === "held" ? holder.taskId : undefined;
 }
 
-function completeHeldTaskIntegration(
+async function completeHeldTaskIntegration(
   repository: GitRepository,
   contractId: ContractId,
   integration: IntegrationPlan,
   taskId: TaskId,
-): { kind: "prepared"; data: typeof integration } | { kind: "refused"; refusal: TaskCompletionRefusal } {
+): Promise<{ kind: "prepared"; data: typeof integration } | { kind: "refused"; refusal: TaskCompletionRefusal }> {
   const path = taskAuthorityRelativePath(taskId);
-  const source = readIntegrationBlob(repository, integration.tree, path);
+  const source = await readIntegrationBlob(repository, integration.tree, path);
   if (source.kind !== "present") {
     return { kind: "refused", refusal: { kind: "task-completion-refused", contractId, taskId, reason: source.kind } };
   }
@@ -341,7 +343,7 @@ function completeHeldTaskIntegration(
     const bytes = completeTaskDocument(source.data.bytes, parseTaskId(taskId));
     return {
       kind: "prepared",
-      data: updateIntegrationPlan(repository, integration, { path, bytes, mode: source.data.mode }),
+      data: await updateIntegrationPlan(repository, integration, { path, bytes, mode: source.data.mode }),
     };
   } catch (error) {
     return {
@@ -357,38 +359,38 @@ function completeHeldTaskIntegration(
   }
 }
 
-export function prepareDelivery(
+export async function prepareDelivery(
   repository: GitRepository,
   stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"]; taskId?: TaskId }>,
   input: Readonly<{ title: string; message?: string; requireBranchesToBeUpToDate?: boolean; includeDirty?: boolean }>,
-): { kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal } {
+): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal }> {
   const { contractId, coordinates } = stage;
   if (coordinates.workspace === "here" && coordinates.target !== undefined) {
-    const branch = currentBranch(repository);
+    const branch = await currentBranch(repository);
     if (branch !== coordinates.target) {
       return { kind: "refused", refusal: { kind: "workspace-not-on-target", contractId, target: coordinates.target, branch } };
     }
   }
-  const tender = captureTender(repository, stage);
+  const tender = await captureTender(repository, stage);
   if (tender.kind === "refused") return tender;
   if ((tender.data.dirty && input.includeDirty !== true) || tender.data.changes.submodules.length > 0) {
-    return { kind: "refused", refusal: dirtyTenderRefusal(repository, contractId, tender.data) };
+    return { kind: "refused", refusal: await dirtyTenderRefusal(repository, contractId, tender.data) };
   }
-  const tenderSnapshot = materializeTenderSnapshot(repository, tender.data, {
+  const tenderSnapshot = await materializeTenderSnapshot(repository, tender.data, {
     contractId,
     title: input.title,
     ...(input.message === undefined ? {} : { message: input.message }),
   });
   const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
-  const planned = planIntegration(repository, stage, { ...tender.data, head: tenderSnapshot }, requireBranchesToBeUpToDate);
+  const planned = await planIntegration(repository, stage, { ...tender.data, head: tenderSnapshot }, requireBranchesToBeUpToDate);
   if (planned.kind === "refused") return planned;
   const integration = stage.taskId === undefined
     ? planned
-    : completeHeldTaskIntegration(repository, contractId, planned.data, stage.taskId);
+    : await completeHeldTaskIntegration(repository, contractId, planned.data, stage.taskId);
   if (integration.kind === "refused") return integration;
   const integrationSnapshot = coordinates.target === undefined && stage.taskId === undefined
     ? tenderSnapshot
-    : materializeIntegrationSnapshot(repository, integration.data.tree, integration.data.predecessor, {
+    : await materializeIntegrationSnapshot(repository, integration.data.tree, integration.data.predecessor, {
       contractId,
       title: input.title,
       ...(input.message === undefined ? {} : { message: input.message }),
@@ -404,22 +406,22 @@ export function prepareDelivery(
   };
 }
 
-export function prepareReview(
+export async function prepareReview(
   repository: GitRepository,
   stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"]; taskId?: TaskId }>,
-): { kind: "prepared"; data: Readonly<{ changeId: DeliverData["integration"]["changeId"]; workspace?: WorkspaceDirtyDelta }> }
-  | { kind: "refused"; refusal: ReviewPreparationRefusal } {
-  const tender = captureTender(repository, stage);
+): Promise<{ kind: "prepared"; data: Readonly<{ changeId: DeliverData["integration"]["changeId"]; workspace?: WorkspaceDirtyDelta }> }
+  | { kind: "refused"; refusal: ReviewPreparationRefusal }> {
+  const tender = await captureTender(repository, stage);
   if (tender.kind === "refused") return tender;
   if (tender.data.changes.submodules.length > 0) {
-    return { kind: "refused", refusal: dirtyTenderRefusal(repository, stage.contractId, tender.data) };
+    return { kind: "refused", refusal: await dirtyTenderRefusal(repository, stage.contractId, tender.data) };
   }
-  const workspace = dirtyTenderDelta(repository, tender.data);
-  const planned = planIntegration(repository, stage, tender.data, false);
+  const workspace = await dirtyTenderDelta(repository, tender.data);
+  const planned = await planIntegration(repository, stage, tender.data, false);
   if (planned.kind === "refused") return planned;
   const integration = stage.taskId === undefined
     ? planned
-    : completeHeldTaskIntegration(repository, stage.contractId, planned.data, stage.taskId);
+    : await completeHeldTaskIntegration(repository, stage.contractId, planned.data, stage.taskId);
   return integration.kind === "refused"
     ? integration
     : { kind: "prepared", data: { changeId: integration.data.changeId, ...(workspace === undefined ? {} : { workspace }) } };
@@ -447,7 +449,7 @@ async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptCont
       refusal: derivation.verification.refusal,
     };
   } else {
-    const prepared = prepareDelivery(input.scope, {
+    const prepared = await prepareDelivery(input.scope, {
       contractId: state.id,
       coordinates: state.coordinates,
       ...(taskId === undefined ? {} : { taskId }),
@@ -555,7 +557,7 @@ export async function deliverOperation(
     if (result.kind === "redecide") continue;
   }
   if (first === null) return { kind: "retry", reason: { kind: "exhausted" } };
-  return completeDelivery(input, first);
+  return await completeDelivery(input, first);
 }
 
 export async function abandonOperation(
@@ -603,11 +605,11 @@ type PreparedReview = Readonly<{
   workspace?: WorkspaceDirtyDelta;
 }>;
 
-function reviewAttempt(
+async function reviewAttempt(
   input: ReviewOperationInput,
   attempt: AttemptContext,
 ): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
-  return reviewAttemptObserved(input, attempt);
+  return await reviewAttemptObserved(input, attempt);
 }
 
 async function reviewAttemptObserved(
@@ -627,7 +629,7 @@ async function reviewAttemptObserved(
   let workspace: WorkspaceDirtyDelta | undefined;
   if (state !== null) {
     taskId = await heldTaskId(input.channel, decisionObservation, state.id);
-    const prepared = prepareReview(input.scope, {
+    const prepared = await prepareReview(input.scope, {
       contractId: state.id,
       coordinates: state.coordinates,
       ...(taskId === undefined ? {} : { taskId }),
@@ -791,7 +793,7 @@ export async function reconcileAllOperation(
   input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }> & ReconcileOptions,
 ): Promise<RepoReconcileReport> {
   const git = input.scope;
-  const observation = await withGitReadObservation(input.scope, input.channel, (read) => observeContractWorld(read));
+  const observation = await withGitReadObservation(input.scope, input.channel, async (read) => await observeContractWorld(read));
   const contracts = (await reconcileBatch(
     git,
     input.channel,

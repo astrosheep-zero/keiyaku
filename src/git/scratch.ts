@@ -16,7 +16,7 @@ const SCRATCH_PATTERN = /^keiyaku-v4-verify-([0-9a-f]{24})$/;
 
 export type MaterializedScratchCandidate = Readonly<{
   cwd: string;
-  dispose: () => WorktreeLeak | null;
+  dispose: () => Promise<WorktreeLeak | null>;
 }>;
 
 export type CollectableScratchWorktree = Readonly<{
@@ -51,10 +51,10 @@ export function collectableScratchWorktrees(paths: Iterable<string>): readonly C
 }
 
 /** Materialize a disposable candidate worktree and own only its removal. */
-export function materializeScratchCandidate(
+export async function materializeScratchCandidate(
   repository: GitRepository,
   candidate: SnapshotId,
-): MaterializedScratchCandidate {
+): Promise<MaterializedScratchCandidate> {
   const cwd = scratchPath();
   const lockPath = ownershipLockPath(cwd);
   if (lockPath === null) throw new Error("scratch ownership lock path is invalid");
@@ -64,7 +64,7 @@ export function materializeScratchCandidate(
   });
   if (ownership === null) throw new Error("new scratch ownership lock is unexpectedly held");
   try {
-    runGit(repository, ["worktree", "add", "--detach", cwd, gitObjectIdForSnapshot(candidate)]);
+    await runGit(repository, ["worktree", "add", "--detach", cwd, gitObjectIdForSnapshot(candidate)]);
   } catch (error) {
     ownership.close();
     throw error;
@@ -72,11 +72,11 @@ export function materializeScratchCandidate(
   let disposed = false;
   return {
     cwd,
-    dispose: () => {
+    dispose: async () => {
       if (disposed) return null;
       disposed = true;
       try {
-        runGit(repository, ["worktree", "remove", "--force", cwd]);
+        await runGit(repository, ["worktree", "remove", "--force", cwd]);
         return null;
       } catch (error) {
         return {

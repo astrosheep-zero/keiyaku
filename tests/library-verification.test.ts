@@ -22,7 +22,7 @@ test("public deliver keeps its Verification admission in accepted facts", async 
 
 test("status and audit expose only current Verification testimony", async () => {
   const repository = repositoryWithMain();
-  const repo = Repo.at({ path: repository.path });
+  const repo = await Repo.at({ path: repository.path });
   const bound = await Keiyaku.bind({ repo,
     markdown: document('printf "checked"; printf "warning" >&2'),
     workspace: "here",
@@ -70,7 +70,7 @@ test("status and audit expose only current Verification testimony", async () => 
 
 test("amend preserves untouched Verification bytes and currentness", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: document("exit 0"),
     workspace: "here",
     gates: ["reviewed", "verified"],
@@ -90,7 +90,7 @@ test("amend preserves untouched Verification bytes and currentness", async () =>
 
 test("a declaration timeout admits unsatisfied testimony and leaves placement to gates", async () => {
   const openRepository = repositoryWithMain();
-  const open = await Keiyaku.bind({ repo: Repo.at({ path: openRepository.path }),
+  const open = await Keiyaku.bind({ repo: await Repo.at({ path: openRepository.path }),
     markdown: document("sleep 1").replace("~~~bash\n", "~~~bash timeout=25ms\n"),
     workspace: "here",
     gates: [],
@@ -104,7 +104,7 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
   assert.equal((await open.keiyaku.state()).terminal?.kind, "claimed");
 
   const gatedRepository = repositoryWithMain();
-  const gated = await Keiyaku.bind({ repo: Repo.at({ path: gatedRepository.path }),
+  const gated = await Keiyaku.bind({ repo: await Repo.at({ path: gatedRepository.path }),
     markdown: document("sleep 1").replace("~~~bash\n", "~~~bash timeout=25ms\n"),
     workspace: "here",
     gates: ["verified"],

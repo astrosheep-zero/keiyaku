@@ -1,7 +1,7 @@
 # Public API
 
 ```ts
-Keiyaku.bind({ repo: Repo.at(), markdown, target: "main" });
+Keiyaku.bind({ repo: await Repo.at(), markdown, target: "main" });
 ```
 
 Keiyaku is published as the public ESM-only npm package
@@ -95,7 +95,7 @@ type ReconcileInput = Readonly<{
   retryHooks?: boolean
 }>
 
-Repo.at(input?: { path?: string }): Repo
+Repo.at(input?: { path?: string }): Promise<Repo>
 repo.root: string
 repo.currentBranch(): Promise<string | null>
 repo.reconcile(input?: ReconcileInput): Promise<RepoReconcileReport>
@@ -150,8 +150,9 @@ birth. A later deliver from a here workspace rechecks the immutable coordinate;
 when that branch moved. Both refusals report the expected target and observed
 branch; `null` denotes detached HEAD. Targetless here remains valid.
 
-`Repo.at` resolves and pins its repository coordinate before it returns. An
-omitted `path` uses the caller's current working directory. The library has
+`Repo.at` asynchronously resolves and pins its repository coordinate before it
+returns. An omitted `path` uses the caller's current working directory. The
+library has
 exactly one `process.cwd()` call, in the private scope resolver used by
 `Repo.at`. `Keiyaku.of` and `Keiyaku.bind` require that already-pinned `Repo`
 capability; they accept neither a path nor an ambient repository default. No

@@ -44,7 +44,10 @@ export type ExecuteVerificationInput = Readonly<{
   candidate: SnapshotId;
   declarations: readonly VerificationDeclaration[];
   environment: NodeJS.ProcessEnv;
-  materializeScratchCandidate: (repository: GitRepository, candidate: SnapshotId) => MaterializedScratchCandidate;
+  materializeScratchCandidate: (
+    repository: GitRepository,
+    candidate: SnapshotId,
+  ) => Promise<MaterializedScratchCandidate>;
   projectSettings: (root: string) => Promise<Settings>;
   signal?: AbortSignal;
 }>;
@@ -111,7 +114,7 @@ async function executeDeclarations(input: Readonly<{
 export async function executeVerification(input: ExecuteVerificationInput): Promise<VerificationExecution> {
   let scratch: MaterializedScratchCandidate;
   try {
-    scratch = input.materializeScratchCandidate(input.repository, input.candidate);
+    scratch = await input.materializeScratchCandidate(input.repository, input.candidate);
   } catch (error) {
     return { outcome: { kind: "candidate-unavailable", diagnostic: error instanceof Error ? error.message : String(error) } };
   }
@@ -143,7 +146,7 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
       if (result.kind === "cancelled") throw new Error("scratch destroy cancelled without a signal");
       if (result.kind === "failed") cleanup = { phase: "destroy", command: result.command, detail: result.failure };
     }
-    leak = scratch.dispose();
+    leak = await scratch.dispose();
   }
   if (outcome === undefined) throw new Error("Verification ended without an outcome");
   return {

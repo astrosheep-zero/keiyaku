@@ -78,18 +78,18 @@ export function terminalSealExpectations(
   };
 }
 
-function changedPaths(repository: GitRepository, left: string, right: string): readonly string[] {
-  const fields = runGit(repository, ["diff", "--name-only", "-z", left, right]).toString("utf8").split("\0");
+async function changedPaths(repository: GitRepository, left: string, right: string): Promise<readonly string[]> {
+  const fields = (await runGit(repository, ["diff", "--name-only", "-z", left, right])).toString("utf8").split("\0");
   if (fields.at(-1) !== "") throw new Error("Git tree diff paths are not NUL terminated");
   return fields.slice(0, -1).sort();
 }
 
-export function unsealedBytes(
+export async function unsealedBytes(
   repository: GitRepository,
   path: string,
   expected: TerminalSealExpectations,
-): UnsealedBytes | null {
-  const workspace = captureWorkspaceTree(repository, path);
+): Promise<UnsealedBytes | null> {
+  const workspace = await captureWorkspaceTree(repository, path);
   const headIsSealed = expected.heads.includes(workspace.head);
   if (workspace.changes.submodules.length > 0) {
     return {
@@ -100,7 +100,8 @@ export function unsealedBytes(
     };
   }
   if (headIsSealed && expected.trees.includes(workspace.tree)) return null;
-  const alternatives = expected.trees.map((tree) => changedPaths(repository, tree, workspace.tree));
+  const alternatives: (readonly string[])[] = [];
+  for (const tree of expected.trees) alternatives.push(await changedPaths(repository, tree, workspace.tree));
   alternatives.sort((left, right) => left.length - right.length || left.join("\0").localeCompare(right.join("\0")));
   return {
     kind: "unsealed-bytes",

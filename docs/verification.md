@@ -12,7 +12,7 @@ core fact or core gate vocabulary.
 
 ## Execution
 
-Verification is synchronous. `deliver` and `audit` receive the invocation's
+Verification is awaited within the invoking operation. `deliver` and `audit` receive the invocation's
 selected key-stamped `verification` derivation and execute exactly its ordered
 declarations. The presence of
 the `verified` token in `terms.gates` controls whether placement waits for the
@@ -108,7 +108,7 @@ eligibility judge.
 ## Runtime Contract
 
 Verification owns declaration resolution and verdict production. The complete
-synchronous attempt is implemented only by `src/verification/execution.ts`:
+attempt is implemented only by `src/verification/execution.ts`:
 it materializes the exact integration snapshot, decodes tracked Settings,
 runs create commands, executes every declaration, runs destroy commands
 best-effort, and disposes scratch. Git scratch and Settings decoding are

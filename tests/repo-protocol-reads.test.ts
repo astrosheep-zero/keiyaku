@@ -61,7 +61,7 @@ function terms(title: string) {
 }
 
 async function bind(repository: TestGitRepository, title: string, workspace: "worktree" | "here"): Promise<ContractId> {
-  const scope = scopeOperation({ coordinate: repository.path });
+  const scope = await scopeOperation({ coordinate: repository.path });
   const result = await withGitDecodeChannel(scope, (channel) => bindOperation({
     scope,
     channel,
@@ -75,14 +75,14 @@ async function bind(repository: TestGitRepository, title: string, workspace: "wo
   return result.value.contractId;
 }
 
-test("git repository resolution rejects omitted and empty coordinates", () => {
-  assert.throws(() => Reflect.apply(repositoryAt, undefined, []), /repository path must be a nonempty string/);
-  assert.throws(() => repositoryAt(""), /repository path must be a nonempty string/);
+test("git repository resolution rejects omitted and empty coordinates", async () => {
+  await assert.rejects(Reflect.apply(repositoryAt, undefined, []), /repository path must be a nonempty string/);
+  await assert.rejects(repositoryAt(""), /repository path must be a nonempty string/);
 });
 
 test("Contract board keeps an absent Keiyaku state snapshot explicit", async () => {
   const repository = repositoryWithMain();
-  const scope = scopeOperation({ coordinate: repository.path });
+  const scope = await scopeOperation({ coordinate: repository.path });
   const report = await withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
   assert.equal(report.state, null);
   assert.deepEqual(report.rows, []);
@@ -92,7 +92,7 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
   const repository = repositoryWithMain();
   const first = await bind(repository, "First status row", "here");
   const second = await bind(repository, "Second status row", "worktree");
-  const scope = scopeOperation({ coordinate: repository.path });
+  const scope = await scopeOperation({ coordinate: repository.path });
   const log = resolve(repository.path, "status-blob-reads.log");
   writeFileSync(log, "");
 
@@ -107,14 +107,14 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
     { KEIYAKU_STATUS_READ_LOG: log },
     () => withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel })),
   );
-  const git = repositoryAt(repository.path);
+  const git = await repositoryAt(repository.path);
 
   assert.equal(report.rows.length, 2);
   assert.equal(scope.effectiveCwd, resolve(repository.path));
   assert.equal(scope.primaryWorktree, git.primaryWorktree);
   assert.equal(git.effectiveCwd, resolve(repository.path));
   assert.equal(report.root, git.primaryWorktree);
-  assert.equal(report.state, readGit(git).commit);
+  assert.equal(report.state, (await readGit(git)).commit);
   assert.deepEqual(report.rows.find((contract) => contract.id === first), {
     id: first,
     phase: "waiting",
@@ -156,7 +156,7 @@ test("single Contract observation never combines state and target from different
   repository.run(["branch", "target"]);
   repository.run(["checkout", "--quiet", "target"]);
   const targetBefore = repository.run(["rev-parse", "refs/heads/target"]).trim();
-  const scope = scopeOperation({ coordinate: repository.path });
+  const scope = await scopeOperation({ coordinate: repository.path });
   const contract = await withGitDecodeChannel(scope, (channel) => bindOperation({
     scope,
     channel,
@@ -169,8 +169,8 @@ test("single Contract observation never combines state and target from different
   assert.equal(contract.kind, "accepted");
   if (contract.kind !== "accepted") throw new Error("bind did not succeed");
   const id = contract.value.contractId;
-  const git = repositoryAt(repository.path);
-  const before = readGit(git);
+  const git = await repositoryAt(repository.path);
+  const before = await readGit(git);
   const activePath = contractJournalPath(id, "active");
   const active = before.paths.get(activePath);
   if (active?.type !== "blob" || before.commit === null) throw new Error("active Contract journal was not published");
@@ -182,14 +182,14 @@ test("single Contract observation never combines state and target from different
     at: "2026-08-13T00:00:00Z",
     data: {},
   };
-  const terminalBlob = writeBlob(git, Buffer.concat([readBlob(git, active.oid), Buffer.from(encodeEntry(abandoned))]));
-  const terminalTree = updateGitTree(git, before.tree, new Map([
+  const terminalBlob = await writeBlob(git, Buffer.concat([await readBlob(git, active.oid), Buffer.from(encodeEntry(abandoned))]));
+  const terminalTree = await updateGitTree(git, before.tree, new Map([
     [activePath, null],
     [contractJournalPath(id, "terminal"), { oid: terminalBlob }],
   ]));
-  const terminalCommit = writeCommit({ repository: git, tree: terminalTree, parent: before.commit });
+  const terminalCommit = await writeCommit({ repository: git, tree: terminalTree, parent: before.commit });
   const targetTree = repository.run(["rev-parse", `${targetBefore}^{tree}`]).trim();
-  const movedTarget = writeCommit({ repository: git, tree: targetTree, parent: targetBefore });
+  const movedTarget = await writeCommit({ repository: git, tree: targetTree, parent: targetBefore });
   const firstRead = join(repository.path, "first-state-read");
   const moved = join(repository.path, "moved-state");
   const result = await withGitShim([
@@ -234,10 +234,10 @@ test("batch reconcile isolates a failed contract and retains successful reports"
   const repository = repositoryWithMain();
   const blocked = await bind(repository, "Blocked reconcile", "worktree");
   const healthy = await bind(repository, "Healthy reconcile", "worktree");
-  const git = repositoryAt(repository.path);
+  const git = await repositoryAt(repository.path);
   mkdirSync(deliveryWorktreePath(git, blocked), { recursive: true });
 
-  const scope = scopeOperation({ coordinate: repository.path });
+  const scope = await scopeOperation({ coordinate: repository.path });
   const report = await withGitDecodeChannel(scope, (channel) => reconcileAllOperation({
     scope,
     channel,

@@ -94,22 +94,22 @@ function decode(path: string, bytes: Uint8Array): Dispatch {
   return dispatch;
 }
 
-function dispatchFromSnapshot(
+async function dispatchFromSnapshot(
   repository: GitRepository,
   snapshot: GitSnapshot,
   akuId: AkuId,
-): Dispatch | null {
+): Promise<Dispatch | null> {
   const path = pathFor(akuId);
   const entry = snapshot.paths.get(path);
   if (entry === undefined) return null;
   if (entry.type !== "blob") corruption(`Dispatch path is not a blob: ${path}`);
-  return decode(path, readBlob(repository, entry.oid));
+  return decode(path, await readBlob(repository, entry.oid));
 }
 
-export function readDispatch(repository: GitRepository, value: AkuId): Dispatch | null {
+export async function readDispatch(repository: GitRepository, value: AkuId): Promise<Dispatch | null> {
   const akuId = parseAkuId(value).id;
   const path = pathFor(akuId);
-  return dispatchFromSnapshot(repository, readGitPaths(repository, [path]), akuId);
+  return await dispatchFromSnapshot(repository, await readGitPaths(repository, [path]), akuId);
 }
 
 export async function readDispatchesAt(observation: GitReadObservation): Promise<readonly Dispatch[]> {
@@ -134,15 +134,15 @@ export async function readDispatchesAt(observation: GitReadObservation): Promise
 }
 
 export async function readDispatches(repository: GitRepository): Promise<readonly Dispatch[]> {
-  return withGitDecodeChannel(repository, (channel) => withGitReadObservation(repository, channel, readDispatchesAt));
+  return await withGitDecodeChannel(repository, (channel) => withGitReadObservation(repository, channel, readDispatchesAt));
 }
 
-function observedPublication(
+async function observedPublication(
   repository: GitRepository,
   akuId: AkuId,
   owner: ContractId,
-): DispatchPublication | null {
-  const current = readDispatch(repository, akuId);
+): Promise<DispatchPublication | null> {
+  const current = await readDispatch(repository, akuId);
   if (current === null) return null;
   return current.contractId === owner
     ? { kind: "dispatched", dispatch: current }
@@ -153,19 +153,19 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function publishDispatch(input: Readonly<{
+export async function publishDispatch(input: Readonly<{
   repository: GitRepository;
   akuId: AkuId;
   contractId: ContractId;
-}>): DispatchPublication {
+}>): Promise<DispatchPublication> {
   const akuId = parseAkuId(input.akuId).id;
   const owner = contractId(input.contractId);
   const intended: Dispatch = { akuId, contractId: owner, dispatchedAt: new Date().toISOString() };
   const path = pathFor(akuId);
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-    const snapshot = readGitPaths(input.repository, [path]);
-    const current = dispatchFromSnapshot(input.repository, snapshot, akuId);
+    const snapshot = await readGitPaths(input.repository, [path]);
+    const current = await dispatchFromSnapshot(input.repository, snapshot, akuId);
     if (current !== null) {
       return current.contractId === owner
         ? { kind: "dispatched", dispatch: current }
@@ -174,28 +174,28 @@ export function publishDispatch(input: Readonly<{
 
     const changes = new Map<string, TreeChange>();
     if (snapshot.commit === null) {
-      changes.set(GIT_FORMAT_PATH, { oid: writeBlob(input.repository, GIT_FORMAT_BYTES) });
+      changes.set(GIT_FORMAT_PATH, { oid: await writeBlob(input.repository, GIT_FORMAT_BYTES) });
     }
-    changes.set(path, { oid: writeBlob(input.repository, bytesFor(intended)) });
-    const tree = updateGitTree(input.repository, snapshot.tree, changes);
-    const commit = writeCommit({
+    changes.set(path, { oid: await writeBlob(input.repository, bytesFor(intended)) });
+    const tree = await updateGitTree(input.repository, snapshot.tree, changes);
+    const commit = await writeCommit({
       repository: input.repository,
       tree,
       parent: snapshot.commit,
       message: `dispatch ${akuId}`,
       at: intended.dispatchedAt,
     });
-    const publication = updateRefsAtomically(input.repository, [{
+    const publication = await updateRefsAtomically(input.repository, [{
       ref: GIT_REF,
       newOid: commit,
       expectedOid: snapshot.commit,
     }]);
     if (publication.kind === "published") return { kind: "dispatched", dispatch: intended };
 
-    const observed = observedPublication(input.repository, akuId, owner);
+    const observed = await observedPublication(input.repository, akuId, owner);
     if (observed !== null) return observed;
     if (publication.kind === "non-published") {
-      const fresh = readGitPaths(input.repository, [path]);
+      const fresh = await readGitPaths(input.repository, [path]);
       if (fresh.commit === snapshot.commit) {
         return {
           kind: "failed",

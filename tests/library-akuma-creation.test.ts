@@ -59,7 +59,7 @@ async function repositoryFixture() {
   raw.run(["config", "user.email", "test@example.com"]);
   raw.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  return { raw, repo: Repo.at({ path: raw.path }), git: repositoryAt(raw.path) };
+  return { raw, repo: await Repo.at({ path: raw.path }), git: await repositoryAt(raw.path) };
 }
 
 async function archetypeSettings(root: string) {
@@ -116,7 +116,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.deepEqual(independent.dispatch, { kind: "none" });
     assert.deepEqual(independent.alias, { kind: "none" });
     assert.equal(independent.observation.kind, "observed");
-    assert.equal(readDispatch(git, independent.akuma), null);
+    assert.equal(await readDispatch(git, independent.akuma), null);
 
     const bound = await Keiyaku.bind({ repo, markdown: markdown("Akuma dispatch"), workspace: "here" });
     const owner = (await bound.keiyaku.state()).id;
@@ -145,7 +145,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.equal(associated.dispatch.kind, "dispatched");
     if (associated.dispatch.kind !== "dispatched") return;
     assert.equal(associated.dispatch.dispatch.contractId, owner);
-    assert.deepEqual(readDispatch(git, associated.akuma), associated.dispatch.dispatch);
+    assert.deepEqual(await readDispatch(git, associated.akuma), associated.dispatch.dispatch);
     assert.deepEqual(associated.alias, {
       kind: "aliased",
       alias: { alias, akuId: associated.akuma },
@@ -169,7 +169,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.equal(partial.dispatch.kind, "dispatched");
     assert.equal(partial.alias.kind, "failed");
     assert.equal(partial.observation.kind, "observed");
-    assert.notEqual(readDispatch(git, partial.akuma), null);
+    assert.notEqual(await readDispatch(git, partial.akuma), null);
 
     const detached = await Keiyaku.call({
       path: world,
@@ -265,7 +265,7 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
   }, {
     now: () => "2026-08-11T01:00:00.000Z",
   });
-  publishDispatch({ repository: git, akuId: source.id, contractId: owner });
+  await publishDispatch({ repository: git, akuId: source.id, contractId: owner });
   const alias = parseAkumaAlias("@parent");
   await moveAlias({ world, alias, akuId: source.id });
 
@@ -277,21 +277,21 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
     assert.equal(result.kind, "forked", JSON.stringify(result));
     if (result.kind !== "forked") return;
     assert.equal(result.dispatch.kind, "dispatched");
-    assert.equal(readDispatch(git, result.child)?.contractId, owner);
+    assert.equal((await readDispatch(git, result.child))?.contractId, owner);
     assert.equal(resolveAlias(world, alias), source.id);
 
-    const snapshot = readGit(git);
+    const snapshot = await readGit(git);
     const dispatchPath = `dispatch/${createHash("sha256").update(source.id).digest("hex")}.json`;
-    const blob = writeBlob(git, Buffer.from("broken\n"));
-    const tree = updateGitTree(git, snapshot.tree, new Map([[dispatchPath, { oid: blob }]]));
-    const commit = writeCommit({
+    const blob = await writeBlob(git, Buffer.from("broken\n"));
+    const tree = await updateGitTree(git, snapshot.tree, new Map([[dispatchPath, { oid: blob }]]));
+    const commit = await writeCommit({
       repository: git,
       tree,
       parent: snapshot.commit,
       message: "corrupt parent dispatch",
       at: "2026-08-11T01:00:01.000Z",
     });
-    assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
+    assert.equal((await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
     const partial = await Keiyaku.fork({ path: world, akuma: source.id, at: "history-1", repo });
     assert.equal(partial.kind, "forked", JSON.stringify(partial));
     if (partial.kind !== "forked") return;

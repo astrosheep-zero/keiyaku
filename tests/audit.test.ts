@@ -63,7 +63,7 @@ async function failedStoredVerification(): Promise<Readonly<{
   state: Awaited<ReturnType<Keiyaku["state"]>>;
 }>> {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(), workspace: "here", gates: ["verified"] });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(), workspace: "here", gates: ["verified"] });
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
   repository.run(["add", "candidate.txt"]);
   repository.run(["commit", "--quiet", "-m", "candidate"]);
@@ -77,7 +77,7 @@ async function failedStoredVerification(): Promise<Readonly<{
 test("a verified placement gate without a Verification declaration is refused at bind", async () => {
   const repository = repositoryWithMain();
   await assert.rejects(
-    Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+    Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
       markdown: verificationBody(null),
       workspace: "here",
       gates: ["verified"],
@@ -88,7 +88,7 @@ test("a verified placement gate without a Verification declaration is refused at
 
 test("an active amend cannot admit verified terms without a Verification declaration", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
   const before = await bound.keiyaku.state();
 
   await assert.rejects(
@@ -106,7 +106,7 @@ test("an active amend cannot admit verified terms without a Verification declara
 
 test("terminal amend refusal outranks a missing Verification declaration", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
   const id = (await bound.keiyaku.state()).id;
   await bound.keiyaku.abandon();
 
@@ -121,7 +121,7 @@ test("terminal amend refusal outranks a missing Verification declaration", async
 
 test("a stale document derivation is refused inside its E-decision", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
   const state = await bound.keiyaku.state();
   const decoded = decodeContractDocument(state.terms.document.bytes);
   const derivation = {
@@ -134,7 +134,7 @@ test("a stale document derivation is refused inside its E-decision", async () =>
     }),
   };
   await bound.keiyaku.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
-  const scope = scopeOperation({ coordinate: repository.path });
+  const scope = await scopeOperation({ coordinate: repository.path });
   const refusal = { kind: "document-moved", contractId: state.id };
 
   await withGitDecodeChannel(scope, async (channel) => {
@@ -156,12 +156,12 @@ test("a stale document derivation is refused inside its E-decision", async () =>
 
 test("read-only audit returns its initial observation when verification is skipped", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
     workspace: "here",
   });
 
-  const scope = scopeOperation({ coordinate: repository.path });
+  const scope = await scopeOperation({ coordinate: repository.path });
   const contractId = (await bound.keiyaku.state()).id;
   const initial = await withGitDecodeChannel(scope, (channel) => readAuditAt(scope, channel, contractId, gate("reviewed")));
   const decoded = decodeContractDocument(initial.state!.terms.document.bytes);
@@ -288,7 +288,7 @@ test("Verification reuse requires its exact producer subject", async () => {
   };
   let executions = 0;
 
-  const git = repositoryAt(repository.path);
+  const git = await repositoryAt(repository.path);
   const result = await withGitDecodeChannel(git, (channel) => verifyDelivery({
     channel,
     repository: git,

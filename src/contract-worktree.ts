@@ -73,9 +73,9 @@ export type ContractWorktreeResult = Readonly<{
   lag: readonly ContractFileLag[];
 }>;
 
-function isTracked(repository: GitRepository, relativePath: string): boolean {
+async function isTracked(repository: GitRepository, relativePath: string): Promise<boolean> {
   try {
-    runGit(repository, ["ls-files", "--error-unmatch", "--", relativePath]);
+    await runGit(repository, ["ls-files", "--error-unmatch", "--", relativePath]);
     return true;
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 1) return false;
@@ -92,8 +92,8 @@ export type ContractAppointment =
   | Readonly<{ kind: "appointed"; path: string; contract: ContractId }>
   | Readonly<{ kind: "invalid"; path: string }>;
 
-export function readContractAppointment(repository: GitRepository): ContractAppointment {
-  const path = generatedPath(worktreeRoot(repository), "KEIYAKU.md");
+export async function readContractAppointment(repository: GitRepository): Promise<ContractAppointment> {
+  const path = generatedPath(await worktreeRoot(repository), "KEIYAKU.md");
   const stat = lstatSync(path, { throwIfNoEntry: false });
   if (stat === undefined) return { kind: "absent", path };
   if (!stat.isFile() || stat.isSymbolicLink()) return { kind: "invalid", path };
@@ -110,16 +110,16 @@ export type ContractReservation =
   | Readonly<{ kind: "reserved"; path: string }>
   | Exclude<ContractAppointment, Readonly<{ kind: "absent"; path: string }>>;
 
-export function reserveContractWorktree(repository: GitRepository, contract: ContractId): ContractReservation {
-  const worktree = worktreeRoot(repository);
+export async function reserveContractWorktree(repository: GitRepository, contract: ContractId): Promise<ContractReservation> {
+  const worktree = await worktreeRoot(repository);
   const scoped = { ...repository, effectiveCwd: worktree };
   const ignore = generatedPath(worktree, ".gitignore");
-  if (isTracked(scoped, ".keiyaku/.gitignore")) throw new Error(`generated path is tracked by Git: ${ignore}`);
+  if (await isTracked(scoped, ".keiyaku/.gitignore")) throw new Error(`generated path is tracked by Git: ${ignore}`);
   repairDerivedFile(ignore, IGNORE_BYTES);
   const path = generatedPath(worktree, "KEIYAKU.md");
-  if (isTracked(scoped, ".keiyaku/KEIYAKU.md")) throw new Error(`generated path is tracked by Git: ${path}`);
+  if (await isTracked(scoped, ".keiyaku/KEIYAKU.md")) throw new Error(`generated path is tracked by Git: ${path}`);
   if (createFileDurablyExclusive(path, appointmentBytes(contract), 0o444)) return { kind: "reserved", path };
-  const appointment = readContractAppointment(repository);
+  const appointment = await readContractAppointment(repository);
   return appointment.kind === "absent" ? { kind: "invalid", path } : appointment;
 }
 
@@ -127,9 +127,9 @@ export async function withContractWorktreeAppointment<T>(
   repository: GitRepository,
   action: () => T | Promise<T>,
 ): Promise<T> {
-  const root = worktreeRoot(repository);
+  const root = await worktreeRoot(repository);
   const lock = await acquireSqliteTransactionLock({
-    path: join(worktreeGitDirectory(repository, root), "keiyaku", "contract-worktree.sqlite"),
+    path: join(await worktreeGitDirectory(repository, root), "keiyaku", "contract-worktree.sqlite"),
     mode: "immediate",
   });
   try {
@@ -139,22 +139,22 @@ export async function withContractWorktreeAppointment<T>(
   }
 }
 
-export function releaseContractWorktree(repository: GitRepository, contract: ContractId): void {
-  const appointment = readContractAppointment(repository);
+export async function releaseContractWorktree(repository: GitRepository, contract: ContractId): Promise<void> {
+  const appointment = await readContractAppointment(repository);
   if (appointment.kind !== "appointed" || appointment.contract !== contract) return;
   if (readFileSync(appointment.path, "utf8") !== appointmentBytes(contract)) return;
   try { unlinkSync(appointment.path); } catch { /* reservation cleanup is best effort */ }
 }
 
-export function removeContractWorktreeAppointment(repository: GitRepository, contract: ContractId): void {
-  const appointment = readContractAppointment(repository);
+export async function removeContractWorktreeAppointment(repository: GitRepository, contract: ContractId): Promise<void> {
+  const appointment = await readContractAppointment(repository);
   if (appointment.kind !== "appointed" || appointment.contract !== contract) return;
   unlinkSync(appointment.path);
 }
 
-function repair(repository: GitRepository, worktree: string, relativePath: string, bytes: string): ContractFileEffect {
+async function repair(repository: GitRepository, worktree: string, relativePath: string, bytes: string): Promise<ContractFileEffect> {
   const path = join(worktree, relativePath);
-  if (isTracked(repository, relativePath)) throw new Error(`generated path is tracked by Git: ${path}`);
+  if (await isTracked(repository, relativePath)) throw new Error(`generated path is tracked by Git: ${path}`);
   const action = repairDerivedFile(path, bytes);
   if (relativePath === ".keiyaku/KEIYAKU.md") {
     try { chmodSync(path, 0o444); } catch { /* advisory protection only */ }
@@ -162,7 +162,7 @@ function repair(repository: GitRepository, worktree: string, relativePath: strin
   return { kind: "contract-file", path, action };
 }
 
-function materialize(repository: GitRepository, worktree: string, guidance: string): ContractWorktreeResult {
+async function materialize(repository: GitRepository, worktree: string, guidance: string): Promise<ContractWorktreeResult> {
   const stat = lstatSync(worktree, { throwIfNoEntry: false });
   if (stat === undefined || !stat.isDirectory()) {
     return {
@@ -181,7 +181,7 @@ function materialize(repository: GitRepository, worktree: string, guidance: stri
     [".keiyaku/.gitignore", IGNORE_BYTES],
     [".keiyaku/KEIYAKU.md", guidance],
   ] as const) {
-    try { effects.push(repair(scoped, worktree, relativePath, bytes)); } catch (error) {
+    try { effects.push(await repair(scoped, worktree, relativePath, bytes)); } catch (error) {
       return {
         effects,
         lag: [{
@@ -196,11 +196,11 @@ function materialize(repository: GitRepository, worktree: string, guidance: stri
   return { effects, lag: [] };
 }
 
-function here(repository: GitRepository, state: ContractState, guidance: string): ContractWorktreeResult {
-  const worktree = worktreeRoot(repository);
-  const appointment = readContractAppointment(repository);
+async function here(repository: GitRepository, state: ContractState, guidance: string): Promise<ContractWorktreeResult> {
+  const worktree = await worktreeRoot(repository);
+  const appointment = await readContractAppointment(repository);
   if (appointment.kind === "appointed" && appointment.contract === state.id) {
-    return materialize(repository, worktree, guidance);
+    return await materialize(repository, worktree, guidance);
   }
   const diagnostic = appointment.kind === "appointed"
     ? `here worktree is appointed to ${appointment.contract}`
@@ -211,9 +211,9 @@ function here(repository: GitRepository, state: ContractState, guidance: string)
   };
 }
 
-function removeHere(repository: GitRepository, contract: ContractId): ContractWorktreeResult {
-  const worktree = worktreeRoot(repository);
-  const appointment = readContractAppointment(repository);
+async function removeHere(repository: GitRepository, contract: ContractId): Promise<ContractWorktreeResult> {
+  const worktree = await worktreeRoot(repository);
+  const appointment = await readContractAppointment(repository);
   if (appointment.kind === "absent" || (appointment.kind === "appointed" && appointment.contract !== contract)) {
     return { effects: [], lag: [] };
   }
@@ -235,12 +235,12 @@ function removeHere(repository: GitRepository, contract: ContractId): ContractWo
   }
 }
 
-export function projectContractWorktree(repository: GitRepository, state: ContractState | null): ContractWorktreeResult {
+export async function projectContractWorktree(repository: GitRepository, state: ContractState | null): Promise<ContractWorktreeResult> {
   if (state === null) return { effects: [], lag: [] };
   if (state.coordinates.workspace === "here") {
-    return state.terminal ? removeHere(repository, state.id) : here(repository, state, renderContractGuidance(state));
+    return state.terminal ? await removeHere(repository, state.id) : await here(repository, state, renderContractGuidance(state));
   }
   return state.terminal
     ? { effects: [], lag: [] }
-    : materialize(repository, deliveryWorktreePath(repository, state.id), renderContractGuidance(state));
+    : await materialize(repository, deliveryWorktreePath(repository, state.id), renderContractGuidance(state));
 }

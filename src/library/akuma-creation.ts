@@ -135,13 +135,13 @@ async function observeCall(
   }
 }
 
-function dispatchStage(input: Readonly<{
+async function dispatchStage(input: Readonly<{
   repository: Parameters<typeof publishDispatch>[0]["repository"];
   akuId: AkuId;
   contractId: Parameters<typeof publishDispatch>[0]["contractId"];
-}>): DispatchStage {
+}>): Promise<DispatchStage> {
   try {
-    const published = publishDispatch(input);
+    const published = await publishDispatch(input);
     return published.kind === "dispatched"
       ? { kind: "dispatched", dispatch: published.dispatch }
       : { kind: "failed", failure: published.failure };
@@ -150,16 +150,16 @@ function dispatchStage(input: Readonly<{
   }
 }
 
-function forkDispatchStage(input: Readonly<{
+async function forkDispatchStage(input: Readonly<{
   repository: Parameters<typeof readDispatch>[0];
   parent: AkuId;
   child: AkuId;
-}>): DispatchStage {
+}>): Promise<DispatchStage> {
   try {
-    const parent = readDispatch(input.repository, input.parent);
+    const parent = await readDispatch(input.repository, input.parent);
     return parent === null
       ? { kind: "none" }
-      : dispatchStage({ repository: input.repository, akuId: input.child, contractId: parent.contractId });
+      : await dispatchStage({ repository: input.repository, akuId: input.child, contractId: parent.contractId });
   } catch (error) {
     return { kind: "failed", failure: integrationFailure(error) };
   }
@@ -191,7 +191,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   });
   const dispatch: DispatchStage = seat === undefined
     ? { kind: "none" }
-    : dispatchStage({ repository: seat.scope, akuId: handle.id, contractId: seat.id });
+    : await dispatchStage({ repository: seat.scope, akuId: handle.id, contractId: seat.id });
   let aliasStage: AliasStage = { kind: "none" };
   if (alias !== undefined) {
     if (dispatch.kind === "failed") aliasStage = { kind: "skipped", reason: "dispatch-failed" };
@@ -227,6 +227,6 @@ export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
   if (receipt.kind !== "forked") return { ...receipt, parent: akuma };
   const dispatch = repository === undefined
     ? { kind: "none" as const }
-    : forkDispatchStage({ repository, parent: akuma, child: receipt.child });
+    : await forkDispatchStage({ repository, parent: akuma, child: receipt.child });
   return { kind: "forked", parent: akuma, child: receipt.child, dispatch };
 }

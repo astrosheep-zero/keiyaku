@@ -127,16 +127,16 @@ function recoveredAcceptance(
   };
 }
 
-function publicationPremiseMoved(
+async function publicationPremiseMoved(
   repository: GitRepository,
   observation: GitDecisionObservation,
   offer: Offer,
   assertions: readonly GitRefAssertion[],
-): boolean {
-  if (readRef(repository, GIT_REF) !== observation.admission.snapshot.commit) return true;
-  for (const assertion of assertions) if (readRef(repository, assertion.ref) !== assertion.oid) return true;
+): Promise<boolean> {
+  if (await readRef(repository, GIT_REF) !== observation.admission.snapshot.commit) return true;
+  for (const assertion of assertions) if (await readRef(repository, assertion.ref) !== assertion.oid) return true;
   return offer.target !== undefined
-    && readRef(repository, offer.target.target) !== offer.target.expectedOid;
+    && await readRef(repository, offer.target.target) !== offer.target.expectedOid;
 }
 
 /** Admit one decided offer without making another legal decision. */
@@ -153,7 +153,7 @@ export async function admitDecidedOffer(input: Readonly<{
   const assertions = input.assertions ?? [];
   validateOffer(offer, attempt);
   const primary = primaryAppend(offer, primaryContract);
-  const admission = admit(repository, offer, decisionObservation.admission, assertions);
+  const admission = await admit(repository, offer, decisionObservation.admission, assertions);
   if (admission.kind === "accepted") {
     return {
       kind: "accepted",
@@ -163,7 +163,7 @@ export async function admitDecidedOffer(input: Readonly<{
     };
   }
   if (admission.kind === "publication-failed") {
-    return publicationPremiseMoved(repository, decisionObservation, offer, assertions)
+    return await publicationPremiseMoved(repository, decisionObservation, offer, assertions)
       ? { kind: "redecide" }
       : admission;
   }

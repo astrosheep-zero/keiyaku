@@ -53,14 +53,14 @@ function document(title = "Target checkout placement"): string {
 
 async function managedCandidate(repository: TestGitRepository, gates: readonly string[] = []) {
   const bound = await Keiyaku.bind({
-    repo: Repo.at({ path: repository.path }),
+    repo: await Repo.at({ path: repository.path }),
     markdown: document(),
     workspace: "worktree",
     target: "refs/heads/main",
     gates,
   });
   const contract = bound.keiyaku;
-  const path = deliveryWorktreePath(repositoryAt(repository.path), contract.id);
+  const path = deliveryWorktreePath(await repositoryAt(repository.path), contract.id);
   writeFileSync(resolve(path, "delivered.txt"), "candidate\n");
   repository.run(["-C", path, "add", "delivered.txt"]);
   repository.run(["-C", path, "commit", "--quiet", "-m", "candidate"]);
@@ -92,7 +92,7 @@ test("claimed target observation is current at integration and drifts after rewi
   await contract.deliver();
   const delivery = (await contract.state()).delivery?.data;
   if (delivery === undefined) throw new Error("delivery was not recorded");
-  const repo = Repo.at({ path: repository.path });
+  const repo = await Repo.at({ path: repository.path });
   const placed = await Keiyaku.observe({ repo, id: contract.id });
   assert.equal(placed.kind, "present");
   if (placed.kind !== "present") return;
@@ -172,7 +172,7 @@ test("conflicting target bytes refuse placement before claimed or target movemen
   });
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]), predecessor);
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "local conflict\n");
-  assert.equal((await observeContract(repositoryAt(repository.path), contract.id)).state?.terminal, null);
+  assert.equal((await observeContract(await repositoryAt(repository.path), contract.id)).state?.terminal, null);
   assert.deepEqual(delivered.lags, []);
 });
 
@@ -247,7 +247,7 @@ test("a staged candidate-changed path refuses placement with its exact path", as
 test("dirty here placement commits staged unstaged and untracked bytes without rewriting the worktree", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({
-    repo: Repo.at({ path: repository.path }),
+    repo: await Repo.at({ path: repository.path }),
     markdown: document("Here placement"),
     workspace: "here",
     target: "main",
@@ -271,7 +271,7 @@ test("here delivery refuses before tender after its workspace leaves the target 
   const repository = repositoryWithMain();
   repository.run(["branch", "other"]);
   const bound = await Keiyaku.bind({
-    repo: Repo.at({ path: repository.path }),
+    repo: await Repo.at({ path: repository.path }),
     markdown: document("Moved here workspace"),
     workspace: "here",
     target: "main",
@@ -285,7 +285,7 @@ test("here delivery refuses before tender after its workspace leaves the target 
       && error.code === "workspace-not-on-target"
       && error.refusal.branch === "refs/heads/other",
   );
-  assert.equal((await observeContract(repositoryAt(repository.path), bound.keiyaku.id)).state?.delivery, null);
+  assert.equal((await observeContract(await repositoryAt(repository.path), bound.keiyaku.id)).state?.delivery, null);
 });
 
 test("targeted here bind refuses a foreign branch before Contract birth", async () => {
@@ -293,8 +293,8 @@ test("targeted here bind refuses a foreign branch before Contract birth", async 
   repository.run(["branch", "foreign"]);
 
   await assert.rejects(
-    () => Keiyaku.bind({
-      repo: Repo.at({ path: repository.path }),
+    async () => Keiyaku.bind({
+      repo: await Repo.at({ path: repository.path }),
       markdown: document("Foreign here target"),
       workspace: "here",
       target: "foreign",
@@ -309,7 +309,7 @@ test("targeted here bind refuses a foreign branch before Contract birth", async 
 async function admitClaimWithoutFollow(repository: TestGitRepository, contract: Awaited<ReturnType<typeof managedCandidate>>["contract"]): Promise<void> {
   await contract.deliver({ includeDirty: true });
   await contract.review({ verdict: "unsatisfied" });
-  const git = repositoryAt(repository.path);
+  const git = await repositoryAt(repository.path);
   const state = (await observeContract(git, contract.id)).state;
   const subject = state?.attestations.at(-1)?.data.subject;
   assert.ok(subject);
@@ -372,7 +372,7 @@ test("reconcile recognizes a completed ordinary follow despite unrelated staged 
   const repository = repositoryWithMain();
   const candidate = await managedCandidate(repository, ["reviewed"]);
   await admitClaimWithoutFollow(repository, candidate.contract);
-  const delivery = (await observeContract(repositoryAt(repository.path), candidate.contract.id)).state?.delivery?.data;
+  const delivery = (await observeContract(await repositoryAt(repository.path), candidate.contract.id)).state?.delivery?.data;
   assert.ok(delivery);
   repository.run(["read-tree", "-m", "-u", delivery.integration.predecessor, delivery.integration.snapshot]);
   writeFileSync(resolve(repository.path, "local.txt"), "staged local\n");
@@ -397,7 +397,7 @@ test("reconcile aligns a candidate worktree to its index without disturbing unre
   repository.run(["add", "local.txt"]);
   const stagedPatch = repository.run(["diff", "--cached", "--", "local.txt"]);
   await admitClaimWithoutFollow(repository, candidate.contract);
-  const delivery = (await observeContract(repositoryAt(repository.path), candidate.contract.id)).state?.delivery?.data;
+  const delivery = (await observeContract(await repositoryAt(repository.path), candidate.contract.id)).state?.delivery?.data;
   assert.ok(delivery);
   writeFileSync(resolve(repository.path, "delivered.txt"), "candidate\n");
   assert.equal(repository.run(["diff", "--cached", "--name-only", delivery.integration.predecessor]), "local.txt\n");
@@ -416,7 +416,7 @@ test("reconcile aligns a candidate worktree to its index without disturbing unre
 test("reconcile completes a dirty here index alignment interrupted after atomic publication", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({
-    repo: Repo.at({ path: repository.path }),
+    repo: await Repo.at({ path: repository.path }),
     markdown: document("Interrupted here placement"),
     workspace: "here",
     target: "main",
@@ -441,7 +441,7 @@ test("reconcile independently recovers here and ordinary checkouts of one target
   const checkout = `${repository.path}-forced-main-checkout`;
   repository.run(["worktree", "add", "--force", "--quiet", checkout, "main"]);
   const bound = await Keiyaku.bind({
-    repo: Repo.at({ path: repository.path }),
+    repo: await Repo.at({ path: repository.path }),
     markdown: document("Interrupted multiple-checkout here placement"),
     workspace: "here",
     target: "main",
@@ -466,7 +466,7 @@ test("reconcile identifies a dirty here source by checkout shape instead of invo
   const checkout = `${repository.path}-reconcile-caller`;
   repository.run(["worktree", "add", "--force", "--quiet", checkout, "main"]);
   const bound = await Keiyaku.bind({
-    repo: Repo.at({ path: repository.path }),
+    repo: await Repo.at({ path: repository.path }),
     markdown: document("Shape-proven here recovery"),
     workspace: "here",
     target: "main",
@@ -478,7 +478,7 @@ test("reconcile identifies a dirty here source by checkout shape instead of invo
   writeFileSync(resolve(repository.path, "untracked.txt"), "untracked candidate\n");
   await admitClaimWithoutFollow(repository, bound.keiyaku);
 
-  const reconciled = await Keiyaku.of({ repo: Repo.at({ path: checkout }), id: bound.keiyaku.id }).reconcile();
+  const reconciled = await Keiyaku.of({ repo: await Repo.at({ path: checkout }), id: bound.keiyaku.id }).reconcile();
 
   assert.deepEqual(reconciled.lag, []);
   assert.equal(repository.run(["status", "--porcelain"]), "");

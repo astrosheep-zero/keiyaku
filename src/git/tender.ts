@@ -36,12 +36,12 @@ export type TenderCapture = Readonly<{
   tree: GitObjectId;
   head: SnapshotId;
   dirty: boolean;
-  changes: ReturnType<typeof captureWorkspaceTree>["changes"];
+  changes: Awaited<ReturnType<typeof captureWorkspaceTree>>["changes"];
 }>;
 
-function workspaceExists(repository: GitRepository, workspace: "worktree" | "here", path: string): boolean {
+async function workspaceExists(repository: GitRepository, workspace: "worktree" | "here", path: string): Promise<boolean> {
   return workspace === "here"
-    || (existsSync(path) && registeredWorktreePaths(repository).includes(path));
+    || (existsSync(path) && (await registeredWorktreePaths(repository)).includes(path));
 }
 
 function workspaceFor(repository: GitRepository, id: ContractId, workspace: "worktree" | "here"): string {
@@ -49,25 +49,25 @@ function workspaceFor(repository: GitRepository, id: ContractId, workspace: "wor
 }
 
 /** Capture the complete workspace tree through Git's private index mechanics. */
-export function captureTender(
+export async function captureTender(
   repository: GitRepository,
   input: TenderCaptureCoordinates,
-): Preparation<TenderCapture, TenderCaptureRefusal> {
+): Promise<Preparation<TenderCapture, TenderCaptureRefusal>> {
   const workspace = workspaceFor(repository, input.contractId, input.coordinates.workspace);
-  if (!workspaceExists(repository, input.coordinates.workspace, workspace)) {
+  if (!(await workspaceExists(repository, input.coordinates.workspace, workspace))) {
     return { kind: "refused", refusal: { kind: "worktree-missing", contractId: input.contractId } };
   }
-  return { kind: "prepared", data: captureWorkspaceTree(repository, workspace) };
+  return { kind: "prepared", data: await captureWorkspaceTree(repository, workspace) };
 }
 
-function dirtyShortStat(repository: GitRepository, tender: TenderCapture): WorkspaceDirtyDelta["shortStat"] {
-  const fields = runGit(repository, [
+async function dirtyShortStat(repository: GitRepository, tender: TenderCapture): Promise<WorkspaceDirtyDelta["shortStat"]> {
+  const fields = (await runGit(repository, [
     "diff",
     "--numstat",
     "-z",
     gitObjectIdForSnapshot(tender.head),
     tender.tree,
-  ]).toString("utf8").split("\0");
+  ])).toString("utf8").split("\0");
   if (fields.at(-1) !== "") throw new Error("Git numstat output is not NUL terminated");
   let filesChanged = 0;
   let insertions = 0;
@@ -91,23 +91,23 @@ function dirtyShortStat(repository: GitRepository, tender: TenderCapture): Works
   return { filesChanged, insertions, deletions };
 }
 
-export function dirtyTenderRefusal(
+export async function dirtyTenderRefusal(
   repository: GitRepository,
   contractId: ContractId,
   tender: TenderCapture,
-): DirtyWorkspaceRefusal {
+): Promise<DirtyWorkspaceRefusal> {
   return {
     kind: "dirty-workspace",
     contractId,
     ...tender.changes,
-    shortStat: dirtyShortStat(repository, tender),
+    shortStat: await dirtyShortStat(repository, tender),
   };
 }
 
-export function dirtyTenderDelta(repository: GitRepository, tender: TenderCapture): WorkspaceDirtyDelta | undefined {
+export async function dirtyTenderDelta(repository: GitRepository, tender: TenderCapture): Promise<WorkspaceDirtyDelta | undefined> {
   if (!tender.dirty) return undefined;
   const { staged, unstaged, untracked } = tender.changes;
-  return { staged, unstaged, untracked, shortStat: dirtyShortStat(repository, tender) };
+  return { staged, unstaged, untracked, shortStat: await dirtyShortStat(repository, tender) };
 }
 
 function commitMessage(contractId: ContractId, title: string, message?: string): string {
@@ -116,13 +116,13 @@ function commitMessage(contractId: ContractId, title: string, message?: string):
 }
 
 /** Materialize the tender tree when it contains admitted dirty workspace bytes. */
-export function materializeTenderSnapshot(
+export async function materializeTenderSnapshot(
   repository: GitRepository,
   tender: TenderCapture,
   input: Readonly<{ contractId: ContractId; title: string; message?: string }>,
-): SnapshotId {
+): Promise<SnapshotId> {
   if (!tender.dirty) return tender.head;
-  const commit = runGitWithEnvironment(
+  const commit = (await runGitWithEnvironment(
     repository,
     ["commit-tree", tender.tree, "-p", gitObjectIdForSnapshot(tender.head)],
     commitMessage(input.contractId, input.title, input.message),
@@ -134,6 +134,6 @@ export function materializeTenderSnapshot(
       GIT_AUTHOR_DATE: "Thu, 01 Jan 1970 00:00:00 +0000",
       GIT_COMMITTER_DATE: "Thu, 01 Jan 1970 00:00:00 +0000",
     },
-  ).toString("utf8").trim();
+  )).toString("utf8").trim();
   return mintSnapshotId(commit);
 }

@@ -98,23 +98,23 @@ function readCanonicalJournal(
   return { bytes: journal, path };
 }
 
-function buildOffer(
+async function buildOffer(
   repository: GitRepository,
   admission: GitAdmissionSnapshot,
   appends: readonly ContractJournalAppend[],
   companions: readonly TreeUpdate[],
-): { readonly changes: ReadonlyMap<string, TreeChange>; readonly heads: Readonly<Record<string, ContractHead>> } {
+): Promise<{ readonly changes: ReadonlyMap<string, TreeChange>; readonly heads: Readonly<Record<string, ContractHead>> }> {
   const snapshot = admission.snapshot;
   const changes = new Map<string, TreeChange>();
   const heads: Record<string, ContractHead> = {};
 
   if (snapshot.commit === null) {
-    changes.set(GIT_FORMAT_PATH, { oid: writeBlob(repository, GIT_FORMAT_BYTES), mode: "100644", type: "blob" });
+    changes.set(GIT_FORMAT_PATH, { oid: await writeBlob(repository, GIT_FORMAT_BYTES), mode: "100644", type: "blob" });
   }
 
   for (const companion of companions) {
     changes.set(companion.path, {
-      oid: writeBlob(repository, companion.bytes),
+      oid: await writeBlob(repository, companion.bytes),
       mode: "100644",
       type: "blob",
     });
@@ -124,7 +124,7 @@ function buildOffer(
     const current = readCanonicalJournal(admission, append.contractId);
     let journal = current.bytes;
     for (const entry of append.entries) journal = Buffer.concat([journal, Buffer.from(encodeEntry(entry))]);
-    const blob = writeBlob(repository, journal);
+    const blob = await writeBlob(repository, journal);
     const entries = decodeJournal(journal.toString("utf8"));
     const terminal = entries.some((entry) => entry.kind === "claimed" || entry.kind === "abandoned");
     const destination = contractJournalPath(append.contractId, terminal ? "terminal" : "active");
@@ -136,26 +136,26 @@ function buildOffer(
   return { changes, heads };
 }
 
-function publishOffer(
+async function publishOffer(
   repository: GitRepository,
   admission: GitAdmissionSnapshot,
   target: RefOperation | null,
   changes: ReadonlyMap<string, TreeChange>,
   assertions: readonly GitRefAssertion[],
-): RefPublication {
+): Promise<RefPublication> {
   const { snapshot } = admission;
-  const gitTree = updateGitTreeFromFrozenDirectories(
+  const gitTree = await updateGitTreeFromFrozenDirectories(
     repository,
     snapshot.tree,
     admission.treeDirectories,
     changes,
   );
-  const gitCommit = mintSnapshotId(writeCommit({
+  const gitCommit = mintSnapshotId(await writeCommit({
     repository,
     tree: gitTree,
     parent: snapshot.commit,
   }));
-  return updateRefsAtomically(repository, [
+  return await updateRefsAtomically(repository, [
     { ref: GIT_REF, newOid: gitObjectIdForSnapshot(gitCommit), expectedOid: snapshot.commit },
     ...(target === null
       ? []
@@ -167,12 +167,12 @@ function publishOffer(
   ], assertions);
 }
 
-export function admit(
+export async function admit(
   repository: GitRepository,
   offer: Offer,
   admission: GitAdmissionSnapshot,
   assertions: readonly GitRefAssertion[] = [],
-): Admission {
+): Promise<Admission> {
   if (!Array.isArray(offer.facts) || offer.facts.length === 0) {
     throw new Error("facts must be a nonempty array");
   }
@@ -181,8 +181,8 @@ export function admit(
   const companions = assertCompanionStructure(offer.companions ?? [], appends);
   const target = offer.target ?? null;
 
-  const attempt = buildOffer(repository, admission, appends, companions);
-  const publication = publishOffer(repository, admission, target, attempt.changes, assertions);
+  const attempt = await buildOffer(repository, admission, appends, companions);
+  const publication = await publishOffer(repository, admission, target, attempt.changes, assertions);
   if (publication.kind === "published") {
     return {
       kind: "accepted",

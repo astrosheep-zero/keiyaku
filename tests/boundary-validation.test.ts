@@ -9,10 +9,10 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
   repository.run(["config", "user.email", "boundary@example.test"]);
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const repo = Repo.at({ path: repository.path });
+  const repo = await Repo.at({ path: repository.path });
   const before = (await Keiyaku.list({ repo })).rows;
 
-  assert.throws(
+  await assert.rejects(
     () => withGitShim("exit 99", {}, () => Reflect.apply(Repo.at, Repo, [null])),
     TypeError,
   );
@@ -43,7 +43,7 @@ test("amend validates programmer input before observing a missing contract", asy
   repository.run(["config", "user.email", "boundary@example.test"]);
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const repo = Repo.at({ path: repository.path });
+  const repo = await Repo.at({ path: repository.path });
   const contract = Keiyaku.of({ repo, id: "kei/missing" as never });
   const before = (await Keiyaku.list({ repo })).rows;
 
@@ -61,7 +61,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
   repository.run(["config", "user.email", "boundary@example.test"]);
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const repo = Repo.at({ path: repository.path });
+  const repo = await Repo.at({ path: repository.path });
   await assert.rejects(
     Keiyaku.bind({ repo,
       markdown: ["# T", "", "## Context", "C", "", "## Objective", "O", "", "## Design", "D", "", "## Region", "~~~", "src/**", "~~~", "", "## Criteria", "### C", "C", ""].join("\n"),

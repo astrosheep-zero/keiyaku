@@ -25,7 +25,7 @@ test("public audit exposes admitted verified attestations through facts", async 
 
 test("audit keeps its leading observation when the delivery candidate is unavailable", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: document("exit 0"),
     workspace: "here",
     gates: ["reviewed"],
@@ -69,7 +69,7 @@ test("public read-only audit returns empty facts without a second outcome kind",
 
 test("public audit rejects a missing contract with a typed refusal", async () => {
   const repository = repositoryWithMain();
-  const contract = Keiyaku.of({ repo: Repo.at({ path: repository.path }), id: "kei/missing" as ContractId });
+  const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id: "kei/missing" as ContractId });
 
   await assert.rejects(
     contract.audit(),
