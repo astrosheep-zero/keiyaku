@@ -1577,6 +1577,29 @@ function opencodeToolCall(name: string, input: unknown): Extract<AgentEvent, { t
   return event?.type === "tool" ? event.call : { kind: "other", display: "missing" };
 }
 
+function opencodeToolParts(
+  name: string,
+  states: readonly Readonly<Record<string, unknown>>[],
+  extras: readonly unknown[] = [],
+): AgentEvent[] {
+  const observed: AgentEvent[] = [];
+  const state = createEventState("session-1");
+  const emitter = { emit(event: AgentEvent) { observed.push(event); } };
+  for (const toolState of states) {
+    mapEvent({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "part-1", sessionID: "session-1", type: "tool", callID: "tool-1", tool: name,
+          state: toolState,
+        },
+      },
+    }, emitter, state);
+  }
+  for (const extra of extras) mapEvent(extra, emitter, state);
+  return observed;
+}
+
 function collectCodexTools(...items: readonly Readonly<Record<string, unknown>>[]): readonly Extract<AgentEvent, { type: "tool" }>[] {
   const events = new CollectingChannel();
   const state = { settled: false, tools: new Map() };
@@ -1928,6 +1951,136 @@ test("Pi edit keeps native update plus patch diffstat and write stays other", ()
   ]);
   assert.equal(concurrent.filter((event) => event.id === "left").length, 2);
   assert.equal(concurrent.filter((event) => event.id === "right").length, 2);
+});
+
+test("OpenCode edit, write, and apply_patch preserve native file-change facts", () => {
+  const edited = opencodeToolParts("edit", [
+    { status: "running", input: { filePath: "src/a.ts" } },
+    {
+      status: "completed", input: { filePath: "src/a.ts" }, output: "ok", title: "a.ts",
+      metadata: { filediff: { file: "src/a.ts", additions: 3, deletions: 1 } },
+      time: { start: 1, end: 2 },
+    },
+  ]);
+  assert.deepEqual(edited[0], {
+    type: "tool", phase: "started", id: "tool-1", name: "edit",
+    call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] },
+  });
+  assert.deepEqual(edited[1], {
+    type: "tool", phase: "completed", id: "tool-1", name: "edit",
+    call: {
+      kind: "fileChange",
+      changes: [{ op: "update", path: "src/a.ts", diffstat: { added: 3, removed: 1 } }],
+    },
+    result: { status: "ok" },
+  });
+  const omitted = opencodeToolParts("EDIT", [
+    { status: "running", input: { filePath: "src/a.ts" } },
+    {
+      status: "completed", input: { filePath: "src/a.ts" }, output: "ok", title: "a.ts",
+      metadata: { filediff: { additions: -1, deletions: 1 } }, time: { start: 1, end: 2 },
+    },
+  ]);
+  assert.deepEqual(
+    omitted[1]?.type === "tool" ? omitted[1].call : undefined,
+    { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] },
+  );
+  const kept = opencodeToolParts("edit", [
+    { status: "running", input: { filePath: "src/a.ts" } },
+    {
+      status: "completed", input: {}, output: "ok", title: "a.ts", metadata: { filediff: "no" },
+      time: { start: 1, end: 2 },
+    },
+  ]);
+  assert.deepEqual(
+    kept[1]?.type === "tool" ? kept[1].call : undefined,
+    { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] },
+  );
+
+  const created = opencodeToolParts("write", [
+    { status: "running", input: { filePath: "src/a.ts" } },
+    {
+      status: "completed", input: { filePath: "src/a.ts" }, output: "ok", title: "a.ts",
+      metadata: { filepath: "src/a.ts", exists: false }, time: { start: 1, end: 2 },
+    },
+  ]);
+  assert.deepEqual(created[0]?.type === "tool" ? created[0].call : undefined, {
+    kind: "other", display: "write",
+  });
+  assert.deepEqual(created[1]?.type === "tool" ? created[1].call : undefined, {
+    kind: "fileChange", changes: [{ op: "add", path: "src/a.ts" }],
+  });
+  const overwritten = opencodeToolParts("WRITE", [
+    { status: "running", input: { filePath: "src/a.ts" } },
+    {
+      status: "completed", input: { filePath: "src/a.ts" }, output: "ok", title: "a.ts",
+      metadata: { filepath: "src/a.ts", exists: true }, time: { start: 1, end: 2 },
+    },
+  ]);
+  assert.deepEqual(overwritten[1]?.type === "tool" ? overwritten[1].call : undefined, {
+    kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }],
+  });
+  const unknownWrite = opencodeToolParts("write", [
+    { status: "running", input: { filePath: "src/a.ts" } },
+    {
+      status: "completed", input: { filePath: "src/a.ts" }, output: "ok", title: "a.ts",
+      metadata: { filepath: "src/a.ts" }, time: { start: 1, end: 2 },
+    },
+  ]);
+  assert.deepEqual(unknownWrite[1]?.type === "tool" ? unknownWrite[1].call : undefined, {
+    kind: "other", display: "write",
+  });
+
+  const patched = opencodeToolParts("apply_patch", [
+    { status: "running", input: { patchText: "*** Begin Patch" } },
+    {
+      status: "completed", input: { patchText: "*** Begin Patch" }, output: "ok", title: "patch",
+      metadata: {
+        files: [
+          { filePath: "src/new.ts", type: "add", additions: 2, deletions: 0 },
+          { filePath: "src/a.ts", type: "update", additions: 1, deletions: 1 },
+          { filePath: "src/gone.ts", type: "delete", additions: 0, deletions: 3 },
+          {
+            filePath: "src/old.ts", type: "move", movePath: "src/renamed.ts",
+            additions: 4, deletions: 1,
+          },
+        ],
+      },
+      time: { start: 1, end: 2 },
+    },
+  ]);
+  assert.deepEqual(patched[0]?.type === "tool" ? patched[0].call : undefined, {
+    kind: "other", display: "apply_patch",
+  });
+  assert.deepEqual(patched[1]?.type === "tool" ? patched[1].call : undefined, {
+    kind: "fileChange",
+    changes: [
+      { op: "add", path: "src/new.ts", diffstat: { added: 2, removed: 0 } },
+      { op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 1 } },
+      { op: "delete", path: "src/gone.ts", diffstat: { added: 0, removed: 3 } },
+      { op: "update", path: "src/renamed.ts", diffstat: { added: 4, removed: 1 } },
+    ],
+  });
+
+  const observed = opencodeToolParts("write_file", [
+    { status: "running", input: { filePath: "src/a.ts" } },
+    {
+      status: "completed", input: { filePath: "src/a.ts" }, output: "ok", title: "a.ts",
+      metadata: { filepath: "src/a.ts", exists: false, files: [{ filePath: "x", type: "add" }] },
+      time: { start: 1, end: 2 },
+    },
+  ], [
+    { type: "session.diff", properties: { diffs: [{ file: "src/a.ts", additions: 1, deletions: 0 }] } },
+    { type: "file.edited", properties: { file: "src/a.ts" } },
+    { type: "file.watcher.updated", properties: { file: "src/a.ts", event: "add" } },
+  ]);
+  assert.deepEqual(observed.map((event) => event.type === "tool" ? event.call : event), [
+    { kind: "other", display: "write_file" },
+    { kind: "other", display: "write_file" },
+  ]);
+  assert.deepEqual(opencodeToolCall("applyPatch", { patchText: "x" }), {
+    kind: "other", display: "applyPatch",
+  });
 });
 
 function fakeCodex(

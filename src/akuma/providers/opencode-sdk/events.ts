@@ -76,6 +76,66 @@ function diagnostic(value: unknown): string {
 function positiveLine(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
 }
+function nonnegativeCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+type FileChangeCall = Extract<ToolCall, { kind: "fileChange" }>;
+function diffstat(value: Record<string, unknown> | undefined): FileChangeCall["changes"][number]["diffstat"] {
+  if (value === undefined) return undefined;
+  const added = nonnegativeCount(value.additions);
+  const removed = nonnegativeCount(value.deletions);
+  return added === undefined || removed === undefined ? undefined : { added, removed };
+}
+function fileChange(changes: FileChangeCall["changes"]): FileChangeCall | undefined {
+  return changes.length === 0 ? undefined : { kind: "fileChange", changes };
+}
+function change(
+  op: FileChangeCall["changes"][number]["op"],
+  path: string,
+  stats: FileChangeCall["changes"][number]["diffstat"],
+): FileChangeCall["changes"][number] {
+  return stats === undefined ? { op, path } : { op, path, diffstat: stats };
+}
+function editCall(
+  input: Record<string, unknown> | undefined,
+  metadata: Record<string, unknown> | undefined,
+): ToolCall | undefined {
+  const path = text(input?.filePath);
+  if (path === undefined) return undefined;
+  return fileChange([change("update", path, diffstat(object(metadata?.filediff)))]);
+}
+function writeCall(
+  input: Record<string, unknown> | undefined,
+  metadata: Record<string, unknown> | undefined,
+): ToolCall | undefined {
+  const path = text(metadata?.filepath) ?? text(input?.filePath);
+  const op = metadata?.exists === false ? "add" as const
+    : metadata?.exists === true ? "update" as const : undefined;
+  return path === undefined || op === undefined ? undefined : fileChange([change(op, path, undefined)]);
+}
+function applyPatchFile(value: unknown): FileChangeCall["changes"][number] | undefined {
+  const file = object(value);
+  if (file === undefined) return undefined;
+  const type = file.type;
+  const op = type === "add" ? "add" as const
+    : type === "delete" ? "delete" as const
+    : type === "update" || type === "modify" || type === "move"
+      ? "update" as const : undefined;
+  const path = type === "move" ? text(file.movePath) : text(file.filePath);
+  return op === undefined || path === undefined ? undefined : change(op, path, diffstat(file));
+}
+function applyPatchCall(metadata: Record<string, unknown> | undefined): ToolCall | undefined {
+  if (!Array.isArray(metadata?.files)) return undefined;
+  return fileChange(metadata.files.flatMap((value) => {
+    const next = applyPatchFile(value);
+    return next === undefined ? [] : [next];
+  }));
+}
+function strongerCall(previous: ToolCall | undefined, next: ToolCall | undefined): ToolCall | undefined {
+  if (next === undefined) return previous;
+  if (previous?.kind === "fileChange" && next.kind !== "fileChange") return previous;
+  return next;
+}
 
 function runCall(name: string, value: Record<string, unknown> | undefined): ToolCall | undefined {
   return name === "bash" || name === "shell"
@@ -113,12 +173,16 @@ function searchCall(name: string, value: Record<string, unknown> | undefined): T
   };
 }
 
-function callFor(name: string, input: unknown): ToolCall | undefined {
+function callFor(name: string, input: unknown, metadata?: unknown): ToolCall | undefined {
   const value = object(input);
+  const meta = object(metadata);
   const lower = name.toLowerCase();
   if (lower === "bash" || lower === "shell") return runCall(lower, value);
   if (lower === "read") return readCall(lower, value);
   if (lower === "grep" || lower === "glob" || lower === "search") return searchCall(lower, value);
+  if (lower === "edit") return editCall(value, meta) ?? { kind: "other", display: name };
+  if (lower === "write") return writeCall(value, meta) ?? { kind: "other", display: name };
+  if (lower === "apply_patch") return applyPatchCall(meta) ?? { kind: "other", display: name };
   return { kind: "other", display: name };
 }
 function belongs(part: Part, state: State): boolean {
@@ -148,23 +212,25 @@ function mapToolPart(part: Part, events: Emitter, state: State): void {
   const name = text(part.tool);
   const toolState = object(part.state);
   if (id === undefined || name === undefined || toolState === undefined) return;
+  const next = callFor(name, toolState.input, toolState.metadata);
   if ((toolState.status === "pending" || toolState.status === "running")
     && !state.tools.has(id) && !state.completedTools.has(id)) {
-    const call = callFor(name, toolState.input);
-    if (call === undefined) return;
-    const observed = { name, call };
+    if (next === undefined) return;
+    const observed = { name, call: next };
     state.tools.set(id, observed);
     events.emit({ type: "tool", phase: "started", id, ...observed });
     return;
   }
   if ((toolState.status !== "completed" && toolState.status !== "error") || state.completedTools.has(id)) return;
   const started = state.tools.get(id);
-  const call = started?.call ?? callFor(name, toolState.input);
+  const call = strongerCall(started?.call, next);
   if (call === undefined) return;
-  const observed = started ?? { name, call };
+  const observed = { name: started?.name ?? name, call };
   if (!state.tools.has(id)) {
     state.tools.set(id, observed);
     events.emit({ type: "tool", phase: "started", id, ...observed });
+  } else {
+    state.tools.set(id, observed);
   }
   state.completedTools.add(id);
   events.emit({
