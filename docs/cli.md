@@ -334,13 +334,15 @@ then the complete AkuId and optional frozen Alias. When a Contract is
 associated, its complete `kei/...` identity is one hanging relation line
 beginning with `U+2514` and `U+2500`; an unassociated Akuma omits that line.
 Identity rows never contain current life, and no divider or blank line splits
-the relation from the following activity. Status, wait, unfinished observed
-call, and kill end with the public life on a subdued trailing line. Ordinary
-and interrupt tell compose the refreshed snapshot without a current-life
-claim; history does the same for its page, while `history --last` writes exact
-answer bytes. An answered default call likewise writes only those answer
-bytes; a successful detached call prints its born identity and
-`$ keiyaku wait <AkuId> --timeout 5m`. The id already contains the Akuma name
+the relation from the following activity. Status, unfinished or non-answered
+single-target wait, every multi-target wait, unfinished observed call, and kill
+end with the public life on a subdued trailing line. Ordinary and interrupt
+tell compose the refreshed snapshot without a current-life claim; history does
+the same for its page, while `history --last` writes exact answer bytes. An
+ordinary answered single-target wait and an answered default call likewise
+write only those answer bytes; a successful detached call prints its born
+identity and `$ keiyaku wait <AkuId> --timeout 5m`. The id already contains the
+Akuma name
 and the CLI never reverse-selects an Alias. Text never prints the storage
 words `retained`, `latest`, `body`, `heart`, or `turn`.
 

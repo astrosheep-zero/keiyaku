@@ -4,10 +4,14 @@ This chapter owns help, rendering, and exit status.
 
 ## Shared Akuma Rendering
 
-Status, wait, call, tell, interrupt, and kill share one snapshot renderer, and
+Status, unfinished or non-answered wait, every multi-target wait, unfinished
+observed call, tell, interrupt, and kill share one snapshot renderer, and
 history uses the same row vocabulary without snapshot budgets. The renderer
-consumes typed public values only; it does not mine Heart facts or reconstruct
-outcomes or tool lifecycle. Full answer bytes remain available through `history --last` and are
+consumes typed public values only; it does not mine Heart facts, reconstruct
+outcomes or tool lifecycle, or read history. One typed raw-answer decision,
+shared with stdout newline custody, writes exact answer bytes for an answered
+default call and an ordinary answered single-target wait. `history --last`
+remains the explicit exact read independent of waiting. Full answer bytes are
 never clipped in JSON.
 
 `show` is a raw Contract read. Text writes the exact guidance Markdown with no
@@ -120,10 +124,17 @@ Text and `--json` render this same object. Both write to stdout; JSON serializes
 it without another output schema. A corrupted authority or other exception
 writes its verbatim diagnostic to stderr and exits `3`.
 
-Akuma text has one shared snapshot presentation across status, wait, unfinished
-observed call, tell, interrupt, and kill; history remains the unbounded browsing
-surface. An answered default call writes the exact answer bytes with no snapshot
-or fact prefix. A successful detached call writes its born AkuId and a final
+Akuma text has one shared snapshot presentation across status, unfinished or
+non-answered single wait, every multi-target wait, unfinished observed call,
+tell, interrupt, and kill; history remains the unbounded browsing surface. An
+answered default call and an ordinary single-target wait that observes
+`life: asleep` with an idle answered outcome write the exact persisted answer
+bytes, including the empty string, with no identity, timeline row, life footer,
+clipping, sanitization, or extra newline. A running timeout, failed outcome,
+open Turn, killed, stranded, hung, untidy, readonly-none, or no-outcome
+observation remains that snapshot, even when an older answered idle outcome is
+still retained. Multi-target wait remains identity-bearing snapshots for every
+selected member and never concatenates naked answers. A successful detached call writes its born AkuId and a final
 `$ keiyaku wait <AkuId> --timeout 5m` command without inventing life. Dispatch
 failure, alias failure, readonly-none refusal, or observation failure keeps its
 diagnostic and does not add that wait command. Snapshot

@@ -16,6 +16,10 @@ test("Akuma owner law records the settled snapshot timeline", () => {
   assert.match(output, /Event glyphs/u);
   assert.match(output, /place life/u);
   assert.match(output, /history omit/u);
+  assert.match(output, /ordinary single-target wait that observes/u);
+  assert.match(output, /unfinished or\nnon-answered single wait/u);
+  assert.match(output, /Multi-target wait remains identity-bearing snapshots/u);
+  assert.match(output, /explicit exact read independent of waiting/u);
   assert.match(cli, /cli-output\.md/u);
 });
 

@@ -8,7 +8,7 @@ import {
 } from "./parse.js";
 import { renderText } from "./render/text.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "./render/task.js";
-import { akumaExitCode, renderAkumaJson, renderAkumaText } from "./render/akuma.js";
+import { akumaExitCode, akumaRawAnswer, renderAkumaJson, renderAkumaText } from "./render/akuma.js";
 import { isParsedAkumaCommand, renderAkumaHelp } from "./commands/akuma.js";
 import { installExitCode, renderInstallHelp, renderInstallText, type InstallInvocationResult } from "./commands/install.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
@@ -36,12 +36,8 @@ function writeAkuma(command: Parameters<typeof renderAkumaText>[0], result: Akum
     columns: process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : 80,
     color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
   });
-  const callOutcome = result.action === "call" && result.result.observation.kind === "observed"
-    && result.result.observation.status.timeline.kind === "idle"
-    ? result.result.observation.status.timeline.outcome?.outcome : undefined;
-  const rawAnswer = callOutcome?.kind === "answered" && output === callOutcome.answer;
   const raw = command.output === "text"
-    && ((command.command === "history" && command.last) || rawAnswer);
+    && ((command.command === "history" && command.last) || akumaRawAnswer(result) !== undefined);
   process.stdout.write(raw ? output : `${output}\n`);
   return akumaExitCode(result);
 }

@@ -14,11 +14,12 @@ import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/requests.js";
+import type { AkumaStatusView } from "../src/index.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { akumaExitCode, akumaJsonValue, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
+import { akumaExitCode, akumaJsonValue, akumaRawAnswer, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 import { toolRepr } from "../src/cli/render/akuma-tool.js";
 import { normalizeToolCommand } from "../src/cli/render/akuma-tool-command.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
@@ -32,6 +33,17 @@ function packagedCliEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   delete next.FORCE_COLOR;
   delete next.NO_COLOR;
   return next;
+}
+
+async function captureMain(argv: readonly string[]): Promise<Readonly<{ code: number; stdout: string }>> {
+  let stdout = "";
+  const writeStdout = process.stdout.write;
+  process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
+  try {
+    return { code: await main([...argv]), stdout };
+  } finally {
+    process.stdout.write = writeStdout;
+  }
 }
 
 function runPackagedCli(
@@ -180,11 +192,11 @@ test("Akuma snapshots preserve activity and typed omission", () => {
     id: "aku/reviewer/deadbeef",
     timeline: { kind: "idle" as const, entries: [], omitted: 0, outcome: { kind: "outcome" as const, sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", outcome: { kind: "answered" as const, answer: "second answer", historyId: "history-2", session: { sessionId: "session-2" } } } },
   };
-  assert.match(renderAkumaText(command, {
+  assert.equal(renderAkumaText(command, {
     kind: "akuma",
     action: "wait",
     result: { completion: "any", statuses: [{ status: answered }] },
-  }), /first answer/u);
+  }), "first answer");
   const plural = renderAkumaText(command, {
     kind: "akuma",
     action: "wait",
@@ -1240,10 +1252,20 @@ test("Akuma status, wait, and history share public observations without embeddin
     assert.equal("kind" in waitResult && waitResult.kind, "akuma");
     if (!("kind" in waitResult) || waitResult.kind !== "akuma" || waitResult.action !== "wait") return;
     assert.deepEqual(waitResult.result.statuses, [statusResult.status]);
+    assert.equal(renderAkumaText(parseArgv(["wait", allocated.id]).command, waitResult), "cli answer");
+    assert.equal(akumaRawAnswer(waitResult), "cli answer");
+    const waited = await captureMain(["-C", root, "wait", allocated.id, "--timeout", "0ms"]);
+    assert.equal(waited.code, 0);
+    assert.equal(waited.stdout, "cli answer");
     await moveAlias({ world: root, alias: "@review", akuId: allocated.id });
     const aliasWait = await invoke(parseArgv(["-C", root, "wait", "@review", "--timeout", "0ms"]));
     assert.equal("kind" in aliasWait && aliasWait.kind === "akuma" && aliasWait.action === "wait"
       ? aliasWait.alias : undefined, "@review");
+    if (!("kind" in aliasWait) || aliasWait.kind !== "akuma" || aliasWait.action !== "wait") return;
+    assert.equal(renderAkumaText(parseArgv(["wait", "@review"]).command, aliasWait), "cli answer");
+    const aliasOut = await captureMain(["-C", root, "wait", "@review", "--timeout", "0ms"]);
+    assert.equal(aliasOut.code, 0);
+    assert.equal(aliasOut.stdout, "cli answer");
 
     const laterTurn = await beginTurn(allocated.paths, {
       bodySequence: 1,
@@ -1258,6 +1280,16 @@ test("Akuma status, wait, and history share public observations without embeddin
     if (!("kind" in failedStatus) || failedStatus.kind !== "akuma" || failedStatus.action !== "status") return;
     assert.equal(failedStatus.status.status.timeline.kind === "idle"
       && failedStatus.status.status.timeline.outcome?.outcome.kind === "failed", true);
+    const failedWait = await captureMain(["-C", root, "wait", allocated.id, "--timeout", "0ms"]);
+    assert.equal(failedWait.code, 0);
+    assert.match(failedWait.stdout, /! error\s+later failed/u);
+    assert.match(failedWait.stdout, / {2}○ asleep\n$/u);
+    assert.notEqual(failedWait.stdout, "cli answer");
+    assert.equal(akumaRawAnswer({
+      kind: "akuma",
+      action: "wait",
+      result: { completion: "all", statuses: [failedStatus.status] },
+    }), undefined);
 
     const historyParsed = parseArgv(["-C", root, "history", allocated.id]);
     const historyResult = await invoke(historyParsed, { readStdin: () => { throw new Error("history must not read stdin"); } });
@@ -1386,6 +1418,134 @@ test("history --last renders typed no-answer and preserves answered empty bytes"
     contractId: "kei/provider-core-review" as const,
   });
   assert.equal(akumaExitCode(emptyAnswer), 0);
+});
+
+test("one raw-answer decision writes exact wait bytes and keeps unfinished observations as snapshots", () => {
+  const id = "aku/worker/1234abcd" as const;
+  const other = "aku/reviewer/deadbeef" as const;
+  const waitCommand = parseArgv(["wait", id]).command;
+  const answered = (answer: string, life: "asleep" | "running" | "killed" | "stranded" | "hung" | "untidy" = "asleep") => ({
+    status: {
+      id,
+      life,
+      timeline: {
+        kind: "idle" as const,
+        entries: [],
+        omitted: 0,
+        outcome: {
+          kind: "outcome" as const,
+          sequence: 1,
+          turnSequence: 1,
+          at: "2026-08-10T16:42:00.000Z",
+          outcome: { kind: "answered" as const, answer, historyId: "history", session: { sessionId: "session" } },
+        },
+      },
+    },
+  });
+  const waitOf = (...statuses: readonly AkumaStatusView[]): Extract<AkumaInvocationResult, { action: "wait" }> => ({
+    kind: "akuma",
+    action: "wait",
+    result: { completion: "all", statuses },
+  });
+  const multiline = "line one\nline two\n";
+  const complete = waitOf(answered(multiline));
+  const call = {
+    kind: "akuma" as const,
+    action: "call" as const,
+    result: {
+      kind: "called" as const,
+      akuma: id,
+      dispatch: { kind: "none" as const },
+      alias: { kind: "none" as const },
+      observation: { kind: "observed" as const, status: complete.result.statuses[0]!.status },
+    },
+  };
+  const cases = [
+    { name: "multiline", result: complete, raw: multiline },
+    { name: "empty", result: waitOf(answered("")), raw: "" },
+    { name: "trailing", result: waitOf(answered("kept\n")), raw: "kept\n" },
+    { name: "call", result: call, command: parseArgv(["call", "worker", "-"]).command, raw: multiline },
+    { name: "running", result: waitOf(answered("kept", "running")), fact: / {2}● running$/u },
+    { name: "killed", result: waitOf(answered("kept", "killed")), fact: / {2}× killed$/u },
+    { name: "stranded", result: waitOf(answered("kept", "stranded")), fact: / {2}\? stranded$/u },
+    { name: "hung", result: waitOf(answered("kept", "hung")), fact: / {2}\? hung$/u },
+    { name: "untidy", result: waitOf(answered("kept", "untidy")), fact: / {2}\? untidy$/u },
+    {
+      name: "readonly-none",
+      result: waitOf({
+        status: {
+          ...answered("kept").status,
+          readonly: { enforcement: "none" as const, diagnostic: "ACP cannot remove task-surface mutation capabilities" },
+        },
+      }),
+      fact: /! ACP cannot remove task-surface mutation capabilities/u,
+    },
+    {
+      name: "failed",
+      result: waitOf({
+        status: {
+          id,
+          life: "asleep",
+          timeline: {
+            kind: "idle",
+            entries: [],
+            omitted: 0,
+            outcome: {
+              kind: "outcome",
+              sequence: 1,
+              turnSequence: 1,
+              at: "2026-08-10T16:42:00.000Z",
+              outcome: { kind: "failed", diagnostic: "turn failed" },
+            },
+          },
+        },
+      }),
+      fact: /! error\s+turn failed/u,
+    },
+    {
+      name: "open",
+      result: waitOf({
+        status: {
+          id,
+          life: "asleep",
+          timeline: {
+            kind: "open",
+            turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
+            entries: [],
+            omitted: 0,
+          },
+        },
+      }),
+      fact: / {2}○ asleep$/u,
+    },
+    {
+      name: "no-outcome",
+      result: waitOf({ status: { id, life: "asleep", timeline: { kind: "idle", entries: [], omitted: 0 } } }),
+      fact: / {2}○ asleep$/u,
+    },
+  ] as const;
+  for (const item of cases) {
+    assert.equal(akumaRawAnswer(item.result), "raw" in item ? item.raw : undefined, item.name);
+    const text = renderAkumaText("command" in item ? item.command : waitCommand, item.result);
+    if ("raw" in item) assert.equal(text, item.raw, item.name);
+    else {
+      assert.notEqual(text, "kept", item.name);
+      assert.match(text, /^─────/u, item.name);
+      assert.match(text, /aku\/worker\/1234abcd/u, item.name);
+      assert.match(text, item.fact, item.name);
+    }
+  }
+
+  const plural = waitOf(answered("first answer"), { status: { ...answered("second answer").status, id: other } });
+  assert.equal(akumaRawAnswer(plural), undefined);
+  const pluralText = renderAkumaText(waitCommand, plural);
+  assert.match(pluralText, /aku\/worker\/1234abcd/u);
+  assert.match(pluralText, /first answer/u);
+  assert.match(pluralText, /aku\/reviewer\/deadbeef/u);
+  assert.match(pluralText, /second answer/u);
+  assert.notEqual(pluralText, "first answersecond answer");
+  assert.deepEqual(akumaJsonValue(parseArgv(["wait", id, "--json"]).command, complete), complete.result);
+  assert.deepEqual(akumaJsonValue(parseArgv(["wait", id, other, "--all", "--json"]).command, plural), plural.result);
 });
 
 test("history JSON preserves an associated Contract for every result mode", () => {
@@ -1639,6 +1799,57 @@ test("packaged CLI call writes missing, detached, answered, unfinished, and fail
     await pump.close();
     for (const child of held) child.release();
     leash.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("packaged CLI wait writes exact multiline and empty answer bytes", async () => {
+  assert.equal(existsSync(PACKAGED_CLI), true, "npm run build must produce build/src/cli/index.js before this test");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-wait-")));
+  const answering = (answer: string): ProviderAdapter => ({
+    confinement: () => ({ kind: "unconfined" }),
+    admitOptions(options) { return { kind: "admitted", options }; },
+    async start() {
+      return {
+        admission: { fence: "wait-answer" },
+        events: { async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "wait-session" } };
+        } },
+        completion: Promise.resolve({ kind: "answered" as const, answer, historyId: "wait-history" }),
+        async abort() {},
+      };
+    },
+  });
+  const answered = async (draw: string, answer: string) => {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => draw });
+    await initializeHeart(allocated.paths);
+    await driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        cwd: root,
+        createdAt: "2026-08-16T00:00:00.000Z",
+      },
+      initialBody: "work",
+    }, answering(answer), { now: () => "2026-08-16T00:00:00.000Z" });
+    return allocated;
+  };
+  try {
+    const multiline = await answered("aaa11111", "line one\nline two\n");
+    const exact = await runPackagedCli(["-C", root, "wait", multiline.id, "--timeout", "0ms"], { cwd: root });
+    assert.equal(exact.code, 0);
+    assert.equal(exact.stdout, "line one\nline two\n");
+    assert.equal(exact.stderr, "");
+    const empty = await answered("bbb22222", "");
+    const emptyOut = await runPackagedCli(["-C", root, "wait", empty.id, "--timeout", "0ms"], { cwd: root });
+    assert.equal(emptyOut.code, 0);
+    assert.equal(emptyOut.stdout, "");
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
