@@ -52,7 +52,8 @@ test("provider activity codec round trips every closed event and tool-call arm",
 function fakeCodex(
   root: string,
   mode: "complete" | "empty-final" | "interrupt" | "observations" | "failed-notification" | "failed-turn"
-    | "steer" | "steer-complete-first" | "steer-error-after-complete" | "steer-mismatch" | "steer-missing" = "complete",
+    | "terminal-drain" | "terminal-unmatched" | "terminal-hang" | "exit-before-completion" | "steer" | "steer-complete-first"
+    | "steer-hung-terminal" | "steer-error-after-complete" | "steer-mismatch" | "steer-missing" = "complete",
 ): Readonly<{
   executable: string;
   requests(): readonly Readonly<Record<string, unknown>>[];
@@ -70,7 +71,17 @@ function fakeCodex(
     `const mode=${JSON.stringify(mode)};`,
     "const send=(value)=>process.stdout.write(JSON.stringify(value)+'\\n');",
     "const reply=(message,result)=>send({id:message.id,result});",
-    "readline.createInterface({input:process.stdin,crlfDelay:Infinity}).on('line',(line)=>{",
+    "const hang=mode==='terminal-hang'?setInterval(()=>{},1000):null;",
+    "const lines=readline.createInterface({input:process.stdin,crlfDelay:Infinity});",
+    "lines.on('close',()=>{",
+    "  if(mode==='terminal-drain') return setTimeout(()=>{",
+    "    send({method:'item/completed',params:{item:{id:'command-terminal',type:'commandExecution',command:'npm test',status:'completed',exitCode:0}}});",
+    "    process.exit(0);",
+    "  },350);",
+    "  if(mode==='terminal-hang') return;",
+    "  process.exit(0);",
+    "});",
+    "lines.on('line',(line)=>{",
     "  const message=JSON.parse(line); fs.appendFileSync(log,JSON.stringify(message)+'\\n');",
     "  if(message.method==='initialize') return reply(message,{userAgent:'codex-cli/0.146.0'});",
     "  if(message.method==='initialized') return;",
@@ -83,6 +94,11 @@ function fakeCodex(
     "      send({method:'item/completed',params:{item:{id:'item-1',type:'agentMessage',text:'codex answer'}}});",
     "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
     "    }",
+    "    if(mode==='terminal-drain'||mode==='terminal-unmatched'||mode==='terminal-hang'){",
+    "      send({method:'item/started',params:{item:{id:'command-terminal',type:'commandExecution',command:'npm test'}}});",
+    "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
+    "    }",
+    "    if(mode==='exit-before-completion') process.exit(7);",
     "    if(mode==='empty-final'){",
     "      send({method:'item/completed',params:{item:{id:'answer-1',type:'agentMessage',text:'first answer'}}});",
     "      send({method:'item/completed',params:{item:{id:'answer-2',type:'agentMessage',text:''}}});",
@@ -110,6 +126,10 @@ function fakeCodex(
     "    return;",
     "  }",
     "  if(message.method==='turn/steer'){",
+    "    if(mode==='steer-hung-terminal'){",
+    "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:message.params.expectedTurnId,status:'completed'}}});",
+    "      return;",
+    "    }",
     "    if(mode==='steer-complete-first'){",
     "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:message.params.expectedTurnId,status:'completed'}}});",
     "      return setTimeout(()=>reply(message,{turnId:message.params.expectedTurnId}),10);",
@@ -937,6 +957,34 @@ test("Codex maps observations without leaking output or unknown payloads", async
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("Codex drains admitted native completion narration before terminal closure", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-terminal-drain-"));
+  try {
+    const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-drain").executable).start({
+      body: "drain", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    let completionSettled = false;
+    void drive.completion.then(() => { completionSettled = true; });
+    const events = [];
+    for await (const event of drive.events) {
+      events.push(event);
+      if (event.type === "tool" && event.phase === "completed") assert.equal(completionSettled, false);
+    }
+
+    assert.deepEqual(events.slice(1), [
+      {
+        type: "tool", phase: "started", id: "command-terminal", name: "commandExecution",
+        call: { kind: "run", command: "npm test" },
+      },
+      {
+        type: "tool", phase: "completed", id: "command-terminal", name: "commandExecution",
+        call: { kind: "run", command: "npm test" }, result: { status: "ok", exitCode: 0 },
+      },
+    ]);
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("Codex preserves an empty final agent message as the answered turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-empty-answer-"));
   try {
@@ -955,6 +1003,49 @@ test("Codex preserves an empty final agent message as the answered turn", async 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("Codex leaves an unmatched native tool start unmatched at terminal closure", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-terminal-unmatched-"));
+  try {
+    const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-unmatched").executable).start({
+      body: "observe", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    const events = [];
+    for await (const event of drive.events) events.push(event);
+
+    assert.deepEqual(events.slice(1), [{
+      type: "tool", phase: "started", id: "command-terminal", name: "commandExecution",
+      call: { kind: "run", command: "npm test" },
+    }]);
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex terminal drain has a bounded fallback for a hung producer", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-terminal-hang-"));
+  try {
+    const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-hang").executable).start({
+      body: "observe", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    const started = performance.now();
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
+    assert.ok(performance.now() - started < 2_000);
+    for await (const _event of drive.events) { /* drain */ }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex settles when the native process exits without turn completion", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-exit-before-completion-"));
+  try {
+    const drive = await createCodexAppServerProvider(fakeCodex(root, "exit-before-completion").executable).start({
+      body: "exit", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    for await (const _event of drive.events) { /* drain */ }
+    assert.deepEqual(await drive.completion, {
+      kind: "failed",
+      diagnostic: "codex app-server exited before completion (7)",
+    });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 test("Codex failed turns retain native notification and turn diagnostics", async () => {
   for (const [mode, diagnostic] of [
     ["failed-notification", "native request exploded: provider detail"],
@@ -1022,29 +1113,39 @@ test("Codex app-server abort requests native interruption and waits for terminal
 });
 
 test("Codex app-server live tell steers the admitted turn with exact correlation", async () => {
-  for (const mode of ["steer", "steer-complete-first"] as const) {
-    const root = mkdtempSync(join(tmpdir(), `keiyaku-codex-${mode}-`));
-    try {
-      const fake = fakeCodex(root, mode);
-      const drive = await createCodexAppServerProvider(fake.executable).start({
-        body: "work", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
-      });
-      assert.ok(drive.tell !== undefined);
-      const acknowledgement = drive.tell!({ id: "tell-live-1", text: "check the race" });
-      if (mode === "steer-complete-first") await drive.abort();
-      assert.deepEqual(await acknowledgement, {
-        kind: "accepted",
-        fence: "turn-1:tell-live-1",
-      });
-      assert.equal((await drive.completion).kind, "answered");
-      assert.deepEqual(fake.requests().find((request) => request.method === "turn/steer")?.params, {
-        threadId: "thread-fresh",
-        expectedTurnId: "turn-1",
-        input: [{ type: "text", text: "check the race" }],
-        clientUserMessageId: "tell-live-1",
-      });
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  }
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-steer-"));
+  try {
+    const fake = fakeCodex(root, "steer");
+    const drive = await createCodexAppServerProvider(fake.executable).start({
+      body: "work", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    assert.ok(drive.tell !== undefined);
+    assert.deepEqual(await drive.tell!({ id: "tell-live-1", text: "check the race" }), {
+      kind: "accepted",
+      fence: "turn-1:tell-live-1",
+    });
+    assert.equal((await drive.completion).kind, "answered");
+    assert.deepEqual(fake.requests().find((request) => request.method === "turn/steer")?.params, {
+      threadId: "thread-fresh",
+      expectedTurnId: "turn-1",
+      input: [{ type: "text", text: "check the race" }],
+      clientUserMessageId: "tell-live-1",
+    });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex rejects a steer acknowledgement that remains pending at terminal observation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-steer-complete-first-"));
+  try {
+    const drive = await createCodexAppServerProvider(fakeCodex(root, "steer-complete-first").executable).start({
+      body: "work", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    await assert.rejects(
+      drive.tell!({ id: "tell-live-pending", text: "check the boundary" }),
+      /line RPC process is closed/u,
+    );
+    assert.equal((await drive.completion).kind, "answered");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("Codex live tell rejects a mismatched native turn acknowledgement", async () => {
@@ -1064,14 +1165,28 @@ test("Codex live tell rejects a mismatched native turn acknowledgement", async (
   }
 });
 
-test("Codex preserves a rejected steer even when completion arrives first", async () => {
+test("Codex closes a pending rejected steer when completion arrives first", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-steer-rejected-"));
   try {
     const fake = fakeCodex(root, "steer-error-after-complete");
     const drive = await createCodexAppServerProvider(fake.executable).start({
       body: "work", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
     });
-    await assert.rejects(drive.tell!({ id: "tell-live-error", text: "check rejection" }), /native steer rejected/u);
+    await assert.rejects(drive.tell!({ id: "tell-live-error", text: "check rejection" }), /line RPC process is closed/u);
     assert.equal((await drive.completion).kind, "answered");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex terminal closure fails a hung steer acknowledgement without waiting", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-steer-hung-terminal-"));
+  try {
+    const drive = await createCodexAppServerProvider(fakeCodex(root, "steer-hung-terminal").executable).start({
+      body: "work", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    await assert.rejects(
+      drive.tell!({ id: "tell-live-hung", text: "never acknowledged" }),
+      /line RPC process is closed/u,
+    );
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

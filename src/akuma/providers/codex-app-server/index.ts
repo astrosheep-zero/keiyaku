@@ -20,6 +20,18 @@ export { CODEX_ITEM_DISPOSITIONS, CODEX_NOTIFICATION_DISPOSITIONS } from "./even
 type StartInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 type ForkInput = Parameters<NonNullable<ProviderAdapter["fork"]>>[0];
 type Finish = (result: TurnResult) => void;
+const INTERRUPT_TIMEOUT_MS = 1_000;
+
+function interrupt(server: LineRpcProcess, threadId: string, turnId: string): Promise<unknown> {
+  const request = server.request("turn/interrupt", { threadId, turnId });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("codex app-server interrupt timed out")), INTERRUPT_TIMEOUT_MS);
+    void request.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error: unknown) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -52,7 +64,6 @@ function turnId(result: unknown): string {
 async function steerTurn(
   server: LineRpcProcess,
   state: CodexTurnState,
-  inFlight: Set<Promise<void>>,
   tell: Readonly<{ id: string; text: string }>,
 ): ReturnType<NonNullable<Session["tell"]>> {
   if (state.settled) return { kind: "turn-ended" };
@@ -63,9 +74,6 @@ async function steerTurn(
     input: [{ type: "text", text: tell.text }],
     clientUserMessageId: tell.id,
   });
-  const settled = request.then(() => undefined, () => undefined);
-  inFlight.add(settled);
-  void settled.finally(() => inFlight.delete(settled));
   const response = codexObject(await request);
   const accepted = codexText(response?.turnId);
   if (accepted === undefined) throw new Error("codex app-server steer did not return a turn id");
@@ -139,7 +147,7 @@ async function abortTurn(
   server: LineRpcProcess,
   state: CodexTurnState,
   completion: Promise<TurnResult>,
-  finish: Finish,
+  settle: Finish,
 ): Promise<void> {
   if (state.settled) {
     await completion;
@@ -147,11 +155,11 @@ async function abortTurn(
   }
   if (state.threadId !== undefined && state.turnId !== undefined) {
     try {
-      await server.request("turn/interrupt", { threadId: state.threadId, turnId: state.turnId });
+      await interrupt(server, state.threadId, state.turnId);
       await completion;
-    } catch (error) { finish({ kind: "failed", diagnostic: diagnostic(error) }); }
+    } catch (error) { settle({ kind: "failed", diagnostic: diagnostic(error) }); }
   } else {
-    finish({ kind: "failed", diagnostic: "codex app-server aborted before turn admission" });
+    settle({ kind: "failed", diagnostic: "codex app-server aborted before turn admission" });
   }
   await completion;
 }
@@ -168,18 +176,28 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
     } }),
   });
   const state: CodexTurnState = { settled: false, tools: new Map() };
-  const inFlightSteers = new Set<Promise<void>>();
   let settle!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
+  let terminal: TurnResult | undefined;
   const finish: Finish = (result) => {
-    if (state.settled) return;
+    if (terminal !== undefined) return;
+    terminal = result;
     state.settled = true;
-    events.end();
-    void Promise.all([...inFlightSteers]).then(() => server.close()).then(
-      () => settle(result),
-      (error: unknown) => settle({ kind: "failed", diagnostic: `codex app-server cleanup failed: ${diagnostic(error)}` }),
+    void server.endInputAndDrain().then(
+      () => {
+        events.end();
+        settle(result);
+      },
+      () => {
+        events.end();
+        settle(result);
+      },
     );
   };
+  server.onNotification((notification) => {
+    const result = codexNotificationResult(notification, state, events);
+    if (result !== undefined) finish(result);
+  });
   server.onExit(({ code, signal, stderr }) => finish({
     kind: "failed",
     diagnostic: stderr || `codex app-server exited before completion (${code ?? signal ?? "unknown"})`,
@@ -188,10 +206,6 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
     kind: "failed",
     diagnostic: `codex app-server made forbidden interactive request ${request.method}`,
   }));
-  server.onNotification((notification) => {
-    const result = codexNotificationResult(notification, state, events);
-    if (result !== undefined) finish(result);
-  });
   try { await admitTurn(server, input, state, events, execution.config); }
   catch (error) { finish({ kind: "failed", diagnostic: diagnostic(error) }); }
   if (state.turnId === undefined) throw new Error("codex app-server did not admit a turn");
@@ -200,7 +214,7 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
     events,
     completion,
     abort: () => abortTurn(server, state, completion, finish),
-    tell: (tell) => steerTurn(server, state, inFlightSteers, tell),
+    tell: (tell) => steerTurn(server, state, tell),
   };
 }
 

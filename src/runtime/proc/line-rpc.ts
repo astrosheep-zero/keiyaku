@@ -6,6 +6,18 @@ export type LineRpcNotification = Readonly<{ method: string; params?: Readonly<R
 export type LineRpcServerRequest = LineRpcNotification & Readonly<{ id: number | string }>;
 export type LineRpcExit = Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>;
 
+const DEFAULT_DRAIN_TIMEOUT_MS = 1_000;
+
+function bounded<T>(promise: Promise<T>, milliseconds: number): Promise<T | undefined> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(undefined), milliseconds);
+    void promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error: unknown) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Readonly<Record<string, unknown>>
@@ -106,6 +118,18 @@ export class LineRpcProcess {
 
   notify(method: string): void {
     if (!this.closed) this.child.stdin.write(`${JSON.stringify({ method })}\n`);
+  }
+
+  async endInputAndDrain(timeoutMs = DEFAULT_DRAIN_TIMEOUT_MS): Promise<void> {
+    if (this.closed) { await this.exited; return; }
+    this.closed = true;
+    this.fail(new Error("line RPC process is closed"));
+    this.child.stdin.end();
+    const drained = await bounded(this.exited, timeoutMs);
+    if (drained === undefined) {
+      await terminateProcessTree(this.child.pid, true);
+      await this.exited;
+    }
   }
 
   async close(force = false): Promise<void> {

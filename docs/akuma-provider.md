@@ -204,6 +204,23 @@ union disposition is compile-time exhaustive with a runtime unknown fallback.
 The Codex app-server method set is open, so its explicit known dispositions end
 in an unknown fallback. Tests pin both tables and both unknown paths.
 
+Codex notification admission has one adapter-local native transport boundary.
+Notifications received through that boundary are translated in native arrival
+order. `turn/completed` freezes the first terminal `TurnResult`, but does not
+close narration: every notification already admitted through the same boundary
+is translated and emitted in order. The adapter closes request admission and
+pending RPCs, ends native stdin, and keeps reading stdout until the producer
+honors EOF and stdio closes. A bounded one-second drain fallback force-terminates
+an uncooperative producer after that observation window; it then ends the
+Session event stream and resolves the already frozen completion rather than
+waiting indefinitely or rewriting the provider result as cleanup failure.
+Terminal translation freezes steer immediately, and any unacknowledged live
+steer rejects when request admission closes instead of delaying terminal
+settlement. An interrupt request uses the same bounded observation window before
+the existing abort terminal path settles. Only a real native `item/completed`
+produces a completed tool event and typed `ToolResult`; terminal observation
+never repairs or synthesizes a completion for an unmatched start.
+
 Claude's terminal answer is exactly `result.result`. Codex emits every completed
 `agentMessage` as assistant activity, while its terminal answer is exactly the
 last completed `agentMessage` text. A failed Codex turn preserves
@@ -216,9 +233,11 @@ active turn, accepts only a response naming that same turn, and then returns an
 opaque fence scoped to that native acknowledgement. Codex supplies no receipt
 stream: successful `turn/steer` acceptance is its strongest terminal evidence.
 Terminal turn observation returns `turn-ended` for new steers immediately, but the adapter keeps
-the RPC transport alive until every already-submitted steer acknowledgement has
-settled; an independently ordered completion notification cannot erase native
-acceptance evidence.
+only acknowledgements received before that terminal observation as native
+acceptance evidence. An already-submitted steer still awaiting acknowledgement
+is rejected when terminal observation closes request admission; terminal
+settlement never waits indefinitely for it, and a later response cannot invent
+acceptance across the closed boundary.
 
 Claude exposes live tell through the same long-lived streaming-input `Query`
 that consumes launch input. The adapter owns one pushable

@@ -184,6 +184,49 @@ test("LineRpcProcess close terminates its complete helper tree", async () => {
   }
 });
 
+test("LineRpcProcess endInputAndDrain admits delayed notifications before producer EOF", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-drain-"));
+  const child = [
+    'process.stdin.resume();',
+    'const send = (method) => process.stdout.write(JSON.stringify({ method }) + "\\n");',
+    'process.stdin.on("end", () => setTimeout(() => { send("item/completed"); process.exit(0); }, 350));',
+    'send("turn/completed");',
+  ].join(" ");
+  try {
+    const rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root });
+    const notifications: string[] = [];
+    let drained: Promise<void> | undefined;
+    rpc.onNotification((notification) => {
+      notifications.push(notification.method);
+      if (notification.method === "turn/completed") drained = rpc.endInputAndDrain();
+    });
+    const deadline = performance.now() + 2_000;
+    while (drained === undefined) {
+      if (performance.now() >= deadline) throw new Error("line RPC terminal notification was not admitted");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    await drained;
+    assert.deepEqual(notifications, ["turn/completed", "item/completed"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("LineRpcProcess endInputAndDrain force-closes an uncooperative producer", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-drain-timeout-"));
+  const child = [
+    "process.stdin.resume();",
+    "process.stdin.on('end',()=>{});",
+    "setInterval(()=>{},1000);",
+  ].join(" ");
+  try {
+    const rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root });
+    const started = performance.now();
+    await rpc.endInputAndDrain(50);
+    assert.ok(performance.now() - started < 1_000);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("detached process collars fence put-down by process identity", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-collar-"));
   try {
