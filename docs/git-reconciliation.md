@@ -62,10 +62,12 @@ non-ignored workspace tree through the same private-index mechanism as delivery.
 The tree must equal one of the journal-sealed trees and `HEAD` must independently
 name one of the journal-sealed commit identities. With no delivery, only start
 is sealed. With a delivery, tender and integration trees are sealed, while
-start, tender, and integration are permitted `HEAD` identities. Dirty submodule
-internals are never sealed. This proof permits the ordinary base-`HEAD` plus
-dirty tender-bytes shape, but rejects a later same-tree commit and every byte not
-represented by a sealed tree.
+start, tender, integration, and the sealed tender commit's first parent are
+permitted `HEAD` identities. That tender-parent case permits the ordinary
+base-`HEAD` plus dirty tender-bytes shape only when the complete captured tree
+equals a sealed tree. Dirty submodule internals are never sealed. The proof
+rejects a later same-tree commit and every byte not represented by a sealed
+tree.
 
 Failure retains the worktree and every required reachability ref, then reports
 `unsealed-bytes` with the least differing path set and, when applicable, the

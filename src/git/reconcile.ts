@@ -30,7 +30,13 @@ import {
   type WorktreeHookLag,
   type WorktreeHooks,
 } from "./hooks.js";
-import { captureWorkspaceTree, deliveryWorktreePath } from "./workspace.js";
+import { deliveryWorktreePath } from "./workspace.js";
+import {
+  terminalSealExpectations,
+  unsealedBytes,
+  type TerminalSealExpectations,
+  type UnsealedBytes,
+} from "./terminal-seal.js";
 
 export type Effect =
   | Readonly<{
@@ -56,12 +62,6 @@ type WorktreeRetained = Readonly<{
   kind: "worktree-retained";
   path: string;
 }>;
-type UnsealedBytes = Readonly<{
-  kind: "unsealed-bytes";
-  path: string;
-  paths: readonly string[];
-  head?: SnapshotId;
-}>;
 export type ReconcileFailure = Readonly<{
   kind: "reconcile-failed";
   stage: "observation" | "effect";
@@ -81,7 +81,7 @@ type TerminalWorktreeCleanup = Readonly<{
   repository: GitRepository;
   topology: WorktreeTopology;
   path: string;
-  expected: ReturnType<typeof terminalSealExpectations>;
+  expected: TerminalSealExpectations;
   hooks: WorktreeHooks;
   retryHooks: boolean;
   acc: ReconcileAccumulation;
@@ -167,38 +167,6 @@ function commitTree(repository: GitRepository, snapshot: SnapshotId): string {
   return runGit(repository, ["rev-parse", "--verify", `${gitObjectIdForSnapshot(snapshot)}^{tree}`])
     .toString("utf8")
     .trim();
-}
-function changedPaths(repository: GitRepository, left: string, right: string): readonly string[] {
-  const fields = runGit(repository, ["diff", "--name-only", "-z", left, right]).toString("utf8").split("\0");
-  if (fields.at(-1) !== "") throw new Error("Git tree diff paths are not NUL terminated");
-  return fields.slice(0, -1).sort();
-}
-function unsealedBytes(
-  repository: GitRepository,
-  path: string,
-  expectedHeads: readonly SnapshotId[],
-  expectedTrees: readonly SnapshotId[],
-): UnsealedBytes | null {
-  const workspace = captureWorkspaceTree(repository, path);
-  const trees = expectedTrees.map((snapshot) => commitTree(repository, snapshot));
-  const headIsSealed = expectedHeads.includes(workspace.head);
-  if (workspace.changes.submodules.length > 0) {
-    return {
-      kind: "unsealed-bytes",
-      path,
-      paths: workspace.changes.submodules,
-      ...(headIsSealed ? {} : { head: workspace.head }),
-    };
-  }
-  if (headIsSealed && trees.includes(workspace.tree)) return null;
-  const alternatives = trees.map((tree) => changedPaths(repository, tree, workspace.tree));
-  alternatives.sort((left, right) => left.length - right.length || left.join("\0").localeCompare(right.join("\0")));
-  return {
-    kind: "unsealed-bytes",
-    path,
-    paths: alternatives[0] ?? [],
-    ...(headIsSealed ? {} : { head: workspace.head }),
-  };
 }
 function removeWorktree(
   repository: GitRepository,
@@ -302,18 +270,6 @@ function reconcileHereWorkspaceRefs(
   return complete(effects, lag);
 }
 
-function terminalSealExpectations(state: ContractState): Readonly<{
-  heads: readonly SnapshotId[];
-  trees: readonly SnapshotId[];
-}> {
-  return state.delivery === null
-    ? { heads: [state.coordinates.start], trees: [state.coordinates.start] }
-    : {
-      heads: [state.coordinates.start, state.delivery.data.tenderSnapshot, state.delivery.data.integration.snapshot],
-      trees: [state.coordinates.start, state.delivery.data.tenderSnapshot, state.delivery.data.integration.snapshot],
-    };
-}
-
 function retainTerminalWorktree(
   path: string,
   retainedLag: ReconcileLag,
@@ -328,11 +284,11 @@ async function removeSealedTerminalWorktree(
   { repository, topology, path, expected, hooks, retryHooks, acc }: TerminalWorktreeCleanup,
 ): Promise<ReconcileResult | null> {
   if (topology.paths.has(path) && existsSync(path)) {
-    const beforeHooks = unsealedBytes(repository, path, expected.heads, expected.trees);
+    const beforeHooks = unsealedBytes(repository, path, expected);
     if (beforeHooks !== null) return retainTerminalWorktree(path, beforeHooks, acc);
     const hookLag = await runDestroyHooks(path, worktreeGitDirectory(repository, path), hooks, retryHooks);
     if (hookLag !== null) return retainTerminalWorktree(path, hookLag, acc);
-    const afterHooks = unsealedBytes(repository, path, expected.heads, expected.trees);
+    const afterHooks = unsealedBytes(repository, path, expected);
     if (afterHooks !== null) return retainTerminalWorktree(path, afterHooks, acc);
   }
   const removal = removeWorktree(repository, topology, path, true);
@@ -388,7 +344,7 @@ async function reconcileTerminalManagedWorktree(
   const ref = deliveryRefFor(state.id);
   const pin = candidatePinRefFor(state.id);
   const path = deliveryWorktreePath(repository, state.id);
-  const expected = terminalSealExpectations(state);
+  const expected = terminalSealExpectations(repository, state);
   acc.effects.push(updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
   if (state.delivery !== null) acc.effects.push(updateRef(primary, pin, state.delivery.data.integration.snapshot));
 

@@ -281,7 +281,9 @@ retains no additional Keiyaku diff blob, permanent ref, or state index.
 Terminal cleanup removes an eligible managed worktree before releasing any
 redundant ref. It compares the complete private-index workspace tree with the
 journal-sealed start, tender, or integration trees and separately requires
-`HEAD` to be a sealed start, tender, or integration commit identity. Matching
+`HEAD` to be a sealed start, tender, integration, or dirty-tender base commit
+identity. The dirty-tender base is the sealed tender commit's first parent and
+only matters when the complete workspace bytes equal a sealed tree. Matching
 bytes therefore remain removable even when ordinary status is dirty, while a
 new same-tree commit remains user work and is retained. No-delivery abandon
 permits only the start tree and start `HEAD`. Dirty submodule internals are

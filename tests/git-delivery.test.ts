@@ -651,6 +651,54 @@ test("terminal reconcile removes a delivered managed worktree reset to its seale
   assert.equal(repository.run(["cat-file", "-e", `${candidate}^{commit}`]), "");
 });
 
+test("terminal reconcile removes dirty deliver bytes over their sealed base HEAD", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
+  await bound.keiyaku.reconcile();
+  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  writeFileSync(join(path, "candidate.txt"), "dirty candidate\n");
+  const baseHead = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
+
+  const delivered = await bound.keiyaku.deliver({ includeDirty: true });
+  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), baseHead);
+  assert.deepEqual(delivered.lags, []);
+  const abandoned = await bound.keiyaku.abandon();
+
+  assert.deepEqual(abandoned.lags, []);
+  assert.equal(abandoned.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"), true);
+  assert.equal(existsSync(path), false);
+});
+
+test("terminal reconcile retains a tender merge second parent despite sealed bytes", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const start = repository.run(["rev-parse", "HEAD"]).trim();
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
+  await bound.keiyaku.reconcile();
+  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  writeFileSync(join(path, "candidate.txt"), "candidate\n");
+  repository.run(["-C", path, "add", "candidate.txt"]);
+  const tenderTree = repository.run(["-C", path, "write-tree"]).trim();
+  const firstParent = repository.run(["commit-tree", tenderTree, "-p", start], "first parent\n").trim();
+  const secondParent = repository.run(["commit-tree", `${start}^{tree}`, "-p", start], "second parent\n").trim();
+  const mergeTender = repository.run(["commit-tree", tenderTree, "-p", firstParent, "-p", secondParent], "merge tender\n").trim();
+  repository.run(["-C", path, "checkout", "--quiet", "--detach", mergeTender]);
+  await bound.keiyaku.deliver();
+  repository.run(["-C", path, "reset", "--soft", secondParent]);
+  await bound.keiyaku.abandon();
+
+  const reconciled = await bound.keiyaku.reconcile();
+
+  assert.deepEqual(reconciled.lag, [{ kind: "unsealed-bytes", path, paths: [], head: secondParent }]);
+  assert.equal(existsSync(path), true);
+  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), secondParent);
+});
+
 test("a clean no-delivery abandonment releases the managed worktree from its start", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);

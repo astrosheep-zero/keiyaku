@@ -193,7 +193,17 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/read-observation.ts", ["withGitReadObservation"]),
         any("git/repository.ts"),
         any("git/target-placement.ts"),
-        any("git/workspace.ts", ["captureWorkspaceTree", "deliveryWorktreePath"]),
+        any("git/terminal-seal.ts"),
+        any("git/workspace.ts", ["deliveryWorktreePath"]),
+      ],
+    },
+    {
+      source: "git/terminal-seal.ts",
+      allow: [
+        types("core/facts/types.ts"),
+        any("git/identity.ts"),
+        any("git/repository.ts"),
+        any("git/workspace.ts", ["captureWorkspaceTree"]),
       ],
     },
     { source: "git/hooks.ts", allow: [any("coordination/durable-file.ts"), any("coordination/sqlite-transaction-lock.ts"), any("runtime/proc/run.ts")] },
