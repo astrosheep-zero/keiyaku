@@ -1,4 +1,4 @@
-import { gatesFrom, Keiyaku, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
+import { gatesFrom, Keiyaku, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type WorktreeHooks } from "../index.js";
 import { kanshi, selectKanshi, selectRegion, type KanshiRegionSelection } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromMutationCall } from "./accepted.js";
@@ -9,7 +9,7 @@ import { bindFromCommand } from "./commands/bind.js";
 import { installHarnesses, type InstallInvocationResult } from "./commands/install.js";
 import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js";
 import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
-import type { DiffUnavailable, InvocationResult, RegionResult } from "./result.js";
+import type { InvocationResult, RegionResult } from "./result.js";
 import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
 import { resolveNamedAddress } from "../library/address.js";
 import type { WorldRoot } from "../world.js";
@@ -133,14 +133,6 @@ async function invokeBind({ parsed, repo, edge, configuration, hooks, establishW
   }
 }
 
-function unavailableDiff(delivery: { integration: { snapshot: SnapshotId; changeId: ChangeId } }): DiffUnavailable {
-  return {
-    reason: "git-unavailable",
-    integrationSnapshot: delivery.integration.snapshot,
-    changeId: delivery.integration.changeId,
-  };
-}
-
 type ExistingSeat = Readonly<{
   contract: KeiyakuContract;
   id: ContractId;
@@ -173,6 +165,7 @@ async function invokeDeliver(
     project: (result) => ({
       obligations: {
         ...(result.value.verification === undefined ? {} : { verification: result.value.verification }),
+        ...(result.value.verificationReuse === undefined ? {} : { verificationReuse: result.value.verificationReuse }),
         ...(result.value.placement === undefined ? {} : { placement: result.value.placement }),
         ...(result.value.cleanup === undefined ? {} : { cleanup: result.value.cleanup }),
         ...(result.value.leak === undefined ? {} : { leak: result.value.leak }),
@@ -204,24 +197,20 @@ async function invokeReview(
 async function invokeAudit(
   parsed: Extract<ExistingCommand, { command: "audit" }>,
   seat: ExistingSeat,
+  requireBranchesToBeUpToDate: boolean,
 ): Promise<InvocationResult> {
-  const delivery = parsed.showDiffBody ? await seat.contract.delivery() : null;
   return resultFromMutationCall(
     "audit",
-    () => seat.contract.audit({ ...(seat.actor === undefined ? {} : { actor: seat.actor }), hooks: seat.hooks }),
+    () => seat.contract.audit({
+      ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+      includeDirty: parsed.includeDirty,
+      showDiff: parsed.showDiffBody,
+      requireBranchesToBeUpToDate,
+      hooks: seat.hooks,
+    }),
     {
       coordinate: seat.id,
-      project: async (result) => {
-        let renderedDiff: string | DiffUnavailable | undefined;
-        if (parsed.showDiffBody && delivery !== null) {
-          const diff = await delivery.diff();
-          renderedDiff = diff === null ? unavailableDiff(delivery) : diff;
-        }
-        return {
-          report: result.value,
-          ...(renderedDiff === undefined ? {} : { diff: renderedDiff }),
-        };
-      },
+      project: (result) => ({ report: result.value }),
     },
   );
 }
@@ -271,7 +260,7 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
         hooks,
       }), { coordinate: id });
     case "audit":
-      return invokeAudit(parsed, seat);
+      return invokeAudit(parsed, seat, selectedGitPolicy(configuration));
     default:
       return parsed satisfies never;
   }

@@ -37,7 +37,9 @@ export type {
   AmendResult,
   AmendInput,
   ArcInput,
+  AuditPreview,
   AuditReport,
+  DeliveryPreparationRefusal,
   BindInput,
   BindResult,
   CallInput,
@@ -94,6 +96,7 @@ export type {
   TaskId,
   TimelineEntry,
   TopologyEffect,
+  VerificationReuse,
   VerificationStop,
   WorktreeHooks,
 } from "./library/keiyaku.js";

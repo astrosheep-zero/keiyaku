@@ -226,6 +226,7 @@ test("accepted text keeps named stops under an accepted header", () => {
     contract,
     head: null,
     facts: [{ contract, entry, kind: "deliver" }],
+    verificationReuse: { entry: "01J00000000000000000000001" as never, verdict: "satisfied" },
     verification: { refusal: { kind: "terminal", contractId: contract } },
     placement: { retry: { kind: "exhausted" } },
     leak: { path: "/tmp/keiyaku-v4-verify-leak", diagnostic: "worktree remove failed" },
@@ -236,6 +237,8 @@ test("accepted text keeps named stops under an accepted header", () => {
   assert.equal(text.split("\n")[0], `✓ deliver accepted — ${contract}`);
   assertBefore(text, "! gate verification", "! gate placement");
   assertBefore(text, "! gate placement", "· ref unchanged");
+  assertBefore(text, `journal ${entry} · deliver`, "reuse verification");
+  assertBefore(text, "reuse verification 01J00000000000000000000001 satisfied", "· ref unchanged");
   assert.match(text, /refusal=terminal/);
   assert.match(text, /terminal/);
   assert.equal(text.split(contract).length - 1, 1);
@@ -439,6 +442,85 @@ test("addressed Contract ID appears once on a refusal receipt", () => {
   assert.equal(text.split(contract).length - 1, 1);
   assert.equal(text.includes("contractId="), false);
   assertJsonIdentity(refused);
+});
+
+test("audit text emits a requested diff body once and omits it without the presentation field", () => {
+  const contract = contractId("kei/render-audit-diff");
+  const candidate = {
+    tenderSnapshot: "tender" as never,
+    integration: {
+      predecessor: "predecessor" as never,
+      snapshot: "snapshot" as never,
+      changeId: "change" as never,
+    },
+    method: "squash" as const,
+    policy: { requireBranchesToBeUpToDate: false },
+  };
+  const body = "diff --git a/candidate.txt b/candidate.txt\n+unique-audit-diff-marker\n";
+  const shown: InvocationResult = {
+    kind: "accepted",
+    verb: "audit",
+    contract,
+    head: null,
+    facts: [],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+    report: {
+      reworks: 0,
+      reviews: 0,
+      timeline: [],
+      preview: { kind: "ready", candidate, diff: body },
+    },
+  };
+  const shownText = renderText(shown, wide);
+  assert.equal("diff" in shown, false);
+  assert.equal(shownText.split("\n")[0], `✓ audit accepted — ${contract}`);
+  assert.match(shownText, /preview ready tender snapshot change/);
+  assert.equal(shownText.split("unique-audit-diff-marker").length - 1, 1);
+  assert.match(shownText, /^\+unique-audit-diff-marker$/m);
+  assert.equal(shown.report?.preview?.kind === "ready" ? shown.report.preview.diff : undefined, body);
+  assert.doesNotMatch(shownText, /"diff":"diff --git/);
+
+  const unavailable: InvocationResult = {
+    kind: "accepted",
+    verb: "audit",
+    contract,
+    head: null,
+    facts: [],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+    report: {
+      reworks: 0,
+      reviews: 0,
+      timeline: [],
+      preview: { kind: "ready", candidate, diff: null },
+    },
+  };
+  const unavailableText = renderText(unavailable, wide);
+  assert.equal("diff" in unavailable, false);
+  assert.equal(unavailable.report?.preview?.kind === "ready" ? unavailable.report.preview.diff : undefined, null);
+  assert.match(unavailableText, /git-unavailable integrationSnapshot=snapshot changeId=change/);
+  assert.doesNotMatch(unavailableText, /"diff":null/);
+
+  const hidden: InvocationResult = {
+    kind: "accepted",
+    verb: "audit",
+    contract,
+    head: null,
+    facts: [],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+    report: {
+      reworks: 0,
+      reviews: 0,
+      timeline: [],
+      preview: { kind: "ready", candidate },
+    },
+  };
+  const hiddenText = renderText(hidden, wide);
+  assert.match(hiddenText, /preview ready tender snapshot change/);
+  assert.equal(hiddenText.includes("unique-audit-diff-marker"), false);
+  assert.equal(hiddenText.includes("diff --git"), false);
 });
 
 test("observation text keeps the command and view data together", () => {

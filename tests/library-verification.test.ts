@@ -6,6 +6,25 @@ import { Keiyaku, Repo } from "../src/index.js";
 import { withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
 
+test("changed worktree after audit prevents Verification reuse", async () => {
+  const repository = repositoryWithMain();
+  const contract = await bind(repository, "exit 0");
+  commitCandidate(repository);
+  const audited = await contract.audit();
+  assert.equal(audited.value.preview?.kind, "ready");
+
+  writeFileSync(join(repository.path, "candidate.txt"), "changed\n");
+  repository.run(["add", "candidate.txt"]);
+  repository.run(["commit", "--quiet", "-m", "changed"]);
+
+  const delivered = await contract.deliver();
+  assert.equal(delivered.value.verificationReuse, undefined);
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
+  assert.notEqual(delivered.value.integration.snapshot, audited.value.preview?.kind === "ready"
+    ? audited.value.preview.candidate.integration.snapshot
+    : undefined);
+});
+
 test("public deliver keeps its Verification admission in accepted facts", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");

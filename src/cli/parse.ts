@@ -106,6 +106,7 @@ export type ParsedLs = Output & Readonly<{ command: "ls"; query: CatalogQuery }>
 export type ParsedAudit = Output & Readonly<{
   command: "audit";
   contract?: string;
+  includeDirty: boolean;
   showDiffBody: boolean;
   actor?: string;
 }>;
@@ -434,6 +435,7 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
       return {
         command: "audit",
         ...(contract === undefined ? {} : { contract }),
+        includeDirty: parts.flags["include-dirty"] === true,
         showDiffBody: parts.flags["show-diff-body"] === true,
         ...(parts.actor === undefined ? {} : { actor: parts.actor }),
         output: parts.output,

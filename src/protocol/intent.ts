@@ -7,7 +7,8 @@ import type { HookFailure } from "../git/hooks.js";
 import { projectSettings } from "../settings.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import { dependencyKeySet } from "../core/subject.js";
-import type { ActorId, ContractId, ContractState, DependencyKeySet } from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState, DependencyKeySet, EntryUlid, SnapshotId } from "../core/facts/types.js";
+import { latestCurrentAttestations } from "../core/facts/gate.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
 import { executeVerification, type VerificationNonterminalOutcome, type VerificationTerminalOutcome } from "../verification/execution.js";
 import { VERIFIED, type VerificationDefinition } from "../verification/declaration.js";
@@ -65,6 +66,7 @@ type VerifyDeliveryInput = Readonly<{
   actor?: ActorId;
   at: string;
   state: ContractState;
+  snapshot?: SnapshotId;
   environment: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   verification?: VerificationDefinition;
@@ -124,23 +126,31 @@ function verificationInput(
   };
 }
 
-/** Run Verification for an observed delivery, then tender its fact. */
+export type CurrentVerifiedAttestation = Readonly<{
+  entry: EntryUlid;
+  verdict: "satisfied" | "unsatisfied";
+}>;
+
+/** Read the latest current verified attestation through the generic currentness judge. */
+export function currentVerifiedAttestation(state: ContractState): CurrentVerifiedAttestation | undefined {
+  const current = latestCurrentAttestations(state, new Set([VERIFIED])).get(VERIFIED);
+  return current === undefined ? undefined : { entry: current.entry, verdict: current.data.verdict };
+}
+
+/** Run Verification against an explicit or admitted integration snapshot. */
 export async function verifyDelivery(
   input: VerifyDeliveryInput,
 ): Promise<VerificationResult | null> {
-  const state = input.state;
-  if (
-    state.delivery === null
-    || input.verification === undefined
-  ) return null;
+  const snapshot = input.snapshot ?? input.state.delivery?.data.integration.snapshot;
+  if (snapshot === undefined || input.verification === undefined) return null;
   const subject = dependencyKeySet([
-    { kind: "snapshot", value: state.delivery.data.integration.snapshot },
+    { kind: "snapshot", value: snapshot },
     { kind: "segment", value: input.verification.segment },
   ]);
 
   const execution = await executeVerification({
     repository: input.repository,
-    candidate: state.delivery.data.integration.snapshot,
+    candidate: snapshot,
     declarations: input.verification.declarations,
     environment: input.environment,
     materializeScratchCandidate,

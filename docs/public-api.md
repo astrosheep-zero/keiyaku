@@ -286,7 +286,14 @@ keiyaku.abandon(input?: {
   hooks?: WorktreeHooks
 }): Promise<MutationResult<void>>
 keiyaku.arc(input: { markdown: string; actor?: ActorId; hooks?: WorktreeHooks }): Promise<MutationResult<void>>
-keiyaku.audit(input?: { actor?: ActorId; signal?: AbortSignal; hooks?: WorktreeHooks }): Promise<MutationResult<AuditReport>>
+keiyaku.audit(input?: {
+  actor?: ActorId;
+  includeDirty?: boolean;
+  showDiff?: boolean;
+  requireBranchesToBeUpToDate?: boolean;
+  signal?: AbortSignal;
+  hooks?: WorktreeHooks;
+}): Promise<MutationResult<AuditReport>>
 keiyaku.reconcile(input?: ReconcileInput): Promise<ReconcileReport>
 
 delivery.diff(): Promise<string | null>
@@ -296,7 +303,11 @@ delivery.diff(): Promise<string | null>
 authorizes the complete non-ignored staged, unstaged, and untracked final tree;
 it does not select only staged paths and never includes dirty submodule
 internals. Omission and `false` are identical. Git performs the capture without
-changing the caller's real `HEAD`, index, branch, or files.
+changing the caller's real `HEAD`, index, branch, or files. Audit receives the
+same clean-worktree default and the same `includeDirty` authorization. It does
+not accept a custom commit message. `showDiff: true` asks the accepted audit
+result to carry the prospective predecessor-to-candidate diff; omission leaves
+those bytes off the report.
 
 When a delivery or audit runs Verification, the library materializes the
 integration snapshot into a private scratch worktree and derives its worktree

@@ -271,6 +271,97 @@ test("architecture policy keeps receipt folding out of operation orchestration",
   assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
 
+test("architecture policy lets Verification protocol own generic currentness lookup", () => {
+  const accepted = check({
+    "core/facts/gate.ts": "export function latestCurrentAttestations(): void {}",
+    "verification/declaration.ts": "export const VERIFIED = 'verified';",
+    "protocol/intent.ts": [
+      'import { latestCurrentAttestations } from "../core/facts/gate.js";',
+      'import { VERIFIED } from "../verification/declaration.js";',
+      "export function current(): void { latestCurrentAttestations(); void VERIFIED; }",
+    ].join("\n"),
+  });
+  assert.deepEqual(accepted, []);
+
+  const rejectedLookup = check({
+    "core/facts/gate.ts": "export function latestCurrentAttestations(): void {}",
+    "protocol/operations.ts": 'import { latestCurrentAttestations } from "../core/facts/gate.js"; export function complete(): void { latestCurrentAttestations(); }',
+  });
+  assert.deepEqual(rules(rejectedLookup), ["architecture/dependency-direction"]);
+
+  const rejectedVerified = check({
+    "verification/declaration.ts": "export const VERIFIED = 'verified';",
+    "protocol/operations.ts": 'import { VERIFIED } from "../verification/declaration.js"; export function complete(): void { void VERIFIED; }',
+  });
+  assert.deepEqual(rules(rejectedVerified), ["architecture/dependency-direction"]);
+
+  const rejectedOtherGate = check({
+    "core/facts/gate.ts": "export function gateReports(): void {}",
+    "protocol/intent.ts": 'import { gateReports } from "../core/facts/gate.js"; export function verify(): void { gateReports(); }',
+  });
+  assert.deepEqual(rules(rejectedOtherGate), ["architecture/dependency-direction"]);
+});
+
+test("architecture policy gives public audit invocation one library owner", () => {
+  const accepted = check({
+    "protocol/operations.ts": "export function auditOperation(): void {} export type AuditReport = {}; export type RepositoryScope = {};",
+    "library/input.ts": "export function requireInput(): void {} export function documentDerivation(): void {}",
+    "library/mutation.ts": "export function completeMutation(): void {}",
+    "library/refusal.ts": "export function requireAccepted(): void {}",
+    "library/configuration.ts": "export function worktreeHooksOption(): void {}",
+    "library/audit.ts": [
+      'import { auditOperation } from "../protocol/operations.js";',
+      'import { documentDerivation, requireInput } from "./input.js";',
+      'import { completeMutation } from "./mutation.js";',
+      'import { requireAccepted } from "./refusal.js";',
+      'import { worktreeHooksOption } from "./configuration.js";',
+      "export type AuditInput = {};",
+      "export function auditContract(): void { requireInput(); worktreeHooksOption(); documentDerivation(); requireAccepted(); auditOperation(); completeMutation(); }",
+    ].join("\n"),
+    "library/contract.ts": 'import { auditContract, type AuditInput } from "./audit.js"; export type Input = AuditInput; export function audit(): void { auditContract(); }',
+  });
+  assert.deepEqual(accepted, []);
+
+  const rejectedFacade = check({
+    "protocol/operations.ts": "export function auditOperation(): void {}",
+    "library/contract.ts": 'import { auditOperation } from "../protocol/operations.js"; export function audit(): void { auditOperation(); }',
+  });
+  assert.deepEqual(rules(rejectedFacade), ["architecture/dependency-direction"]);
+
+  const rejectedGate = check({
+    "core/facts/gate.ts": "export function latestCurrentAttestations(): void {}",
+    "library/audit.ts": 'import { latestCurrentAttestations } from "../core/facts/gate.js"; export function audit(): void { latestCurrentAttestations(); }',
+  });
+  assert.deepEqual(rules(rejectedGate), ["architecture/dependency-direction"]);
+
+  const rejectedObserver = check({
+    "git/target-placement.ts": "export function observeTargetPlacement(): void {}",
+    "library/audit.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export function audit(): void { observeTargetPlacement(); }',
+  });
+  assert.deepEqual(rules(rejectedObserver), ["architecture/dependency-direction"]);
+});
+
+test("architecture policy keeps physical target observation behind placement protocol", () => {
+  const accepted = check({
+    "git/target-placement.ts": "export function observeTargetPlacement(): void {} export type TargetPlacementRefusal = {};",
+    "protocol/placement.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export function observe(): void { observeTargetPlacement(); }',
+    "verification/declaration.ts": "export type VerificationDeclarationPreparation = {};",
+    "protocol/operations.ts": [
+      'import type { TargetPlacementRefusal } from "../git/target-placement.js";',
+      'import type { VerificationDeclarationPreparation } from "../verification/declaration.js";',
+      "export type Refusal = TargetPlacementRefusal;",
+      "export type Prep = VerificationDeclarationPreparation;",
+    ].join("\n"),
+  });
+  assert.deepEqual(accepted, []);
+
+  const rejected = check({
+    "git/target-placement.ts": "export function observeTargetPlacement(): void {}",
+    "protocol/operations.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export function audit(): void { observeTargetPlacement(); }',
+  });
+  assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
+});
+
 test("architecture policy permits the aggregate status read path", () => {
   const diagnostics = check({
     "core/facts/types.ts": "export type ContractId = string; export type ContractState = {}; export type SnapshotId = string;",

@@ -12,6 +12,8 @@ import {
   followTargetPlacement,
   prepareTargetPlacement,
   observeTargetHead,
+  observeTargetPlacement,
+  type TargetPlacementObservationInput,
   type TargetPlacementRefusal,
 } from "../git/target-placement.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
@@ -47,9 +49,35 @@ function placementFailure(error: unknown): PlacementExecutionFailure {
   return { kind: "placement-failed", diagnostic: error instanceof Error ? error.message : String(error) };
 }
 
-function expectedPlacementFailure(error: unknown): PlacementExecutionFailure {
-  if (error instanceof GitPlumbingError || error instanceof SqliteTransactionLockError) return placementFailure(error);
+function expectedOperationalDiagnostic(error: unknown): string {
+  if (error instanceof GitPlumbingError || error instanceof SqliteTransactionLockError) {
+    return error instanceof Error ? error.message : String(error);
+  }
   throw error;
+}
+
+function expectedPlacementFailure(error: unknown): PlacementExecutionFailure {
+  return { kind: "placement-failed", diagnostic: expectedOperationalDiagnostic(error) };
+}
+
+export type ProspectiveTargetPreview =
+  | Readonly<{ kind: "ready" }>
+  | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+
+/** Observe prospective target followability without fencing or placing. */
+export async function observeProspectiveTargetPlacement(
+  repository: GitRepository,
+  input: TargetPlacementObservationInput,
+): Promise<ProspectiveTargetPreview> {
+  try {
+    const observed = await observeTargetPlacement(repository, input);
+    return observed.kind === "ready"
+      ? { kind: "ready" }
+      : { kind: "refused", refusal: observed.refusal };
+  } catch (error) {
+    return { kind: "failed", diagnostic: expectedOperationalDiagnostic(error) };
+  }
 }
 
 async function runFencedPlacement(

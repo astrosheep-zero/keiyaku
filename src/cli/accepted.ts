@@ -26,7 +26,7 @@ type ResultOptions = Readonly<{
   target?: string | null;
   report?: import("../index.js").AuditReport;
   workspace?: AcceptedResult["workspace"];
-  obligations?: Pick<AcceptedResult, "verification" | "placement" | "leak">;
+  obligations?: Pick<AcceptedResult, "verification" | "verificationReuse" | "placement" | "cleanup" | "leak">;
   diff?: AcceptedResult["diff"];
 }>;
 

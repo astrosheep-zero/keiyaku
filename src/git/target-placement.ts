@@ -322,18 +322,33 @@ export async function acquireTargetPlacementFence(
   });
 }
 
-export async function prepareTargetPlacement(
+export type TargetedContractCoordinates = ContractState["coordinates"] & Readonly<{ target: string }>;
+
+export type TargetPlacementObservationInput = Readonly<{
+  contractId: ContractId;
+  coordinates: TargetedContractCoordinates;
+  predecessor: SnapshotId;
+  candidate: SnapshotId;
+}>;
+
+export type TargetPlacementObservation =
+  | Readonly<{ kind: "ready"; arms: readonly FollowArm[] }>
+  | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>;
+
+/** Observe whether registered target checkouts can follow a predecessor-to-candidate movement. */
+export async function observeTargetPlacement(
   repository: GitRepository,
-  state: ContractState,
-  target: RefOperation,
-): Promise<TargetPlacementPreparation> {
-  if (state.coordinates.target !== target.target || state.delivery?.data.integration.snapshot !== target.newOid) {
-    throw new Error("placement state does not match its offered target movement");
-  }
+  input: TargetPlacementObservationInput,
+): Promise<TargetPlacementObservation> {
+  const target: RefOperation = {
+    target: input.coordinates.target,
+    expectedOid: input.predecessor,
+    newOid: input.candidate,
+  };
   const worktrees = (await registeredWorktrees(repository))
     .filter((worktree) => worktree.branch === target.target)
     .sort((left, right) => left.path.localeCompare(right.path));
-  const hereSource = state.coordinates.workspace === "here" ? await sourceWorktree(repository) : null;
+  const hereSource = input.coordinates.workspace === "here" ? await sourceWorktree(repository) : null;
   if (hereSource !== null) {
     const branch = await currentBranch(repository, hereSource);
     if (branch !== target.target) {
@@ -341,7 +356,7 @@ export async function prepareTargetPlacement(
         kind: "refused",
         refusal: {
           kind: "workspace-not-on-target",
-          contractId: state.id,
+          contractId: input.contractId,
           target: target.target,
           branch,
         },
@@ -353,7 +368,7 @@ export async function prepareTargetPlacement(
   for (const worktree of worktrees) {
     const kind = hereSource !== null && resolve(worktree.path) === hereSource ? "here" : "ordinary";
     if (kind === "ordinary") {
-      const refusal = await ordinaryPrecheck(repository, state.id, target, worktree.path);
+      const refusal = await ordinaryPrecheck(repository, input.contractId, target, worktree.path);
       if (refusal !== null) return { kind: "refused", refusal };
     }
     arms.push({ kind, path: worktree.path });
@@ -361,7 +376,26 @@ export async function prepareTargetPlacement(
   if (hereSource !== null && !arms.some((arm) => arm.kind === "here")) {
     throw new Error("targeted here workspace is not a registered checkout of its target");
   }
-  return { kind: "prepared", placement: { target, arms } };
+  return { kind: "ready", arms };
+}
+
+export async function prepareTargetPlacement(
+  repository: GitRepository,
+  state: ContractState,
+  target: RefOperation,
+): Promise<TargetPlacementPreparation> {
+  if (state.coordinates.target !== target.target || state.delivery?.data.integration.snapshot !== target.newOid) {
+    throw new Error("placement state does not match its offered target movement");
+  }
+  const observation = await observeTargetPlacement(repository, {
+    contractId: state.id,
+    coordinates: { ...state.coordinates, target: target.target },
+    predecessor: target.expectedOid,
+    candidate: target.newOid,
+  });
+  return observation.kind === "refused"
+    ? observation
+    : { kind: "prepared", placement: { target, arms: observation.arms } };
 }
 
 export async function followTargetPlacement(

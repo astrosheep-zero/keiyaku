@@ -1,10 +1,103 @@
 import type { BindDraftReceipt, RefusedResult } from "../result.js";
 import type { KeiyakuRefusal } from "../../index.js";
-import { renderRefusalFacts } from "./contract.js";
-import { displayColumns, safeText, type TextRenderContext } from "./terminal.js";
+import { displayColumns, renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
+
+type DirtyWithOption = Extract<KeiyakuRefusal, { kind: "dirty-workspace" }> & {
+  option?: Readonly<{ flag: string; available: boolean }>;
+};
+export type RenderableRefusal = KeiyakuRefusal | DirtyWithOption;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function wrap(lines: string[], text: string, indent: string, columns: number): void {
+  lines.push(...renderOpaqueBlock(text, indent, columns));
+}
+
+function collectionLines(
+  name: string,
+  members: readonly string[],
+  indent: string,
+  columns: number,
+): readonly string[] {
+  if (members.length === 0) return renderOpaqueBlock(`${name} 0`, indent, columns);
+  return [
+    ...renderOpaqueBlock(name, indent, columns),
+    ...members.flatMap((member) => renderOpaqueBlock(member, `${indent}│ `, columns)),
+  ];
+}
+
+function skipAddressedContract(addressed: string | undefined, contractId: string | undefined): boolean {
+  return addressed !== undefined && contractId === addressed;
+}
+
+function refusalIdentity(refusal: RenderableRefusal, addressed?: string): string | undefined {
+  const contractId = "contractId" in refusal ? refusal.contractId : undefined;
+  return skipAddressedContract(addressed, contractId) ? undefined : contractId;
+}
+
+function refusalHead(kind: string, identity: string | undefined, details: readonly string[]): string {
+  return [kind, identity === undefined ? undefined : `contractId=${identity}`, ...details]
+    .filter((part): part is string => part !== undefined).join(" ");
+}
+
+function renderDirtyRefusal(
+  refusal: DirtyWithOption,
+  indent: string,
+  columns: number,
+  identity: string | undefined,
+): readonly string[] {
+  const lines: string[] = [];
+  wrap(lines, refusalHead(refusal.kind, identity, []), indent, columns);
+  for (const name of ["staged", "unstaged", "untracked", "submodules"] as const) {
+    lines.push(...collectionLines(name, refusal[name], indent, columns));
+  }
+  const { filesChanged, insertions, deletions } = refusal.shortStat;
+  wrap(lines, `shortstat files=${filesChanged} insertions=${insertions} deletions=${deletions}`, indent, columns);
+  if (refusal.option !== undefined) {
+    wrap(lines, `option ${refusal.option.flag} ${refusal.option.available ? "available" : "unavailable"}`, indent, columns);
+  }
+  return lines;
+}
+
+export function renderRefusalFacts(
+  refusal: RenderableRefusal,
+  indent: string,
+  columns: number,
+  addressed?: string,
+): readonly string[] {
+  const identity = refusalIdentity(refusal, addressed);
+  if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
+  if (refusal.kind === "integration-failed") {
+    const lines = [
+      ...renderOpaqueBlock(refusalHead(refusal.kind, identity, [`reason=${refusal.reason}`, `targetHead=${refusal.targetHead}`]), indent, columns),
+    ];
+    if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflictPaths", refusal.conflictPaths, indent, columns));
+    return lines;
+  }
+  if (refusal.kind === "integration-unsupported") {
+    return renderOpaqueBlock(refusalHead(refusal.kind, identity, [`requiredGit=${refusal.requiredGit}`]), indent, columns);
+  }
+  if (refusal.kind === "checkout-not-followable") {
+    const lines = [...renderOpaqueBlock(refusalHead(refusal.kind, identity, [`target=${refusal.target}`, `path=${refusal.path}`, `reason=${refusal.reason}`]), indent, columns)];
+    lines.push(...collectionLines("paths", refusal.paths, indent, columns));
+    return lines;
+  }
+  if (refusal.kind === "workspace-not-on-target") {
+    return renderOpaqueBlock(refusalHead(refusal.kind, identity, [`target=${refusal.target}`, `branch=${refusal.branch}`]), indent, columns);
+  }
+  if (refusal.kind === "here-target-mismatch") {
+    return renderOpaqueBlock(`here-target-mismatch target=${refusal.target} branch=${refusal.branch}`, indent, columns);
+  }
+  if (refusal.kind === "here-worktree-appointed") {
+    return renderOpaqueBlock(
+      refusalHead(refusal.kind, undefined, [refusal.contract === undefined ? "" : `contract=${refusal.contract}`, `path=${refusal.path}`]),
+      indent,
+      columns,
+    );
+  }
+  return renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns);
 }
 
 export function renderRefusal(result: RefusedResult, context?: TextRenderContext): string {
@@ -17,7 +110,7 @@ export function renderRefusal(result: RefusedResult, context?: TextRenderContext
       : [`${base} —`, `  ${safeText(result.contract)}`];
   if (isRecord(result.refusal) && typeof result.refusal.kind === "string") {
     lines.push(...renderRefusalFacts(
-      result.refusal as KeiyakuRefusal,
+      result.refusal as RenderableRefusal,
       "   ",
       columns,
       result.contract,

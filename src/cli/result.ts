@@ -9,6 +9,7 @@ import type {
   Review,
   SettlementReport,
   SnapshotId,
+  VerificationReuse,
   VerificationStop,
 } from "../index.js";
 import type { KanshiReport } from "../kanshi/index.js";
@@ -46,6 +47,7 @@ export type AcceptedResult = Readonly<{
   settlement: SettlementReport;
   target?: string | null;
   verification?: VerificationStop;
+  verificationReuse?: VerificationReuse;
   placement?: PlacementStop;
   cleanup?: NonNullable<AuditReport["cleanup"]>;
   leak?: NonNullable<AuditReport["leak"]>;

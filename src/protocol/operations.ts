@@ -46,12 +46,20 @@ import { decideAttestation, type AttestationInput, type AttestationRefusal } fro
 import type { VerificationDeclarationPreparation, VerificationDeclarationRefusal } from "../verification/declaration.js";
 import {
   admitIntent,
+  currentVerifiedAttestation,
   verifyDelivery,
+  type CurrentVerifiedAttestation,
+  type VerificationResult,
   type VerificationStep,
   type VerificationRuntimeStop,
   type VerificationCleanupFailure,
 } from "./intent.js";
-import { admitPlacement, type PlacementProtocolResult } from "./placement.js";
+import {
+  admitPlacement,
+  observeProspectiveTargetPlacement,
+  type PlacementProtocolResult,
+  type ProspectiveTargetPreview,
+} from "./placement.js";
 import type { TargetPlacementRefusal } from "../git/target-placement.js";
 import { auditReport, readAuditAt, type AuditReport as AuditReadReport } from "./read/audit.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
@@ -81,7 +89,7 @@ import type { CompanionDecorator } from "./run.js";
 
 export type { FactKind, TimelineEntry } from "./read/audit.js";
 export type { ContractDocumentProjection } from "./read/documents.js";
-type DeliveryPreparationRefusal = Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
+export type DeliveryPreparationRefusal = Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
   | DirtyWorkspaceRefusal
   | IntegrationPreparationRefusal
   | TargetPlacementRefusal;
@@ -105,7 +113,25 @@ export type IntentOutcome<Value, Refusal = IntentRefusal> = ProtocolIntentOutcom
 type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId; actor?: ActorId }>;
 type MutationOperationInput = OperationInput & Readonly<{ channel: GitDecodeChannel }>;
 
-export type AuditReport = AuditReadReport & Readonly<{ attempt?: VerificationStop; cleanup?: VerificationCleanupFailure; leak?: WorktreeLeak }>;
+export type AuditTargetPreview = ProspectiveTargetPreview;
+
+export type AuditPreview =
+  | Readonly<{ kind: "blocked"; refusal: DeliveryPreparationRefusal }>
+  | Readonly<{
+      kind: "ready";
+      candidate: DeliveryIdentity;
+      target?: AuditTargetPreview;
+      diff?: string | null;
+    }>;
+
+export type AuditReport = AuditReadReport & Readonly<{
+  preview?: AuditPreview;
+  attempt?: VerificationStop;
+  cleanup?: VerificationCleanupFailure;
+  leak?: WorktreeLeak;
+}>;
+
+export type VerificationReuse = CurrentVerifiedAttestation;
 
 export type DocumentDerivation = Readonly<{ document: DocumentKey; title: string; verification: VerificationDeclarationPreparation }>;
 
@@ -136,6 +162,24 @@ function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> |
 
 function verificationStop(step: VerificationStep): VerificationStop | undefined {
   return "failure" in step ? step : stepStop(step);
+}
+
+function unpackVerificationOutcome(verification: VerificationResult): Readonly<{
+  cleanup?: VerificationCleanupFailure;
+  leak?: WorktreeLeak;
+  stop?: VerificationStop;
+  admission?: AcceptedProtocolStep;
+}> {
+  const stop = verificationStop(verification.step);
+  const admission = !("failure" in verification.step) && verification.step.kind === "accepted"
+    ? verification.step
+    : undefined;
+  return {
+    ...(verification.cleanup === undefined ? {} : { cleanup: verification.cleanup }),
+    ...(verification.leak === undefined ? {} : { leak: verification.leak }),
+    ...(stop === undefined ? {} : { stop }),
+    ...(admission === undefined ? {} : { admission }),
+  };
 }
 
 function placementStop(result: PlacementProtocolResult): PlacementStop | undefined {
@@ -281,7 +325,13 @@ export async function amendOperation(
   return { kind: "retry", reason: { kind: "exhausted" } };
 }
 
-export type DeliverValue = DeliveryIdentity & Readonly<{ verification?: VerificationStop; placement?: PlacementStop; cleanup?: VerificationCleanupFailure; leak?: WorktreeLeak }>;
+export type DeliverValue = DeliveryIdentity & Readonly<{
+  verification?: VerificationStop;
+  verificationReuse?: VerificationReuse;
+  placement?: PlacementStop;
+  cleanup?: VerificationCleanupFailure;
+  leak?: WorktreeLeak;
+}>;
 
 type AttemptDecision<Value, Refusal = IntentRefusal> =
   | (AcceptedAdmission & Readonly<{ value: Value }>)
@@ -422,27 +472,33 @@ async function completeDelivery(
   }
   let admission: AcceptedProtocolStep = first;
   let verificationValue: VerificationStop | undefined;
+  let verificationReuse: VerificationReuse | undefined;
   let cleanup: VerificationCleanupFailure | undefined;
   let leak: WorktreeLeak | undefined;
-  const verification = await verifyDelivery({
-    channel: input.channel,
-    repository: input.scope,
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-    state: first.state,
-    environment: process.env,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-    ...(derivation.verification.data === null
-      ? {}
-      : { verification: derivation.verification.data }),
-  });
-  if (verification !== null) {
-    cleanup = verification.cleanup;
-    leak = verification.leak;
-    verificationValue = verificationStop(verification.step);
-    if (!("failure" in verification.step) && verification.step.kind === "accepted") {
-      admission = mergeAdmissions(admission, verification.step);
+  const currentVerified = currentVerifiedAttestation(first.state);
+  if (currentVerified !== undefined) {
+    verificationReuse = currentVerified;
+  } else {
+    const verification = await verifyDelivery({
+      channel: input.channel,
+      repository: input.scope,
+      contractId: input.contractId,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+      at: timestamp(),
+      state: first.state,
+      snapshot: first.value.delivery.integration.snapshot,
+      environment: process.env,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(derivation.verification.data === null
+        ? {}
+        : { verification: derivation.verification.data }),
+    });
+    if (verification !== null) {
+      const unpacked = unpackVerificationOutcome(verification);
+      cleanup = unpacked.cleanup;
+      leak = unpacked.leak;
+      verificationValue = unpacked.stop;
+      if (unpacked.admission !== undefined) admission = mergeAdmissions(admission, unpacked.admission);
     }
   }
   const placement = await admitPlacement(input.channel, input.scope, first.state.coordinates.target, {
@@ -455,6 +511,7 @@ async function completeDelivery(
   return admitted(admission, {
     ...first.value.delivery,
     ...(verificationValue === undefined ? {} : { verification: verificationValue }),
+    ...(verificationReuse === undefined ? {} : { verificationReuse }),
     ...(placementValue === undefined ? {} : { placement: placementValue }),
     ...(cleanup === undefined ? {} : { cleanup }),
     ...(leak === undefined ? {} : { leak }),
@@ -608,14 +665,66 @@ export async function reviewOperation(
   });
 }
 
-export async function auditOperation(
-  input: MutationOperationInput & Readonly<{
-    deriveDocument?: (state: ContractState) => DocumentDerivation;
-    signal?: AbortSignal;
-  }>,
-): Promise<IntentOutcome<AuditReport>> {
-  const git = input.scope;
-  const initial = await readAuditAt(git, input.channel, input.contractId, REVIEWED);
+type AuditOperationInput = MutationOperationInput & Readonly<{
+  deriveDocument?: (state: ContractState) => DocumentDerivation;
+  requireBranchesToBeUpToDate?: boolean;
+  includeDirty?: boolean;
+  showDiff?: boolean;
+  signal?: AbortSignal;
+}>;
+
+async function auditCandidateVerification(
+  input: AuditOperationInput,
+  state: ContractState,
+  snapshot: SnapshotId,
+  definition: NonNullable<DocumentDerivation["verification"]["data"]>,
+): Promise<ReturnType<typeof unpackVerificationOutcome>> {
+  const verification = await verifyDelivery({
+    channel: input.channel,
+    repository: input.scope,
+    contractId: input.contractId,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    at: timestamp(),
+    state,
+    snapshot,
+    environment: process.env,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    verification: definition,
+  });
+  if (verification === null) {
+    throw new Error("audit verification preparation unexpectedly produced no attempt");
+  }
+  return unpackVerificationOutcome(verification);
+}
+
+async function readyAuditPreview(
+  repository: RepositoryScope,
+  state: ContractState,
+  candidate: DeliveryIdentity,
+  showDiff: boolean,
+): Promise<Extract<AuditPreview, { kind: "ready" }>> {
+  const targetName = state.coordinates.target;
+  const target = targetName === undefined
+    ? undefined
+    : await observeProspectiveTargetPlacement(repository, {
+      contractId: state.id,
+      coordinates: { ...state.coordinates, target: targetName },
+      predecessor: candidate.integration.predecessor,
+      candidate: candidate.integration.snapshot,
+    });
+  const diff = showDiff
+    ? await readDeliveryDiff(repository, candidate.integration.predecessor, candidate.integration.snapshot)
+    : undefined;
+  return {
+    kind: "ready",
+    candidate,
+    ...(target === undefined ? {} : { target }),
+    ...(diff === undefined ? {} : { diff }),
+  };
+}
+
+export async function auditOperation(input: AuditOperationInput): Promise<IntentOutcome<AuditReport>> {
+  const initial = await readAuditAt(input.scope, input.channel, input.contractId, REVIEWED);
   if (initial.state === null) return { kind: "refused", refusal: { kind: "contract-missing", contractId: input.contractId } };
   const derivation = input.deriveDocument?.(initial.state);
   if (derivation === undefined || !documentIsCurrent(initial.state, derivation.document)) {
@@ -625,37 +734,34 @@ export async function auditOperation(
     return { kind: "refused", refusal: derivation.verification.refusal };
   }
 
-  if (initial.state.delivery === null || derivation.verification.data === null) {
-    return accepted(initial.state, [], initial.report);
+  const prepared = await prepareDelivery(input.scope, {
+    contractId: initial.state.id,
+    coordinates: initial.state.coordinates,
+  }, {
+    title: derivation.title,
+    requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate ?? false,
+    includeDirty: input.includeDirty ?? false,
+  });
+  if (prepared.kind === "refused") {
+    return accepted(initial.state, [], { ...initial.report, preview: { kind: "blocked", refusal: prepared.refusal } });
   }
 
-  const verification = await verifyDelivery({
-    channel: input.channel,
-    repository: git,
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-    state: initial.state,
-    environment: process.env,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-    verification: derivation.verification.data,
-  });
-  if (verification === null) {
-    throw new Error("audit verification preparation unexpectedly produced no attempt");
-  }
-  const attempt = verificationStop(verification.step);
-  const report = !("failure" in verification.step) && verification.step.kind === "accepted"
-    ? auditReport(verification.step.journal, REVIEWED, initial.state, initial.report.targetObservation)
-    : initial.report;
-  const value = {
+  const verified = derivation.verification.data === null
+    ? undefined
+    : await auditCandidateVerification(input, initial.state, prepared.data.integration.snapshot, derivation.verification.data);
+  const report = verified?.admission === undefined
+    ? initial.report
+    : auditReport(verified.admission.journal, REVIEWED, initial.state, initial.report.targetObservation);
+  const value: AuditReport = {
     ...report,
-    ...(attempt === undefined ? {} : { attempt }),
-    ...(verification.cleanup === undefined ? {} : { cleanup: verification.cleanup }),
-    ...(verification.leak === undefined ? {} : { leak: verification.leak }),
+    preview: await readyAuditPreview(input.scope, initial.state, prepared.data, input.showDiff === true),
+    ...(verified?.stop === undefined ? {} : { attempt: verified.stop }),
+    ...(verified?.cleanup === undefined ? {} : { cleanup: verified.cleanup }),
+    ...(verified?.leak === undefined ? {} : { leak: verified.leak }),
   };
-  return !("failure" in verification.step) && verification.step.kind === "accepted"
-    ? admitted(verification.step, value)
-    : accepted(initial.state, [], value);
+  return verified?.admission === undefined
+    ? accepted(initial.state, [], value)
+    : admitted(verified.admission, value);
 }
 
 export type ReconcileReport = ReconcileResult;

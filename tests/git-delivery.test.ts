@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import test from "node:test";
 import { prepareDelivery, prepareReview } from "../src/protocol/operations.js";
 import { mintSnapshotId } from "../src/git/identity.js";
+import { observeTargetPlacement } from "../src/git/target-placement.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
 import { readDeliveryDiff } from "../src/git/integration.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
@@ -384,6 +385,77 @@ test("a deep candidate write does not observe ignored sibling contents", async (
   assert.equal(delivered.value.placement, undefined);
   assert.equal(readFileSync(join(repository.path, "artifact", "deep", "result.txt"), "utf8"), "candidate\n");
   assert.equal(readFileSync(join(cache, "entry-4999.tmp"), "utf8"), "cache");
+});
+
+test("target placement observation reports checkout collisions without moving the target", async () => {
+  const { contract, repository, worktree, state } = await targetedContract();
+  const collision = "literal[1].tmp";
+  writeFileSync(join(repository.path, ".gitignore"), "literal*.tmp\n");
+  repository.run(["add", ".gitignore"]);
+  repository.run(["commit", "--quiet", "-m", "ignore literal candidate"]);
+  writeFileSync(join(repository.path, collision), "local\n");
+  writeFileSync(join(worktree, collision), "candidate\n");
+  repository.run(["-C", worktree, "add", collision]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "literal candidate"]);
+  const git = await repositoryAt(repository.path);
+  const prepared = await prepareDelivery(git, preparationCoordinates(state), { title: "Delivery patch identity" });
+  assert.equal(prepared.kind, "prepared");
+  if (prepared.kind !== "prepared") throw new Error("delivery preparation was refused");
+  const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
+  const indexBefore = repository.run(["diff", "--cached", "--binary"]);
+  const worktreeBefore = repository.run(["status", "--porcelain=v1", "--untracked-files=all"]);
+
+  const targetName = state.coordinates.target;
+  assert.notEqual(targetName, undefined);
+  if (targetName === undefined) return;
+  const observed = await observeTargetPlacement(git, {
+    contractId: state.id,
+    coordinates: { ...state.coordinates, target: targetName },
+    predecessor: mintSnapshotId(target),
+    candidate: prepared.data.integration.snapshot,
+  });
+
+  assert.equal(observed.kind, "refused");
+  if (observed.kind !== "refused") return;
+  assert.equal(observed.refusal.kind, "checkout-not-followable");
+  if (observed.refusal.kind !== "checkout-not-followable") return;
+  assert.equal(observed.refusal.reason, "untracked");
+  assert.deepEqual(observed.refusal.paths, [collision]);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
+  assert.equal(repository.run(["diff", "--cached", "--binary"]), indexBefore);
+  assert.equal(repository.run(["status", "--porcelain=v1", "--untracked-files=all"]), worktreeBefore);
+  assert.equal(readFileSync(join(repository.path, collision), "utf8"), "local\n");
+
+  const delivered = await contract.deliver();
+  assert.deepEqual(delivered.value.placement?.refusal, observed.refusal);
+});
+
+test("target placement observation reports a ready targeted candidate without following it", async () => {
+  const { repository, worktree, state } = await targetedContract();
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
+  const git = await repositoryAt(repository.path);
+  const prepared = await prepareDelivery(git, preparationCoordinates(state), { title: "Delivery patch identity" });
+  assert.equal(prepared.kind, "prepared");
+  if (prepared.kind !== "prepared") throw new Error("delivery preparation was refused");
+  const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
+
+  const targetName = state.coordinates.target;
+  assert.notEqual(targetName, undefined);
+  if (targetName === undefined) return;
+  const observed = await observeTargetPlacement(git, {
+    contractId: state.id,
+    coordinates: { ...state.coordinates, target: targetName },
+    predecessor: mintSnapshotId(target),
+    candidate: prepared.data.integration.snapshot,
+  });
+
+  assert.equal(observed.kind, "ready");
+  if (observed.kind !== "ready") return;
+  assert.deepEqual(observed.arms.map((arm) => arm.kind), ["ordinary"]);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
+  assert.equal(existsSync(join(repository.path, "candidate.txt")), false);
 });
 
 test("ignored custody treats candidate metacharacters as a literal path", async () => {

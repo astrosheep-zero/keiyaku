@@ -154,7 +154,7 @@ test("a stale document derivation is refused inside its E-decision", async () =>
   });
 });
 
-test("read-only audit returns its initial observation when verification is skipped", async () => {
+test("audit without Verification still returns an accepted candidate preview", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
@@ -165,7 +165,7 @@ test("read-only audit returns its initial observation when verification is skipp
   const contractId = (await bound.keiyaku.state()).id;
   const initial = await withGitDecodeChannel(scope, (channel) => readAuditAt(scope, channel, contractId, gate("reviewed")));
   const decoded = decodeContractDocument(initial.state!.terms.document.bytes);
-  const pending = withGitDecodeChannel(scope, (channel) => auditOperation({
+  const result = await withGitDecodeChannel(scope, (channel) => auditOperation({
     scope,
     channel,
     contractId,
@@ -179,29 +179,14 @@ test("read-only audit returns its initial observation when verification is skipp
       }),
     }),
   }));
-  const amendment = new Promise<void>((resolve, reject) => {
-    process.nextTick(() => {
-      void bound.keiyaku.amend({ markdown: [
-        "## Replace: Objective",
-        "Keep the original audit observation.",
-        "",
-      ].join("\n") }).then((result) => {
-        try {
-          resolve();
-        } catch (error) {
-          reject(error);
-        }
-      }, reject);
-    });
-  });
-
-  const result = await pending;
-  await amendment;
-  assert.deepEqual(result.value, initial.report);
   assert.deepEqual(result.facts, []);
   assert.equal(result.head, initial.state.head);
-  const current = await withGitDecodeChannel(scope, (channel) => readAuditAt(scope, channel, contractId, gate("reviewed")));
-  assert.notDeepEqual(current.report, initial.report);
+  assert.equal(result.value.preview?.kind, "ready");
+  if (result.value.preview?.kind !== "ready") return;
+  assert.equal(result.value.preview.candidate.method, "squash");
+  assert.equal("diff" in result.value.preview, false);
+  assert.equal("target" in result.value.preview, false);
+  assert.equal(result.value.attempt, undefined);
 });
 
 test("audit accepts an attestation refusal as a typed attempt without facts", async () => {

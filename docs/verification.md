@@ -25,14 +25,22 @@ an attestation. A declaration timeout is instead a terminal unsatisfied
 verdict and does not skip a later declared executor. It does not
 cancel the composed operation's later placement obligation.
 
-There is no attestation reuse or stale-skip rule. A matching satisfied or
-unsatisfied attestation is durable history, and a later testimony for the same
-gate and subject supersedes it under the generic lifecycle rule; neither one
-permits an invocation to omit a declaration from the admitted document
-revision. The `verified` producer's subject is exactly the delivery's
-integration snapshot
-key and the decoded Verification segment key. Core only mints and compares
-those opaque keys; it does not know how the producer chose them.
+Audit may admit an ordinary `verified` attestation against a prospective
+integration snapshot before any delivery fact exists. That testimony is
+initially non-current because the snapshot is not yet a Contract dependency;
+it becomes current when deliver records the identical integration snapshot.
+After admitting a delivery, deliver asks the Verification protocol owner
+for the latest current `verified` evidence. That owner uses the one generic
+currentness implementation and returns only the evidence identity and verdict.
+If an attestation for
+the exact delivered snapshot and current Verification segment exists,
+satisfied or unsatisfied, deliver does not execute the declarations again.
+That skip is not a cache, preview fact, journal kind, result blob, or special
+audit gate. A later testimony for the same gate and subject supersedes the
+prior one under the generic lifecycle rule. The `verified` producer's subject
+is exactly the judged integration snapshot key and the decoded Verification
+segment key. Core only mints and compares those opaque keys; it does not know
+how the producer chose them.
 
 Before execution, the producer captures its `AttestationData.subject`.
 Admission receives it through the core `Preparation` primitive, never
@@ -99,8 +107,8 @@ Audit's leading observation remains accepted with zero facts when no
 attestation lands. It never persists the process outcome, report, artifact, or
 blob evidence outside the bounded attestation summary.
 
-Audit may use its sole read-only observation to report a missing or moved
-document when no Verification fact can be produced. Once a producer has run,
+Audit may refuse a missing or moved document before any candidate exists.
+Once a producer has run,
 its captured preparation enters the same `decideAttestation` used by every
 producer, and only that decision may issue `contract-missing` or `terminal`.
 Document movement can make the resulting testimony stale for a gate; it cannot
@@ -177,8 +185,10 @@ harness loss, or a Node crash, lies outside that guarantee.
 
 The runtime result is transient. Only its bounded terminal diagnostic rendering
 may enter the attestation fact; it is neither cache authority nor a separate
-state surface. Journal attestations do not authorize reuse, stale skipping, or
-a different declaration selection.
+state surface. Journal attestations remain ordinary history. Deliver may omit a later
+declaration run only when generic currentness already names a matching
+`verified` attestation for the delivered snapshot; that is not a second
+evidence source or a different declaration selection.
 
 Disposing the scratch worktree is post-admission physical cleanup. A failed
 destroy command is returned separately from a worktree-removal leak; neither
@@ -195,7 +205,9 @@ never recovers the run or executes candidate commands.
 
 The generic gate currentness judge is pure over the declared gate and
 dependency-key set. It performs no IO, candidate recheck, or producer-specific
-declaration interpretation. Protocol is the sole reader that derives audit
+declaration interpretation. The Verification protocol owner is the sole
+protocol reader of that judge for current `verified` evidence. Protocol is
+the sole reader that derives audit
 rework and attestation counts, timeline entries, and elapsed milliseconds from
 raw facts. The package root exports readonly reports; the CLI renders them
 without journal access or timestamp arithmetic.

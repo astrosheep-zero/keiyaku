@@ -100,7 +100,7 @@ ls kei/ [--json]
 ls aku/ [--json]
 ls aku/<akuma>/ [--json]
 ls aku/*/* [--json]
-audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
+audit [<contract>|@<contract>] [--include-dirty] [--show-diff-body] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
 install <codex|claude|opencode|pi> [--json]
@@ -209,9 +209,14 @@ per-deliver policy flag.
 dirty, the accepted result discloses the ordinary dirty paths and short stat.
 Dirty submodule internals still refuse because no review projection can seal
 them. `abandon` accepts optional `--note`, `--actor`, and `--json`; it has no
-reason flag or hidden reason classification. `arc` and `audit` accept
-`--actor` and `--json`; audit also accepts
-`--show-diff-body`. `status`, `show`, and `reconcile` accept `--json`.
+reason flag or hidden reason classification. `arc` accepts `--actor` and `--json`. `audit` accepts `--actor`, `--json`,
+the same `--include-dirty` authorization as deliver, and `--show-diff-body`.
+`--show-diff-body` selects the public `showDiff` input. The prospective
+predecessor-to-candidate value lives only on `report.preview.diff`; text
+renders that report-owned body once, and JSON does not add a second `diff`
+field. This is not a Delivery read performed before audit. Audit does not accept a custom commit
+message. Its up-to-date policy is the same Settings consumer used by deliver.
+`status`, `show`, and `reconcile` accept `--json`.
 `--json` is output-only.
 
 `install` is the one edge command that does not read a repository or Git. It

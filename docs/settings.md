@@ -110,9 +110,9 @@ The Git integration consumer publicly provides
 boolean entry `git.requireBranchesToBeUpToDate` and defaults to `false` when
 the entry is absent. The `git` namespace rejects unknown entries and a
 non-boolean selected value with `SettingsError`. The CLI resolves this consumer
-for each deliver invocation and passes only the resulting boolean; Git custody
-never imports Settings. Project/user shadowing and provenance remain the
-generic namespace behavior above.
+for each deliver and audit invocation and passes only the resulting boolean;
+Git custody never imports Settings. Project/user shadowing and provenance
+remain the generic namespace behavior above.
 
 Akuma owns the `providers` interpreter and record grammar in
 [akuma-provider.md](akuma-provider.md), with Soul freezing in

@@ -35,7 +35,6 @@ import {
   abandonOperation,
   amendOperation,
   arcOperation,
-  auditOperation,
   contractObservationOperation,
   contractsOperation,
   deliveryDiffOperation,
@@ -44,6 +43,7 @@ import {
   reconcileOperation,
   reviewOperation,
   stateOperation,
+  type AuditPreview,
   type AuditReport,
   type ContractBoard,
   type ContractDisposition,
@@ -59,7 +59,9 @@ import {
   type RepositoryScope,
   type ReviewValue,
   type TimelineEntry,
+  type VerificationReuse,
   type VerificationStop,
+  type DeliveryPreparationRefusal,
 } from "../protocol/operations.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { settle, type SettlementReport } from "../settlement/settle.js";
@@ -71,6 +73,7 @@ import {
 } from "../settlement/holder.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
+import { auditContract, type AuditInput } from "./audit.js";
 import { Delivery, deliveryHandle } from "./delivery.js";
 import {
   completeHolderMutation,
@@ -90,7 +93,9 @@ export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "./con
 export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks } from "./configuration.js";
 
 export type {
+  AuditPreview,
   AuditReport,
+  DeliveryPreparationRefusal,
   ChangeId,
   ContractId,
   ContractState,
@@ -112,7 +117,7 @@ export type Fact = JournalEntry;
 export type ActorId = string;
 export type AttestationVerdict = "satisfied" | "unsatisfied";
 export type Review = ReviewValue;
-export type { PlacementStop, VerificationStop };
+export type { PlacementStop, VerificationReuse, VerificationStop };
 
 export type TopologyEffect = ProtocolReconcileReport["effects"][number] | ContractFileEffect;
 export type Lag = ProtocolReconcileReport["lag"][number] | ContractFileLag;
@@ -167,7 +172,7 @@ export type DeliverInput = ActorOptions & Readonly<{
   includeDirty?: boolean;
   signal?: AbortSignal;
 }>;
-export type AuditInput = ActorOptions & Readonly<{ signal?: AbortSignal }>;
+export type { AuditInput };
 
 function taskOption(value: unknown): TaskId | undefined {
   if (value === undefined) return undefined;
@@ -376,27 +381,10 @@ export class KeiyakuHandle {
   }
 
   async audit(input?: AuditInput): Promise<MutationResult<AuditReport>> {
-    const values = input === undefined ? undefined : requireInput(input, "audit input");
-    const hooks = worktreeHooksOption(values?.hooks);
-    const actor = actorOption(values?.actor);
-    const signal = optionalSignal(values?.signal);
-    return withGitDecodeChannel(this.scope, async (channel) => {
-      const accepted = requireAccepted(await auditOperation({
-        scope: this.scope,
-        channel,
-        contractId: this.id,
-        deriveDocument: (state) => documentDerivation(
-          decodeContractDocument(state.terms.document.bytes),
-          state.terms.gates,
-          state.id,
-        ),
-        ...(signal === undefined ? {} : { signal }),
-        ...actor,
-      }));
-      return completeMutation({
-        ...completion(this.scope, channel, this.id, (report: AuditReport) => report, hooks),
-        accepted,
-      });
+    return auditContract({
+      scope: this.scope,
+      contractId: this.id,
+      ...(input === undefined ? {} : { input }),
     });
   }
 

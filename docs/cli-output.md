@@ -231,9 +231,10 @@ outcome glyphs and lowercase vocabulary remain the shared scanner vocabulary.
 Obligation rows come first and contain only unresolved verification or
 placement stops, lags, cleanup failures, and leaks. Deviation rows contain
 Region warnings, accepted review workspace bytes, and typed audit drift. The
-record tail contains admitted journal facts, head, bind `target`, normal Git
-effects, normal settlement actions, reports, and the document diff. Changed
-effects precede unchanged confirmations; unchanged effects remain visible.
+record tail contains admitted journal facts, head, bind `target`, deliver
+`verificationReuse`, normal Git effects, normal settlement actions, reports,
+and the document diff. Changed effects precede unchanged confirmations;
+unchanged effects remain visible.
 
 An opaque Contract ID, entry, ref, path, hash, diagnostic, or diff coordinate
 is indivisible. The renderer never inserts bytes, whitespace, ellipses, or a
@@ -256,10 +257,15 @@ observation renders no overlap block. JSON exposes the same `overlaps` or
 
 Document diff is labeled, then the exact public content, including an empty
 string. The CLI never computes another diff or makes availability a lifecycle
-decision. Audit omits diff unless `--show-diff-body` is present; a `null`
-public diff renders the typed `git-unavailable` facts. Audit also renders its
-public report, head, and facts; it does not inspect journal entries or raw
-process output.
+decision. Audit omits diff unless `--show-diff-body` is present. That flag
+keeps the public value only on `report.preview.diff`; text consumes that
+report-owned value exactly once and never adds a second top-level `diff`. A
+`null` preview diff renders the typed `git-unavailable` facts. Default audit
+text makes ready versus blocked, candidate identity, Verification verdict or
+stop, target readiness or exact conflict, drift, and history scannable inside
+the report. Deliver text makes `verificationReuse` visible when present. Audit
+also renders its public report, head, and facts; it does not inspect journal
+entries or raw process output.
 
 The flat `lag` array remains the public `ReconcileResult` shape defined in
 [git-reconciliation.md](git-reconciliation.md). JSON exposes that same array.

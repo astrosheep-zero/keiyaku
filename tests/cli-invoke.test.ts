@@ -10,6 +10,7 @@ import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import { renderText } from "../src/cli/render/text.js";
 import { BindDraftError, preserveBindDraft } from "../src/cli/draft.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
@@ -562,7 +563,7 @@ test("bind freezes the selected gate snapshot", async () => {
   );
 });
 
-test("audit --show-diff-body retains its Delivery across a terminal transition", async () => {
+test("audit --show-diff-body renders the prospective candidate without a prior Delivery read", async () => {
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(
     repository.path,
@@ -571,42 +572,48 @@ test("audit --show-diff-body retains its Delivery across a terminal transition",
   );
   const id = acceptedContract(bound);
   writeFileSync(resolve(repository.path, "candidate.txt"), "candidate\n");
-  const delivered = await invokeWithDocument(
-    repository.path,
-    ["deliver", id, "--include-dirty", "--actor", "external-test"],
-    "",
-  );
-  assert.equal(delivered.kind, "accepted");
 
   const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id });
-  const pinned = await contract.delivery();
-  if (pinned === null) throw new Error("delivery was not available before audit");
   const delivery = Keiyaku.prototype.delivery;
-  const audit = Keiyaku.prototype.audit;
   let deliveryReads = 0;
-
   Keiyaku.prototype.delivery = async function() {
     deliveryReads += 1;
     return delivery.call(this);
   };
-  Keiyaku.prototype.audit = async function(options) {
-    await this.review({ verdict: "satisfied", ...options });
-    return audit.call(this, options);
-  };
   try {
     const result = await invokeWithDocument(
       repository.path,
-      ["audit", id, "--show-diff-body", "--actor", "external-test"],
+      ["audit", id, "--include-dirty", "--show-diff-body", "--actor", "external-test"],
       "",
     );
     assert.equal(result.kind, "accepted");
-    assert.match(JSON.stringify(result), /\+candidate/);
-    assert.equal(deliveryReads, 1);
+    if (result.kind !== "accepted") return;
+    const text = renderText(result);
+    const json = JSON.parse(JSON.stringify(result)) as { diff?: unknown; report?: { preview?: { kind?: string; diff?: unknown } } };
+    assert.equal("diff" in result, false);
+    assert.equal("diff" in json, false);
+    assert.equal(result.report?.preview?.kind === "ready" ? result.report.preview.diff?.includes("+candidate") : false, true);
+    assert.equal(typeof json.report?.preview?.diff, "string");
+    assert.match(String(json.report?.preview?.diff), /\+candidate/);
+    assert.equal(text.split("+candidate").length - 1, 1);
+    assert.match(text, /preview ready /);
+    assert.doesNotMatch(text, /"diff":"diff --git/);
+    assert.equal(deliveryReads, 0);
+    assert.equal((await contract.delivery()), null);
+
+    const hidden = await invokeWithDocument(
+      repository.path,
+      ["audit", id, "--include-dirty", "--actor", "external-test"],
+      "",
+    );
+    assert.equal(hidden.kind, "accepted");
+    if (hidden.kind !== "accepted") return;
+    assert.equal(hidden.report?.preview?.kind === "ready" && "diff" in hidden.report.preview, false);
+    assert.equal("diff" in hidden, false);
+    assert.equal(renderText(hidden).includes("+candidate"), false);
   } finally {
     Keiyaku.prototype.delivery = delivery;
-    Keiyaku.prototype.audit = audit;
   }
-  assert.equal((await contract.state()).terminal?.kind, "claimed");
 });
 
 test("audit renders an unavailable public delivery diff as accepted", async () => {
@@ -626,21 +633,29 @@ test("audit renders an unavailable public delivery diff as accepted", async () =
   const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id });
   const delivery = await contract.delivery();
   if (delivery === null) throw new Error("delivery was not available for audit");
-  const diff = Delivery.prototype.diff;
-  Delivery.prototype.diff = async function() {
-    return null;
+  const audit = Keiyaku.prototype.audit;
+  Keiyaku.prototype.audit = async function(input) {
+    const result = await audit.call(this, input);
+    if (result.value.preview?.kind === "ready") {
+      return { ...result, value: { ...result.value, preview: { ...result.value.preview, diff: null } } };
+    }
+    return result;
   };
   try {
     const result = await invokeWithDocument(repository.path, ["audit", id, "--show-diff-body"], "");
     assert.equal(result.kind, "accepted");
     if (result.kind !== "accepted") return;
-    assert.deepEqual(result.diff, {
-      reason: "git-unavailable",
-      integrationSnapshot: delivery.integration.snapshot,
-      changeId: delivery.integration.changeId,
-    });
+    const json = JSON.parse(JSON.stringify(result)) as { diff?: unknown; report?: { preview?: { kind?: string; diff?: unknown } } };
+    assert.equal("diff" in result, false);
+    assert.equal("diff" in json, false);
+    assert.equal(result.report?.preview?.kind === "ready" ? result.report.preview.diff : undefined, null);
+    assert.equal(json.report?.preview?.diff, null);
+    assert.match(
+      renderText(result, { columns: 200, color: false }),
+      new RegExp(`git-unavailable integrationSnapshot=${delivery.integration.snapshot} changeId=${delivery.integration.changeId}`),
+    );
   } finally {
-    Delivery.prototype.diff = diff;
+    Keiyaku.prototype.audit = audit;
   }
 });
 

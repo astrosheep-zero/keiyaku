@@ -39,7 +39,9 @@ export type {
   ArcInput,
   AttestationVerdict,
   AuditInput,
+  AuditPreview,
   AuditReport,
+  DeliveryPreparationRefusal,
   BindInput,
   BindResult,
   ContractBoard,
@@ -66,6 +68,7 @@ export type {
   TimelineEntry,
   TaskId,
   TopologyEffect,
+  VerificationReuse,
   VerificationStop,
 } from "./contract.js";
 export type {

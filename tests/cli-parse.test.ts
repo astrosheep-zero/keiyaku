@@ -190,9 +190,12 @@ test("flag specs preserve value and boolean option behavior", () => {
     /duplicate option: --clear-after/,
   );
   assert.deepEqual(parseArgv(["audit", "kei/example", "--show-diff-body"]), {
-    command: { command: "audit", contract: "kei/example", showDiffBody: true, output: "text" },
+    command: { command: "audit", contract: "kei/example", includeDirty: false, showDiffBody: true, output: "text" },
   });
   assert.deepEqual(parseArgv(["audit", "kei/example", "--actor", "audit-user"]), {
-    command: { command: "audit", contract: "kei/example", showDiffBody: false, actor: "audit-user", output: "text" },
+    command: { command: "audit", contract: "kei/example", includeDirty: false, showDiffBody: false, actor: "audit-user", output: "text" },
+  });
+  assert.deepEqual(parseArgv(["audit", "kei/example", "--include-dirty", "--show-diff-body"]), {
+    command: { command: "audit", contract: "kei/example", includeDirty: true, showDiffBody: true, output: "text" },
   });
 });

@@ -76,8 +76,14 @@ fact, Git materializes the complete integration candidate that this attempt may
 verify and place. The fact records the tender snapshot, integration
 predecessor, integration snapshot, integration ChangeId, squash method, and the
 attempt's frozen up-to-date policy. A later tender replaces the current
-delivery on the read model. The tender and integration preparation rules live
-in [git.md](git.md).
+delivery on the read model. After admission, deliver asks the Verification protocol owner, which
+uses the one generic currentness implementation, for latest `verified`
+evidence. If that attestation names the exact delivered snapshot and current
+Verification segment, satisfied or unsatisfied, deliver does not execute the
+declarations again and exposes a transient `verificationReuse` observation.
+Otherwise it runs Verification. Placement consumes only generic current gate
+evidence. The
+tender and integration preparation rules live in [git.md](git.md).
 
 `review` is a contract operation and may record testimony before any `deliver`.
 It uses Git's compute-only integration projection to capture the ChangeId that
@@ -349,25 +355,28 @@ derivation and has no `document-moved` refusal. Its captured subject names the
 document and patch identities it actually reviewed; later currentness is a gate
 question, not an admission condition.
 
-Audit has two mutually exclusive arms. A read-only report arm may project
-`contract-missing` or `document-moved` from its sole observation because it
-admits no fact and has no later legal decision. When audit attempts to admit a
-Verification attestation, protocol performs no admission-side lifecycle
-pre-judgment: the captured preparation enters `decideAttestation`, whose
-attempt observation solely decides contract existence and terminal state. No
-`decideAuditEligibility` or protocol fast path exists.
+Audit's leading act observes the Contract, derives the current document, and
+prepares a prospective delivery with the same `prepareDelivery` path as
+deliver. Missing Contract and moved document remain top-level refusals.
+Candidate-preparation failures are accepted `preview.blocked` observations and
+admit no Verification fact. A prepared candidate runs Verification against its
+integration snapshot, then the shared no-effects target precheck, and returns
+accepted `preview.ready`. Audit never requests placement, admits claimed, or
+moves a target. When audit admits a `verified` attestation, protocol performs
+no admission-side lifecycle pre-judgment: the captured preparation enters
+`decideAttestation`. No `decideAuditEligibility` exists.
 
 A composed operation has one leading act: the invoked verb's own journal
-admission for bind, amend, deliver, review, abandon, and arc, and the observation
-report for audit. That leading act alone selects the outer outcome arm.
+admission for bind, amend, deliver, review, abandon, and arc, and the accepted
+audit preview for audit. That leading act alone selects the outer outcome arm.
 `refused` and `retry` assert that this invocation landed no journal fact. Once
 the leading act completes, the outcome is irrevocably `accepted`; no trailing
 result may flip it.
 
 Trailing obligations are independent domain duties, not a short-circuiting
-pipeline. Running a valid Verification, admitting its attestation, and
-attempting placement occur in that fixed order, and every applicable obligation
-runs even when an earlier one stops without a fact. Their only communication is
+pipeline. After a delivery fact lands, deliver either reuses a now-current
+`verified` attestation or runs Verification, then attempts placement. Every
+applicable obligation runs even when an earlier one stops without a fact. Their only communication is
 through admitted facts. A trailing fact joins the accepted outcome's `facts`;
 a trailing refusal, retry, or nonterminal process result appears on that
 obligation's own presence-discriminated stop channel. The channels are

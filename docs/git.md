@@ -251,6 +251,21 @@ placement returns `target-moved` with the expected and freshly observed target
 coordinates. It appends no claimed fact, does not move the target, and never
 re-integrates or reuses Verification inside that attempt.
 
+The checkout observation used by targeted placement is one no-effects precheck
+in `src/git/target-placement.ts`. It accepts targeted Contract coordinates plus
+prospective predecessor and candidate snapshots, lists registered checkouts of
+the named target, and returns ready follow arms or a typed checkout or
+workspace refusal. It never publishes, follows a checkout, or claims a
+Contract. Callers decide targetless Contracts at their boundary and do not
+invoke the observation. `prepareTargetPlacement` calls that same observation
+under the existing target fence after the offered movement matches the
+admitted delivery. The target-placement protocol owner may call the same
+observation prospectively for audit without fencing or placing. Actual
+placement remains the only publisher. Later drift or local-byte changes may
+produce a different result. A stream, spawn, or other expected operational
+failure while that owner observes a targeted candidate is
+`preview.target.failed`; audit does not throw.
+
 When the target checkout is not the tender source, placement follows Git merge semantics.
 Before publication, each registered checkout must admit the predecessor-to-candidate
 two-tree merge of its current index, have no worktree modification on changed paths,

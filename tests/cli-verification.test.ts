@@ -158,7 +158,8 @@ test("audit stays accepted when it admits a verified attestation", async () => {
   if (audit.kind !== "accepted") return;
   assert.deepEqual(audit.facts.map((fact) => fact.kind), ["attestation"]);
   assert.equal(audit.report.attempt, undefined);
-  assert.equal("diff" in audit, true);
+  assert.equal("diff" in audit, false);
+  assert.equal(audit.report.preview?.kind === "ready" ? typeof audit.report.preview.diff : undefined, "string");
   assert.equal((await observeContract(pending.repository, pending.id)).state?.attestations.at(-1)?.actor, "audit-user");
 });
 
@@ -182,7 +183,8 @@ test("audit renders a pure read as accepted with its public report and optional 
   if (detailed.kind !== "accepted") return;
   assert.equal(detailed.report?.attempt, undefined);
   assert.equal(detailed.report?.reworks, 1);
-  assert.equal("diff" in detailed, true);
+  assert.equal(detailed.report?.preview?.kind, "blocked");
+  assert.equal("diff" in detailed, false);
 });
 
 test("audit renders transient Verification cleanup leaks after accepted and observation paths", async () => {

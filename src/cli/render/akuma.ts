@@ -223,18 +223,35 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
   }
 }
 
+function callExitCode(result: Extract<AkumaInvocationResult, { action: "call" }>): number {
+  if (result.result.dispatch.kind === "failed" || result.result.alias.kind === "failed" || result.result.observation.kind === "failed") return 2;
+  if (result.result.observation.kind !== "observed") return 0;
+  const timeline = result.result.observation.status.timeline;
+  return timeline.kind === "idle" && timeline.outcome?.outcome.kind === "failed" ? 2 : 0;
+}
+
+function killExitCode(result: Extract<AkumaInvocationResult, { action: "kill" }>): number {
+  return result.result.results.some((member) =>
+    member.evidence === "unavailable" || member.evidence === "hung" || member.evidence === "untidy") ? 1 : 0;
+}
+
+function tellExitCode(result: Extract<AkumaInvocationResult, { action: "tell" }>): number {
+  if (result.mode === "ordinary") return typeof result.result.tell.wake === "string" ? 0 : 2;
+  return result.result.receipt.kind === "interrupted" ? 0 : 1;
+}
+
+function forkExitCode(result: Extract<AkumaInvocationResult, { action: "fork" }>): number {
+  return result.receipt.kind === "forked" ? 0 : result.receipt.kind === "upstream-forked" ? 2 : 1;
+}
+
 export function akumaExitCode(result: AkumaInvocationResult): number {
-  if (result.action === "call" && (result.result.dispatch.kind === "failed" || result.result.alias.kind === "failed" || result.result.observation.kind === "failed")) return 2;
-  if (result.action === "call" && result.result.observation.kind === "observed") {
-    const timeline = result.result.observation.status.timeline;
-    if (timeline.kind === "idle" && timeline.outcome?.outcome.kind === "failed") return 2;
+  switch (result.action) {
+    case "call": return callExitCode(result);
+    case "kill": return killExitCode(result);
+    case "tell": return tellExitCode(result);
+    case "fork": return forkExitCode(result);
+    default: return 0;
   }
-  if (result.action === "kill" && result.result.results.some((member) =>
-    member.evidence === "unavailable" || member.evidence === "hung" || member.evidence === "untidy")) return 1;
-  if (result.action === "tell" && result.mode === "ordinary" && typeof result.result.tell.wake !== "string") return 2;
-  if (result.action === "tell" && result.mode === "interrupt" && result.result.receipt.kind !== "interrupted") return 1;
-  if (result.action === "fork" && result.receipt.kind !== "forked") return result.receipt.kind === "upstream-forked" ? 2 : 1;
-  return 0;
 }
 
 export function akumaJsonValue(command: ParsedCommand, result: AkumaInvocationResult): unknown {

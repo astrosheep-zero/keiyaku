@@ -1,11 +1,11 @@
 import type {
-  KeiyakuRefusal,
   KeiyakuRetryReason,
   PlacementStop,
   RegionOverlap,
   VerificationStop,
 } from "../../index.js";
 import type { AcceptedResult, Effect, Lag, RetryResult } from "../result.js";
+import { previewLines, reuseLines } from "./audit.js";
 import { displayColumns, renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 type HookFailure = Extract<Lag, { kind: "worktree-hook-failed" }>["failure"];
@@ -47,23 +47,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function wrap(lines: string[], text: string, indent: string, columns: number): void {
-  lines.push(...renderOpaqueBlock(text, indent, columns));
-}
-
-function collectionLines(
-  name: string,
-  members: readonly string[],
-  indent: string,
-  columns: number,
-): readonly string[] {
-  if (members.length === 0) return renderOpaqueBlock(`${name} 0`, indent, columns);
-  return [
-    ...renderOpaqueBlock(name, indent, columns),
-    ...members.flatMap((member) => renderOpaqueBlock(member, `${indent}│ `, columns)),
-  ];
-}
-
 function hookFailureSummary(failure: HookFailure): string {
   if (failure.kind === "timeout" || failure.kind === "unknown-exit") return failure.kind;
   if (failure.kind === "spawn-error") return failure.kind;
@@ -82,65 +65,6 @@ function retryLines(detail: KeiyakuRetryReason, indent: string, columns: number)
     return [...renderOpaqueBlock("publication-failed", indent, columns), ...["diagnostic", "", detail.diagnostic, ""]];
   }
   return renderOpaqueBlock(detail.kind, indent, columns);
-}
-
-function skipAddressedContract(addressed: string | undefined, contractId: string | undefined): boolean {
-  return addressed !== undefined && contractId === addressed;
-}
-
-type RefusalWithOption = KeiyakuRefusal & { option?: Readonly<{ flag: string; available: boolean }> };
-
-function refusalIdentity(refusal: KeiyakuRefusal, addressed?: string): string | undefined {
-  const contractId = "contractId" in refusal ? refusal.contractId : undefined;
-  return skipAddressedContract(addressed, contractId) ? undefined : contractId;
-}
-
-function refusalHead(kind: string, identity: string | undefined, details: readonly string[]): string {
-  return [kind, identity === undefined ? undefined : `contractId=${identity}`, ...details]
-    .filter((part): part is string => part !== undefined).join(" ");
-}
-
-function renderDirtyRefusal(
-  refusal: Extract<KeiyakuRefusal, { kind: "dirty-workspace" }>,
-  indent: string,
-  columns: number,
-  identity: string | undefined,
-): readonly string[] {
-  const lines: string[] = [];
-  wrap(lines, refusalHead(refusal.kind, identity, []), indent, columns);
-  for (const name of ["staged", "unstaged", "untracked", "submodules"] as const) lines.push(...collectionLines(name, refusal[name], indent, columns));
-  const { filesChanged, insertions, deletions } = refusal.shortStat;
-  wrap(lines, `shortstat files=${filesChanged} insertions=${insertions} deletions=${deletions}`, indent, columns);
-  const option = (refusal as RefusalWithOption).option;
-  if (option !== undefined) wrap(lines, `option ${option.flag} ${option.available ? "available" : "unavailable"}`, indent, columns);
-  return lines;
-}
-
-export function renderRefusalFacts(
-  refusal: KeiyakuRefusal | (KeiyakuRefusal & { option?: Readonly<{ flag: string; available: boolean }> }),
-  indent: string,
-  columns: number,
-  addressed?: string,
-): readonly string[] {
-  const identity = refusalIdentity(refusal, addressed);
-  if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
-  if (refusal.kind === "integration-failed") {
-    const lines = [
-      ...renderOpaqueBlock(refusalHead(refusal.kind, identity, [`reason=${refusal.reason}`, `targetHead=${refusal.targetHead}`]), indent, columns),
-    ];
-    if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflictPaths", refusal.conflictPaths, indent, columns));
-    return lines;
-  }
-  if (refusal.kind === "integration-unsupported") return renderOpaqueBlock(refusalHead(refusal.kind, identity, [`requiredGit=${refusal.requiredGit}`]), indent, columns);
-  if (refusal.kind === "checkout-not-followable") {
-    const lines = [...renderOpaqueBlock(refusalHead(refusal.kind, identity, [`target=${refusal.target}`, `path=${refusal.path}`, `reason=${refusal.reason}`]), indent, columns)];
-    lines.push(...collectionLines("paths", refusal.paths, indent, columns));
-    return lines;
-  }
-  if (refusal.kind === "workspace-not-on-target") return renderOpaqueBlock(refusalHead(refusal.kind, identity, [`target=${refusal.target}`, `branch=${refusal.branch}`]), indent, columns);
-  if (refusal.kind === "here-target-mismatch") return renderOpaqueBlock(`here-target-mismatch target=${refusal.target} branch=${refusal.branch}`, indent, columns);
-  if (refusal.kind === "here-worktree-appointed") return renderOpaqueBlock(refusalHead(refusal.kind, undefined, [refusal.contract === undefined ? "" : `contract=${refusal.contract}`, `path=${refusal.path}`]), indent, columns);
-  return renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns);
 }
 
 function stopLines(
@@ -285,6 +209,7 @@ function overlapRows(overlaps: readonly RegionOverlap[], columns: number): reado
 function reportRows(
   report: NonNullable<AcceptedResult["report"]>,
   columns: number,
+  addressed: string,
 ): readonly string[] {
   const lines: string[] = [];
   receiptRow(lines, " ", "report", [{ text: `reworks=${report.reworks} reviews=${report.reviews}` }], columns);
@@ -294,6 +219,7 @@ function reportRows(
       receiptRow(lines, " ", "report", [{ text: `${entry.attestation.gate} ${entry.attestation.verdict}${entry.attestation.summary === undefined ? "" : ` ${entry.attestation.summary}`}`, opaque: true }], columns);
     }
   }
+  if (report.preview !== undefined) lines.push(...previewLines(report.preview, columns, addressed));
   if (report.delivery !== undefined) {
     receiptRow(lines, " ", "report", [{ text: [report.delivery.tenderSnapshot, report.delivery.integration.snapshot, report.delivery.integration.changeId].join(" "), opaque: true }], columns);
   }
@@ -322,7 +248,8 @@ function acceptedRecord(result: AcceptedResult, columns: number): readonly strin
   if (result.target !== undefined) {
     receiptRow(record, " ", "target", [{ text: result.target ?? "null", opaque: true }], columns);
   }
-  if (result.report !== undefined) pushBlock(record, reportRows(result.report, columns));
+  pushBlock(record, reuseLines(result.verificationReuse, columns));
+  if (result.report !== undefined) pushBlock(record, reportRows(result.report, columns, result.contract));
   if (result.diff !== undefined) {
     if (typeof result.diff === "string") receiptPayload(record, "diff", result.diff);
     else receiptRow(record, " ", "diff", [{ text: `git-unavailable integrationSnapshot=${result.diff.integrationSnapshot} changeId=${result.diff.changeId}`, opaque: true }], columns);

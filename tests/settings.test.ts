@@ -184,7 +184,7 @@ test("Archetype resolves grok-build as its own builtin protocol execution", asyn
     writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: grok-build\n---\nBuild.\n");
     await assert.rejects(
       loadArchetype({ name: "grok", settings: await settings({ root: value.project, home: value.home }) }),
-      /Grok Build does not support the Archetype systemPrompt option/u,
+      /Grok Build does not support the systemPrompt option/u,
     );
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: {
       private: { kind: "grok-build", executable: "private-grok", env: { XAI_API_KEY: "test" } },

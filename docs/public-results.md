@@ -133,6 +133,13 @@ type DeliveryWorkspaceRefusal = Readonly<{
   branch: string | null
 }>
 
+type DeliveryPreparationRefusal =
+  | Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
+  | DirtyWorkspaceRefusal
+  | IntegrationRefusal
+  | CheckoutNotFollowableRefusal
+  | DeliveryWorkspaceRefusal
+
 type DirtyWorkspaceRefusal = Readonly<{
   kind: "dirty-workspace"
   contractId: ContractId
@@ -193,6 +200,11 @@ type VerificationCleanupFailure = Readonly<{
   detail: HookFailure
 }>
 
+type VerificationReuse = Readonly<{
+  entry: EntryUlid
+  verdict: "satisfied" | "unsatisfied"
+}>
+
 type Delivery = Readonly<{
   tenderSnapshot: SnapshotId
   integration: Readonly<{
@@ -203,6 +215,7 @@ type Delivery = Readonly<{
   method: "squash"
   policy: Readonly<{ requireBranchesToBeUpToDate: boolean }>
   verification?: VerificationStop
+  verificationReuse?: VerificationReuse
   placement?: PlacementStop
   cleanup?: VerificationCleanupFailure
   leak?: WorktreeLeak
@@ -330,10 +343,23 @@ retrying bind mints a new identity. Adapters keep their addressed input instead
 of mining another coordinate from an error.
 
 ```ts
+type AuditPreview =
+  | Readonly<{ kind: "blocked"; refusal: DeliveryPreparationRefusal }>
+  | Readonly<{
+      kind: "ready"
+      candidate: DeliveryIdentity
+      target?:
+        | { kind: "ready" }
+        | { kind: "refused"; refusal: CheckoutNotFollowableRefusal | DeliveryWorkspaceRefusal }
+        | { kind: "failed"; diagnostic: string }
+      diff?: string | null
+    }>
+
 type AuditReport = Readonly<{
   reworks: number
   reviews: number
   timeline: readonly TimelineEntry[]
+  preview?: AuditPreview
   delivery?: DeliveryIdentity
   targetObservation?: Readonly<{ head: SnapshotId | null; drift: boolean }>
   attempt?: VerificationStop
@@ -364,13 +390,20 @@ fresh target observation when available, but no journal entries, body snapshots,
 detached raw logs, artifacts, or evidence bytes.
 
 `audit()` returns `MutationResult<AuditReport>` when its leading observation and
-mandatory reconciliation complete. A read-only audit and any Verification stop
-remain a successful result with zero facts. A successful Verification
-attestation appears in `facts`; a process nonterminal or attestation
-refusal/retry appears in `report.attempt`. A leading refusal or retry, such as a
-missing contract, uses the same `KeiyakuRefused` or `KeiyakuRetry` rejection as
-every other public mutation. None of these cases creates a second observation
-authority or duplicate boolean flag.
+mandatory reconciliation complete. An accepted pre-delivery audit always
+carries `preview`. `preview.blocked` is an accepted observation of a
+candidate-preparation failure and admits no Verification fact. `preview.ready`
+names the exact prospective candidate; `diff` is present only when the public
+input requested it, and `null` retains the typed Git-unavailable presentation.
+A Verification stop remains a successful result with that candidate preview and
+zero or more facts. A successful Verification attestation appears in `facts`;
+a process nonterminal or attestation refusal/retry appears in `report.attempt`.
+A leading refusal or retry, such as a missing contract, uses the same
+`KeiyakuRefused` or `KeiyakuRetry` rejection as every other public mutation.
+None of these cases creates a second observation authority or duplicate
+boolean flag. Deliver may expose transient `verificationReuse` naming the
+reused attestation entry and verdict; that field is absent when deliver ran
+Verification or no declarations applied.
 
 Verification may use one process-local disposable worktree. Failure to remove
 it after a fact was admitted cannot change the accepted arm, facts, or exit
