@@ -20,6 +20,10 @@ import {
   finishTaskHolderAdmission,
   readTaskHoldersAt,
 } from "../src/settlement/holder.js";
+import { completeHolderMutation } from "../src/library/mutation.js";
+import { EMPTY_WORKTREE_HOOKS } from "../src/library/configuration.js";
+import { requireAccepted } from "../src/library/refusal.js";
+import { reviewOperation } from "../src/protocol/operations.js";
 import { settle } from "../src/settlement/settle.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { readNamespaceContext } from "../src/task/context.js";
@@ -349,6 +353,59 @@ test("holder fence release failures preserve accepted admission", async () => {
     () => finishTaskHolderAdmission("task/example" as const, { kind: "refused" } as const, () => { throw new Error("release failed"); }),
     /release failed/u,
   );
+});
+
+test("a terminal held Contract completes placement and Task settlement after its fence close fails", async () => {
+  const world = repository(), repo = await Repo.at({ path: world.path });
+  const taskId = await task(world.path, "Fence teardown completion");
+  const bound = await Keiyaku.bind({
+    repo,
+    task: taskId,
+    markdown: document("Fence teardown completion"),
+    workspace: "worktree",
+    target: "main",
+    gates: ["reviewed"],
+  });
+  const state = await bound.keiyaku.state();
+  const path = deliveryWorktreePath(await repositoryAt(world.path), state.id);
+  const fromWorktree = Keiyaku.of({ repo: await Repo.at({ path }), id: state.id });
+  writeFileSync(`${path}/terminal.txt`, "candidate\n");
+  await fromWorktree.deliver({ includeDirty: true });
+
+  const scope = await repositoryAt(world.path);
+  const completed = await withGitDecodeChannel(scope, async (channel) => {
+    const accepted = requireAccepted(await reviewOperation({
+      scope,
+      channel,
+      contractId: state.id,
+      verdict: "satisfied",
+    }));
+    const admission = finishTaskHolderAdmission(taskId, accepted, () => {
+      throw new Error("fence close failed");
+    });
+    return completeHolderMutation({
+      completion: {
+        scope,
+        channel,
+        contractId: state.id,
+        value: (review) => review,
+        hooks: EMPTY_WORKTREE_HOOKS,
+      },
+      admission,
+      requireAccepted,
+    });
+  });
+
+  assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
+  assert.match(world.run(["ls-tree", "-r", "--name-only", "HEAD"]), /^terminal\.txt$/mu);
+  assert.equal(await taskState(world.path, taskId), "done");
+  assert.deepEqual(completed.settlement.lags, [{
+    kind: "settlement-failed",
+    surface: "task-holder",
+    contractId: state.id,
+    taskId,
+    diagnostic: "fence close failed",
+  }]);
 });
 
 test("holder claim executes inside the Task settlement fence", async () => {

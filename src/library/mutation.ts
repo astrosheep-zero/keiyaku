@@ -61,17 +61,18 @@ export async function completeHolderMutation<Value, PublicValue, Refusal>(input:
   requireAccepted: (result: IntentOutcome<Value, Refusal>) => AcceptedIntent<Value>;
 }>): Promise<MutationResult<PublicValue>> {
   const accepted = input.requireAccepted(input.admission.result);
-  if (input.admission.kind === "completed") return completeMutation({ ...input.completion, accepted });
+  const completed = await completeMutation({ ...input.completion, accepted });
+  if (input.admission.kind === "completed") return completed;
+  const deferred = deferredTaskHolderSettlement({
+    contractId: input.completion.contractId,
+    taskId: input.admission.taskId,
+    diagnostic: input.admission.diagnostic,
+  });
   return {
-    facts: accepted.facts,
-    head: accepted.head,
-    value: input.completion.value(accepted.value),
-    effects: [...(accepted.physical?.effects ?? [])],
-    lags: [...(accepted.physical?.lag ?? [])],
-    settlement: deferredTaskHolderSettlement({
-      contractId: input.completion.contractId,
-      taskId: input.admission.taskId,
-      diagnostic: input.admission.diagnostic,
-    }),
+    ...completed,
+    settlement: {
+      actions: completed.settlement.actions,
+      lags: [...completed.settlement.lags, ...deferred.lags],
+    },
   };
 }
