@@ -23,6 +23,7 @@ import { encodeAgentEvent, type Drive, type ProviderAdapter, type TurnResult } f
 import { providerNamed } from "./providers/index.js";
 import {
   BodyRequestPump,
+  clearBodyRequestTransport,
   settleBodyRequests,
   type RequestChildLaunch,
 } from "./requests.js";
@@ -282,7 +283,9 @@ function childSpawner(runtime: BodyRuntime): (launch: RequestChildLaunch) => Pro
 async function beginBody(paths: AkumaPaths, soul: Soul, runtime: BodyRuntime): Promise<BodyFact | null> {
   if (!await settlePredecessor(paths)) return null;
   const body = recordBody(paths, { collar: runtime.collar, leashTakenAt: runtime.now() });
-  if (await settleBodyRequests(paths, soul, runtime.now) === "settled") return body;
+  const requests = await settleBodyRequests(paths, soul, runtime.now);
+  clearBodyRequestTransport(paths);
+  if (requests === "settled") return body;
   breakBody(paths, { sequence: body.sequence, end: "broke-off", at: runtime.now() });
   return null;
 }

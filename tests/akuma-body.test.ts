@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
-import { HeldAkumaLeash, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, readTurns, recordTell, requestPause, requestStop, stopRequested, type AkuId, type ProviderOptions } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, admitRequest, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, readTurns, recordTell, requestPause, requestStop, stopRequested, type AkuId, type ProviderOptions } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { AgentEvent, ProviderAdapter, TurnResult } from "../src/akuma/provider.js";
 import { requestBodyCall } from "../src/akuma/requests.js";
@@ -134,6 +134,22 @@ test("a declared drive drains Body Requests before recording its terminal turn",
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
     initializeHeart(allocated.paths);
+    const recoveredRequestId = "00000000-0000-4000-8000-000000000020";
+    admitRequest(allocated.paths, {
+      id: recoveredRequestId,
+      archetype: "worker",
+      body: "crashed nested work",
+      world: root,
+      recipe: {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: { systemPrompt: "Work.\n" },
+        confinement: { kind: "unconfined" },
+      },
+      admittedAt: "2026-08-09T00:00:00.000Z",
+    });
+    const staleTransport = join(allocated.paths.directory, "requests", "1", `${recoveredRequestId}.request.json`);
+    mkdirSync(join(allocated.paths.directory, "requests", "1"), { recursive: true });
+    writeFileSync(staleTransport, "stale");
     let requestDirectory: string | undefined;
     let childId: AkuId | undefined;
     const provider: ProviderAdapter = {
@@ -141,6 +157,8 @@ test("a declared drive drains Body Requests before recording its terminal turn",
       admitOptions(options) { return { kind: "admitted", options }; },
       async start(input) {
         assert.ok(input.requests);
+        assert.equal(existsSync(staleTransport), false);
+        assert.equal(input.requests.dir, join(allocated.paths.directory, "requests", "1"));
         requestDirectory = input.requests.dir;
         childId = await requestBodyCall({
           directory: input.requests.dir,
@@ -190,6 +208,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
     });
 
     assert.ok(childId);
+    assert.equal(readRequest(allocated.paths, recoveredRequestId)?.state, "voided");
     assert.deepEqual(readSoul(pathsForAkuId(root, childId))?.origin, {
       kind: "request",
       parentId: allocated.id,

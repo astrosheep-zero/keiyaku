@@ -350,6 +350,10 @@ export class BodyRequestPump {
   stopAdmission(): void { this.closed = true; }
 }
 
+export function clearBodyRequestTransport(paths: AkumaPaths): void {
+  rmSync(join(paths.directory, "requests"), { recursive: true, force: true });
+}
+
 function matchingRequestOrigin(soul: Soul, parent: AkuId, requestId: string): boolean {
   return soul.origin.kind === "request"
     && soul.origin.parentId === parent
