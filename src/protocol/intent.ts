@@ -2,20 +2,14 @@ import type { GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
 import type { GitRepository } from "../git/repository.js";
 import type { GitRefAssertion } from "../git/repository.js";
-import { materializeScratchCandidate } from "../git/verification.js";
-import type { WorktreeLeak } from "../git/verification.js";
-import { runHookCommands, worktreeHooksFrom, type HookFailure, type WorktreeHooks } from "../git/hooks.js";
+import { materializeScratchCandidate, type WorktreeLeak } from "../git/scratch.js";
+import type { HookFailure } from "../git/hooks.js";
 import { projectSettings } from "../settings.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import { dependencyKeySet } from "../core/subject.js";
 import type { ActorId, ContractId, ContractState, DependencyKeySet } from "../core/facts/types.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
-import {
-  type ProduceVerificationInput,
-  type VerificationNonterminalOutcome,
-  type VerificationOutcome,
-  type VerificationTerminalOutcome,
-} from "../verification/producer.js";
+import { executeVerification, type VerificationNonterminalOutcome, type VerificationTerminalOutcome } from "../verification/execution.js";
 import { VERIFIED, type VerificationDefinition } from "../verification/declaration.js";
 import { runProtocol, type CompanionDecorator, type ProtocolResult } from "./run.js";
 import { mintAttempts } from "./attempt.js";
@@ -72,7 +66,6 @@ type VerifyDeliveryInput = Readonly<{
   at: string;
   state: ContractState;
   environment: NodeJS.ProcessEnv;
-  produce: (input: ProduceVerificationInput) => Promise<VerificationOutcome>;
   signal?: AbortSignal;
   verification?: VerificationDefinition;
 }>;
@@ -145,68 +138,41 @@ export async function verifyDelivery(
     { kind: "segment", value: input.verification.segment },
   ]);
 
-  let prepared: ReturnType<typeof materializeScratchCandidate>;
-  try {
-    prepared = materializeScratchCandidate(input.repository, state.delivery.data.integration.snapshot);
-  } catch (error) {
-    return {
-      step: {
-        failure: "candidate-unavailable",
-        diagnostic: error instanceof Error ? error.message : String(error),
-      },
-    };
+  const execution = await executeVerification({
+    repository: input.repository,
+    candidate: state.delivery.data.integration.snapshot,
+    declarations: input.verification.declarations,
+    environment: input.environment,
+    materializeScratchCandidate,
+    projectSettings,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  let step: VerificationStep;
+  if (execution.outcome.kind === "terminal") {
+    step = await admitIntent<AttestationInput<never>, AttestationRefusal>(
+      input.channel,
+      input.repository,
+      verificationInput(execution.outcome, input, subject),
+      decideAttestation,
+    );
+  } else if (execution.outcome.kind === "candidate-unavailable") {
+    step = { failure: "candidate-unavailable", diagnostic: execution.outcome.diagnostic };
+  } else if (execution.outcome.kind === "environment-failure") {
+    step = "diagnostic" in execution.outcome
+      ? { failure: "environment-failure", diagnostic: execution.outcome.diagnostic }
+      : { failure: "environment-failure", command: execution.outcome.command, detail: execution.outcome.detail };
+  } else if (
+    execution.outcome.kind === "unknown-exit"
+    || execution.outcome.kind === "cancelled"
+    || execution.outcome.kind === "spawn-error"
+  ) {
+    step = runtimeStop(execution.outcome);
+  } else {
+    throw new Error("Verification execution returned an invalid outcome");
   }
-  let step: VerificationStep | undefined;
-  let cleanup: VerificationCleanupFailure | undefined;
-  let leak: WorktreeLeak | null = null;
-  let hooks: WorktreeHooks | undefined;
-  try {
-    try {
-      hooks = worktreeHooksFrom({ settings: projectSettings(prepared.cwd) });
-    } catch (error) {
-      step = {
-        failure: "environment-failure",
-        diagnostic: error instanceof Error ? error.message : String(error),
-      };
-    }
-    if (hooks !== undefined) {
-      const readiness = await runHookCommands(prepared.cwd, hooks.create, input.signal);
-      if (readiness.kind === "cancelled") {
-        step = { failure: "cancelled" };
-      } else if (readiness.kind === "failed") {
-        step = { failure: "environment-failure", command: readiness.command, detail: readiness.failure };
-      } else {
-        const outcome = await input.produce({
-          declarations: input.verification.declarations,
-          cwd: prepared.cwd,
-          env: input.environment,
-          ...(input.signal === undefined ? {} : { signal: input.signal }),
-        });
-        if (outcome.kind === "terminal") {
-          step = await admitIntent<AttestationInput<never>, AttestationRefusal>(
-            input.channel,
-            input.repository,
-            verificationInput(outcome, input, subject),
-            decideAttestation,
-          );
-        } else {
-          step = runtimeStop(outcome);
-        }
-      }
-    }
-  } finally {
-    if (hooks !== undefined) {
-      const destroy = await runHookCommands(prepared.cwd, hooks.destroy);
-      if (destroy.kind === "cancelled") throw new Error("scratch destroy cancelled without a signal");
-      if (destroy.kind === "failed") cleanup = { phase: "destroy", command: destroy.command, detail: destroy.failure };
-    }
-    const removeLeak = prepared.dispose();
-    if (removeLeak !== null) leak = removeLeak;
-  }
-  if (step === undefined) throw new Error("Verification ended without an outcome");
   return {
     step,
-    ...(cleanup === undefined ? {} : { cleanup }),
-    ...(leak === null ? {} : { leak }),
+    ...(execution.cleanup === undefined ? {} : { cleanup: execution.cleanup }),
+    ...(execution.leak === undefined ? {} : { leak: execution.leak }),
   };
 }

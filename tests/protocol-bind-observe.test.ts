@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { AuthorityCorruptionError, Keiyaku, Repo } from "../src/index.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
-import { prepareDelivery } from "../src/git/delivery.js";
+import { prepareDelivery } from "../src/protocol/operations.js";
 import { admit } from "../src/git/admission.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,

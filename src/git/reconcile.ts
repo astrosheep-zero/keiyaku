@@ -37,7 +37,7 @@ import {
   type WorktreeHooks,
 } from "./hooks.js";
 import { deliveryWorktreePath } from "./workspace.js";
-import { orphanedScratchWorktrees } from "./verification.js";
+import { orphanedScratchWorktrees } from "./scratch.js";
 import {
   terminalSealExpectations as decodeTerminalSealExpectations,
   terminalSealSnapshots,

@@ -141,7 +141,8 @@ or hook fact. Hook commands must not recursively invoke a mutation or
 reconciliation for the same Contract: the outer effect decision owns that
 Contract's lock until the command returns.
 
-Verification scratch is not a managed worktree effect and has none of this
+`src/git/scratch.ts` owns Verification scratch physical lifecycle. Verification
+scratch is not a managed worktree effect and has none of this
 marker, retry, or resume state. Its disposable path is materialized and
 disposed by Verification in one invocation. The shared ordered command
 primitive executes managed commands under this marker policy and scratch

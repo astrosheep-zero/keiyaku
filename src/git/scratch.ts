@@ -3,7 +3,6 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SnapshotId } from "../core/facts/types.js";
-import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectIdForSnapshot } from "./identity.js";
 import { runGit, type GitRepository } from "./repository.js";
 import {
@@ -77,40 +76,4 @@ export function materializeScratchCandidate(
       }
     },
   };
-}
-
-/** Resolve both pinned delivery objects through one structured Git batch. */
-function deliverySnapshotAvailability(
-  repository: GitRepository,
-  predecessor: SnapshotId,
-  candidate: SnapshotId,
-): "available" | "unavailable" {
-  const objects = [gitObjectIdForSnapshot(predecessor), gitObjectIdForSnapshot(candidate)] as const;
-  const types = runGit(
-    repository,
-    ["cat-file", "--batch-check=%(objectname) %(objecttype)"],
-    `${objects.join("\n")}\n`,
-  ).toString("ascii").trimEnd().split("\n").map((record) => record.split(" ")[1]);
-  if (types.includes("missing")) return "unavailable";
-  if (types.some((type) => type !== "commit")) {
-    throw new AuthorityCorruptionError("recorded delivery snapshot is not a Git commit");
-  }
-  return "available";
-}
-
-export function readDeliveryDiff(repository: GitRepository, predecessor: SnapshotId, candidate: SnapshotId): string | null {
-  if (deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
-  try {
-    return runGit(repository, [
-      "diff",
-      "--no-ext-diff",
-      "--no-color",
-      gitObjectIdForSnapshot(predecessor),
-      gitObjectIdForSnapshot(candidate),
-    ]).toString("utf8");
-  } catch (error) {
-    // A pruning race after the probes is still Git absence, not a Git error for callers.
-    if (deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
-    throw error;
-  }
 }

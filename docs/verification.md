@@ -107,7 +107,16 @@ eligibility judge.
 
 ## Runtime Contract
 
-Verification owns producer declaration resolution and verdict production. It
+Verification owns declaration resolution and verdict production. The complete
+synchronous attempt is implemented only by `src/verification/execution.ts`:
+it materializes the exact integration snapshot, decodes tracked Settings,
+runs create commands, executes every declaration, runs destroy commands
+best-effort, and disposes scratch. Git scratch and Settings decoding are
+injected concrete capabilities; there is no producer compatibility module,
+registry, cache, or asynchronous runner. Protocol admits only a terminal
+outcome as an attestation.
+
+Verification owns declaration resolution and verdict production. It
 does not define a core gate vocabulary or declaration type. The shared process
 runtime owns spawn, normal stop, timeout, and process-tree kill. Its input is:
 

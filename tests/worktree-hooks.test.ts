@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
 import { hookMarkerPath, runCreateHooks, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
-import { materializeScratchCandidate } from "../src/git/verification.js";
+import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { abandonOperation, scopeOperation } from "../src/protocol/operations.js";
@@ -250,7 +250,7 @@ test("reconcile removes dead-owner scratch without commands and preserves active
   });
   const snapshot = repository.run(["rev-parse", "HEAD"]).trim();
   const pathFile = join(mkdtempSync(join(tmpdir(), "keiyaku-orphan-path-")), "path");
-  const module = pathToFileURL(join(process.cwd(), "src", "git", "verification.ts")).href;
+  const module = pathToFileURL(join(process.cwd(), "src", "git", "scratch.ts")).href;
   const repositoryModule = pathToFileURL(join(process.cwd(), "src", "git", "repository.ts")).href;
   const childSource = [
     'import { writeFileSync } from "node:fs";',
@@ -285,5 +285,34 @@ test("reconcile removes dead-owner scratch without commands and preserves active
   } finally {
     const leak = active.dispose();
     if (leak !== null) throw new Error(leak.diagnostic);
+  }
+});
+
+test("scratch refuses creation when its process owner identity is unavailable", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-scratch-identity-"));
+  try {
+    const ps = join(root, "ps");
+    writeFileSync(ps, "#!/bin/sh\nexit 1\n");
+    chmodSync(ps, 0o755);
+    const module = pathToFileURL(join(process.cwd(), "src", "git", "scratch.ts")).href;
+    const childSource = [
+      `const { materializeScratchCandidate } = await import(${JSON.stringify(module)});`,
+      'materializeScratchCandidate({}, "0000000000000000000000000000000000000000");',
+    ].join(" ");
+    const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
+    const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", childSource], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: root },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    const code = await new Promise<number | null>((resolve) => child.once("close", resolve));
+    assert.notEqual(code, 0);
+    assert.match(stderr, /cannot read process start identity/u);
+    assert.doesNotMatch(stderr, /git worktree add/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

@@ -3,10 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFile
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import test from "node:test";
-import { prepareDelivery, prepareReview } from "../src/git/delivery.js";
+import { prepareDelivery, prepareReview } from "../src/protocol/operations.js";
 import { mintSnapshotId } from "../src/git/identity.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
-import { materializeScratchCandidate, readDeliveryDiff } from "../src/git/verification.js";
+import { readDeliveryDiff } from "../src/git/integration.js";
+import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { contractId } from "../src/core/facts/types.js";

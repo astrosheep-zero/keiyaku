@@ -157,6 +157,20 @@ worktrees therefore derive the same path for one Contract. The path is a
 read-time projection from the pinned common Git directory and ContractId; it is
 not stored in the Contract journal, and there is no legacy-path fallback.
 
+## Tender, Integration, And Diff Ownership
+
+Tender capture and materialization live in `src/git/tender.ts`, including the
+private-index workspace observation, dirty-workspace policy statistics, and
+tender commit creation. `src/git/integration.ts` owns target observation,
+ancestry and merge-tree semantics, integration snapshot and ChangeId
+materialization, review preparation, and recorded integration-pair diff reads.
+Protocol composes those typed capabilities directly for deliver and review;
+there is no generic preparation wrapper.
+
+`src/git/scratch.ts` owns only disposable Verification scratch worktrees,
+including process-derived naming, materialization, disposal, and orphan
+judgment. Managed worktrees remain governed by the reconciliation rules below.
+
 ## Delivery Preparation And Placement
 
 Preparation consumes only the state coordinates projected from that attempt,

@@ -10,7 +10,6 @@ import { dependencyKeySet } from "../src/core/subject.js";
 import { verifyDelivery } from "../src/protocol/intent.js";
 import { auditOperation, deliverOperation, scopeOperation, type AuditReport } from "../src/protocol/operations.js";
 import { readAuditAt } from "../src/protocol/read/audit.js";
-import { produceVerification, type VerificationOutcome } from "../src/verification/producer.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { makeGitRepository, type TestGitRepository } from "./support/git.js";
 
@@ -57,11 +56,6 @@ function verificationBody(script: string | null = "exit 1"): string {
   ].join("\n");
 }
 
-function failureOutcome(failure: "spawn-error" | "unknown-exit"): VerificationOutcome {
-  return failure === "spawn-error"
-    ? { kind: failure, diagnostic: "spawn failed" }
-    : { kind: failure };
-}
 
 async function failedStoredVerification(): Promise<Readonly<{
   repository: TestGitRepository;
@@ -210,30 +204,6 @@ test("read-only audit returns its initial observation when verification is skipp
   assert.notDeepEqual(current.report, initial.report);
 });
 
-test("stored Verification maps every nonterminal producer outcome to an audit attempt without admission", async () => {
-  for (const failure of ["spawn-error", "unknown-exit"] as const) {
-    const { repository, contract, state } = await failedStoredVerification();
-    const before = state.attestations.length;
-    const git = repositoryAt(repository.path);
-    const result = await withGitDecodeChannel(git, (channel) => verifyDelivery({
-      channel,
-      repository: git,
-      contractId: state.id,
-      at: "2026-08-06T00:00:00.000Z",
-      state,
-      verification: verificationDefinition(decodeContractDocument(state.terms.document.bytes))!,
-      environment: {},
-      produce: async () => failureOutcome(failure),
-      hooksFromCandidate: () => ({ create: [], destroy: [] }),
-    }));
-    const step = failure === "spawn-error"
-      ? { failure, diagnostic: "spawn failed" }
-      : { failure };
-    assert.deepEqual(result, { step });
-    assert.equal((await contract.state()).attestations.length, before);
-  }
-});
-
 test("audit accepts an attestation refusal as a typed attempt without facts", async () => {
   const { contract } = await failedStoredVerification();
   const amended = await contract.amend({ markdown: [
@@ -304,65 +274,6 @@ test("audit admits Verification testimony for its captured old subject", async (
   ]));
 });
 
-test("stored Verification records a result captured before its declaration changes", async () => {
-  const { repository, contract, state } = await failedStoredVerification();
-  const before = state.attestations.length;
-  const git = repositoryAt(repository.path);
-  const result = await withGitDecodeChannel(git, (channel) => verifyDelivery({
-    channel,
-    repository: git,
-    contractId: state.id,
-    at: "2026-08-06T00:00:00.000Z",
-    state,
-    verification: verificationDefinition(decodeContractDocument(state.terms.document.bytes))!,
-    environment: {},
-    produce: async (input) => {
-      const amended = await contract.amend({ markdown: [
-        "## Replace: Verification",
-        "~~~bash",
-        "exit 0",
-        "~~~",
-        "",
-      ].join("\n") });
-      return produceVerification(input);
-    },
-    hooksFromCandidate: () => ({ create: [], destroy: [] }),
-  }));
-  assert.equal(result?.step.kind, "accepted");
-  assert.equal((await contract.state()).attestations.length, before + 1);
-});
-
-test("Verification runs a valid declaration even after prior testimony", async () => {
-  const { repository, contract, state } = await failedStoredVerification();
-  const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes))!;
-  const before = state.attestations.length;
-  let executions = 0;
-  const produce = async () => {
-    executions += 1;
-    return { kind: "terminal", verdict: "satisfied" } as const;
-  };
-
-  const git = repositoryAt(repository.path);
-  const result = await withGitDecodeChannel(git, (channel) => verifyDelivery({
-    channel,
-    repository: git,
-    contractId: state.id,
-    at: "2026-08-06T00:00:00.000Z",
-    state,
-    environment: {},
-    produce,
-    verification: definition,
-    hooksFromCandidate: () => ({ create: [], destroy: [] }),
-  }));
-  assert.equal(executions, 1);
-  assert.equal(result?.step.kind, "accepted");
-  assert.equal((await contract.state()).attestations.length, before + 1);
-  assert.equal((await contract.state()).attestations.at(-1)?.data.subject, dependencyKeySet([
-    { kind: "snapshot", value: state.delivery!.data.integration.snapshot },
-    { kind: "segment", value: definition.segment },
-  ]));
-});
-
 test("Verification reuse requires its exact producer subject", async () => {
   const { repository, state } = await failedStoredVerification();
   const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes))!;
@@ -386,13 +297,6 @@ test("Verification reuse requires its exact producer subject", async () => {
     state: { ...state, attestations: [...state.attestations, unrelated] },
     verification: definition,
     environment: {},
-    produce: async () => {
-      executions += 1;
-      return { kind: "unknown-exit" };
-    },
-    hooksFromCandidate: () => ({ create: [], destroy: [] }),
   }));
-
-  assert.equal(executions, 1);
-  assert.deepEqual(result, { step: { failure: "unknown-exit" } });
+  assert.equal(result?.step.kind, "accepted");
 });

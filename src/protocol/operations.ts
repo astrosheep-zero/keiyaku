@@ -1,10 +1,18 @@
 import {
-  prepareDelivery,
-  prepareReview,
-  type DeliveryPreparationRefusal,
-  type ReviewPreparationRefusal,
+  materializeIntegrationSnapshot,
+  planIntegration,
+  prepareReviewIntegration,
+  readDeliveryDiff,
+  type IntegrationPreparationRefusal,
+} from "../git/integration.js";
+import {
+  captureTender,
+  dirtyTenderDelta,
+  dirtyTenderRefusal,
+  materializeTenderSnapshot,
+  type DirtyWorkspaceRefusal,
   type WorkspaceDirtyDelta,
-} from "../git/delivery.js";
+} from "../git/tender.js";
 import {
   currentBranch,
   extendContractsForAdmissionAt,
@@ -21,8 +29,7 @@ import {
 import type { WorktreeHooks } from "../git/hooks.js";
 import { NoGitWorldError, repositoryAt, type GitRepository } from "../git/repository.js";
 import { withGitReadObservation, type GitDecodeChannel, type GitTreeSelection } from "../git/read-observation.js";
-import { readDeliveryDiff } from "../git/verification.js";
-import type { WorktreeLeak } from "../git/verification.js";
+import type { WorktreeLeak } from "../git/scratch.js";
 import { dependencyKeySet } from "../core/subject.js";
 import type { AttemptContext } from "../core/decide.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -35,7 +42,6 @@ import { decideArc, type ArcRefusal } from "../core/verbs/arc.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import type { PlacementRefusal } from "../core/verbs/placement.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
-import { produceVerification } from "../verification/producer.js";
 import type { VerificationDeclarationPreparation, VerificationDeclarationRefusal } from "../verification/declaration.js";
 import {
   admitIntent,
@@ -74,6 +80,13 @@ import type { CompanionDecorator } from "./run.js";
 
 export type { FactKind, TimelineEntry } from "./read/audit.js";
 export type { ContractDocumentProjection } from "./read/documents.js";
+type DeliveryPreparationRefusal = Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
+  | DirtyWorkspaceRefusal
+  | IntegrationPreparationRefusal
+  | TargetPlacementRefusal;
+type ReviewPreparationRefusal = Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
+  | DirtyWorkspaceRefusal
+  | IntegrationPreparationRefusal;
 type DeliveryFailure = DeliveryPreparationRefusal | VerificationDeclarationRefusal | DeliverRefusal;
 
 type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
@@ -262,6 +275,63 @@ type DeliverOperationInput = MutationOperationInput & Readonly<{
 
 type PreparedDelivery = Readonly<{ delivery: DeliveryIdentity; derivation: DocumentDerivation }>;
 
+export function prepareDelivery(
+  repository: GitRepository,
+  stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"] }>,
+  input: Readonly<{ title: string; message?: string; requireBranchesToBeUpToDate?: boolean; includeDirty?: boolean }>,
+): { kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal } {
+  const { contractId, coordinates } = stage;
+  if (coordinates.workspace === "here" && coordinates.target !== undefined) {
+    const branch = currentBranch(repository);
+    if (branch !== coordinates.target) {
+      return { kind: "refused", refusal: { kind: "workspace-not-on-target", contractId, target: coordinates.target, branch } };
+    }
+  }
+  const tender = captureTender(repository, stage);
+  if (tender.kind === "refused") return tender;
+  if ((tender.data.dirty && input.includeDirty !== true) || tender.data.changes.submodules.length > 0) {
+    return { kind: "refused", refusal: dirtyTenderRefusal(repository, contractId, tender.data) };
+  }
+  const tenderSnapshot = materializeTenderSnapshot(repository, tender.data, {
+    contractId,
+    title: input.title,
+    ...(input.message === undefined ? {} : { message: input.message }),
+  });
+  const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
+  const integration = planIntegration(repository, stage, { ...tender.data, head: tenderSnapshot }, requireBranchesToBeUpToDate);
+  if (integration.kind === "refused") return integration;
+  const integrationSnapshot = coordinates.target === undefined
+    ? tenderSnapshot
+    : materializeIntegrationSnapshot(repository, integration.data.tree, integration.data.predecessor, {
+      contractId,
+      title: input.title,
+      ...(input.message === undefined ? {} : { message: input.message }),
+    });
+  return {
+    kind: "prepared",
+    data: {
+      tenderSnapshot,
+      integration: { predecessor: integration.data.predecessor, snapshot: integrationSnapshot, changeId: integration.data.changeId },
+      method: "squash",
+      policy: { requireBranchesToBeUpToDate },
+    },
+  };
+}
+
+export function prepareReview(
+  repository: GitRepository,
+  stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"] }>,
+): { kind: "prepared"; data: Readonly<{ changeId: DeliverData["integration"]["changeId"]; workspace?: WorkspaceDirtyDelta }> }
+  | { kind: "refused"; refusal: ReviewPreparationRefusal } {
+  const tender = captureTender(repository, stage);
+  if (tender.kind === "refused") return tender;
+  if (tender.data.changes.submodules.length > 0) {
+    return { kind: "refused", refusal: dirtyTenderRefusal(repository, stage.contractId, tender.data) };
+  }
+  const workspace = dirtyTenderDelta(repository, tender.data);
+  return prepareReviewIntegration(repository, stage, tender.data, workspace);
+}
+
 async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptContext): Promise<AttemptDecision<PreparedDelivery>> {
   let decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
@@ -340,7 +410,6 @@ async function completeDelivery(
     at: timestamp(),
     state: first.state,
     environment: process.env,
-    produce: produceVerification,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(derivation.verification.data === null
       ? {}
@@ -543,7 +612,6 @@ export async function auditOperation(
     at: timestamp(),
     state: initial.state,
     environment: process.env,
-    produce: produceVerification,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     verification: derivation.verification.data,
   });
