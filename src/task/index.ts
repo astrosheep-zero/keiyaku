@@ -1,7 +1,7 @@
 import type { WorldRoot } from "../world.js";
 export type { WorldRoot } from "../world.js";
 import {
-  buildTree, diagnoseBoard, projectDetailFacts, taskRelations, type BlockedTaskRow,
+  buildTree, createTaskRelations, diagnoseBoard, projectDetailFacts, type BlockedTaskRow,
   type TaskDetailFacts, type TaskDoctorIssue, type TaskRef, type TaskRow, type TaskTreeNode,
 } from "./board.js";
 import { composeTasks, type TaskCompositionResult } from "./compose.js";
@@ -112,13 +112,13 @@ class TaskHandle {
   constructor(readonly id: TaskId, private readonly world: WorldRoot) {}
   async read(): Promise<TaskDetail | null> {
     const board = (await readBoard(this.world)).board;
-    const facts = projectDetailFacts(board, this.id, taskRelations.of(board));
+    const facts = projectDetailFacts(board, this.id, createTaskRelations(board));
     return facts === null ? null : { ...facts, task: taskView(facts.task) };
   }
   async tree(): Promise<TaskDecompositionTree> {
     if (arguments.length > 0) throw new TypeError("tree accepts no input");
     const board = (await readBoard(this.world)).board;
-    const node = buildTree(board, this.id, taskRelations.of(board));
+    const node = buildTree(board, this.id, createTaskRelations(board));
     return node === null ? { kind: "refused", refusal: { kind: "task-missing", taskId: this.id } } : { kind: "accepted", value: node };
   }
   update(input: UpdateTaskInput): Promise<TaskUpdateResult> { return updateTask(this.world, this.id, updateInput(input)); }

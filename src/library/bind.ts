@@ -13,28 +13,6 @@ import type { TaskId } from "../task/identity.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
 import type { KeiyakuRefusal } from "./refusal.js";
 
-const suffixDraw = {
-  next(): string {
-    return randomBytes(8).toString("hex");
-  },
-};
-
-export async function withBindSuffixDraws<T>(suffixes: readonly string[], run: () => Promise<T>): Promise<T> {
-  const previous = suffixDraw.next;
-  let index = 0;
-  suffixDraw.next = () => {
-    const next = suffixes[index];
-    if (next === undefined) throw new Error("bind suffix fixture is exhausted");
-    index += 1;
-    return next;
-  };
-  try {
-    return await run();
-  } finally {
-    suffixDraw.next = previous;
-  }
-}
-
 type BindAttemptInput = Readonly<{
   scope: RepositoryScope;
   channel: GitDecodeChannel;
@@ -49,7 +27,7 @@ type BindAttemptInput = Readonly<{
 
 function candidateId(title: string, collision: number): ContractId {
   const stem = fitIdentityStem({ stem: normalizeIdentityStem({ source: title }) || "contract", maxBytes: 48 });
-  const suffix = collision === 0 ? "" : `-${suffixDraw.next()}`;
+  const suffix = collision === 0 ? "" : `-${randomBytes(8).toString("hex")}`;
   return contractIdFromSegment(`${stem}${suffix}`);
 }
 

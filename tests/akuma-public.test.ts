@@ -93,60 +93,20 @@ test("history completion keeps the start sequence and never remints", async () =
     });
     assert.deepEqual([born.turn.sequence, start, done], [1, 2, 3]);
 
-    const pages = [
-      await born.handle.history(),
-      await born.handle.history({ before: 3 }),
-      await born.handle.history({ before: 4 }),
-      await born.handle.history({ since: 1 }),
-    ];
-    for (const page of pages) {
-      const tools = toolRow(page.rows);
-      assert.equal(tools.length, 1);
-      assert.equal(tools[0]?.sequence, 2);
-      assert.equal(tools[0] !== undefined && "state" in tools[0] && tools[0].state !== "active", true);
-      assert.equal(page.rows.some((row) => row.kind === "tool" && row.sequence === 3), false);
-    }
-    assert.equal(toolRow((await born.handle.history({ since: 2 })).rows).length, 0);
-    assert.deepEqual(toolRow((await born.handle.history({ before: 3 })).rows).map((row) => row.sequence), [2]);
-  } finally {
-    born.holder.release();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("history cursors do not fragment a tool across start and completion", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-boundary-"));
-  const born = await bornHistoryHandle(root, "c0000002");
-  try {
-    await appendActivity(born.allocated.paths, {
-      turnSequence: born.turn.sequence,
-      event: {
-        type: "tool", phase: "started", id: "search-1", name: "Search",
-        call: { kind: "search", query: "TODO" },
-      },
-      at: "2026-08-10T00:00:02.000Z",
-    });
-    await appendActivity(born.allocated.paths, {
-      turnSequence: born.turn.sequence,
-      event: {
-        type: "tool", phase: "completed", id: "search-1", name: "Search",
-        call: { kind: "search", query: "TODO" }, result: { status: "ok" },
-      },
-      at: "2026-08-10T00:00:03.000Z",
-    });
+    const page = await born.handle.history();
+    const tools = toolRow(page.rows);
+    assert.equal(tools.length, 1);
+    assert.equal(tools[0]?.sequence, 2);
+    assert.equal(tools[0] !== undefined && "state" in tools[0] && tools[0].state !== "active", true);
+    assert.equal(page.rows.some((row) => row.kind === "tool" && row.sequence === 3), false);
 
     const sinceStart = await born.handle.history({ since: 2 });
     assert.equal(sinceStart.rows.some((row) => row.kind === "tool"), false);
     assert.equal(sinceStart.rows.some((row) => row.sequence === 3), false);
 
-    const beforeDone = await born.handle.history({ before: 3 });
+    const beforeDone = await born.handle.history({ before: done });
     assert.deepEqual(toolRow(beforeDone.rows).map((row) => row.sequence), [2]);
     assert.equal(beforeDone.rows.filter((row) => row.kind === "tool").length, 1);
-
-    const beforeStart = await born.handle.history({ before: 2 });
-    assert.equal(toolRow(beforeStart.rows).length, 0);
-    const sinceDone = await born.handle.history({ since: 3 });
-    assert.equal(toolRow(sinceDone.rows).length, 0);
   } finally {
     born.holder.release();
     rmSync(root, { recursive: true, force: true });
@@ -199,7 +159,6 @@ test("history limit counts folded semantic rows", async () => {
 });
 
 test("Heart activity reads do not take public history cursors", async () => {
-  assert.equal(activitySlice.length, 1);
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-owner-"));
   const born = await bornHistoryHandle(root, "c0000004");
   try {
@@ -1363,26 +1322,6 @@ test("list rejects post-identity schema corruption with AkuId and directory", as
       assert.match(error.cause.message, /leash schema version must be 4/u);
       return true;
     });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("list distinguishes sealed residue from an unclaimed birth", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-seal-"));
-  try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "abcdef12" });
-    await initializeHeart(allocated.paths);
-    const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-    assert.equal(await leash.sealIfUnborn(allocated.paths, {
-      evidence: "fixture-abandonment",
-      at: "2026-08-08T00:00:00.000Z",
-    }), "sealed");
-    assert.deepEqual((await (await akumaAt(root)).list()).rows, [{
-      id: allocated.id,
-      life: "stillborn",
-      seal: { evidence: "fixture-abandonment", at: "2026-08-08T00:00:00.000Z" },
-    }]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

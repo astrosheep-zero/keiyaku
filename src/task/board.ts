@@ -46,7 +46,7 @@ export type TaskRelationProjection = Readonly<{
   supersededBy(id: TaskId): readonly TaskRef[];
   related(id: TaskId): readonly TaskRef[];
 }>;
-function createTaskRelations(board: TaskBoard): TaskRelationProjection {
+export function createTaskRelations(board: TaskBoard): TaskRelationProjection {
   const children = new Map<TaskId, TaskId[]>();
   const blocks = new Map<TaskId, TaskId[]>();
   const supersededBy = new Map<TaskId, TaskId[]>();
@@ -73,10 +73,19 @@ function createTaskRelations(board: TaskBoard): TaskRelationProjection {
     },
   };
 }
-export const taskRelations = { of(board: TaskBoard): TaskRelationProjection { return createTaskRelations(board); } };
+function needReleased(board: TaskBoard, id: TaskId): boolean {
+  const target = board.tasks.get(id);
+  return target !== undefined && terminal(target.state);
+}
+function hasUnresolvedNeeds(board: TaskBoard, task: TaskDocument): boolean {
+  return task.needs.some((id) => !needReleased(board, id));
+}
 export function taskDisposition(board: TaskBoard, task: TaskDocument): TaskDisposition {
   if (task.state !== "open") return task.state;
-  return task.needs.every((id) => { const target = board.tasks.get(id); return target !== undefined && terminal(target.state); }) ? "ready" : "blocked";
+  return hasUnresolvedNeeds(board, task) ? "blocked" : "ready";
+}
+export function taskBlocked(board: TaskBoard, task: TaskDocument): boolean {
+  return (task.state === "open" || task.state === "in_progress") && hasUnresolvedNeeds(board, task);
 }
 export function projectDetailFacts(
   board: TaskBoard,
@@ -84,7 +93,7 @@ export function projectDetailFacts(
   relations: TaskRelationProjection,
 ): TaskDetailFacts | null {
   const task = board.tasks.get(id); if (task === undefined) return null;
-  const needs = task.needs.map((need) => ({ ...taskRef(board, need), released: board.tasks.has(need) && terminal(board.tasks.get(need)!.state) }));
+  const needs = task.needs.map((need) => ({ ...taskRef(board, need), released: needReleased(board, need) }));
   return {
     task,
     needs,
@@ -112,14 +121,13 @@ export function projectBlocked(
   relations: TaskRelationProjection,
 ): readonly BlockedTaskRow[] {
   return projectRows(board, scope, "active").flatMap((row) => {
-    if (row.state !== "open" && row.state !== "in_progress") return [];
-    const blockers = projectDetailFacts(board, row.id, relations)!.blockers;
-    return blockers.length === 0 ? [] : [{ ...row, blockers }];
+    if (!taskBlocked(board, board.tasks.get(row.id)!)) return [];
+    return [{ ...row, blockers: projectDetailFacts(board, row.id, relations)!.blockers }];
   });
 }
 
 export function projectStatusRows(board: TaskBoard, scope: readonly string[] | null) {
-  const relations = taskRelations.of(board);
+  const relations = createTaskRelations(board);
   const blockers = new Map(projectBlocked(board, scope, relations).map((row) => [row.id, row.blockers]));
   return projectRows(board, scope, "all").map((row) => {
     const unresolved = blockers.get(row.id);

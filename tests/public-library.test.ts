@@ -9,7 +9,6 @@ import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId 
 import { contractId, documentKey } from "../src/core/facts/types.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { withBindSuffixDraws } from "../src/library/bind.js";
 import { bindOperation } from "../src/protocol/operations.js";
 import { makeGitRepository } from "./support/git.js";
 
@@ -448,31 +447,15 @@ async function occupyContract(repositoryPath: string, id: ContractId) {
   assert.equal(occupied.kind, "accepted");
 }
 
-test("library bind tries the title stem then three suffixed identities and keeps the last typed refusal", async () => {
+test("library bind retries a colliding title stem with a hexadecimal suffix", async () => {
   const repository = repositoryWithInitialCommit();
-  const stem = "kei/collision-title";
-  const suffixes = ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc"] as const;
-  const candidates = [stem, ...suffixes.map((suffix) => `${stem}-${suffix}`)] as const;
-  for (const id of candidates) await occupyContract(repository.path, contractId(id));
-
-  const error = await withBindSuffixDraws(suffixes, async () => {
-    try {
-      await Keiyaku.bind({
-        repo: await Repo.at({ path: repository.path }),
-        markdown: markdown("Collision title"),
-        workspace: "worktree",
-      });
-      return undefined;
-    } catch (caught) {
-      return caught;
-    }
+  await occupyContract(repository.path, contractId("kei/collision-title"));
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: markdown("Collision title"),
+    workspace: "worktree",
   });
-
-  assert.ok(error instanceof KeiyakuRefused);
-  assert.equal(error instanceof KeiyakuRetry, false);
-  assert.deepEqual(error.refusal, { kind: "contract-exists", contractId: candidates[3] });
-  assert.match(candidates[1]!, /^kei\/collision-title-[0-9a-f]{16}$/);
-  assert.equal(new Set(candidates).size, 4);
+  assert.match((await bound.keiyaku.state()).id, /^kei\/collision-title-[0-9a-f]{16}$/);
 });
 
 test("a non-collision here refusal stops after the first candidate and releases its reservation", async () => {

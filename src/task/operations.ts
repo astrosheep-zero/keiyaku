@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { documentDiff } from "../markdown/diff.js";
 import { installNamespaceContext, readNamespaceContext } from "./context.js";
 import {
-  relationProblem, projectBlocked, projectRows, projectStatusRows, taskRelations,
+  createTaskRelations, relationProblem, projectBlocked, projectRows, projectStatusRows,
   type BlockedTaskRow, type TaskBoard, type TaskRow,
 } from "./board.js";
 import { parseTaskCreationDocument, serializeTaskDocument, type TaskCreationDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
@@ -194,7 +194,7 @@ export async function readyTasks(world: WorldRoot, scope?: "namespace" | "world"
   const selected = await readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
   const board = (await readBoard(world)).board;
   if (parent !== undefined && !board.tasks.has(parent)) return { kind: "refused", refusal: { kind: "task-missing", taskId: parent } };
-  const relations = taskRelations.of(board);
+  const relations = createTaskRelations(board);
   const ready: TaskQueryExpression = { kind: "predicate", predicate: { field: "ready", operator: "=", value: true } };
   const expression: TaskQueryExpression = parent === undefined ? ready : { kind: "and", terms: [ready, underExpression(parent)] };
   const selectedRows = projectQuery(board, relations, {
@@ -209,7 +209,7 @@ export async function blockedTasks(world: WorldRoot, scope?: "namespace" | "worl
   const selected = await readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
   const board = (await readBoard(world)).board;
   if (parent !== undefined && !board.tasks.has(parent)) return { kind: "refused", refusal: { kind: "task-missing", taskId: parent } };
-  const relations = taskRelations.of(board);
+  const relations = createTaskRelations(board);
   const blocked: TaskQueryExpression = { kind: "predicate", predicate: { field: "blocked", operator: "=", value: true } };
   const expression: TaskQueryExpression = parent === undefined ? blocked : { kind: "and", terms: [blocked, underExpression(parent)] };
   const selectedRows = projectQuery(board, relations, {
@@ -235,7 +235,7 @@ export async function queryTasks(
 ): Promise<TaskOutcome<TaskPage<TaskQueryRow>>> {
   const selected = await readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
   const board = (await readBoard(world)).board;
-  const relations = taskRelations.of(board);
+  const relations = createTaskRelations(board);
   for (const target of queryUnderTargets(expression)) if (!board.tasks.has(target)) {
     return { kind: "refused", refusal: { kind: "task-missing", taskId: target } };
   }

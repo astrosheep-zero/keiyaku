@@ -1,13 +1,13 @@
 import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
 import { formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import type { BlockedTaskRow, TaskBoard, TaskRef, TaskRelationProjection, TaskRow } from "./board.js";
-import { taskDisposition, taskRef } from "./board.js";
+import { taskBlocked, taskDisposition, taskRef } from "./board.js";
 
 export const DEFAULT_TASK_LIMIT = 100;
 export const MAX_TASK_LIMIT = 1_000;
 export const TASK_RELATION_PREDICATE_FIELDS = ["under", "needs", "blocks"] as const;
 export type TaskRelationPredicateField = (typeof TASK_RELATION_PREDICATE_FIELDS)[number];
-export function isTaskRelationPredicateField(value: string): value is TaskRelationPredicateField {
+function isTaskRelationPredicateField(value: string): value is TaskRelationPredicateField {
   return (TASK_RELATION_PREDICATE_FIELDS as readonly string[]).includes(value);
 }
 
@@ -223,14 +223,6 @@ function matchRelation(selected: boolean, operator: "=" | "!="): boolean {
   return operator === "=" ? selected : !selected;
 }
 
-function isBlocked(board: TaskBoard, task: TaskDocument): boolean {
-  const active = task.state === "open" || task.state === "in_progress";
-  return active && task.needs.some((need) => {
-    const target = board.tasks.get(need);
-    return target === undefined || (target.state !== "done" && target.state !== "drop");
-  });
-}
-
 function matchesPredicate(
   board: TaskBoard,
   relations: TaskRelationProjection,
@@ -248,7 +240,7 @@ function matchesPredicate(
     case "needs": return matchRelation(relation(board, relations, task.id, "needs", value.value), value.operator);
     case "blocks": return matchRelation(relation(board, relations, task.id, "blocks", value.value), value.operator);
     case "ready": return membership(taskDisposition(board, task) === "ready", value.operator, value.value);
-    case "blocked": return membership(isBlocked(board, task), value.operator, value.value);
+    case "blocked": return membership(taskBlocked(board, task), value.operator, value.value);
     case "created": return compare(task.createdAt, value.operator, value.value);
     case "updated": return compare(task.updatedAt, value.operator, value.value);
   }
