@@ -1,6 +1,6 @@
 import type { ActorId } from "../index.js";
 
-const PROJECTION_ID_ENV = "KEIYAKU_PROJECTION_ID";
+const ACTOR_ID_ENV = "KEIYAKU_ACTOR_ID";
 
 type ActorResolutionInput = Readonly<{
   env?: Readonly<Record<string, string | undefined>>;
@@ -13,6 +13,6 @@ export function resolveActor(input: ActorResolutionInput = {}): ActorId | undefi
     if (input.actor.trim().length === 0) throw new TypeError("actor must be a nonblank string");
     return input.actor;
   }
-  const projectionId = input.env?.[PROJECTION_ID_ENV];
-  return projectionId !== undefined && projectionId.trim().length > 0 ? projectionId : undefined;
+  const actorId = input.env?.[ACTOR_ID_ENV];
+  return actorId !== undefined && actorId.trim().length > 0 ? actorId : undefined;
 }

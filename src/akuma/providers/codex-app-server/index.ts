@@ -6,7 +6,7 @@ import {
   type ProviderAdapter,
   type TurnResult,
 } from "../../provider.js";
-import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
+import { providerLaunchEnv, type ProviderExecution, type ProviderOptions } from "../../provider-recipe.js";
 import {
   codexNotificationResult,
   codexObject,
@@ -121,7 +121,7 @@ async function forkCodex(execution: ProviderExecution, input: ForkInput): Promis
   const server = new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
     cwd: input.cwd,
-    ...(execution.env === undefined ? {} : { env: { ...process.env, ...execution.env } }),
+    ...(execution.env === undefined ? {} : { env: providerLaunchEnv(process.env, execution.env) }),
   });
   try {
     await initialize(server);
@@ -151,8 +151,7 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
     cwd: input.cwd,
     ...((execution.env === undefined && input.requests === undefined) ? {} : { env: {
-      ...process.env,
-      ...execution.env,
+      ...providerLaunchEnv(process.env, execution.env),
       ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
     } }),
   });

@@ -60,7 +60,7 @@ incomplete-call refusal whose body is the root projection; requesting root
 help produces that projection on stdout with exit `0`.
 
 The adapter chooses actor testimony in this order: explicit nonblank `--actor`,
-then `KEIYAKU_PROJECTION_ID`, then no actor. Explicit input wins over the
+then `KEIYAKU_ACTOR_ID`, then no actor. Explicit input wins over the
 environment. Missing input is a typed usage refusal with one usage line; the
 CLI does not prompt.
 

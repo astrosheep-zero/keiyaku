@@ -735,9 +735,12 @@ export async function driveAkumaBody(
 
 export async function spawnAkumaBody(launch: BodyLaunch): Promise<void> {
   const encoded = Buffer.from(JSON.stringify(launch), "utf8").toString("base64url");
+  const actorId = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
+  if (actorId === undefined) throw new Error("Akuma wake has no born soul");
   const owned = await spawnDetachedProcess({
     argv: [process.execPath, ...process.execArgv, fileURLToPath(import.meta.url), encoded],
     cwd: await launchCwd(launch),
+    env: { ...process.env, KEIYAKU_ACTOR_ID: actorId },
     log: launch.paths.log,
   });
   owned.release();

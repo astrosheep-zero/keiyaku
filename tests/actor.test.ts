@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { resolveActor } from "../src/cli/actor.js";
 
-const ENV = "KEIYAKU_PROJECTION_ID";
+const ENV = "KEIYAKU_ACTOR_ID";
 
 test("uses opaque environment testimony without projection validation", () => {
   const actor = "projection/codex";

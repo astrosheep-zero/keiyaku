@@ -120,7 +120,7 @@ identity or interpreted by Akuma.
 Actor is optional testimony, not lifecycle identity or gate input. `ActorId` is
 an opaque nonblank brand. A library write records it only when the caller
 supplies it; its absence is legal. The CLI selects an explicit nonblank
-`--actor`, then `KEIYAKU_PROJECTION_ID`, then no signature. Git uses a
+`--actor`, then `KEIYAKU_ACTOR_ID`, then no signature. Git uses a
 neutral Git author when testimony is absent. Contract facts retain full `kei/`
 identities; Git paths may privately strip that prefix but never reconstruct
 public identity from a path.

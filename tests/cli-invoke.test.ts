@@ -306,13 +306,13 @@ test("journal-writing commands preserve optional actor testimony", async () => {
 
   const environmentActor = "projection/codex";
   const fromEnvironment = await command(["bind", "-"], {
-    KEIYAKU_PROJECTION_ID: environmentActor,
+    KEIYAKU_ACTOR_ID: environmentActor,
   });
   assert.equal((await observeContract(await repositoryAt(repository.path), acceptedContract(fromEnvironment))).entries[0]?.actor, environmentActor);
 
   const explicitActor = " external \u{1f9d1}\u{1f3fd}\u200d\u{1f4bb} ";
   const explicit = await command(["bind", "--actor", explicitActor, "-"], {
-    KEIYAKU_PROJECTION_ID: "different projection",
+    KEIYAKU_ACTOR_ID: "different projection",
   });
   const persisted = (await observeContract(await repositoryAt(repository.path), acceptedContract(explicit))).entries[0]?.actor;
   assert.equal(persisted, explicitActor);
@@ -320,7 +320,7 @@ test("journal-writing commands preserve optional actor testimony", async () => {
 
   const beforeBlank = await readRef(await repositoryAt(repository.path), GIT_REF);
   await assert.rejects(
-    async () => command(["bind", "--actor", " \t", "-"], { KEIYAKU_PROJECTION_ID: "aku/environment" }),
+    async () => command(["bind", "--actor", " \t", "-"], { KEIYAKU_ACTOR_ID: "aku/environment" }),
     (error: unknown) => error instanceof CliUsageError && /--actor requires a nonblank value/.test(error.message),
   );
   assert.equal(await readRef(await repositoryAt(repository.path), GIT_REF), beforeBlank);

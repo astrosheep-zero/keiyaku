@@ -141,6 +141,10 @@ Public world and summon coordinates are normalized once at the Akuma boundary.
 Soul cwd, heart paths, and detached launch paths are absolute below that point;
 downstream layers do not reinterpret relative paths.
 
+Each Body and provider launch receives reserved `KEIYAKU_ACTOR_ID` equal to
+that Soul's AkuId. Provider execution `env` cannot override it. The caller
+process environment is unchanged.
+
 Stillborn residue is visible in `list()` with its evidence. No automatic
 cleaner ships until a real reader needs one; manual removal is safe because
 a body must not outlive its heart (ENOENT -> abort through its live provider

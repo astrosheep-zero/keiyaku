@@ -8,7 +8,7 @@ import {
   type TellReceipt,
   type TurnResult,
 } from "../../provider.js";
-import type { ProviderOptions } from "../../provider-recipe.js";
+import { providerLaunchEnv, type ProviderOptions } from "../../provider-recipe.js";
 import {
   emitClaudeMessage,
   type ClaudeObservationState,
@@ -94,7 +94,7 @@ function claudeQueryOptions(
     cwd: input.cwd,
     abortController,
     ...(execution.executable === undefined ? {} : { pathToClaudeCodeExecutable: execution.executable }),
-    ...(execution.env === undefined ? {} : { env: { ...process.env, ...execution.env } }),
+    ...(execution.env === undefined ? {} : { env: providerLaunchEnv(process.env, execution.env) }),
     permissionMode: mode,
     ...(mode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
     settingSources: ["user", "project", "local"],

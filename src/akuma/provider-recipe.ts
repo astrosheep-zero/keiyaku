@@ -19,6 +19,20 @@ export type ProviderExecution = Readonly<{
   env?: Readonly<Record<string, string>>;
 }>;
 
+export const KEIYAKU_ACTOR_ID_ENV = "KEIYAKU_ACTOR_ID";
+
+export function providerLaunchEnv(
+  inherited: NodeJS.ProcessEnv,
+  configured?: Readonly<Record<string, string>>,
+): NodeJS.ProcessEnv {
+  const reserved = inherited[KEIYAKU_ACTOR_ID_ENV];
+  return {
+    ...inherited,
+    ...configured,
+    ...(reserved === undefined ? {} : { [KEIYAKU_ACTOR_ID_ENV]: reserved }),
+  };
+}
+
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Readonly<Record<string, unknown>>
