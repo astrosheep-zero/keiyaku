@@ -1,4 +1,10 @@
-import type { ActivityRow, ActivitySnapshotEntry, SnapshotRow } from "../../akuma/index.js";
+import type {
+  ActivityRow,
+  ActivitySnapshot,
+  ActivitySnapshotEntry,
+  ReportedFileChange,
+  SnapshotRow,
+} from "../../akuma/index.js";
 import type { AkumaObservation, CreatedTaskObservation, DispatchStage } from "../../index.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
@@ -166,6 +172,28 @@ function taskScanLine(row: CreatedTaskRow, indent = ""): string {
   return `${indent}${taskDispositionMark(row.disposition)} ${row.id} · P${row.priority} ${row.disposition}`;
 }
 
+function changeOp(op: ReportedFileChange["op"]): "write" | "edit" | "delete" {
+  return op === "add" ? "write" : op === "delete" ? "delete" : "edit";
+}
+
+function renderReportedChangeLines(snapshot: ActivitySnapshot, columns: number): readonly string[] {
+  const lines = [`  changes ${snapshot.reportedChanges.length + snapshot.reportedChangesOmitted}`];
+  for (const change of snapshot.reportedChanges) {
+    const scan = `  ${changeOp(change.op)}`;
+    const path = safeText(change.path);
+    const stat = change.diffstat === undefined
+      ? ""
+      : ` — +${change.diffstat.added} -${change.diffstat.removed}`;
+    const inline = `${scan} ${path}${stat}`;
+    if (displayColumns(inline) <= columns) lines.push(inline);
+    else lines.push(`${scan}`, ...renderTextBlock(`${path}${stat}`, "    ", columns));
+  }
+  if (snapshot.reportedChangesOmitted > 0) {
+    lines.push(`  ⋮ ${snapshot.reportedChangesOmitted} earlier changes`);
+  }
+  return lines;
+}
+
 function renderTaskContextLines(
   created: CreatedTaskObservation | undefined,
   columns: number,
@@ -209,6 +237,7 @@ function snapshotText(
     ...facts,
     ...activity,
     ...footer,
+    ...renderReportedChangeLines(snapshot, context.columns),
     ...renderTaskContextLines(view.createdTasks, context.columns),
   ].join("\n");
 }

@@ -39,6 +39,7 @@ export type {
   OpenTurn,
   OpenTurnRow,
   OutcomeRow,
+  ReportedFileChange,
   RetainedWindow,
   Snapshot,
   SnapshotRow,

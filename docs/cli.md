@@ -302,16 +302,23 @@ answered single wait, and `history --last` write exact answer bytes. Detached
 call prints the copyable canonical-world wait command. Text never exposes
 provider receipt/fence stages or Heart storage vocabulary.
 
-Created Task context follows the snapshot, including after its life footer:
+Provider-reported changes and created Task context follow the snapshot,
+including after its life footer:
 
 ```text
+  changes <total>
+  <write|edit|delete> <path> [— +<added> -<removed>]
+  ⋮ <N> earlier changes
   tasks <N>
   <mark> <complete TaskId> · P<n> <disposition> — <title>
 ```
 
-Zero matches render `tasks 0`; failure renders `! tasks failed <diagnostic>`.
-Complete TaskIds and titles are never truncated, and this block does not
-consume the timeline budget.
+`<total>` is shown plus omitted; emit the omitted line only when nonzero.
+Missing diffstat shortens that item. Empty summaries print `changes 0`.
+Zero Task matches render `tasks 0`; failure renders `! tasks failed
+<diagnostic>`. Complete TaskIds and titles are never truncated. Neither block
+consumes the timeline budget. Exact-answer call/wait and `history --last`
+remain raw and have no snapshot block; JSON retains the complete observation.
 
 Tell appears once as pending (`⧗ tell`) or terminally evidenced (`told`), and
 pending tells survive the snapshot budget. JSON preserves

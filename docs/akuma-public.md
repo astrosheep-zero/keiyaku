@@ -12,7 +12,15 @@ only that Turn's tail-three plus independent pre-tail voice-three union, active
 tools, and actionable pending tells. Tail and voice are taken from ordinary
 window rows; an active tool does not occupy a tail slot. With
 no open Turn it exposes only the latest outcome and actionable pending tells.
-It never samples activity across closed Turns. Contiguous hidden open-Turn runs
+Every snapshot arm, including unborn, also carries `reportedChanges` and
+`reportedChangesOmitted` from that same frontier Turn. Eligible source rows
+are completed `fileChange` tools with successful result status; each native
+change stays its own item, with the tool row's start sequence and timestamp.
+The newest five items are restored to original order; the omitted count is
+exactly the older remainder and is independent of snapshot `omitted`, tail,
+voice, pins, and typed gaps. Repeated paths remain repeated operations. An
+empty frontier summary is `[]` and `0`. It never samples activity across
+closed Turns. Contiguous hidden open-Turn runs
 remain visible at their actual positions as typed read-time gap entries whose
 counts sum to the snapshot's `omitted` total. `history` exposes pages of the
 complete retained ledger in global order and does not consume snapshot gaps.

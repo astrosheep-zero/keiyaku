@@ -429,6 +429,115 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
   assert.equal(selectSnapshot(mixedLedger).kind, "idle");
 });
 
+test("reported file changes follow the open or latest closed frontier", () => {
+  const earlierCall = { kind: "fileChange" as const, changes: [{ op: "add" as const, path: "src/earlier.ts" }] };
+  const frontierCall = {
+    kind: "fileChange" as const,
+    changes: [
+      { op: "add" as const, path: "src/created.ts", diffstat: { added: 4, removed: 0 } },
+      { op: "update" as const, path: "src/repeated.ts", diffstat: { added: 2, removed: 1 } },
+      { op: "delete" as const, path: "src/removed.ts", diffstat: { added: 0, removed: 3 } },
+      { op: "update" as const, path: "src/unknown.ts" },
+      { op: "update" as const, path: "src/repeated.ts", diffstat: { added: 1, removed: 0 } },
+    ],
+  };
+  const failedCall = { kind: "fileChange" as const, changes: [{ op: "add" as const, path: "src/failed.ts" }] };
+  const activeCall = { kind: "fileChange" as const, changes: [{ op: "delete" as const, path: "src/active.ts" }] };
+  const facts = [
+    { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
+    { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "tool" as const, phase: "started" as const, id: "earlier", name: "Write", call: earlierCall } },
+    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "earlier", name: "Write", call: earlierCall, result: { status: "ok" as const } } },
+    { kind: "turn-end" as const, sequence: 4, turnSequence: 1, completedAt: "2026-08-10T00:00:04.000Z", outcome: { kind: "answered" as const, answer: "earlier", session: { sessionId: "earlier" } } },
+    { kind: "turn-start" as const, sequence: 5, bodySequence: 1, startedAt: "2026-08-10T00:00:05.000Z" },
+    { kind: "activity" as const, sequence: 6, turnSequence: 5, at: "2026-08-10T00:00:06.000Z", event: { type: "tool" as const, phase: "started" as const, id: "frontier", name: "Write", call: frontierCall } },
+    { kind: "activity" as const, sequence: 7, turnSequence: 5, at: "2026-08-10T00:00:07.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "frontier", name: "Write", call: frontierCall, result: { status: "ok" as const } } },
+    { kind: "activity" as const, sequence: 8, turnSequence: 5, at: "2026-08-10T00:00:08.000Z", event: { type: "tool" as const, phase: "started" as const, id: "failed", name: "Write", call: failedCall } },
+    { kind: "activity" as const, sequence: 9, turnSequence: 5, at: "2026-08-10T00:00:09.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "failed", name: "Write", call: failedCall, result: { status: "error" as const } } },
+    { kind: "activity" as const, sequence: 10, turnSequence: 5, at: "2026-08-10T00:00:10.000Z", event: { type: "tool" as const, phase: "started" as const, id: "active", name: "Write", call: activeCall } },
+    { kind: "activity" as const, sequence: 11, turnSequence: 5, at: "2026-08-10T00:00:11.000Z", event: { type: "tool" as const, phase: "started" as const, id: "run", name: "Bash", call: { kind: "run" as const, command: "touch src/non-file.ts" } } },
+    { kind: "activity" as const, sequence: 12, turnSequence: 5, at: "2026-08-10T00:00:12.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "run", name: "Bash", call: { kind: "run" as const, command: "touch src/non-file.ts" }, result: { status: "ok" as const } } },
+  ];
+  const reported = (snapshot: ReturnType<typeof selectSnapshot>) => snapshot.reportedChanges.map((change) => ({
+    sequence: change.sequence,
+    at: change.at,
+    op: change.op,
+    path: change.path,
+    ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
+  }));
+  const openLedger = projectTurns(facts);
+  const openFrontier = openLedger.openTurn?.rows.find((row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 6);
+  assert.ok(openFrontier !== undefined && openFrontier.kind === "tool" && openFrontier.call.kind === "fileChange");
+  (openFrontier.call.changes[3] as unknown as { op: "unspecified" }).op = "unspecified";
+
+  const open = selectSnapshot(openLedger);
+  assert.equal(open.kind, "open");
+  assert.deepEqual(reported(open), [
+    { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "add", path: "src/created.ts", diffstat: { added: 4, removed: 0 } },
+    { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "update", path: "src/repeated.ts", diffstat: { added: 2, removed: 1 } },
+    { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "delete", path: "src/removed.ts", diffstat: { added: 0, removed: 3 } },
+    { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "unspecified", path: "src/unknown.ts" },
+    { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "update", path: "src/repeated.ts", diffstat: { added: 1, removed: 0 } },
+  ]);
+  assert.equal(open.reportedChangesOmitted, 0);
+
+  const closedLedger = projectTurns([...facts, {
+    kind: "turn-end" as const,
+    sequence: 13,
+    turnSequence: 5,
+    completedAt: "2026-08-10T00:00:13.000Z",
+    outcome: { kind: "answered" as const, answer: "frontier", session: { sessionId: "frontier" } },
+  }]);
+  const closedFrontier = closedLedger.turns.at(-1);
+  assert.ok(closedFrontier?.kind === "closed");
+  const closedChange = closedFrontier.rows.find((row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 6);
+  assert.ok(closedChange !== undefined && closedChange.kind === "tool" && closedChange.call.kind === "fileChange");
+  (closedChange.call.changes[3] as unknown as { op: "unspecified" }).op = "unspecified";
+
+  const idle = selectSnapshot(closedLedger);
+  assert.equal(idle.kind, "idle");
+  assert.deepEqual(reported(idle), reported(open));
+  assert.equal(idle.reportedChangesOmitted, 0);
+});
+
+test("reported file changes keep the newest five independently of ordinary omissions", () => {
+  const firstCall = {
+    kind: "fileChange" as const,
+    changes: [
+      { op: "add" as const, path: "src/one.ts" },
+      { op: "update" as const, path: "src/two.ts" },
+      { op: "delete" as const, path: "src/three.ts" },
+    ],
+  };
+  const secondCall = {
+    kind: "fileChange" as const,
+    changes: [
+      { op: "add" as const, path: "src/four.ts" },
+      { op: "update" as const, path: "src/five.ts" },
+      { op: "delete" as const, path: "src/six.ts" },
+      { op: "add" as const, path: "src/seven.ts" },
+    ],
+  };
+  const ledger = projectTurns([
+    { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
+    { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "tool" as const, phase: "started" as const, id: "first", name: "Write", call: firstCall } },
+    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "first", name: "Write", call: firstCall, result: { status: "ok" as const } } },
+    { kind: "activity" as const, sequence: 4, turnSequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "note" as const, text: "ordinary one" } },
+    { kind: "activity" as const, sequence: 5, turnSequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "tool" as const, phase: "started" as const, id: "second", name: "Write", call: secondCall } },
+    { kind: "activity" as const, sequence: 6, turnSequence: 1, at: "2026-08-10T00:00:06.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "second", name: "Write", call: secondCall, result: { status: "ok" as const } } },
+    { kind: "activity" as const, sequence: 7, turnSequence: 1, at: "2026-08-10T00:00:07.000Z", event: { type: "note" as const, text: "ordinary two" } },
+    { kind: "activity" as const, sequence: 8, turnSequence: 1, at: "2026-08-10T00:00:08.000Z", event: { type: "note" as const, text: "ordinary three" } },
+  ]);
+  const snapshot = selectSnapshot(ledger, { tail: 0, voice: 0 });
+  assert.equal(snapshot.kind, "open");
+  assert.deepEqual(snapshot.reportedChanges.map((change) => change.path), [
+    "src/three.ts", "src/four.ts", "src/five.ts", "src/six.ts", "src/seven.ts",
+  ]);
+  assert.deepEqual(snapshot.reportedChanges.map((change) => change.sequence), [2, 5, 5, 5, 5]);
+  assert.equal(snapshot.reportedChangesOmitted, 2);
+  assert.equal(snapshot.omitted, 5);
+  assert.deepEqual(snapshot.entries, [{ kind: "gap", count: 5 }]);
+});
+
 test("open snapshot independently retains pre-tail voice and actionable pins", () => {
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },

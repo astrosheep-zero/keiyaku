@@ -53,7 +53,14 @@ enters an open Turn as `active`; admitting that Turn's end purely rewrites any
 remaining active rows to `unsettled` in the closed arm, without adding a
 completion fact or `ToolResult`.
 Its snapshot frontier is one open Turn, otherwise the latest closed outcome,
-or unborn. Pending tells are the body-scoped actionable exception to that Turn
+or unborn. The same frontier independently yields a read-time
+`reportedChanges` summary: flatten every successful completed `fileChange`
+tool row in native change-array order, keep the newest five items, and count
+older eligible items as `reportedChangesOmitted`. Unborn and a frontier with
+no eligible rows use `[]` and `0`. The summary never samples earlier Turns,
+never includes active, unsettled, or failed tools, and does not deduplicate,
+net, or invent paths. It is not a Heart fact. Pending tells are the
+body-scoped actionable exception to that Turn
 frontier. For an open Turn, the selector retains the newest three rows as its
 tail and independently retains the newest three `said` or `thought` rows
 strictly before that tail. Every active tool and pending tell is pinned outside

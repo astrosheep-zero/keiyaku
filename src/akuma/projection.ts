@@ -8,6 +8,7 @@ import type {
 
 const DEFAULT_TAIL = 3;
 const DEFAULT_VOICE = 3;
+const REPORTED_CHANGE_LIMIT = 5;
 
 export type TurnOutcome = TurnEndFact["outcome"];
 
@@ -105,20 +106,35 @@ export type ActivitySnapshotEntry<Row extends SnapshotRow = SnapshotRow> =
   | Readonly<{ kind: "row"; row: Row }>
   | Readonly<{ kind: "gap"; count: number }>;
 
+export type ReportedFileChange = Readonly<{
+  sequence: number;
+  at: string;
+  op: "add" | "update" | "delete" | "unspecified";
+  path: string;
+  diffstat?: Readonly<{ added: number; removed: number }>;
+}>;
+
+type ReportedChangeSummary = Readonly<{
+  reportedChanges: readonly ReportedFileChange[];
+  reportedChangesOmitted: number;
+}>;
+
+const EMPTY_REPORTED: ReportedChangeSummary = { reportedChanges: [], reportedChangesOmitted: 0 };
+
 export type Snapshot =
-  | Readonly<{ kind: "unborn"; entries: readonly []; omitted: 0 }>
+  | Readonly<{ kind: "unborn"; entries: readonly []; omitted: 0 } & ReportedChangeSummary>
   | Readonly<{
       kind: "open";
       turn: TurnStartRow;
       entries: readonly ActivitySnapshotEntry<OpenSnapshotRow>[];
       omitted: number;
-    }>
+    } & ReportedChangeSummary>
   | Readonly<{
       kind: "idle";
       outcome?: OutcomeRow;
       entries: readonly ActivitySnapshotEntry<IdleSnapshotRow>[];
       omitted: number;
-    }>;
+    } & ReportedChangeSummary>;
 
 export type ActivitySnapshot = Snapshot;
 
@@ -378,10 +394,51 @@ export function ordinarySelectedCount(snapshot: ActivitySnapshot): number {
   }, 0);
 }
 
+type SuccessfulFileChangeRow = CompletedToolRow & Readonly<{
+  call: Extract<ToolCall, { kind: "fileChange" }>;
+}>;
+
+function isSuccessfulFileChange(row: OpenTurnRow | ClosedTurnRow): row is SuccessfulFileChangeRow {
+  return row.kind === "tool"
+    && typeof row.state === "object"
+    && row.state.status === "ok"
+    && row.call.kind === "fileChange";
+}
+
+function flattenReportedChanges(rows: readonly (OpenTurnRow | ClosedTurnRow)[]): readonly ReportedFileChange[] {
+  return rows.flatMap((row) => {
+    if (!isSuccessfulFileChange(row)) return [];
+    return row.call.changes.map((change) => ({
+      sequence: row.sequence,
+      at: row.at,
+      op: change.op,
+      path: change.path,
+      ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
+    }));
+  });
+}
+
+function summarizeReportedChanges(rows: readonly (OpenTurnRow | ClosedTurnRow)[]): ReportedChangeSummary {
+  const eligible = flattenReportedChanges(rows);
+  return {
+    reportedChanges: eligible.slice(-REPORTED_CHANGE_LIMIT),
+    reportedChangesOmitted: Math.max(0, eligible.length - REPORTED_CHANGE_LIMIT),
+  };
+}
+
+function frontierReportedChanges(ledger: TurnLedger): ReportedChangeSummary {
+  if (ledger.openTurn !== undefined) return summarizeReportedChanges(ledger.openTurn.rows);
+  const closed = ledger.turns.findLast((turn): turn is ClosedTurn => turn.kind === "closed");
+  return closed === undefined ? EMPTY_REPORTED : summarizeReportedChanges(closed.rows);
+}
+
 /** Select one current Turn, one latest outcome, or no focus; pending tells stay actionable. */
 export function selectSnapshot(ledger: TurnLedger, budget: Readonly<{ tail: number; voice?: number }> = { tail: DEFAULT_TAIL, voice: DEFAULT_VOICE }): ActivitySnapshot {
-  if (ledger.turns.length === 0 && !ledger.rows.some((row) => row.kind === "tell")) return { kind: "unborn", entries: [], omitted: 0 };
+  if (ledger.turns.length === 0 && !ledger.rows.some((row) => row.kind === "tell")) {
+    return { kind: "unborn", entries: [], omitted: 0, ...EMPTY_REPORTED };
+  }
   const pending = ledger.rows.filter((row): row is Extract<ActivityRow, { kind: "tell" }> => row.kind === "tell" && row.state === "pending");
+  const reported = frontierReportedChanges(ledger);
   if (ledger.openTurn !== undefined) {
     const window = ledger.openTurn.rows;
     const active = window.filter((row) => row.kind === "tool" && row.state === "active");
@@ -395,13 +452,14 @@ export function selectSnapshot(ledger: TurnLedger, budget: Readonly<{ tail: numb
     const voice = voiceCount === 0 ? [] : voiceCandidates.slice(-voiceCount);
     const selected = new Set<ActivityRow>([...tail, ...voice, ...active, ...pending]);
     const omitted = window.filter((row) => !selected.has(row)).length;
-    return { kind: "open", turn: ledger.openTurn.turn, entries: openEntries(ledger, window, selected), omitted };
+    return { kind: "open", turn: ledger.openTurn.turn, entries: openEntries(ledger, window, selected), omitted, ...reported };
   }
   return {
     kind: "idle",
     ...(ledger.latestOutcome === undefined ? {} : { outcome: ledger.latestOutcome }),
     entries: entries(pending),
     omitted: 0,
+    ...reported,
   };
 }
 

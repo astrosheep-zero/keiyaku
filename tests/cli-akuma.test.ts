@@ -33,11 +33,16 @@ import type { ActivityRow } from "../src/akuma/index.js";
 
 const PACKAGED_CLI = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
 const emptyCreatedTasks = { kind: "present" as const, rows: [] };
+const emptyReported = { reportedChanges: [] as const, reportedChangesOmitted: 0 as const };
 function akumaObservation(
   status: AkumaObservation["status"],
   extra: Omit<Partial<AkumaObservation>, "status"> = {},
 ): AkumaObservation {
-  return { status, createdTasks: emptyCreatedTasks, ...extra };
+  return {
+    status: { ...status, timeline: { ...emptyReported, ...status.timeline } },
+    createdTasks: emptyCreatedTasks,
+    ...extra,
+  };
 }
 
 function packagedCliEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -406,6 +411,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
         { kind: "row" as const, row: { kind: "thought" as const, sequence: 14, turnSequence: 1, at: "2026-08-10T16:42:30.000Z", text: "same minute" } },
       ],
       omitted: 12,
+      ...emptyReported,
     },
   };
   const result = { kind: "akuma" as const, action: "status" as const, status: akumaObservation(status) };
@@ -419,7 +425,8 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   assert.match(snapshotLines[2]!, /^\d{2}:\d{2} · note   /u);
   assert.equal(snapshotLines[3], "      ⋮ 12 omitted");
   assert.match(snapshotLines[4]!, /^ {5} · think  “same minute”$/u);
-  assert.equal(snapshotLines.at(-2), "  ● running");
+  assert.equal(snapshotLines.at(-3), "  ● running");
+  assert.equal(snapshotLines.at(-2), "  changes 0");
   assert.equal(snapshotLines.at(-1), "  tasks 0");
   assert.equal(snapshotLines.filter((line) => line === "─────").length, 1);
   assert.equal((akumaJsonValue(result) as { status: typeof status }).status.timeline.omitted, 12);
@@ -438,12 +445,12 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   const answered = {
     ...status,
     life: "asleep" as const,
-    timeline: { kind: "idle" as const, entries: [], omitted: 0, outcome: { kind: "outcome" as const, sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", outcome: { kind: "answered" as const, answer: "first answer", historyId: "history-1", session: { sessionId: "session-1" } } } },
+    timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported, outcome: { kind: "outcome" as const, sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", outcome: { kind: "answered" as const, answer: "first answer", historyId: "history-1", session: { sessionId: "session-1" } } } },
   };
   const other = {
     ...answered,
     id: "aku/reviewer/deadbeef",
-    timeline: { kind: "idle" as const, entries: [], omitted: 0, outcome: { kind: "outcome" as const, sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", outcome: { kind: "answered" as const, answer: "second answer", historyId: "history-2", session: { sessionId: "session-2" } } } },
+    timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported, outcome: { kind: "outcome" as const, sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", outcome: { kind: "answered" as const, answer: "second answer", historyId: "history-2", session: { sessionId: "session-2" } } } },
   };
   assert.equal(renderAkumaText(command, {
     kind: "akuma",
@@ -506,6 +513,41 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   };
   assert.equal(renderAkumaText(command, observedTell).match(/current input/gu)?.length, 1);
   assert.deepEqual(akumaJsonValue(observedTell), observedTell.result);
+});
+
+test("Akuma snapshots render provider-reported file changes without inference", () => {
+  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
+  const status = {
+    id: "aku/worker/1234abcd" as const,
+    life: "running" as const,
+    timeline: {
+      kind: "open" as const,
+      turn: { kind: "turn" as const, sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
+      entries: [],
+      omitted: 0,
+      reportedChanges: [
+        { sequence: 2, at: "2026-08-10T16:42:01.000Z", op: "add" as const, path: "src/created.ts", diffstat: { added: 4, removed: 0 } },
+        { sequence: 3, at: "2026-08-10T16:42:02.000Z", op: "update" as const, path: "src/updated.ts", diffstat: { added: 2, removed: 1 } },
+        { sequence: 4, at: "2026-08-10T16:42:03.000Z", op: "delete" as const, path: "src/removed.ts", diffstat: { added: 0, removed: 3 } },
+        { sequence: 5, at: "2026-08-10T16:42:04.000Z", op: "unspecified" as const, path: "src/unknown.ts" },
+      ],
+      reportedChangesOmitted: 2,
+    },
+  };
+  const result = { kind: "akuma" as const, action: "status" as const, status: akumaObservation(status) };
+  const lines = renderAkumaText(command, result).split("\n");
+  assert.deepEqual(lines.slice(-8), [
+    "  ● running",
+    "  changes 6",
+    "  write src/created.ts — +4 -0",
+    "  edit src/updated.ts — +2 -1",
+    "  delete src/removed.ts — +0 -3",
+    "  edit src/unknown.ts",
+    "  ⋮ 2 earlier changes",
+    "  tasks 0",
+  ]);
+  assert.deepEqual((akumaJsonValue(result) as { status: typeof status }).status.timeline.reportedChanges, status.timeline.reportedChanges);
+  assert.equal((akumaJsonValue(result) as { status: typeof status }).status.timeline.reportedChangesOmitted, 2);
 });
 
 test("Akuma snapshot rows use fixed semantic line budgets", () => {
@@ -639,7 +681,7 @@ test("Akuma voice is bounded and active tools carry the live mark", () => {
         at: "2026-08-10T16:42:02.000Z", name: "Search",
         call: { kind: "search" as const, query: "TODO" }, state: "active" as const,
       } },
-    ], omitted: 0 },
+    ], omitted: 0, ...emptyReported },
   };
   const text = renderAkumaText(command, { kind: "akuma", action: "status", status: { status } });
   assert.match(text, /hello/u);
@@ -672,7 +714,7 @@ test("Akuma snapshot life uses the fleet vocabulary independently of activity", 
   const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
   const base = {
     id: "aku/worker/1234abcd" as const,
-    timeline: { kind: "idle" as const, entries: [], omitted: 0 },
+    timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported },
   };
   const cases = [
     ["running", "● running"],
@@ -697,7 +739,7 @@ test("Akuma status-oriented commands include life while tell excludes it", () =>
   const status = {
     id,
     life: "running" as const,
-    timeline: { kind: "idle" as const, entries: [], omitted: 0 },
+    timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported },
   };
   const observation = akumaObservation(status);
   const tell = { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const };
@@ -775,7 +817,7 @@ test("Akuma status-oriented commands include life while tell excludes it", () =>
 
 test("Akuma text renders only a none readonly restraint as an existing ! line", () => {
   const id = "aku/worker/1234abcd" as const;
-  const base = { id, life: "running" as const, timeline: { kind: "idle" as const, entries: [], omitted: 0 } };
+  const base = { id, life: "running" as const, timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported } };
   const command = parseArgv(["status", id]).command;
   const none = renderAkumaText(command, {
     kind: "akuma" as const,
@@ -1039,6 +1081,7 @@ test("Akuma semantic glyphs mark successful tools and pending tells", () => {
           turn: { kind: "turn", sequence: 0, turnSequence: 1, bodySequence: 1, at },
           entries: [{ kind: "row", row: item.row }],
           omitted: 0,
+          ...emptyReported,
         },
       } },
     });
@@ -1057,7 +1100,7 @@ test("Akuma header shows a complete associated Contract without truncating ident
       life: "running",
       confinement: { kind: "unconfined" },
       pending: [],
-      timeline: { kind: "unborn", entries: [], omitted: 0 },
+      timeline: { kind: "unborn", entries: [], omitted: 0, ...emptyReported },
     }, contractId: "kei/provider-core-review" },
   }, { columns: 28, color: false });
   const lines = text.split("\n");
@@ -1079,7 +1122,7 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
       at: "2026-08-10T16:42:00.000Z", name: "Shell",
       call: { kind: "run" as const, command: "npm test -- --configuration production --reporter final.json" },
       state: "active" as const,
-    } }], omitted: 0 },
+    } }], omitted: 0, ...emptyReported },
   };
   const text = renderAkumaText(command, { kind: "akuma", action: "status", status: { status } }, { columns: 42, color: false });
   const runLine = (rendered: string): string => {
@@ -1267,6 +1310,7 @@ test("akuma call renders optional integration stages and maps partial success", 
             kind: "idle" as const,
             entries: [],
             omitted: 0,
+            ...emptyReported,
             outcome: {
               kind: "outcome" as const,
               sequence: 1,
@@ -1308,6 +1352,7 @@ test("akuma call renders optional integration stages and maps partial success", 
             turn: { kind: "turn" as const, sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
             entries: [],
             omitted: 0,
+            ...emptyReported,
           },
         },
       },
@@ -1315,8 +1360,8 @@ test("akuma call renders optional integration stages and maps partial success", 
   };
   const waitCommand = parseArgv(["wait", akuma]).command;
   const waited = { kind: "akuma" as const, action: "wait" as const, result: { completion: "all" as const, observations: [akumaObservation(running.result.observation.status)] } };
-  assert.equal(renderAkumaText(command, running), `─────\n${akuma}\n  ● running`);
-  assert.equal(renderAkumaText(waitCommand, waited), `─────\n${akuma}\n  ● running\n  tasks 0`);
+  assert.equal(renderAkumaText(command, running).endsWith("  ● running\n  changes 0"), true);
+  assert.equal(renderAkumaText(waitCommand, waited).endsWith("  ● running\n  changes 0\n  tasks 0"), true);
 
   const failedTurn = {
     ...answered,
@@ -1330,6 +1375,7 @@ test("akuma call renders optional integration stages and maps partial success", 
             kind: "idle" as const,
             entries: [],
             omitted: 0,
+            ...emptyReported,
             outcome: {
               kind: "outcome" as const,
               sequence: 1,
@@ -1555,7 +1601,7 @@ test("Akuma status, wait, and history share public observations without embeddin
     const failedWait = await captureMain(["-C", root, "wait", allocated.id, "--timeout", "0ms"]);
     assert.equal(failedWait.code, 0);
     assert.match(failedWait.stdout, /! error\s+later failed/u);
-    assert.match(failedWait.stdout, / {2}○ asleep\n  tasks 0\n$/u);
+    assert.match(failedWait.stdout, / {2}○ asleep\n  changes 0\n  tasks 0\n$/u);
     assert.notEqual(failedWait.stdout, "cli answer");
     assert.equal(akumaRawAnswer({
       kind: "akuma",
@@ -1741,11 +1787,11 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
     { name: "empty", result: waitOf(answered("")), raw: "" },
     { name: "trailing", result: waitOf(answered("kept\n")), raw: "kept\n" },
     { name: "call", result: call, command: parseArgv(["call", "worker", "-"]).command, raw: multiline },
-    { name: "running", result: waitOf(answered("kept", "running")), fact: / {2}● running\n  tasks 0$/u },
-    { name: "killed", result: waitOf(answered("kept", "killed")), fact: / {2}× killed\n  tasks 0$/u },
-    { name: "stranded", result: waitOf(answered("kept", "stranded")), fact: / {2}\? stranded\n  tasks 0$/u },
-    { name: "hung", result: waitOf(answered("kept", "hung")), fact: / {2}\? hung\n  tasks 0$/u },
-    { name: "untidy", result: waitOf(answered("kept", "untidy")), fact: / {2}\? untidy\n  tasks 0$/u },
+    { name: "running", result: waitOf(answered("kept", "running")), fact: / {2}● running\n  changes 0\n  tasks 0$/u },
+    { name: "killed", result: waitOf(answered("kept", "killed")), fact: / {2}× killed\n  changes 0\n  tasks 0$/u },
+    { name: "stranded", result: waitOf(answered("kept", "stranded")), fact: / {2}\? stranded\n  changes 0\n  tasks 0$/u },
+    { name: "hung", result: waitOf(answered("kept", "hung")), fact: / {2}\? hung\n  changes 0\n  tasks 0$/u },
+    { name: "untidy", result: waitOf(answered("kept", "untidy")), fact: / {2}\? untidy\n  changes 0\n  tasks 0$/u },
     {
       name: "readonly-none",
       result: waitOf(akumaObservation({
@@ -1786,12 +1832,12 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
           omitted: 0,
         },
       })),
-      fact: / {2}○ asleep\n  tasks 0$/u,
+      fact: / {2}○ asleep\n  changes 0\n  tasks 0$/u,
     },
     {
       name: "no-outcome",
       result: waitOf(akumaObservation({ id, life: "asleep", timeline: { kind: "idle", entries: [], omitted: 0 } })),
-      fact: / {2}○ asleep\n  tasks 0$/u,
+      fact: / {2}○ asleep\n  changes 0\n  tasks 0$/u,
     },
   ] as const;
   for (const item of cases) {
@@ -1932,7 +1978,7 @@ test("akuma call renders the CallResult restraint on detached and failed observa
           id: akuma,
           life: "asleep" as const,
           readonly: restraint,
-          timeline: { kind: "idle" as const, entries: [], omitted: 0 },
+          timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported },
         },
       },
     },
@@ -1953,6 +1999,7 @@ test("akuma call renders the CallResult restraint on detached and failed observa
             kind: "idle" as const,
             entries: [],
             omitted: 0,
+            ...emptyReported,
             outcome: {
               kind: "outcome" as const,
               sequence: 1,
@@ -2086,7 +2133,7 @@ test("packaged CLI call writes missing, detached, answered, unfinished, and fail
     const unfinished = await runPackagedCli(["-C", root, "call", "worker", "--wait", "0ms", "-"], { cwd: root, env, stdin: "hang" });
     assert.equal(unfinished.code, 0);
     assert.match(unfinished.stdout, /^aku\/worker\/[0-9a-f]{8}$/mu);
-    assert.match(unfinished.stdout, / {2}● running\n$/u);
+    assert.match(unfinished.stdout, / {2}● running\n  changes 0\n$/u);
     assert.doesNotMatch(unfinished.stdout, /keiyaku wait|finished/u);
     const unfinishedId = unfinished.stdout.match(/aku\/worker\/[0-9a-f]{8}/u)?.[0];
     assert.notEqual(unfinishedId, undefined);
