@@ -28,6 +28,10 @@ Settings, or Akuma execution cwd.
 
 The edge discovers the optional invocation Repo once, calls `World.resolve`
 once, and reuses that resolution across every reader and creating operation.
+Read commands use its current root, Akuma call uses its non-writing candidate,
+and operations that require marker custody use its establishing operation. A
+call refusal before Akuma birth therefore creates no World marker or runtime
+storage.
 Without `--repo`, the invocation Repo also serves Contract selectors, verbs,
 reconciliation, Dispatch, and composite observation. Explicit `--repo` adds a
 separate Contract Repo consumed by Contract verbs, `reconcile`, `call
@@ -261,8 +265,10 @@ Dispatch after birth. It is not a lifecycle gate and does not accept an
 omitted or `@` Contract selector. `--alias` accepts the sole `@name` grammar and
 assigns that world-local selector to the born Akuma after any Dispatch succeeds;
 when the Alias already exists, it moves to the born Akuma. Both flags are
-optional. The canonical invocation cwd is the immutable execution cwd supplied
-to the public call; the CLI has no separate execution-cwd option.
+optional. For `call --contract`, explicit `-C` or `--cwd` supplies the
+canonical invocation cwd; omission lets Library use the appointed managed
+worktree. Contract-free calls always use the invocation cwd. The CLI has no
+other execution-cwd input and never derives a Place path.
 Call waits on the born Akuma for five minutes by default and consumes the same
 public status carrier as `wait` when it stops running or that window ends. An
 answered terminal observation writes the exact answer bytes and nothing else.

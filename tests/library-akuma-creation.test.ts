@@ -24,6 +24,7 @@ import {
 } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { Keiyaku, Repo, World, settings } from "../src/index.js";
+import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { makeGitRepository } from "./support/git.js";
@@ -116,6 +117,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     });
     assert.deepEqual(independent.dispatch, { kind: "none" });
     assert.deepEqual(independent.alias, { kind: "none" });
+    assert.deepEqual(independent.execution, { cwd: world, source: "world" });
     assert.equal(independent.observation.kind, "observed");
     assert.equal(await readDispatch(git, independent.akuma), null);
 
@@ -166,6 +168,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       settings: configured.value,
       contract: bound.keiyaku,
       alias,
+      cwd: executionCwd,
     });
     assert.equal(partial.dispatch.kind, "dispatched");
     assert.equal(partial.alias.kind, "failed");
@@ -191,6 +194,80 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       }),
       /timeoutMs is not valid in detach mode/u,
     );
+  } finally {
+    await pump.close();
+    leash.release();
+    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("managed Contract calls use the appointed Place only when cwd is omitted", async () => {
+  const { raw, repo, git } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await archetypeSettings(world);
+  const { pump, leash } = await requestPump(world);
+  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
+  process.env[AKUMA_REQUESTS_ENV] = pump.directory;
+  try {
+    const managed = await Keiyaku.bind({
+      repo,
+      markdown: markdown("Implicit Contract cwd"),
+      workspace: "worktree",
+      hooks: { create: [], destroy: [] },
+    });
+    const managedId = (await managed.keiyaku.state()).id;
+    const appointment = await readManagedWorktreeAppointment(git, managedId);
+    assert.equal(appointment.kind, "appointed");
+    if (appointment.kind !== "appointed") return;
+
+    const invoked = await invoke(parseArgv([
+      "call",
+      "worker",
+      "--contract",
+      managedId,
+      "-",
+    ]), {
+      cwd: raw.path,
+      environment: { ...process.env, KEIYAKU_HOME: configured.home },
+      readStdin: () => "implicit",
+    });
+    assert.equal("kind" in invoked && invoked.kind, "akuma");
+    if (!("kind" in invoked) || invoked.kind !== "akuma" || invoked.action !== "call") return;
+    const implicit = invoked.result;
+    assert.deepEqual(implicit.execution, { cwd: appointment.path, source: "contract-worktree" });
+    assert.equal((await readSoul(pathsForAkuId(world, implicit.akuma)))?.cwd, appointment.path);
+
+    const explicit = await Keiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "explicit",
+      cwd: world,
+      settings: configured.value,
+      contract: managed.keiyaku,
+    });
+    assert.deepEqual(explicit.execution, { cwd: world, source: "input" });
+    assert.equal((await readSoul(pathsForAkuId(world, explicit.akuma)))?.cwd, world);
+
+    await managed.keiyaku.abandon({ hooks: { create: [], destroy: [] } });
+
+    const here = await Keiyaku.bind({
+      repo,
+      markdown: markdown("Here Contract"),
+      workspace: "here",
+    });
+    await assert.rejects(
+      Keiyaku.call({
+        path: world,
+        archetype: "worker",
+        body: "must refuse",
+        settings: configured.value,
+        contract: here.keiyaku,
+      }),
+      /Contract workspace is unavailable: .* is here/u,
+    );
+    await here.keiyaku.abandon();
   } finally {
     await pump.close();
     leash.release();

@@ -80,6 +80,29 @@ test("a missing invocation cwd is a typed usage refusal", async () => {
   );
 });
 
+test("an implicit Contract call refuses before creating its candidate World", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
+  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
+  const marker = resolve(repository.path, ".keiyaku");
+  assert.equal(existsSync(marker), false);
+
+  await assert.rejects(
+    () => invoke(parseArgv([
+      "call", "worker", "--contract", "kei/missing", "-",
+    ]), {
+      cwd: repository.path,
+      environment: {},
+      readStdin: () => Promise.resolve("work"),
+    }),
+    (error: unknown) => error instanceof KeiyakuRefused
+      && assert.deepEqual(error.refusal, { kind: "contract-missing", contractId: "kei/missing" }) === undefined,
+  );
+  assert.equal(existsSync(marker), false);
+});
+
 function acceptedContract(result: Awaited<ReturnType<typeof invoke>>): ContractId {
   if (result.kind !== "accepted") throw new Error(`expected accepted result, got ${result.kind}`);
   return result.contract;

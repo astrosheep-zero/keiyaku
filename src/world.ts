@@ -11,6 +11,7 @@ export type WorldResolutionInput = Readonly<{
 }>;
 export type WorldResolution = Readonly<{
   root: WorldRoot | null;
+  candidate: WorldRoot | null;
   establish: () => Promise<WorldRoot>;
 }>;
 
@@ -112,11 +113,19 @@ async function exact(input: string): Promise<WorldRoot> {
 async function resolved(input: WorldInput): Promise<WorldResolution> {
   const values = await inputValues(input, "world location");
   const root = values.repositoryRoot === undefined ? await locateMarker(values.cwd) : brand(values.repositoryRoot);
-  if (root !== null) await rejectReservedRoot(root);
+  const selected = root ?? brand(values.cwd);
+  let candidate: WorldRoot | null = selected;
+  try {
+    await rejectReservedRoot(selected);
+  } catch (error) {
+    if (root !== null || !(error instanceof WorldError)) throw error;
+    candidate = null;
+  }
   return Object.freeze({
     root,
+    candidate,
     async establish(): Promise<WorldRoot> {
-      const established = root ?? brand(values.cwd);
+      const established = candidate ?? brand(values.cwd);
       await rejectReservedRoot(established);
       await ensureMarker(established);
       return established;

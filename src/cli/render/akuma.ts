@@ -203,26 +203,38 @@ export function akumaRawAnswer(result: AkumaInvocationResult): string | undefine
   return undefined;
 }
 
+function executionCwdLine(result: Extract<AkumaInvocationResult, { action: "call" }>["result"]): readonly string[] {
+  return result.execution.source === "contract-worktree" ? [`cwd ${result.execution.cwd}`] : [];
+}
+
 function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, context: TextRenderContext): string {
   const alias = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : undefined;
   const contractId = result.result.dispatch.kind === "dispatched" ? result.result.dispatch.dispatch.contractId : undefined;
   const facts = [...dispatchLines(result.result.dispatch)];
   const restraint = result.result.readonly?.enforcement === "none" ? [`! ${safeText(result.result.readonly.diagnostic)}`] : [];
   if (result.result.alias.kind === "failed") facts.push(`alias failed ${result.result.alias.failure.kind} ${safeText(result.result.alias.failure.diagnostic)}`);
+  const cwd = executionCwdLine(result.result);
   if (result.result.observation.kind === "detached") {
-    const lines = [...snapshotHeading(result.result.akuma, alias, contractId), ...restraint, ...facts];
+    const lines = [...snapshotHeading(result.result.akuma, alias, contractId), ...cwd, ...restraint, ...facts];
     if (!callFailed(result.result)) lines.push(`$ keiyaku wait ${result.result.akuma} --timeout 5m`);
     return lines.join("\n");
   }
   if (result.result.observation.kind === "failed") {
-    return [...snapshotHeading(result.result.akuma, alias, contractId), ...restraint, ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
+    return [...snapshotHeading(result.result.akuma, alias, contractId), ...cwd, ...restraint, ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
   }
-  return snapshotText({ status: result.result.observation.status, ...(contractId === undefined ? {} : { contractId }) }, context, { ...(alias === undefined ? {} : { alias }), facts });
+  return snapshotText({ status: result.result.observation.status, ...(contractId === undefined ? {} : { contractId }) }, context, {
+    ...(alias === undefined ? {} : { alias }),
+    facts: [...cwd, ...facts],
+  });
 }
 
 export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
   const answer = akumaRawAnswer(result);
-  if (answer !== undefined) return answer;
+  if (answer !== undefined) {
+    if (result.action !== "call") return answer;
+    const cwd = executionCwdLine(result.result);
+    return cwd.length === 0 ? answer : `${cwd.join("\n")}\n${answer}`;
+  }
   switch (result.action) {
     case "call": return callText(result, context);
     case "status": return snapshotText(result.status, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) });

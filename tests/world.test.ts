@@ -18,6 +18,9 @@ test("World.locate selects the nearest marker without creating one", async () =>
   assert.equal(await World.locate(leaf), await realpath(nested));
   const bare = join(temporary(), "leaf"); mkdirSync(bare);
   assert.equal(await World.locate(bare), null);
+  const bareResolution = await World.resolve(bare);
+  assert.equal(bareResolution.root, null);
+  assert.equal(bareResolution.candidate, await realpath(bare));
   assert.equal(existsSync(join(bare, ".keiyaku")), false);
 });
 
@@ -27,6 +30,7 @@ test("World resolution reuses a non-Git ancestor marker while World.at remains e
   mkdirSync(nested, { recursive: true });
   const resolution = await World.resolve(nested);
   assert.equal(resolution.root, await realpath(marked));
+  assert.equal(resolution.candidate, await realpath(marked));
   assert.equal(await resolution.establish(), await realpath(marked));
 
   const root = temporary(), leaf = join(root, "a", "b"); mkdirSync(leaf, { recursive: true });
@@ -64,6 +68,7 @@ test("Git reads do not create a marker and Git creation establishes only the pri
 
   const world = await World.resolve({ cwd: linked, repositoryRoot: scope.primaryWorktree });
   assert.equal(world.root, await realpath(repository.path));
+  assert.equal(world.candidate, await realpath(repository.path));
   assert.equal(existsSync(join(repository.path, ".keiyaku")), false);
   assert.equal(existsSync(join(linked, ".keiyaku")), false);
 
@@ -74,12 +79,18 @@ test("Git reads do not create a marker and Git creation establishes only the pri
 
 test("World excludes the user home from locate and exact construction", async () => {
   assert.equal(await World.locate(homedir()), null);
+  const resolution = await World.resolve(homedir());
+  assert.equal(resolution.candidate, null);
+  await assert.rejects(resolution.establish(), (error) => error instanceof WorldError && error.kind === "home-world");
   await assert.rejects(World.at(homedir()), (error) => error instanceof WorldError && error.kind === "home-world");
 });
 
 test("World excludes the filesystem root from locate and exact construction", async () => {
   const root = parse(process.cwd()).root;
   assert.equal(await World.locate(root), null);
+  const resolution = await World.resolve(root);
+  assert.equal(resolution.candidate, null);
+  await assert.rejects(resolution.establish(), (error) => error instanceof WorldError && error.kind === "root-world");
   await assert.rejects(World.at(root), (error) => error instanceof WorldError && error.kind === "root-world");
 });
 

@@ -1,3 +1,4 @@
+import { realpath, stat } from "node:fs/promises";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import {
   Akuma,
@@ -7,6 +8,7 @@ import {
 } from "../akuma/akuma.js";
 import type { AkuId } from "../akuma/identity.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import type { ContractId } from "../core/facts/types.js";
 import {
   publishDispatch,
   readDispatch,
@@ -14,11 +16,12 @@ import {
   type DispatchFailure,
 } from "../dispatch/index.js";
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
+import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
-import { seatForKeiyaku, type Keiyaku } from "./contract.js";
+import { KeiyakuRefused, seatForKeiyaku, type Keiyaku } from "./contract.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
 export type { AkumaStatus } from "../akuma/akuma.js";
@@ -60,10 +63,16 @@ export type CallResult = Readonly<{
   kind: "called";
   akuma: AkuId;
   readonly?: ReadonlyRestraint;
+  execution: Readonly<{
+    cwd: string;
+    source: "input" | "world" | "contract-worktree";
+  }>;
   dispatch: DispatchStage;
   alias: AliasStage;
   observation: CallObservation;
 }>;
+
+type CallExecution = CallResult["execution"];
 
 export type ForkInput = Readonly<{
   path: WorldRoot;
@@ -171,6 +180,68 @@ async function forkDispatchStage(input: Readonly<{
   }
 }
 
+async function canonicalizeExistingDirectory(path: string, diagnostic: string): Promise<string> {
+  try {
+    const real = await realpath(path);
+    if (!(await stat(real)).isDirectory()) throw new Error(diagnostic);
+    return real;
+  } catch (error) {
+    if (error instanceof Error && error.message === diagnostic) throw error;
+    throw new Error(diagnostic);
+  }
+}
+
+function unavailableWorkspace(contractId: ContractId, detail: string): Error {
+  return new Error(`Contract workspace is unavailable: ${contractId} ${detail}`);
+}
+
+async function currentManagedContract(contract: Keiyaku, contractId: ContractId) {
+  let state: Awaited<ReturnType<Keiyaku["state"]>>;
+  try {
+    state = await contract.state();
+  } catch (error) {
+    if (error instanceof Error && error.message === `contract does not exist: ${contractId}`) {
+      throw new KeiyakuRefused({ kind: "contract-missing", contractId });
+    }
+    throw error;
+  }
+  if (state.terminal !== null) throw new KeiyakuRefused({ kind: "terminal", contractId: state.id });
+  if (state.coordinates.workspace !== "worktree") {
+    throw unavailableWorkspace(state.id, "is here");
+  }
+  return state;
+}
+
+async function resolveCallExecution(input: Readonly<{
+  path: WorldRoot;
+  cwd?: string;
+  contract?: Keiyaku;
+}>): Promise<CallExecution> {
+  if (input.cwd !== undefined) {
+    return {
+      cwd: await canonicalizeExistingDirectory(input.cwd, `cwd is not an existing directory: ${input.cwd}`),
+      source: "input",
+    };
+  }
+  if (input.contract === undefined) return { cwd: input.path, source: "world" };
+  const seat = seatForKeiyaku(input.contract);
+  const state = await currentManagedContract(input.contract, seat.id);
+  const appointment = await readManagedWorktreeAppointment(seat.scope, state.id);
+  if (appointment.kind === "unappointed") {
+    throw unavailableWorkspace(state.id, "is unappointed; use reconcile");
+  }
+  if (appointment.kind === "failed") {
+    throw new Error(`${appointment.diagnostic}; use reconcile`);
+  }
+  return {
+    cwd: await canonicalizeExistingDirectory(
+      appointment.path,
+      `Contract workspace is unavailable: ${appointment.path}`,
+    ),
+    source: "contract-worktree",
+  };
+}
+
 export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const values = requireInput(input, "Keiyaku.call input");
   onlyKeys(
@@ -189,11 +260,16 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     ? undefined
     : parseAkumaAlias(nonblank(values.alias, "alias"));
   const seat = values.contract === undefined ? undefined : seatForKeiyaku(values.contract);
+  const execution = await resolveCallExecution({
+    path,
+    ...(cwd === undefined ? {} : { cwd }),
+    ...(seat === undefined ? {} : { contract: values.contract as Keiyaku }),
+  });
 
   const handle = await Akuma.of(path, settings).call({
     archetype,
     body,
-    ...(cwd === undefined ? {} : { cwd }),
+    cwd: execution.cwd,
   });
   const readonly = (await handle.status()).readonly;
   const dispatch: DispatchStage = seat === undefined
@@ -216,6 +292,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     kind: "called",
     akuma: handle.id,
     ...(readonly === undefined ? {} : { readonly }),
+    execution,
     dispatch,
     alias: aliasStage,
     observation,

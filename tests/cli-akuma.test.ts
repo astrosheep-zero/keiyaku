@@ -495,7 +495,7 @@ test("Akuma status-oriented commands include life while tell excludes it", () =>
       result: {
         kind: "akuma" as const,
         action: "call" as const,
-        result: { kind: "called" as const, akuma: id, dispatch: { kind: "none" as const }, alias: { kind: "none" as const }, observation: { kind: "observed" as const, status } },
+        result: { kind: "called" as const, akuma: id, execution: { cwd: "/world", source: "world" as const }, dispatch: { kind: "none" as const }, alias: { kind: "none" as const }, observation: { kind: "observed" as const, status } },
       },
       hasLife: true,
     },
@@ -961,12 +961,24 @@ test("akuma call renders optional integration stages and maps partial success", 
     result: {
       kind: "called" as const,
       akuma,
+      execution: { cwd: "/world", source: "world" as const },
       dispatch: { kind: "none" as const },
       alias: { kind: "none" as const },
       observation: { kind: "detached" as const },
     },
   };
   assert.equal(renderAkumaText(command, plain), `─────\n${akuma}\n$ keiyaku wait ${akuma} --timeout 5m`);
+  const managed = {
+    ...plain,
+    result: {
+      ...plain.result,
+      execution: { cwd: "/repo/.git/keiyaku/wt/atlantis", source: "contract-worktree" as const },
+    },
+  };
+  assert.equal(
+    renderAkumaText(command, managed),
+    `─────\n${akuma}\ncwd /repo/.git/keiyaku/wt/atlantis\n$ keiyaku wait ${akuma} --timeout 5m`,
+  );
   assert.deepEqual(akumaJsonValue(command, plain), plain.result);
   assert.equal(akumaExitCode(plain), 0);
 
@@ -1483,6 +1495,7 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
     result: {
       kind: "called" as const,
       akuma: id,
+      execution: { cwd: "/world", source: "world" as const },
       dispatch: { kind: "none" as const },
       alias: { kind: "none" as const },
       observation: { kind: "observed" as const, status: complete.result.statuses[0]!.status },
@@ -1563,6 +1576,19 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
       assert.match(text, item.fact, item.name);
     }
   }
+
+  const managedCall = {
+    ...call,
+    result: {
+      ...call.result,
+      execution: { cwd: "/repo/.git/keiyaku/wt/atlantis", source: "contract-worktree" as const },
+    },
+  };
+  assert.equal(akumaRawAnswer(managedCall), multiline);
+  assert.equal(
+    renderAkumaText(parseArgv(["call", "worker", "-"]).command, managedCall),
+    `cwd /repo/.git/keiyaku/wt/atlantis\n${multiline}`,
+  );
 
   const plural = waitOf(answered("first answer"), { status: { ...answered("second answer").status, id: other } });
   assert.equal(akumaRawAnswer(plural), undefined);
@@ -1646,6 +1672,7 @@ test("akuma call renders the CallResult restraint on detached and failed observa
     result: {
       kind: "called" as const,
       akuma,
+      execution: { cwd: "/world", source: "world" as const },
       readonly: restraint,
       dispatch: { kind: "none" as const },
       alias: { kind: "none" as const },

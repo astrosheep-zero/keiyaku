@@ -268,7 +268,7 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
 
 type AkumaEdgeInput = Readonly<{
   path: WorldRoot;
-  executionCwd: string;
+  executionCwd?: string;
   repo?: Repo;
   configuration: Settings;
   edge: InvocationEdge;
@@ -281,7 +281,7 @@ async function invokeAkumaCommand(parsed: ParsedAkumaCommand, input: AkumaEdgeIn
     const selected = contractFromInput(repo, parsed.contract);
     return await invokeAkuma(parsed, {
       path,
-      executionCwd,
+      ...(executionCwd === undefined ? {} : { executionCwd }),
       settings: configuration,
       contract: selected.contract,
       readStdin: edge.readStdin,
@@ -289,7 +289,7 @@ async function invokeAkumaCommand(parsed: ParsedAkumaCommand, input: AkumaEdgeIn
   }
   return await invokeAkuma(parsed, {
     path,
-    executionCwd,
+    ...(executionCwd === undefined ? {} : { executionCwd }),
     settings: configuration,
     ...(repo === undefined ? {} : { repo }),
     readStdin: edge.readStdin,
@@ -301,8 +301,13 @@ async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, input: AkumaEdgeI
   catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
 }
 
-async function akumaWorldFor(parsed: ParsedAkumaCommand, located: WorldRoot | null, establish: () => Promise<WorldRoot>): Promise<WorldRoot> {
-  const world = parsed.command === "call" ? await establish() : located;
+async function akumaWorldFor(
+  parsed: ParsedAkumaCommand,
+  located: WorldRoot | null,
+  candidate: WorldRoot | null,
+  establish: () => Promise<WorldRoot>,
+): Promise<WorldRoot> {
+  const world = parsed.command === "call" ? candidate ?? await establish() : located;
   if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
   return world;
 }
@@ -412,7 +417,7 @@ async function invokeParsed(
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
     command: invocation.command,
   });
-  const { cwd, repo, world, establishWorld } = coordinates;
+  const { cwd, repo, world, candidateWorld, establishWorld } = coordinates;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
     readStdin: runtime.readStdin ?? readStdin,
@@ -432,11 +437,13 @@ async function invokeParsed(
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
   }
   if (isParsedAkumaCommand(parsed)) {
-    const akumaWorld = await akumaWorldFor(parsed, world, coordinates.establishWorld);
+    const akumaWorld = await akumaWorldFor(parsed, world, candidateWorld, coordinates.establishWorld);
     const configuration = await settingsAt(akumaWorld, edge.environment);
     return await invokeAkumaFromEdge(parsed, {
       path: akumaWorld,
-      executionCwd: cwd,
+      ...(parsed.command === "call" && parsed.contract !== undefined && invocation.cwd === undefined
+        ? {}
+        : { executionCwd: cwd }),
       ...(repo === undefined ? {} : { repo }),
       configuration,
       edge,

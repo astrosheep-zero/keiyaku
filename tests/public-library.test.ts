@@ -71,6 +71,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'const worldResult: Promise<WorldRoot> = World.at(".");',
     'const worldInput: WorldResolutionInput = { cwd: "." };',
     'const worldResolution: Promise<WorldResolution> = World.resolve(worldInput);',
+    'const worldCandidate: WorldRoot | null = (await worldResolution).candidate;',
     'const callInput: CallInput = { path: world, archetype: "worker", body: "work", mode: "wait", timeoutMs: 300000, contract: existing, alias };',
     'const callResult: Promise<CallResult> = Keiyaku.call(callInput);',
     'const callStatus = null as unknown as AkumaStatus;',

@@ -48,9 +48,13 @@ Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 ```
 
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.
-`cwd` is the optional execution cwd and defaults to that world for direct
-library calls. The CLI always supplies its canonical invocation cwd and has no
-separate execution-cwd option. `mode` defaults to `"wait"`; wait mode observes the born handle
+`cwd` is the optional execution cwd. Explicit input is canonicalized; an
+omitted Contract-free value uses the WorldRoot. With a Contract and no cwd,
+Library accepts only an active managed workspace and uses the workspace
+owner's Place appointment. It never derives, allocates, releases, creates, or
+reconciles a Place or worktree. An unavailable Contract workspace refuses
+before birth with no cwd fallback; appointment failures identify `reconcile`
+as the repair entry. `mode` defaults to `"wait"`; wait mode observes the born handle
 until it stops running or `timeoutMs`, which defaults to 300,000 milliseconds.
 Detach mode returns after the post-birth integration stages and rejects a
 supplied `timeoutMs` as contradictory caller input. `archetype` remains the TypeScript input name for
@@ -104,6 +108,10 @@ type CallResult = Readonly<{
   kind: "called"
   akuma: AkuId
   readonly?: ReadonlyRestraint
+  execution: Readonly<{
+    cwd: string
+    source: "input" | "world" | "contract-worktree"
+  }>
   dispatch: DispatchStage
   alias: AliasStage
   observation: CallObservation
@@ -137,7 +145,8 @@ already born child remains visible. The same exception before birth or native
 fork retains the ordinary package-root exception behavior.
 `CallResult.readonly` and its observed `AkumaStatus.readonly` project the same
 Soul fact. Library neither judges realization nor constructs a second warning
-or capability value.
+or capability value. `execution` records the canonical cwd used for birth and
+exactly one source. It adds no second path, Place, boolean, or Contract field.
 
 ## Akuma Address And Fleet Facets
 

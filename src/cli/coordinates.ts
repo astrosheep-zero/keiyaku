@@ -15,6 +15,7 @@ export type CliCoordinates = Readonly<{
   cwd: string;
   repo?: Repo;
   world: WorldRoot | null;
+  candidateWorld: WorldRoot | null;
   establishWorld: () => Promise<WorldRoot>;
 }>;
 
@@ -97,6 +98,7 @@ async function resolveWorld(cwd: string, repo: Repo | undefined) {
     const resolution = await World.resolve({ cwd, ...(repo === undefined ? {} : { repositoryRoot: repo.root }) });
     return {
       root: resolution.root,
+      candidate: resolution.candidate,
       async establish(): Promise<WorldRoot> {
         try { return await resolution.establish(); }
         catch (error) {
@@ -125,6 +127,7 @@ export async function resolveCliCoordinates(input: CliCoordinateInput): Promise<
     cwd,
     ...(repo === undefined ? {} : { repo }),
     world: world.root,
+    candidateWorld: world.candidate,
     establishWorld: world.establish,
   };
 }

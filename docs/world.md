@@ -16,6 +16,7 @@ type WorldResolutionInput = {
 
 type WorldResolution = {
   root: WorldRoot | null
+  candidate: WorldRoot | null
   establish(): Promise<WorldRoot>
 }
 
@@ -25,9 +26,10 @@ World.at(path: string): Promise<WorldRoot>
 ```
 
 `World.resolve` resolves the invocation directory once and returns the current
-root plus the creating operation for that same resolution. Reading `root`
-never changes the filesystem; `establish()` creates only the selected marker.
-`World.locate` is the read-only projection of `root`.
+root, the non-writing candidate root, and the creating operation for that same
+resolution. Reading either coordinate never changes the filesystem;
+`establish()` creates only the selected marker. `World.locate` is the read-only
+projection of `root`.
 
 Each operation completes its filesystem observation before its Promise resolves.
 
@@ -37,6 +39,11 @@ it, the resolver climbs toward the filesystem root for the nearest `.keiyaku/`
 marker. It skips the user home directory selected by the process edge (`$HOME`)
 and the filesystem root itself; neither may be a World. A non-Git invocation
 with no marker returns `null` and creates nothing.
+
+`candidate` is the coordinate that `establish()` would select. It equals
+`root` when a marker or repository root selected one; otherwise it is the
+canonical invocation directory. Home and filesystem root yield a null
+candidate and retain their typed refusal when establishment is attempted.
 
 `establish()` is the creating form of the same invocation resolution. With a
 `repositoryRoot` it establishes the primary worktree marker. Without one it
