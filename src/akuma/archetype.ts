@@ -174,15 +174,31 @@ function configuredProvider(name: string, selected: unknown): ProviderExecution 
   });
 }
 
+const BUILTIN_EXECUTIONS = {
+  claude: { kind: "claude-agent-sdk" },
+  "codex-app-server": { kind: "codex-app-server" },
+  "opencode-sdk": { kind: "opencode-sdk" },
+  pi: { kind: "pi" },
+  "grok-build": {
+    kind: "acp",
+    executable: "grok",
+    config: {
+      argvBefore: ["agent", "--always-approve"],
+      argvAfter: ["stdio"],
+      modelArg: "--model",
+      effortArg: "--reasoning-effort",
+      systemPromptArg: "--system-prompt-override",
+    },
+  },
+} as const satisfies Readonly<Record<string, Omit<ProviderExecution, "name">>>;
+
 function providerExecution(settings: Settings, name: string): ProviderExecution {
   const view = settings.namespace("providers");
   if (view.kind === "failed") throw new TypeError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
   const selected = view.entries.find((entry) => entry.name === name)?.value;
   if (selected !== undefined) return configuredProvider(name, selected);
-  if (name === "claude") return Object.freeze({ name, kind: "claude-agent-sdk" });
-  if (name === "codex-app-server") return Object.freeze({ name, kind: "codex-app-server" });
-  if (name === "opencode-sdk") return Object.freeze({ name, kind: "opencode-sdk" });
-  if (name === "pi") return Object.freeze({ name, kind: "pi" });
+  const builtin = BUILTIN_EXECUTIONS[name as keyof typeof BUILTIN_EXECUTIONS];
+  if (builtin !== undefined) return Object.freeze({ name, ...builtin });
   throw new TypeError(`unknown provider ${name}`);
 }
 

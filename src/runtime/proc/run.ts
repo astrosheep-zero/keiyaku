@@ -1,5 +1,7 @@
-import { spawn, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
 
 const TERMINATION_GRACE_MS = 250;
 const STREAM_TAIL_BYTES = 16 * 1024;
@@ -110,22 +112,17 @@ function tailCapture(limit: number) {
   };
 }
 
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
 function ignoreMissingProcess(error: unknown): void {
   if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
 }
 
-function terminateWindowsTree(pid: number): Promise<void> {
-  return new Promise((resolve) => {
-    const taskkill = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    taskkill.once("error", resolve);
-    taskkill.once("close", resolve);
+const WINDOWS_TERMINATION_TIMEOUT_MS = 1_000;
+const execFileAsync = promisify(execFile);
+
+async function terminateWindowsTree(pid: number): Promise<void> {
+  await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+    timeout: WINDOWS_TERMINATION_TIMEOUT_MS,
+    windowsHide: true,
   });
 }
 
@@ -145,7 +142,7 @@ export async function terminateProcessTree(pid: number | undefined, force = fals
     ignoreMissingProcess(error);
     return;
   }
-  await wait(TERMINATION_GRACE_MS);
+  await delay(TERMINATION_GRACE_MS);
   try {
     process.kill(-pid, "SIGKILL");
   } catch (error) {

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough, Readable, Writable } from "node:stream";
 import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import * as acp from "@agentclientprotocol/sdk";
 import {
   AGENT_EVENT_TEXT_LIMIT,
   decodeAgentEvent,
@@ -26,6 +28,9 @@ import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/inde
 import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/events.js";
 import type { OpencodeSdkLoader, OpencodeSdkSession } from "../src/akuma/providers/opencode-sdk/session.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
+import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
+import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
+import type { StdioProcess } from "../src/runtime/proc/stdio.js";
 
 function fakeOpencode() {
   let closed = 0;
@@ -82,6 +87,305 @@ function fakeOpencode() {
 test("provider answered results may omit an exact fork point", () => {
   const result: TurnResult = { kind: "answered", answer: "complete answer" };
   assert.deepEqual(result, { kind: "answered", answer: "complete answer" });
+});
+
+function fakeAcp(root: string, mode: "complete" | "cancel" | "permission" | "reverse" = "complete") {
+  const executable = join(root, "fake-acp.mjs");
+  const log = join(root, "acp-log.jsonl");
+  const sdk = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
+  writeFileSync(executable, `
+import { appendFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { Readable, Writable } from "node:stream";
+import * as acp from ${JSON.stringify(sdk)};
+const log = (event) => appendFileSync(process.env.ACP_TEST_LOG, JSON.stringify(event) + "\\n");
+const app = acp.agent({ name: "fake-acp" })
+  .onRequest(acp.methods.agent.initialize, ({ params }) => {
+    log({ kind: "initialize", params });
+    if (process.env.ACP_TEST_MODE === "cancel") {
+      const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+      log({ kind: "descendant", pid: child.pid });
+    }
+    return { protocolVersion: params.protocolVersion, agentCapabilities: { loadSession: true } };
+  })
+  .onRequest(acp.methods.agent.session.new, ({ params }) => {
+    log({ kind: "new", params });
+    return { sessionId: "fresh-session" };
+  })
+  .onRequest(acp.methods.agent.session.load, ({ params }) => {
+    log({ kind: "load", params });
+    return {};
+  })
+  .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
+    log({ kind: "prompt", params, argv: process.argv.slice(2) });
+    if (process.env.ACP_TEST_MODE === "cancel") return await new Promise(() => {});
+    if (process.env.ACP_TEST_MODE === "permission") {
+      const permission = await client.request(acp.methods.client.session.requestPermission, { sessionId: params.sessionId, toolCall: { toolCallId: "permission-1" }, options: [] });
+      log({ kind: "permission", permission });
+    }
+    if (process.env.ACP_TEST_MODE === "reverse") {
+      const request = async (kind, method, request) => {
+        try { log({ kind, response: await client.request(method, request) }); }
+        catch (error) { log({ kind, refusal: { code: error.code, message: error.message } }); }
+      };
+      await request("fs-read", acp.methods.client.fs.readTextFile, { sessionId: params.sessionId, path: "/tmp/refused" });
+      await request("fs-write", acp.methods.client.fs.writeTextFile, { sessionId: params.sessionId, path: "/tmp/refused", content: "no" });
+      await request("terminal-create", acp.methods.client.terminal.create, { sessionId: params.sessionId, command: "false" });
+      await request("terminal-output", acp.methods.client.terminal.output, { sessionId: params.sessionId, terminalId: "refused" });
+      await request("terminal-release", acp.methods.client.terminal.release, { sessionId: params.sessionId, terminalId: "refused" });
+      await request("terminal-wait", acp.methods.client.terminal.waitForExit, { sessionId: params.sessionId, terminalId: "refused" });
+      await request("terminal-kill", acp.methods.client.terminal.kill, { sessionId: params.sessionId, terminalId: "refused" });
+      await request("elicitation", acp.methods.client.elicitation.create, { sessionId: params.sessionId, mode: "form", message: "refused", requestedSchema: { type: "object" } });
+    }
+    await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "complete " } } });
+    await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "answer" } } });
+    await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "checked" } } });
+    await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Run tests", kind: "execute", status: "in_progress" } });
+    await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-1", status: "completed" } });
+    await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "plan", entries: [{ content: "Verify", priority: "high", status: "completed" }] } });
+    await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "config_option_update", configOptions: [] } });
+    return { stopReason: "end_turn" };
+  })
+  .onNotification(acp.methods.agent.session.cancel, ({ params }) => {
+    log({ kind: "cancel", params });
+  });
+app.connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
+`);
+  return {
+    log,
+    execution: {
+      name: "test-acp",
+      kind: "acp" as const,
+      executable: process.execPath,
+      config: {
+        argvBefore: [executable],
+        argvAfter: ["stdio"],
+        modelArg: "--model",
+        effortArg: "--effort",
+        systemPromptArg: "--system-prompt",
+      },
+      env: { ACP_TEST_LOG: log, ACP_TEST_MODE: mode },
+    },
+  };
+}
+
+function acpLog(path: string): readonly Record<string, unknown>[] {
+  return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+async function processGone(pid: number): Promise<boolean> {
+  for (let attempts = 0; attempts < 20; attempts += 1) {
+    try { process.kill(pid, 0); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return true; }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return false;
+}
+
+test("ACP uses stable initialization, fresh sessions, mapped profile arguments, and one prompt response", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-provider-"));
+  try {
+    const fake = fakeAcp(root);
+    const provider = createAcpProvider(fake.execution);
+    assert.deepEqual(provider.confinement({ cwd: root, options: {} }), { kind: "unconfined" });
+    assert.equal(provider.admitOptions({ access: "write" }).kind, "refused");
+    assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
+    const drive = await provider.start({
+      body: "build", launchTells: [{ id: "tell-1", text: "then test" }], cwd: root,
+      options: { model: "grok-4", effort: "high", systemPrompt: "Be precise." }, session: { kind: "fresh" },
+    });
+    const events = [];
+    for await (const event of drive.events) events.push(event);
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
+    assert.deepEqual(events, [
+      { type: "session", coordinate: { sessionId: "fresh-session" } },
+      { type: "assistant", text: "complete answer" },
+      { type: "thought", text: "checked" },
+      { type: "tool", phase: "started", id: "tool-1", name: "Run tests", call: { kind: "other", display: "Run tests" } },
+      { type: "tool", phase: "completed", id: "tool-1", name: "Run tests", call: { kind: "other", display: "Run tests" }, result: { status: "ok" } },
+      { type: "note", text: "Plan updated: Verify" },
+      { type: "note", text: "ACP configuration updated" },
+    ]);
+    const records = acpLog(fake.log);
+    assert.deepEqual(records.map((record) => record.kind), ["initialize", "new", "prompt"]);
+    assert.deepEqual((records[2]!.params as { prompt: unknown }).prompt, [
+      { type: "text", text: "build" },
+      { type: "text", text: "then test" },
+    ]);
+    assert.deepEqual((records[2]!.argv as readonly string[]).slice(-7), ["--model", "grok-4", "--effort", "high", "--system-prompt", "Be precise.", "stdio"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("ACP cancels stable agent permission requests without an unhandled method error", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-permission-"));
+  try {
+    const fake = fakeAcp(root, "permission");
+    const drive = await createAcpProvider(fake.execution).start({
+      body: "build", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
+    assert.deepEqual(acpLog(fake.log).find((record) => record.kind === "permission")?.permission, { outcome: { outcome: "cancelled" } });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("ACP explicitly refuses unsupported filesystem and terminal reverse requests", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-reverse-"));
+  try {
+    const fake = fakeAcp(root, "reverse");
+    const drive = await createAcpProvider(fake.execution).start({
+      body: "build", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
+    const records = acpLog(fake.log);
+    const refused = records.filter((record) => record.refusal !== undefined);
+    assert.deepEqual(refused.map((record) => [record.kind, (record.refusal as { code: number }).code]), [
+      ["fs-read", -32000],
+      ["fs-write", -32000],
+      ["terminal-create", -32000],
+      ["terminal-output", -32000],
+      ["terminal-release", -32000],
+      ["terminal-wait", -32000],
+      ["terminal-kill", -32000],
+    ]);
+    assert.deepEqual(records.find((record) => record.kind === "elicitation")?.response, { action: "cancel" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("ACP load retains the exact session ID without a fork or live tell capability", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-resume-"));
+  try {
+    const fake = fakeAcp(root);
+    const provider = createAcpProvider(fake.execution);
+    assert.equal(provider.fork, undefined);
+    const drive = await provider.resume!({
+      body: "continue", launchTells: [], cwd: root, options: {}, session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
+    });
+    const events = [];
+    for await (const event of drive.events) events.push(event);
+    assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "retained-session" } });
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
+    const load = acpLog(fake.log).find((record) => record.kind === "load")!;
+    assert.equal((load.params as { sessionId: string }).sessionId, "retained-session");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("ACP cancellation closes its owned process tree after standard session/cancel", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-cancel-"));
+  try {
+    const fake = fakeAcp(root, "cancel");
+    const drive = await createAcpProvider(fake.execution).start({
+      body: "wait", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    await drive.abort();
+    const events = [];
+    for await (const event of drive.events) events.push(event);
+    assert.deepEqual(events, [{ type: "session", coordinate: { sessionId: "fresh-session" } }]);
+    assert.equal((await drive.completion).kind, "failed");
+    const descendant = acpLog(fake.log).find((record) => record.kind === "descendant")!;
+    assert.equal(await processGone(descendant.pid as number), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+function controlledAcpProcess(): Readonly<{
+  process: StdioProcess;
+  cleanupStarted: Promise<void>;
+  forcedCleanup(): number;
+  resolveCleanup(): void;
+  rejectCleanup(error: Error): void;
+}> {
+  const inbound = new PassThrough();
+  const outbound = new PassThrough();
+  let startCleanup!: () => void;
+  const cleanupStarted = new Promise<void>((resolve) => { startCleanup = resolve; });
+  let resolveCleanup!: () => void;
+  let rejectCleanup!: (error: Error) => void;
+  let forcedCleanup = 0;
+  const cleanup = new Promise<void>((resolve, reject) => {
+    resolveCleanup = resolve;
+    rejectCleanup = reject;
+  });
+  acp.agent({ name: "controlled-acp" })
+    .onRequest(acp.methods.agent.initialize, ({ params }) => ({
+      protocolVersion: params.protocolVersion,
+      agentCapabilities: { loadSession: true },
+    }))
+    .onRequest(acp.methods.agent.session.new, () => ({ sessionId: "controlled-session" }))
+    .onRequest(acp.methods.agent.session.prompt, () => ({ stopReason: "end_turn" }))
+    .connect(acp.ndJsonStream(
+      Writable.toWeb(outbound) as WritableStream<Uint8Array>,
+      Readable.toWeb(inbound) as ReadableStream<Uint8Array>,
+    ));
+  return {
+    process: {
+      input: inbound,
+      output: outbound,
+      exited: new Promise(() => undefined),
+      endInputAndDrain: async () => {
+        startCleanup();
+        await cleanup;
+      },
+      close: async (force) => {
+        if (force) {
+          forcedCleanup += 1;
+          resolveCleanup();
+        }
+      },
+    },
+    cleanupStarted,
+    forcedCleanup: () => forcedCleanup,
+    resolveCleanup,
+    rejectCleanup,
+  };
+}
+
+const controlledAcpExecution = {
+  name: "controlled-acp",
+  kind: "acp" as const,
+  executable: "controlled",
+  config: { argvBefore: [], argvAfter: [] },
+};
+
+test("ACP completion waits for owned process cleanup", async () => {
+  const controlled = controlledAcpProcess();
+  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
+    body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" },
+  });
+  let completed = false;
+  void drive.completion.then(() => { completed = true; });
+  await controlled.cleanupStarted;
+  assert.equal(completed, false);
+  controlled.resolveCleanup();
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "" });
+});
+
+test("ACP cleanup failure settles a typed failed Turn", async () => {
+  const controlled = controlledAcpProcess();
+  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
+    body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" },
+  });
+  await controlled.cleanupStarted;
+  controlled.rejectCleanup(new Error("drain failed"));
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "ACP cleanup failed: drain failed" });
+});
+
+test("ACP abort upgrades an in-flight graceful drain to forced cleanup", async () => {
+  const controlled = controlledAcpProcess();
+  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
+    body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" },
+  });
+  await controlled.cleanupStarted;
+  await drive.abort();
+  assert.equal(controlled.forcedCleanup(), 1);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "" });
+});
+
+test("ACP mapper preserves buffered state for an unknown runtime update discriminant", () => {
+  const previous = { ...EMPTY_ACP_EVENT_STATE, answer: "retained", open: { type: "assistant" as const, text: "partial" } };
+  const mapped = mapAcpUpdate({ sessionUpdate: "future_update" } as never, previous);
+  assert.deepEqual(mapped, {
+    events: [{ type: "unknown", kind: "future_update" }],
+    state: previous,
+  });
 });
 
 function fakePiSdk(input: {

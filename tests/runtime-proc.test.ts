@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
+import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import {
   consumeProcessStdout,
   probeProcessTree,
@@ -263,6 +264,59 @@ test("LineRpcProcess endInputAndDrain force-closes an uncooperative producer", a
     assert.ok(performance.now() - started < 1_000);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("StdioProcess endInputAndDrain retains output until producer EOF", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-stdio-drain-"));
+  const child = [
+    'process.stdout.write("terminal");',
+    'process.stdin.resume();',
+    'process.stdin.on("end", () => setTimeout(() => { process.stdout.write(" tail"); process.exit(0); }, 50));',
+  ].join(" ");
+  try {
+    const stdio = spawnStdioProcess({ argv: [process.execPath, "-e", child], cwd: root });
+    const output = (async () => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of stdio.output) chunks.push(Buffer.from(chunk));
+      return Buffer.concat(chunks).toString("utf8");
+    })();
+    await stdio.endInputAndDrain();
+    assert.equal(await output, "terminal tail");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("StdioProcess forced close terminates its complete helper tree", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-stdio-tree-"));
+  const descendantFile = join(root, "descendant-pid");
+  const descendant = 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000);';
+  const parent = [
+    'const { writeFileSync } = require("node:fs");',
+    'const { spawn } = require("node:child_process");',
+    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore" });`,
+    `writeFileSync(${JSON.stringify(descendantFile)}, String(child.pid));`,
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
+  let descendantPid: number | undefined;
+  try {
+    const stdio = spawnStdioProcess({ argv: [process.execPath, "-e", parent], cwd: root });
+    const deadline = performance.now() + 2_000;
+    while (descendantPid === undefined) {
+      try { descendantPid = Number.parseInt(readFileSync(descendantFile, "utf8"), 10); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if (performance.now() >= deadline) throw new Error("stdio descendant was not spawned");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+    await stdio.close(true);
+    await waitForExit(descendantPid);
+  } finally {
+    if (descendantPid !== undefined) {
+      try { process.kill(descendantPid, "SIGKILL"); } catch { /* already reaped */ }
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 
 test("detached process collars fence put-down by process identity", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-collar-"));

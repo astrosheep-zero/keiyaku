@@ -1,5 +1,6 @@
 import type { ProviderAdapter } from "../provider.js";
 import type { ProviderExecution } from "../heart/index.js";
+import { createAcpProvider, decodeAcpConfig } from "./acp/index.js";
 import { claudeProvider, createClaudeProvider } from "./claude/index.js";
 import { createCodexAppServerProvider } from "./codex-app-server/index.js";
 import { createOpencodeProvider } from "./opencode-sdk/index.js";
@@ -31,7 +32,7 @@ function optionalText(value: Readonly<Record<string, unknown>>, field: "executab
 }
 
 function providerKind(value: unknown): value is ProviderExecution["kind"] {
-  return value === "claude-agent-sdk" || value === "codex-app-server" || value === "opencode-sdk" || value === "pi";
+  return value === "acp" || value === "claude-agent-sdk" || value === "codex-app-server" || value === "opencode-sdk" || value === "pi";
 }
 
 function providerConfig(value: Readonly<Record<string, unknown>>, kind: ProviderExecution["kind"]): Readonly<Record<string, unknown>> | undefined {
@@ -39,6 +40,7 @@ function providerConfig(value: Readonly<Record<string, unknown>>, kind: Provider
   if (config === null) throw new TypeError("provider execution config must be an object");
   if (kind === "claude-agent-sdk" && config !== undefined) throw new TypeError("provider execution config is unsupported by claude-agent-sdk");
   if (kind === "opencode-sdk" && config !== undefined) throw new TypeError("provider execution config is unsupported by opencode-sdk");
+  if (kind === "acp") return decodeAcpConfig(config);
   return config;
 }
 
@@ -71,6 +73,7 @@ export function decodeProviderExecution(input: unknown): ProviderExecution {
 }
 
 export function providerNamed(execution: ProviderExecution): ProviderAdapter {
+  if (execution.kind === "acp") return createAcpProvider(execution);
   if (execution.kind === "claude-agent-sdk") {
     return execution.executable === undefined && execution.env === undefined
       ? PROVIDERS.claude

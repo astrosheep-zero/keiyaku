@@ -1,22 +1,9 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { terminateProcessTree } from "./run.js";
+import { spawnStdioProcess, type StdioProcess, type StdioProcessExit } from "./stdio.js";
 
 type Pending = Readonly<{ resolve(value: unknown): void; reject(error: unknown): void }>;
 export type LineRpcNotification = Readonly<{ method: string; params?: Readonly<Record<string, unknown>> }>;
 export type LineRpcServerRequest = LineRpcNotification & Readonly<{ id: number | string }>;
-export type LineRpcExit = Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>;
-
-const DEFAULT_DRAIN_TIMEOUT_MS = 1_000;
-
-function bounded<T>(promise: Promise<T>, milliseconds: number): Promise<T | undefined> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => resolve(undefined), milliseconds);
-    void promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (error: unknown) => { clearTimeout(timer); reject(error); },
-    );
-  });
-}
+export type LineRpcExit = StdioProcessExit;
 
 function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -29,39 +16,27 @@ function text(value: unknown): string | undefined {
 }
 
 export class LineRpcProcess {
-  private readonly child: ChildProcessWithoutNullStreams;
+  private readonly process: StdioProcess;
   private readonly pending = new Map<number, Pending>();
   private readonly notifications = new Set<(value: LineRpcNotification) => void>();
   private readonly serverRequests = new Set<(value: LineRpcServerRequest) => void>();
-  private readonly exited: Promise<LineRpcExit>;
   private nextId = 1;
   private stdout = "";
-  private stderr = "";
   private closed = false;
 
   constructor(input: Readonly<{ argv: readonly [string, ...string[]]; cwd: string; env?: NodeJS.ProcessEnv }>) {
-    this.child = spawn(input.argv[0], input.argv.slice(1), {
-      cwd: input.cwd,
-      env: input.env ?? process.env,
-      detached: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    this.child.stdout.setEncoding("utf8");
-    this.child.stderr.setEncoding("utf8");
-    this.child.stdout.on("data", (chunk: string) => this.consume(chunk));
-    this.child.stderr.on("data", (chunk: string) => { this.stderr = `${this.stderr}${chunk}`.slice(-4_000); });
-    this.child.on("error", (error) => this.fail(error));
-    this.exited = new Promise((resolve) => this.child.once("close", (code, signal) => {
+    this.process = spawnStdioProcess(input);
+    this.process.output.setEncoding("utf8");
+    this.process.output.on("data", (chunk: string) => this.consume(chunk));
+    void this.process.exited.then((exit) => {
       this.closed = true;
-      this.fail(new Error(`line RPC process exited${code === null ? "" : ` with code ${code}`}`));
-      resolve({ code, signal, stderr: this.stderr.trim() });
-    }));
+      this.fail(new Error(`line RPC process exited${exit.code === null ? "" : ` with code ${exit.code}`}`));
+    });
   }
 
   onNotification(listener: (value: LineRpcNotification) => void): void { this.notifications.add(listener); }
   onServerRequest(listener: (value: LineRpcServerRequest) => void): void { this.serverRequests.add(listener); }
-  onExit(listener: (value: LineRpcExit) => void): void { void this.exited.then(listener); }
+  onExit(listener: (value: LineRpcExit) => void): void { void this.process.exited.then(listener); }
 
   private consume(chunk: string): void {
     this.stdout += chunk;
@@ -108,7 +83,7 @@ export class LineRpcProcess {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.child.stdin.write(`${JSON.stringify({ id, method, ...(params === undefined ? {} : { params }) })}\n`, (error) => {
+      this.process.input.write(`${JSON.stringify({ id, method, ...(params === undefined ? {} : { params }) })}\n`, (error) => {
         if (error === null || error === undefined) return;
         this.pending.delete(id);
         reject(error);
@@ -117,27 +92,20 @@ export class LineRpcProcess {
   }
 
   notify(method: string): void {
-    if (!this.closed) this.child.stdin.write(`${JSON.stringify({ method })}\n`);
+    if (!this.closed) this.process.input.write(`${JSON.stringify({ method })}\n`);
   }
 
-  async endInputAndDrain(timeoutMs = DEFAULT_DRAIN_TIMEOUT_MS): Promise<void> {
-    if (this.closed) { await this.exited; return; }
+  async endInputAndDrain(timeoutMs?: number): Promise<void> {
+    if (this.closed) { await this.process.exited; return; }
     this.closed = true;
     this.fail(new Error("line RPC process is closed"));
-    this.child.stdin.end();
-    const drained = await bounded(this.exited, timeoutMs);
-    if (drained === undefined) {
-      await terminateProcessTree(this.child.pid, true);
-      await this.exited;
-    }
+    await this.process.endInputAndDrain(timeoutMs);
   }
 
   async close(force = false): Promise<void> {
-    if (this.closed) { await this.exited; return; }
+    if (this.closed) { await this.process.exited; return; }
     this.closed = true;
     this.fail(new Error("line RPC process is closed"));
-    this.child.stdin.end();
-    await terminateProcessTree(this.child.pid, force);
-    await this.exited;
+    await this.process.close(force);
   }
 }

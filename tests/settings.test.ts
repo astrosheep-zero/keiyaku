@@ -170,6 +170,51 @@ test("Archetype resolves builtin and configured Pi executions", async () => {
   } finally { value.close(); }
 });
 
+test("Archetype resolves grok-build as the builtin ACP execution profile", () => {
+  const value = fixture();
+  try {
+    writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: grok-build\nmodel: grok-4\neffort: high\n---\nBuild.\n");
+    const loaded = loadArchetype({ name: "grok", settings: settings({ root: value.project, home: value.home }) });
+    assert.deepEqual(loaded.provider, {
+      name: "grok-build",
+      kind: "acp",
+      executable: "grok",
+      config: {
+        argvBefore: ["agent", "--always-approve"],
+        argvAfter: ["stdio"],
+        modelArg: "--model",
+        effortArg: "--reasoning-effort",
+        systemPromptArg: "--system-prompt-override",
+      },
+    });
+    assert.deepEqual(loaded.options, { model: "grok-4", effort: "high", systemPrompt: "Build.\n" });
+  } finally { value.close(); }
+});
+
+test("Archetype resolves a second configured ACP execution without registry changes", () => {
+  const value = fixture();
+  try {
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: {
+      local: {
+        kind: "acp",
+        executable: "other-agent",
+        config: { argvBefore: ["serve"], argvAfter: ["stdio"], modelArg: "--model-id", systemPromptArg: "--prompt" },
+        env: { AGENT_PROFILE: "local" },
+      },
+    } }));
+    writeFileSync(join(value.home, "akuma", "local.md"), "---\nprovider: local\nmodel: test-model\n---\nBuild.\n");
+    const loaded = loadArchetype({ name: "local", settings: settings({ root: value.project, home: value.home }) });
+    assert.deepEqual(loaded.provider, {
+      name: "local",
+      kind: "acp",
+      executable: "other-agent",
+      config: { argvBefore: ["serve"], argvAfter: ["stdio"], modelArg: "--model-id", systemPromptArg: "--prompt" },
+      env: { AGENT_PROFILE: "local" },
+    });
+    assert.deepEqual(loaded.options, { model: "test-model", systemPrompt: "Build.\n" });
+  } finally { value.close(); }
+});
+
 test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
   const value = fixture();
   try {

@@ -324,6 +324,33 @@ nothing gates call admission on it. During a declared drive the adapter grants
 the body-owned request transport as one additional writable root and injects
 `AKUMA_REQUESTS`; an unconfined adapter never receives that input.
 
+## ACP
+
+`acp` is one stable protocol adapter, not a product-specific provider family.
+Its execution configuration is limited to process launch data, with fixed argv
+before and after declared portable option-to-argument mappings. An option
+without such a mapping, and
+portable access or network claims ACP cannot enforce, are refused at Archetype
+admission. Its process has the caller environment with the frozen execution
+overlay; ACP itself neither reads nor copies another product's credentials or
+configuration.
+
+An ACP drive initializes one connection, creates or loads one session, and
+uses one `session/prompt` response as the sole terminal authority. The exact
+ACP session id is the resume coordinate. Assistant chunks form the complete
+answer while session updates remain activity only. Completion is published
+only after owned-process cleanup settles; cleanup failure is a typed failed
+Turn. ACP cancellation sends the standard session cancellation before
+connection and owned-process cleanup.
+There is no ACP live tell or fork surface, so pending tells travel once in the
+next launch prompt and answered turns have no fork coordinate.
+
+`grok-build` is the built-in ACP execution profile for the official trusted
+noninteractive `grok agent stdio` launch. It is ordinary execution data,
+including its documented portable argument mappings and unconfined custody; it does not change ACP
+wire behavior, credentials, persistence, or Heart facts. Settings may shadow
+it with another ordinary ACP execution record.
+
 No `probe`, capability or plugin registry, or registration schema exists. Provider instance
 names are Settings data; built-in provider kinds remain a closed composition
 used by the public boundary and detached body.

@@ -2,7 +2,7 @@
 
 This chapter owns Akuma identity, heart facts, life, detached bodies, provider
 boundaries, lifecycle verbs, and persistence. The current surface ships the
-Claude, Codex app-server, and OpenCode V1 providers, public handles, status, wait, interrupt,
+ACP, Claude, Codex app-server, and OpenCode V1 providers, public handles, status, wait, interrupt,
 fork, Body Requests, CLI skin, and Kanshi rows. Body Requests reroute the
 existing call surface; they do not add a public verb.
 
@@ -49,9 +49,11 @@ body -> {heart, provider, providers, requests, runtime/proc}
 requests -> {heart, identity, provider, providers(map), publication}
 publication -> {heart, identity, runtime/proc}
 provider -> heart types
-providers/* -> {provider, runtime/proc/line-rpc}
+providers/* -> {provider, runtime/proc/stdio}
 providers/codex-app-server/index -> {events, provider, heart, runtime/proc/line-rpc}
 providers/codex-app-server/events -> {provider, runtime/proc/line-rpc(type)}
+runtime/proc/line-rpc -> runtime/proc/stdio
+runtime/proc/stdio -> runtime/proc/run
 kanshi -> akuma public values
 ```
 
@@ -186,12 +188,13 @@ catalog, and other IO failures remain exceptions for both reads.
 
 A provider entry is one strict object with required `kind`, optional nonblank
 `description` and `executable`, optional object `config`, and optional `env`
-whose values are strings. The built-in kinds are `claude-agent-sdk`,
-`codex-app-server`, `opencode-sdk`, and `pi`; only Codex consumes `config`.
-When no same-name Settings entry exists, Archetype names `claude`,
-`codex-app-server`, `opencode-sdk`, and `pi` select their
-Akuma-owned default executions. A configured same-name entry replaces that
-default wholly under Settings shadow law.
+whose values are strings. The built-in kinds are `acp`, `claude-agent-sdk`,
+`codex-app-server`, `opencode-sdk`, and `pi`; each kind owns its optional
+configuration shape. When no same-name Settings entry exists, Archetype names
+`claude`, `codex-app-server`, `opencode-sdk`, `pi`, and `grok-build` select
+Akuma-owned default executions. `grok-build` is an ordinary data-only `acp`
+execution profile, not a provider kind or wire adapter. A configured same-name
+entry replaces that default wholly under Settings shadow law.
 
 Birth snapshots the Archetype name, optional description, complete provider
 execution, and admitted options into the soul. The body never reads Settings or
