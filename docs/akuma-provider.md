@@ -39,10 +39,12 @@ type Session = {
   receipts?: AsyncIterable<TellReceipt>;
   completion: Promise<TurnResult>;
   abort: () => Promise<void>;
-  tell?: (tell: { id: TellId; text: string }) => Promise<SubmitAck>;
+  tell?: (tell: { id: TellId; text: string }) => Promise<TellSubmission>;
 };
 
-type SubmitAck = { fence: ProviderFence };
+type TellSubmission =
+  | { kind: "accepted"; fence: ProviderFence }
+  | { kind: "turn-ended" };
 type SessionAdmission = { fence: ProviderFence };
 type TellReceipt =
   | { evidence: "exact"; tellId: TellId; kind: ReceiptKind }
@@ -67,8 +69,11 @@ boundary through `launchTells`; an adapter without resume starts fresh only
 when no durable resume promise exists. There is no capability registry,
 declaration table, probe, independent `SteerControl`, or `ExecutionObserver`.
 
-`Session` owns only one live native execution. A successful live `tell` returns
-a provider submission fence. When `receipts` exists, that acknowledgement
+`Session` owns only one live native execution. A live `tell` returns `accepted`
+with a provider submission fence, or `turn-ended` when the adapter has already
+observed terminal native evidence and submitted nothing. The adapter is the sole
+judge of that native boundary; transport and native failures still reject the
+operation. When `receipts` exists, an accepted acknowledgement
 proves submission only and terminal evidence must arrive through the receipt
 stream. When `receipts` is absent, exposing live `tell` promises that its
 acknowledgement is the adapter's strongest terminal native evidence for the
@@ -209,7 +214,7 @@ text input with the TellId as `clientUserMessageId` to the admitted thread and
 active turn, accepts only a response naming that same turn, and then returns an
 opaque fence scoped to that native acknowledgement. Codex supplies no receipt
 stream: successful `turn/steer` acceptance is its strongest terminal evidence.
-Terminal turn observation stops new steers immediately, but the adapter keeps
+Terminal turn observation returns `turn-ended` for new steers immediately, but the adapter keeps
 the RPC transport alive until every already-submitted steer acknowledgement has
 settled; an independently ordered completion notification cannot erase native
 acceptance evidence.

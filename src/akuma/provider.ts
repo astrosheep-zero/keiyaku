@@ -309,6 +309,9 @@ export type ProviderFence = string;
 export type TellReceipt =
   | Readonly<{ evidence: "exact"; tellId: string; kind: string }>
   | Readonly<{ evidence: "fence"; fence: ProviderFence; kind: string }>;
+export type TellSubmission =
+  | Readonly<{ kind: "accepted"; fence: ProviderFence }>
+  | Readonly<{ kind: "turn-ended" }>;
 
 export type Session = Readonly<{
   admission: Readonly<{ fence: ProviderFence }>;
@@ -316,7 +319,7 @@ export type Session = Readonly<{
   receipts?: AsyncIterable<TellReceipt>;
   completion: Promise<TurnResult>;
   abort(): Promise<void>;
-  tell?(tell: Readonly<{ id: string; text: string }>): Promise<Readonly<{ fence: ProviderFence }>>;
+  tell?(tell: Readonly<{ id: string; text: string }>): Promise<TellSubmission>;
 }>;
 
 export type DriveInput = Readonly<{

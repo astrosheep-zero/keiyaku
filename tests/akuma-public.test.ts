@@ -45,9 +45,12 @@ test("interrupt refuses an unborn address without leaving durable input or contr
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10005" });
     initializeHeart(allocated.paths);
-    await assert.rejects(akumaAt(root).of({ id: allocated.id }).interrupt("future input"), AkumaNotBornError);
-    assert.deepEqual(readHeart(allocated.paths).pending, []);
-    assert.equal(pauseRequested(allocated.paths), false);
+    const holder = HeldAkumaLeash.try(allocated.paths)!;
+    try {
+      await assert.rejects(akumaAt(root).of({ id: allocated.id }).interrupt("future input"), AkumaNotBornError);
+      assert.deepEqual(readHeart(allocated.paths).pending, []);
+      assert.equal(pauseRequested(allocated.paths), false);
+    } finally { holder.release(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

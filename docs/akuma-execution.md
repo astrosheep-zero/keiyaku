@@ -111,7 +111,10 @@ While a Body holds the
 leash, wake nudges it to read pending tells at its checkpoint. When its current
 Session supports live tell, Body submits pending tells in recorded order and
 records the returned acknowledgement. Otherwise they stay pending until the
-turn boundary. A fresh or resumed drive carries every pending tell in
+turn boundary. If the adapter reports that the Session has already ended,
+Body records no delivery, stops live submission for that Session, and retains
+the Tell for successor launch without changing the terminal turn result. A
+fresh or resumed drive carries every pending tell in
 `launchTells`; the Session's launch admission supplies only a provider fence.
 Body pairs that fence with the immutable
 `launchTells` it constructed and atomically records their shared delivery

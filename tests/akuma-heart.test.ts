@@ -388,7 +388,7 @@ test("pause remains distinct from stop and can be cleared only under the leash",
       kind: "requested",
       body: firstBody,
     });
-    assert.equal(requestPause(value.allocated.paths, "2026-08-08T00:00:02.000Z"), "requested");
+    assert.deepEqual(requestPause(value.allocated.paths, "2026-08-08T00:00:02.000Z"), { kind: "requested" });
     assert.equal(stopRequested(value.allocated.paths), true);
     assert.equal(pauseRequested(value.allocated.paths), true);
 
@@ -398,7 +398,7 @@ test("pause remains distinct from stop and can be cleared only under the leash",
     assert.equal(pauseRequested(value.allocated.paths), false);
     assert.equal(stopRequested(value.allocated.paths), true);
 
-    assert.equal(requestPause(value.allocated.paths, "2026-08-08T00:00:04.000Z"), "requested");
+    assert.deepEqual(requestPause(value.allocated.paths, "2026-08-08T00:00:04.000Z"), { kind: "requested" });
     assert.equal(pauseRequested(value.allocated.paths), true);
   } finally { value.close(); }
 });

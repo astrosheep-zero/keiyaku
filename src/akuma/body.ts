@@ -194,23 +194,27 @@ async function submitPendingLiveTells(
   drive: Session,
   attempted: Set<string>,
   writeWitness: ReturnType<typeof serializeEffects>,
-): Promise<void> {
-  if (drive.tell === undefined) return;
+): Promise<"live" | "turn-ended"> {
+  if (drive.tell === undefined) return "live";
   for (const tell of readHeart(input.paths).pending) {
     if (attempted.has(tell.id)) continue;
     attempted.add(tell.id);
-    await writeWitness(async () => {
-      const acknowledgement = await drive.tell!({ id: tell.id, text: tell.body });
+    const outcome = await writeWitness(async () => {
+      const submission = await drive.tell!({ id: tell.id, text: tell.body });
+      if (submission.kind === "turn-ended") return "turn-ended" as const;
       recordTellDeliveries(input.paths, [{
         tellId: tell.id,
         route: "live",
         bodySequence: input.bodySequence,
-        fence: acknowledgement.fence,
+        fence: submission.fence,
         receipt: drive.receipts === undefined ? "unavailable" : "required",
         deliveredAt: input.now(),
       }]);
+      return "accepted" as const;
     });
+    if (outcome === "turn-ended") return "turn-ended";
   }
+  return "live";
 }
 
 async function consumeTurnDrive(
@@ -228,6 +232,7 @@ async function consumeTurnDrive(
   );
   const iterator = drive.events[Symbol.asyncIterator]();
   let pending = iterator.next();
+  let liveTells = true;
   try {
     for (;;) {
       if (stopRequested(input.paths, input.bodySequence) || pauseRequested(input.paths)) {
@@ -238,7 +243,9 @@ async function consumeTurnDrive(
         }
         return { kind: "stopped" };
       }
-      await submitPendingLiveTells(input, drive, attempted, writeWitness);
+      if (liveTells) {
+        liveTells = await submitPendingLiveTells(input, drive, attempted, writeWitness) === "live";
+      }
       const next = await Promise.race([
         pending,
         wait(LEASH_RETRY_MS).then(() => null),

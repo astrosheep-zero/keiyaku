@@ -183,7 +183,7 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
           async tell() {
             releaseReceipt();
             tellObserved();
-            return { fence: "live-fence" };
+            return { kind: "accepted" as const, fence: "live-fence" };
           },
           async abort() {},
         };
@@ -241,7 +241,7 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
             },
           },
           completion: Promise.resolve({ kind: "answered", answer: "done", historyId: "live-history" }),
-          async tell() { tellObserved(); return { fence: "turn-1:tell-live" }; },
+          async tell() { tellObserved(); return { kind: "accepted" as const, fence: "turn-1:tell-live" }; },
           async abort() {},
         };
       },
@@ -276,6 +276,82 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a Tell after Session terminality stays pending without replacing the answered turn", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-terminal-tell-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "codex", draw: () => "1a2b3c41" });
+    initializeHeart(allocated.paths);
+    let closeEvents!: () => void;
+    const eventsClosed = new Promise<void>((resolve) => { closeEvents = resolve; });
+    let bodyStarted!: () => void;
+    const started = new Promise<void>((resolve) => { bodyStarted = resolve; });
+    const launches: Array<readonly Readonly<{ id: string; text: string }>[]> = [];
+    let turn = 0;
+    const drive = async (input: Parameters<ProviderAdapter["start"]>[0]
+      | Parameters<NonNullable<ProviderAdapter["resume"]>>[0]) => {
+        turn += 1;
+        const currentTurn = turn;
+        launches.push(input.launchTells);
+        if (currentTurn === 1) bodyStarted();
+        return {
+          admission: { fence: `terminal-turn-${currentTurn}` },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "terminal-session" } };
+              if (currentTurn === 1) await eventsClosed;
+            },
+          },
+          completion: Promise.resolve({
+            kind: "answered" as const,
+            answer: currentTurn === 1 ? "done" : "continued",
+            historyId: `terminal-history-${currentTurn}`,
+          }),
+          async tell() { return { kind: "turn-ended" as const }; },
+          async abort() {},
+        };
+      };
+    const provider: ProviderAdapter = {
+      confinement: () => ({ kind: "declared", writableRoots: [root] }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      start: drive,
+      resume: drive,
+    };
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "codex",
+        provider: { name: "codex", kind: "codex-app-server" },
+        options: {},
+        origin: { kind: "direct" },
+        confinement: { kind: "declared", writableRoots: [root] },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, provider, {
+      collar: { pid: 999_976, processGroup: 999_976, spawnedAt: "terminal-tell" },
+      now: () => "2026-08-08T00:00:00.000Z",
+      async putDownOwnTree() {},
+    });
+    await started;
+    recordTell(allocated.paths, {
+      id: "tell-after-terminal", body: "next turn", recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    closeEvents();
+    await body;
+
+    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
+      kind: "answered",
+      answer: "done",
+      historyId: "terminal-history-1",
+      session: { sessionId: "terminal-session" },
+    });
+    assert.deepEqual(launches, [[], [{ id: "tell-after-terminal", text: "next turn" }]]);
+    assert.deepEqual(readHeart(allocated.paths).pending, []);
+    assert.equal(readHeart(allocated.paths).latestBody?.end, "exited");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("receipt persistence failure aborts the Session and terminates the Body", async () => {
@@ -608,7 +684,7 @@ test("a successor settles an abandoned Body-scoped stop before creating its Body
     });
     const stopped = requestStop(allocated.paths, "2026-08-08T00:00:01.000Z");
     assert.equal(stopped.kind, "requested");
-    assert.equal(requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), "requested");
+    assert.deepEqual(requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), { kind: "requested" });
     assert.equal(stopRequested(allocated.paths), true);
     assert.equal(pauseRequested(allocated.paths), true);
     recordTell(allocated.paths, {
@@ -690,7 +766,7 @@ test("pause aborts the current drive and records the body as put down", async ()
       async putDownOwnTree() {},
     });
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
-    assert.equal(requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), "requested");
+    assert.deepEqual(requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), { kind: "requested" });
     await body;
     assert.equal(aborted, true);
     assert.equal(readHeart(allocated.paths).latestBody?.end, "put-down");

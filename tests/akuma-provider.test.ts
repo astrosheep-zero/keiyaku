@@ -52,7 +52,7 @@ test("provider activity codec round trips every closed event and tool-call arm",
 function fakeCodex(
   root: string,
   mode: "complete" | "interrupt" | "observations" | "failed-notification" | "failed-turn"
-    | "steer" | "steer-complete-first" | "steer-mismatch" | "steer-missing" = "complete",
+    | "steer" | "steer-complete-first" | "steer-error-after-complete" | "steer-mismatch" | "steer-missing" = "complete",
 ): Readonly<{
   executable: string;
   requests(): readonly Readonly<Record<string, unknown>>[];
@@ -108,6 +108,10 @@ function fakeCodex(
     "    if(mode==='steer-complete-first'){",
     "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:message.params.expectedTurnId,status:'completed'}}});",
     "      return setTimeout(()=>reply(message,{turnId:message.params.expectedTurnId}),10);",
+    "    }",
+    "    if(mode==='steer-error-after-complete'){",
+    "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:message.params.expectedTurnId,status:'completed'}}});",
+    "      return setTimeout(()=>send({id:message.id,error:{code:-32000,message:'native steer rejected'}}),10);",
     "    }",
     "    reply(message,mode==='steer-missing'?{}:{turnId:mode==='steer-mismatch'?'turn-other':message.params.expectedTurnId});",
     "    if(mode==='steer') send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:message.params.expectedTurnId,status:'completed'}}});",
@@ -813,6 +817,7 @@ test("Codex app-server live tell steers the admitted turn with exact correlation
       const acknowledgement = drive.tell!({ id: "tell-live-1", text: "check the race" });
       if (mode === "steer-complete-first") await drive.abort();
       assert.deepEqual(await acknowledgement, {
+        kind: "accepted",
         fence: "turn-1:tell-live-1",
       });
       assert.equal((await drive.completion).kind, "answered");
@@ -841,4 +846,16 @@ test("Codex live tell rejects a mismatched native turn acknowledgement", async (
       await drive.abort();
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
+});
+
+test("Codex preserves a rejected steer even when completion arrives first", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-steer-rejected-"));
+  try {
+    const fake = fakeCodex(root, "steer-error-after-complete");
+    const drive = await createCodexAppServerProvider(fake.executable).start({
+      body: "work", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    await assert.rejects(drive.tell!({ id: "tell-live-error", text: "check rejection" }), /native steer rejected/u);
+    assert.equal((await drive.completion).kind, "answered");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

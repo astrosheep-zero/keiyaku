@@ -448,11 +448,15 @@ export function requestStop(
     }));
 }
 
-export function requestPause(paths: AkumaPaths, at: string): "requested" {
+export function requestPause(
+  paths: AkumaPaths,
+  at: string,
+): Readonly<{ kind: "not-born" } | { kind: "requested" }> {
   return withHeart(paths, (heart) =>
     transaction(heart, () => {
+      if (soulFact(heart) === null) return { kind: "not-born" };
       insertPauseControl(heart, at);
-      return "requested";
+      return { kind: "requested" };
     }));
 }
 

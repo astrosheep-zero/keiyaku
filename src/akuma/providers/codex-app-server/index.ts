@@ -54,10 +54,9 @@ async function steerTurn(
   state: CodexTurnState,
   inFlight: Set<Promise<void>>,
   tell: Readonly<{ id: string; text: string }>,
-): Promise<Readonly<{ fence: string }>> {
-  if (state.settled || state.threadId === undefined || state.turnId === undefined) {
-    throw new Error("codex app-server turn is not live");
-  }
+): ReturnType<NonNullable<Session["tell"]>> {
+  if (state.settled) return { kind: "turn-ended" };
+  if (state.threadId === undefined || state.turnId === undefined) throw new Error("codex app-server turn is not admitted");
   const request = server.request("turn/steer", {
     threadId: state.threadId,
     expectedTurnId: state.turnId,
@@ -71,7 +70,7 @@ async function steerTurn(
   const accepted = codexText(response?.turnId);
   if (accepted === undefined) throw new Error("codex app-server steer did not return a turn id");
   if (accepted !== state.turnId) throw new Error("codex app-server steer acknowledged a different turn");
-  return { fence: `${accepted}:${tell.id}` };
+  return { kind: "accepted", fence: `${accepted}:${tell.id}` };
 }
 
 function sandbox(cwd: string, options: ProviderOptions, requests?: Readonly<{ dir: string }>): Readonly<Record<string, unknown>> {

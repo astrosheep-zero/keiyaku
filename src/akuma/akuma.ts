@@ -274,7 +274,9 @@ export class AkumaHandle {
   }
 
   async interrupt(body: string): Promise<InterruptReceipt> {
-    requestPause(this.paths, new Date().toISOString());
+    if (requestPause(this.paths, new Date().toISOString()).kind === "not-born") {
+      throw new AkumaNotBornError(this.id);
+    }
 
     let putDown: "was-idle" | "self-aborted" | "collar" = "was-idle";
     let leash = HeldAkumaLeash.try(this.paths);
