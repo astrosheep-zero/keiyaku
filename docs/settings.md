@@ -95,8 +95,13 @@ An omitted entry means an empty command array. `argv` must be a nonempty array
 of strings whose executable is nonblank. `timeoutMs` must be an integer from 1
 through 2,147,483,647. Commands execute directly without a shell; interpolation
 and environment loading are not part of Settings. The returned arrays and
-commands are deeply frozen. Their managed-worktree execution and durable
-freezing rules are owned by [git-reconciliation.md](git-reconciliation.md).
+commands are deeply frozen. A Keiyaku-created worktree uses only commands
+decoded from the project Settings bytes in the snapshot it checks out. Managed
+worktrees freeze those commands in their durable marker. Disposable Verification
+scratch uses a project-only reader against its materialized integration tree:
+it does not read user Settings, caller-current Settings, caller lockfiles, or
+caller `node_modules`, and it retains no marker or progress state. Execution
+and durable freezing rules are owned by [git-reconciliation.md](git-reconciliation.md).
 
 The Git integration consumer publicly provides
 `requireBranchesToBeUpToDateFrom({ settings })`. It reads the one optional

@@ -41,6 +41,7 @@ export type AcceptedResult = Readonly<{
   target?: string | null;
   verification?: VerificationStop;
   placement?: PlacementStop;
+  cleanup?: NonNullable<AuditReport["cleanup"]>;
   leak?: NonNullable<AuditReport["leak"]>;
   overlaps?: readonly RegionOverlap[];
   overlapFailure?: string;

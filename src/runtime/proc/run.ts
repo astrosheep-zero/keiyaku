@@ -8,10 +8,11 @@ type ProcessLaunch = Readonly<{
   readonly argv: readonly string[];
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly signal?: AbortSignal;
 }>;
 
 export type ProcessInput = ProcessLaunch & Readonly<{
-  readonly timeoutMs: number;
+  readonly timeoutMs?: number;
 }>;
 
 type ProcessTerminal = Readonly<{
@@ -35,7 +36,20 @@ type ProcessUnknownExit = Readonly<{
   readonly kind: "unknown-exit";
 }>;
 
-export type ProcessOutcome = ProcessTerminal | ProcessTimeout | ProcessSpawnError | ProcessUnknownExit;
+type ProcessCancelled = Readonly<{
+  readonly kind: "cancelled";
+}>;
+
+export type ProcessOutcome = ProcessTerminal | ProcessTimeout | ProcessSpawnError | ProcessUnknownExit | ProcessCancelled;
+
+export type ProcessIdentity = Readonly<{
+  pid: number;
+  spawnedAt: string;
+}>;
+
+export type ProcessIdentityProbe =
+  | Readonly<{ kind: "gone" | "alive" | "replaced" }>
+  | Readonly<{ kind: "unverifiable"; diagnostic: string }>;
 
 export type ProcessCollar = Readonly<{
   pid: number;
@@ -139,9 +153,28 @@ function processStartToken(pid: number): string | null {
 }
 
 export function currentProcessCollar(): ProcessCollar {
+  const identity = currentProcessIdentity();
+  return { ...identity, processGroup: identity.pid };
+}
+
+export function currentProcessIdentity(): ProcessIdentity {
   const spawnedAt = processStartToken(process.pid);
   if (spawnedAt === null) throw new Error(`cannot read process start identity for ${process.pid}`);
-  return { pid: process.pid, processGroup: process.pid, spawnedAt };
+  return { pid: process.pid, spawnedAt };
+}
+
+export function probeProcessIdentity(identity: ProcessIdentity): ProcessIdentityProbe {
+  try {
+    process.kill(identity.pid, 0);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return { kind: "gone" };
+    return { kind: "unverifiable", diagnostic: error instanceof Error ? error.message : String(error) };
+  }
+  const current = processStartToken(identity.pid);
+  if (current === null) return { kind: "unverifiable", diagnostic: `cannot read process start identity for ${identity.pid}` };
+  if (current === identity.spawnedAt) return { kind: "alive" };
+  return { kind: "replaced" };
 }
 
 export async function spawnDetachedProcess(input: DetachedProcessInput): Promise<ProcessCollar> {
@@ -193,6 +226,7 @@ export async function putDownProcessTree(collar: ProcessCollar): Promise<PutDown
 }
 
 async function executeProcess(input: ProcessLaunch, timeoutMs: number | undefined): Promise<ProcessOutcome> {
+  if (input.signal?.aborted === true) return { kind: "cancelled" };
   const child = spawn(input.argv[0]!, input.argv.slice(1), {
     cwd: input.cwd,
     env: input.env,
@@ -205,14 +239,16 @@ async function executeProcess(input: ProcessLaunch, timeoutMs: number | undefine
   child.stdout.on("data", (chunk: Buffer) => stdout.append(chunk));
   child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
 
-  let timedOut = false;
+  let stop: "timeout" | "cancelled" | undefined;
   let termination: Promise<void> | undefined;
-  const requestStop = (): void => {
-    if (timedOut) return;
-    timedOut = true;
+  const requestStop = (reason: "timeout" | "cancelled"): void => {
+    if (stop !== undefined) return;
+    stop = reason;
     termination = terminateProcessTree(child.pid);
   };
-  const timeout = timeoutMs === undefined ? undefined : setTimeout(requestStop, timeoutMs);
+  const cancel = (): void => requestStop("cancelled");
+  input.signal?.addEventListener("abort", cancel, { once: true });
+  const timeout = timeoutMs === undefined ? undefined : setTimeout(() => requestStop("timeout"), timeoutMs);
 
   const terminal = await new Promise<
     | Readonly<{ readonly kind: "closed"; readonly code: number | null }>
@@ -222,10 +258,11 @@ async function executeProcess(input: ProcessLaunch, timeoutMs: number | undefine
     child.once("error", (error) => resolve({ kind: "spawn-error", error }));
   });
   if (timeout !== undefined) clearTimeout(timeout);
+  input.signal?.removeEventListener("abort", cancel);
   await termination;
 
   if (terminal.kind === "spawn-error") return { kind: "spawn-error", diagnostic: terminal.error.message };
-  if (timedOut) return { kind: "timeout" };
+  if (stop !== undefined) return { kind: stop };
   if (terminal.code === null) return { kind: "unknown-exit" };
   const capturedStdout = stdout.result();
   const capturedStderr = stderr.result();

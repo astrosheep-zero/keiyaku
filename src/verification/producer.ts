@@ -12,7 +12,9 @@ export type VerificationTerminalOutcome = Readonly<{
 }>;
 
 export type VerificationNonterminalOutcome = Readonly<{
-  readonly kind: "timeout" | "unknown-exit";
+  readonly kind: "unknown-exit";
+}> | Readonly<{
+  readonly kind: "cancelled";
 }> | Readonly<{
   readonly kind: "spawn-error";
   readonly diagnostic: string;
@@ -25,8 +27,8 @@ export type VerificationOutcome =
 export type ProduceVerificationInput = Readonly<{
   readonly declarations: readonly VerificationDeclaration[];
   readonly cwd: string;
-  readonly timeoutMs: number;
   readonly env?: NodeJS.ProcessEnv;
+  readonly signal?: AbortSignal;
 }>;
 
 function argvFor(declaration: VerificationDeclaration): readonly string[] {
@@ -60,21 +62,24 @@ function appendSummary(current: string | undefined, diagnostic: string | null): 
 }
 
 export async function produceVerification(input: ProduceVerificationInput): Promise<VerificationOutcome> {
-  const deadline = performance.now() + input.timeoutMs;
   let verdict: VerificationVerdict = "satisfied";
   let summary: string | undefined;
   for (const [index, declaration] of input.declarations.entries()) {
-    const timeoutMs = deadline - performance.now();
-    if (timeoutMs <= 0) return { kind: "timeout" };
     const outcome = await runProcess({
       argv: argvFor(declaration),
       cwd: input.cwd,
-      timeoutMs,
       ...(input.env === undefined ? {} : { env: input.env }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(declaration.timeoutMs === undefined ? {} : { timeoutMs: declaration.timeoutMs }),
     });
-    if (outcome.kind === "timeout") return { kind: "timeout" };
+    if (outcome.kind === "timeout") {
+      verdict = "unsatisfied";
+      summary = appendSummary(summary, `[${index + 1} ${declaration.executor} timeout after ${declaration.timeoutMs}ms]`);
+      continue;
+    }
     if (outcome.kind === "spawn-error") return { kind: "spawn-error", diagnostic: outcome.diagnostic };
     if (outcome.kind === "unknown-exit") return { kind: "unknown-exit" };
+    if (outcome.kind === "cancelled") return { kind: "cancelled" };
     if (outcome.code !== 0) verdict = "unsatisfied";
     summary = appendSummary(summary, processDiagnostic(declaration, index, outcome));
   }

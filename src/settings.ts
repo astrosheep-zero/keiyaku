@@ -37,6 +37,15 @@ export type Settings = Readonly<{
 
 export type SettingsInput = Readonly<{ root?: string; home?: string }>;
 
+export class SettingsError extends Error {
+  readonly kind = "settings";
+  constructor(message: string) {
+    super(message);
+    this.name = "SettingsError";
+  }
+}
+
+
 type LoadedScope = Readonly<{
   state: SettingsScopeState;
   root?: Readonly<Record<string, unknown>>;
@@ -102,20 +111,7 @@ function namespaceEntries(
   };
 }
 
-export function settings(input: SettingsInput = {}): Settings {
-  if (!object(input)) throw new TypeError("settings input must be an object");
-  if (input.root !== undefined && (typeof input.root !== "string" || input.root.trim().length === 0)) {
-    throw new TypeError("settings root must be a nonblank string");
-  }
-  if (input.home !== undefined && (typeof input.home !== "string" || input.home.trim().length === 0)) {
-    throw new TypeError("settings home must be a nonblank string");
-  }
-  const home = resolve(input.home ?? join(homedir(), ".keiyaku"));
-  const user = readScope(join(home, "settings.json"));
-  const project = input.root === undefined
-    ? { state: { kind: "absent" as const } }
-    : readScope(join(resolve(input.root), ".keiyaku", "settings.json"));
-
+function settingsFromScopes(project: LoadedScope, user: LoadedScope): Settings {
   return Object.freeze({
     scopes: Object.freeze({ project: project.state, user: user.state }),
     namespace(name: string): SettingsNamespaceView {
@@ -138,4 +134,28 @@ export function settings(input: SettingsInput = {}): Settings {
         : Object.freeze({ kind: "failed" as const, name, entries, failures });
     },
   });
+}
+
+export function settings(input: SettingsInput = {}): Settings {
+  if (!object(input)) throw new TypeError("settings input must be an object");
+  if (input.root !== undefined && (typeof input.root !== "string" || input.root.trim().length === 0)) {
+    throw new TypeError("settings root must be a nonblank string");
+  }
+  if (input.home !== undefined && (typeof input.home !== "string" || input.home.trim().length === 0)) {
+    throw new TypeError("settings home must be a nonblank string");
+  }
+  const project = input.root === undefined
+    ? { state: { kind: "absent" as const } }
+    : readScope(join(resolve(input.root), ".keiyaku", "settings.json"));
+  const user = readScope(join(resolve(input.home ?? join(homedir(), ".keiyaku")), "settings.json"));
+  return settingsFromScopes(project, user);
+}
+
+/** Read only the project scope owned by a materialized candidate snapshot. */
+export function projectSettings(root: string): Settings {
+  if (typeof root !== "string" || root.trim().length === 0) throw new TypeError("settings root must be a nonblank string");
+  return settingsFromScopes(
+    readScope(join(resolve(root), ".keiyaku", "settings.json")),
+    { state: { kind: "absent" } },
+  );
 }

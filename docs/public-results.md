@@ -160,7 +160,16 @@ type TargetInputRefusal =
 type VerificationStop =
   | StepStop<AttestationRefusal>
   | Readonly<{ failure: "candidate-unavailable"; diagnostic: string }>
-  | Readonly<{ failure: "timeout" | "unknown-exit" }>
+  | Readonly<{
+      failure: "environment-failure"
+      diagnostic: string
+    }>
+  | Readonly<{
+      failure: "environment-failure"
+      command: number
+      detail: HookFailure
+    }>
+  | Readonly<{ failure: "unknown-exit" | "cancelled" }>
   | Readonly<{ failure: "spawn-error"; diagnostic: string }>
 
 type PlacementStop =
@@ -174,6 +183,12 @@ type PlacementStop =
     }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>
 
+type VerificationCleanupFailure = Readonly<{
+  phase: "destroy"
+  command: number
+  detail: HookFailure
+}>
+
 type Delivery = Readonly<{
   tenderSnapshot: SnapshotId
   integration: Readonly<{
@@ -185,6 +200,7 @@ type Delivery = Readonly<{
   policy: Readonly<{ requireBranchesToBeUpToDate: boolean }>
   verification?: VerificationStop
   placement?: PlacementStop
+  cleanup?: VerificationCleanupFailure
   leak?: WorktreeLeak
   diff(): Promise<string | null>
 }>
@@ -257,7 +273,11 @@ admission stops share `VerificationStop`; placement admission stops use
 present on one Delivery. A channel is absent exactly when its obligation was
 not applicable or admitted its fact; callers distinguish those cases through
 `facts`. These values remain process-local and non-authoritative; the journal
-is the sole lifecycle authority.
+is the sole lifecycle authority. `environment-failure` identifies candidate
+provisioning, never a Verification verdict; `candidate-unavailable` identifies
+materialization failure; `unknown-exit`, `spawn-error`, and admission stops
+remain execution/admission stops. A declaration-owned timeout instead admits
+an unsatisfied attestation and therefore has no stop arm.
 
 `KeiyakuRefused` stores the complete structured `KeiyakuRefusal`; its `code`
 getter derives from `refusal.kind`. `KeiyakuRetry` does the same for
@@ -294,6 +314,7 @@ type AuditReport = Readonly<{
   delivery?: DeliveryIdentity
   targetObservation?: Readonly<{ head: SnapshotId | null; drift: boolean }>
   attempt?: VerificationStop
+  cleanup?: VerificationCleanupFailure
   leak?: WorktreeLeak
 }>
 

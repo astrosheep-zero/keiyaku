@@ -83,6 +83,12 @@ test("contract Markdown rejects frontmatter, duplicate sections, and missing str
 test("Verification uses direct fenced executors and retired H2s are refused", () => {
   const verified = decodeContractDocument(`${document()}\n## Verification\n\`\`\`bash\ntrue\n\`\`\`\n`);
   assert.deepEqual(verified.verification, [{ executor: "bash", script: "true" }]);
+  const timed = decodeContractDocument(`${document()}\n## Verification\n~~~bash timeout=25\ntrue\n~~~\n`);
+  assert.deepEqual(timed.verification, [{ executor: "bash", script: "true", timeoutMs: 25 }]);
+  assert.throws(
+    () => decodeContractDocument(`${document()}\n## Verification\n~~~bash  timeout=25\ntrue\n~~~\n`),
+    /optional timeout=<milliseconds>/,
+  );
   for (const name of ["Gates", "Pipeline", "After"]) {
     assert.throws(
       () => decodeContractDocument(`${document()}\n## ${name}\n- declaration\n`),

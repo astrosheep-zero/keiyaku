@@ -10,6 +10,7 @@ import {
   normalizedList,
   optionalBoolean,
   optionalNonblank,
+  optionalSignal,
   requireInput,
   requireMarkdown,
 } from "./input.js";
@@ -76,8 +77,8 @@ import {
   type AcceptedIntent,
   type MutationResult,
 } from "./mutation.js";
-export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
-export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks, WorktreeHooksFromInput } from "./configuration.js";
+export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "./configuration.js";
+export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks } from "./configuration.js";
 
 export type {
   AuditReport,
@@ -175,8 +176,9 @@ export type DeliverInput = ActorOptions & Readonly<{
   message?: string;
   requireBranchesToBeUpToDate?: boolean;
   includeDirty?: boolean;
+  signal?: AbortSignal;
 }>;
-export type AuditInput = ActorOptions;
+export type AuditInput = ActorOptions & Readonly<{ signal?: AbortSignal }>;
 
 function requireAccepted<Value, Refusal extends KeiyakuRefusal>(result: IntentOutcome<Value, Refusal>): AcceptedIntent<Value> {
   if (result.kind === "refused") throw new KeiyakuRefused(result.refusal);
@@ -290,6 +292,7 @@ export class KeiyakuHandle {
     ) ?? false;
     const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty") ?? false;
     const actor = actorOption(values?.actor);
+    const signal = optionalSignal(values?.signal);
     return withGitDecodeChannel(this.scope, async (channel) => {
       const accepted = requireAccepted(await deliverOperation({
         scope: this.scope,
@@ -304,6 +307,7 @@ export class KeiyakuHandle {
         ...(message === undefined ? {} : { message }),
         requireBranchesToBeUpToDate,
         includeDirty,
+        ...(signal === undefined ? {} : { signal }),
       }));
       return completeMutation({
         ...completion(this.scope, channel, this.id, (delivery: DeliverValue) => this.deliveryHandle(delivery), hooks),
@@ -384,6 +388,7 @@ export class KeiyakuHandle {
     const values = input === undefined ? undefined : requireInput(input, "audit input");
     const hooks = worktreeHooksOption(values?.hooks);
     const actor = actorOption(values?.actor);
+    const signal = optionalSignal(values?.signal);
     return withGitDecodeChannel(this.scope, async (channel) => {
       const accepted = requireAccepted(await auditOperation({
         scope: this.scope,
@@ -394,6 +399,7 @@ export class KeiyakuHandle {
           state.terms.gates,
           state.id,
         ),
+        ...(signal === undefined ? {} : { signal }),
         ...actor,
       }));
       return completeMutation({

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -114,6 +114,38 @@ test("runProcess timeout kills a detached descendant tree", async () => {
       } catch {
         // The asserted path has already reaped the descendant.
       }
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("runProcess cancellation kills a detached descendant tree", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-cancel-"));
+  const descendantFile = join(root, "descendant-pid");
+  const descendant = 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000);';
+  const parent = [
+    'const { writeFileSync } = require("node:fs");',
+    'const { spawn } = require("node:child_process");',
+    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore" });`,
+    `writeFileSync(${JSON.stringify(descendantFile)}, String(child.pid));`,
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
+  const controller = new AbortController();
+  let descendantPid: number | undefined;
+  try {
+    const pending = runProcess({ argv: [process.execPath, "-e", parent], cwd: root, signal: controller.signal });
+    const deadline = performance.now() + 2_000;
+    while (!existsSync(descendantFile)) {
+      if (performance.now() >= deadline) throw new Error("cancelled process did not start its descendant");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    descendantPid = Number.parseInt(readFileSync(descendantFile, "utf8"), 10);
+    controller.abort();
+    assert.deepEqual(await pending, { kind: "cancelled" });
+    await waitForExit(descendantPid);
+  } finally {
+    if (descendantPid !== undefined) {
+      try { process.kill(descendantPid, "SIGKILL"); } catch { /* already reaped */ }
     }
     rmSync(root, { recursive: true, force: true });
   }

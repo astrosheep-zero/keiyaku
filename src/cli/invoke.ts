@@ -179,6 +179,7 @@ async function invokeDeliver(
       obligations: {
         ...(result.value.verification === undefined ? {} : { verification: result.value.verification }),
         ...(result.value.placement === undefined ? {} : { placement: result.value.placement }),
+        ...(result.value.cleanup === undefined ? {} : { cleanup: result.value.cleanup }),
         ...(result.value.leak === undefined ? {} : { leak: result.value.leak }),
       },
     }),

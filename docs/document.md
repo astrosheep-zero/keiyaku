@@ -78,8 +78,11 @@ supplies those opaque terms for persistence. It never supplies the decoded
 body. Core stores the bytes without parsing them. `gates` and `after` are
 machine terms, not Markdown-derived core fields.
 
-`Verification` uses one or more direct closed fences
-with an exact `bash`, `zsh`, or `pwsh` info string and a nonblank script body.
+`Verification` uses one or more direct closed fences with an exact `bash`,
+`zsh`, or `pwsh` info string, optionally followed by one ASCII space and
+`timeout=<positive-safe-integer-milliseconds>`, and a nonblank script body.
+The optional timeout belongs to that declaration alone; its absence means no
+Keiyaku deadline. A declaration has no other attributes.
 The resulting declaration values are private library/verification values. Core
 receives only the opaque segment key and never sees executor, script, or section
 name.

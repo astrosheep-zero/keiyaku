@@ -35,7 +35,9 @@ import type { VerificationDeclarationPreparation, VerificationDeclarationRefusal
 import {
   admitIntent,
   verifyDelivery,
+  type VerificationStep,
   type VerificationRuntimeStop,
+  type VerificationCleanupFailure,
 } from "./intent.js";
 import { admitPlacement, type PlacementProtocolResult } from "./placement.js";
 import type { TargetPlacementRefusal } from "../git/target-placement.js";
@@ -84,7 +86,7 @@ export type IntentOutcome<Value, Refusal = IntentRefusal> = ProtocolIntentOutcom
 type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId; actor?: ActorId }>;
 type MutationOperationInput = OperationInput & Readonly<{ channel: GitDecodeChannel }>;
 
-export type AuditReport = AuditReadReport & Readonly<{ attempt?: VerificationStop; leak?: WorktreeLeak }>;
+export type AuditReport = AuditReadReport & Readonly<{ attempt?: VerificationStop; cleanup?: VerificationCleanupFailure; leak?: WorktreeLeak }>;
 
 export type DocumentDerivation = Readonly<{ document: DocumentKey; title: string; verification: VerificationDeclarationPreparation }>;
 
@@ -111,6 +113,10 @@ function mergeAdmissions(current: AcceptedProtocolStep, next: AcceptedProtocolSt
 function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> | undefined {
   if (result.kind === "accepted") return undefined;
   return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
+}
+
+function verificationStop(step: VerificationStep): VerificationStop | undefined {
+  return "failure" in step ? step : stepStop(step);
 }
 
 function placementStop(result: PlacementProtocolResult): PlacementStop | undefined {
@@ -228,7 +234,7 @@ export async function amendOperation(
   return { kind: "retry", reason: { kind: "exhausted" } };
 }
 
-export type DeliverValue = DeliveryIdentity & Readonly<{ verification?: VerificationStop; placement?: PlacementStop; leak?: WorktreeLeak }>;
+export type DeliverValue = DeliveryIdentity & Readonly<{ verification?: VerificationStop; placement?: PlacementStop; cleanup?: VerificationCleanupFailure; leak?: WorktreeLeak }>;
 
 type AttemptDecision<Value, Refusal = IntentRefusal> =
   | (AcceptedAdmission & Readonly<{ value: Value }>)
@@ -242,6 +248,7 @@ type DeliverOperationInput = MutationOperationInput & Readonly<{
   message?: string;
   requireBranchesToBeUpToDate: boolean;
   includeDirty: boolean;
+  signal?: AbortSignal;
 }>;
 
 type PreparedDelivery = Readonly<{ delivery: DeliveryIdentity; derivation: DocumentDerivation }>;
@@ -311,6 +318,7 @@ async function completeDelivery(
   }
   let admission: AcceptedProtocolStep = first;
   let verificationValue: VerificationStop | undefined;
+  let cleanup: VerificationCleanupFailure | undefined;
   let leak: WorktreeLeak | undefined;
   const verification = await verifyDelivery({
     channel: input.channel,
@@ -321,16 +329,17 @@ async function completeDelivery(
     state: first.state,
     environment: process.env,
     produce: produceVerification,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(derivation.verification.data === null
       ? {}
       : { verification: derivation.verification.data }),
   });
   if (verification !== null) {
+    cleanup = verification.cleanup;
     leak = verification.leak;
-    if ("failure" in verification.step) verificationValue = verification.step;
-    else {
-      verificationValue = stepStop(verification.step);
-      if (verification.step.kind === "accepted") admission = mergeAdmissions(admission, verification.step);
+    verificationValue = verificationStop(verification.step);
+    if (!("failure" in verification.step) && verification.step.kind === "accepted") {
+      admission = mergeAdmissions(admission, verification.step);
     }
   }
   const placement = await admitPlacement(input.channel, input.scope, first.state.coordinates.target, {
@@ -344,6 +353,7 @@ async function completeDelivery(
     ...first.value.delivery,
     ...(verificationValue === undefined ? {} : { verification: verificationValue }),
     ...(placementValue === undefined ? {} : { placement: placementValue }),
+    ...(cleanup === undefined ? {} : { cleanup }),
     ...(leak === undefined ? {} : { leak }),
   });
 }
@@ -493,17 +503,16 @@ export async function reviewOperation(
 }
 
 export async function auditOperation(
-  input: MutationOperationInput & Readonly<{ deriveDocument?: (state: ContractState) => DocumentDerivation }>,
+  input: MutationOperationInput & Readonly<{
+    deriveDocument?: (state: ContractState) => DocumentDerivation;
+    signal?: AbortSignal;
+  }>,
 ): Promise<IntentOutcome<AuditReport>> {
   const git = input.scope;
   const initial = await readAuditAt(git, input.channel, input.contractId, REVIEWED);
   if (initial.state === null) return { kind: "refused", refusal: { kind: "contract-missing", contractId: input.contractId } };
   const derivation = input.deriveDocument?.(initial.state);
-  if (derivation === undefined) {
-    return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
-  }
-
-  if (!documentIsCurrent(initial.state, derivation.document)) {
+  if (derivation === undefined || !documentIsCurrent(initial.state, derivation.document)) {
     return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
   }
   if (derivation.verification.kind === "refused") {
@@ -523,24 +532,20 @@ export async function auditOperation(
     state: initial.state,
     environment: process.env,
     produce: produceVerification,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
     verification: derivation.verification.data,
   });
   if (verification === null) {
     throw new Error("audit verification preparation unexpectedly produced no attempt");
   }
-  const attempt = "failure" in verification.step
-    ? verification.step
-    : verification.step.kind === "accepted"
-      ? undefined
-      : verification.step.kind === "refused"
-        ? { refusal: verification.step.refusal }
-        : { retry: verification.step };
+  const attempt = verificationStop(verification.step);
   const report = !("failure" in verification.step) && verification.step.kind === "accepted"
     ? auditReport(verification.step.journal, REVIEWED, initial.state, initial.report.targetObservation)
     : initial.report;
   const value = {
     ...report,
     ...(attempt === undefined ? {} : { attempt }),
+    ...(verification.cleanup === undefined ? {} : { cleanup: verification.cleanup }),
     ...(verification.leak === undefined ? {} : { leak: verification.leak }),
   };
   return !("failure" in verification.step) && verification.step.kind === "accepted"

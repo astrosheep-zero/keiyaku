@@ -198,6 +198,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/target-placement.ts"),
         any("git/terminal-seal.ts"),
         any("git/workspace.ts", ["deliveryWorktreePath"]),
+        any("git/verification.ts", ["orphanedScratchWorktrees"]),
       ],
     },
     {
@@ -209,10 +210,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/workspace.ts", ["captureWorkspaceTree"]),
       ],
     },
-    { source: "git/hooks.ts", allow: [any("coordination/durable-file.ts"), any("coordination/sqlite-transaction-lock.ts"), any("runtime/proc/run.ts")] },
+    { source: "git/hooks.ts", allow: [any("coordination/durable-file.ts"), any("coordination/sqlite-transaction-lock.ts"), any("runtime/proc/run.ts"), any("settings.ts", ["Settings", "SettingsError"])] },
     {
       source: "git/verification.ts",
-      allow: [any("git/identity.ts"), any("git/repository.ts"), any("core/facts/errors.ts"), types("core/facts/types.ts")],
+      allow: [any("git/identity.ts"), any("git/repository.ts"), any("core/facts/errors.ts"), types("core/facts/types.ts"), any("runtime/proc/run.ts", ["currentProcessIdentity", "probeProcessIdentity", "ProcessIdentity"])],
     },
     {
       source: "protocol/attempt.ts",
@@ -266,8 +267,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("git/observe.ts"),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
-        any("git/verification.ts", ["materializeVerificationCandidate"]),
+        any("git/verification.ts", ["materializeScratchCandidate"]),
         types("git/verification.ts"),
+        any("git/hooks.ts", ["runHookCommands", "worktreeHooksFrom", "HookFailure", "WorktreeHooks"]),
+        any("settings.ts", ["projectSettings"]),
         types("git/repository.ts"),
         types("core/decide.ts"),
         types("core/facts/types.ts"),
@@ -381,6 +384,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/input.ts"),
         any("library/region.ts"),
         any("library/configuration.ts"),
+        any("git/hooks.ts", ["worktreeHooksFrom"]),
         any("library/repo.ts"),
         any("settlement/holder.ts"),
         any("settlement/settle.ts"),
@@ -427,6 +431,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/repo.ts"),
         any("library/configuration.ts"),
         any("library/akuma-creation.ts"),
+        any("git/hooks.ts", ["worktreeHooksFrom"]),
         any("library/fleet.ts"),
         any("library/catalog.ts"),
         any("library/address.ts"),
@@ -500,7 +505,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("verification/declaration.ts", ["prepareVerificationDeclaration"]),
       ],
     },
-    { source: "library/configuration.ts", allow: [any("core/facts/types.ts", ["gateWord"]), types("settings.ts")] },
+    { source: "library/configuration.ts", allow: [any("core/facts/types.ts", ["gateWord"]), any("settings.ts", ["Settings", "SettingsError"]), types("git/hooks.ts")] },
     {
       source: "library/region.ts",
       allow: [
@@ -662,6 +667,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "git/hooks.ts", symbols: ["closeSync", "fsyncSync", "mkdirSync", "openSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"] },
         { source: "git/delivery.ts", symbols: ["existsSync"] },
         { source: "git/workspace.ts", symbols: ["mkdtempSync", "realpathSync", "rmSync"] },
+        { source: "git/verification.ts", symbols: ["realpathSync"] },
         { source: "task/context.ts", symbols: ["closeSync", "fsyncSync", "lstatSync", "mkdirSync", "openSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"] },
         { source: "task/store.ts", symbols: ["closeSync", "existsSync", "fsyncSync", "lstatSync", "mkdirSync", "openSync", "readFileSync", "readdirSync", "renameSync", "unlinkSync", "writeFileSync"] },
         { source: "world.ts", symbols: ["existsSync", "mkdirSync", "realpathSync", "statSync"] },
@@ -760,7 +766,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },
-    { capability: "type-error-construction", owners: ["world.ts", "akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/archetype.ts", "akuma/provider.ts", "akuma/providers/index.ts", "alias/index.ts", "body/**", "cli/actor.ts", "kanshi/**", "library/configuration.ts", "library/contract.ts", "library/input.ts", "library/repo.ts", "library/akuma-creation.ts", "library/address.ts", "library/fleet.ts", "library/catalog.ts", "identity/coordinates.ts", "identity/selector.ts", "settings.ts", "task/**"] },
+    { capability: "type-error-construction", owners: ["world.ts", "akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/archetype.ts", "akuma/provider.ts", "akuma/providers/index.ts", "alias/index.ts", "body/**", "cli/actor.ts", "git/hooks.ts", "kanshi/**", "library/configuration.ts", "library/contract.ts", "library/input.ts", "library/repo.ts", "library/akuma-creation.ts", "library/address.ts", "library/fleet.ts", "library/catalog.ts", "identity/coordinates.ts", "identity/selector.ts", "settings.ts", "task/**"] },
   ],
   forbiddenFileNames: [
     "approval-preparation.ts",

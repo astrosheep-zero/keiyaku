@@ -29,7 +29,7 @@ function fenced(value: string, info = ""): string {
 }
 
 function verificationFence(declaration: VerificationDeclaration): string {
-  return fenced(declaration.script, declaration.executor);
+  return fenced(declaration.script, `${declaration.executor}${declaration.timeoutMs === undefined ? "" : ` timeout=${declaration.timeoutMs}`}`);
 }
 
 function arcSection(arc: ArcData): string {

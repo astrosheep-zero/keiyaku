@@ -37,6 +37,7 @@ import {
   type WorktreeHooks,
 } from "./hooks.js";
 import { deliveryWorktreePath } from "./workspace.js";
+import { orphanedScratchWorktrees } from "./verification.js";
 import {
   terminalSealExpectations as decodeTerminalSealExpectations,
   terminalSealSnapshots,
@@ -200,6 +201,19 @@ function removeWorktree(
   }
   topology.paths.delete(path);
   return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
+}
+
+function removeOrphanedScratch(
+  repository: GitRepository,
+  topology: WorktreeTopology,
+  effects: Effect[],
+  lag: ReconcileLag[],
+): void {
+  for (const path of orphanedScratchWorktrees(topology.paths)) {
+    const removal = removeWorktree(repository, topology, path, true);
+    effects.push(removal.effect);
+    if (removal.retained) lag.push({ kind: "worktree-retained", path });
+  }
 }
 
 function refRows(repository: GitRepository): readonly Readonly<{ ref: string; oid: string }>[] {
@@ -404,6 +418,7 @@ async function reconcileWithTopology(
   const effects: Effect[] = [];
   const lag: ReconcileLag[] = [];
   try {
+    removeOrphanedScratch(repository, topology, effects, lag);
     if (!state) return complete(effects, lag);
     const targetCheckouts = await reconcileTargetCheckouts(repository, state);
     effects.push(...targetCheckouts.effects);
@@ -415,10 +430,6 @@ async function reconcileWithTopology(
   } catch (error) {
     return failed("effect", error, effects, lag);
   }
-}
-
-function needsWorktreeTopology(state: ContractState | null): boolean {
-  return state !== null && state.coordinates.workspace === "worktree" && (state.terminal !== null || state.bound !== null);
 }
 
 function releaseFailure(
@@ -452,9 +463,7 @@ export async function reconcile(input: ReconcileInput): Promise<GitReconcileObse
   let exceptional: unknown;
   try {
     const state = (await observeContractAt(input.repository, input.channel, input.contractId)).state;
-    const topology = needsWorktreeTopology(state)
-      ? acquireWorktreeTopology(input.repository)
-      : { paths: new Set<string>() };
+    const topology = acquireWorktreeTopology(input.repository);
     observation = {
       state,
       result: await reconcileWithTopology(input, state, topology),

@@ -138,6 +138,12 @@ runs hook commands or reads marker files. `reconcile --retry-hooks` maps to
 `retryHooks: true`. It retries only a failed marker phase with its frozen
 commands and does not recapture edited settings for an existing worktree.
 
+`deliver` and `audit` do not pass that caller-derived value into Verification
+scratch. Their package-root operation reads only the tracked project Settings
+in the materialized integration snapshot before Verification starts. The CLI
+has no Verification timeout or caller-cancellation flag; an optional timeout
+belongs to each declaration fence in Contract Markdown.
+
 Repository `.keiyaku/settings.json` may supply named gate snapshots and the Git
 delivery policy for the edge:
 

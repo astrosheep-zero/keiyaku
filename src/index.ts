@@ -95,5 +95,4 @@ export type {
   TopologyEffect,
   VerificationStop,
   WorktreeHooks,
-  WorktreeHooksFromInput,
 } from "./library/keiyaku.js";

@@ -1,23 +1,12 @@
 import { gateWord } from "../core/facts/types.js";
-import type { Settings } from "../settings.js";
+import { SettingsError, type Settings } from "../settings.js";
+import type { HookCommand, WorktreeHooks } from "../git/hooks.js";
+export type { HookCommand, WorktreeHooks } from "../git/hooks.js";
 
 export type Gate = string;
 export type GatesFromInput = Readonly<{ settings: Settings; name?: string }>;
-export type HookCommand = Readonly<{ argv: readonly string[]; timeoutMs: number }>;
-export type WorktreeHooks = Readonly<{
-  create: readonly HookCommand[];
-  destroy: readonly HookCommand[];
-}>;
-export type WorktreeHooksFromInput = Readonly<{ settings: Settings }>;
 export type RequireBranchesToBeUpToDateFromInput = Readonly<{ settings: Settings }>;
-
-export class SettingsError extends Error {
-  readonly kind = "settings";
-  constructor(message: string) {
-    super(message);
-    this.name = "SettingsError";
-  }
-}
+export { SettingsError };
 
 function record(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -66,22 +55,6 @@ function command(value: unknown, coordinate: string, ErrorType: typeof TypeError
 function commands(value: unknown, coordinate: string, ErrorType: typeof TypeError | typeof SettingsError): readonly HookCommand[] {
   if (!Array.isArray(value)) throw new ErrorType(`${coordinate} must be an array`);
   return Object.freeze(value.map((item, index) => command(item, `${coordinate}[${index}]`, ErrorType)));
-}
-
-export function worktreeHooksFrom(input: WorktreeHooksFromInput): WorktreeHooks {
-  if (!record(input)) throw new TypeError("worktreeHooksFrom input must be an object");
-  const view = input.settings.namespace("worktree");
-  if (view.kind === "failed") namespaceFailure(view);
-  for (const entry of view.entries) {
-    if (entry.name !== "create" && entry.name !== "destroy") {
-      throw new SettingsError(`worktree has unknown entry: ${entry.name}`);
-    }
-  }
-  const value = (phase: "create" | "destroy"): readonly HookCommand[] => {
-    const selected = view.entries.find((entry) => entry.name === phase);
-    return selected === undefined ? Object.freeze([]) : commands(selected.value, `worktree.${phase}`, SettingsError);
-  };
-  return Object.freeze({ create: value("create"), destroy: value("destroy") });
 }
 
 export function requireBranchesToBeUpToDateFrom(input: RequireBranchesToBeUpToDateFromInput): boolean {

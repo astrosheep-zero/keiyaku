@@ -87,6 +87,7 @@ function diagnostic(argv: readonly string[], outcome: ProcessOutcome): string {
   if (outcome.kind === "spawn-error") return `${argv[0]} unavailable: ${outcome.diagnostic}`;
   if (outcome.kind === "timeout") return `${argv[0]} timed out`;
   if (outcome.kind === "unknown-exit") return `${argv[0]} exited without a status`;
+  if (outcome.kind === "cancelled") return `${argv[0]} cancelled`;
   if (outcome.code === 0) return "";
   const detail = outcome.stderr.trim() || outcome.stdout.trim();
   return `${argv[0]} exited ${outcome.code}${detail.length === 0 ? "" : `: ${detail}`}`;

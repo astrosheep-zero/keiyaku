@@ -7,10 +7,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { contractLocator } from "../src/git/identity.js";
+import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
 import { hookMarkerPath, runCreateHooks, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
+import { materializeScratchCandidate } from "../src/git/verification.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { abandonOperation, scopeOperation } from "../src/protocol/operations.js";
@@ -223,5 +224,66 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
   } finally {
     if (caller.exitCode === null && caller.signalCode === null) caller.kill("SIGKILL");
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("reconcile removes dead-owner scratch without commands and preserves active scratch", async () => {
+  const repository = repositoryWithMain();
+  const git = repositoryAt(repository.path);
+  const commandRan = join(repository.path, "orphan-command-ran");
+  mkdirSync(join(repository.path, ".keiyaku"), { recursive: true });
+  writeFileSync(join(repository.path, ".keiyaku", "settings.json"), JSON.stringify({
+    worktree: {
+      create: [],
+      destroy: [{
+        argv: [process.execPath, "-e", `require("node:fs").writeFileSync(${JSON.stringify(commandRan)}, "ran")`],
+        timeoutMs: 5_000,
+      }],
+    },
+  }));
+  repository.run(["add", ".keiyaku/settings.json"]);
+  repository.run(["commit", "--quiet", "-m", "scratch settings"]);
+  const bound = await Keiyaku.bind({
+    repo: Repo.at({ path: repository.path }),
+    markdown: contractBody("Scratch cleanup"),
+    hooks: EMPTY_HOOKS,
+  });
+  const snapshot = repository.run(["rev-parse", "HEAD"]).trim();
+  const pathFile = join(mkdtempSync(join(tmpdir(), "keiyaku-orphan-path-")), "path");
+  const module = pathToFileURL(join(process.cwd(), "src", "git", "verification.ts")).href;
+  const repositoryModule = pathToFileURL(join(process.cwd(), "src", "git", "repository.ts")).href;
+  const childSource = [
+    'import { writeFileSync } from "node:fs";',
+    `const { materializeScratchCandidate } = await import(${JSON.stringify(module)});`,
+    `const { repositoryAt } = await import(${JSON.stringify(repositoryModule)});`,
+    `const scratch = materializeScratchCandidate(repositoryAt(${JSON.stringify(repository.path)}), ${JSON.stringify(snapshot)});`,
+    `writeFileSync(${JSON.stringify(pathFile)}, scratch.cwd);`,
+  ].join(" ");
+  const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
+  const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", childSource], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  await new Promise<void>((resolve, reject) => child.once("close", (code, signal) => {
+    if (code === 0) resolve();
+    else reject(new Error(`scratch owner exited ${code ?? signal}: ${stderr.trim()}`));
+  }));
+  const orphan = readFileSync(pathFile, "utf8");
+  assert.equal(existsSync(orphan), true);
+  assert.equal(existsSync(hookMarkerPath(worktreeGitDirectory(git, orphan))), false);
+
+  const active = materializeScratchCandidate(git, mintSnapshotId(snapshot));
+  try {
+    const report = await bound.keiyaku.reconcile();
+    assert.equal(report.effects.some((effect) => effect.kind === "worktree" && effect.path === orphan && effect.action === "removed"), true);
+    assert.equal(existsSync(orphan), false);
+    assert.equal(existsSync(active.cwd), true);
+    assert.equal(existsSync(commandRan), false);
+  } finally {
+    const leak = active.dispose();
+    if (leak !== null) throw new Error(leak.diagnostic);
   }
 });

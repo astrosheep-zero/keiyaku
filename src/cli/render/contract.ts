@@ -33,13 +33,14 @@ function workspaceLine(workspace: AcceptedResult["workspace"]): string | undefin
   return workspace === undefined ? undefined : `workspace ${JSON.stringify(workspace)}`;
 }
 
-export function obligationLines(value: Pick<AcceptedResult, "verification" | "placement" | "leak">): readonly string[] {
+export function obligationLines(value: Pick<AcceptedResult, "verification" | "placement" | "cleanup" | "leak">): readonly string[] {
   const lines: string[] = [];
   for (const name of ["verification", "placement"] as const) {
     const stop = value[name];
     if (stop === undefined) continue;
     lines.push(`stop ${name} ${JSON.stringify(stop)}`);
   }
+  if (value.cleanup !== undefined) lines.push(`cleanup ${value.cleanup.phase} command=${value.cleanup.command} ${JSON.stringify(value.cleanup.detail)}`);
   const leak = leakLine(value.leak);
   if (leak !== undefined) lines.push(leak);
   return lines;
@@ -50,6 +51,10 @@ function observationLines(result: AcceptedResult): readonly string[] {
   if (result.target !== undefined) lines.push(`target ${result.target ?? "null"}`);
   const reportLeak = leakLine(result.report?.leak);
   if (reportLeak !== undefined) lines.push(reportLeak);
+  if (result.report?.cleanup !== undefined) {
+    const cleanup = result.report.cleanup;
+    lines.push(`cleanup ${cleanup.phase} command=${cleanup.command} ${JSON.stringify(cleanup.detail)}`);
+  }
   for (const overlap of result.overlaps ?? []) {
     for (const pattern of overlap.patterns) {
       lines.push(`overlap ${overlap.contract} ${pattern.mine} ~ ${pattern.theirs}`);

@@ -257,6 +257,7 @@ keiyaku.deliver(input?: {
   message?: string
   requireBranchesToBeUpToDate?: boolean
   includeDirty?: boolean
+  signal?: AbortSignal
   hooks?: WorktreeHooks
 }): Promise<MutationResult<Delivery>>
 keiyaku.review(input: {
@@ -271,7 +272,7 @@ keiyaku.abandon(input?: {
   hooks?: WorktreeHooks
 }): Promise<MutationResult<void>>
 keiyaku.arc(input: { markdown: string; actor?: ActorId; hooks?: WorktreeHooks }): Promise<MutationResult<void>>
-keiyaku.audit(input?: { actor?: ActorId; hooks?: WorktreeHooks }): Promise<MutationResult<AuditReport>>
+keiyaku.audit(input?: { actor?: ActorId; signal?: AbortSignal; hooks?: WorktreeHooks }): Promise<MutationResult<AuditReport>>
 keiyaku.reconcile(input?: ReconcileInput): Promise<ReconcileReport>
 
 delivery.diff(): Promise<string | null>
@@ -282,6 +283,15 @@ authorizes the complete non-ignored staged, unstaged, and untracked final tree;
 it does not select only staged paths and never includes dirty submodule
 internals. Omission and `false` are identical. Git performs the capture without
 changing the caller's real `HEAD`, index, branch, or files.
+
+When a delivery or audit runs Verification, the library materializes the
+integration snapshot into a private scratch worktree and derives its worktree
+commands from that snapshot's tracked project Settings. Caller Settings and
+`node_modules` are not public inputs to this operation. An environment that
+cannot become ready returns the typed Verification stop from
+[public-results.md](public-results.md) and admits no attestation; declaration
+timeouts are instead unsatisfied attestation facts. Caller cancellation is a
+nonterminal stop and admits no attestation.
 
 `state()` observes and folds afresh for each call. Worktree paths are projected
 by `status()` for selectors and board views; a contract handle has no duplicate

@@ -6,8 +6,12 @@ import test from "node:test";
 import type { VerificationDeclaration } from "../src/verification/declaration.js";
 import { produceVerification, type ProduceVerificationInput } from "../src/verification/producer.js";
 
-function declaration(script: string, executor: VerificationDeclaration["executor"] = "bash"): VerificationDeclaration {
-  return { executor, script };
+function declaration(
+  script: string,
+  executor: VerificationDeclaration["executor"] = "bash",
+  timeoutMs?: number,
+): VerificationDeclaration {
+  return { executor, script, ...(timeoutMs === undefined ? {} : { timeoutMs }) };
 }
 
 function command(program: string): string {
@@ -18,7 +22,6 @@ function input(root: string, declarations: readonly VerificationDeclaration[], o
   return {
     declarations,
     cwd: root,
-    timeoutMs: 2_000,
     ...overrides,
   };
 }
@@ -50,50 +53,58 @@ test("producer runs every declaration after a nonzero exit and returns only its 
   });
 });
 
-test("producer gives each declaration only the remaining invocation budget", async (t) => {
-  const now = t.mock.method(Object.getPrototypeOf(performance), "now", (() => {
-    const values = [0, 0, 40];
-    return () => values.shift() ?? 40;
-  })());
+test("producer leaves an omitted declaration unbounded", async (t) => {
   const timeouts: number[] = [];
   t.mock.method(globalThis, "setTimeout", ((_callback: () => void, milliseconds?: number) => {
     timeouts.push(milliseconds ?? 0);
     return undefined;
   }) as typeof setTimeout);
 
-  const outcome = await produceVerification(input("/tmp", [declaration("true"), declaration("true")], { timeoutMs: 100 }));
+  const outcome = await produceVerification(input("/tmp", [declaration("true")]));
 
   assert.deepEqual(outcome, { kind: "terminal", verdict: "satisfied" });
-  assert.deepEqual(timeouts, [100, 60]);
-  now.mock.restore();
+  assert.deepEqual(timeouts, []);
 });
 
-test("producer does not spawn a declaration after the invocation budget is exhausted", async (t) => {
+test("a declaration timeout is terminally unsatisfied and later declarations still run", async () => {
   await inTemporaryDirectory(async (root) => {
     const secondStarted = join(root, "second-started");
-    const now = t.mock.method(Object.getPrototypeOf(performance), "now", (() => {
-      const values = [0, 0, 100];
-      return () => values.shift() ?? 100;
-    })());
-    const timeouts: number[] = [];
-    t.mock.method(globalThis, "setTimeout", ((_callback: () => void, milliseconds?: number) => {
-      timeouts.push(milliseconds ?? 0);
-      return undefined;
-    }) as typeof setTimeout);
-
     const outcome = await produceVerification(input(root, [
-      declaration("true"),
+      declaration("sleep 1", "bash", 25),
       declaration(command(`require("node:fs").writeFileSync(${JSON.stringify(secondStarted)}, "started")`)),
-    ], { timeoutMs: 100 }));
+    ]));
 
-    assert.deepEqual(outcome, { kind: "timeout" });
-    assert.deepEqual(timeouts, [100]);
-    assert.equal(existsSync(secondStarted), false);
-    now.mock.restore();
+    assert.deepEqual(outcome, {
+      kind: "terminal",
+      verdict: "unsatisfied",
+      summary: "[1 bash timeout after 25ms]",
+    });
+    assert.equal(existsSync(secondStarted), true);
   });
 });
 
-test("producer returns an unsatisfied verdict, timeout, unknown-exit, and spawn-error without persistence", async () => {
+test("caller cancellation is nonterminal and stops later declarations", async () => {
+  await inTemporaryDirectory(async (root) => {
+    const started = join(root, "started");
+    const later = join(root, "later");
+    const controller = new AbortController();
+    const outcome = produceVerification(input(root, [
+      declaration(`${command(`require("node:fs").writeFileSync(${JSON.stringify(started)}, "started")`)}; sleep 30`),
+      declaration(command(`require("node:fs").writeFileSync(${JSON.stringify(later)}, "later")`)),
+    ], { signal: controller.signal }));
+    const deadline = performance.now() + 2_000;
+    while (!existsSync(started)) {
+      if (performance.now() >= deadline) throw new Error("Verification declaration did not start");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    controller.abort();
+
+    assert.deepEqual(await outcome, { kind: "cancelled" });
+    assert.equal(existsSync(later), false);
+  });
+});
+
+test("producer returns an unsatisfied verdict, unknown-exit, and spawn-error without persistence", async () => {
   await inTemporaryDirectory(async (root) => {
     const failed = await produceVerification(input(root, [declaration("false")]));
     assert.deepEqual(failed, {
@@ -101,9 +112,6 @@ test("producer returns an unsatisfied verdict, timeout, unknown-exit, and spawn-
       verdict: "unsatisfied",
       summary: "[1 bash exit 1]",
     });
-
-    const timeout = await produceVerification(input(root, [declaration("sleep 1")], { timeoutMs: 25 }));
-    assert.deepEqual(timeout, { kind: "timeout" });
 
     const unknownExit = await produceVerification(input(root, [declaration("kill -TERM $$")]));
     assert.deepEqual(unknownExit, { kind: "unknown-exit" });

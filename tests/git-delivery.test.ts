@@ -6,7 +6,7 @@ import test from "node:test";
 import { prepareDelivery, prepareReview } from "../src/git/delivery.js";
 import { mintSnapshotId } from "../src/git/identity.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
-import { materializeVerificationCandidate, readDeliveryDiff } from "../src/git/verification.js";
+import { materializeScratchCandidate, readDeliveryDiff } from "../src/git/verification.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { contractId } from "../src/core/facts/types.js";
@@ -735,7 +735,7 @@ test("verification materializes the protocol-selected candidate snapshot", () =>
   const candidate = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "later head"]);
 
-  const prepared = materializeVerificationCandidate(repositoryAt(repository.path), candidate);
+  const prepared = materializeScratchCandidate(repositoryAt(repository.path), candidate);
   try {
     assert.equal(repository.run(["-C", prepared.cwd, "rev-parse", "HEAD"]).trim(), candidate);
   } finally {

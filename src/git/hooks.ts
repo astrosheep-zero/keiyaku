@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { replaceFileDurably } from "../coordination/durable-file.js";
 import { acquireSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import { runProcess, runProcessToExit, type ProcessOutcome } from "../runtime/proc/run.js";
+import { SettingsError, type Settings } from "../settings.js";
 
 export type HookCommand = Readonly<{ argv: readonly string[]; timeoutMs: number }>;
 export type WorktreeHooks = Readonly<{
@@ -40,6 +41,37 @@ const MARKER_VERSION = 1;
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+
+export function worktreeHooksFrom(input: Readonly<{ settings: Settings }>): WorktreeHooks {
+  if (!object(input)) throw new TypeError("worktreeHooksFrom input must be an object");
+  const view = input.settings.namespace("worktree");
+  if (view.kind === "failed") {
+    throw new SettingsError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
+  }
+  for (const entry of view.entries) {
+    if (entry.name !== "create" && entry.name !== "destroy") throw new SettingsError(`worktree has unknown entry: ${entry.name}`);
+  }
+  const commands = (phase: "create" | "destroy"): readonly HookCommand[] => {
+    const selected = view.entries.find((entry) => entry.name === phase);
+    if (selected === undefined) return Object.freeze([]);
+    if (!Array.isArray(selected.value)) throw new SettingsError(`worktree.${phase} must be an array`);
+    return Object.freeze(selected.value.map((item, index) => {
+      if (!object(item)) throw new SettingsError(`worktree.${phase}[${index}] must be an object`);
+      const coordinate = `worktree.${phase}[${index}]`;
+      exactKeys(item, ["argv", "timeoutMs"], coordinate);
+      if (!Array.isArray(item.argv) || item.argv.length === 0 || !item.argv.every((value) => typeof value === "string")) {
+        throw new SettingsError(`${coordinate}.argv must be a nonempty string array`);
+      }
+      if (item.argv[0]!.trim().length === 0) throw new SettingsError(`${coordinate}.argv[0] must be nonblank`);
+      if (!Number.isSafeInteger(item.timeoutMs) || (item.timeoutMs as number) < 1 || (item.timeoutMs as number) > 2_147_483_647) {
+        throw new SettingsError(`${coordinate}.timeoutMs must be an integer from 1 through 2147483647`);
+      }
+      return Object.freeze({ argv: Object.freeze([...item.argv]), timeoutMs: item.timeoutMs as number });
+    }));
+  };
+  return Object.freeze({ create: commands("create"), destroy: commands("destroy") });
+}
+
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[], coordinate: string): void {
   const actual = Object.keys(value).sort();
@@ -159,7 +191,7 @@ function freshMarker(commands: WorktreeHooks, createPending: boolean): HookMarke
   };
 }
 
-function failedOutcome(outcome: ProcessOutcome): HookFailure | null {
+function failedOutcome(outcome: Exclude<ProcessOutcome, { kind: "cancelled" }>): HookFailure | null {
   if (outcome.kind === "terminal") {
     return outcome.code === 0 ? null : {
       kind: "exit",
@@ -170,6 +202,32 @@ function failedOutcome(outcome: ProcessOutcome): HookFailure | null {
     };
   }
   return outcome;
+}
+
+export type HookCommandRun = Readonly<{ kind: "ok" }> | Readonly<{ kind: "cancelled" }> | Readonly<{
+  kind: "failed";
+  command: number;
+  failure: HookFailure;
+}>;
+
+/** Execute an ordered command list without lifecycle state. Scratch owns this policy. */
+export async function runHookCommands(
+  worktree: string,
+  commands: readonly HookCommand[],
+  signal?: AbortSignal,
+): Promise<HookCommandRun> {
+  for (const [command, value] of commands.entries()) {
+    const outcome = await runProcess({
+      argv: value.argv,
+      timeoutMs: value.timeoutMs,
+      cwd: worktree,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (outcome.kind === "cancelled") return outcome;
+    const failure = failedOutcome(outcome);
+    if (failure !== null) return { kind: "failed", command, failure };
+  }
+  return { kind: "ok" };
 }
 
 function withProgress(marker: HookMarker, phase: HookPhase, progress: HookProgress): HookMarker {
@@ -221,11 +279,9 @@ async function executePendingCommand(input: HookRunnerInput): Promise<void> {
     if (progress.status !== "pending" || progress.next !== input.command) return;
     const command = marker.commands[input.phase][input.command];
     if (command === undefined) throw new Error("worktree hook marker pending index is out of range");
-    const failure = failedOutcome(await runProcess({
-      argv: command.argv,
-      timeoutMs: command.timeoutMs,
-      cwd: input.worktree,
-    }));
+    const result = await runHookCommands(input.worktree, [command]);
+    if (result.kind === "cancelled") throw new Error("managed hook runner cancelled without a signal");
+    const failure = result.kind === "failed" ? result.failure : null;
     const next = input.command + 1;
     writeMarker(input.administrationDirectory, withProgress(marker, input.phase, failure === null
       ? next === marker.commands[input.phase].length ? { status: "ok" } : { status: "pending", next }

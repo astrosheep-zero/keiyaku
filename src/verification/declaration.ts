@@ -6,6 +6,7 @@ export type VerificationExecutor = "bash" | "zsh" | "pwsh";
 export type VerificationDeclaration = Readonly<{
   readonly executor: VerificationExecutor;
   readonly script: string;
+  readonly timeoutMs?: number;
 }>;
 
 export type VerificationDefinition = Readonly<{

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { withGitShim } from "./support/git.js";
-import { bind, commitCandidate, document, repositoryWithMain, withImmediateVerificationTimeout } from "./support/library-verbs.js";
+import { bind, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
 
 test("public deliver keeps its Verification admission in accepted facts", async () => {
   const repository = repositoryWithMain();
@@ -86,33 +88,159 @@ test("amend preserves untouched Verification bytes and currentness", async () =>
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation", "claimed"]);
 });
 
-test("Verification timeout never suppresses placement", async () => {
+test("a declaration timeout admits unsatisfied testimony and leaves placement to gates", async () => {
   const openRepository = repositoryWithMain();
   const open = await Keiyaku.bind({ repo: Repo.at({ path: openRepository.path }),
-    markdown: document("exit 0"),
+    markdown: document("sleep 1").replace("~~~bash\n", "~~~bash timeout=25\n"),
     workspace: "here",
     gates: [],
   });
   commitCandidate(openRepository);
-  const openDelivery = await withImmediateVerificationTimeout(() => open.keiyaku.deliver());
-  assert.deepEqual(openDelivery.facts.map((fact) => fact.kind), ["deliver", "claimed"]);
-  assert.deepEqual(openDelivery.value.verification, { failure: "timeout" });
+  const openDelivery = await open.keiyaku.deliver();
+  assert.deepEqual(openDelivery.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  assert.equal(openDelivery.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "unsatisfied");
+  assert.equal(openDelivery.value.verification, undefined);
   assert.equal(openDelivery.value.placement, undefined);
   assert.equal((await open.keiyaku.state()).terminal?.kind, "claimed");
 
   const gatedRepository = repositoryWithMain();
   const gated = await Keiyaku.bind({ repo: Repo.at({ path: gatedRepository.path }),
-    markdown: document("exit 0"),
+    markdown: document("sleep 1").replace("~~~bash\n", "~~~bash timeout=25\n"),
     workspace: "here",
     gates: ["verified"],
   });
   commitCandidate(gatedRepository);
-  const gatedDelivery = await withImmediateVerificationTimeout(() => gated.keiyaku.deliver());
-  assert.deepEqual(gatedDelivery.facts.map((fact) => fact.kind), ["deliver"]);
-  assert.deepEqual(gatedDelivery.value.verification, { failure: "timeout" });
+  const gatedDelivery = await gated.keiyaku.deliver();
+  assert.deepEqual(gatedDelivery.facts.map((fact) => fact.kind), ["deliver", "attestation"]);
+  assert.equal(gatedDelivery.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "unsatisfied");
+  assert.equal(gatedDelivery.value.verification, undefined);
   assert.deepEqual(gatedDelivery.value.placement, {
     refusal: { kind: "gates-unsatisfied", contractId: (await gated.keiyaku.state()).id },
   });
+});
+
+function worktreeSettings(create: readonly string[], destroy: readonly string[] = []): string {
+  return JSON.stringify({
+    worktree: {
+      create: create.length === 0 ? [] : [{ argv: create, timeoutMs: 30_000 }],
+      destroy: destroy.length === 0 ? [] : [{ argv: destroy, timeoutMs: 30_000 }],
+    },
+  });
+}
+
+function writeCandidateSettings(repository: ReturnType<typeof repositoryWithMain>, settings: string): void {
+  mkdirSync(join(repository.path, ".keiyaku"), { recursive: true });
+  writeFileSync(join(repository.path, ".keiyaku", "settings.json"), settings);
+  writeFileSync(join(repository.path, "package-lock.json"), "{}\n");
+  repository.run(["add", ".keiyaku/settings.json", "package-lock.json"]);
+  repository.run(["commit", "--quiet", "-m", "candidate settings"]);
+}
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = performance.now() + 2_000;
+  while (!existsSync(path)) {
+    if (performance.now() >= deadline) throw new Error(`timed out waiting for ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+test("Verification provisions only the candidate Settings environment and destroys it afterward", async () => {
+  const repository = repositoryWithMain();
+  writeFileSync(join(repository.path, ".gitignore"), "node_modules/\n");
+  repository.run(["add", ".gitignore"]);
+  repository.run(["commit", "--quiet", "-m", "ignore caller dependencies"]);
+  const destroyed = join(repository.path, "destroyed");
+  const contract = await bind(repository, "test -f node_modules/candidate-ready && test ! -e node_modules/caller-only");
+  const create = [process.execPath, "-e", [
+    "const fs = require('node:fs');",
+    "if (!fs.existsSync('package-lock.json')) process.exit(1);",
+    "fs.mkdirSync('node_modules', { recursive: true });",
+    "fs.writeFileSync('node_modules/candidate-ready', 'ready');",
+  ].join(" ")];
+  const destroy = [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(destroyed)}, 'destroyed')`];
+  writeCandidateSettings(repository, worktreeSettings(create, destroy));
+  mkdirSync(join(repository.path, "node_modules"), { recursive: true });
+  writeFileSync(join(repository.path, "node_modules", "caller-only"), "caller\n");
+
+  const delivered = await contract.deliver();
+
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  assert.equal(delivered.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "satisfied");
+  assert.equal(existsSync(destroyed), true);
+});
+
+test("candidate create failure stops Verification with no attestation and still runs destroy", async () => {
+  const repository = repositoryWithMain();
+  const destroyed = join(repository.path, "destroyed-after-create-failure");
+  const contract = await bind(repository, `require('node:fs').writeFileSync(${JSON.stringify(join(repository.path, "verification-ran"))}, 'ran')`);
+  const create = [process.execPath, "-e", "process.exit(17)"];
+  const destroy = [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(destroyed)}, 'destroyed')`];
+  writeCandidateSettings(repository, worktreeSettings(create, destroy));
+
+  const delivered = await contract.deliver();
+
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver"]);
+  assert.equal(delivered.value.verification?.failure, "environment-failure");
+  assert.equal(existsSync(join(repository.path, "verification-ran")), false);
+  assert.equal(existsSync(destroyed), true);
+});
+
+test("candidate Settings failure is honest and has no command sentinel", async () => {
+  const repository = repositoryWithMain();
+  const contract = await bind(repository, "exit 0");
+  writeCandidateSettings(repository, "{ not-json\n");
+
+  const delivered = await contract.deliver();
+
+  assert.equal(delivered.facts.some((fact) => fact.kind === "attestation"), false);
+  assert.deepEqual(delivered.value.verification, {
+    failure: "environment-failure",
+    diagnostic: delivered.value.verification && "diagnostic" in delivered.value.verification
+      ? delivered.value.verification.diagnostic
+      : "",
+  });
+  assert.match(delivered.value.verification && "diagnostic" in delivered.value.verification
+    ? delivered.value.verification.diagnostic
+    : "", /project:/);
+  assert.equal("command" in (delivered.value.verification ?? {}), false);
+});
+
+test("caller cancellation admits no attestation and still destroys scratch", async () => {
+  const repository = repositoryWithMain();
+  const started = join(repository.path, "verification-started");
+  const destroyed = join(repository.path, "destroyed-after-cancel");
+  const contract = await bind(repository, `${process.execPath} -e ${JSON.stringify(`require("node:fs").writeFileSync(${JSON.stringify(started)}, "started")`)}; sleep 30`);
+  writeCandidateSettings(repository, worktreeSettings([], [
+    process.execPath,
+    "-e",
+    `require('node:fs').writeFileSync(${JSON.stringify(destroyed)}, 'destroyed')`,
+  ]));
+  const controller = new AbortController();
+  const pending = contract.deliver({ signal: controller.signal });
+  await waitForFile(started);
+  controller.abort();
+
+  const delivered = await pending;
+  assert.equal(delivered.facts.some((fact) => fact.kind === "attestation"), false);
+  assert.deepEqual(delivered.value.verification, { failure: "cancelled" });
+  assert.equal(existsSync(destroyed), true);
+  assert.equal(repository.run(["worktree", "list", "--porcelain"]).includes("keiyaku-v4-verify-"), false);
+});
+
+test("destroy failure is cleanup evidence, not a leak after successful removal", async () => {
+  const repository = repositoryWithMain();
+  const contract = await bind(repository, "exit 0");
+  writeCandidateSettings(repository, worktreeSettings([], [process.execPath, "-e", "process.exit(19)"]));
+
+  const delivered = await contract.deliver();
+
+  assert.deepEqual(delivered.value.cleanup, {
+    phase: "destroy",
+    command: 0,
+    detail: { kind: "exit", code: 19, stdout: "", stderr: "", truncated: false },
+  });
+  assert.equal(delivered.value.leak, undefined);
+  assert.equal(repository.run(["worktree", "list", "--porcelain"]).includes("keiyaku-v4-verify-"), false);
 });
 
 test("public deliver preserves admission when Verification cleanup leaks a worktree", async () => {
@@ -135,4 +263,3 @@ test("public deliver preserves admission when Verification cleanup leaks a workt
   assert.match(delivered.value.leak?.diagnostic ?? "", /worktree remove --force .*forced verification cleanup failure/);
   repository.run(["worktree", "remove", "--force", delivered.value.leak!.path]);
 });
-

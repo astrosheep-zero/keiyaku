@@ -147,6 +147,16 @@ and one accepted invocation may render both lines. The `stop` prefix
 distinguishes an accepted verb's obligation result from a top-level
 `refused <verb>` result. JSON serializes the public value unchanged. The
 renderer never mines facts from value fields or duplicates an accepted fact.
+An environment failure renders in that same `stop verification` value with its
+command index and typed command failure. A declaration timeout is an
+unsatisfied attestation fact, not a stop.
+
+A failed scratch destroy command renders without claiming that the worktree
+remains:
+
+```text
+cleanup destroy command=<index> <failure-json>
+```
 
 The leak line reports a disposable Verification worktree that could not be
 removed after admission. It does not change the accepted exit status and is

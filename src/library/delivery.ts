@@ -4,6 +4,7 @@ import type { DeliverValue } from "../protocol/operations.js";
 class DeliveryHandle {
   declare readonly verification?: DeliverValue["verification"];
   declare readonly placement?: DeliverValue["placement"];
+  declare readonly cleanup?: DeliverValue["cleanup"];
   declare readonly leak?: DeliverValue["leak"];
   declare readonly tenderSnapshot: SnapshotId;
   declare readonly integration: DeliverValue["integration"];
@@ -13,7 +14,7 @@ class DeliveryHandle {
   constructor(
     identity: Pick<DeliverValue, "tenderSnapshot" | "integration" | "method" | "policy">,
     private readonly readDiff: () => Promise<string | null>,
-    outcomes: Partial<Pick<DeliverValue, "verification" | "placement" | "leak">> = {},
+    outcomes: Partial<Pick<DeliverValue, "verification" | "placement" | "cleanup" | "leak">> = {},
   ) {
     this.tenderSnapshot = identity.tenderSnapshot;
     this.integration = identity.integration;

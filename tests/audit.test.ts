@@ -57,7 +57,7 @@ function verificationBody(script: string | null = "exit 1"): string {
   ].join("\n");
 }
 
-function failureOutcome(failure: NonNullable<AuditReport["attempt"]>["failure"]): VerificationOutcome {
+function failureOutcome(failure: "spawn-error" | "unknown-exit"): VerificationOutcome {
   return failure === "spawn-error"
     ? { kind: failure, diagnostic: "spawn failed" }
     : { kind: failure };
@@ -211,7 +211,7 @@ test("read-only audit returns its initial observation when verification is skipp
 });
 
 test("stored Verification maps every nonterminal producer outcome to an audit attempt without admission", async () => {
-  for (const failure of ["timeout", "spawn-error", "unknown-exit"] as const) {
+  for (const failure of ["spawn-error", "unknown-exit"] as const) {
     const { repository, contract, state } = await failedStoredVerification();
     const before = state.attestations.length;
     const git = repositoryAt(repository.path);
@@ -224,6 +224,7 @@ test("stored Verification maps every nonterminal producer outcome to an audit at
       verification: verificationDefinition(decodeContractDocument(state.terms.document.bytes))!,
       environment: {},
       produce: async () => failureOutcome(failure),
+      hooksFromCandidate: () => ({ create: [], destroy: [] }),
     }));
     const step = failure === "spawn-error"
       ? { failure, diagnostic: "spawn failed" }
@@ -325,6 +326,7 @@ test("stored Verification records a result captured before its declaration chang
       ].join("\n") });
       return produceVerification(input);
     },
+    hooksFromCandidate: () => ({ create: [], destroy: [] }),
   }));
   assert.equal(result?.step.kind, "accepted");
   assert.equal((await contract.state()).attestations.length, before + 1);
@@ -350,6 +352,7 @@ test("Verification runs a valid declaration even after prior testimony", async (
     environment: {},
     produce,
     verification: definition,
+    hooksFromCandidate: () => ({ create: [], destroy: [] }),
   }));
   assert.equal(executions, 1);
   assert.equal(result?.step.kind, "accepted");
@@ -385,10 +388,11 @@ test("Verification reuse requires its exact producer subject", async () => {
     environment: {},
     produce: async () => {
       executions += 1;
-      return { kind: "timeout" };
+      return { kind: "unknown-exit" };
     },
+    hooksFromCandidate: () => ({ create: [], destroy: [] }),
   }));
 
   assert.equal(executions, 1);
-  assert.deepEqual(result, { step: { failure: "timeout" } });
+  assert.deepEqual(result, { step: { failure: "unknown-exit" } });
 });

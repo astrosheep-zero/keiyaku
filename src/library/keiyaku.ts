@@ -28,8 +28,8 @@ export {
   gatesFrom,
   requireBranchesToBeUpToDateFrom,
   SettingsError,
-  worktreeHooksFrom,
 } from "./configuration.js";
+export { worktreeHooksFrom } from "../git/hooks.js";
 
 export type {
   AbandonInput,
@@ -80,7 +80,6 @@ export type {
   HookCommand,
   RequireBranchesToBeUpToDateFromInput,
   WorktreeHooks,
-  WorktreeHooksFromInput,
 } from "./configuration.js";
 export type { RegionOverlap } from "./region.js";
 export type {

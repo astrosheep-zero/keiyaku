@@ -71,18 +71,3 @@ export function commitCandidate(repository: TestGitRepository): void {
   repository.run(["add", "candidate.txt"]);
   repository.run(["commit", "--quiet", "-m", "candidate"]);
 }
-
-export async function withImmediateVerificationTimeout<T>(run: () => Promise<T>): Promise<T> {
-  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "performance");
-  let readings = 0;
-  Object.defineProperty(globalThis, "performance", {
-    configurable: true,
-    value: { now: () => (readings++ === 0 ? 0 : 5 * 60 * 1_000 + 1) },
-  });
-  try {
-    return await run();
-  } finally {
-    if (descriptor === undefined) delete (globalThis as { performance?: Performance }).performance;
-    else Object.defineProperty(globalThis, "performance", descriptor);
-  }
-}

@@ -52,6 +52,12 @@ export function optionalBoolean(value: unknown, label: string): boolean | undefi
   return value;
 }
 
+export function optionalSignal(value: unknown): AbortSignal | undefined {
+  if (value === undefined) return undefined;
+  if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal");
+  return value;
+}
+
 export function normalizedList<T>(
   values: unknown,
   label: string,
