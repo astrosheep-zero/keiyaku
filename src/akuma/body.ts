@@ -373,7 +373,12 @@ function persistTurn(
   endTurn(paths, {
     turnSequence,
     outcome: result.kind === "answered" && result.session !== undefined
-      ? { kind: "answered", historyId: result.historyId, session: result.session, answer: result.answer }
+      ? {
+          kind: "answered",
+          session: result.session,
+          answer: result.answer,
+          ...(result.historyId === undefined ? {} : { historyId: result.historyId }),
+        }
       : result.kind === "answered"
         ? { kind: "failed", diagnostic: "Provider answered without a resumable session" }
       : { kind: "failed", diagnostic: result.diagnostic },

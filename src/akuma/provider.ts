@@ -306,7 +306,7 @@ export class AgentEventChannel implements AsyncIterable<AgentEvent> {
 }
 
 export type TurnResult =
-  | Readonly<{ kind: "answered"; answer: string; historyId: string }>
+  | Readonly<{ kind: "answered"; answer: string; historyId?: string }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 
 export type ProviderFence = string;

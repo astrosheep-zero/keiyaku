@@ -65,7 +65,10 @@ present, then moves Alias only when requested and Dispatch did not fail. A
 contract-free call therefore remains a complete ordinary call and writes no
 Dispatch. After a successful fork, Library reads the parent's Dispatch from
 the supplied `repo`; when one exists it publishes the identical ContractId for
-the child. Fork never inherits Alias.
+the child. Fork never inherits Alias. Fork remains an optional provider
+capability: Library invokes it only when the source provider offers the
+operation and the requested Turn owns an exact point. It never manufactures a
+substitute.
 
 ```ts
 type DispatchStage =

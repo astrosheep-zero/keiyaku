@@ -75,7 +75,7 @@ export type ForkPoint = Readonly<{
 }>;
 
 export type TurnOutcome =
-  | Readonly<{ kind: "answered"; historyId: string; session: ResumeCoordinate; answer: string }>
+  | Readonly<{ kind: "answered"; historyId?: string; session: ResumeCoordinate; answer: string }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 
 export type TurnStartFact = Readonly<{

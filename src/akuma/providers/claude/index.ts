@@ -143,9 +143,11 @@ type ObserveInput = Readonly<{
 }>;
 
 function successfulResult(message: Extract<SDKMessage, { type: "result" }>, historyId?: string): TurnResult {
-  return historyId === undefined
-    ? { kind: "failed", diagnostic: "Claude query succeeded without an assistant history id" }
-    : { kind: "answered", answer: message.subtype === "success" ? message.result : "", historyId };
+  return {
+    kind: "answered",
+    answer: message.subtype === "success" ? message.result : "",
+    ...(historyId === undefined ? {} : { historyId }),
+  };
 }
 
 function finishClaudeInput(input: ClaudeInput, terminal: TurnResult | null): void {

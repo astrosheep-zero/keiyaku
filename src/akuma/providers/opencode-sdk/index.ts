@@ -93,9 +93,7 @@ async function readTurnResult(input: Readonly<{
     const assistant = newest(rows.filter((row) => row.info.role === "assistant" && row.info.parentID === userId));
     const historyId = text(assistant?.info.id);
     if (input.state.failure !== undefined) return { kind: "failed", diagnostic: input.state.failure };
-    if (assistant === undefined || historyId === undefined) {
-      return { kind: "failed", diagnostic: "OpenCode completed without a native assistant answer/history point" };
-    }
+    if (assistant === undefined) return { kind: "failed", diagnostic: "OpenCode completed without a native assistant answer" };
     if (assistant.info.error !== undefined) return { kind: "failed", diagnostic: diagnostic(assistant.info.error) };
     const answer = assistant.parts
       .map((part) => object(part))
@@ -103,7 +101,7 @@ async function readTurnResult(input: Readonly<{
       .map((part) => part?.text)
       .filter((part): part is string => typeof part === "string")
       .join("\n\n");
-    return { kind: "answered", answer, historyId };
+    return historyId === undefined ? { kind: "answered", answer } : { kind: "answered", answer, historyId };
   } catch (error) {
     return { kind: "failed", diagnostic: diagnostic(error) };
   }

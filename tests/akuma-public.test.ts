@@ -190,6 +190,57 @@ test("wait refuses invalid public timeoutMs values", async () => {
   }
 });
 
+test("an answered Turn without a fork point remains visible and keeps its answer", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-no-fork-point-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10006" });
+    initializeHeart(allocated.paths);
+    const noPointProvider: ProviderAdapter = {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        return {
+          admission: { fence: "no-point-turn" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "no-point-session" } };
+            },
+          },
+          completion: Promise.resolve({ kind: "answered" as const, answer: "complete without fork" }),
+          async abort() {},
+        };
+      },
+    };
+    await driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        description: "No fork point",
+        provider: CLAUDE_EXECUTION,
+        options: { model: "fixture-model" },
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, noPointProvider, {
+      collar: { pid: 999_978, processGroup: 999_978, spawnedAt: "no-fork-point" },
+      now: () => "2026-08-08T00:00:00.000Z",
+      async putDownOwnTree() {},
+    });
+
+    const handle = akumaAt(root).of({ id: allocated.id });
+    assert.deepEqual(handle.lastAnswer(), { kind: "answer", answer: "complete without fork" });
+    assert.deepEqual(handle.history().rows.find((row) => row.kind === "outcome")?.outcome, {
+      kind: "answered",
+      session: { sessionId: "no-point-session" },
+      answer: "complete without fork",
+    });
+    assert.deepEqual(await handle.fork({ at: "missing-point" }), { kind: "unknown-history", at: "missing-point" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("fork publishes a sleeping child with lineage and its native birth session", async () => {
   const root = mkdtempSync(join(process.cwd(), ".tmp-keiyaku-akuma-fork-"));
   const mutable = claudeProvider as MutableProvider;

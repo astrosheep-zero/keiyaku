@@ -292,11 +292,12 @@ every represented change supplies a diffstat. No terminal file ledger, event
 bus, subscription fan-out, usage or cost arm, raw-provider passthrough,
 severity taxonomy, or native output body belongs in this boundary.
 
-An answered `TurnResult.historyId` is the provider-owned fork point, not a
-generic result identifier. The Claude adapter uses the outer assistant message
-UUID associated with the successful result; the result UUID is not a valid
-substitute. Together with the session observed by the body, it forms the
-answered turn's durable fork coordinate.
+An answered `TurnResult.historyId`, when present, is the provider-owned fork
+point, not a generic result identifier. Completion does not require one and no
+session or generated identifier may substitute for it. The Claude adapter uses
+the outer assistant message UUID associated with the successful result; the
+result UUID is not a valid substitute. Together with the session observed by
+the body, it forms the answered turn's durable fork coordinate.
 
 Provider execution and option admission are provider-owned validation at the
 public boundary, before identity allocation. `start()` and `resume()` are their effect readers.

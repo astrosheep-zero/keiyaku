@@ -204,7 +204,7 @@ export function decodeTurnRow(row: TurnRow): TurnFact {
     outcome: row.outcome === "answered"
       ? {
           kind: "answered",
-          historyId: row.history_id!,
+          ...(row.history_id === null ? {} : { historyId: row.history_id }),
           session: resumeCoordinate(parsed<unknown>(row.session_json)),
           answer: row.answer!,
         }
@@ -414,7 +414,7 @@ export function insertTurnEndFact(database: DatabaseSync, input: Omit<TurnEndFac
   const result = input.outcome.kind === "answered"
     ? database.prepare(`UPDATE turns SET end_sequence = ?, outcome = 'answered', history_id = ?,
         session_json = ?, answer = ?, completed_at = ? WHERE sequence = ? AND end_sequence IS NULL`).run(
-        sequence, input.outcome.historyId, encodeResumeCoordinate(input.outcome.session), input.outcome.answer,
+        sequence, input.outcome.historyId ?? null, encodeResumeCoordinate(input.outcome.session), input.outcome.answer,
         input.completedAt, input.turnSequence,
       )
     : database.prepare(`UPDATE turns SET end_sequence = ?, outcome = 'failed', diagnostic = ?, completed_at = ?

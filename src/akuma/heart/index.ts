@@ -376,12 +376,13 @@ export function readForkPoint(
   if (!existsSync(paths.heart)) return null;
   return withHeart(paths, (heart) => {
     const turn = answeredTurnFact(heart, historyId);
-    if (turn?.end?.outcome.kind !== "answered") return null;
-    const recipe = sessionFactForCoordinate(heart, turn.end.outcome.session);
+    const outcome = turn?.end?.outcome;
+    if (outcome?.kind !== "answered" || outcome.historyId === undefined) return null;
+    const recipe = sessionFactForCoordinate(heart, outcome.session);
     if (recipe === null) throw new Error(`Akuma fork point ${historyId} has no session recipe`);
     return {
-      historyId: turn.end.outcome.historyId,
-      session: turn.end.outcome.session,
+      historyId: outcome.historyId,
+      session: outcome.session,
       provider: recipe.provider,
       cwd: recipe.cwd,
       options: recipe.options,

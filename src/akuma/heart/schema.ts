@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 10;
+const HEART_SCHEMA_VERSION = 11;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(
@@ -69,7 +69,7 @@ export const HEART_SCHEMA = `
     diagnostic TEXT,
     completed_at TEXT,
     CHECK (
-      (outcome = 'answered' AND history_id IS NOT NULL AND session_json IS NOT NULL AND answer IS NOT NULL AND diagnostic IS NULL)
+      (outcome = 'answered' AND session_json IS NOT NULL AND answer IS NOT NULL AND diagnostic IS NULL)
       OR (outcome = 'failed' AND history_id IS NULL AND session_json IS NULL AND answer IS NULL AND diagnostic IS NOT NULL)
       OR (outcome IS NULL AND end_sequence IS NULL AND history_id IS NULL AND session_json IS NULL AND answer IS NULL AND diagnostic IS NULL AND completed_at IS NULL)
     )

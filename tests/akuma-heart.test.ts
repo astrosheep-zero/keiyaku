@@ -397,19 +397,52 @@ test("Body Request facts have one idempotent monotonic authority", () => {
   } finally { value.close(); }
 });
 
-test("heart schema version 10 and leash schema version 4 hard-refuse old authority", () => {
+test("heart schema version 11 and leash schema version 4 hard-refuse old authority", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
     const heart = new DatabaseSync(allocated.paths.heart);
-    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 5)");
+    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 10)");
     heart.close();
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 10/u);
+    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 11/u);
     assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("answered Turns persist without a provider fork point", () => {
+  const value = fixture();
+  try {
+    const claim = HeldAkumaLeash.try(value.allocated.paths)!;
+    claim.birth(value.allocated.paths, value.soul);
+    const body = recordBody(value.allocated.paths, {
+      collar: { pid: 1, processGroup: 1, spawnedAt: "optional-fork-point" },
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    const turn = beginTurn(value.allocated.paths, {
+      bodySequence: body.sequence,
+      startedAt: "2026-08-08T00:00:01.000Z",
+    });
+    endTurn(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      outcome: {
+        kind: "answered",
+        session: { sessionId: "native-session" },
+        answer: "complete answer",
+      },
+      completedAt: "2026-08-08T00:00:02.000Z",
+    });
+    claim.release();
+
+    assert.deepEqual(activitySlice(value.allocated.paths, { limit: 5_000 }).rows
+      .filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome), [{
+      kind: "answered",
+      session: { sessionId: "native-session" },
+      answer: "complete answer",
+    }]);
+  } finally { value.close(); }
 });
 
 test("pause remains distinct from stop and can be cleared only under the leash", () => {

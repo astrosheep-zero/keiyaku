@@ -10,6 +10,7 @@ import {
   encodeAgentEvent,
   noteEvent,
   type AgentEvent,
+  type TurnResult,
 } from "../src/akuma/provider.js";
 import {
   CLAUDE_MESSAGE_DISPOSITIONS,
@@ -78,9 +79,15 @@ function fakeOpencode() {
   return { loader, closed: () => closed, prompts };
 }
 
+test("provider answered results may omit an exact fork point", () => {
+  const result: TurnResult = { kind: "answered", answer: "complete answer" };
+  assert.deepEqual(result, { kind: "answered", answer: "complete answer" });
+});
+
 function fakePiSdk(input: {
   events?: readonly Record<string, unknown>[];
   fail?: Error;
+  historyId?: string | null;
   waitForAbort?: boolean;
   promptNeverSettles?: boolean;
   abortNeverSettles?: boolean;
@@ -96,7 +103,7 @@ function fakePiSdk(input: {
     disposed: number;
   };
   const manager = {
-    getLeafId: () => "entry-final",
+    getLeafId: () => input.historyId === undefined ? "entry-final" : input.historyId,
     createBranchedSession: (id: string) => {
       seen.branched = id;
       return "/sessions/child.jsonl";
@@ -295,8 +302,40 @@ test("OpenCode V1 fails terminal observation without native assistant evidence",
     })() };
   } } as never }, close: () => { closed += 1; } }) });
   const drive = await provider.start({ body: "idle", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
-  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "OpenCode completed without a native assistant answer/history point" });
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "OpenCode completed without a native assistant answer" });
   assert.equal(closed, 1);
+});
+
+test("OpenCode V1 keeps an assistant answer without a usable message ID", async () => {
+  let messageID = "msg_unset";
+  let prompt!: () => void;
+  const prompted = new Promise<void>((resolve) => { prompt = resolve; });
+  const session = {
+    async create() { return { data: { id: "session-no-point" } }; },
+    async promptAsync(input: unknown) {
+      messageID = String((input as { body?: { messageID?: unknown } }).body?.messageID);
+      prompt();
+      return { data: undefined };
+    },
+    async messages() {
+      return {
+        data: [
+          { info: { id: messageID, sessionID: "session-no-point", role: "user", time: { created: 1 } }, parts: [] },
+          { info: { id: "", parentID: messageID, sessionID: "session-no-point", role: "assistant", time: { created: 2 } }, parts: [{ type: "text", text: "complete" }] },
+        ],
+      };
+    },
+  } as unknown as OpencodeSdkSession;
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { session, event: { async subscribe() {
+    return { stream: (async function* () {
+      await prompted;
+      yield { type: "message.updated", properties: { info: { id: messageID, sessionID: "session-no-point", role: "user" } } };
+      yield { type: "session.status", properties: { sessionID: "session-no-point", status: { type: "busy" } } };
+      yield { type: "session.status", properties: { sessionID: "session-no-point", status: { type: "idle" } } };
+    })() };
+  } } as never }, close() {} }) });
+  const drive = await provider.start({ body: "answer", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete" });
 });
 
 test("OpenCode V1 ignores a prior terminal pair before this prompt is admitted", async () => {
@@ -428,6 +467,18 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   ]);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
   assert.equal(fake.seen.disposed, 1);
+});
+
+test("Pi keeps a completed answer when no exact fork point exists", async () => {
+  const fake = fakePiSdk({
+    historyId: null,
+    events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }],
+  });
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+    body: "work", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  for await (const _event of drive.events) { /* drain */ }
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done" });
 });
 
 test("Pi rejects wrong coordinates before loading its native SDK", async () => {
@@ -1001,7 +1052,7 @@ test("Claude refuses a Pi coordinate before loading its native SDK", async () =>
   assert.equal(loaded, false);
 });
 
-test("Claude never substitutes a result UUID for the assistant fork point", async () => {
+test("Claude answers without substituting a result UUID for the assistant fork point", async () => {
   const provider = createClaudeProvider(async () => ({
     query(input) {
       return fakeQuery([{
@@ -1017,10 +1068,7 @@ test("Claude never substitutes a result UUID for the assistant fork point", asyn
     body: "build", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
   });
   for await (const _event of drive.events) { /* drain */ }
-  assert.deepEqual(await drive.completion, {
-    kind: "failed",
-    diagnostic: "Claude query succeeded without an assistant history id",
-  });
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done" });
 });
 
 test("Claude never substitutes a sidechain assistant UUID for the outer fork point", async () => {

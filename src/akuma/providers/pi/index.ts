@@ -113,9 +113,11 @@ async function drivePi(sdk: PiSdk, input: PiDriveInput): Promise<Session> {
         return;
       }
       const historyId = native.sessionManager.getLeafId();
-      settle(historyId === null
-        ? { kind: "failed", diagnostic: "Pi completed without a forkable history entry" }
-        : { kind: "answered", answer: state.answer, historyId });
+      settle({
+        kind: "answered",
+        answer: state.answer,
+        ...(historyId === null ? {} : { historyId }),
+      });
     } catch (error) { settle({ kind: "failed", diagnostic: diagnostic(error) }); }
   })();
   return {

@@ -4,8 +4,8 @@ This chapter owns Akuma durable facts, custody, schemas, and projections.
 
 ## Turn Timeline
 
-Heart schema version 10 is a hard cut. Its retained timeline sequence is the
-only order visible to public Akuma projections. A Body owns process, leash,
+The retained Heart timeline sequence is the only order visible to public Akuma
+projections. A Body owns process, leash,
 collar, stop, pause, kill, and Body Request facts. A Turn is one provider start
 or resume within that Body, and one Body may contain many Turns.
 
@@ -36,8 +36,8 @@ dies; their existence does not depend on a current control-flow reader.
   broke-off / put-down).
 - **turns** — one row per admitted Turn, keyed by its `turn-start` timeline
   sequence. It may remain open or carry exactly one `turn-end` outcome. An
-  answered outcome carries the complete answer and exact provider-owned fork
-  pair; a failed outcome carries only its diagnostic.
+  answered outcome carries the complete answer and may carry an exact
+  provider-owned fork point; a failed outcome carries only its diagnostic.
 - **session** — the provider's resumable coordinate, written the moment the
   adapter declares one resumable, not at turn completion. A new body resumes
   from the latest valid session fact; no
@@ -90,12 +90,11 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed `heart/` custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `10`; leash schema version remains `4`. Heart version 10
-hard-cuts every child origin to one `parent` field. It retains the shared
-activity-and-tell timeline, Body-scoped kill witnesses, and the Archetype and
-Contract-column hard cut. This is a hard cut: an
-older heart fails the existing schema gate; no migration or compatibility
-decoder exists. Absence is stored as SQL `NULL` and omitted from public values.
+Heart schema version is `11`; leash schema version remains `4`. Version 11
+separates successful completion from the optional exact provider fork point;
+session and complete answer remain required for an answered Turn. Older hearts
+fail the schema gate; no migration or compatibility decoder exists. Absence is
+stored as SQL `NULL` and omitted from public values.
 
 Heart custody owns its fact vocabulary, schema gates, row codecs, connections,
 transactions, conditional judgments, custody verbs, and durable timeline
@@ -158,8 +157,9 @@ budget while retaining the same in-flight and pending pins. Full history pages
 do not apply snapshot pinning or category budgets.
 
 The shared timeline is the sole retained Turn projection. Its `turn-start` and
-`turn-end` rows provide answer, failure, and boundary order. The fork-point reader is the only targeted
-`turns` read: it exact-matches one answered `historyId` and returns that fact's
+`turn-end` rows provide answer, failure, and boundary order. The fork-point
+reader is the only targeted `turns` read: it exact-matches one answered Turn
+carrying `historyId` and returns that fact's
 inseparable session and native point. It also resolves that session
 coordinate's admitted provider, cwd, and options recipe for the native call and
 child birth; a retained answered turn without that recipe is authority

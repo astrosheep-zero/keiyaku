@@ -97,8 +97,9 @@ boundary; healthy members remain visible. Confinement is triage evidence and fut
 placement input, never an admission result; no read reaches back into home.
 
 Every admitted provider Turn starts on the shared timeline and has at most one
-provider outcome. Answered outcomes retain the provider fork coordinate and
-complete answer; failed outcomes retain a diagnostic and cannot be forked. A
+provider outcome. Answered outcomes retain the complete answer and any real
+provider fork coordinate; an answer without one remains a normal answer but is
+not an exact fork point. Failed outcomes retain a diagnostic and cannot be forked. A
 terminated or crashed Turn may remain open rather than inventing an outcome.
 Provider activity contains only provider-authored events; neither Body nor CLI
 reinterprets failure as activity.
