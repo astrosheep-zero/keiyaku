@@ -154,6 +154,11 @@ an accepted fact, creates `abandoned`, or rejects the public mutation. The
 result returns admitted facts and head, observed Git effects and lags, and the
 complete `SettlementReport`. Settlement is synchronous in that public Promise;
 a lag reports incomplete follow-up without hiding the admitted Contract.
+Settlement reads Git authority from the pinned primary worktree, never the
+invocation worktree, because a terminal reconcile may have removed that
+worktree. The package-root Library defers terminal managed-worktree removal
+until after settlement, so one invocation settles first and removes last; a
+later replay still settles correctly because the primary worktree remains.
 If a holder mutation admits but releasing its fence fails, the public result
 preserves the admitted facts and reports a `task-holder` Settlement lag. It
 does not begin reconcile or settlement while fence release remains uncertain.

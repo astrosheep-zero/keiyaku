@@ -204,20 +204,26 @@ async function settleObserved(input: SettlementInput, observation: SettlementObs
   return { actions, lags };
 }
 
+function onPrimaryWorktree(repository: GitRepository): GitRepository {
+  return { ...repository, effectiveCwd: repository.primaryWorktree };
+}
+
 export async function settle(input: SettlementInput): Promise<SettlementReport> {
+  const repository = onPrimaryWorktree(input.repository);
   const observation = taskRuleCanApply(input.state)
-    ? await observeSettlement(input.repository, input.channel)
+    ? await observeSettlement(repository, input.channel)
     : null;
-  return settleObserved(input, observation);
+  return settleObserved({ ...input, repository }, observation);
 }
 
 export async function settleAll(input: SettlementBatchInput): Promise<readonly SettlementReport[]> {
+  const repository = onPrimaryWorktree(input.repository);
   const observation = input.contracts.some((contract) => taskRuleCanApply(contract.state))
-    ? await observeSettlement(input.repository, input.channel)
+    ? await observeSettlement(repository, input.channel)
     : null;
   const reports: SettlementReport[] = [];
   for (const contract of input.contracts) {
-    reports.push(await settleObserved({ repository: input.repository, channel: input.channel, ...contract }, observation));
+    reports.push(await settleObserved({ repository, channel: input.channel, ...contract }, observation));
   }
   return reports;
 }

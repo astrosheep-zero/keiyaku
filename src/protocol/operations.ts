@@ -562,7 +562,7 @@ export async function auditOperation(
 
 export type ReconcileReport = ReconcileResult;
 export type ReconcileObservation = Readonly<{ state: ContractState | null; report: ReconcileReport }>;
-type ReconcileOptions = Readonly<{ hooks: WorktreeHooks; retryHooks: boolean }>;
+type ReconcileOptions = Readonly<{ hooks: WorktreeHooks; retryHooks: boolean; retainTerminalWorktree?: boolean }>;
 
 export async function reconcileOperation(input: MutationOperationInput & ReconcileOptions): Promise<ReconcileObservation> {
   try {
@@ -572,6 +572,7 @@ export async function reconcileOperation(input: MutationOperationInput & Reconci
       contractId: input.contractId,
       hooks: input.hooks,
       retryHooks: input.retryHooks,
+      ...(input.retainTerminalWorktree === undefined ? {} : { retainTerminalWorktree: input.retainTerminalWorktree }),
     });
     return { state: observation.state, report: observation.result };
   } catch (error) {
@@ -595,6 +596,7 @@ export async function reconcileAllOperation(
     observation.contracts.keys(),
     input.hooks,
     input.retryHooks,
+    input.retainTerminalWorktree ?? false,
   )).map((item): RepoReconcileItem => ({
     contractId: item.contract,
     state: item.state,

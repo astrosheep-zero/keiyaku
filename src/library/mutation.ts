@@ -36,14 +36,19 @@ export async function completeMutation<Value, PublicValue>(
   input: Completion<Value, PublicValue>,
 ): Promise<MutationResult<PublicValue>> {
   const { scope, channel, contractId, accepted, value, hooks } = input;
-  const reconciled = await reconcileOperation({ scope, channel, contractId, hooks, retryHooks: false });
-  const settlement = await settle({ repository: scope, channel, state: reconciled.state, effects: reconciled.report.effects });
+  const retained = await reconcileOperation({ scope, channel, contractId, hooks, retryHooks: false, retainTerminalWorktree: true });
+  const settlement = await settle({ repository: scope, channel, state: retained.state, effects: retained.report.effects });
+  const deferRemoval = retained.state !== null && retained.state.terminal !== null
+    && retained.state.coordinates.workspace === "worktree";
+  const cleanup = deferRemoval
+    ? await reconcileOperation({ scope, channel, contractId, hooks, retryHooks: false })
+    : null;
   return {
     facts: accepted.facts,
     head: accepted.head,
     value: value(accepted.value),
-    effects: [...(accepted.physical?.effects ?? []), ...reconciled.report.effects],
-    lags: [...(accepted.physical?.lag ?? []), ...reconciled.report.lag],
+    effects: [...(accepted.physical?.effects ?? []), ...retained.report.effects, ...(cleanup?.report.effects ?? [])],
+    lags: [...(accepted.physical?.lag ?? []), ...retained.report.lag, ...(cleanup?.report.lag ?? [])],
     settlement,
   };
 }

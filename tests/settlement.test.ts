@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, unlinkSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
@@ -22,6 +22,7 @@ import {
   readTaskHoldersAt,
 } from "../src/settlement/holder.js";
 import { settle, settleAll } from "../src/settlement/settle.js";
+import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { settlementFencePath } from "../src/settlement/fence.js";
 import { readNamespaceContext } from "../src/task/context.js";
 import { Tasks } from "../src/task/index.js";
@@ -388,4 +389,36 @@ test("managed bind installs Task namespace only after worktree materialization",
   const state = await bound.keiyaku.state();
   assert.deepEqual(readNamespaceContext(action.path), [state.id.slice("kei/".length)]);
   assert.equal(bound.effects.some((effect) => effect.kind === "namespace-context"), false);
+});
+
+test("settlement replays from the primary worktree when the invocation cwd is gone", async () => {
+  const world = repository(), repo = Repo.at({ path: world.path });
+  const taskId = await task(world.path, "Dead cwd claim");
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Dead cwd"), workspace: "here", gates: [] });
+  writeFileSync(`${world.path}/candidate.txt`, "candidate\n");
+  const delivered = await bound.keiyaku.deliver({ includeDirty: true });
+  assert.deepEqual(delivered.settlement.lags, []);
+  const state = await bound.keiyaku.state();
+  assert.equal(state.terminal?.kind, "claimed");
+  const git = repositoryAt(world.path);
+  const dead = { ...git, effectiveCwd: join(world.path, "gone") };
+  const report = await withGitDecodeChannel(git, (channel) => settle({ repository: dead, channel, state, effects: [] }));
+  assert.deepEqual(report.lags, []);
+  assert.deepEqual(report.actions, []);
+});
+
+test("a claimed managed-worktree Contract settles its held Task after removal", async () => {
+  const world = repository(), repo = Repo.at({ path: world.path });
+  const taskId = await task(world.path, "Managed claim");
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Managed claim"), workspace: "worktree", gates: [] });
+  const state = await bound.keiyaku.state();
+  const path = deliveryWorktreePath(repositoryAt(world.path), state.id);
+  const fromWorktree = Keiyaku.of({ repo: Repo.at({ path }), id: state.id });
+  writeFileSync(`${path}/candidate.txt`, "candidate\n");
+  const claimed = await fromWorktree.deliver({ includeDirty: true });
+  assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
+  assert.deepEqual(claimed.settlement.lags, []);
+  assert.deepEqual(claimed.settlement.actions, [{ kind: "task", taskId, action: "done" }]);
+  assert.equal(await taskState(world.path, taskId), "done");
+  assert.equal(existsSync(path), false);
 });

@@ -61,23 +61,33 @@ export class Repo {
   async reconcile(input?: ReconcileInput): Promise<RepoReconcileReport> {
     const scope = scopeForRepo(this);
     return withGitDecodeChannel(scope, async (channel) => {
-      const reconciled = await reconcileAllOperation({ scope, channel, ...reconcileInput(input) });
+      const options = reconcileInput(input);
+      const retained = await reconcileAllOperation({ scope, channel, ...options, retainTerminalWorktree: true });
       const settlements = await settleAll({
         repository: scope,
         channel,
-        contracts: reconciled.contracts.map((contract) => ({
+        contracts: retained.contracts.map((contract) => ({
           state: contract.state,
           effects: contract.report.effects,
         })),
       });
+      const deferRemoval = retained.contracts.some((contract) =>
+        contract.state !== null && contract.state.terminal !== null
+        && contract.state.coordinates.workspace === "worktree");
+      const cleanup = deferRemoval ? await reconcileAllOperation({ scope, channel, ...options }) : null;
+      const later = cleanup === null ? null : new Map(cleanup.contracts.map((contract) => [contract.contractId, contract.report]));
       return {
-        contracts: reconciled.contracts.map((contract, index) => ({
-          contractId: contract.contractId,
-          report: {
-            ...contract.report,
-            settlement: settlements[index]!,
-          },
-        })),
+        contracts: retained.contracts.map((contract, index) => {
+          const report = later?.get(contract.contractId);
+          return {
+            contractId: contract.contractId,
+            report: {
+              effects: [...contract.report.effects, ...(report?.effects ?? [])],
+              lag: [...contract.report.lag, ...(report?.lag ?? [])],
+              settlement: settlements[index]!,
+            },
+          };
+        }),
       };
     });
   }

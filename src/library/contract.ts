@@ -412,10 +412,17 @@ export class KeiyakuHandle {
   async reconcile(input?: ReconcileInput): Promise<ReconcileReport> {
     const options = reconcileInput(input);
     return withGitDecodeChannel(this.scope, async (channel) => {
-      const reconciled = await reconcileOperation({ scope: this.scope, channel, contractId: this.id, ...options });
+      const retained = await reconcileOperation({ scope: this.scope, channel, contractId: this.id, ...options, retainTerminalWorktree: true });
+      const settlement = await settle({ repository: this.scope, channel, state: retained.state, effects: retained.report.effects });
+      const deferRemoval = retained.state !== null && retained.state.terminal !== null
+        && retained.state.coordinates.workspace === "worktree";
+      const cleanup = deferRemoval
+        ? await reconcileOperation({ scope: this.scope, channel, contractId: this.id, ...options })
+        : null;
       return {
-        ...reconciled.report,
-        settlement: await settle({ repository: this.scope, channel, state: reconciled.state, effects: reconciled.report.effects }),
+        effects: [...retained.report.effects, ...(cleanup?.report.effects ?? [])],
+        lag: [...retained.report.lag, ...(cleanup?.report.lag ?? [])],
+        settlement,
       };
     });
   }

@@ -66,6 +66,7 @@ type ReconcileInput = Readonly<{
   contractId: ContractId;
   hooks: WorktreeHooks;
   retryHooks: boolean;
+  retainTerminalWorktree?: boolean;
 }>;
 type ReconcileEffectsInput = ReconcileInput;
 type WorktreeRetained = Readonly<{
@@ -372,7 +373,7 @@ function releaseTerminalCustody(
 }
 
 async function reconcileTerminalManagedWorktree(
-  { repository, channel, hooks, retryHooks }: ReconcileEffectsInput,
+  { repository, channel, hooks, retryHooks, retainTerminalWorktree }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
   acc: ReconcileAccumulation,
@@ -384,6 +385,7 @@ async function reconcileTerminalManagedWorktree(
   const expected = await terminalSealExpectations(channel, state);
   acc.effects.push(updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
   if (state.delivery !== null) acc.effects.push(updateRef(primary, pin, state.delivery.data.integration.snapshot));
+  if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag);
 
   const retained = await removeSealedTerminalWorktree({ repository: primary, topology, path, expected, hooks, retryHooks, acc });
   if (retained !== null) return retained;
@@ -492,8 +494,9 @@ async function reconcileBatchItem(
   contract: ContractId,
   hooks: WorktreeHooks,
   retryHooks: boolean,
+  retainTerminalWorktree: boolean,
 ): Promise<ReconcileBatchItem> {
-  const observation = await reconcile({ repository, channel, contractId: contract, hooks, retryHooks });
+  const observation = await reconcile({ repository, channel, contractId: contract, hooks, retryHooks, retainTerminalWorktree });
   return {
     contract,
     state: observation.state,
@@ -508,8 +511,9 @@ export async function reconcileBatch(
   contracts: Iterable<ContractId>,
   hooks: WorktreeHooks,
   retryHooks: boolean,
+  retainTerminalWorktree: boolean,
 ): Promise<readonly ReconcileBatchItem[]> {
   const items: ReconcileBatchItem[] = [];
-  for (const contract of contracts) items.push(await reconcileBatchItem(repository, channel, contract, hooks, retryHooks));
+  for (const contract of contracts) items.push(await reconcileBatchItem(repository, channel, contract, hooks, retryHooks, retainTerminalWorktree));
   return items;
 }
