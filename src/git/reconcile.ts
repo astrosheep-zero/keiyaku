@@ -16,7 +16,12 @@ import {
   type GitRepository,
 } from "./repository.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
-import { contractLocator, contractPhysicalName, gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
+import {
+  contractLocator,
+  contractPhysicalName,
+  gitObjectIdForSnapshot,
+  mintSnapshotId,
+} from "./identity.js";
 import { observeContractAt } from "./observe.js";
 import type { GitDecodeChannel } from "./read-observation.js";
 import {
@@ -33,7 +38,8 @@ import {
 } from "./hooks.js";
 import { deliveryWorktreePath } from "./workspace.js";
 import {
-  terminalSealExpectations,
+  terminalSealExpectations as decodeTerminalSealExpectations,
+  terminalSealSnapshots,
   unsealedBytes,
   type TerminalSealExpectations,
   type UnsealedBytes,
@@ -60,7 +66,7 @@ type ReconcileInput = Readonly<{
   hooks: WorktreeHooks;
   retryHooks: boolean;
 }>;
-type ReconcileEffectsInput = Omit<ReconcileInput, "channel">;
+type ReconcileEffectsInput = ReconcileInput;
 type WorktreeRetained = Readonly<{
   kind: "worktree-retained";
   path: string;
@@ -87,6 +93,14 @@ type TerminalWorktreeCleanup = Readonly<{
   expected: TerminalSealExpectations;
   hooks: WorktreeHooks;
   retryHooks: boolean;
+  acc: ReconcileAccumulation;
+}>;
+type TerminalCustody = Readonly<{
+  repository: GitRepository;
+  state: ContractState;
+  expected: TerminalSealExpectations;
+  ref: string;
+  pin: string;
   acc: ReconcileAccumulation;
 }>;
 
@@ -165,11 +179,6 @@ function worktree(repository: GitRepository, topology: WorktreeTopology, path: s
   mkdirSync(dirname(path), { recursive: true }); runGit(repository, ["worktree", "add", "--detach", path, gitObjectIdForSnapshot(desired)]);
   topology.paths.add(path);
   return { kind: "worktree", path, action: "created" };
-}
-function commitTree(repository: GitRepository, snapshot: SnapshotId): string {
-  return runGit(repository, ["rev-parse", "--verify", `${gitObjectIdForSnapshot(snapshot)}^{tree}`])
-    .toString("utf8")
-    .trim();
 }
 function removeWorktree(
   repository: GitRepository,
@@ -283,6 +292,15 @@ function retainTerminalWorktree(
   return complete(effects, lag);
 }
 
+async function terminalSealExpectations(
+  channel: GitDecodeChannel,
+  state: ContractState,
+): Promise<TerminalSealExpectations> {
+  const snapshots = terminalSealSnapshots(state);
+  const objects = await channel.readObjects(snapshots.map(gitObjectIdForSnapshot));
+  return decodeTerminalSealExpectations(state, objects);
+}
+
 async function removeSealedTerminalWorktree(
   { repository, topology, path, expected, hooks, retryHooks, acc }: TerminalWorktreeCleanup,
 ): Promise<ReconcileResult | null> {
@@ -311,12 +329,14 @@ function targetCustodyForClaimedIntegration(
     : null;
 }
 
+function sealedTree(expected: TerminalSealExpectations, snapshot: SnapshotId): GitOid {
+  const tree = expected.treeBySnapshot.get(snapshot);
+  if (tree === undefined) throw new Error(`terminal seal tree was not resolved: ${snapshot}`);
+  return tree;
+}
+
 function releaseTerminalCustody(
-  repository: GitRepository,
-  state: ContractState,
-  ref: string,
-  pin: string,
-  { effects }: ReconcileAccumulation,
+  { repository, state, expected, ref, pin, acc: { effects } }: TerminalCustody,
 ): void {
   if (state.delivery === null) {
     const custodian = snapshotCustodian(repository, state.coordinates.start);
@@ -327,7 +347,7 @@ function releaseTerminalCustody(
   const tender = state.delivery.data.tenderSnapshot;
   const integration = state.delivery.data.integration.snapshot;
   const target = targetCustodyForClaimedIntegration(repository, state, integration);
-  if (commitTree(repository, tender) === commitTree(repository, integration) && target !== null) {
+  if (sealedTree(expected, tender) === sealedTree(expected, integration) && target !== null) {
     effects.push(removeRefWithCustody(repository, ref, target.ref, target.oid));
     effects.push(removeRefWithCustody(repository, pin, target.ref, target.oid));
   } else if (tender === integration) {
@@ -338,7 +358,7 @@ function releaseTerminalCustody(
 }
 
 async function reconcileTerminalManagedWorktree(
-  { repository, hooks, retryHooks }: ReconcileEffectsInput,
+  { repository, channel, hooks, retryHooks }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
   acc: ReconcileAccumulation,
@@ -347,13 +367,13 @@ async function reconcileTerminalManagedWorktree(
   const ref = deliveryRefFor(state.id);
   const pin = candidatePinRefFor(state.id);
   const path = deliveryWorktreePath(repository, state.id);
-  const expected = terminalSealExpectations(repository, state);
+  const expected = await terminalSealExpectations(channel, state);
   acc.effects.push(updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
   if (state.delivery !== null) acc.effects.push(updateRef(primary, pin, state.delivery.data.integration.snapshot));
 
   const retained = await removeSealedTerminalWorktree({ repository: primary, topology, path, expected, hooks, retryHooks, acc });
   if (retained !== null) return retained;
-  releaseTerminalCustody(primary, state, ref, pin, acc);
+  releaseTerminalCustody({ repository: primary, state, expected, ref, pin, acc });
   return complete(acc.effects, acc.lag);
 }
 
@@ -376,10 +396,11 @@ async function reconcileActiveManagedWorktree(
 }
 
 async function reconcileWithTopology(
-  { repository, hooks, retryHooks }: ReconcileEffectsInput,
+  input: ReconcileEffectsInput,
   state: ContractState | null,
   topology: WorktreeTopology,
 ): Promise<ReconcileResult> {
+  const { repository } = input;
   const effects: Effect[] = [];
   const lag: ReconcileLag[] = [];
   try {
@@ -388,9 +409,9 @@ async function reconcileWithTopology(
     effects.push(...targetCheckouts.effects);
     lag.push(...targetCheckouts.lag);
     if (state.coordinates.workspace === "here") return reconcileHereWorkspaceRefs(repository, state, { effects, lag });
-    if (state.terminal) return await reconcileTerminalManagedWorktree({ repository, hooks, retryHooks, contractId: state.id }, state, topology, { effects, lag });
+    if (state.terminal) return await reconcileTerminalManagedWorktree(input, state, topology, { effects, lag });
     if (!state.bound) return complete(effects, lag);
-    return await reconcileActiveManagedWorktree({ repository, hooks, retryHooks, contractId: state.id }, state, topology, { effects, lag });
+    return await reconcileActiveManagedWorktree(input, state, topology, { effects, lag });
   } catch (error) {
     return failed("effect", error, effects, lag);
   }

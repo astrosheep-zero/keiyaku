@@ -57,7 +57,9 @@ at the candidate needs no recovery effect.
 A pending tender keeps its tender and integration reachable through
 Keiyaku-owned refs in either workspace mode. Cleanup never moves the target ref.
 
-Terminal removal of a managed worktree begins by capturing its complete
+Terminal removal of a managed worktree resolves the immutable tree and parent
+metadata for its sealed commit identities once through the current Git decode
+channel. It then begins by capturing its complete
 non-ignored workspace tree through the same private-index mechanism as delivery.
 The tree must equal one of the journal-sealed trees and `HEAD` must independently
 name one of the journal-sealed commit identities. With no delivery, only start
@@ -69,7 +71,9 @@ equals a sealed tree. Dirty submodule internals are never sealed. The proof
 rejects a later same-tree commit and every byte not represented by a sealed
 tree.
 
-Failure retains the worktree and every required reachability ref, then reports
+The resolved commit metadata is reused by both the proof before destroy hooks,
+the proof after them, and same-tree custody comparison; those proofs still
+capture the complete workspace independently. Failure retains the worktree and every required reachability ref, then reports
 `unsealed-bytes` with the least differing path set and, when applicable, the
 unsealed `HEAD`. Destroy hooks run only after the initial proof, and Keiyaku
 repeats the complete proof after the hooks return. An eligible worktree is then

@@ -1,6 +1,6 @@
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
-import { gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
-import { runGit, type GitRepository } from "./repository.js";
+import { gitObjectId, gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
+import { runGit, type GitOid, type GitRepository } from "./repository.js";
 import { captureWorkspaceTree } from "./workspace.js";
 
 export type UnsealedBytes = Readonly<{
@@ -12,22 +12,70 @@ export type UnsealedBytes = Readonly<{
 
 export type TerminalSealExpectations = Readonly<{
   heads: readonly SnapshotId[];
-  trees: readonly SnapshotId[];
+  trees: readonly GitObjectId[];
+  treeBySnapshot: ReadonlyMap<SnapshotId, GitObjectId>;
 }>;
+export type TerminalSealObject = Readonly<{ kind: "present"; type: string; bytes: Buffer }>
+  | Readonly<{ kind: "missing" }>;
+type CommitMetadata = Readonly<{ tree: GitObjectId; parents: readonly SnapshotId[] }>;
 
-function commitTree(repository: GitRepository, snapshot: SnapshotId): string {
-  return runGit(repository, ["rev-parse", "--verify", `${gitObjectIdForSnapshot(snapshot)}^{tree}`])
-    .toString("utf8")
-    .trim();
+export function terminalSealSnapshots(state: ContractState): readonly SnapshotId[] {
+  return [...new Set([
+    state.coordinates.start,
+    ...(state.delivery === null ? [] : [
+      state.delivery.data.tenderSnapshot,
+      state.delivery.data.integration.snapshot,
+    ]),
+  ])];
 }
 
-function commitParents(repository: GitRepository, snapshot: SnapshotId): readonly SnapshotId[] {
-  const fields = runGit(repository, ["rev-list", "--parents", "-n", "1", gitObjectIdForSnapshot(snapshot)])
-    .toString("utf8")
-    .trim()
-    .split(" ");
-  if (fields.length === 0 || fields[0] !== snapshot) throw new Error("Git commit parent row is malformed");
-  return fields.slice(1).map((parent) => mintSnapshotId(parent));
+function commitMetadata(snapshot: SnapshotId, result: TerminalSealObject | undefined): CommitMetadata {
+  if (result === undefined || result.kind === "missing") {
+    throw new Error(`terminal seal commit is missing: ${snapshot}`);
+  }
+  if (result.type !== "commit") throw new Error(`terminal seal snapshot is not a commit: ${snapshot}`);
+  const headerEnd = result.bytes.indexOf("\n\n");
+  if (headerEnd < 0) throw new Error(`terminal seal commit has no headers: ${snapshot}`);
+  const headers = result.bytes.subarray(0, headerEnd).toString("ascii").split("\n");
+  const treeHeader = headers[0];
+  if (treeHeader === undefined || !treeHeader.startsWith("tree ")) {
+    throw new Error(`terminal seal commit has no root tree: ${snapshot}`);
+  }
+  return {
+    tree: gitObjectId(treeHeader.slice("tree ".length), "terminal seal tree"),
+    parents: headers
+      .filter((header) => header.startsWith("parent "))
+      .map((header) => mintSnapshotId(header.slice("parent ".length))),
+  };
+}
+
+export function terminalSealExpectations(
+  state: ContractState,
+  objects: ReadonlyMap<GitOid, TerminalSealObject>,
+): TerminalSealExpectations {
+  const snapshots = terminalSealSnapshots(state);
+  const metadata = new Map(snapshots.map((snapshot) => [
+    snapshot,
+    commitMetadata(snapshot, objects.get(gitObjectIdForSnapshot(snapshot))),
+  ]));
+  const treeBySnapshot = new Map([...metadata].map(([snapshot, commit]) => [snapshot, commit.tree]));
+  if (state.delivery === null) {
+    return { heads: [state.coordinates.start], trees: [...treeBySnapshot.values()], treeBySnapshot };
+  }
+  const tender = state.delivery.data.tenderSnapshot;
+  const tenderMetadata = metadata.get(tender);
+  if (tenderMetadata === undefined) throw new Error(`terminal seal metadata was not resolved: ${tender}`);
+  const [tenderParent] = tenderMetadata.parents;
+  return {
+    heads: [...new Set([
+      state.coordinates.start,
+      ...(tenderParent === undefined ? [] : [tenderParent]),
+      tender,
+      state.delivery.data.integration.snapshot,
+    ])],
+    trees: [...treeBySnapshot.values()],
+    treeBySnapshot,
+  };
 }
 
 function changedPaths(repository: GitRepository, left: string, right: string): readonly string[] {
@@ -36,31 +84,12 @@ function changedPaths(repository: GitRepository, left: string, right: string): r
   return fields.slice(0, -1).sort();
 }
 
-export function terminalSealExpectations(
-  repository: GitRepository,
-  state: ContractState,
-): TerminalSealExpectations {
-  if (state.delivery === null) return { heads: [state.coordinates.start], trees: [state.coordinates.start] };
-  const tender = state.delivery.data.tenderSnapshot;
-  const [tenderParent] = commitParents(repository, tender);
-  return {
-    heads: [...new Set([
-      state.coordinates.start,
-      ...(tenderParent === undefined ? [] : [tenderParent]),
-      tender,
-      state.delivery.data.integration.snapshot,
-    ])],
-    trees: [state.coordinates.start, tender, state.delivery.data.integration.snapshot],
-  };
-}
-
 export function unsealedBytes(
   repository: GitRepository,
   path: string,
   expected: TerminalSealExpectations,
 ): UnsealedBytes | null {
   const workspace = captureWorkspaceTree(repository, path);
-  const trees = expected.trees.map((snapshot) => commitTree(repository, snapshot));
   const headIsSealed = expected.heads.includes(workspace.head);
   if (workspace.changes.submodules.length > 0) {
     return {
@@ -70,8 +99,8 @@ export function unsealedBytes(
       ...(headIsSealed ? {} : { head: workspace.head }),
     };
   }
-  if (headIsSealed && trees.includes(workspace.tree)) return null;
-  const alternatives = trees.map((tree) => changedPaths(repository, tree, workspace.tree));
+  if (headIsSealed && expected.trees.includes(workspace.tree)) return null;
+  const alternatives = expected.trees.map((tree) => changedPaths(repository, tree, workspace.tree));
   alternatives.sort((left, right) => left.length - right.length || left.join("\0").localeCompare(right.join("\0")));
   return {
     kind: "unsealed-bytes",
