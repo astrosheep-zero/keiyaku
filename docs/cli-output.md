@@ -234,7 +234,21 @@ Activity follows the identity and optional relation directly. Status, wait,
 unfinished observed call, and kill place life on one two-space-indented
 trailing line immediately after activity. Ordinary and interrupt tell output
 and history omit life. The life vocabulary remains `● running`, `○ asleep`,
-`× killed`, `? stranded`, `? hung`, and `? untidy`. JSON values, timeline row
+`× killed`, `? stranded`, `? hung`, and `? untidy`. The shared snapshot then
+appends created Task context from the typed `AkumaObservation` after that
+existing body, including after the life footer on commands that show one:
+
+```text
+  tasks <N>
+  <mark> <complete TaskId> · P<n> <disposition> — <title>
+```
+
+Zero matches render `tasks 0`; failure renders `! tasks failed <diagnostic>`.
+Use the existing Task disposition glyphs and wrapping rules. Complete TaskIds
+and titles are never truncated, and the block does not consume or alter
+timeline row budgets. Raw answered wait, call, history, compact FLEET,
+timeline selection, and activity budgets remain unchanged. Renderers perform
+no Task, Heart, or Dispatch lookup. JSON values, timeline row
 semantics, and history model remain unchanged.
 
 Post-admission physical or settlement failures remain inside the accepted

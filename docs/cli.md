@@ -391,7 +391,22 @@ beginning with `U+2514` and `U+2500`; an unassociated Akuma omits that line.
 Identity rows never contain current life, and no divider or blank line splits
 the relation from the following activity. Status, unfinished or non-answered
 single-target wait, every multi-target wait, unfinished observed call, and kill
-end with the public life on a subdued trailing line. Ordinary and interrupt
+end with the public life on a subdued trailing line. Wherever a returned
+`AkumaObservation` is rendered, the shared snapshot appends created Task
+context after that existing snapshot body, including after the life footer:
+
+```text
+  tasks <N>
+  <mark> <complete TaskId> · P<n> <disposition> — <title>
+```
+
+Zero matches render `tasks 0`; failure renders `! tasks failed <diagnostic>`.
+Use the existing Task disposition glyphs and wrapping rules. Complete TaskIds
+and titles are never truncated, and the block does not consume or alter
+timeline row budgets. The existing exact-answer optimization for an answered
+ordinary one-member wait remains byte-for-byte raw and therefore has no
+snapshot block; JSON still contains the complete `AkumaObservation`. Call,
+history, and compact Kanshi FLEET text remain unchanged. Ordinary and interrupt
 tell compose the refreshed snapshot without a current-life claim; history does
 the same for its page, while `history --last` writes exact answer bytes. An
 ordinary answered single-target wait and an answered default call likewise

@@ -9,10 +9,22 @@ import {
 import { readBudgetedStatus } from "../akuma/akuma.js";
 import type { ContractId } from "../core/facts/types.js";
 import { readDispatch } from "../dispatch/index.js";
+import type { TaskRow } from "../task/index.js";
+import { observeTaskBoard } from "../task/operations.js";
 import type { WorldRoot } from "../world.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
+
+export type CreatedTaskObservation =
+  | Readonly<{ kind: "present"; rows: readonly TaskRow[] }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+
+export type AkumaObservation = Readonly<{
+  status: AkumaStatus;
+  contractId?: ContractId;
+  createdTasks: CreatedTaskObservation;
+}>;
 
 export type AkumaWaitInput = AkumaSetAddressInput & Readonly<{
   completion?: "any" | "all";
@@ -21,19 +33,21 @@ export type AkumaWaitInput = AkumaSetAddressInput & Readonly<{
 
 export type AkumaWaitResult = Readonly<{
   completion: "any" | "all";
-  statuses: readonly AkumaStatusView[];
+  observations: readonly AkumaObservation[];
 }>;
 
-export type AkumaStatusView = Readonly<{ status: AkumaStatus; contractId?: ContractId }>;
-
 export type AkumaKillResult = Readonly<{
-  results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence; observation: AkumaStatusView }>[];
+  results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence; observation: AkumaObservation }>[];
 }>;
 
 export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string }>;
-export type AkumaTellResult = Readonly<{ akuma: AkumaStatus["id"]; tell: TellResult; observation: AkumaStatusView }>;
+export type AkumaTellResult = Readonly<{ akuma: AkumaStatus["id"]; tell: TellResult; observation: AkumaObservation }>;
 export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string }>;
-export type AkumaInterruptResult = Readonly<{ id: AkumaStatus["id"]; receipt: InterruptReceipt; observation: AkumaStatusView }>;
+export type AkumaInterruptResult = Readonly<{
+  id: AkumaStatus["id"];
+  receipt: InterruptReceipt;
+  observation: AkumaObservation;
+}>;
 export type AkumaHistoryInput = AkumaAddressInput & Readonly<{
   before?: number;
   since?: number;
@@ -54,9 +68,48 @@ async function contractFor(repo: Repo | undefined, id: AkumaStatus["id"]): Promi
   return dispatch?.contractId;
 }
 
-async function statusView(status: AkumaStatus, repo?: Repo): Promise<AkumaStatusView> {
+function createdTaskDiagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function createdTasksFor(
+  path: WorldRoot,
+  statuses: readonly AkumaStatus[],
+): Promise<readonly CreatedTaskObservation[]> {
+  let board;
+  try {
+    board = await observeTaskBoard(path);
+  } catch (error) {
+    const failed = { kind: "failed" as const, diagnostic: createdTaskDiagnostic(error) };
+    return statuses.map(() => failed);
+  }
+  return statuses.map((status) => ({ kind: "present", rows: board.selectCreatedBy(status.id) }));
+}
+
+async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): Promise<AkumaObservation> {
   const contractId = await contractFor(repo, status.id);
-  return contractId === undefined ? { status } : { status, contractId };
+  const [createdTasks] = await createdTasksFor(path, [status]);
+  return {
+    status,
+    createdTasks: createdTasks!,
+    ...(contractId === undefined ? {} : { contractId }),
+  };
+}
+
+async function observeAkumaSet(
+  statuses: readonly AkumaStatus[],
+  path: WorldRoot,
+  repo?: Repo,
+): Promise<readonly AkumaObservation[]> {
+  const created = await createdTasksFor(path, statuses);
+  return await Promise.all(statuses.map(async (status, index) => {
+    const contractId = await contractFor(repo, status.id);
+    return {
+      status,
+      createdTasks: created[index]!,
+      ...(contractId === undefined ? {} : { contractId }),
+    };
+  }));
 }
 
 function timeout(value: unknown): number | undefined {
@@ -106,9 +159,9 @@ function setAddress(values: Record<string, unknown>): AkumaSetAddressInput {
   };
 }
 
-export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaStatusView> {
+export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaObservation> {
   const addressed = await addressAkuma(input);
-  return await statusView(await source(addressed.path).of({ id: addressed.id }).status(), input.repo);
+  return await observeAkuma(await source(addressed.path).of({ id: addressed.id }).status(), addressed.path, input.repo);
 }
 
 export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult> {
@@ -132,7 +185,10 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
     const settled = statuses.map((status) => status.life !== "running");
     if ((selected === "any" ? settled.some(Boolean) : settled.every(Boolean))
       || (deadline !== undefined && performance.now() >= deadline)) {
-      return { completion: selected, statuses: await Promise.all(statuses.map(async (status) => await statusView(status, values.repo as Repo | undefined))) };
+      return {
+        completion: selected,
+        observations: await observeAkumaSet(statuses, addressed.path, values.repo as Repo | undefined),
+      };
     }
     await delay(deadline === undefined ? 25 : Math.min(25, Math.max(0, deadline - performance.now())));
   }
@@ -142,8 +198,9 @@ export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillR
   const addressed = await addressAkumaSet(input);
   const handles = addressed.ids.map((id) => source(addressed.path).of({ id }));
   const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
-  const observations = await Promise.all(addressed.ids.map(async (id) =>
-    await statusView(await source(addressed.path).of({ id }).status(), input.repo)));
+  const statuses = await Promise.all(addressed.ids.map(async (id) =>
+    await source(addressed.path).of({ id }).status()));
+  const observations = await observeAkumaSet(statuses, addressed.path, input.repo);
   return {
     results: addressed.ids.map((id, index) => ({
       id,
@@ -164,8 +221,9 @@ export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult>
   const addressed = await addressAkuma(directAddress(values));
   const handle = source(addressed.path).of({ id: addressed.id });
   const tell = await handle.tell(values.body);
-  const observation = await statusView(
+  const observation = await observeAkuma(
     await handle.status(),
+    addressed.path,
     values.repo as Repo | undefined,
   );
   return { akuma: addressed.id, tell, observation };
@@ -182,7 +240,7 @@ export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaI
   const addressed = await addressAkuma(directAddress(values));
   const handle = source(addressed.path).of({ id: addressed.id });
   const receipt = await handle.interrupt(values.body);
-  const observation = await statusView(await handle.status(), values.repo as Repo | undefined);
+  const observation = await observeAkuma(await handle.status(), addressed.path, values.repo as Repo | undefined);
   return { id: addressed.id, receipt, observation };
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
@@ -13,9 +13,10 @@ import { AkumaWorldScopeError, Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { parseArgv } from "../src/cli/parse.js";
+import { projectTaskBoardObservation } from "../src/task/board.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
-import { serializeTaskDocument } from "../src/task/document.js";
-import { authorityPath } from "../src/task/store.js";
+import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
+import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 import { matchesAkumaGlob, parseAkumaGlob } from "../src/identity/selector.js";
@@ -98,14 +99,14 @@ async function openOrdinary(
   }
 }
 
-function ordinaryEntries(view: Awaited<ReturnType<typeof Keiyaku.wait>>["statuses"][number]) {
+function ordinaryEntries(view: Awaited<ReturnType<typeof Keiyaku.wait>>["observations"][number]) {
   return view.status.timeline.entries.filter((entry) =>
     entry.kind === "row"
       && !(entry.row.kind === "tool" && entry.row.state === "active")
       && !(entry.row.kind === "tell" && entry.row.state === "pending"));
 }
 
-function hasPinned(view: Awaited<ReturnType<typeof Keiyaku.wait>>["statuses"][number]): boolean {
+function hasPinned(view: Awaited<ReturnType<typeof Keiyaku.wait>>["observations"][number]): boolean {
   return view.status.timeline.entries.some((entry) =>
     entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active")
     && view.status.timeline.entries.some((entry) =>
@@ -147,7 +148,7 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
       completion: "all",
       timeoutMs: 0,
     });
-    assert.deepEqual(waited.statuses.map((view) => view.status.id), [reviewer.id, worker.id]);
+    assert.deepEqual(waited.observations.map((view) => view.status.id), [reviewer.id, worker.id]);
 
     const killed = await Keiyaku.kill({ path: root, akuma: ["@review", worker.id] });
     assert.deepEqual(killed.results.map((member) => member.id), [reviewer.id, worker.id]);
@@ -200,14 +201,14 @@ test("plural wait shares one 30-row budget across five complete members", async 
       completion: "all",
       timeoutMs: 0,
     });
-    const ordinary = waited.statuses.flatMap(ordinaryEntries);
+    const ordinary = waited.observations.flatMap(ordinaryEntries);
     assert.equal(ordinary.length, 30);
-    assert.deepEqual(waited.statuses.slice(0, 5).map((view) => ordinaryEntries(view).length), [6, 6, 6, 6, 6]);
-    assert.equal(hasPinned(waited.statuses[4]!), true);
-    assert.equal(waited.statuses[5]!.status.timeline.kind, "open");
-    assert.equal(ordinaryEntries(waited.statuses[5]!).length, 0);
-    assert.equal(hasPinned(waited.statuses[5]!), true);
-    assert.deepEqual(waited.statuses[5]!.status.timeline.entries.map((entry) =>
+    assert.deepEqual(waited.observations.slice(0, 5).map((view) => ordinaryEntries(view).length), [6, 6, 6, 6, 6]);
+    assert.equal(hasPinned(waited.observations[4]!), true);
+    assert.equal(waited.observations[5]!.status.timeline.kind, "open");
+    assert.equal(ordinaryEntries(waited.observations[5]!).length, 0);
+    assert.equal(hasPinned(waited.observations[5]!), true);
+    assert.deepEqual(waited.observations[5]!.status.timeline.entries.map((entry) =>
       entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:2", "tool", "tell"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -252,10 +253,10 @@ test("plural wait carries unused allowance and keeps pins after exhaustion", asy
       completion: "all",
       timeoutMs: 0,
     });
-    assert.equal(waited.statuses.flatMap(ordinaryEntries).length, 30);
-    assert.equal(ordinaryEntries(waited.statuses[0]!).length, 2);
-    assert.deepEqual(waited.statuses.slice(1, 5).map((view) => ordinaryEntries(view).length), [6, 6, 6, 6]);
-    const later = waited.statuses[5]!;
+    assert.equal(waited.observations.flatMap(ordinaryEntries).length, 30);
+    assert.equal(ordinaryEntries(waited.observations[0]!).length, 2);
+    assert.deepEqual(waited.observations.slice(1, 5).map((view) => ordinaryEntries(view).length), [6, 6, 6, 6]);
+    const later = waited.observations[5]!;
     assert.deepEqual(
       ordinaryEntries(later).map((entry) => entry.kind === "row" && (entry.row.kind === "said" || entry.row.kind === "note")
         ? entry.row.text
@@ -263,10 +264,10 @@ test("plural wait carries unused allowance and keeps pins after exhaustion", asy
       ["partial-voice-3", "partial-voice-4", "partial-note-0", "partial-note-1"],
     );
     assert.equal(hasPinned(later), true);
-    assert.equal(ordinaryEntries(waited.statuses[6]!).length, 0);
-    assert.equal(hasPinned(waited.statuses[6]!), true);
-    assert.equal(waited.statuses[6]!.status.timeline.kind, "open");
-    assert.deepEqual(waited.statuses[6]!.status.timeline.entries.map((entry) =>
+    assert.equal(ordinaryEntries(waited.observations[6]!).length, 0);
+    assert.equal(hasPinned(waited.observations[6]!), true);
+    assert.equal(waited.observations[6]!.status.timeline.kind, "open");
+    assert.deepEqual(waited.observations[6]!.status.timeline.entries.map((entry) =>
       entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:7", "tool", "tell"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -561,7 +562,7 @@ test("same-World Contract selector wait keeps Dispatch order and completion", as
     completion: "all",
     timeoutMs: 0,
   });
-  assert.deepEqual(waited.statuses.map((view) => view.status.id), [earlier.id, later.id]);
+  assert.deepEqual(waited.observations.map((view) => view.status.id), [earlier.id, later.id]);
   assert.equal(waited.completion, "all");
   const any = await Keiyaku.wait({
     path: world,
@@ -571,7 +572,7 @@ test("same-World Contract selector wait keeps Dispatch order and completion", as
     timeoutMs: 0,
   });
   assert.equal(any.completion, "any");
-  assert.equal(any.statuses.length, 2);
+  assert.equal(any.observations.length, 2);
 });
 
 test("cross-World Contract selector wait and kill refuse before operating", async () => {
@@ -694,7 +695,7 @@ test("fleet status projects Dispatch association without changing Akuma core", a
     repo: await Repo.at({ path: repository.path }),
     timeoutMs: 0,
   });
-  assert.equal(waited.statuses[0]!.contractId, owner);
+  assert.equal(waited.observations[0]!.contractId, owner);
 });
 
 test("CLI wait and kill expose Contract selector world refusal as typed usage", async () => {
@@ -764,6 +765,150 @@ test("exact set selection does not read unrelated Alias authority", async () => 
     writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "broken\n");
     const id = akuId({ archetype: "worker", suffix: "deadbeef" });
     assert.deepEqual((await addressAkumaSet({ path: root, akuma: [id] })).ids, [id]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function creatorTask(input: Readonly<{
+  id: TaskId;
+  title: string;
+  createdBy?: string;
+  state?: TaskDocument["state"];
+  priority?: TaskDocument["priority"];
+}>): TaskDocument {
+  return {
+    id: input.id,
+    title: input.title,
+    body: "",
+    note: "",
+    state: input.state ?? "open",
+    priority: input.priority ?? 2,
+    needs: [],
+    parent: null,
+    supersedes: [],
+    relates: [],
+    ...(input.createdBy === undefined ? {} : { createdBy: input.createdBy }),
+    createdAt: "2026-08-17T00:00:00.000Z",
+    updatedAt: "2026-08-17T00:00:00.000Z",
+  };
+}
+
+function writeCreatorTask(world: string, document: TaskDocument): void {
+  const path = authorityPath(world, document.id);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, serializeTaskDocument(document));
+}
+
+test("creator testimony appears on every Fleet observation carrier", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-created-tasks-"));
+  try {
+    const worker = await answered(root, "worker", "00000001");
+    const reviewer = await answered(root, "reviewer", "00000002");
+    const world = await World.at(root);
+    writeCreatorTask(world, creatorTask({
+      id: "task/match-high", title: "Match high", createdBy: worker.id, priority: 0, state: "done",
+    }));
+    writeCreatorTask(world, creatorTask({
+      id: "task/match-low", title: "Match low", createdBy: worker.id, priority: 3, state: "open",
+    }));
+    writeCreatorTask(world, creatorTask({
+      id: "task/reviewer-only", title: "Reviewer only", createdBy: reviewer.id, priority: 1,
+    }));
+    writeCreatorTask(world, creatorTask({
+      id: "task/unsigned", title: "Unsigned",
+    }));
+    writeCreatorTask(world, creatorTask({
+      id: "task/near-miss", title: "Near miss", createdBy: `${worker.id} `,
+    }));
+    const expected = projectTaskBoardObservation((await readBoard(world)).board);
+    const workerRows = expected.selectCreatedBy(worker.id);
+    const reviewerRows = expected.selectCreatedBy(reviewer.id);
+    assert.deepEqual(workerRows.map((row) => row.id), ["task/match-high", "task/match-low"]);
+    assert.deepEqual(reviewerRows.map((row) => row.id), ["task/reviewer-only"]);
+
+    const status = await Keiyaku.status({ path: root, akuma: worker.id });
+    assert.deepEqual(status.createdTasks, { kind: "present", rows: workerRows });
+    const waited = await Keiyaku.wait({ path: root, akuma: [worker.id], timeoutMs: 0 });
+    assert.deepEqual(waited.observations[0]!.createdTasks, { kind: "present", rows: workerRows });
+    const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
+    assert.deepEqual(told.observation.createdTasks, { kind: "present", rows: workerRows });
+    const interrupted = await Keiyaku.interrupt({ path: root, akuma: worker.id, body: "stop" });
+    assert.deepEqual(interrupted.observation.createdTasks, { kind: "present", rows: workerRows });
+    const killed = await Keiyaku.kill({ path: root, akuma: [worker.id] });
+    assert.deepEqual(killed.results[0]!.observation.createdTasks, { kind: "present", rows: workerRows });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("multi-member wait and kill project every member from one Task board snapshot", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-created-set-"));
+  try {
+    const worker = await answered(root, "worker", "00000001");
+    const reviewer = await answered(root, "reviewer", "00000002");
+    const world = await World.at(root);
+    writeCreatorTask(world, creatorTask({
+      id: "task/from-worker", title: "From worker", createdBy: worker.id, priority: 1,
+    }));
+    writeCreatorTask(world, creatorTask({
+      id: "task/from-reviewer", title: "From reviewer", createdBy: reviewer.id, priority: 0, state: "drop",
+    }));
+    const expected = projectTaskBoardObservation((await readBoard(world)).board);
+    const waited = await Keiyaku.wait({
+      path: root,
+      akuma: [worker.id, reviewer.id],
+      completion: "all",
+      timeoutMs: 0,
+    });
+    assert.deepEqual(waited.observations.map((observation) => observation.status.id), [reviewer.id, worker.id]);
+    assert.deepEqual(waited.observations.map((observation) => observation.createdTasks), [
+      { kind: "present", rows: expected.selectCreatedBy(reviewer.id) },
+      { kind: "present", rows: expected.selectCreatedBy(worker.id) },
+    ]);
+    const killed = await Keiyaku.kill({ path: root, akuma: [worker.id, reviewer.id] });
+    assert.deepEqual(killed.results.map((member) => member.id), [reviewer.id, worker.id]);
+    assert.deepEqual(killed.results.map((member) => member.observation.createdTasks), [
+      { kind: "present", rows: expected.selectCreatedBy(reviewer.id) },
+      { kind: "present", rows: expected.selectCreatedBy(worker.id) },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Task board failure keeps Fleet status and aggregate members", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-created-failed-"));
+  try {
+    const worker = await answered(root, "worker", "00000001");
+    const reviewer = await answered(root, "reviewer", "00000002");
+    mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+    writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
+    const status = await Keiyaku.status({ path: root, akuma: worker.id });
+    assert.equal(status.status.id, worker.id);
+    assert.equal(status.createdTasks.kind, "failed");
+    if (status.createdTasks.kind === "failed") assert.match(status.createdTasks.diagnostic, /front matter/u);
+    const waited = await Keiyaku.wait({
+      path: root,
+      akuma: [worker.id, reviewer.id],
+      completion: "all",
+      timeoutMs: 0,
+    });
+    assert.deepEqual(waited.observations.map((observation) => observation.status.id), [reviewer.id, worker.id]);
+    assert.equal(waited.observations.every((observation) => observation.createdTasks.kind === "failed"), true);
+    assert.deepEqual(
+      waited.observations.map((observation) => observation.createdTasks),
+      [status.createdTasks, status.createdTasks],
+    );
+    const told = await Keiyaku.tell({ path: root, akuma: worker.id, body: "continue" });
+    assert.equal(told.akuma, worker.id);
+    assert.equal(told.tell.admission.fact, "recorded");
+    assert.equal(typeof told.tell.admission.tellId, "string");
+    assert.deepEqual(told.observation.createdTasks, status.createdTasks);
+    const killed = await Keiyaku.kill({ path: root, akuma: [reviewer.id] });
+    assert.equal(killed.results[0]!.id, reviewer.id);
+    assert.equal(killed.results[0]!.evidence, "already-stopped");
+    assert.deepEqual(killed.results[0]!.observation.createdTasks, status.createdTasks);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

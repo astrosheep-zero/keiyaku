@@ -178,7 +178,7 @@ Repo.
 The Fleet facet composes only public Akuma handles after that expansion:
 
 ```ts
-Keiyaku.status(input: AkumaAddressInput): Promise<AkumaStatusView>
+Keiyaku.status(input: AkumaAddressInput): Promise<AkumaObservation>
 Keiyaku.tell(input: AkumaTellInput): Promise<AkumaTellResult>
 Keiyaku.interrupt(input: AkumaInterruptInput): Promise<AkumaInterruptResult>
 Keiyaku.history(input: AkumaHistoryInput): Promise<AkumaHistoryResult>
@@ -187,10 +187,25 @@ Keiyaku.kill(input: AkumaSetAddressInput): Promise<AkumaKillResult>
 ```
 
 ```ts
+type CreatedTaskObservation =
+  | Readonly<{ kind: "present"; rows: readonly TaskRow[] }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+
+type AkumaObservation = Readonly<{
+  status: AkumaStatus;
+  contractId?: ContractId;
+  createdTasks: CreatedTaskObservation;
+}>;
+
+type AkumaWaitResult = Readonly<{
+  completion: "any" | "all";
+  observations: readonly AkumaObservation[];
+}>;
+
 type AkumaTellResult = {
   akuma: AkuId;
   tell: TellResult;
-  observation: AkumaStatusView;
+  observation: AkumaObservation;
 };
 
 type AkumaInterruptResult = {
@@ -198,34 +213,45 @@ type AkumaInterruptResult = {
   receipt:
     | { kind: "interrupted"; putDown: "was-idle" | "self-aborted"; tell: TellResult }
     | { kind: "unavailable"; evidence: "hung" | "untidy" | "unavailable" };
-  observation: AkumaStatusView;
+  observation: AkumaObservation;
 };
 
 type AkumaKillResult = {
   results: readonly {
     id: AkuId;
     evidence: KillEvidence;
-    observation: AkumaStatusView;
+    observation: AkumaObservation;
   }[];
-};
-
-type AkumaStatusView = {
-  status: AkumaStatus;
-  contractId?: ContractId;
 };
 ```
 
 The optional `repo` coordinate enables this read-only Dispatch composition.
 `status` is always the unmodified Akuma observation; the optional neighboring
-`contractId` comes only from Dispatch. Fleet never intersects the association
-into `AkumaStatus`, and every Fleet observation keeps the association in this
-one location. Akuma core still knows no Contract, Dispatch, or Repo, and
-renderers perform no lookup.
+`contractId` comes only from Dispatch. `createdTasks` are the current Task
+rows whose parsed `createdBy` equals `status.id` by exact string bytes. Do not
+parse `createdBy` as AkuId, authenticate it, normalize it, or infer it from
+namespace, Dispatch, cwd, Git author, TaskHolder, or later Task mutations.
+Missing `createdBy` does not match. Manual testimony remains authoritative
+under existing Task law. A successful Task read with no matches is
+`{ kind: "present", rows: [] }`. Task authority corruption or infrastructure
+failure becomes `{ kind: "failed", diagnostic }` and never suppresses an Akuma
+status, Dispatch association, mutation receipt, kill evidence, or another
+member. Each direct status or single-member mutation first obtains its existing
+fresh Akuma status, then performs one Task board observation. Multi-member wait
+performs no Task read during its polling loop; once the existing completion
+predicate or timeout selects the final statuses, it reads the Task board
+exactly once and projects every member from that same board snapshot.
+Multi-member kill likewise reads the Task board once for all post-action
+observations. There is no `AkumaStatusView` export, type alias, or wait
+`statuses` compatibility field. Fleet never intersects the association into
+`AkumaStatus`. Akuma core still knows no Contract, Dispatch, Task, or Repo,
+and renderers perform no lookup. `CallObservation` and `AkumaHistoryResult`
+remain on their current raw status/history shapes.
 
 Wait and kill freeze their subject set at entry. A one-member wait defaults to
 `all`; a multi-member wait requires `completion: "any" | "all"`. Any returns
 after one member satisfies the ordinary Akuma wait predicate; all returns after
-every member does. Timeout returns one complete aggregate of fresh statuses
+every member does. Timeout returns one complete aggregate of fresh observations
 and is not a streaming or partial result. A plural aggregate carries one shared
 30-row ordinary-detail budget, equal to five complete default `3 + 3` snapshots.
 Each member uses the same `tail=3`, `voice=3` selector as ordinary status. After

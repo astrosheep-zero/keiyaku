@@ -40,6 +40,10 @@ export function deferredTaskHolderSettlement(input: Readonly<{
   return { actions: [], lags: [{ kind: "settlement-failed", surface: "task-holder", ...input }] };
 }
 
+export function contractNamespace(id: ContractId): readonly [string] {
+  return [contractSegment(id)];
+}
+
 export type SettlementInput = Readonly<{
   repository: GitRepository;
   channel: GitDecodeChannel;
@@ -132,7 +136,7 @@ async function settleNamespace(state: ContractState, effects: readonly Effect[],
       actions.push({
         kind: "namespace-context",
         path: effect.path,
-        action: await repairNamespaceContext(world, [contractSegment(state.id)]),
+        action: await repairNamespaceContext(world, contractNamespace(state.id)),
       });
     } catch (error) {
       lags.push({

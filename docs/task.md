@@ -280,7 +280,14 @@ claim, assignment, scheduler, Contract, Akuma, Git, or prose-inferred field.
 select recursive descendants only; a missing parent is a typed Task refusal.
 An omitted query expression selects active Tasks, excluding `done` and `drop`.
 The Task operations owner can project the complete world rows and these blocker
-references from one board snapshot for a composite reader; this observation
+references from one board snapshot for a composite reader. That same internal
+composite observation also exposes enough data to select ordinary `TaskRow`
+values by exact namespace or current `createdBy`. Public contextual rows
+contain only the existing `TaskRow` fields; they do not expose `createdBy`,
+timestamps, note, body, or Task persistence. Both selections include every
+Task state and preserve priority-then-TaskId byte order. They are complete,
+not paged: there is no row cap, latest-only rule, continuation, omitted
+counter, cache, reverse index, or persisted projection. This observation
 does not expose Task persistence or read TaskHolder or Contract authority.
 
 ## Compose

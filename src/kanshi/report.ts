@@ -25,6 +25,7 @@ export type ContractFleetAttachment = Readonly<{
 export type ContractKanshiRow = ContractBoard["rows"][number] & Readonly<{
   holder: ContractHolderObservation;
   fleet: readonly ContractFleetAttachment[];
+  namespaceTasks: Section<readonly TaskRow[]>;
 }>;
 
 export type ContractKanshiBoard = Omit<ContractBoard, "rows"> & Readonly<{

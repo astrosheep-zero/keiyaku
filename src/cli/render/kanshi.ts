@@ -189,6 +189,26 @@ function endpointFact(id: string, observed: string | undefined): string {
   return `-> ${id}`;
 }
 
+function renderNamespaceTasks(row: ContractKanshiRow, context: TextRenderContext): readonly string[] {
+  if (row.namespaceTasks.kind === "absent") return plumbFacts(["namespace tasks absent"], context.columns);
+  if (row.namespaceTasks.kind === "failed") {
+    return plumbFacts([`namespace tasks failed ${row.namespaceTasks.failure.message}`], context.columns);
+  }
+  const lines = [...plumbFacts([`namespace tasks ${row.namespaceTasks.value.length}`], context.columns)];
+  for (const task of row.namespaceTasks.value) {
+    const scan = `${taskMark(task)} ${task.id} · P${task.priority} ${task.disposition}`;
+    const title = safeText(task.title);
+    const inline = `${scan} — ${title}`;
+    if (displayColumns(inline) <= context.columns - displayColumns(PLUMB)) {
+      lines.push(...plumbFacts([inline], context.columns));
+    } else {
+      lines.push(...plumbFacts([`${scan} —`], context.columns));
+      lines.push(...plumbBlock(title, context.columns));
+    }
+  }
+  return lines;
+}
+
 function renderContracts(report: KanshiReport, context: TextRenderContext, selection: "world" | "contract"): readonly string[] {
   const section = report.contracts;
   if (section.kind === "absent") return sectionAbsent("KEIYAKU", context.columns);
@@ -226,6 +246,7 @@ function renderContracts(report: KanshiReport, context: TextRenderContext, selec
       const aliases = attached.aliases.length === 0 ? "" : ` (${attached.aliases.join(" ")})`;
       lines.push(...plumbFacts([`akuma ${attached.id}${aliases}`], context.columns));
     }
+    if (selection === "contract") lines.push(...renderNamespaceTasks(row, context));
   }
   const attention = rows.filter(contractHot).length;
   lines.push(aperture(`${rows.length} keiyaku · ${attention} attention`, context.columns));

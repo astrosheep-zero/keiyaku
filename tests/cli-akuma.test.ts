@@ -14,7 +14,7 @@ import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/requests.js";
-import type { AkumaStatusView, ContractHistory, Fact } from "../src/index.js";
+import type { AkumaObservation, ContractHistory, Fact } from "../src/index.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
@@ -32,6 +32,13 @@ import { makeGitRepository } from "./support/git.js";
 import type { ActivityRow } from "../src/akuma/index.js";
 
 const PACKAGED_CLI = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
+const emptyCreatedTasks = { kind: "present" as const, rows: [] };
+function akumaObservation(
+  status: AkumaObservation["status"],
+  extra: Omit<Partial<AkumaObservation>, "status"> = {},
+): AkumaObservation {
+  return { status, createdTasks: emptyCreatedTasks, ...extra };
+}
 
 function packagedCliEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const next = { ...env };
@@ -401,7 +408,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
       omitted: 12,
     },
   };
-  const result = { kind: "akuma" as const, action: "status" as const, status: { status } };
+  const result = { kind: "akuma" as const, action: "status" as const, status: akumaObservation(status) };
   const text = renderAkumaText(command, result);
   assert.match(text, /running tests/u);
   assert.match(text, /same minute/u);
@@ -412,19 +419,20 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   assert.match(snapshotLines[2]!, /^\d{2}:\d{2} · note   /u);
   assert.equal(snapshotLines[3], "      ⋮ 12 omitted");
   assert.match(snapshotLines[4]!, /^ {5} · think  “same minute”$/u);
-  assert.equal(snapshotLines.at(-1), "  ● running");
+  assert.equal(snapshotLines.at(-2), "  ● running");
+  assert.equal(snapshotLines.at(-1), "  tasks 0");
   assert.equal(snapshotLines.filter((line) => line === "─────").length, 1);
   assert.equal((akumaJsonValue(result) as { status: typeof status }).status.timeline.omitted, 12);
   assert.equal(renderAkumaText(command, {
     kind: "akuma",
     action: "wait",
-    result: { completion: "all", statuses: [{ status }] },
+    result: { completion: "all", observations: [akumaObservation(status)] },
   }), renderAkumaText(command, result));
   const aliasedWait = renderAkumaText(command, {
     kind: "akuma",
     action: "wait",
     alias: "@review",
-    result: { completion: "all", statuses: [{ status }] },
+    result: { completion: "all", observations: [akumaObservation(status)] },
   });
   assert.equal(aliasedWait.split("\n")[1], "aku/worker/1234abcd (@review)");
   const answered = {
@@ -440,12 +448,12 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   assert.equal(renderAkumaText(command, {
     kind: "akuma",
     action: "wait",
-    result: { completion: "any", statuses: [{ status: answered }] },
+    result: { completion: "any", observations: [akumaObservation(answered)] },
   }), "first answer");
   const plural = renderAkumaText(command, {
     kind: "akuma",
     action: "wait",
-    result: { completion: "all", statuses: [{ status: answered }, { status: other }] },
+    result: { completion: "all", observations: [akumaObservation(answered), akumaObservation(other)] },
   });
   assert.match(plural, /aku\/worker\/1234abcd/u);
   assert.match(plural, /first answer/u);
@@ -460,7 +468,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
     result: {
       akuma: status.id,
       tell: { admission: { tellId: "tell-1", fact: "recorded" }, wake: "spawned" },
-      observation: { status },
+      observation: akumaObservation(status),
     },
   };
   const recordedText = renderAkumaText(command, recorded);
@@ -480,7 +488,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
     result: {
       akuma: status.id,
       tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
-      observation: { status: {
+      observation: akumaObservation({
         ...status,
         timeline: {
           ...status.timeline,
@@ -493,7 +501,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
             state: "told" as const,
           } }],
         },
-      } },
+      }),
     },
   };
   assert.equal(renderAkumaText(command, observedTell).match(/current input/gu)?.length, 1);
@@ -518,7 +526,7 @@ test("Akuma snapshot rows use fixed semantic line budgets", () => {
       ...base,
       timeline,
     };
-    const rendered = renderAkumaText(command, { kind: "akuma", action: "status", status: { status } }, { columns: 34, color: false }).split("\n");
+    const rendered = renderAkumaText(command, { kind: "akuma", action: "status", status: akumaObservation(status) }, { columns: 34, color: false }).split("\n");
     const start = rendered.findIndex((line) => / [·✓!⧖⧗?] /u.test(line) || line.includes("⋮"));
     const footer = rendered.findIndex((line) => /^  (?:●|○|×|\?)/u.test(line));
     return rendered.slice(start === -1 ? 0 : start, footer === -1 ? undefined : footer);
@@ -603,7 +611,7 @@ test("ordinary tell leads with mutation authority before an asleep observation",
     result: {
       akuma: observation.id,
       tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
-      observation: { status: observation },
+      observation: akumaObservation(observation),
     },
   };
   const text = renderAkumaText(command, result);
@@ -691,7 +699,7 @@ test("Akuma status-oriented commands include life while tell excludes it", () =>
     life: "running" as const,
     timeline: { kind: "idle" as const, entries: [], omitted: 0 },
   };
-  const observation = { status };
+  const observation = akumaObservation(status);
   const tell = { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const };
   const cases = [
     {
@@ -703,7 +711,7 @@ test("Akuma status-oriented commands include life while tell excludes it", () =>
     {
       name: "wait",
       command: parseArgv(["wait", id]).command,
-      result: { kind: "akuma" as const, action: "wait" as const, result: { completion: "all" as const, statuses: [observation] } },
+      result: { kind: "akuma" as const, action: "wait" as const, result: { completion: "all" as const, observations: [observation] } },
       hasLife: true,
     },
     {
@@ -1302,8 +1310,9 @@ test("akuma call renders optional integration stages and maps partial success", 
     },
   };
   const waitCommand = parseArgv(["wait", akuma]).command;
-  const waited = { kind: "akuma" as const, action: "wait" as const, result: { completion: "all" as const, statuses: [{ status: running.result.observation.status }] } };
-  assert.equal(renderAkumaText(command, running), renderAkumaText(waitCommand, waited));
+  const waited = { kind: "akuma" as const, action: "wait" as const, result: { completion: "all" as const, observations: [akumaObservation(running.result.observation.status)] } };
+  assert.equal(renderAkumaText(command, running), `─────\n${akuma}\n  ● running`);
+  assert.equal(renderAkumaText(waitCommand, waited), `─────\n${akuma}\n  ● running\n  tasks 0`);
 
   const failedTurn = {
     ...answered,
@@ -1406,11 +1415,11 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
         putDown: "self-aborted" as const,
         tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
       },
-      observation: { status: {
+      observation: akumaObservation({
         id: "aku/claude/1d1e0004" as const,
         life: "asleep" as const,
         timeline: { entries: [], lowestRetained: null, highest: null },
-      }, contractId: "kei/provider-core-review" as const },
+      }, { contractId: "kei/provider-core-review" as const }),
     },
   };
   const interruptedText = renderAkumaText(parsed.command, interrupted);
@@ -1510,7 +1519,7 @@ test("Akuma status, wait, and history share public observations without embeddin
     });
     assert.equal("kind" in waitResult && waitResult.kind, "akuma");
     if (!("kind" in waitResult) || waitResult.kind !== "akuma" || waitResult.action !== "wait") return;
-    assert.deepEqual(waitResult.result.statuses, [statusResult.status]);
+    assert.deepEqual(waitResult.result.observations, [statusResult.status]);
     assert.equal(renderAkumaText(parseArgv(["wait", allocated.id]).command, waitResult), "cli answer");
     assert.equal(akumaRawAnswer(waitResult), "cli answer");
     const waited = await captureMain(["-C", root, "wait", allocated.id, "--timeout", "0ms"]);
@@ -1542,12 +1551,12 @@ test("Akuma status, wait, and history share public observations without embeddin
     const failedWait = await captureMain(["-C", root, "wait", allocated.id, "--timeout", "0ms"]);
     assert.equal(failedWait.code, 0);
     assert.match(failedWait.stdout, /! error\s+later failed/u);
-    assert.match(failedWait.stdout, / {2}○ asleep\n$/u);
+    assert.match(failedWait.stdout, / {2}○ asleep\n  tasks 0\n$/u);
     assert.notEqual(failedWait.stdout, "cli answer");
     assert.equal(akumaRawAnswer({
       kind: "akuma",
       action: "wait",
-      result: { completion: "all", statuses: [failedStatus.status] },
+      result: { completion: "all", observations: [failedStatus.status] },
     }), undefined);
 
     const historyParsed = parseArgv(["-C", root, "history", allocated.id]);
@@ -1686,8 +1695,8 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
   const id = "aku/worker/1234abcd" as const;
   const other = "aku/reviewer/deadbeef" as const;
   const waitCommand = parseArgv(["wait", id]).command;
-  const answered = (answer: string, life: "asleep" | "running" | "killed" | "stranded" | "hung" | "untidy" = "asleep") => ({
-    status: {
+  const answered = (answer: string, life: "asleep" | "running" | "killed" | "stranded" | "hung" | "untidy" = "asleep") =>
+    akumaObservation({
       id,
       life,
       timeline: {
@@ -1702,12 +1711,11 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
           outcome: { kind: "answered" as const, answer, historyId: "history", session: { sessionId: "session" } },
         },
       },
-    },
-  });
-  const waitOf = (...statuses: readonly AkumaStatusView[]): Extract<AkumaInvocationResult, { action: "wait" }> => ({
+    });
+  const waitOf = (...observations: readonly AkumaObservation[]): Extract<AkumaInvocationResult, { action: "wait" }> => ({
     kind: "akuma",
     action: "wait",
-    result: { completion: "all", statuses },
+    result: { completion: "all", observations },
   });
   const multiline = "line one\nline two\n";
   const complete = waitOf(answered(multiline));
@@ -1720,7 +1728,7 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
       execution: { cwd: "/world", source: "world" as const },
       dispatch: { kind: "none" as const },
       alias: { kind: "none" as const },
-      observation: { kind: "observed" as const, status: complete.result.statuses[0]!.status },
+      observation: { kind: "observed" as const, status: complete.result.observations[0]!.status },
     },
     world: "/world" as import("../src/index.js").WorldRoot,
   };
@@ -1729,63 +1737,57 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
     { name: "empty", result: waitOf(answered("")), raw: "" },
     { name: "trailing", result: waitOf(answered("kept\n")), raw: "kept\n" },
     { name: "call", result: call, command: parseArgv(["call", "worker", "-"]).command, raw: multiline },
-    { name: "running", result: waitOf(answered("kept", "running")), fact: / {2}● running$/u },
-    { name: "killed", result: waitOf(answered("kept", "killed")), fact: / {2}× killed$/u },
-    { name: "stranded", result: waitOf(answered("kept", "stranded")), fact: / {2}\? stranded$/u },
-    { name: "hung", result: waitOf(answered("kept", "hung")), fact: / {2}\? hung$/u },
-    { name: "untidy", result: waitOf(answered("kept", "untidy")), fact: / {2}\? untidy$/u },
+    { name: "running", result: waitOf(answered("kept", "running")), fact: / {2}● running\n  tasks 0$/u },
+    { name: "killed", result: waitOf(answered("kept", "killed")), fact: / {2}× killed\n  tasks 0$/u },
+    { name: "stranded", result: waitOf(answered("kept", "stranded")), fact: / {2}\? stranded\n  tasks 0$/u },
+    { name: "hung", result: waitOf(answered("kept", "hung")), fact: / {2}\? hung\n  tasks 0$/u },
+    { name: "untidy", result: waitOf(answered("kept", "untidy")), fact: / {2}\? untidy\n  tasks 0$/u },
     {
       name: "readonly-none",
-      result: waitOf({
-        status: {
-          ...answered("kept").status,
-          readonly: { enforcement: "none" as const, diagnostic: "ACP cannot remove task-surface mutation capabilities" },
-        },
-      }),
+      result: waitOf(akumaObservation({
+        ...answered("kept").status,
+        readonly: { enforcement: "none" as const, diagnostic: "ACP cannot remove task-surface mutation capabilities" },
+      })),
       fact: /! ACP cannot remove task-surface mutation capabilities/u,
     },
     {
       name: "failed",
-      result: waitOf({
-        status: {
-          id,
-          life: "asleep",
-          timeline: {
-            kind: "idle",
-            entries: [],
-            omitted: 0,
-            outcome: {
-              kind: "outcome",
-              sequence: 1,
-              turnSequence: 1,
-              at: "2026-08-10T16:42:00.000Z",
-              outcome: { kind: "failed", diagnostic: "turn failed" },
-            },
+      result: waitOf(akumaObservation({
+        id,
+        life: "asleep",
+        timeline: {
+          kind: "idle",
+          entries: [],
+          omitted: 0,
+          outcome: {
+            kind: "outcome",
+            sequence: 1,
+            turnSequence: 1,
+            at: "2026-08-10T16:42:00.000Z",
+            outcome: { kind: "failed", diagnostic: "turn failed" },
           },
         },
-      }),
+      })),
       fact: /! error\s+turn failed/u,
     },
     {
       name: "open",
-      result: waitOf({
-        status: {
-          id,
-          life: "asleep",
-          timeline: {
-            kind: "open",
-            turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
-            entries: [],
-            omitted: 0,
-          },
+      result: waitOf(akumaObservation({
+        id,
+        life: "asleep",
+        timeline: {
+          kind: "open",
+          turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
+          entries: [],
+          omitted: 0,
         },
-      }),
-      fact: / {2}○ asleep$/u,
+      })),
+      fact: / {2}○ asleep\n  tasks 0$/u,
     },
     {
       name: "no-outcome",
-      result: waitOf({ status: { id, life: "asleep", timeline: { kind: "idle", entries: [], omitted: 0 } } }),
-      fact: / {2}○ asleep$/u,
+      result: waitOf(akumaObservation({ id, life: "asleep", timeline: { kind: "idle", entries: [], omitted: 0 } })),
+      fact: / {2}○ asleep\n  tasks 0$/u,
     },
   ] as const;
   for (const item of cases) {
@@ -1813,7 +1815,7 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
     `cwd /repo/.git/keiyaku/wt/atlantis\n${multiline}`,
   );
 
-  const plural = waitOf(answered("first answer"), { status: { ...answered("second answer").status, id: other } });
+  const plural = waitOf(answered("first answer"), akumaObservation({ ...answered("second answer").status, id: other }));
   assert.equal(akumaRawAnswer(plural), undefined);
   const pluralText = renderAkumaText(waitCommand, plural);
   assert.match(pluralText, /aku\/worker\/1234abcd/u);

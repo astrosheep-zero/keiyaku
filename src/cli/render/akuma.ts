@@ -1,9 +1,16 @@
 import type { ActivityRow, ActivitySnapshotEntry, SnapshotRow } from "../../akuma/index.js";
-import type { AkumaStatusView, DispatchStage } from "../../index.js";
+import type { AkumaObservation, CreatedTaskObservation, DispatchStage } from "../../index.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
 import { toolRepr } from "./akuma-tool.js";
-import { displayColumns, renderBoundedTextBlock, safeText, truncateMiddleDisplayText, type TextRenderContext } from "./terminal.js";
+import {
+  displayColumns,
+  renderBoundedTextBlock,
+  renderTextBlock,
+  safeText,
+  truncateMiddleDisplayText,
+  type TextRenderContext,
+} from "./terminal.js";
 
 const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 const OPENING_STROKE = "─────";
@@ -26,7 +33,7 @@ function snapshotHeading(id: string, alias?: string, contractId?: string): reado
   ];
 }
 
-function lifeLabel(life: AkumaStatusView["status"]["life"]): string {
+function lifeLabel(life: AkumaObservation["status"]["life"]): string {
   if (life === "running") return "● running";
   if (life === "asleep") return "○ asleep";
   if (life === "killed") return "× killed";
@@ -145,7 +152,46 @@ function groupedRows(rows: readonly ActivityRow[], context: TextRenderContext, h
   return groupedEntries(rows.filter((row) => row.kind !== "turn").map((row) => ({ kind: "row", row })), context, history);
 }
 
-function snapshotText(view: AkumaStatusView, context: TextRenderContext, options: Readonly<{ alias?: string; facts?: readonly string[]; showLife?: boolean }> = {}): string {
+type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows"][number];
+
+function taskDispositionMark(disposition: CreatedTaskRow["disposition"]): string {
+  if (disposition === "done") return "✓";
+  if (disposition === "drop") return "×";
+  if (disposition === "on_hold") return "⧗";
+  if (disposition === "in_progress") return "●";
+  return disposition === "blocked" ? "‖" : "○";
+}
+
+function taskScanLine(row: CreatedTaskRow, indent = ""): string {
+  return `${indent}${taskDispositionMark(row.disposition)} ${row.id} · P${row.priority} ${row.disposition}`;
+}
+
+function renderTaskContextLines(
+  created: CreatedTaskObservation | undefined,
+  columns: number,
+): readonly string[] {
+  if (created === undefined) return [];
+  if (created.kind === "failed") return [`! tasks failed ${safeText(created.diagnostic)}`];
+  const lines = [`  tasks ${created.rows.length}`];
+  for (const row of created.rows) {
+    const scan = `  ${taskScanLine(row)}`;
+    const title = safeText(row.title);
+    const inline = `${scan} — ${title}`;
+    if (displayColumns(inline) <= columns) lines.push(inline);
+    else lines.push(`${scan} —`, ...renderTextBlock(title, "    ", columns));
+  }
+  return lines;
+}
+
+function snapshotText(
+  view: Readonly<{
+    status: AkumaObservation["status"];
+    contractId?: AkumaObservation["contractId"];
+    createdTasks?: CreatedTaskObservation;
+  }>,
+  context: TextRenderContext,
+  options: Readonly<{ alias?: string; facts?: readonly string[]; showLife?: boolean }> = {},
+): string {
   const snapshot = view.status.timeline;
   const activity = snapshot.kind === "idle" && snapshot.outcome !== undefined
     ? groupedRows([
@@ -158,7 +204,13 @@ function snapshotText(view: AkumaStatusView, context: TextRenderContext, options
     ...(options.facts ?? []),
   ];
   const footer = options.showLife === false ? [] : [`  ${lifeLabel(view.status.life)}`];
-  return [...snapshotHeading(view.status.id, options.alias, view.contractId), ...facts, ...activity, ...footer].join("\n");
+  return [
+    ...snapshotHeading(view.status.id, options.alias, view.contractId),
+    ...facts,
+    ...activity,
+    ...footer,
+    ...renderTaskContextLines(view.createdTasks, context.columns),
+  ].join("\n");
 }
 
 function historyText(
@@ -190,7 +242,7 @@ function callFailed(result: Extract<AkumaInvocationResult, { action: "call" }>["
     || result.readonly?.enforcement === "none";
 }
 
-function statusAnswer(view: AkumaStatusView): string | undefined {
+function statusAnswer(view: Readonly<{ status: AkumaObservation["status"] }>): string | undefined {
   if (view.status.life !== "asleep") return undefined;
   if (view.status.readonly?.enforcement === "none") return undefined;
   const timeline = view.status.timeline;
@@ -203,7 +255,9 @@ export function akumaRawAnswer(result: AkumaInvocationResult): string | undefine
     if (callFailed(result.result) || result.result.observation.kind !== "observed") return undefined;
     return statusAnswer({ status: result.result.observation.status });
   }
-  if (result.action === "wait" && result.result.statuses.length === 1) return statusAnswer(result.result.statuses[0]!);
+  if (result.action === "wait" && result.result.observations.length === 1) {
+    return statusAnswer(result.result.observations[0]!);
+  }
   return undefined;
 }
 
@@ -245,7 +299,12 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
   switch (result.action) {
     case "call": return callText(result, context);
     case "status": return snapshotText(result.status, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) });
-    case "wait": return result.result.statuses.map((status) => snapshotText(status, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) })).join("\n\n");
+    case "wait":
+      return result.result.observations.map((observation) => snapshotText(
+        observation,
+        context,
+        { ...(result.alias === undefined ? {} : { alias: result.alias }) },
+      )).join("\n\n");
     case "tell": return result.mode === "ordinary" ? tellText(result, context) : snapshotText(result.result.observation, context, { ...(result.alias === undefined ? {} : { alias: result.alias }), showLife: false });
     case "history":
       return historyText(command as Extract<ParsedCommand, { command: "history"; last: boolean }>, result, context);

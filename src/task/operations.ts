@@ -2,8 +2,8 @@ import { resolve } from "node:path";
 import { documentDiff } from "../markdown/diff.js";
 import { installNamespaceContext, readNamespaceContext } from "./context.js";
 import {
-  createTaskRelations, relationProblem, projectBlocked, projectRows, projectStatusRows,
-  type BlockedTaskRow, type TaskBoard, type TaskRow,
+  createTaskRelations, projectTaskBoardObservation, relationProblem, projectBlocked, projectRows,
+  type BlockedTaskRow, type TaskBoard, type TaskBoardObservation, type TaskRow,
 } from "./board.js";
 import { parseTaskCreationDocument, serializeTaskDocument, type TaskCreationDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
@@ -250,8 +250,8 @@ export async function queryTasks(
   };
 }
 /** Internal composite observation from one complete Task board read. */
-export async function observeTaskStatusRows(world: WorldRoot) {
-  return projectStatusRows((await readBoard(world)).board, null);
+export async function observeTaskBoard(world: WorldRoot): Promise<TaskBoardObservation> {
+  return projectTaskBoardObservation((await readBoard(world)).board);
 }
 /** Internal identity catalog from one complete Task board read. */
 export async function observeTaskCatalogRows(world: WorldRoot): Promise<readonly TaskRow[]> {

@@ -96,7 +96,19 @@ type ContractHolderObservation =
 `none` means the holder authority was read successfully and has no current
 `held` fact for that Contract. `unavailable` means the holder read failed; it
 is not absence. This decoration does not add Task knowledge to `ContractRow`
-or change `ContractBoard`.
+or change `ContractBoard`. Each public `ContractKanshiRow` also carries
+`namespaceTasks: Section<readonly TaskRow[]>`. Settlement owns the canonical
+one-segment namespace; Kanshi consumes that projection and does not re-encode
+it. A Task matches only when its complete TaskId namespace equals that
+namespace. When a World is present, one Task board read supplies both the
+top-level Task section and every Contract row's namespace selection. A
+successful read with no matches is `present` with an empty array. Without a
+World it is `absent`. Task authority corruption or infrastructure failure is
+`failed` and retains the existing bounded diagnostic. TaskHolder failure keeps
+its current effect on the top-level Task section and holder decoration, but
+does not suppress a successfully read namespace selection. Task board failure
+does not suppress the base Contract or Akuma sections. A namespace match
+creates no holder, endpoint, lifecycle consequence, or association.
 
 The join is one hop. Kanshi does not validate associations, infer them from cwd
 or origin, follow Task associations to derive an Akuma association, or persist
@@ -128,7 +140,8 @@ lifecycle, and never changes or repairs either authority.
 `selectKanshi({ report, contract })` projects an assembled report without new
 reads. It keeps the addressed Contract row, Task rows whose joined endpoint id
 exactly matches the selector, and Akuma rows whose Dispatch endpoint names that
-Contract. Section presence, absence, and
+Contract. The selected Contract row already carries `namespaceTasks`; do not
+copy namespace matches into the TASK section. Section presence, absence, and
 failure remain unchanged. The text renderer consumes only this public report
 and renders each present endpoint as `keiyaku <id> (<observed>)`.
 
@@ -238,7 +251,19 @@ Dispatch endpoint is missing or unavailable. Attention counts those hot rows.
 Contract rows retain complete `kei/...` identity, read-time title, phase, target,
 numeric behind when known, `behind unknown` beside a known target name when
 lag is unknown, explicit no-target when none, independent drift, gate
-testimony, and exact attached Task/Akuma coordinates. Task and Akuma rows
+testimony, and exact attached Task/Akuma coordinates. Selected Contract text
+renders `namespaceTasks` only under KEIYAKU, after holder and Fleet attachment
+rows, as one summary then every matching row:
+
+```text
+  │ namespace tasks <N>
+  │ <mark> <complete TaskId> · P<n> <disposition> — <title>
+```
+
+Zero matches render `namespace tasks 0`. Absent and failed observations render
+`namespace tasks absent` or `namespace tasks failed <diagnostic>`. Bare world
+Kanshi omits those nested rows because TASK already renders every Task.
+Namespace tasks do not affect Contract heat or attention. Task and Akuma rows
 retain complete identities, state or key facts, and exact `-> kei/...`
 associations where present. A missing endpoint is `-> kei/... (missing)`; an
 unavailable board is `-> kei/... (unavailable)`. An unbound Task or Akuma

@@ -3,7 +3,7 @@ import {
   Keiyaku,
   type AkumaKillResult,
   type AkumaHistoryResult,
-  type AkumaStatusView,
+  type AkumaObservation,
   type AkumaTellResult,
   type AkumaWaitResult,
   type CallResult,
@@ -17,7 +17,7 @@ import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
 
 export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; result: CallResult; world: WorldRoot }>
-  | Readonly<{ kind: "akuma"; action: "status"; status: AkumaStatusView; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "status"; status: AkumaObservation; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "interrupt"; result: Awaited<ReturnType<typeof Keiyaku.interrupt>>; body: string; alias?: string }>

@@ -135,6 +135,21 @@ export function projectStatusRows(board: TaskBoard, scope: readonly string[] | n
   });
 }
 
+export type TaskBoardObservation = Readonly<{
+  statusRows: ReturnType<typeof projectStatusRows>;
+  selectNamespace(namespace: readonly string[]): readonly TaskRow[];
+  selectCreatedBy(createdBy: string): readonly TaskRow[];
+}>;
+
+export function projectTaskBoardObservation(board: TaskBoard): TaskBoardObservation {
+  const rows = projectRows(board, null, "all");
+  return {
+    statusRows: projectStatusRows(board, null),
+    selectNamespace: (namespace) => projectRows(board, namespace, "all"),
+    selectCreatedBy: (createdBy) => rows.filter((row) => board.tasks.get(row.id)?.createdBy === createdBy),
+  };
+}
+
 function relationIds(task: TaskDocument, relation: TaskRelation): readonly TaskId[] {
   return relation === "parent" ? task.parent === null ? [] : [task.parent] : task[relation];
 }
