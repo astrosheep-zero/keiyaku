@@ -275,25 +275,33 @@ the Archetype, so the Archetype is never repeated. The closed marks are `●` ru
 idle, `×` killed, `!` stillborn or warning, `│` spine, `⋮` omitted history,
 `⧗` pending tell, `told` effective tell, `✂` interrupted, and `✓`
 answered. Text never prints the storage words
-`retained`, `latest`, `body`, `heart`, or `turn`. A running tool row is marked
-with `●` before its activity label; there is no separate running footer.
+`retained`, `latest`, `body`, `heart`, or `turn`. A running tool replaces that
+row's spine glyph with `●`; there is no separate running footer and ordinary
+rows pay no extra prefix width. Activity labels use one fixed six-column field.
+A future longer label may extend its own row but never widens or shifts the page.
 
 ```text
 aku/worker/1234abcd (@review) ─────────────────────────────
      ⋮ +12
-09:31│ say     “narrowing the failing suite”
-     │ run     $ npm test — 41s · exit 1
-09:32│ edit    src/akuma.ts — +12 -3
-     │ thought “the collar probe races the pid check”
-     │ ● run     $ npm test
+09:31│ say    “narrowing the failing suite”
+     │ run    $ npm test — 41s · exit 1
+09:32│ edit   src/akuma.ts — +12 -3
+     │ think  “the collar probe races the pid check”
+     ● run    $ npm test
      │ ⧗ tell “also check the leash timeout”
 ```
 
 Every typed gap renders in place as `⋮ +<count>`. Activity text wraps to at
 most three terminal-width lines in snapshots and ends in `…` when display text
 remains or the persisted row carries `truncated: true`. Tool representation
-uses the same visible bound. History uses the same row renderer without that
-three-line cap. Rendering never changes the JSON fact, and copyable history
+uses the same visible bound, except a `run` command always occupies one row and
+middle-truncates when necessary so both its command head and tail remain
+visible. A completed run's outcome is a separate suffix outside that command
+truncation region when the row can also retain a recognizable command head and
+tail. On narrower rows the command wins and the outcome is omitted. Display-width
+truncation preserves grapheme clusters and never exceeds the requested width.
+History uses the same row renderer without the voice three-line cap;
+`run` remains one row there too. Rendering never changes the JSON fact, and copyable history
 commands remain indivisible. Activity labels are display-width-aware and
 left-aligned in one fixed field. Quoted voice reserves its closing delimiter
 outside the truncatable payload, so wrapping and truncation preserve balanced

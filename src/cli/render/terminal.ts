@@ -1,5 +1,7 @@
 export type TextRenderContext = Readonly<{ columns: number; color: boolean }>;
 
+const GRAPHEMES = new Intl.Segmenter("und", { granularity: "grapheme" });
+
 const WIDE_RANGES = [
   [0x1100, 0x115f], [0x2329, 0x232a], [0x2e80, 0xa4cf], [0xac00, 0xd7a3],
   [0xf900, 0xfaff], [0xfe10, 0xfe19], [0xfe30, 0xfe6f], [0xff00, 0xff60],
@@ -21,11 +23,11 @@ export function displayColumns(value: string): number {
 }
 
 export function takeDisplayColumns(value: string, maximum: number): Readonly<{ text: string; rest: string }> {
-  const characters = [...value];
+  const characters = [...GRAPHEMES.segment(value)].map(({ segment }) => segment);
   let columns = 0;
   let index = 0;
   for (; index < characters.length; index += 1) {
-    const width = characterColumns(characters[index]!);
+    const width = displayColumns(characters[index]!);
     if (columns + width > maximum) break;
     columns += width;
   }
@@ -38,6 +40,28 @@ export function truncateDisplayText(value: string, maximum: number): string {
   if (maximum <= 0) return "";
   if (maximum === 1) return "…";
   return `${takeDisplayColumns(clean, maximum - 1).text.replace(/…+$/u, "")}…`;
+}
+
+export function truncateMiddleDisplayText(value: string, maximum: number): string {
+  const clean = safeText(value);
+  if (displayColumns(clean) <= maximum) return clean;
+  if (maximum <= 0) return "";
+  if (maximum === 1) return "…";
+  const available = maximum - 1;
+  const headColumns = Math.ceil(available / 2);
+  const tailColumns = available - headColumns;
+  const head = takeDisplayColumns(clean, headColumns).text.replace(/…+$/u, "");
+  const characters = [...GRAPHEMES.segment(clean)].map(({ segment }) => segment);
+  let tailStart = characters.length;
+  let used = 0;
+  while (tailStart > 0) {
+    const candidate = characters[tailStart - 1]!;
+    const width = displayColumns(candidate);
+    if (used + width > tailColumns) break;
+    used += width;
+    tailStart -= 1;
+  }
+  return `${head}…${characters.slice(tailStart).join("").replace(/^…+/u, "")}`;
 }
 
 export function renderBoundedTextBlock(

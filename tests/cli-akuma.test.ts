@@ -12,6 +12,7 @@ import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { akumaExitCode, akumaJsonValue, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
+import { displayColumns } from "../src/cli/render/terminal.js";
 
 test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "--workdir", "/work", "-"]), {
@@ -113,7 +114,7 @@ test("Akuma status aligns and counts omitted activity", () => {
   assert.match(lines[0]!, /^aku\/worker\/1234abcd ─+$/u);
   assert.equal(lines[1], "     ⋮ +12");
   assert.equal(lines[1]!.indexOf("⋮"), lines[2]!.indexOf("│"));
-  assert.match(lines[2]!, /^\d{2}:42│ note    running tests$/u);
+  assert.match(lines[2]!, /^\d{2}:42│ note {3}running tests$/u);
   assert.equal(lines.at(-1), lines[2]);
   assert.deepEqual((akumaJsonValue(command, result) as typeof status).activity.entries[0], { kind: "gap", count: 12 });
 
@@ -145,7 +146,7 @@ test("Akuma status aligns and counts omitted activity", () => {
   };
   const recordedText = renderAkumaText(command, recorded);
   assert.match(recordedText.split("\n")[0]!, /^aku\/worker\/1234abcd \(@review\) ─+$/u);
-  assert.match(recordedText, /│ ⧗ tell {2}“current input”$/u);
+  assert.match(recordedText, /│ ⧗ tell “current input”$/u);
   assert.deepEqual(akumaJsonValue(command, recorded), recorded.result);
   assert.equal(renderAkumaText(command, {
     ...recorded,
@@ -205,9 +206,14 @@ test("Akuma voice is quoted and running tools carry the live mark", () => {
     ], lowestRetained: 1, highest: 3 },
   };
   const text = renderAkumaText(command, { kind: "akuma", action: "status", status });
-  assert.match(text, /│ say     “hello”/u);
-  assert.match(text, /│ thought “considering”/u);
-  assert.match(text, /│ ● search {2}TODO/u);
+  assert.match(text, /│ say {4}“hello”/u);
+  assert.match(text, /│ think {2}“considering”/u);
+  assert.match(text, /● search TODO/u);
+  const activity = text.split("\n").slice(1);
+  assert.deepEqual(activity.map((line) => line.indexOf("say") >= 0
+    ? line.indexOf("say")
+    : line.indexOf("think") >= 0 ? line.indexOf("think") : line.indexOf("search")), [7, 7, 7]);
+  assert.deepEqual(activity.map((line) => line.indexOf("“") >= 0 ? line.indexOf("“") : line.indexOf("TODO")), [14, 14, 14]);
   assert.doesNotMatch(text, /● running$/u);
 
   const narrow = renderAkumaText(command, {
@@ -227,6 +233,89 @@ test("Akuma voice is quoted and running tools carry the live mark", () => {
   assert.match(voice, /…”$/u);
   assert.equal(voice.match(/“/gu)?.length, 1);
   assert.equal(voice.match(/”/gu)?.length, 1);
+});
+
+test("Akuma run commands stay on one row and preserve their head and tail", () => {
+  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
+  const status = {
+    id: "aku/worker/1234abcd",
+    archetype: "worker",
+    life: "running" as const,
+    collar: { kind: "alive" as const },
+    confinement: { kind: "unconfined" as const },
+    pending: [],
+    activity: { entries: [{ kind: "row" as const, row: {
+      kind: "tool" as const, sequence: 1, bodySequence: 1,
+      at: "2026-08-10T16:42:00.000Z", name: "Shell",
+      call: { kind: "run" as const, command: "npm test -- --configuration production --reporter final.json" },
+      state: "running" as const,
+    } }], lowestRetained: 1, highest: 1 },
+  };
+  const text = renderAkumaText(command, { kind: "akuma", action: "status", status }, { columns: 42, color: false });
+  const activity = text.split("\n").slice(1);
+  assert.equal(activity.length, 1);
+  assert.match(activity[0]!, /^\d{2}:42● run {4}\$ npm test/u);
+  assert.match(activity[0]!, /….*final\.json$/u);
+
+  const completed = renderAkumaText(command, {
+    kind: "akuma",
+    action: "status",
+    status: {
+      ...status,
+      activity: { ...status.activity, entries: [{ kind: "row", row: {
+        ...status.activity.entries[0]!.row,
+        state: { status: "failed", exitCode: 1 },
+        durationMs: 41_000,
+      } }] },
+    },
+  }, { columns: 50, color: false }).split("\n").at(-1)!;
+  assert.match(completed, /\$ npm test/u);
+  assert.match(completed, /….*final\.json — 41s · exit 1$/u);
+
+  const unicode = renderAkumaText(command, {
+    kind: "akuma",
+    action: "status",
+    status: {
+      ...status,
+      activity: { ...status.activity, entries: [{ kind: "row", row: {
+        ...status.activity.entries[0]!.row,
+        call: { kind: "run", command: "printf long-command-ending-in-界́" },
+      } }] },
+    },
+  }, { columns: 24, color: false }).split("\n").at(-1)!;
+  assert.match(unicode, /….*界́$/u);
+  assert.doesNotMatch(unicode, /…\p{Mark}/u);
+
+  const combiningHead = renderAkumaText(command, {
+    kind: "akuma",
+    action: "status",
+    status: {
+      ...status,
+      activity: { ...status.activity, entries: [{ kind: "row", row: {
+        ...status.activity.entries[0]!.row,
+        call: { kind: "run", command: "界́abcdefghijklmnopqrstuvwxyz-final.json" },
+      } }] },
+    },
+  }, { columns: 24, color: false }).split("\n").at(-1)!;
+  assert.ok(displayColumns(combiningHead) <= 24);
+  assert.match(combiningHead, /界́/u);
+
+  const narrowCompleted = renderAkumaText(command, {
+    kind: "akuma",
+    action: "status",
+    status: {
+      ...status,
+      activity: { ...status.activity, entries: [{ kind: "row", row: {
+        ...status.activity.entries[0]!.row,
+        state: { status: "failed", exitCode: 1 },
+        durationMs: 41_000,
+      } }] },
+    },
+  }, { columns: 30, color: false }).split("\n").at(-1)!;
+  assert.ok(displayColumns(narrowCompleted) <= 30);
+  assert.match(narrowCompleted, /\$ npm/u);
+  assert.match(narrowCompleted, /al\.json$/u);
+  assert.doesNotMatch(narrowCompleted, /exit 1/u);
 });
 
 test("Akuma follow remains outside the unsettled CLI vocabulary", () => {

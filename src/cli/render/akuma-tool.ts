@@ -2,7 +2,12 @@ import type { ActivityRow } from "../../akuma/index.js";
 
 type ToolRow = Extract<ActivityRow, { kind: "tool" }>;
 
-export type ToolRepr = Readonly<{ label: string; text: string }>;
+export type ToolRepr = Readonly<{
+  label: string;
+  text: string;
+  overflow?: "middle-ellipsis";
+  suffix?: string;
+}>;
 
 function oneLine(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
@@ -55,12 +60,15 @@ function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>): Too
 export function toolRepr(row: ToolRow): ToolRepr {
   let core: ToolRepr;
   switch (row.call.kind) {
-    case "run": core = { label: "run", text: `$ ${oneLine(row.call.command)}` }; break;
+    case "run": core = { label: "run", text: `$ ${oneLine(row.call.command)}`, overflow: "middle-ellipsis" }; break;
     case "read": core = { label: "read", text: oneLine(row.call.path) }; break;
     case "search": core = { label: "search", text: oneLine(row.call.query) }; break;
     case "fileChange": core = fileChange(row.call); break;
     case "other": core = { label: "use", text: oneLine(row.call.display || row.name) }; break;
   }
   const suffix = result(row);
-  return suffix === undefined ? core : { ...core, text: `${core.text} — ${suffix}` };
+  if (suffix === undefined) return core;
+  return core.overflow === "middle-ellipsis"
+    ? { ...core, suffix: ` — ${suffix}` }
+    : { ...core, text: `${core.text} — ${suffix}` };
 }

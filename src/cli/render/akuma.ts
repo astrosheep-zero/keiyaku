@@ -8,6 +8,7 @@ import {
   renderBoundedTextBlock,
   renderVoiceRuler,
   safeText,
+  truncateMiddleDisplayText,
   type TextRenderContext,
 } from "./terminal.js";
 
@@ -21,12 +22,15 @@ type SpineRow = Readonly<{
   quoted?: true;
   truncated?: true;
   indivisible?: true;
+  overflow?: "middle-ellipsis";
+  suffix?: string;
 }>;
 type SpineGap = Readonly<{ kind: "gap"; count: number }>;
 type SpineItem = SpineRow | SpineGap;
 
 const GUTTER_MS = 60_000;
-const LABEL_WIDTH = 8;
+const LABEL_WIDTH = 6;
+const RUN_IDENTITY_COLUMNS = 16;
 const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 
 function mark(life: Exclude<AkumaStatus["life"], "running">): string {
@@ -78,11 +82,21 @@ function renderSpine(
     const time = printable ? clock(item.at) : "";
     const index = item.index === undefined ? "" : String(item.index).padStart(4, " ");
     const gutter = `${index}${index.length === 0 ? "" : " "}${time.padStart(5, " ")}`;
-    const activityPrefix = item.active === true ? "● " : "";
+    const spine = item.active === true ? "●" : "│";
     const quote = item.quoted === true ? "“" : "";
-    const first = `${gutter}│ ${activityPrefix}${alignedLabel(item.label)}${quote}`;
+    const first = `${gutter}${spine} ${alignedLabel(item.label)} ${quote}`;
     if (item.indivisible === true) return [`${first}${safeText(item.text)}`.trimEnd()];
-    const continuation = `${"".padStart(gutter.length)}│ ${"".padEnd(displayColumns(activityPrefix) + LABEL_WIDTH, " ")}`;
+    if (item.overflow === "middle-ellipsis") {
+      const rowBudget = Math.max(1, context.columns - displayColumns(first));
+      const candidateSuffix = item.suffix ?? "";
+      const suffix = rowBudget - displayColumns(candidateSuffix) >= RUN_IDENTITY_COLUMNS
+        ? candidateSuffix
+        : "";
+      const budget = Math.max(1, rowBudget - displayColumns(suffix));
+      const text = item.truncated === true ? `${item.text}…` : item.text;
+      return [`${first}${truncateMiddleDisplayText(text, budget)}${suffix}`.trimEnd()];
+    }
+    const continuation = `${"".padStart(gutter.length)}│ ${"".padEnd(LABEL_WIDTH + 1, " ")}`;
     const lines = renderBoundedTextBlock(item.text, {
       first,
       continuation,
@@ -99,7 +113,7 @@ function renderSpine(
 function activityItem(row: ActivityRow): SpineRow {
   const truncated = "truncated" in row && row.truncated === true ? { truncated: true as const } : {};
   if (row.kind === "said") return { kind: "row", at: row.at, label: "say", text: row.text, quoted: true, ...truncated };
-  if (row.kind === "thought") return { kind: "row", at: row.at, label: "thought", text: row.text, quoted: true, ...truncated };
+  if (row.kind === "thought") return { kind: "row", at: row.at, label: "think", text: row.text, quoted: true, ...truncated };
   if (row.kind === "note") return { kind: "row", at: row.at, label: "note", text: row.text, ...truncated };
   if (row.kind === "tell") return {
     kind: "row",
@@ -109,7 +123,16 @@ function activityItem(row: ActivityRow): SpineRow {
     quoted: true,
   };
   const repr = toolRepr(row);
-  return { kind: "row", at: row.at, label: repr.label, text: repr.text, ...(row.state === "running" ? { active: true } : {}), ...truncated };
+  return {
+    kind: "row",
+    at: row.at,
+    label: repr.label,
+    text: repr.text,
+    ...(repr.overflow === undefined ? {} : { overflow: repr.overflow }),
+    ...(repr.suffix === undefined ? {} : { suffix: repr.suffix }),
+    ...(row.state === "running" ? { active: true } : {}),
+    ...truncated,
+  };
 }
 
 function snapshotItems(entries: readonly ActivitySnapshotEntry[], exceptTell?: string): readonly SpineItem[] {
