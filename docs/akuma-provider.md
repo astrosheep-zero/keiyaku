@@ -197,11 +197,13 @@ the heart's authoritative session fact and also appends the event as activity;
 it never waits for turn completion. `assistant` contains a bounded completed
 agent narration of at most 16,384 characters, never deltas or summaries. The
 complete answer is stored separately in `TurnFact` and is never truncated.
-`tool` preserves the provider's stable
-tool id, the started/completed lifecycle, one provider-neutral call shape, and
-the typed result disposition. A started event carries no result; a completed
-event requires one. Result `message` is a bounded diagnostic, never stdout,
-stderr, or a native result body. `thought` is one completed reasoning summary
+`tool` preserves the provider's stable tool id, one started/completed lifecycle
+per use, one provider-neutral call shape, and the typed result disposition.
+A nonterminal native update after the start may refine adapter-local observation
+but never creates another typed event; independent ids remain concurrent, and
+reuse follows completion. A started event carries no result; a completed event
+requires one. Result `message` is a bounded diagnostic, never stdout, stderr,
+or a native result body. `thought` is one completed reasoning summary
 or block bounded at 4,000 characters, never raw thinking text or a delta stream.
 `note` is one bounded line for non-tool plan, todo, retry, warning, or refusal
 narration. Every other persisted activity text field, including tool names,

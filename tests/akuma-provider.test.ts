@@ -33,6 +33,7 @@ import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
 import { createGrokBuildProvider } from "../src/akuma/providers/grok-build/index.js";
 import { resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
+import { projectTurns } from "../src/akuma/projection.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
 
 function fakeOpencode() {
@@ -623,6 +624,73 @@ test("ACP mapper treats unidentified v1 assistant chunks as one message", () => 
   }, first.state);
 
   assert.equal(second.state.answer, "complete answer");
+});
+
+test("ACP mapper collapses tool progress into one lifecycle per stable id", () => {
+  const updates = [
+    { sessionUpdate: "tool_call", toolCallId: "tool-a", title: "read_file", status: "pending" },
+    { sessionUpdate: "tool_call_update", toolCallId: "tool-a", title: "Read `/tmp/a`", status: "in_progress" },
+    { sessionUpdate: "tool_call", toolCallId: "tool-b", title: "run_terminal_command", status: "in_progress" },
+    { sessionUpdate: "tool_call_update", toolCallId: "tool-b", title: "Execute `npm test`", status: "in_progress" },
+    { sessionUpdate: "tool_call_update", toolCallId: "tool-a", status: "completed" },
+    { sessionUpdate: "tool_call_update", toolCallId: "tool-b", status: "failed" },
+    { sessionUpdate: "tool_call", toolCallId: "tool-a", title: "read_file", status: "in_progress" },
+  ] as const;
+  let state = EMPTY_ACP_EVENT_STATE;
+  const events: AgentEvent[] = [];
+  for (const update of updates) {
+    const mapped = mapAcpUpdate(update, state);
+    events.push(...mapped.events);
+    state = mapped.state;
+  }
+
+  assert.deepEqual(events, [
+    { type: "tool", phase: "started", id: "tool-a", name: "read_file", call: { kind: "other", display: "read_file" } },
+    { type: "tool", phase: "started", id: "tool-b", name: "run_terminal_command", call: { kind: "other", display: "run_terminal_command" } },
+    { type: "tool", phase: "completed", id: "tool-a", name: "Read `/tmp/a`", call: { kind: "other", display: "Read `/tmp/a`" }, result: { status: "ok" } },
+    { type: "tool", phase: "completed", id: "tool-b", name: "Execute `npm test`", call: { kind: "other", display: "Execute `npm test`" }, result: { status: "error" } },
+    { type: "tool", phase: "started", id: "tool-a", name: "read_file", call: { kind: "other", display: "read_file" } },
+  ]);
+
+  const ledger = projectTurns([
+    { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: "2026-08-15T00:00:00.000Z" },
+    ...events.map((event, index) => ({
+      kind: "activity" as const,
+      sequence: index + 2,
+      turnSequence: 1,
+      at: `2026-08-15T00:00:0${index + 1}.000Z`,
+      event,
+    })),
+  ]);
+  assert.deepEqual(ledger.openTurn?.rows.map((row) => row.kind === "tool" ? [row.name, row.state] : row.kind), [
+    ["Read `/tmp/a`", { status: "ok" }],
+    ["Execute `npm test`", { status: "error" }],
+    ["read_file", "active"],
+  ]);
+});
+
+test("ACP tool progress retains narration boundaries without another start", () => {
+  const started = mapAcpUpdate({
+    sessionUpdate: "tool_call", toolCallId: "tool-a", title: "read_file", status: "in_progress",
+  }, EMPTY_ACP_EVENT_STATE);
+  const first = mapAcpUpdate({
+    sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "first block" },
+  }, started.state);
+  const progress = mapAcpUpdate({
+    sessionUpdate: "tool_call_update", toolCallId: "tool-a", title: "Read `/tmp/a`", status: "in_progress",
+  }, first.state);
+  const second = mapAcpUpdate({
+    sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "second block" },
+  }, progress.state);
+  const completed = mapAcpUpdate({
+    sessionUpdate: "tool_call_update", toolCallId: "tool-a", status: "completed",
+  }, second.state);
+
+  assert.deepEqual(progress.events, [{ type: "thought", text: "first block" }]);
+  assert.deepEqual(completed.events, [
+    { type: "thought", text: "second block" },
+    { type: "tool", phase: "completed", id: "tool-a", name: "Read `/tmp/a`", call: { kind: "other", display: "Read `/tmp/a`" }, result: { status: "ok" } },
+  ]);
 });
 
 function fakePiSdk(input: {

@@ -78,8 +78,11 @@ export function mapAcpUpdate(update: SessionUpdate, previous: AcpEventState): Ac
         tools.delete(update.toolCallId);
         return flushAcpEvents({ ...previous, tools }, [{ type: "tool", phase: "completed", id: update.toolCallId, ...observed, result: { status: update.status === "completed" ? "ok" : "error" } }]);
       }
+      const started = tools.has(update.toolCallId);
       tools.set(update.toolCallId, name);
-      return flushAcpEvents({ ...previous, tools }, [{ type: "tool", phase: "started", id: update.toolCallId, ...observed }]);
+      return started
+        ? flushAcpEvents({ ...previous, tools })
+        : flushAcpEvents({ ...previous, tools }, [{ type: "tool", phase: "started", id: update.toolCallId, ...observed }]);
     }
     case "plan": return flushAcpEvents(previous, [noteEvent(`Plan updated: ${update.entries.map((entry) => entry.content).join("; ")}`)]);
     case "available_commands_update": return flushAcpEvents(previous, [noteEvent("ACP commands updated")]);
