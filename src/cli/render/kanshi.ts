@@ -20,7 +20,8 @@ function taskMark(row: TaskKanshiRow): string {
 function akumaMark(life: string): string {
   if (life === "running") return "●";
   if (life === "stillborn") return "!";
-  if (life === "asleep" || life === "dead") return "○";
+  if (life === "asleep") return "○";
+  if (life === "killed") return "×";
   return "?";
 }
 

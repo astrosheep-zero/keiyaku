@@ -90,7 +90,7 @@ export type TellFact = Readonly<{
   id: string;
   body: string;
   recordedAt: string;
-  state: "pending" | "told" | "voided";
+  state: "pending" | "told";
 }>;
 
 export type TellDeliveryInput = Readonly<{
@@ -128,8 +128,9 @@ export type RequestFact = RequestInput & Readonly<{ admittedAt: string }> & (
   | Readonly<{ state: "voided"; evidence: string }>
 );
 
-export type KillEvidence = "killed" | "already-dead" | "alive-after-sigkill" | "unavailable";
-export type DeathFact = Readonly<{ evidence: KillEvidence; at: string }>;
+export type KillEvidence = "killed" | "already-killed" | "alive-after-sigkill" | "unavailable";
+export type KillFact = Readonly<{ sequence: number; bodySequence: number; evidence: "killed"; at: string }>;
+export type StopFact = Readonly<{ bodySequence: number; requestedAt: string }>;
 export type SealFact = Readonly<{ evidence: string; at: string }>;
 export type LeashProbe = "held" | "free";
 
@@ -138,19 +139,24 @@ export type CollarProbe =
   | Readonly<{ kind: "alive" }>
   | Readonly<{ kind: "unverifiable"; diagnostic: string }>;
 
-export type AkumaLife = "running" | "asleep" | "stranded" | "headless" | "dead";
+export type AkumaLife = "running" | "asleep" | "stranded" | "headless" | "killed";
 
 export type HeartSnapshot = Readonly<{
   soul: Soul | null;
   latestBody: BodyFact | null;
   latestSession: SessionFact | null;
   pending: readonly TellFact[];
-  death: DeathFact | null;
+  latestKill: KillFact | null;
 }>;
 
-export function life(leashProbe: LeashProbe, collarProbe: CollarProbe, deathRow: DeathFact | null): AkumaLife {
-  if (deathRow !== null) return "dead";
+export function life(
+  leashProbe: LeashProbe,
+  collarProbe: CollarProbe,
+  latestBody: BodyFact | null,
+  latestKill: KillFact | null,
+): AkumaLife {
   if (leashProbe === "held") return "running";
   if (collarProbe.kind !== "gone") return "headless";
+  if (latestBody !== null && latestKill?.bodySequence === latestBody.sequence) return "killed";
   return collarProbe.end === "exited" ? "asleep" : "stranded";
 }

@@ -18,7 +18,6 @@ type TellRow = Readonly<{
 }>;
 
 const TELL_STATE_SQL = `CASE
-  WHEN EXISTS (SELECT 1 FROM tell_voids v WHERE v.tell_id = tells.id) THEN 'voided'
   WHEN EXISTS (
     SELECT 1 FROM tell_deliveries d
     WHERE d.tell_id = tells.id AND (d.route = 'launch' OR d.receipt = 'unavailable')
@@ -158,11 +157,6 @@ export function tellIdsForFence(database: DatabaseSync, bodySequence: number, fe
   return database.prepare(`SELECT tell_id FROM tell_deliveries
     WHERE body_sequence = ? AND fence = ? ORDER BY sequence`)
     .all(bodySequence, fence).map((row) => (row as { tell_id: string }).tell_id);
-}
-
-export function voidTellsByDeath(database: DatabaseSync, evidence: string, at: string): void {
-  database.prepare(`INSERT OR IGNORE INTO tell_voids(tell_id, evidence, voided_at)
-    SELECT tells.id, ?, ? FROM tells WHERE ${TELL_STATE_SQL} = 'pending'`).run(evidence, at);
 }
 
 export function pendingTellFacts(database: DatabaseSync): readonly TellFact[] {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { initializeHeart, recordDeath, recordTurn } from "../src/akuma/heart/index.js";
+import { initializeHeart, recordTurn } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { invoke } from "../src/cli/invoke.js";
@@ -41,10 +41,10 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.throws(() => parseArgv(["call", "claude", "--timeout", "5m", "-d", "-"]), /mutually exclusive/u);
   assert.throws(() => parseArgv(["call", "claude", "--alias", "review", "-"]), /Akuma alias must match/u);
   assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--json", "-"]), {
-    command: { command: "tell", akuma: "aku/claude/1234abcd", output: "json" },
+    command: { command: "tell", akuma: "aku/claude/1234abcd", interrupt: false, output: "json" },
   });
-  assert.deepEqual(parseArgv(["interrupt", "aku/claude/1234abcd", "-"]), {
-    command: { command: "interrupt", akuma: "aku/claude/1234abcd", output: "text" },
+  assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--interrupt", "-"]), {
+    command: { command: "tell", akuma: "aku/claude/1234abcd", interrupt: true, output: "text" },
   });
   assert.deepEqual(parseArgv(["fork", "aku/claude/1234abcd", "--at", "history-1", "--json"]), {
     command: { command: "fork", akuma: "aku/claude/1234abcd", at: "history-1", output: "json" },
@@ -79,7 +79,8 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.throws(() => parseArgv(["call", "-"]), CliUsageError);
   assert.throws(() => parseArgv(["call", "claude"]), CliUsageError);
   assert.throws(() => parseArgv(["call", "claude", "reviewer", "-"]), CliUsageError);
-  assert.throws(() => parseArgv(["interrupt", "aku\/claude\/1234abcd"]), /requires stdin/);
+  assert.throws(() => parseArgv(["interrupt", "aku\/claude\/1234abcd", "-"]), /unknown command/u);
+  assert.throws(() => parseArgv(["tell", "aku\/claude\/1234abcd", "--interrupt"]), /requires stdin/);
   assert.throws(() => parseArgv(["kill", "aku\/claude\/1234abcd", "-"]), /stdin marker .* not valid/);
   assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd"]), /requires --at/);
   assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd", "--at", ""]), /requires --at/);
@@ -123,6 +124,7 @@ test("Akuma status aligns and counts omitted activity", () => {
   assert.equal(renderAkumaText(command, {
     kind: "akuma",
     action: "tell",
+    mode: "ordinary",
     body: "current input",
     result: {
       akuma: status.id,
@@ -133,6 +135,7 @@ test("Akuma status aligns and counts omitted activity", () => {
   assert.equal(renderAkumaText(command, {
     kind: "akuma",
     action: "tell",
+    mode: "ordinary",
     body: "current input",
     result: {
       akuma: status.id,
@@ -143,6 +146,7 @@ test("Akuma status aligns and counts omitted activity", () => {
   const observedTell = {
     kind: "akuma" as const,
     action: "tell" as const,
+    mode: "ordinary" as const,
     body: "current input",
     result: {
       akuma: status.id,
@@ -299,83 +303,56 @@ test("akuma fork renders the public receipt and maps every exit class", () => {
   assert.equal(akumaExitCode(partial), 2);
 });
 
-test("akuma interrupt invokes the public receipt and maps every exit class", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-interrupt-"));
-  try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0004" });
-    initializeHeart(allocated.paths);
-    await driveAkumaBody({
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
-        cwd: root,
-      },
-      initialBody: "done",
-    }, {
-      confinement: () => ({ kind: "unconfined" }),
-      admitOptions(options) { return { kind: "admitted", options }; },
-      async start() {
-        return {
-          admission: { fence: "cli-terminal-fixture" },
-          events: { async *[Symbol.asyncIterator]() {} },
-          completion: Promise.resolve({ kind: "failed", diagnostic: "done" }),
-          async abort() {},
-        };
-      },
-    }, {
-      collar: { pid: 999_986, processGroup: 999_986, spawnedAt: "cli-interrupt" },
-      now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
-    });
-    recordDeath(allocated.paths, { evidence: "killed", at: "2026-08-08T00:00:01.000Z" });
-    const parsed = parseArgv(["-C", root, "interrupt", allocated.id, "-"]);
-    const result = await invoke(parsed, { readStdin: () => "replace" });
-    assert.deepEqual(result, {
-      kind: "akuma",
-      action: "interrupt",
-      akuma: allocated.id,
-      receipt: { kind: "dead" },
-    });
-    if (!("kind" in result) || result.kind !== "akuma") return;
-    assert.equal(renderAkumaText(parsed.command, result), `${allocated.id} interrupt dead`);
-    assert.equal(akumaExitCode(result), 1);
-
-    const interrupted = {
-      kind: "akuma" as const,
-      action: "interrupt" as const,
-      akuma: allocated.id,
+test("tell --interrupt renders the public receipt and maps every exit class", () => {
+  const parsed = parseArgv(["tell", "aku/claude/1d1e0004", "--interrupt", "-"]);
+  const interrupted = {
+    kind: "akuma" as const,
+    action: "tell" as const,
+    mode: "interrupt" as const,
+    body: "replace",
+    result: {
+      id: "aku/claude/1d1e0004" as const,
       receipt: {
         kind: "interrupted" as const,
         putDown: "self-aborted" as const,
         tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
       },
-    };
-    assert.equal(renderAkumaText(parsed.command, interrupted), `${allocated.id} interrupted self-aborted`);
-    assert.equal(akumaExitCode(interrupted), 0);
-    const wakeFailed = {
-      ...interrupted,
-      receipt: { ...interrupted.receipt, tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: { kind: "failed", diagnostic: "spawn" } } },
-    };
-    assert.equal(renderAkumaText(parsed.command, wakeFailed), `${allocated.id} interrupted self-aborted · wake failed: spawn`);
-    assert.equal(akumaExitCode(wakeFailed), 2);
-    const refusedDead = {
-      ...interrupted,
-      receipt: { kind: "interrupted", putDown: "collar", tell: { kind: "refused-dead" } },
-    } as const;
-    assert.equal(renderAkumaText(parsed.command, refusedDead), `${allocated.id} interrupted collar · tell refused: dead`);
-    assert.equal(akumaExitCode(refusedDead), 1);
-    assert.equal(akumaExitCode({
-      ...interrupted,
-      receipt: { kind: "unstoppable", evidence: "leash-held-after-put-down" },
-    }), 1);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+    },
+  };
+  assert.equal(renderAkumaText(parsed.command, interrupted), "aku/claude/1d1e0004 interrupted self-aborted");
+  assert.equal(akumaExitCode(interrupted), 0);
+
+  const wakeFailed = {
+    ...interrupted,
+    result: {
+      ...interrupted.result,
+      receipt: {
+        ...interrupted.result.receipt,
+        tell: {
+          admission: { tellId: "tell-1", fact: "recorded" as const },
+          wake: { kind: "failed" as const, diagnostic: "spawn" },
+        },
+      },
+    },
+  };
+  assert.equal(
+    renderAkumaText(parsed.command, wakeFailed),
+    "aku/claude/1d1e0004 interrupted self-aborted · wake failed: spawn",
+  );
+  assert.equal(akumaExitCode(wakeFailed), 2);
+
+  const unstoppable = {
+    ...interrupted,
+    result: {
+      ...interrupted.result,
+      receipt: { kind: "unstoppable" as const, evidence: "leash-held-after-put-down" as const },
+    },
+  };
+  assert.equal(
+    renderAkumaText(parsed.command, unstoppable),
+    "aku/claude/1d1e0004 interrupt unstoppable leash-held-after-put-down",
+  );
+  assert.equal(akumaExitCode(unstoppable), 1);
 });
 
 test("Akuma status, wait, and history share public observations without embedding history", async () => {

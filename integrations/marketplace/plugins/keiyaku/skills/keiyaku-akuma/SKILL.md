@@ -14,7 +14,7 @@ An Akuma is a durable callable worker projection. Its complete id is
 keiyaku -C <repo> call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -
 keiyaku -C <repo> wait <aku/...> [--timeout <duration>]
 keiyaku -C <repo> tell <aku/...> -
-keiyaku -C <repo> interrupt <aku/...> -
+keiyaku -C <repo> tell <aku/...> --interrupt -
 keiyaku -C <repo> history <aku/...>
 keiyaku -C <repo> fork <aku/...> --at <historyId>
 keiyaku -C <repo> kill <aku/...>
@@ -24,9 +24,10 @@ keiyaku -C <repo> kill <aku/...>
 five minutes by default. Use `-d` or `--detach` to return after birth. `tell` continues
 the same projection, including after it has answered. `fork` starts a child
 from one exact retained answered-turn coordinate and leaves the source alone.
-`interrupt` puts down the current body synchronously, then records the tell;
-it is not terminal kill. `kill` records death and returns typed physical
-evidence.
+`tell --interrupt` puts down the current Body synchronously, then records the
+Tell for its successor. `kill` stops the current Body while preserving the
+Akuma's Heart, session, history, pending Tells, and Body Requests; a later Tell
+wakes the same Akuma.
 
 ## Observe
 

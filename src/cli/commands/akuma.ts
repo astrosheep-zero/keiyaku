@@ -17,8 +17,7 @@ export type ParsedAkumaCommand = Output & (
     }>
   | Readonly<{ command: "kill"; akuma: readonly string[] }>
   | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
-  | (Readonly<{ command: "tell" }> & Addressed)
-  | (Readonly<{ command: "interrupt" }> & Addressed)
+  | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed)
   | (Readonly<{ command: "history"; last: boolean; before?: number; since?: number }> & Addressed)
   | (Readonly<{ command: "fork"; at: string }> & Addressed)
 );
@@ -59,16 +58,9 @@ const AKUMA_COMMAND_SPECS = {
   tell: {
     arity: 1,
     stdin: true,
-    flags: { json: "boolean" },
-    usage: "tell <aku/...> [--json] -",
-    purpose: "Record and wake one Akuma with an stdin body.",
-  },
-  interrupt: {
-    arity: 1,
-    stdin: true,
-    flags: { json: "boolean" },
-    usage: "interrupt <aku/...> [--json] -",
-    purpose: "Put down the current body and deliver an stdin body.",
+    flags: { interrupt: "boolean", json: "boolean" },
+    usage: "tell <aku/...> [--interrupt] [--json] -",
+    purpose: "Record and wake one Akuma, optionally putting down its current Body first.",
   },
   history: {
     arity: 1,
@@ -89,7 +81,7 @@ const AKUMA_COMMAND_SPECS = {
     stdin: false,
     flags: { json: "boolean" },
     usage: "kill <akuma-selector>... [--json]",
-    purpose: "Record death and put down an Akuma selector snapshot.",
+    purpose: "Put down the current Body of an Akuma selector snapshot.",
   },
 } as const satisfies Readonly<Record<string, AkumaCommandSpec>>;
 
@@ -247,8 +239,8 @@ function parseAddressed(
   fail: (message: string) => never,
 ): ParsedAkumaCommand {
   if (action === "kill") return { command: action, akuma: rawSelectors.map((value) => validateSet(value, fail)), output };
-  if (action === "tell" || action === "interrupt") {
-    return { command: action, akuma: validateDirect(rawSelectors[0]!, fail), output };
+  if (action === "tell") {
+    return { command: action, akuma: validateDirect(rawSelectors[0]!, fail), interrupt: flags.interrupt === true, output };
   }
   if (action === "wait") return parseWait(rawSelectors, flags, output, fail);
   const akuma = validateDirect(rawSelectors[0]!, fail);

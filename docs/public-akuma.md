@@ -163,11 +163,16 @@ selected AkuId in the same stable order. `Keiyaku.tell` composes the handle's
 typed mutation result with one subsequent whole-Akuma status observation. The
 two fields have separate authority: `tell` alone states what this invocation
 caused; `observation` gives the flagship current life, activity, outcomes, and
-the three-state tell projection. Facade code never derives delivery or receipt
+the two-state tell projection. Facade code never derives delivery or receipt
 facts from that observation. Direct verbs accept only AkuId or Alias.
 Their result carries the resolved AkuId, so an adapter never resolves a movable
 Alias twice. `history({ last: true })` is the distinct last-answer arm: it reads
 only the last answered turn and never reads status or activity history.
+
+`Keiyaku.interrupt` remains a Library composition over one addressed Akuma:
+pause the current Body, obtain its leash, atomically clear pause plus record the
+Tell, then wake a successor. It is not an Akuma storage primitive and the CLI
+exposes it only as `tell --interrupt`.
 
 The Catalog facet owns one selected identity directory:
 

@@ -12,9 +12,9 @@ import {
   readLastAnsweredTurn,
   readTurns,
   readForkPoint,
+  readKill,
   readSeal,
   readSoul,
-  recordDeath,
   recordTell,
   requestPause,
   requestStop,
@@ -94,7 +94,6 @@ export type TellResult = Readonly<{
 }>;
 
 export type InterruptReceipt =
-  | Readonly<{ kind: "dead" }>
   | Readonly<{
       kind: "unstoppable";
       evidence:
@@ -107,7 +106,7 @@ export type InterruptReceipt =
   | Readonly<{
       kind: "interrupted";
       putDown: "was-idle" | "self-aborted" | "collar";
-      tell: TellResult | Readonly<{ kind: "refused-dead" }>;
+      tell: TellResult;
     }>;
 
 export type ForkReceipt =
@@ -137,10 +136,10 @@ async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<Held
   }
 }
 
-function recordTellBody(paths: AkumaPaths, body: string): Readonly<{ kind: "recorded"; tellId: string }> | Readonly<{ kind: "dead" }> {
+function recordTellBody(paths: AkumaPaths, body: string): Readonly<{ kind: "recorded"; tellId: string }> {
   const id = randomUUID();
   const admitted = recordTell(paths, { id, body, recordedAt: new Date().toISOString() });
-  return admitted.kind === "dead" ? admitted : { kind: "recorded", tellId: admitted.tell.id };
+  return { kind: "recorded", tellId: admitted.tell.id };
 }
 
 async function wakeTell(paths: AkumaPaths, akuma: AkuId, tellId: string): Promise<TellResult> {
@@ -172,7 +171,7 @@ function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot = readHeart(pa
     id: snapshot.soul.id,
     archetype: snapshot.soul.archetype,
     ...(snapshot.soul.description === undefined ? {} : { description: snapshot.soul.description }),
-    life: life(probeLeash(paths), collar, snapshot.death),
+    life: life(probeLeash(paths), collar, snapshot.latestBody, snapshot.latestKill),
     collar,
     confinement: snapshot.soul.confinement,
     pending: snapshot.pending.map((tell) => tell.id),
@@ -262,12 +261,11 @@ export class AkumaHandle {
 
   async tell(body: string): Promise<TellResult> {
     const recorded = recordTellBody(this.paths, body);
-    if (recorded.kind === "dead") throw new Error(`Akuma ${this.id} is dead`);
     return await wakeTell(this.paths, this.id, recorded.tellId);
   }
 
   async interrupt(body: string): Promise<InterruptReceipt> {
-    if (requestPause(this.paths, new Date().toISOString()) === "dead") return { kind: "dead" };
+    requestPause(this.paths, new Date().toISOString());
 
     let putDown: "was-idle" | "self-aborted" | "collar" = "was-idle";
     let leash = HeldAkumaLeash.try(this.paths);
@@ -290,15 +288,17 @@ export class AkumaHandle {
       putDown = "collar";
     }
 
-    let recorded: ReturnType<typeof recordTellBody>;
+    let recorded: Readonly<{ kind: "recorded"; tellId: string }>;
     try {
-      leash.clearPause(this.paths);
-      recorded = recordTellBody(this.paths, body);
+      const id = randomUUID();
+      const admitted = leash.recordInterruptTell(this.paths, {
+        id,
+        body,
+        recordedAt: new Date().toISOString(),
+      });
+      recorded = { kind: "recorded", tellId: admitted.tell.id };
     } finally {
       leash.release();
-    }
-    if (recorded.kind === "dead") {
-      return { kind: "interrupted", putDown, tell: { kind: "refused-dead" } };
     }
     return { kind: "interrupted", putDown, tell: await wakeTell(this.paths, this.id, recorded.tellId) };
   }
@@ -356,19 +356,27 @@ export class AkumaHandle {
 
   async kill(): Promise<KillEvidence> {
     const at = new Date().toISOString();
-    if (requestStop(this.paths, at) === "dead") return "already-dead";
+    const request = requestStop(this.paths, at);
+    if (request.kind === "already-killed") return "already-killed";
+    const target = request.body;
     const graceDeadline = performance.now() + KILL_GRACE_MS;
     while (probeLeash(this.paths) === "held" && performance.now() < graceDeadline) await wait(POLL_MS);
-    if (probeLeash(this.paths) === "held") {
-      const current = readHeart(this.paths).latestBody;
-      if (current === null) return "unavailable";
-      const evidence = await putDownProcessTree(current.collar);
+    if (readKill(this.paths, target.sequence) !== null) return "killed";
+    const targetProbe = probeProcessTree(target.collar);
+    if (targetProbe.kind === "unverifiable") return "unavailable";
+    if (targetProbe.kind === "alive") {
+      const evidence = await putDownProcessTree(target.collar);
       if (evidence === "unavailable" || evidence === "alive-after-sigkill") return evidence;
     }
-    const releaseDeadline = performance.now() + KILL_GRACE_MS;
-    while (probeLeash(this.paths) === "held" && performance.now() < releaseDeadline) await wait(POLL_MS);
-    if (probeLeash(this.paths) === "held") return "unavailable";
-    return recordDeath(this.paths, { evidence: "killed", at }) === "already-dead" ? "already-dead" : "killed";
+    const leash = await takeLeashUntil(this.paths, performance.now() + KILL_GRACE_MS);
+    if (leash === null) return readKill(this.paths, target.sequence) === null ? "unavailable" : "killed";
+    try {
+      const settled = leash.settleStop(this.paths, target.sequence);
+      if (settled === null) return "unavailable";
+      return "killed";
+    } finally {
+      leash.release();
+    }
   }
 
   lastAnswer(): string {

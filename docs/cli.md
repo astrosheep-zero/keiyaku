@@ -59,7 +59,7 @@ The command vocabulary is:
 | `install` | Installs the bundled Keiyaku skills through one or more native harness installers. |
 | `task ...` | Calls the separate `./task` public surface described below. |
 | `call`, `fork` | Call the package-root Akuma facet so Dispatch and Alias integration is not reimplemented at the edge. |
-| `wait`, `tell`, `interrupt`, `history`, `kill` | Call the corresponding package-root Akuma facade capability as root verbs. |
+| `wait`, `tell`, `history`, `kill` | Call the corresponding package-root Akuma facade capability as root verbs; `tell --interrupt` selects the composed interrupt capability. |
 
 `bind` accepts no contract positional. Commands addressing an existing contract
 accept a full `kei/<contract-segment>` identity or an active short
@@ -94,8 +94,7 @@ install <codex|claude|opencode|pi> [--json]
        install --all [--json]
 call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -
 wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]
-tell <aku/...|@alias> [--json] -
-interrupt <aku/...|@alias> [--json] -
+tell <aku/...|@alias> [--interrupt] [--json] -
 history <aku/...|@alias> [--before <index> | --since <index> | --last] [--json]
 fork <aku/...|@alias> --at <historyId> [--json]
 kill <akuma-selector>... [--json]
@@ -192,7 +191,7 @@ rollback occurs. Text prints one result per harness. JSON returns
 `failed` and a diagnostic on failure. Any failed harness makes the command exit
 `1`; successful installation exits `0`.
 
-`call`, `tell`, and `interrupt` require the final `-` and pass those bytes
+`call` and `tell` require the final `-` and pass those bytes
 as the public body input. The `call` positional is the Archetype name and names
 `~/.keiyaku/akuma/<name>.md`; its provider must resolve through the
 Settings-backed provider interpretation. When no same-name Settings entry
@@ -211,7 +210,7 @@ status carrier when it stops running or after five minutes. `--wait` explicitly
 selects that default mode, while `--timeout` replaces the five-minute duration.
 `-d` and `--detach` are identical and return after birth plus Dispatch and Alias
 integration. Detach is mutually exclusive with `--wait` and `--timeout`.
-`tell`, `interrupt`, `history`, `fork`, and exact `status` accept a complete
+`tell`, `history`, `fork`, and exact `status` accept a complete
 `aku/<archetype>/<hex8>` or world-local `@alias`. `wait` and `kill` additionally
 accept Akuma globs and complete `kei/...` worker selectors. Their positional
 set is expanded once, deduplicated, and byte-sorted before the operation.
@@ -266,8 +265,8 @@ or just bound one, that frozen Alias in v3's `(@alias)` form. It never
 reverse-selects an Alias. Life and elapsed time cannot appear in the header
 because they may change after a stream fixes its head. The id already contains
 the Archetype, so the Archetype is never repeated. The closed marks are `●` running, `○` nonterminal
-idle, `×` dead, `!` stillborn or warning, `│` spine, `⋮` omitted history, `⧗`
-pending tell, `told` effective tell, `†` voided tell, `✂` interrupted, and `✓`
+idle, `×` killed, `!` stillborn or warning, `│` spine, `⋮` omitted history,
+`⧗` pending tell, `told` effective tell, `✂` interrupted, and `✓`
 answered. Text never prints the storage words
 `retained`, `latest`, `body`, `heart`, or `turn`. Every status snapshot ends in
 one copied life footer such as `● running`; it never infers life from tools,
@@ -292,19 +291,25 @@ printed, and prints again at 60 seconds or more. A row without `at`, such as a
 pending tell, always has an empty gutter and does not move the anchor. There
 is no date line, cross-day exception, seconds display, or derived silence row.
 The same pure gutter function serves exact status, running wait results, tell,
-interrupt, kill, and history.
+kill, and history.
 
 Tell remains one input action: the flagship submits stdin text once. Its output
 renders the ordinary post-action Akuma status and appends the current tell at
-its observed three-state face, or as `⧗ tell` when the observation has not yet
+its observed two-state face, or as `⧗ tell` when the observation has not yet
 reached it, excluding the same TellId from the observed rows so it appears once.
-`⧗ tell` means it can still take effect, `told` means the provider's strongest
-available evidence proves it took effect, and `† tell` means death proves it
-cannot. Pending tells are never removed by the snapshot budget; told and voided
-rows share the ordinary activity budget. Provider-specific receipt kinds,
+`⧗ tell` means it can still take effect, and `told` means the provider's
+strongest available evidence proves it took effect. Pending tells are never
+removed by the snapshot budget; told rows share the ordinary activity budget.
+Provider-specific receipt kinds,
 handoff stages, fences, and `bodySequence` never enter text. JSON preserves the
 mutation/observation separation as `{ akuma, tell, observation }` without adding
 a CLI-only diagnostic projection. No output asks the caller to query a TellId.
+
+`tell --interrupt` selects the Library's fenced interrupt composition. It is
+one CLI input action, not a standalone lifecycle verb: the current Body is put
+down before the same stdin bytes are durably recorded and woken for its
+successor. Text reports the typed interrupt receipt; JSON returns the Library
+result unchanged.
 
 A stranded Akuma whose durable coordinate cannot be resumed prints
 `resume unsupported` as its typed reason. The CLI does not offer an automatic

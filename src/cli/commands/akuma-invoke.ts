@@ -3,7 +3,6 @@ import {
   type AkuId,
   type ActivityHistory,
   type AkumaStatus,
-  type InterruptReceipt,
 } from "../../akuma/index.js";
 import {
   Keiyaku,
@@ -23,8 +22,8 @@ export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; result: CallResult }>
   | Readonly<{ kind: "akuma"; action: "status"; status: AkumaStatus }>
   | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult }>
-  | Readonly<{ kind: "akuma"; action: "tell"; result: AkumaTellResult; body: string }>
-  | Readonly<{ kind: "akuma"; action: "interrupt"; akuma: AkuId; receipt: InterruptReceipt }>
+  | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string }>
+  | Readonly<{ kind: "akuma"; action: "tell"; mode: "interrupt"; result: Awaited<ReturnType<typeof Keiyaku.interrupt>>; body: string }>
   | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; history?: ActivityHistory; answer?: string }>
   | Readonly<{ kind: "akuma"; action: "fork"; receipt: ForkResult }>
   | Readonly<{ kind: "akuma"; action: "kill"; result: AkumaKillResult }>;
@@ -55,18 +54,12 @@ async function invokeWait(command: Extract<ParsedAkumaCommand, { command: "wait"
 
 async function invokeTell(command: ParsedAkumaCommand & Readonly<{ command: "tell"; akuma: string }>, input: InvokeInput): Promise<AkumaInvocationResult> {
   const body = input.readStdin();
+  if (command.interrupt) {
+    const result = await Keiyaku.interrupt({ path: input.path, akuma: command.akuma, settings: input.settings, body });
+    return { kind: "akuma", action: "tell", mode: "interrupt", result, body };
+  }
   const result = await Keiyaku.tell({ path: input.path, akuma: command.akuma, settings: input.settings, body });
-  return { kind: "akuma", action: "tell", result, body };
-}
-
-async function invokeInterrupt(command: ParsedAkumaCommand & Readonly<{ command: "interrupt"; akuma: string }>, input: InvokeInput): Promise<AkumaInvocationResult> {
-  const result = await Keiyaku.interrupt({ path: input.path, akuma: command.akuma, settings: input.settings, body: input.readStdin() });
-  return {
-    kind: "akuma",
-    action: "interrupt",
-    akuma: result.id,
-    receipt: result.receipt,
-  };
+  return { kind: "akuma", action: "tell", mode: "ordinary", result, body };
 }
 
 function invokeHistory(command: Extract<ParsedAkumaCommand, { command: "history" }>, input: InvokeInput): AkumaInvocationResult {
@@ -137,7 +130,6 @@ export async function invokeAkuma(
     }
     case "wait": return await invokeWait(command, input);
     case "tell": return await invokeTell(command, input);
-    case "interrupt": return await invokeInterrupt(command, input);
     case "history": return invokeHistory(command, input);
     case "fork": return await invokeFork(command, input);
     case "kill": return await invokeKill(command, input);

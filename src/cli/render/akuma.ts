@@ -13,7 +13,7 @@ const LABEL_WIDTH = 8;
 function mark(life: AkumaStatus["life"]): string {
   switch (life) {
     case "running": return "●";
-    case "dead": return "×";
+    case "killed": return "×";
     case "asleep": return "○";
     case "stranded":
     case "headless": return "!";
@@ -52,7 +52,7 @@ function activityItem(row: ActivityRow): SpineItem {
   if (row.kind === "note") return { at: row.at, label: "note", text: row.text };
   if (row.kind === "tell") return {
     at: row.at,
-    label: row.state === "pending" ? "⧗ tell" : row.state === "told" ? "told" : "† tell",
+    label: row.state === "pending" ? "⧗ tell" : "told",
     text: JSON.stringify(row.text),
   };
   const repr = toolRepr(row);
@@ -155,7 +155,7 @@ function wakeFailure(result: TellResult): string | null {
   return typeof result.wake === "string" ? null : `wake failed: ${safeText(result.wake.diagnostic)}`;
 }
 
-function tellText(result: Extract<AkumaInvocationResult, { action: "tell" }>): string {
+function tellText(result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>): string {
   const { observation } = result.result;
   const tellId = result.result.tell.admission.tellId;
   const observed = observation.activity.rows.find((row) => row.kind === "tell" && row.tellId === tellId);
@@ -217,14 +217,12 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
     case "call": return callText(result);
     case "status": return statusText(result.status);
     case "wait": return result.result.statuses.map(waitText).join("\n\n");
-    case "tell": return tellText(result);
-    case "interrupt": {
-      const receipt = result.receipt;
-      if (receipt.kind === "dead") return `${result.akuma} interrupt dead`;
-      if (receipt.kind === "unstoppable") return `${result.akuma} interrupt unstoppable ${receipt.evidence}`;
-      if ("kind" in receipt.tell) return `${result.akuma} interrupted ${receipt.putDown} · tell refused: dead`;
+    case "tell": {
+      if (result.mode === "ordinary") return tellText(result);
+      const receipt = result.result.receipt;
+      if (receipt.kind === "unstoppable") return `${result.result.id} interrupt unstoppable ${receipt.evidence}`;
       const failure = wakeFailure(receipt.tell);
-      return `${result.akuma} interrupted ${receipt.putDown}${failure === null ? "" : ` · ${failure}`}`;
+      return `${result.result.id} interrupted ${receipt.putDown}${failure === null ? "" : ` · ${failure}`}`;
     }
     case "history": return historyText(command as Extract<ParsedCommand, { command: "history" }>, result);
     case "fork": {
@@ -246,10 +244,10 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
       || result.result.observation.kind === "failed")) return 2;
   if (result.action === "kill" && result.result.results.some((member) =>
     member.evidence === "unavailable" || member.evidence === "alive-after-sigkill")) return 1;
-  if (result.action === "tell" && typeof result.result.tell.wake !== "string") return 2;
-  if (result.action === "interrupt") {
-    if (result.receipt.kind !== "interrupted" || "kind" in result.receipt.tell) return 1;
-    if (typeof result.receipt.tell.wake !== "string") return 2;
+  if (result.action === "tell" && result.mode === "ordinary" && typeof result.result.tell.wake !== "string") return 2;
+  if (result.action === "tell" && result.mode === "interrupt") {
+    if (result.result.receipt.kind !== "interrupted") return 1;
+    if (typeof result.result.receipt.tell.wake !== "string") return 2;
   }
   if (result.action === "fork") {
     if (result.receipt.kind === "forked") return result.receipt.dispatch.kind === "failed" ? 2 : 0;

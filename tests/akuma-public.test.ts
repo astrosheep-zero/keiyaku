@@ -333,10 +333,9 @@ test("public Akuma handles separate compact list rows from full status and wait"
     });
     assert.deepEqual(await handle.wait((candidate) => candidate.answer === "public answer"), status);
     assert.equal(await handle.kill(), "killed");
-    assert.equal(handle.status().life, "dead");
+    assert.equal(handle.status().life, "killed");
     assert.equal(handle.status().answer, "public answer");
-    assert.equal(await handle.kill(), "already-dead");
-    assert.deepEqual(await handle.interrupt("late"), { kind: "dead" });
+    assert.equal(await handle.kill(), "already-killed");
     assert.equal(pauseRequested(allocated.paths), false);
     assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
       kind: "answered",
@@ -344,6 +343,79 @@ test("public Akuma handles separate compact list rows from full status and wait"
       historyId: "public-history",
       session: { sessionId: "public-session" },
     });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("tell after kill wakes the same Akuma through its retained session", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-kill-resume-"));
+  const seat = join(root, "seat");
+  try {
+    mkdirSync(seat);
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0006" });
+    initializeHeart(allocated.paths);
+    await driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: CLAUDE_EXECUTION,
+        options: { model: "fixture-model" },
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        cwd: seat,
+      },
+      initialBody: "first",
+    }, provider, {
+      collar: { pid: 999_975, processGroup: 999_975, spawnedAt: "kill-resume-first" },
+      now: () => "2026-08-08T00:00:00.000Z",
+      async putDownOwnTree() {},
+    });
+
+    const handle = akumaAt(root).of({ id: allocated.id });
+    assert.equal(await handle.kill(), "killed");
+    assert.equal(handle.status().life, "killed");
+
+    rmSync(seat, { recursive: true, force: true });
+    const told = await handle.tell("continue");
+    assert.equal(typeof told.wake, "object");
+    assert.deepEqual(readHeart(allocated.paths).pending.map((tell) => tell.id), [told.admission.tellId]);
+
+    let resumed: Parameters<NonNullable<ProviderAdapter["resume"]>>[0] | undefined;
+    const successor: ProviderAdapter = {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() { throw new Error("retained Akuma must resume"); },
+      async resume(input) {
+        resumed = input;
+        return {
+          admission: { fence: "kill-resume-successor" },
+          events: { async *[Symbol.asyncIterator]() {} },
+          completion: Promise.resolve({ kind: "answered", answer: "continued", historyId: "continued-history" }),
+          async abort() {},
+        };
+      },
+    };
+    await driveAkumaBody({ paths: allocated.paths }, successor, {
+      collar: { pid: 999_974, processGroup: 999_974, spawnedAt: "kill-resume-successor" },
+      now: () => "2026-08-08T00:00:02.000Z",
+      async putDownOwnTree() {},
+    });
+
+    assert.deepEqual(resumed, {
+      body: "",
+      launchTells: [{ id: told.admission.tellId, text: "continue" }],
+      cwd: seat,
+      options: { model: "fixture-model" },
+      session: { kind: "resume", coordinate: { sessionId: "public-session" } },
+    });
+    assert.equal(readHeart(allocated.paths).latestBody?.sequence, 2);
+    assert.deepEqual(readHeart(allocated.paths).pending, []);
+    assert.equal(handle.status().activity.rows.some((row) =>
+      row.kind === "tell" && row.tellId === told.admission.tellId && row.state === "told"), true);
+    assert.equal(handle.status().life, "asleep");
+    assert.equal(handle.status().answer, "continued");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -788,7 +860,7 @@ test("kill gives the body a stop grace before putting down its process tree", as
     assert.notEqual((await waited).life, "running");
     assert.equal(aborted, true);
     assert.equal(readHeart(allocated.paths).latestBody?.end, "put-down");
-    assert.equal(handle.status().life, "dead");
+    assert.equal(handle.status().life, "killed");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -12,7 +12,7 @@ heart rows; body requests become in-process calls.
 
 **Wake is level-triggered.** A waker that finds the leash held does not exit
 blind: it nudges the current Body and re-observes, and it may stop only when
-the tell that woke it is terminally told, is voided by death, or it takes
+the tell that woke it is told, or it takes
 the leash itself and serves it. Two wakers converge through the same rule: the
 leash serializes replacement Bodies, and the second one finds the work already done.
 (The naive "loser exits" rule loses a tell forever when the incumbent's
@@ -31,9 +31,10 @@ pid is never group-killed blind.
 A body must not outlive its heart: heart directory gone (ENOENT on tick) ->
 kill own provider tree, exit. The world ended; the body follows.
 
-The body also reads stop control. It aborts the drive, records `put-down`, and
-releases the leash. A stop without a following death proves the killer vanished;
-the next body clears that abandoned stop under its leash before driving.
+The Body also reads stop control only when it names that Body sequence. It
+aborts the drive, records `put-down`, and releases the leash. If the killer
+vanishes, the next leash holder first settles the frozen predecessor, writes
+its kill witness, and clears stop before creating a successor Body.
 
 The detached launch carries a soul seed only before birth. Once birth returns,
 including `already-born`, the persisted soul is the only source for provider,
@@ -68,8 +69,6 @@ Heart records only tell facts with a named witness:
 - **receipt** — provider-authored evidence attached without reinterpretation.
   Its kind preserves the provider's terminal evidence; its correlation is an
   exact TellId or shared fence.
-- **voided** — witnessed by the death transaction for a tell that had
-  no terminal `told` evidence.
 
 ```ts
 type TellDelivery =
@@ -87,7 +86,7 @@ the one fact needed after restart: whether this live acknowledgement settles
 the tell or terminal provider evidence is still required. There is no durable
 capability registry.
 
-The product fold has exactly three states because only these change the
+The product fold has exactly two states because only these change the
 flagship's next action:
 
 - **pending** (`⧗`) — the tell can still take effect, so observe. This includes
@@ -96,8 +95,6 @@ flagship's next action:
 - **told** — the strongest evidence available from that provider proves the
   tell took effect: launch admission, a terminal live acknowledgement under the
   provider contract, or terminal provider receipt evidence.
-- **voided** (`†`) — death proves the tell can never take effect, so the caller
-  may resend to a successor, fork, or accept the loss.
 
 These are projections, not persisted stages. There is no persisted "in
 delivery" state and no harness-owned seen/consumed lifecycle. Nonterminal
@@ -140,12 +137,9 @@ tell to the replay set when that Body ends; its successor may add another
 delivery attempt. A live delivery with `receipt: "unavailable"` is terminal and
 never replayed. Launch admission is terminal. Any terminal witness settles the
 tell even when another attempt was already admitted; at-least-once permits that
-race without rollback. There is no permanently handed-off product state. Death
-atomically voids every tell without terminal evidence. Heart serialization is
-the sole receipt-versus-death judge: a terminal receipt admitted first yields
-`told`; death admitted first yields `voided` and rejects every later receipt for
-that TellId. Neither terminal can flip afterward, so admitted work is never
-silently unreachable.
+race without rollback. There is no permanently handed-off product state. Kill
+does not settle or discard a Tell; a recorded Tell remains pending until a Body
+delivers it.
 
 If Heart has a durable resume coordinate but the selected adapter has no
 `resume` capability, Body refuses before `start` and exposes the existing
@@ -163,24 +157,22 @@ listArchetypes, list, status, wait, tell, interrupt, history, fork, and kill.
 ## Interrupt
 
 `interrupt(body)` is the high-level composition "synchronously put down this
-turn, then tell"; it is not terminal kill and writes no death row. Its sequence
-is fixed: request pause in a heart transaction that fences death; wait one grace
-window for the body to abort and release the leash; if still held, put down the
-current verified collar; clear pause under the leash; call the ordinary
-tell-record transaction with no death pre-check; then spawn the ordinary wake.
+turn, then tell". Its sequence is fixed: write pause; wait one grace window for
+the Body to abort and release the leash; if still held, put down the current
+verified collar; acquire the leash proving the old Body stopped; in one Heart
+transaction clear pause and record the Tell; release the leash; then spawn the
+ordinary wake. The old Body can never consume the interrupting Tell.
 
-Pause and stop are separate control kinds. The body polls pause beside stop,
+Pause and stop are separate control kinds. The Body polls pause beside stop,
 aborts its drive, records the existing `put-down` body end, and exits. A new
 leash holder clears an orphan pause before driving, just as it clears an orphan
-stop. Pause-vs-death and tell-vs-death remain heart transaction decisions;
-self-abort remains a body effect; collar fallback remains the interruptor's
-public-boundary effect.
+stop. Self-abort remains a Body effect; collar fallback remains the
+interruptor's public-boundary effect.
 
 The receipt is a sum because later steps may never lawfully begin:
 
 ```ts
 type InterruptReceipt =
-  | { kind: "dead" }
   | {
       kind: "unstoppable";
       evidence: "no-collar" | "collar-unverifiable" | "unavailable"
@@ -189,35 +181,37 @@ type InterruptReceipt =
   | {
       kind: "interrupted";
       putDown: "was-idle" | "self-aborted" | "collar";
-      tell: TellResult | { kind: "refused-dead" };
+      tell: TellResult;
     };
 ```
 
-`dead` is the zero-effect result when the request-pause transaction sees the
-death fence; it writes no pause. `unstoppable` means the interruptor did not
-obtain the leash within its bounded windows: no recorded collar, an
+`unstoppable` means the interruptor did not obtain the leash within its bounded
+windows: no recorded collar, an
 unverifiable collar, an unavailable or surviving physical put-down, or a collar
 reported gone while the leash still remained held. The pause remains, and no
-tell, wake, or death row is written. The asynchronous pause signal may still be
+tell or wake is written. The asynchronous pause signal may still be
 observed after this return and cause the body to self-abort; unproven is not
 retracted. The next leash holder clears that abandoned pause.
 
 `interrupted` is possible only while the interruptor itself holds the leash.
 `putDown` states how it acquired that proof: immediately (`was-idle`), after
 the body honored pause (`self-aborted`), or after collar fallback (`collar`). It
-then clears pause and calls the ordinary tell transaction. A concurrent death
-there yields `refused-dead` and no wake; the already completed put-down remains
-in the receipt. Physical killed/already-gone evidence without subsequent leash
-ownership is `leash-held-after-put-down`, never success.
+then clears pause and records the Tell in one transaction. Physical
+killed/already-gone evidence without subsequent leash ownership is
+`leash-held-after-put-down`, never success.
 
 ## Kill
 
-Stop row -> grace -> put down by the collar -> recheck the leash -> death
-row, written by the killer. Kill is a lifecycle verb; the killer is a
-legitimate writer.
+In one Heart transaction, freeze the latest Body sequence into stop -> grace ->
+put down that frozen collar -> acquire the leash -> record a kill witness for
+that same sequence and clear stop. A successor that acquires the leash first
+must complete the same settlement before creating its Body. The witness preserves
+Soul, session, history, pending Tells, and Body Requests. A later Tell wakes a
+successor Body on the retained session; that Body supersedes the killed life
+projection.
 
-Synchronous evidence has four values: `killed`,
-`already-dead`, `alive-after-sigkill`, `unavailable`.
+Synchronous evidence has four values: `killed`, `already-killed`,
+`alive-after-sigkill`, `unavailable`.
 
 ## Fork
 
@@ -245,8 +239,9 @@ order is not-born, provider capability, exact retained history, native fork,
 local allocation/birth/publication, then success. A provider without the
 capability is categorical and is refused before reading `at`. Native rejection
 before a child coordinate exists is `fork-failed` and claims no upstream or
-local effect. There is no dead or abort arm: fork only reads the parent heart,
-so running, asleep, and dead sources may all fork retained history.
+local effect. There is no life-state or abort arm: fork only reads the parent
+Heart, so running, asleep, killed, stranded, and headless sources may all fork
+retained history.
 
 Fork is a provider primitive, not something ordinary resume can compose.
 `ProviderAdapter` has an optional `fork({ session, at, cwd })` operation. An

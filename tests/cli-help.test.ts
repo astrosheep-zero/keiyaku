@@ -43,7 +43,8 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
   assert.doesNotMatch(renderTaskHelp(), /--contract|--no-contract/u);
   assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--json\] -/u);
-  assert.match(renderRootHelp(), /interrupt <aku\/\.\.\.>/u);
+  assert.doesNotMatch(renderRootHelp(), /^  interrupt /mu);
+  assert.match(renderRootHelp(), /tell <aku\/\.\.\.> \[--interrupt\]/u);
   assert.equal(renderAkumaHelp("call"), [
     "Call an Akuma from an Archetype and stdin body.",
     "",

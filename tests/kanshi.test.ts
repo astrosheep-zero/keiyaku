@@ -526,7 +526,7 @@ function attentionReport(): KanshiReport {
         rows: [
           { id: "aku/worker/a0000001", archetype: "worker", life: "running", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: [] },
           { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: [] },
-          { id: "aku/worker/a0000003", archetype: "worker", life: "dead", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: [] },
+          { id: "aku/worker/a0000003", archetype: "worker", life: "killed", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: [] },
           { id: "aku/worker/a0000004", life: "stillborn", seal: { at: "2026-08-10T00:00:00.000Z", evidence: "\u001b[31mstillborn seal evidence is deliberately much longer than a narrow terminal\nsecond line must not render" } },
           { id: "aku/worker/a0000005", life: "unborn" },
           { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: ["pending"] },
@@ -576,7 +576,7 @@ test("bare Kanshi text triages every section without changing its report", () =>
   assert.match(text, /^\? aku\/worker\/a0000007 headless$/mu);
   assert.match(text, /^● aku\/worker\/a0000001 running$/mu);
   assert.match(text, /^○ aku\/worker\/a0000002 asleep$/mu);
-  assert.match(text, /^○ aku\/worker\/a0000003 dead$/mu);
+  assert.match(text, /^× aku\/worker\/a0000003 killed$/mu);
   assert.ok(text.indexOf("a0000004") < text.indexOf("a0000006"));
   assert.ok(text.indexOf("a0000006") < text.indexOf("a0000007"));
   assert.ok(text.indexOf("a0000007") < text.indexOf("a0000001"));

@@ -21,7 +21,6 @@ import {
   readNonterminalRequests,
   readRequest,
   recordBody,
-  recordDeath,
   recordSession,
   recordTell,
   recordTellDeliveries,
@@ -192,36 +191,63 @@ test("live receipts are terminal only under their exact Heart correlation", () =
   } finally { value.close(); }
 });
 
-test("death voids only pending tells and terminal witness order never reverses", () => {
+test("kill witnesses one stopped Body without burning pending work", () => {
   const value = fixture();
   try {
-    const body = HeldAkumaLeash.try(value.allocated.paths)!;
-    body.birth(value.allocated.paths, value.soul);
+    const leash = HeldAkumaLeash.try(value.allocated.paths)!;
+    leash.birth(value.allocated.paths, value.soul);
+    const firstBody = recordBody(value.allocated.paths, {
+      collar: { pid: 1, processGroup: 1, spawnedAt: "kill-1" },
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
     const pending = recordTell(value.allocated.paths, {
       id: "tell-pending", body: "pending", recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    const told = recordTell(value.allocated.paths, {
-      id: "tell-told", body: "told", recordedAt: "2026-08-08T00:00:02.000Z",
-    });
     assert.equal(pending.kind, "recorded");
-    assert.equal(told.kind, "recorded");
-    recordTellReceipt(value.allocated.paths, {
-      evidence: "exact", tellId: "tell-told", kind: "consumed", receivedAt: "2026-08-08T00:00:03.000Z",
+    const request = admitRequest(value.allocated.paths, {
+      id: "00000000-0000-4000-8000-000000000010",
+      archetype: "claude",
+      body: "child work",
+      world: value.root,
+      recipe: {
+        description: value.soul.description,
+        provider: value.soul.provider,
+        options: value.soul.options,
+        confinement: value.soul.confinement,
+      },
+      admittedAt: "2026-08-08T00:00:02.000Z",
     });
-    assert.equal(recordDeath(value.allocated.paths, { evidence: "killed", at: "2026-08-08T00:00:04.000Z" }), "recorded");
-    const rows = activitySlice(value.allocated.paths).rows.filter((fact) => "id" in fact);
-    assert.deepEqual(rows.map((fact) => "id" in fact ? fact.state : null), ["voided", "told"]);
-    assert.throws(() => recordTellDeliveries(value.allocated.paths, [{
-      tellId: "tell-pending", route: "launch", bodySequence: 1,
-      fence: "late", deliveredAt: "2026-08-08T00:00:05.000Z",
-    }]), /is voided/u);
-    assert.throws(() => recordTellReceipt(value.allocated.paths, {
-      evidence: "exact", tellId: "tell-pending", kind: "late", receivedAt: "2026-08-08T00:00:05.000Z",
-    }), /is voided/u);
-    assert.deepEqual(recordTell(value.allocated.paths, {
-      id: "tell-late", body: "late", recordedAt: "2026-08-08T00:00:06.000Z",
-    }), { kind: "dead" });
-    body.release();
+    assert.deepEqual(requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z"), {
+      kind: "requested",
+      body: firstBody,
+    });
+    assert.deepEqual(leash.settleStop(value.allocated.paths), {
+      target: { bodySequence: firstBody.sequence, requestedAt: "2026-08-08T00:00:03.000Z" },
+      result: "recorded",
+    });
+    assert.deepEqual(requestStop(value.allocated.paths, "later"), { kind: "already-killed", body: firstBody });
+    let snapshot = readHeart(value.allocated.paths);
+    assert.equal(snapshot.latestKill?.bodySequence, firstBody.sequence);
+    assert.deepEqual(snapshot.pending.map((tell) => tell.id), ["tell-pending"]);
+    assert.equal(readRequest(value.allocated.paths, request.id)?.state, "admitted");
+    assert.equal(life("free", { kind: "gone", end: "put-down" }, firstBody, snapshot.latestKill), "killed");
+
+    const secondBody = recordBody(value.allocated.paths, {
+      collar: { pid: 2, processGroup: 2, spawnedAt: "kill-2" },
+      leashTakenAt: "2026-08-08T00:00:04.000Z",
+    });
+    snapshot = readHeart(value.allocated.paths);
+    assert.equal(life("free", { kind: "gone", end: "exited" }, secondBody, snapshot.latestKill), "asleep");
+    recordTellDeliveries(value.allocated.paths, [{
+      tellId: "tell-pending",
+      route: "launch",
+      bodySequence: secondBody.sequence,
+      fence: "successor",
+      deliveredAt: "2026-08-08T00:00:05.000Z",
+    }]);
+    assert.deepEqual(readHeart(value.allocated.paths).pending, []);
+    assert.equal(readRequest(value.allocated.paths, request.id)?.state, "admitted");
+    leash.release();
   } finally { value.close(); }
 });
 
@@ -318,34 +344,11 @@ test("Body Request facts have one idempotent monotonic authority", () => {
     });
     assert.equal(voidRequest(value.allocated.paths, voided.id, "caller gone").state, "voided");
 
-    const deathAdmitted = admitRequest(value.allocated.paths, {
-      ...input,
-      id: "00000000-0000-4000-8000-000000000004",
-      body: "death admitted",
-    });
-    const deathReserved = admitRequest(value.allocated.paths, {
-      ...input,
-      id: "00000000-0000-4000-8000-000000000005",
-      body: "death reserved",
-    });
-    const reservedChild = allocateAkumaDirectory({ worldRoot: value.root, archetype: "claude", draw: () => "feedface" });
-    reserveRequest(value.allocated.paths, deathReserved.id, reservedChild.id);
-    recordDeath(value.allocated.paths, { evidence: "killed", at: "2026-08-08T00:00:02.000Z" });
-    assert.deepEqual(readRequest(value.allocated.paths, deathAdmitted.id), {
-      ...deathAdmitted,
-      state: "voided",
-      evidence: "death:killed",
-    });
-    assert.deepEqual(readRequest(value.allocated.paths, deathReserved.id), {
-      ...deathReserved,
-      state: "voided",
-      evidence: `death:killed; child=${reservedChild.id}`,
-    });
     assert.deepEqual(readNonterminalRequests(value.allocated.paths), []);
   } finally { value.close(); }
 });
 
-test("heart schema version 7 and leash schema version 4 hard-refuse old authority", () => {
+test("heart schema version 8 and leash schema version 4 hard-refuse old authority", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -355,18 +358,25 @@ test("heart schema version 7 and leash schema version 4 hard-refuse old authorit
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 7/u);
+    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 8/u);
     assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("pause is death-fenced and remains distinct from terminal stop", () => {
+test("pause remains distinct from stop and can be cleared only under the leash", () => {
   const value = fixture();
   try {
     const body = HeldAkumaLeash.try(value.allocated.paths)!;
     body.birth(value.allocated.paths, value.soul);
     body.release();
-    assert.equal(requestStop(value.allocated.paths, "2026-08-08T00:00:01.000Z"), "requested");
+    const firstBody = recordBody(value.allocated.paths, {
+      collar: { pid: 1, processGroup: 1, spawnedAt: "pause-stop" },
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    assert.deepEqual(requestStop(value.allocated.paths, "2026-08-08T00:00:01.000Z"), {
+      kind: "requested",
+      body: firstBody,
+    });
     assert.equal(requestPause(value.allocated.paths, "2026-08-08T00:00:02.000Z"), "requested");
     assert.equal(stopRequested(value.allocated.paths), true);
     assert.equal(pauseRequested(value.allocated.paths), true);
@@ -377,9 +387,8 @@ test("pause is death-fenced and remains distinct from terminal stop", () => {
     assert.equal(pauseRequested(value.allocated.paths), false);
     assert.equal(stopRequested(value.allocated.paths), true);
 
-    recordDeath(value.allocated.paths, { evidence: "killed", at: "2026-08-08T00:00:03.000Z" });
-    assert.equal(requestPause(value.allocated.paths, "2026-08-08T00:00:04.000Z"), "dead");
-    assert.equal(pauseRequested(value.allocated.paths), false);
+    assert.equal(requestPause(value.allocated.paths, "2026-08-08T00:00:04.000Z"), "requested");
+    assert.equal(pauseRequested(value.allocated.paths), true);
   } finally { value.close(); }
 });
 
@@ -465,11 +474,12 @@ test("fork birth admits the child session in the soul birth transaction", () => 
 });
 
 test("life is the sole five-state interpretation", () => {
-  const death = { evidence: "killed" as const, at: "2026-08-08T00:00:00.000Z" };
-  assert.equal(life("held", { kind: "gone", end: null }, null), "running");
-  assert.equal(life("free", { kind: "gone", end: "exited" }, null), "asleep");
-  assert.equal(life("free", { kind: "gone", end: "broke-off" }, null), "stranded");
-  assert.equal(life("free", { kind: "alive" }, null), "headless");
-  assert.equal(life("free", { kind: "unverifiable", diagnostic: "denied" }, null), "headless");
-  assert.equal(life("held", { kind: "alive" }, death), "dead");
+  const body = { sequence: 1, collar: { pid: 1, processGroup: 1, spawnedAt: "life" }, leashTakenAt: "life" };
+  const kill = { sequence: 1, bodySequence: 1, evidence: "killed" as const, at: "life" };
+  assert.equal(life("held", { kind: "gone", end: null }, body, kill), "running");
+  assert.equal(life("free", { kind: "gone", end: "exited" }, body, null), "asleep");
+  assert.equal(life("free", { kind: "gone", end: "broke-off" }, body, null), "stranded");
+  assert.equal(life("free", { kind: "alive" }, body, null), "headless");
+  assert.equal(life("free", { kind: "unverifiable", diagnostic: "denied" }, body, null), "headless");
+  assert.equal(life("free", { kind: "gone", end: "put-down" }, body, kill), "killed");
 });

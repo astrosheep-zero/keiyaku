@@ -520,7 +520,7 @@ test("an answer without an admitted or resumed session is retained as a failed t
   }
 });
 
-test("a new leash holder revokes stop and pause abandoned before settlement", async () => {
+test("a successor settles an abandoned Body-scoped stop before creating its Body", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-orphan-stop-"));
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "a1b2c3d4" });
@@ -547,7 +547,8 @@ test("a new leash holder revokes stop and pause abandoned before settlement", as
       now: () => "2026-08-08T00:00:00.000Z",
       async putDownOwnTree() {},
     });
-    assert.equal(requestStop(allocated.paths, "2026-08-08T00:00:01.000Z"), "requested");
+    const stopped = requestStop(allocated.paths, "2026-08-08T00:00:01.000Z");
+    assert.equal(stopped.kind, "requested");
     assert.equal(requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), "requested");
     assert.equal(stopRequested(allocated.paths), true);
     assert.equal(pauseRequested(allocated.paths), true);
@@ -566,13 +567,17 @@ test("a new leash holder revokes stop and pause abandoned before settlement", as
     });
     assert.equal(stopRequested(allocated.paths), false);
     assert.equal(pauseRequested(allocated.paths), false);
+    const snapshot = readHeart(allocated.paths);
+    assert.equal(snapshot.latestKill?.bodySequence, stopped.body.sequence);
+    assert.equal(snapshot.latestBody?.sequence, stopped.body.sequence + 1);
+    assert.notEqual(snapshot.latestKill?.bodySequence, snapshot.latestBody?.sequence);
     assert.deepEqual(readTurns(allocated.paths).at(-1)?.outcome, {
       kind: "answered",
       answer: "continued",
       historyId: "orphan-history-2",
       session: { sessionId: "orphan-session" },
     });
-    assert.equal(readHeart(allocated.paths).latestBody?.end, "exited");
+    assert.equal(snapshot.latestBody?.end, "exited");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

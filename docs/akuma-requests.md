@@ -111,8 +111,7 @@ loss closes it immediately. After closing, no new claim is admitted; every
 already-admitted service runs to a terminal request fact and projects its
 receipt before the body persists the turn, records put-down, or follows the
 heart-loss burial path. A normal body exit therefore has no nonterminal
-request. A crash may leave one; the next wake's observation sweep or the death
-transaction closes it.
+request. A crash may leave one; the next wake's observation sweep closes it.
 Requests do not enter the idle predicate because live service drains within its
 drive scope.
 

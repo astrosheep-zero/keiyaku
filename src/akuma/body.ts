@@ -3,7 +3,6 @@ import {
   HeldAkumaLeash,
   appendActivity,
   breakBody,
-  clearAbandonedControl,
   finishBodyIfIdle,
   heartExists,
   pauseRequested,
@@ -231,7 +230,7 @@ async function consumeTurnDrive(
   let pending = iterator.next();
   try {
     for (;;) {
-      if (stopRequested(input.paths) || pauseRequested(input.paths)) {
+      if (stopRequested(input.paths, input.bodySequence) || pauseRequested(input.paths)) {
         const draining = requests?.close();
         try { await drive.abort(); } finally {
           await draining;
@@ -314,9 +313,8 @@ async function driveTurn(
 
 function bornSoul(launch: BodyLaunch, leash: HeldAkumaLeash, now: string): Soul | null {
   const before = readHeart(launch.paths);
-  if (before.death !== null) return null;
   if (before.soul !== null) {
-    clearAbandonedControl(launch.paths);
+    leash.clearPause(launch.paths);
     return before.soul;
   }
   if (launch.seed === undefined) throw new Error("Akuma wake has no born soul");
@@ -370,8 +368,14 @@ function childSpawner(runtime: BodyRuntime): (launch: RequestChildLaunch) => Pro
   return runtime.spawnChild ?? spawnAkumaBody;
 }
 
-async function beginBody(paths: AkumaPaths, soul: Soul, runtime: BodyRuntime): Promise<BodyFact | null> {
+async function beginBody(
+  paths: AkumaPaths,
+  soul: Soul,
+  leash: HeldAkumaLeash,
+  runtime: BodyRuntime,
+): Promise<BodyFact | null> {
   if (!await settlePredecessor(paths)) return null;
+  leash.settleStop(paths);
   const body = recordBody(paths, { collar: runtime.collar, leashTakenAt: runtime.now() });
   const requests = await settleBodyRequests(paths, soul, runtime.now);
   clearBodyRequestTransport(paths);
@@ -392,15 +396,11 @@ export async function driveAkumaBody(
     if (soul === null) return;
     const selected = adapter ?? providerNamed(soul.provider);
 
-    const body = await beginBody(launch.paths, soul, runtime);
+    const body = await beginBody(launch.paths, soul, leash, runtime);
     if (body === null) return;
     let initial = launch.initialBody;
     for (;;) {
       const snapshot = readHeart(launch.paths);
-      if (snapshot.death !== null) {
-        breakBody(launch.paths, { sequence: body.sequence, end: "put-down", at: runtime.now() });
-        return;
-      }
       const launchTells = snapshot.pending;
       if (initial === undefined && launchTells.length === 0) {
         const finished = finishBodyIfIdle(launch.paths, { sequence: body.sequence, at: runtime.now() });

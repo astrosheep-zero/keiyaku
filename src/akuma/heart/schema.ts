@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 7;
+const HEART_SCHEMA_VERSION = 8;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(
@@ -115,11 +115,6 @@ export const HEART_SCHEMA = `
     ON tell_receipts(tell_id, kind) WHERE evidence = 'exact';
   CREATE UNIQUE INDEX IF NOT EXISTS tell_receipts_fence
     ON tell_receipts(body_sequence, fence, kind) WHERE evidence = 'fence';
-  CREATE TABLE IF NOT EXISTS tell_voids (
-    tell_id TEXT PRIMARY KEY REFERENCES tells(id) ON DELETE CASCADE,
-    evidence TEXT NOT NULL,
-    voided_at TEXT NOT NULL
-  ) STRICT;
   CREATE TABLE IF NOT EXISTS requests (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
@@ -141,8 +136,14 @@ export const HEART_SCHEMA = `
     )
   ) STRICT;
   CREATE TABLE IF NOT EXISTS control (
-    kind TEXT PRIMARY KEY CHECK (kind IN ('stop', 'pause', 'death')),
+    kind TEXT PRIMARY KEY CHECK (kind IN ('stop', 'pause')),
     value_json TEXT NOT NULL CHECK (json_valid(value_json)),
+    at TEXT NOT NULL
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS kills (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    body_sequence INTEGER NOT NULL UNIQUE REFERENCES bodies(sequence),
+    evidence TEXT NOT NULL CHECK (evidence = 'killed'),
     at TEXT NOT NULL
   ) STRICT;
 `;

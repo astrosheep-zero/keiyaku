@@ -96,18 +96,18 @@ type ActivityRow =
       at: string;
       tellId: TellId;
       text: string;
-      state: "pending" | "told" | "voided";
+      state: "pending" | "told";
     };
 ```
 
 `tell(body)` returns one typed mutation result: the allocated TellId, its
 recorded Heart admission, and whether the level-triggered waker was spawned. It
 does not imply delivery, provider observation, or turn entry. Delivery and
-provider receipts fold into ordinary Akuma observation as one `pending`, `told`,
-or `voided` tell row at the admission's original timeline position. Pending tell
+provider receipts fold into ordinary Akuma observation as one `pending` or
+`told` tell row at the admission's original timeline position. Pending tell
 rows are pinned outside snapshot budgets because they can still change the
 caller's action; settled tell rows share the ordinary activity budget. Text and
-JSON expose the same three-state row and no provider fence, five-stage
+JSON expose the same two-state row and no provider fence, five-stage
 lifecycle, or stage timeline. Tell
 rows are the sole detailed public tell projection; `AkumaStatus` carries no
 second pending-ID collection. There
@@ -136,8 +136,9 @@ exclusive. Status and wait never carry a full history page. The final answer
 is not activity text: the explicit last-answer read selects the last answered
 `TurnFact`, and CLI `history --last` writes its exact answer bytes.
 
-An akuma that answered and was later killed reports both: `life: "dead"` with
-the retained answer still attached. What to do about a stranded or headless
+An akuma that answered and whose latest Body was later killed reports both:
+`life: "killed"` with the retained answer still attached. What to do about a
+stranded or headless
 akuma is the flagship's decision; the surface puts the state and available
 verbs in front of her and says nothing more.
 

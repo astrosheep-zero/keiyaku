@@ -6,7 +6,7 @@ Claude and Codex app-server providers, public handles, status, wait, interrupt,
 fork, Body Requests, CLI skin, and Kanshi rows. Body Requests reroute the
 existing call surface; they do not add a public verb.
 
-An akuma is a summoned agent: useful, dangerous, cheap, and it can die. The
+An akuma is a summoned agent: useful, dangerous, and cheap. The
 flagship calls one, watches it, steers it, and collects what it brings back —
 in TypeScript first. The CLI is argv skin over the same surface.
 
@@ -73,7 +73,7 @@ trust.
 | stranded | free  | proven gone          | last turn broke off; that work is lost, typed |
 | headless | free  | **not proven gone**  | tree alive, or collar unverifiable — the
                                                 evidence says which; wait or kill          |
-| dead     | —     | —                    | a death row exists                          |
+| killed   | free  | proven gone          | `kill` stopped the latest body              |
 
 `headless` never claims more than the probe can prove: it carries the collar
 evidence (`alive` / `unverifiable`). A recycled pid is never group-killed
@@ -94,18 +94,12 @@ is claimed. Certainty costs the leash: take it; a soul means born; no soul
 means you may seal it, and sealed is permanently **stillborn**. Age is
 evidence for humans, never a judge.
 
-Natural death does not exist. A finished akuma is asleep, not dead. Failures
-are turn facts, not entity death. Death has exactly one writer: `kill`.
-Retained history outlives death — a dead akuma can still be forked, and its
-answers remain readable.
-
-Death closes every outstanding caller obligation in the same heart
-transaction: pending tells become `voided`, and `admitted` or
-`reserved` Body Requests become `voided` with death evidence. A reserved
-request copies its child coordinate into that evidence before clearing the
-state field. Death-void is receipt-scoped: it proves no caller can ever receive
-a receipt, not that the separately judged child failed to be born. A child that
-did finish birth remains a real, origin-bearing akuma.
+An Akuma does not die when its current Body stops. A finished turn is asleep;
+a failed turn is stranded; `kill` records that it stopped one exact Body. That
+witness projects `killed` only while the witnessed Body remains latest. It does
+not alter Soul, sessions, history, pending Tells, or Body Requests. A later
+Tell wakes the same Akuma, and the successor Body naturally supersedes the old
+kill witness. Retained history and fork remain readable throughout.
 
 ## Identity and birth
 

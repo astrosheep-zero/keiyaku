@@ -6,8 +6,7 @@ import type {
   BodyFact,
   Collar,
   Confinement,
-  DeathFact,
-  KillEvidence,
+  KillFact,
   ProviderExecution,
   ProviderOptions,
   RequestFact,
@@ -16,6 +15,7 @@ import type {
   ResumeCoordinate,
   SessionFact,
   Soul,
+  StopFact,
   TurnFact,
 } from "./facts.js";
 
@@ -90,7 +90,8 @@ export type ActivityFact = Readonly<{
   event: unknown;
   at: string;
 }>;
-export type DeathRow = Readonly<{ value_json: string; at: string }>;
+export type KillRow = Readonly<{ sequence: number; body_sequence: number; evidence: "killed"; at: string }>;
+type ControlRow = Readonly<{ value_json: string; at: string }>;
 
 function json(value: unknown): string {
   return JSON.stringify(value);
@@ -215,14 +216,6 @@ export function decodeActivityRow(row: ActivityRow): ActivityFact {
   };
 }
 
-export function encodeDeathRow(death: DeathFact): string {
-  return json({ evidence: death.evidence });
-}
-
-export function decodeDeathRow(row: DeathRow): DeathFact {
-  return { evidence: parsed<{ evidence: KillEvidence }>(row.value_json).evidence, at: row.at };
-}
-
 export function soulFact(database: DatabaseSync): Soul | null {
   const row = database.prepare(`SELECT id, archetype, description, provider_json, options_json, cwd,
     origin_json, confinement_json, created_at FROM soul WHERE singleton = 1`).get() as SoulRow | undefined;
@@ -245,6 +238,10 @@ export function insertSealFact(database: DatabaseSync, input: Readonly<{ evidenc
 
 export function deletePauseControl(database: DatabaseSync): void {
   database.prepare("DELETE FROM control WHERE kind = 'pause'").run();
+}
+
+export function deleteStopControl(database: DatabaseSync): void {
+  database.prepare("DELETE FROM control WHERE kind = 'stop'").run();
 }
 
 export function sealFact(database: DatabaseSync): Readonly<{ evidence: string; at: string }> | null {
@@ -275,10 +272,6 @@ export function insertActivityFact(
   database.prepare("INSERT INTO activity(sequence, body_sequence, event_json, at) VALUES (?, ?, ?, ?)")
     .run(sequence, input.bodySequence, encodeActivityEvent(input.event), input.at);
   return sequence;
-}
-
-export function deathExists(database: DatabaseSync): boolean {
-  return database.prepare("SELECT kind FROM control WHERE kind = 'death'").get() !== undefined;
 }
 
 const REQUEST_COLUMNS = `sequence, id, archetype, body, cwd, world, recipe_json, admitted_at,
@@ -331,36 +324,32 @@ export function updateRequestVoided(database: DatabaseSync, id: string, evidence
     WHERE id = ? AND state IN ('admitted', 'reserved')`).run(evidence, id);
 }
 
-export function insertStopControl(database: DatabaseSync, at: string): void {
-  database.prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('stop', '{}', ?)").run(at);
+export function insertStopControl(database: DatabaseSync, bodySequence: number, at: string): void {
+  database.prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('stop', ?, ?)")
+    .run(json({ bodySequence }), at);
 }
 
 export function insertPauseControl(database: DatabaseSync, at: string): void {
   database.prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('pause', '{}', ?)").run(at);
 }
 
-export function stopExists(database: DatabaseSync): boolean {
-  return database.prepare("SELECT kind FROM control WHERE kind = 'stop'").get() !== undefined;
+export function stopFact(database: DatabaseSync): StopFact | null {
+  const row = database.prepare("SELECT value_json, at FROM control WHERE kind = 'stop'").get() as ControlRow | undefined;
+  if (row === undefined) return null;
+  const value = parsed<{ bodySequence: unknown }>(row.value_json);
+  if (!Number.isSafeInteger(value.bodySequence) || (value.bodySequence as number) <= 0) {
+    throw new Error("Akuma stop control has an invalid Body sequence");
+  }
+  return { bodySequence: value.bodySequence as number, requestedAt: row.at };
 }
 
 export function pauseExists(database: DatabaseSync): boolean {
   return database.prepare("SELECT kind FROM control WHERE kind = 'pause'").get() !== undefined;
 }
 
-export function deleteAbandonedControls(database: DatabaseSync): void {
-  database.prepare("DELETE FROM control WHERE kind IN ('stop', 'pause')").run();
-}
-
-export function insertDeathFact(database: DatabaseSync, death: DeathFact): void {
-  database.prepare("INSERT INTO control(kind, value_json, at) VALUES ('death', ?, ?)")
-    .run(encodeDeathRow(death), death.at);
-}
-
-export function voidRequestsByDeath(database: DatabaseSync, evidence: string): void {
-  database.prepare(`UPDATE requests SET state = 'voided',
-    evidence = CASE WHEN child IS NULL THEN ? ELSE ? || '; child=' || child END,
-    child = NULL
-    WHERE state IN ('admitted', 'reserved')`).run(evidence, evidence);
+export function insertKillFact(database: DatabaseSync, bodySequence: number, at: string): void {
+  database.prepare("INSERT OR IGNORE INTO kills(body_sequence, evidence, at) VALUES (?, 'killed', ?)")
+    .run(bodySequence, at);
 }
 
 export function endBodyFact(
@@ -421,9 +410,26 @@ export function sessionFactForCoordinate(database: DatabaseSync, coordinate: Res
   return row === undefined ? null : decodeSessionRow(row);
 }
 
-export function deathFact(database: DatabaseSync): DeathFact | null {
-  const row = database.prepare("SELECT value_json, at FROM control WHERE kind = 'death'").get() as DeathRow | undefined;
-  return row === undefined ? null : decodeDeathRow(row);
+export function latestKillFact(database: DatabaseSync): KillFact | null {
+  const row = database.prepare(`SELECT sequence, body_sequence, evidence, at
+    FROM kills ORDER BY sequence DESC LIMIT 1`).get() as KillRow | undefined;
+  return row === undefined ? null : {
+    sequence: row.sequence,
+    bodySequence: row.body_sequence,
+    evidence: row.evidence,
+    at: row.at,
+  };
+}
+
+export function killFactForBody(database: DatabaseSync, bodySequence: number): KillFact | null {
+  const row = database.prepare(`SELECT sequence, body_sequence, evidence, at
+    FROM kills WHERE body_sequence = ?`).get(bodySequence) as KillRow | undefined;
+  return row === undefined ? null : {
+    sequence: row.sequence,
+    bodySequence: row.body_sequence,
+    evidence: row.evidence,
+    at: row.at,
+  };
 }
 
 export function historyFacts(database: DatabaseSync): readonly TurnFact[] {
