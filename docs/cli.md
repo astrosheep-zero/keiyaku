@@ -275,20 +275,18 @@ the Archetype, so the Archetype is never repeated. The closed marks are `●` ru
 idle, `×` killed, `!` stillborn or warning, `│` spine, `⋮` omitted history,
 `⧗` pending tell, `told` effective tell, `✂` interrupted, and `✓`
 answered. Text never prints the storage words
-`retained`, `latest`, `body`, `heart`, or `turn`. Every status snapshot ends in
-one copied life footer such as `● running`; it never infers life from tools,
-activity, or outcomes.
+`retained`, `latest`, `body`, `heart`, or `turn`. A running tool row is marked
+with `●` before its activity label; there is no separate running footer.
 
 ```text
 aku/worker/1234abcd (@review) ─────────────────────────────
-      ⋮ +12
-09:31 │      say narrowing the failing suite
-      │      run $ npm test — 41s · exit 1
-09:32 │     edit src/akuma.ts — +12 -3
-      │ thought  the collar probe races the pid check
-      │      run $ npm test
-      │   ⧗ tell “also check the leash timeout”
-      ● running
+     ⋮ +12
+09:31│ say     “narrowing the failing suite”
+     │ run     $ npm test — 41s · exit 1
+09:32│ edit    src/akuma.ts — +12 -3
+     │ thought “the collar probe races the pid check”
+     │ ● run     $ npm test
+     │ ⧗ tell “also check the leash timeout”
 ```
 
 Every typed gap renders in place as `⋮ +<count>`. Activity text wraps to at
@@ -297,7 +295,9 @@ remains or the persisted row carries `truncated: true`. Tool representation
 uses the same visible bound. History uses the same row renderer without that
 three-line cap. Rendering never changes the JSON fact, and copyable history
 commands remain indivisible. Activity labels are display-width-aware and
-right-aligned in one fixed field, with one space before content. The spine prints the first visible row's `HH:MM`. It then suppresses a row's
+left-aligned in one fixed field. Quoted voice reserves its closing delimiter
+outside the truncatable payload, so wrapping and truncation preserve balanced
+quotes. The spine prints the first visible row's `HH:MM`. It then suppresses a row's
 gutter while that row is less than 60 seconds after the last timestamp actually
 printed, and prints again at 60 seconds or more. A row without `at`, such as a
 pending tell, always has an empty gutter and does not move the anchor. There

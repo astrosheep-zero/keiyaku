@@ -111,10 +111,10 @@ test("Akuma status aligns and counts omitted activity", () => {
   const result = { kind: "akuma" as const, action: "status" as const, status };
   const lines = renderAkumaText(command, result).split("\n");
   assert.match(lines[0]!, /^aku\/worker\/1234abcd ─+$/u);
-  assert.equal(lines[1], "      ⋮ +12");
+  assert.equal(lines[1], "     ⋮ +12");
   assert.equal(lines[1]!.indexOf("⋮"), lines[2]!.indexOf("│"));
-  assert.match(lines[2]!, /^\d{2}:42 │ {5}note running tests$/u);
-  assert.equal(lines.at(-1), "      ● running");
+  assert.match(lines[2]!, /^\d{2}:42│ note    running tests$/u);
+  assert.equal(lines.at(-1), lines[2]);
   assert.deepEqual((akumaJsonValue(command, result) as typeof status).activity.entries[0], { kind: "gap", count: 12 });
 
   const complete = { ...result, status: { ...status, activity: { ...status.activity, entries: status.activity.entries.slice(1) } } };
@@ -145,7 +145,7 @@ test("Akuma status aligns and counts omitted activity", () => {
   };
   const recordedText = renderAkumaText(command, recorded);
   assert.match(recordedText.split("\n")[0]!, /^aku\/worker\/1234abcd \(@review\) ─+$/u);
-  assert.match(recordedText, /│ {3}⧗ tell “current input”\n {6}● running$/u);
+  assert.match(recordedText, /│ ⧗ tell {2}“current input”$/u);
   assert.deepEqual(akumaJsonValue(command, recorded), recorded.result);
   assert.equal(renderAkumaText(command, {
     ...recorded,
@@ -177,6 +177,56 @@ test("Akuma status aligns and counts omitted activity", () => {
   };
   assert.equal(renderAkumaText(command, observedTell).match(/current input/gu)?.length, 1);
   assert.deepEqual(akumaJsonValue(command, observedTell), observedTell.result);
+});
+
+test("Akuma voice is quoted and running tools carry the live mark", () => {
+  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
+  const status = {
+    id: "aku/worker/1234abcd",
+    archetype: "worker",
+    life: "running" as const,
+    collar: { kind: "alive" as const },
+    confinement: { kind: "unconfined" as const },
+    pending: [],
+    activity: { entries: [
+      { kind: "row" as const, row: {
+        kind: "said" as const, sequence: 1, bodySequence: 1,
+        at: "2026-08-10T16:42:00.000Z", text: "hello",
+      } },
+      { kind: "row" as const, row: {
+        kind: "thought" as const, sequence: 2, bodySequence: 1,
+        at: "2026-08-10T16:42:01.000Z", text: "considering",
+      } },
+      { kind: "row" as const, row: {
+        kind: "tool" as const, sequence: 3, bodySequence: 1,
+        at: "2026-08-10T16:42:02.000Z", name: "Search",
+        call: { kind: "search" as const, query: "TODO" }, state: "running" as const,
+      } },
+    ], lowestRetained: 1, highest: 3 },
+  };
+  const text = renderAkumaText(command, { kind: "akuma", action: "status", status });
+  assert.match(text, /│ say     “hello”/u);
+  assert.match(text, /│ thought “considering”/u);
+  assert.match(text, /│ ● search {2}TODO/u);
+  assert.doesNotMatch(text, /● running$/u);
+
+  const narrow = renderAkumaText(command, {
+    kind: "akuma",
+    action: "status",
+    status: {
+      ...status,
+      activity: { ...status.activity, entries: [{ kind: "row", row: {
+        kind: "said", sequence: 1, bodySequence: 1,
+        at: "2026-08-10T16:42:00.000Z",
+        text: "alpha beta gamma delta epsilon zeta eta theta iota",
+      } }] },
+    },
+  }, { columns: 30, color: false });
+  const voice = narrow.split("\n").slice(1).join("\n");
+  assert.match(voice, /“/u);
+  assert.match(voice, /…”$/u);
+  assert.equal(voice.match(/“/gu)?.length, 1);
+  assert.equal(voice.match(/”/gu)?.length, 1);
 });
 
 test("Akuma follow remains outside the unsettled CLI vocabulary", () => {

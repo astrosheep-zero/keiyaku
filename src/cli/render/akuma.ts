@@ -17,6 +17,8 @@ type SpineRow = Readonly<{
   index?: number;
   label: string;
   text: string;
+  active?: true;
+  quoted?: true;
   truncated?: true;
   indivisible?: true;
 }>;
@@ -27,9 +29,8 @@ const GUTTER_MS = 60_000;
 const LABEL_WIDTH = 8;
 const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 
-function mark(life: AkumaStatus["life"]): string {
+function mark(life: Exclude<AkumaStatus["life"], "running">): string {
   switch (life) {
-    case "running": return "●";
     case "killed": return "×";
     case "asleep": return "○";
     case "stranded":
@@ -48,11 +49,11 @@ function ruler(left: string, columns: number, scope = ""): string {
 }
 
 function alignedLabel(value: string): string {
-  return `${" ".repeat(Math.max(0, LABEL_WIDTH - displayColumns(value)))}${value}`;
+  return `${value}${" ".repeat(Math.max(0, LABEL_WIDTH - displayColumns(value)))}`;
 }
 
-function lifeFooter(status: AkumaStatus): string {
-  return `      ${mark(status.life)} ${status.life}`;
+function lifeFooter(status: AkumaStatus): readonly string[] {
+  return status.life === "running" ? [] : [`     ${mark(status.life)} ${status.life}`];
 }
 
 function clock(at: string | undefined): string {
@@ -69,7 +70,7 @@ function renderSpine(
 ): string[] {
   let lastPrintedAt: number | undefined;
   return items.flatMap((item) => {
-    if (item.kind === "gap") return [`      ⋮ +${item.count}`];
+    if (item.kind === "gap") return [`     ⋮ +${item.count}`];
     const timestamp = item.at === undefined ? undefined : Date.parse(item.at);
     const printable = timestamp !== undefined && Number.isFinite(timestamp)
       && (lastPrintedAt === undefined || timestamp - lastPrintedAt >= GUTTER_MS);
@@ -77,32 +78,38 @@ function renderSpine(
     const time = printable ? clock(item.at) : "";
     const index = item.index === undefined ? "" : String(item.index).padStart(4, " ");
     const gutter = `${index}${index.length === 0 ? "" : " "}${time.padStart(5, " ")}`;
-    const first = `${gutter} │ ${alignedLabel(item.label)} `;
+    const activityPrefix = item.active === true ? "● " : "";
+    const quote = item.quoted === true ? "“" : "";
+    const first = `${gutter}│ ${activityPrefix}${alignedLabel(item.label)}${quote}`;
     if (item.indivisible === true) return [`${first}${safeText(item.text)}`.trimEnd()];
-    const continuation = `${"".padStart(gutter.length)} │ ${"".padEnd(LABEL_WIDTH, " ")} `;
-    return renderBoundedTextBlock(item.text, {
+    const continuation = `${"".padStart(gutter.length)}│ ${"".padEnd(displayColumns(activityPrefix) + LABEL_WIDTH, " ")}`;
+    const lines = renderBoundedTextBlock(item.text, {
       first,
       continuation,
-      columns: context.columns,
+      columns: context.columns - displayColumns(quote),
       lines: profile === "snapshot" ? 3 : Number.MAX_SAFE_INTEGER,
       ...(item.truncated === true ? { truncated: true } : {}),
     });
+    return item.quoted === true
+      ? lines.map((line, index) => index === lines.length - 1 ? `${line}”` : line)
+      : lines;
   });
 }
 
 function activityItem(row: ActivityRow): SpineRow {
   const truncated = "truncated" in row && row.truncated === true ? { truncated: true as const } : {};
-  if (row.kind === "said") return { kind: "row", at: row.at, label: "say", text: row.text, ...truncated };
-  if (row.kind === "thought") return { kind: "row", at: row.at, label: "thought", text: row.text, ...truncated };
+  if (row.kind === "said") return { kind: "row", at: row.at, label: "say", text: row.text, quoted: true, ...truncated };
+  if (row.kind === "thought") return { kind: "row", at: row.at, label: "thought", text: row.text, quoted: true, ...truncated };
   if (row.kind === "note") return { kind: "row", at: row.at, label: "note", text: row.text, ...truncated };
   if (row.kind === "tell") return {
     kind: "row",
     at: row.at,
     label: row.state === "pending" ? "⧗ tell" : "told",
-    text: `“${row.text}”`,
+    text: row.text,
+    quoted: true,
   };
   const repr = toolRepr(row);
-  return { kind: "row", at: row.at, label: repr.label, text: repr.text, ...truncated };
+  return { kind: "row", at: row.at, label: repr.label, text: repr.text, ...(row.state === "running" ? { active: true } : {}), ...truncated };
 }
 
 function snapshotItems(entries: readonly ActivitySnapshotEntry[], exceptTell?: string): readonly SpineItem[] {
@@ -153,7 +160,7 @@ function statusText(status: AkumaStatus, context: TextRenderContext, options: St
     ruler(identity(status.id, options.alias), context.columns),
     ...(options.facts ?? []),
     ...renderSpine(statusItems(status, options.exceptTell, options.tail), context),
-    lifeFooter(status),
+    ...lifeFooter(status),
   ].join("\n");
 }
 
@@ -215,7 +222,7 @@ function tellText(
     entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === tellId);
   const current = observed?.kind === "row"
     ? activityItem(observed.row)
-    : { kind: "row" as const, label: "⧗ tell", text: `“${result.body}”` };
+    : { kind: "row" as const, label: "⧗ tell", text: result.body, quoted: true as const };
   const status = statusText(result.result.observation, context, {
     ...(result.alias === undefined ? {} : { alias: result.alias }),
     exceptTell: tellId,
