@@ -437,8 +437,6 @@ async function consumeTurnDrive(
   let liveTells = true;
   let tellPump: Promise<"live" | "turn-ended"> | null = null;
   let tellObservation: Promise<Readonly<{ kind: "tell"; result: "live" | "turn-ended" }>> | null = null;
-  let eventsOpen = true;
-  const completionObservation = drive.completion.then((result) => ({ kind: "completion" as const, result }));
   try {
     for (;;) {
       if (input.supervisor.signal.aborted) {
@@ -456,8 +454,7 @@ async function consumeTurnDrive(
         tellObservation = tellPump.then((result) => ({ kind: "tell" as const, result }));
       }
       const next = await Promise.race([
-        ...(eventsOpen ? [pending.then((event) => ({ kind: "event" as const, event }))] : []),
-        completionObservation,
+        pending.then((event) => ({ kind: "event" as const, event })),
         input.supervisor.next(heart).then((observation) => ({ kind: "heart" as const, observation })),
         ...(tellObservation === null ? [] : [tellObservation]),
         receiptFailure,
@@ -473,17 +470,13 @@ async function consumeTurnDrive(
         liveTells = next.result === "live";
         continue;
       }
-      if (next.kind === "completion") {
-        writesOpen = false;
-        return await settleCompletion(next.result, turnSession, requests);
-      }
-      if (next.event.done) {
-        eventsOpen = false;
-        continue;
-      }
+      if (next.event.done) break;
       turnSession = persistProviderEvent(input, active, next.event.value) ?? turnSession;
       pending = iterator.next();
     }
+    const result = await drive.completion;
+    writesOpen = false;
+    return await settleCompletion(result, turnSession, requests);
   } catch (error) {
     writesOpen = false;
     if (input.supervisor.signal.aborted) {

@@ -285,7 +285,7 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
   }
 });
 
-test("a Session without live tell falls back after events close before completion", async () => {
+test("a Session without live tell hands off while narration remains open", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-tell-handoff-"));
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c42" });
@@ -299,7 +299,7 @@ test("a Session without live tell falls back after events close before completio
           admission: { fence: "incumbent" },
           events: {
             async *[Symbol.asyncIterator]() {
-              return;
+              await new Promise(() => undefined);
             },
           },
           completion: new Promise<TurnResult>(() => undefined),
@@ -366,7 +366,7 @@ test("a Session without live tell falls back after events close before completio
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("completion wins before a Tell arrives on a Session without live tell", async () => {
+test("closed narration settles before a later Tell on a Session without live tell", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-tell-completion-"));
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c43" });
@@ -413,9 +413,9 @@ test("completion wins before a Tell arrives on a Session without live tell", asy
     }, incumbent, { now: () => "2026-08-08T00:00:00.000Z" });
     await turnStarted;
     await sessionObserved;
+    releaseEvents();
     settle({ kind: "answered", answer: "complete", historyId: "history-1" });
     await body;
-    releaseEvents();
 
     assert.equal(aborts, 0);
     assert.deepEqual(outcomes(allocated.paths)[0], {

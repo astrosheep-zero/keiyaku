@@ -7,7 +7,11 @@ This chapter owns the provider-neutral protocol and native adapter obligations.
 Provider fences and tell receipts are correlated to the admitted Turn, not to
 the enclosing Body and not to wall-clock order. Launch and live tell attempts
 remain typed attempts for the same Tell admission. A terminal provider result
-closes its Turn once; later narration cannot create another outcome.
+closes its Turn once. An adapter may freeze native terminal evidence earlier,
+but it ends the Session event stream before exposing `completion`; Body drains
+that one narration boundary before reading the result. Completion and events
+are not competing terminal judges, and later narration cannot create another
+outcome.
 
 ## Provider boundary
 

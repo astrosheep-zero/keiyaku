@@ -1,7 +1,7 @@
 ---
 id: task/make-provider-completion-follow-narration-closur
 title: Make Provider completion follow narration closure
-state: open
+state: done
 priority: 0
 needs: []
 parent: null
