@@ -68,7 +68,8 @@ async function archetypeSettings(root: string) {
   mkdirSync(join(home, "akuma"), { recursive: true });
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   writeFileSync(join(home, "akuma", "reviewer.md"), "---\nprovider: claude\nreadonly: true\n---\nReview only.\n");
-  return { home, value: await settings({ root, home }) };
+  const value = await settings({ root, home });
+  return { home, value, placement: { home, settings: value } };
 }
 
 async function requestPump(root: string) {
@@ -113,7 +114,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       path: world,
       archetype: "worker",
       body: "independent",
-      settings: configured.value,
+      ...configured.placement,
     });
     assert.deepEqual(independent.dispatch, { kind: "none" });
     assert.deepEqual(independent.alias, { kind: "none" });
@@ -165,7 +166,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       path: world,
       archetype: "worker",
       body: "partial",
-      settings: configured.value,
+      ...configured.placement,
       contract: bound.keiyaku,
       alias,
       cwd: executionCwd,
@@ -179,7 +180,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
       path: world,
       archetype: "worker",
       body: "detached",
-      settings: configured.value,
+      ...configured.placement,
       mode: "detach",
     });
     assert.deepEqual(detached.observation, { kind: "detached" });
@@ -188,7 +189,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
         path: world,
         archetype: "worker",
         body: "invalid",
-        settings: configured.value,
+        ...configured.placement,
         mode: "detach",
         timeoutMs: 1,
       }),
@@ -244,7 +245,7 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
       archetype: "worker",
       body: "explicit",
       cwd: world,
-      settings: configured.value,
+      ...configured.placement,
       contract: managed.keiyaku,
     });
     assert.deepEqual(explicit.execution, { cwd: world, source: "input" });
@@ -262,7 +263,7 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
         path: world,
         archetype: "worker",
         body: "must refuse",
-        settings: configured.value,
+        ...configured.placement,
         contract: here.keiyaku,
       }),
       /Contract workspace is unavailable: .* is here/u,
@@ -289,7 +290,7 @@ test("Keiyaku.call projects the same readonly restraint on CallResult and AkumaS
       path: world,
       archetype: "reviewer",
       body: "review",
-      settings: configured.value,
+      ...configured.placement,
     });
     assert.deepEqual(result.readonly, { enforcement: "native" });
     assert.equal(result.observation.kind, "observed");
@@ -324,7 +325,7 @@ test("Keiyaku.call observes for five minutes by default", async () => {
       path: world,
       archetype: "worker",
       body: "observe",
-      settings: configured.value,
+      ...configured.placement,
     });
     assert.equal(receivedTimeout, 300_000);
     assert.equal(result.observation.kind, "observed");
@@ -431,6 +432,7 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   writeFileSync(join(home, "akuma", "reviewer.md"), "---\nprovider: claude\nreadonly: true\n---\nReview only.\n");
   const configured = await settings({ root: world, home });
+  const placement = { home, settings: configured };
   const { pump, leash } = await requestPump(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   const originalWait = AkumaHandle.prototype.wait;
@@ -440,7 +442,7 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
       path: world,
       archetype: "grok-review",
       body: "",
-      settings: configured,
+      ...placement,
       mode: "detach",
     });
     assert.deepEqual(detached.readonly, {
@@ -456,7 +458,7 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
       path: world,
       archetype: "reviewer",
       body: "fail",
-      settings: configured,
+      ...placement,
     });
     assert.deepEqual(failed.readonly, { enforcement: "native" });
     assert.equal(failed.observation.kind, "failed");

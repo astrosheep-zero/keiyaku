@@ -266,8 +266,12 @@ rollback occurs. Text prints one result per harness. JSON returns
 `call` and `tell` each accept exactly one nonblank prompt source: one
 positional `<prompt>` argument, or a final `-` that reads stdin. Supplying
 both, neither, or a blank selected source is a usage refusal. The selected
-argument text or stdin bytes become the public body input unchanged. The `call` positional `<akuma-name>` names
-`~/.keiyaku/akuma/<name>.md`; its provider must resolve through the
+argument text or stdin bytes become the public body input unchanged. The CLI
+maps `KEIYAKU_HOME` once to an explicit home and uses that same value for
+Settings construction and Archetype placement; the library never reads that
+environment variable. The `call` positional `<akuma-name>` names
+`<home>/akuma/<name>.md`, defaulting to `~/.keiyaku/akuma/<name>.md`; its
+provider must resolve through the
 Settings-backed provider interpretation. When no same-name Settings entry
 exists, the built-in fallback execution names are `claude` and
 `codex-app-server`. A missing name prints exactly `` `<name>` was not found ``

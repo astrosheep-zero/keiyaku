@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { replaceFileDurably } from "../coordination/durable-file.js";
 import { acquireSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import { runProcess, runProcessToExit, type ProcessOutcome } from "../runtime/proc/run.js";
-import { SettingsError, type Settings } from "../settings.js";
 
 export type HookCommand = Readonly<{ argv: readonly string[]; timeoutMs: number }>;
 export type WorktreeHooks = Readonly<{
@@ -41,37 +40,6 @@ const MARKER_VERSION = 1;
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-
-export function worktreeHooksFrom(input: Readonly<{ settings: Settings }>): WorktreeHooks {
-  if (!object(input)) throw new TypeError("worktreeHooksFrom input must be an object");
-  const view = input.settings.namespace("worktree");
-  if (view.kind === "failed") {
-    throw new SettingsError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
-  }
-  for (const entry of view.entries) {
-    if (entry.name !== "create" && entry.name !== "destroy") throw new SettingsError(`worktree has unknown entry: ${entry.name}`);
-  }
-  const commands = (phase: "create" | "destroy"): readonly HookCommand[] => {
-    const selected = view.entries.find((entry) => entry.name === phase);
-    if (selected === undefined) return Object.freeze([]);
-    if (!Array.isArray(selected.value)) throw new SettingsError(`worktree.${phase} must be an array`);
-    return Object.freeze(selected.value.map((item, index) => {
-      if (!object(item)) throw new SettingsError(`worktree.${phase}[${index}] must be an object`);
-      const coordinate = `worktree.${phase}[${index}]`;
-      exactKeys(item, ["argv", "timeoutMs"], coordinate);
-      if (!Array.isArray(item.argv) || item.argv.length === 0 || !item.argv.every((value) => typeof value === "string")) {
-        throw new SettingsError(`${coordinate}.argv must be a nonempty string array`);
-      }
-      if (item.argv[0]!.trim().length === 0) throw new SettingsError(`${coordinate}.argv[0] must be nonblank`);
-      if (!Number.isSafeInteger(item.timeoutMs) || (item.timeoutMs as number) < 1 || (item.timeoutMs as number) > 2_147_483_647) {
-        throw new SettingsError(`${coordinate}.timeoutMs must be an integer from 1 through 2147483647`);
-      }
-      return Object.freeze({ argv: Object.freeze([...item.argv]), timeoutMs: item.timeoutMs as number });
-    }));
-  };
-  return Object.freeze({ create: commands("create"), destroy: commands("destroy") });
-}
-
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[], coordinate: string): void {
   const actual = Object.keys(value).sort();

@@ -66,7 +66,8 @@ its observation value types, and the Contract-owned pure consumers
 `gatesFrom({ settings, name? })`, `worktreeHooksFrom({ settings })`, and
 `requireBranchesToBeUpToDateFrom({ settings })`. They
 return concrete immutable values; no Contract operation reads a settings file
-or retains a Settings observation. Their selected-entry and resource-view
+or retains a Settings observation. Git receives only the opaque hook value
+and never imports Settings. Their selected-entry and resource-view
 failures throw the exported Contract-owned `SettingsError`; generic Settings
 construction represents its own failures as scope and namespace states and
 never produces that error.

@@ -117,7 +117,8 @@ remain the generic namespace behavior above.
 Akuma owns the `providers` interpreter and record grammar in
 [akuma-provider.md](akuma-provider.md), with Soul freezing in
 [akuma.md](akuma.md). Settings contributes only the resolved opaque
-entry and its provenance.
+entry and its provenance. Settings scope paths are observation evidence, not
+Akuma's home coordinate.
 
 Keiyaku does not load `<home>/.env`, `<root>/.keiyaku/.env`, or any other
 dotenv file. It performs no environment interpolation inside settings JSON.

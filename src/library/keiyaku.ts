@@ -28,8 +28,8 @@ export {
   gatesFrom,
   requireBranchesToBeUpToDateFrom,
   SettingsError,
+  worktreeHooksFrom,
 } from "./configuration.js";
-export { worktreeHooksFrom } from "../git/hooks.js";
 export { AkumaWorldScopeError } from "./address.js";
 
 export type {

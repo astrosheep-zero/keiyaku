@@ -22,7 +22,7 @@ Turn.
 ## Public surface
 
 ```ts
-const world = Akuma.of(root, settings?); // root is already resolved; no climbing
+const world = Akuma.of(root, { home?, settings? }); // root is already resolved; no climbing
 
 const a = await world.call({ archetype, body, cwd? }); // returns after birth
 world.of({ id });

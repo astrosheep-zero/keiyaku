@@ -19,6 +19,16 @@ function fixture() {
   return { root, home, project, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
+type SettingsFixture = ReturnType<typeof fixture>;
+
+async function loadNamed(value: SettingsFixture, name: string) {
+  return loadArchetype({
+    name,
+    home: value.home,
+    settings: await settings({ root: value.project, home: value.home }),
+  });
+}
+
 test("Settings resolves opaque entries by whole-record project shadow", async () => {
   const value = fixture();
   try {
@@ -117,7 +127,7 @@ test("Archetype resolves one provider execution without dotenv loading", async (
       },
     } }));
     writeFileSync(join(value.home, "akuma", "reviewer.md"), "---\nprovider: codex-for\nmodel: gpt-test\n---\nReview.\n");
-    const loaded = await loadArchetype({ name: "reviewer", settings: await settings({ root: value.project, home: value.home }) });
+    const loaded = await loadNamed(value, "reviewer");
     assert.deepEqual(loaded.provider, {
       name: "codex-for",
       kind: "codex-app-server",
@@ -139,7 +149,7 @@ test("Archetype resolves the OpenCode V1 provider execution as one frozen recipe
       local: { kind: "opencode-sdk", executable: "opencode-custom", env: { LITERAL: "yes" } },
     } }));
     writeFileSync(join(value.home, "akuma", "builder.md"), "---\nprovider: local\nmodel: openai/test\n---\n");
-    const loaded = await loadArchetype({ name: "builder", settings: await settings({ root: value.project, home: value.home }) });
+    const loaded = await loadNamed(value, "builder");
     assert.deepEqual(loaded.provider, {
       name: "local",
       kind: "opencode-sdk",
@@ -156,17 +166,14 @@ test("Archetype resolves builtin and configured Pi executions", async () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, "akuma", "pi-worker.md"), "---\nprovider: pi\nmodel: openai/gpt\neffort: high\n---\nWork.\n");
-    let loaded = await loadArchetype({ name: "pi-worker", settings: await settings({ root: value.project, home: value.home }) });
+    let loaded = await loadNamed(value, "pi-worker");
     assert.deepEqual(loaded.provider, { name: "pi", kind: "pi" });
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: { kind: "pi", env: {} } } }));
     writeFileSync(join(value.home, "akuma", "pi-worker.md"), "---\nprovider: local\nmodel: openai/gpt\n---\nWork.\n");
-    loaded = await loadArchetype({ name: "pi-worker", settings: await settings({ root: value.project, home: value.home }) });
+    loaded = await loadNamed(value, "pi-worker");
     assert.deepEqual(loaded.provider, { name: "local", kind: "pi", env: {} });
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: { kind: "pi", env: { A: "x" } } } }));
-    await assert.rejects(
-      loadArchetype({ name: "pi-worker", settings: await settings({ root: value.project, home: value.home }) }),
-      /env injection not supported for provider pi/u,
-    );
+    await assert.rejects(loadNamed(value, "pi-worker"), /env injection not supported for provider pi/u);
   } finally { value.close(); }
 });
 
@@ -174,7 +181,7 @@ test("Archetype resolves grok-build as its own builtin protocol execution", asyn
   const value = fixture();
   try {
     writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: grok-build\nmodel: grok-4\neffort: high\n---\n");
-    const loaded = await loadArchetype({ name: "grok", settings: await settings({ root: value.project, home: value.home }) });
+    const loaded = await loadNamed(value, "grok");
     assert.deepEqual(loaded.provider, {
       name: "grok-build",
       kind: "grok-build",
@@ -183,14 +190,14 @@ test("Archetype resolves grok-build as its own builtin protocol execution", asyn
     assert.deepEqual(loaded.options, { model: "grok-4", effort: "high" });
     writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: grok-build\n---\nBuild.\n");
     await assert.rejects(
-      loadArchetype({ name: "grok", settings: await settings({ root: value.project, home: value.home }) }),
+      loadNamed(value, "grok"),
       /Grok Build does not support the systemPrompt option/u,
     );
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: {
       private: { kind: "grok-build", executable: "private-grok", env: { XAI_API_KEY: "test" } },
     } }));
     writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: private\neffort: high\n---\n");
-    const custom = await loadArchetype({ name: "grok", settings: await settings({ root: value.project, home: value.home }) });
+    const custom = await loadNamed(value, "grok");
     assert.deepEqual(custom.provider, {
       name: "private",
       kind: "grok-build",
@@ -213,7 +220,7 @@ test("Archetype resolves a second configured ACP execution without registry chan
       },
     } }));
     writeFileSync(join(value.home, "akuma", "local.md"), "---\nprovider: local\nmodel: test-model\n---\nBuild.\n");
-    const loaded = await loadArchetype({ name: "local", settings: await settings({ root: value.project, home: value.home }) });
+    const loaded = await loadNamed(value, "local");
     assert.deepEqual(loaded.provider, {
       name: "local",
       kind: "acp",

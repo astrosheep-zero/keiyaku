@@ -261,7 +261,14 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/workspace.ts", ["captureWorkspaceTree"]),
       ],
     },
-    { source: "git/hooks.ts", allow: [any("coordination/durable-file.ts"), any("coordination/sqlite-transaction-lock.ts"), any("runtime/proc/run.ts"), any("settings.ts", ["Settings", "SettingsError"])] },
+    {
+      source: "git/hooks.ts",
+      allow: [
+        any("coordination/durable-file.ts"),
+        any("coordination/sqlite-transaction-lock.ts"),
+        any("runtime/proc/run.ts"),
+      ],
+    },
     {
       source: "git/scratch.ts",
       allow: [any("coordination/sqlite-transaction-lock.ts"), any("git/identity.ts"), any("git/repository.ts"), types("core/facts/types.ts")],
@@ -431,6 +438,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         types("core/facts/types.ts"),
         any("git/hooks.ts"),
+        any("library/configuration.ts", ["worktreeHooksFrom"]),
         types("git/scratch.ts"),
         types("git/repository.ts"),
         types("settings.ts"),
@@ -502,7 +510,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/input.ts"),
         any("library/region.ts"),
         any("library/configuration.ts"),
-        any("git/hooks.ts", ["worktreeHooksFrom"]),
         any("library/repo.ts"),
         any("settlement/holder.ts"),
         any("settlement/settle.ts"),
@@ -615,7 +622,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/repo.ts"),
         any("library/configuration.ts"),
         any("library/akuma-creation.ts"),
-        any("git/hooks.ts", ["worktreeHooksFrom"]),
         any("library/fleet.ts"),
         any("library/catalog.ts"),
         any("library/address.ts"),
@@ -652,7 +658,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/types.ts", ["contractId"]),
         any("dispatch/index.ts", ["readDispatches"]),
         any("identity/selector.ts"),
-        types("settings.ts"),
         any("library/input.ts", ["requireInput"]),
         any("library/repo.ts", ["Repo", "scopeForRepo"]),
         types("world.ts"),
@@ -662,10 +667,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "library/fleet.ts",
       allow: [
         any("akuma/index.ts"),
-        any("akuma/akuma.ts", ["readActionFeedbackStatus", "readBudgetedStatus"]),
+        any("akuma/akuma.ts", ["readBudgetedStatus"]),
         types("core/facts/types.ts", ["ContractId"]),
         any("dispatch/index.ts", ["readDispatch"]),
-        types("settings.ts"),
         any("library/address.ts"),
         any("library/input.ts", ["requireInput"]),
         any("library/repo.ts", ["Repo", "scopeForRepo"]),
@@ -677,7 +681,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("akuma/akuma.ts", ["Akuma", "AkumaList"]),
         any("akuma/archetype.ts", ["ArchetypeCatalogRow", "listArchetypeDefinitions"]),
-        types("settings.ts"),
         types("task/index.ts", ["TaskRow"]),
         any("task/operations.ts", ["observeTaskCatalogRows"]),
         any("library/contract.ts", ["ContractBoard", "listKeiyaku"]),

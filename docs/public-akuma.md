@@ -30,6 +30,7 @@ type CallInput = Readonly<{
   cwd?: string
   mode?: "wait" | "detach"
   timeoutMs?: number
+  home?: string
   settings?: Settings
   contract?: Keiyaku
   alias?: AkumaAlias
@@ -39,7 +40,6 @@ type ForkInput = Readonly<{
   path: WorldRoot
   akuma: string
   at: string
-  settings?: Settings
   repo?: Repo
 }>
 
@@ -48,6 +48,8 @@ Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 ```
 
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.
+Optional `home` is the Archetype coordinate and is never inferred from Settings
+provenance; omission uses `~/.keiyaku`. Settings remains the provider snapshot.
 `cwd` is the optional execution cwd. Explicit input is canonicalized; an
 omitted Contract-free value uses the WorldRoot. With a Contract and no cwd,
 Library accepts only an active managed workspace and uses the workspace
@@ -262,8 +264,8 @@ Keiyaku.ls(input: CatalogInput): Promise<Catalog>
 
 `CatalogInput` is a closed union whose `query` is `tasks`, `contracts`,
 `archetypes`, or `akuma`. Task and Akuma queries carry one resolved WorldRoot;
-Contract queries carry one resolved Repo; Archetype queries carry one Settings
-snapshot. An Akuma query may select one Archetype or all instances. `Catalog`
+Contract queries carry one resolved Repo; Archetype queries carry optional
+`home`. An Akuma query may select one Archetype or all instances. `Catalog`
 is the corresponding closed result arm and contains only the selected rows.
 There is no aggregate, absent section, failed-section wrapper, exact identity
 selector, Alias selector, or cross-product fallback.

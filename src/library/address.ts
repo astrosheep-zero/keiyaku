@@ -11,7 +11,6 @@ import {
   type AkumaAlias,
   type AkumaGlob,
 } from "../identity/selector.js";
-import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
@@ -22,14 +21,12 @@ export type SetAkumaSelector = DirectAkumaSelector | AkumaGlob | `kei/${string}`
 export type AkumaAddressInput = Readonly<{
   path: WorldRoot;
   akuma: string;
-  settings?: Settings;
   repo?: Repo;
 }>;
 
 export type AkumaSetAddressInput = Readonly<{
   path: WorldRoot;
   akuma: readonly string[];
-  settings?: Settings;
   repo?: Repo;
 }>;
 
@@ -54,16 +51,8 @@ function nonblank(value: unknown, label: string): string {
   return value;
 }
 
-function settingsOption(value: unknown): Settings | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "object" || value === null || typeof (value as { namespace?: unknown }).namespace !== "function") {
-    throw new TypeError("settings must be a Settings");
-  }
-  return value as Settings;
-}
-
-function world(path: WorldRoot, settings?: Settings): Akuma {
-  return Akuma.of(path, settings);
+function world(path: WorldRoot): Akuma {
+  return Akuma.of(path);
 }
 
 async function directId(path: WorldRoot, selector: string): Promise<AkuId> {
@@ -114,16 +103,16 @@ export async function resolveNamedAddress(input: NamedAddressInput): Promise<Nam
 export async function addressAkuma(input: AkumaAddressInput): Promise<Readonly<{
   path: WorldRoot;
   id: AkuId;
-  settings?: Settings;
 }>> {
   const values = requireInput(input, "Akuma address input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "settings", "repo"].includes(key)) throw new TypeError(`Akuma address input has unknown field: ${key}`);
+    if (!["path", "akuma", "repo"].includes(key)) {
+      throw new TypeError(`Akuma address input has unknown field: ${key}`);
+    }
   }
   if (values.repo !== undefined) scopeForRepo(values.repo);
   const path = nonblank(values.path, "path") as WorldRoot;
-  const settings = settingsOption(values.settings);
-  return { path, id: await directId(path, nonblank(values.akuma, "akuma")), ...(settings === undefined ? {} : { settings }) };
+  return { path, id: await directId(path, nonblank(values.akuma, "akuma")) };
 }
 
 function idsFromFleet(fleet: AkumaList): readonly AkuId[] {
@@ -191,21 +180,21 @@ async function refuseForeignContractMembers(path: WorldRoot, ids: readonly AkuId
 export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<Readonly<{
   path: WorldRoot;
   ids: readonly AkuId[];
-  settings?: Settings;
 }>> {
   const values = requireInput(input, "Akuma set address input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "settings", "repo"].includes(key)) throw new TypeError(`Akuma set address input has unknown field: ${key}`);
+    if (!["path", "akuma", "repo"].includes(key)) {
+      throw new TypeError(`Akuma set address input has unknown field: ${key}`);
+    }
   }
   if (!Array.isArray(values.akuma) || values.akuma.length === 0) throw new TypeError("akuma must be a nonempty selector array");
   const path = nonblank(values.path, "path") as WorldRoot;
-  const settings = settingsOption(values.settings);
   const selectors = values.akuma.map(parseSetSelector);
   if (hasSelectorKind(selectors, "contract") && values.repo === undefined) {
     throw new TypeError("Contract Akuma selector requires repo");
   }
   const fleetIds = hasSelectorKind(selectors, "glob")
-    ? idsFromFleet(await world(path, settings).list())
+    ? idsFromFleet(await world(path).list())
     : [];
   const aliases = hasSelectorKind(selectors, "alias")
     ? new Map((await readAliases(path)).map((binding) => [binding.alias, binding.akuId]))
@@ -220,5 +209,5 @@ export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<Read
   const ids = [...selected].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
   if (ids.length === 0) throw new TypeError("Akuma selector snapshot is empty");
   await refuseForeignContractMembers(path, ids, contractMembers);
-  return { path, ids, ...(settings === undefined ? {} : { settings }) };
+  return { path, ids };
 }

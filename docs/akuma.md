@@ -186,12 +186,15 @@ soul snapshot. A nonempty Markdown body after frontmatter overrides the system
 prompt; an empty body leaves that option absent so the native harness keeps its
 default.
 
-`Akuma.of(root, settings?)` consumes one already resolved WorldRoot. All
-worktrees of one Git repository therefore share one fleet, Alias authority,
-and Heart storage. The Soul's execution cwd remains the actual invocation
-worktree or subdirectory and does not participate in World identity. Akuma uses the injected
-Settings snapshot when present and otherwise constructs one Settings value for
-that world. `call({ archetype })` validates the name, reads this one Archetype file,
+`Akuma.of(root, { home?, settings? })` consumes one already resolved
+WorldRoot. All worktrees of one Git repository therefore share one fleet,
+Alias authority, and Heart storage. The Soul's execution cwd remains the
+actual invocation worktree or subdirectory and does not participate in World
+identity. `home` is Akuma's own coordinate and defaults to `~/.keiyaku`;
+Archetype definitions are read only from `<home>/akuma`. An injected Settings
+snapshot is configuration for provider resolution and is never the source of
+home. When Settings is omitted, Akuma constructs one Settings value with the
+same WorldRoot and home. `call({ archetype })` validates the name, reads this one Archetype file,
 resolves its `provider` as an execution name in the Settings `providers`
 namespace, and asks the selected built-in adapter kind to admit the Archetype
 options before allocating an identity. Missing, malformed, unknown-provider,

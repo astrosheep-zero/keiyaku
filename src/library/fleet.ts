@@ -6,10 +6,9 @@ import {
   type KillEvidence,
   type TellResult,
 } from "../akuma/index.js";
-import { readActionFeedbackStatus, readBudgetedStatus } from "../akuma/akuma.js";
+import { readBudgetedStatus } from "../akuma/akuma.js";
 import type { ContractId } from "../core/facts/types.js";
 import { readDispatch } from "../dispatch/index.js";
-import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
 import { requireInput } from "./input.js";
@@ -46,8 +45,8 @@ export type AkumaHistoryResult =
   | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer: string; contractId?: ContractId }>
   | Readonly<{ kind: "no-answer"; id: AkumaStatus["id"]; contractId?: ContractId }>;
 
-function source(path: WorldRoot, settings?: Settings): Akuma {
-  return Akuma.of(path, settings);
+function source(path: WorldRoot): Akuma {
+  return Akuma.of(path);
 }
 
 async function contractFor(repo: Repo | undefined, id: AkumaStatus["id"]): Promise<ContractId | undefined> {
@@ -77,10 +76,9 @@ const SHARED_ORDINARY_BUDGET = 30;
 async function observeWaitStatuses(
   path: WorldRoot,
   ids: readonly AkumaStatus["id"][],
-  settings?: Settings,
 ): Promise<readonly AkumaStatus[]> {
   if (ids.length <= 1) {
-    return await Promise.all(ids.map(async (id) => await source(path, settings).of({ id }).status()));
+    return await Promise.all(ids.map(async (id) => await source(path).of({ id }).status()));
   }
   let remaining = SHARED_ORDINARY_BUDGET;
   const statuses: AkumaStatus[] = [];
@@ -96,7 +94,6 @@ function directAddress(values: Record<string, unknown>): AkumaAddressInput {
   return {
     path: values.path as WorldRoot,
     akuma: values.akuma as string,
-    ...(values.settings === undefined ? {} : { settings: values.settings as Settings }),
     ...(values.repo === undefined ? {} : { repo: values.repo as Repo }),
   };
 }
@@ -105,20 +102,19 @@ function setAddress(values: Record<string, unknown>): AkumaSetAddressInput {
   return {
     path: values.path as WorldRoot,
     akuma: values.akuma as readonly string[],
-    ...(values.settings === undefined ? {} : { settings: values.settings as Settings }),
     ...(values.repo === undefined ? {} : { repo: values.repo as NonNullable<AkumaSetAddressInput["repo"]> }),
   };
 }
 
 export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaStatusView> {
   const addressed = await addressAkuma(input);
-  return await statusView(await source(addressed.path, addressed.settings).of({ id: addressed.id }).status(), input.repo);
+  return await statusView(await source(addressed.path).of({ id: addressed.id }).status(), input.repo);
 }
 
 export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult> {
   const values = requireInput(input, "Keiyaku.wait input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "settings", "repo", "completion", "timeoutMs"].includes(key)) {
+    if (!["path", "akuma", "repo", "completion", "timeoutMs"].includes(key)) {
       throw new TypeError(`Keiyaku.wait input has unknown field: ${key}`);
     }
   }
@@ -132,7 +128,7 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
   const timeoutMs = timeout(values.timeoutMs);
   const deadline = timeoutMs === undefined ? undefined : performance.now() + timeoutMs;
   for (;;) {
-    const statuses = await observeWaitStatuses(addressed.path, addressed.ids, addressed.settings);
+    const statuses = await observeWaitStatuses(addressed.path, addressed.ids);
     const settled = statuses.map((status) => status.life !== "running");
     if ((selected === "any" ? settled.some(Boolean) : settled.every(Boolean))
       || (deadline !== undefined && performance.now() >= deadline)) {
@@ -144,10 +140,10 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
 
 export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillResult> {
   const addressed = await addressAkumaSet(input);
-  const handles = addressed.ids.map((id) => source(addressed.path, addressed.settings).of({ id }));
+  const handles = addressed.ids.map((id) => source(addressed.path).of({ id }));
   const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
   const observations = await Promise.all(addressed.ids.map(async (id) =>
-    await statusView(await readActionFeedbackStatus(addressed.path, id), input.repo)));
+    await statusView(await source(addressed.path).of({ id }).status(), input.repo)));
   return {
     results: addressed.ids.map((id, index) => ({
       id,
@@ -160,36 +156,46 @@ export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillR
 export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult> {
   const values = requireInput(input, "Keiyaku.tell input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "settings", "body", "repo"].includes(key)) throw new TypeError(`Keiyaku.tell input has unknown field: ${key}`);
+    if (!["path", "akuma", "body", "repo"].includes(key)) {
+      throw new TypeError(`Keiyaku.tell input has unknown field: ${key}`);
+    }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const addressed = await addressAkuma(directAddress(values));
-  const handle = source(addressed.path, addressed.settings).of({ id: addressed.id });
+  const handle = source(addressed.path).of({ id: addressed.id });
   const tell = await handle.tell(values.body);
-  return { akuma: addressed.id, tell, observation: await statusView(await readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
+  const observation = await statusView(
+    await handle.status(),
+    values.repo as Repo | undefined,
+  );
+  return { akuma: addressed.id, tell, observation };
 }
 
 export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {
   const values = requireInput(input, "Keiyaku.interrupt input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "settings", "body", "repo"].includes(key)) throw new TypeError(`Keiyaku.interrupt input has unknown field: ${key}`);
+    if (!["path", "akuma", "body", "repo"].includes(key)) {
+      throw new TypeError(`Keiyaku.interrupt input has unknown field: ${key}`);
+    }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const addressed = await addressAkuma(directAddress(values));
-  const receipt = await source(addressed.path, addressed.settings).of({ id: addressed.id }).interrupt(values.body);
-  return { id: addressed.id, receipt, observation: await statusView(await readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
+  const handle = source(addressed.path).of({ id: addressed.id });
+  const receipt = await handle.interrupt(values.body);
+  const observation = await statusView(await handle.status(), values.repo as Repo | undefined);
+  return { id: addressed.id, receipt, observation };
 }
 
 export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
   const values = requireInput(input, "Keiyaku.history input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "settings", "before", "since", "limit", "last", "repo"].includes(key)) {
+    if (!["path", "akuma", "before", "since", "limit", "last", "repo"].includes(key)) {
       throw new TypeError(`Keiyaku.history input has unknown field: ${key}`);
     }
   }
   if (values.last !== undefined && typeof values.last !== "boolean") throw new TypeError("last must be a boolean");
   const addressed = await addressAkuma(directAddress(values));
-  const handle = source(addressed.path, addressed.settings).of({ id: addressed.id });
+  const handle = source(addressed.path).of({ id: addressed.id });
   if (values.last === true) {
     const answer = await handle.lastAnswer();
     const contractId = await contractFor(values.repo as Repo | undefined, addressed.id);

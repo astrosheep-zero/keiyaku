@@ -1,5 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { parseDocument } from "yaml";
 import type { Settings } from "../settings.js";
 import { archetypeName } from "./identity.js";
@@ -46,14 +47,12 @@ export class AkumaArchetypeError extends Error {
   }
 }
 
-function archetypeDirectory(settings: Settings): string | null {
-  const userPath = settings.scopes.user.path;
-  return userPath === undefined ? null : join(dirname(userPath), "akuma");
+function archetypeDirectory(home?: string): string {
+  return join(home ?? join(homedir(), ".keiyaku"), "akuma");
 }
 
-async function archetypePaths(settings: Settings): Promise<readonly Readonly<{ name: string; path: string }>[]> {
-  const directory = archetypeDirectory(settings);
-  if (directory === null) return [];
+async function archetypePaths(home?: string): Promise<readonly Readonly<{ name: string; path: string }>[]> {
+  const directory = archetypeDirectory(home);
   try {
     return (await readdir(directory, { withFileTypes: true }))
       .flatMap((entry) => {
@@ -69,8 +68,8 @@ async function archetypePaths(settings: Settings): Promise<readonly Readonly<{ n
   }
 }
 
-export async function listArchetypes(input: Readonly<{ settings: Settings }>): Promise<readonly string[]> {
-  return (await archetypePaths(input.settings)).map(({ name }) => name);
+export async function listArchetypes(input: Readonly<{ home?: string }> = {}): Promise<readonly string[]> {
+  return (await archetypePaths(input.home)).map(({ name }) => name);
 }
 
 function archetypeField(
@@ -138,10 +137,12 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
   });
 }
 
-export async function listArchetypeDefinitions(input: Readonly<{ settings: Settings }>): Promise<readonly ArchetypeCatalogRow[]> {
+export async function listArchetypeDefinitions(
+  input: Readonly<{ home?: string }> = {},
+): Promise<readonly ArchetypeCatalogRow[]> {
   // Reads still run concurrently, but the reported failure is the first invalid
   // definition in catalog byte order, not whichever read happened to finish first.
-  const settled = await Promise.allSettled((await archetypePaths(input.settings)).map(async ({ name, path }) => {
+  const settled = await Promise.allSettled((await archetypePaths(input.home)).map(async ({ name, path }) => {
     try {
       const definition = decodeArchetype(name, path, await readFile(path, "utf8"));
       return Object.freeze({
@@ -234,17 +235,18 @@ function admitArchetype(archetype: DecodedArchetype, settings: Settings): Admitt
   });
 }
 
-export async function loadArchetype(input: Readonly<{ name: string; settings: Settings }>): Promise<AdmittedArchetype> {
+export async function loadArchetype(
+  input: Readonly<{ name: string; home?: string; settings: Settings }>,
+): Promise<AdmittedArchetype> {
   const name = archetypeName(input.name);
-  const directory = archetypeDirectory(input.settings);
+  const directory = archetypeDirectory(input.home);
+  const path = join(directory, `${name}.md`);
   const missing = () => new AkumaArchetypeError(
     name,
-    directory === null ? [] : [join(directory, `${name}.md`)],
+    [path],
     "was not found",
     "use `keiyaku ls aku/` to list available Akuma",
   );
-  if (directory === null) throw missing();
-  const path = join(directory, `${name}.md`);
   let markdown: string;
   try {
     markdown = await readFile(path, "utf8");

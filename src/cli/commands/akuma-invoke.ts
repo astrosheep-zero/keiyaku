@@ -30,7 +30,8 @@ export type AkumaInvocationResult =
 type InvokeInput = Readonly<{
   path: WorldRoot;
   executionCwd?: string;
-  settings: Settings;
+  home?: string;
+  settings?: Settings;
   contract?: KeiyakuContract;
   repo?: Repo;
   readStdin(): Promise<string>;
@@ -52,7 +53,6 @@ async function invokeWait(command: Extract<ParsedAkumaCommand, { command: "wait"
     result: await Keiyaku.wait({
       path: input.path,
       akuma: command.akuma,
-      settings: input.settings,
       ...(input.repo === undefined ? {} : { repo: input.repo }),
       ...(command.completion === undefined ? {} : { completion: command.completion }),
       ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
@@ -64,11 +64,21 @@ async function invokeWait(command: Extract<ParsedAkumaCommand, { command: "wait"
 async function invokeTell(command: ParsedAkumaCommand & Readonly<{ command: "tell"; akuma: string }>, input: InvokeInput): Promise<AkumaInvocationResult> {
   const body = await promptBody(command, input);
   if (command.interrupt) {
-    const result = await Keiyaku.interrupt({ path: input.path, akuma: command.akuma, settings: input.settings, body, ...(input.repo === undefined ? {} : { repo: input.repo }) });
+    const result = await Keiyaku.interrupt({
+      path: input.path,
+      akuma: command.akuma,
+      body,
+      ...(input.repo === undefined ? {} : { repo: input.repo }),
+    });
     const alias = inputAlias(command.akuma);
     return { kind: "akuma", action: "tell", mode: "interrupt", result, body, ...(alias === undefined ? {} : { alias }) };
   }
-  const result = await Keiyaku.tell({ path: input.path, akuma: command.akuma, settings: input.settings, body, ...(input.repo === undefined ? {} : { repo: input.repo }) });
+  const result = await Keiyaku.tell({
+    path: input.path,
+    akuma: command.akuma,
+    body,
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
+  });
   const alias = inputAlias(command.akuma);
   return { kind: "akuma", action: "tell", mode: "ordinary", result, body, ...(alias === undefined ? {} : { alias }) };
 }
@@ -77,7 +87,6 @@ async function invokeHistory(command: Extract<ParsedAkumaCommand, { command: "hi
   const result = await Keiyaku.history({
     path: input.path,
     akuma: command.akuma,
-    settings: input.settings,
     ...(input.repo === undefined ? {} : { repo: input.repo }),
     ...(command.before === undefined ? {} : { before: command.before }),
     ...(command.since === undefined ? {} : { since: command.since }),
@@ -106,7 +115,6 @@ async function invokeFork(command: Extract<ParsedAkumaCommand, { command: "fork"
       path: input.path,
       akuma: command.akuma,
       at: command.at,
-      settings: input.settings,
       ...(input.repo === undefined ? {} : { repo: input.repo }),
     }),
   };
@@ -120,7 +128,6 @@ async function invokeKill(command: Extract<ParsedAkumaCommand, { command: "kill"
     result: await Keiyaku.kill({
       path: input.path,
       akuma: command.akuma,
-      settings: input.settings,
       ...(input.repo === undefined ? {} : { repo: input.repo }),
     }),
     ...(alias === undefined ? {} : { alias }),
@@ -138,7 +145,8 @@ export async function invokeAkuma(
         path: input.path,
         archetype: command.archetype,
         body,
-        settings: input.settings,
+        ...(input.home === undefined ? {} : { home: input.home }),
+        ...(input.settings === undefined ? {} : { settings: input.settings }),
         ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
         mode: command.mode,
         ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
@@ -155,11 +163,16 @@ export async function invokeAkuma(
   }
 }
 
-export async function invokeAkumaStatus(path: WorldRoot, akuma: string, settings: Settings, alias?: string, repo?: Repo): Promise<AkumaInvocationResult> {
+export async function invokeAkumaStatus(
+  path: WorldRoot,
+  akuma: string,
+  alias?: string,
+  repo?: Repo,
+): Promise<AkumaInvocationResult> {
   return {
     kind: "akuma",
     action: "status",
-    status: await Keiyaku.status({ path, akuma, settings, ...(repo === undefined ? {} : { repo }) }),
+    status: await Keiyaku.status({ path, akuma, ...(repo === undefined ? {} : { repo }) }),
     ...(alias === undefined ? {} : { alias }),
   };
 }

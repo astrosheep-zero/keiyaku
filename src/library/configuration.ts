@@ -6,6 +6,7 @@ export type { HookCommand, WorktreeHooks } from "../git/hooks.js";
 export type Gate = string;
 export type GatesFromInput = Readonly<{ settings: Settings; name?: string }>;
 export type RequireBranchesToBeUpToDateFromInput = Readonly<{ settings: Settings }>;
+export type WorktreeHooksFromInput = Readonly<{ settings: Settings }>;
 export { SettingsError };
 
 function record(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -72,6 +73,23 @@ export function requireBranchesToBeUpToDateFrom(input: RequireBranchesToBeUpToDa
     throw new SettingsError("git.requireBranchesToBeUpToDate must be a boolean");
   }
   return selected.value;
+}
+
+export function worktreeHooksFrom(input: WorktreeHooksFromInput): WorktreeHooks {
+  if (!record(input)) throw new TypeError("worktreeHooksFrom input must be an object");
+  const view = input.settings.namespace("worktree");
+  if (view.kind === "failed") namespaceFailure(view);
+  for (const entry of view.entries) {
+    if (entry.name !== "create" && entry.name !== "destroy") {
+      throw new SettingsError(`worktree has unknown entry: ${entry.name}`);
+    }
+  }
+  const selected = (phase: "create" | "destroy"): readonly HookCommand[] => {
+    const entry = view.entries.find((item) => item.name === phase);
+    if (entry === undefined) return Object.freeze([]);
+    return commands(entry.value, `worktree.${phase}`, SettingsError);
+  };
+  return Object.freeze({ create: selected("create"), destroy: selected("destroy") });
 }
 
 export function normalizedWorktreeHooks(value: unknown): WorktreeHooks {

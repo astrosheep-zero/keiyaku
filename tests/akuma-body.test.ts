@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { readActionFeedbackStatus } from "../src/akuma/akuma.js";
 import { CONTROL_RESPONSE_MS } from "../src/akuma/body.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import { HeldAkumaLeash, activitySlice, admitRequest, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, recordSession, recordTell, requestPause, requestStop, reserveRequest, stopRequested, type AkuId } from "../src/akuma/heart/index.js";

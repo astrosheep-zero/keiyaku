@@ -13,7 +13,6 @@ import { AkumaWorldScopeError, Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { settings } from "../src/settings.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
 import { serializeTaskDocument } from "../src/task/document.js";
 import { authorityPath } from "../src/task/store.js";
@@ -311,7 +310,7 @@ test("facade ls reads exactly one selected identity directory", async () => {
       priority: 2,
       disposition: "ready",
     }]);
-    assert.deepEqual(await Keiyaku.ls({ query: { kind: "archetypes" }, settings: await settings({ root, home }) }), {
+    assert.deepEqual(await Keiyaku.ls({ query: { kind: "archetypes" }, home }), {
       kind: "archetypes",
       rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
     });

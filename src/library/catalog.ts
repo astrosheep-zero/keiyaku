@@ -1,6 +1,5 @@
 import { Akuma, type AkumaList } from "../akuma/akuma.js";
 import { listArchetypeDefinitions, type ArchetypeCatalogRow } from "../akuma/archetype.js";
-import type { Settings } from "../settings.js";
 import type { TaskRow } from "../task/index.js";
 import { observeTaskCatalogRows } from "../task/operations.js";
 import { listKeiyaku, type ContractBoard } from "./contract.js";
@@ -17,7 +16,7 @@ export type CatalogQuery =
 export type CatalogInput =
   | Readonly<{ query: Extract<CatalogQuery, { kind: "tasks" }>; path: WorldRoot }>
   | Readonly<{ query: Extract<CatalogQuery, { kind: "contracts" }>; repo: Repo }>
-  | Readonly<{ query: Extract<CatalogQuery, { kind: "archetypes" }>; settings: Settings }>
+  | Readonly<{ query: Extract<CatalogQuery, { kind: "archetypes" }>; home?: string }>
   | Readonly<{ query: Extract<CatalogQuery, { kind: "akuma" }>; path: WorldRoot }>;
 
 export type Catalog =
@@ -32,12 +31,12 @@ export type Catalog =
       searched: readonly string[];
     }>;
 
-function settingsValue(value: unknown): Settings {
-  if (typeof value !== "object" || value === null
-    || typeof (value as { namespace?: unknown }).namespace !== "function") {
-    throw new TypeError("settings must be a Settings");
+function optionalHome(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError("home must be a nonblank string");
   }
-  return value as Settings;
+  return value;
 }
 
 function worldRoot(value: unknown): WorldRoot {
@@ -69,7 +68,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   const values = requireInput(input, "Keiyaku.ls input");
   const query = queryValue(values.query);
   const allowed = query.kind === "contracts" ? ["query", "repo"]
-    : query.kind === "archetypes" ? ["query", "settings"] : ["query", "path"];
+    : query.kind === "archetypes" ? ["query", "home"] : ["query", "path"];
   for (const key of Object.keys(values)) {
     if (!allowed.includes(key)) throw new TypeError(`Keiyaku.ls input has unknown field: ${key}`);
   }
@@ -79,13 +78,19 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
     return { kind: "contracts", root: board.root, state: board.state, rows: board.rows };
   }
   if (query.kind === "archetypes") {
-    return { kind: "archetypes", rows: await listArchetypeDefinitions({ settings: settingsValue(values.settings) }) };
+    const home = optionalHome(values.home);
+    return {
+      kind: "archetypes",
+      rows: await listArchetypeDefinitions(home === undefined ? {} : { home }),
+    };
   }
   const path = worldRoot(values.path);
   if (query.kind === "tasks") {
     return { kind: "tasks", root: path, rows: await observeTaskCatalogRows(path) };
   }
-  const listed = await Akuma.of(path).list(query.archetype === undefined ? undefined : { archetype: query.archetype });
+  const listed = await Akuma.of(path).list(
+    query.archetype === undefined ? undefined : { archetype: query.archetype },
+  );
   return {
     kind: "akuma",
     root: path,

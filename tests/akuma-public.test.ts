@@ -33,8 +33,11 @@ import { World } from "../src/world.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
-async function akumaAt(root: string, value?: Awaited<ReturnType<typeof settings>>) {
-  return Akuma.of(await World.at(root), value);
+async function akumaAt(
+  root: string,
+  input?: { home?: string; settings?: Awaited<ReturnType<typeof settings>> },
+) {
+  return Akuma.of(await World.at(root), input);
 }
 
 async function timeline(paths: Parameters<typeof activitySlice>[0]) {
@@ -1083,7 +1086,7 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
       "Review the change from first principles.",
       "",
     ].join("\n"));
-    const loaded = await loadArchetype({ name: "reviewer", settings: settingsValue });
+    const loaded = await loadArchetype({ name: "reviewer", home, settings: settingsValue });
     const { adapter, ...definition } = loaded;
     assert.equal(typeof adapter.start, "function");
     assert.deepEqual(definition, {
@@ -1101,7 +1104,7 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
     });
     writeFileSync(join(home, "akuma", "invalid.md"), "---\nprovider: claude\nreadonly: false\n---\n");
     await assert.rejects(
-      loadArchetype({ name: "invalid", settings: settingsValue }),
+      loadArchetype({ name: "invalid", home, settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.searched[0] === join(home, "akuma", "invalid.md")
         && !error.message.includes("searched")
@@ -1109,18 +1112,18 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
     );
     writeFileSync(join(home, "akuma", "stale-access.md"), "---\nprovider: claude\naccess: read\n---\n");
     await assert.rejects(
-      loadArchetype({ name: "stale-access", settings: settingsValue }),
+      loadArchetype({ name: "stale-access", home, settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.reason.includes("access is not supported"),
     );
     writeFileSync(join(home, "akuma", "wordy-readonly.md"), "---\nprovider: claude\nreadonly: yes\n---\n");
     await assert.rejects(
-      loadArchetype({ name: "wordy-readonly", settings: settingsValue }),
+      loadArchetype({ name: "wordy-readonly", home, settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.reason.includes("readonly must be true"),
     );
     writeFileSync(join(home, "akuma", "grok-review.md"), "---\nprovider: grok-build\nreadonly: true\n---\n");
-    const grok = await loadArchetype({ name: "grok-review", settings: settingsValue });
+    const grok = await loadArchetype({ name: "grok-review", home, settings: settingsValue });
     assert.deepEqual(grok.readonly, {
       enforcement: "none",
       diagnostic: "Grok Build cannot remove task-surface mutation capabilities",
@@ -1128,13 +1131,13 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
     assert.deepEqual(grok.options, { readonly: true });
     writeFileSync(join(home, "akuma", "unknown.md"), "---\nprovider: missing\n---\n");
     await assert.rejects(
-      loadArchetype({ name: "unknown", settings: settingsValue }),
+      loadArchetype({ name: "unknown", home, settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.reason === "uses unknown provider missing"
         && error.searched[0] === join(home, "akuma", "unknown.md"),
     );
     await assert.rejects(
-      loadArchetype({ name: "missing", settings: settingsValue }),
+      loadArchetype({ name: "missing", home, settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.kind === "akuma-archetype"
         && error.searched[0] === join(home, "akuma", "missing.md")
@@ -1149,7 +1152,7 @@ test("Archetype catalog lists canonical files in byte order without admitting co
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-catalog-"));
   try {
     const settingsValue = await settings({ home });
-    const world = (await akumaAt(home, settingsValue));
+    const world = (await akumaAt(home, { home, settings: settingsValue }));
     assert.deepEqual(await world.listArchetypes(), []);
 
     mkdirSync(join(home, "akuma"));
@@ -1161,7 +1164,7 @@ test("Archetype catalog lists canonical files in byte order without admitting co
 
     assert.deepEqual(await world.listArchetypes(), ["alpha", "zeta"]);
     await assert.rejects(
-      loadArchetype({ name: "zeta", settings: settingsValue }),
+      loadArchetype({ name: "zeta", home, settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError && error.kind === "akuma-archetype",
     );
   } finally {
@@ -1183,7 +1186,7 @@ test("Archetype definition catalog decodes metadata without provider admission",
       "prompt",
       "",
     ].join("\n"));
-    assert.deepEqual(await listArchetypeDefinitions({ settings: settingsValue }), [{
+    assert.deepEqual(await listArchetypeDefinitions({ home }), [{
       name: "reviewer",
       model: "reviewer-model",
       description: "A complete description that is not truncated by the owner.",
@@ -1191,7 +1194,7 @@ test("Archetype definition catalog decodes metadata without provider admission",
 
     writeFileSync(join(home, "akuma", "broken.md"), "not frontmatter\n");
     await assert.rejects(
-      listArchetypeDefinitions({ settings: settingsValue }),
+      listArchetypeDefinitions({ home }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.searched[0] === join(home, "akuma", "broken.md")
         && /must begin with YAML frontmatter/u.test(error.reason),
@@ -1210,13 +1213,42 @@ test("Archetype definition catalog reports the first invalid definition in byte 
     writeFileSync(join(home, "akuma", "alpha.md"), "not frontmatter\n".repeat(100_000));
     writeFileSync(join(home, "akuma", "bravo.md"), "not frontmatter\n");
     await assert.rejects(
-      listArchetypeDefinitions({ settings: settingsValue }),
+      listArchetypeDefinitions({ home }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.searched[0] === join(home, "akuma", "alpha.md")
         && /must begin with YAML frontmatter/u.test(error.reason),
     );
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Akuma home is independent of injected Settings provenance", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-home-root-"));
+  const homeA = mkdtempSync(join(tmpdir(), "keiyaku-akuma-home-a-"));
+  const homeB = mkdtempSync(join(tmpdir(), "keiyaku-akuma-home-b-"));
+  try {
+    mkdirSync(join(homeA, "akuma"));
+    mkdirSync(join(homeB, "akuma"));
+    writeFileSync(join(homeA, "settings.json"), JSON.stringify({
+      providers: { local: { kind: "claude-agent-sdk", executable: "from-a" } },
+    }));
+    writeFileSync(join(homeA, "akuma", "decoy.md"), "---\nprovider: claude\n---\nFrom A.\n");
+    writeFileSync(join(homeB, "akuma", "worker.md"), "---\nprovider: local\n---\nFrom B.\n");
+    const settingsFromA = await settings({ home: homeA });
+    const world = await akumaAt(root, { home: homeB, settings: settingsFromA });
+    assert.deepEqual(await world.listArchetypes(), ["worker"]);
+    const loaded = await loadArchetype({ name: "worker", home: homeB, settings: settingsFromA });
+    assert.equal(loaded.path, join(homeB, "akuma", "worker.md"));
+    assert.deepEqual(loaded.provider, {
+      name: "local",
+      kind: "claude-agent-sdk",
+      executable: "from-a",
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(homeA, { recursive: true, force: true });
+    rmSync(homeB, { recursive: true, force: true });
   }
 });
 

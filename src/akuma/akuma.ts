@@ -150,23 +150,13 @@ async function wakeTell(paths: AkumaPaths, tellId: string): Promise<TellResult> 
   } catch (error) {
     return {
       admission: { tellId, fact: "recorded" },
-      wake: { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) },
+      wake: { kind: "failed", diagnostic: diagnostic(error) },
     };
   }
 }
 
-async function unbornListRow(
-  paths: AkumaPaths,
-  id: AkuId,
-): Promise<UnbornAkumaListRow> {
-  try {
-    if (await probeLeash(paths) === "held") return { id, life: "unborn" };
-    const seal = await readSeal(paths);
-    return seal === null ? { id, life: "unborn" } : { id, life: "stillborn", seal };
-  } catch (error) {
-    if (isHeartAbsent(error)) return { id, life: "unborn" };
-    throw error;
-  }
+function diagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function fleetListRow(
@@ -175,7 +165,14 @@ async function fleetListRow(
 ): Promise<AkumaListRow | UnbornAkumaListRow> {
   const snapshot = await readHeart(paths);
   if (snapshot.soul !== null) return await bornListRow(paths, expected, snapshot);
-  return await unbornListRow(paths, expected);
+  try {
+    if (await probeLeash(paths) === "held") return { id: expected, life: "unborn" };
+    const seal = await readSeal(paths);
+    return seal === null ? { id: expected, life: "unborn" } : { id: expected, life: "stillborn", seal };
+  } catch (error) {
+    if (isHeartAbsent(error)) return { id: expected, life: "unborn" };
+    throw error;
+  }
 }
 
 async function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot?: HeartSnapshot): Promise<AkumaListRow> {
@@ -221,11 +218,6 @@ async function bornStatus(
   };
 }
 
-/** Package-internal action observation; it uses the same snapshot selector as status. */
-export async function readActionFeedbackStatus(worldPath: WorldRoot, id: AkuId): Promise<AkumaStatus> {
-  return await bornStatus(pathsForAkuId(worldPath, id), id);
-}
-
 export type BudgetedStatusObservation = Readonly<{
   status: AkumaStatus;
   ordinarySelected: number;
@@ -246,10 +238,6 @@ export async function readBudgetedStatus(
     ordinarySnapshotBudget(input.ordinaryBudget),
   );
   return { status, ordinarySelected: ordinarySelectedCount(status.timeline) };
-}
-
-function diagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export class AkumaHandle {
@@ -399,7 +387,11 @@ export class AkumaHandle {
       });
       return { kind: "forked", child: child.id };
     } catch (error) {
-      return { kind: "upstream-forked", childSession, diagnostic: diagnostic(error) };
+      return {
+        kind: "upstream-forked",
+        childSession,
+        diagnostic: diagnostic(error),
+      };
     }
   }
 
@@ -446,16 +438,14 @@ export type LastAnswer =
   | Readonly<{ kind: "answer"; answer: string }>
   | Readonly<{ kind: "no-answer" }>;
 
+type AkumaConfiguration = Readonly<{ home?: string; settings?: Settings }>;
+
 export class Akuma {
-  private constructor(private readonly path: WorldRoot, private readonly configuredSettings?: Settings) {}
+  private constructor(private readonly path: WorldRoot, private readonly configuration: AkumaConfiguration) {}
 
-  static of(root: WorldRoot, settings?: Settings): Akuma {
+  static of(root: WorldRoot, input: AkumaConfiguration = {}): Akuma {
     if (typeof root !== "string") throw new TypeError("Akuma.of root must be a WorldRoot");
-    return new Akuma(root, settings);
-  }
-
-  private async settings(): Promise<Settings> {
-    return this.configuredSettings ?? await readSettings({ root: this.path });
+    return new Akuma(root, input);
   }
 
   of(input: Readonly<{ id: string }>): AkumaHandle {
@@ -463,20 +453,21 @@ export class Akuma {
   }
 
   async listArchetypes(): Promise<readonly string[]> {
-    return readArchetypes({ settings: await this.settings() });
+    return readArchetypes(this.configuration.home === undefined ? {} : { home: this.configuration.home });
   }
 
   async call(input: Readonly<{ archetype: string; body: string; cwd?: string }>): Promise<AkumaHandle> {
     const name = archetypeName(input.archetype);
-    const archetype = await loadArchetype({ name, settings: await this.settings() });
-    const provider = archetype.adapter;
+    const home = this.configuration.home === undefined ? {} : { home: this.configuration.home };
+    const settings = this.configuration.settings ?? await readSettings({ root: this.path, ...home });
+    const archetype = await loadArchetype({ name, ...home, settings });
     const cwd = resolve(input.cwd ?? this.path);
     const recipe = Object.freeze({
       ...(archetype.description === undefined ? {} : { description: archetype.description }),
       provider: archetype.provider,
       options: archetype.options,
       ...(archetype.readonly === undefined ? {} : { readonly: archetype.readonly }),
-      confinement: provider.confinement({ cwd, options: archetype.options }),
+      confinement: archetype.adapter.confinement({ cwd, options: archetype.options }),
     });
     const requests = injectedBodyRequests();
     if (requests !== null) {
@@ -499,13 +490,9 @@ export class Akuma {
         seed: {
           id: allocated.id,
           archetype: allocated.archetype,
-          ...(archetype.description === undefined ? {} : { description: archetype.description }),
-          provider: archetype.provider,
-          options: archetype.options,
-          ...(archetype.readonly === undefined ? {} : { readonly: archetype.readonly }),
+          ...recipe,
           cwd,
           origin: { kind: "direct" },
-          confinement: recipe.confinement,
         },
         initialBody: input.body,
       }),

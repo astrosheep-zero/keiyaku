@@ -88,33 +88,25 @@ async function withAcquiredStdin(
 export type SettingsInvocationResult = Readonly<{ kind: "settings"; value: Settings }>;
 export type GuidanceInvocationResult = Readonly<{ kind: "guidance"; contract: ContractId; guidance: string }>;
 
-function settingsAt(root: WorldRoot | undefined, environment: NodeJS.ProcessEnv): Promise<Settings> {
-  const home = environment.KEIYAKU_HOME?.trim();
-  return settings({ ...(root === undefined ? {} : { root }), ...(home === undefined || home.length === 0 ? {} : { home }) });
+function settingsAt(root: WorldRoot | undefined, home?: string): Promise<Settings> {
+  return settings({ ...(root === undefined ? {} : { root }), ...(home === undefined ? {} : { home }) });
+}
+
+function consumeSettings<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof SettingsError) throw new CliUsageError(error.message);
+    throw error;
+  }
 }
 
 function selectedGates(value: Settings, name?: string) {
-  try { return gatesFrom({ settings: value, ...(name === undefined ? {} : { name }) }); }
-  catch (error) {
-    if (error instanceof SettingsError) throw new CliUsageError(error.message);
-    throw error;
-  }
-}
-
-function selectedHooks(value: Settings): WorktreeHooks {
-  try { return worktreeHooksFrom({ settings: value }); }
-  catch (error) {
-    if (error instanceof SettingsError) throw new CliUsageError(error.message);
-    throw error;
-  }
+  return consumeSettings(() => gatesFrom({ settings: value, ...(name === undefined ? {} : { name }) }));
 }
 
 function selectedGitPolicy(value: Settings): boolean {
-  try { return requireBranchesToBeUpToDateFrom({ settings: value }); }
-  catch (error) {
-    if (error instanceof SettingsError) throw new CliUsageError(error.message);
-    throw error;
-  }
+  return consumeSettings(() => requireBranchesToBeUpToDateFrom({ settings: value }));
 }
 
 function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
@@ -300,35 +292,28 @@ type AkumaEdgeInput = Readonly<{
   path: WorldRoot;
   executionCwd?: string;
   repo?: Repo;
-  configuration: Settings;
+  home?: string;
+  configuration?: Settings;
   edge: InvocationEdge;
 }>;
 
-async function invokeAkumaCommand(parsed: ParsedAkumaCommand, input: AkumaEdgeInput): Promise<AkumaInvocationResult> {
-  const { path, executionCwd, repo, configuration, edge } = input;
-  if (parsed.command === "call" && parsed.contract !== undefined) {
-    if (repo === undefined) throw new Error("call with Contract requires a resolved Repo");
-    const selected = contractFromInput(repo, parsed.contract);
+async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, input: AkumaEdgeInput) {
+  try {
+    const { path, executionCwd, repo, home, configuration, edge } = input;
+    if (parsed.command === "call" && parsed.contract !== undefined && repo === undefined) {
+      throw new Error("call with Contract requires a resolved Repo");
+    }
     return await invokeAkuma(parsed, {
       path,
       ...(executionCwd === undefined ? {} : { executionCwd }),
-      settings: configuration,
-      contract: selected.contract,
+      ...(home === undefined ? {} : { home }),
+      ...(configuration === undefined ? {} : { settings: configuration }),
+      ...(parsed.command === "call" && parsed.contract !== undefined
+        ? { contract: contractFromInput(repo as Repo, parsed.contract).contract }
+        : repo === undefined ? {} : { repo }),
       readStdin: edge.readStdin,
     });
-  }
-  return await invokeAkuma(parsed, {
-    path,
-    ...(executionCwd === undefined ? {} : { executionCwd }),
-    settings: configuration,
-    ...(repo === undefined ? {} : { repo }),
-    readStdin: edge.readStdin,
-  });
-}
-
-async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, input: AkumaEdgeInput) {
-  try { return await invokeAkumaCommand(parsed, input); }
-  catch (error) {
+  } catch (error) {
     if (error instanceof AkumaWorldScopeError) throw error;
     if (error instanceof TypeError) throw new CliUsageError(error.message);
     throw error;
@@ -350,7 +335,7 @@ async function invokeCatalog(
   parsed: Extract<ParsedCommand, { command: "ls" }>,
   world: WorldRoot | null,
   repo: Repo | undefined,
-  edge: InvocationEdge,
+  home?: string,
 ) {
   try {
     if (parsed.query.kind === "contracts") {
@@ -360,7 +345,7 @@ async function invokeCatalog(
     if (parsed.query.kind === "archetypes") {
       return {
         kind: "catalog" as const,
-        catalog: await Keiyaku.ls({ query: parsed.query, settings: await settingsAt(undefined, edge.environment) }),
+        catalog: await Keiyaku.ls({ query: parsed.query, ...(home === undefined ? {} : { home }) }),
       };
     }
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
@@ -378,12 +363,10 @@ async function invokeStatus(
   parsed: Extract<ParsedCommand, { command: "status" }>,
   world: WorldRoot | null,
   repo: Repo | undefined,
-  edge: InvocationEdge,
 ) {
-  const configuration = await settingsAt(world ?? undefined, edge.environment);
   if (parsed.akuma === true) {
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-    return invokeAkumaStatus(world, parsed.contract, configuration, undefined, repo);
+    return invokeAkumaStatus(world, parsed.contract, undefined, repo);
   }
   if (parsed.contract === undefined) {
     const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
@@ -398,7 +381,7 @@ async function invokeStatus(
       });
       if (address.kind === "akuma") {
         if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-        return invokeAkumaStatus(world, address.id, configuration, parsed.contract, repo);
+        return invokeAkumaStatus(world, address.id, parsed.contract, repo);
       }
       const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
       return { kind: "status" as const, report: selectKanshi({ report, contract: address.id }), selection: "contract" as const };
@@ -457,8 +440,10 @@ async function invokeParsed(
     readStdin: runtime.readStdin ?? readStdin,
   };
   const parsed = invocation.command;
+  const mapped = edge.environment.KEIYAKU_HOME?.trim();
+  const home = mapped === undefined || mapped.length === 0 ? undefined : mapped;
   if (parsed.command === "settings") {
-    return { kind: "settings", value: await settingsAt(world ?? undefined, edge.environment) };
+    return { kind: "settings", value: await settingsAt(world ?? undefined, home) };
   }
   if (parsed.command === "task") {
     try {
@@ -473,24 +458,25 @@ async function invokeParsed(
   }
   if (isParsedAkumaCommand(parsed)) {
     const akumaWorld = await akumaWorldFor(parsed, world, candidateWorld, coordinates.establishWorld);
-    const configuration = await settingsAt(akumaWorld, edge.environment);
+    const configuration = parsed.command === "call" ? await settingsAt(akumaWorld, home) : undefined;
     return await invokeAkumaFromEdge(parsed, {
       path: akumaWorld,
       ...(parsed.command === "call" && parsed.contract !== undefined && invocation.cwd === undefined
         ? {}
         : { executionCwd: cwd }),
       ...(repo === undefined ? {} : { repo }),
-      configuration,
+      ...(parsed.command === "call" && home !== undefined ? { home } : {}),
+      ...(configuration === undefined ? {} : { configuration }),
       edge,
     });
   }
-  if (parsed.command === "ls") return await invokeCatalog(parsed, world, repo, edge);
-  if (parsed.command === "status") return await invokeStatus(parsed, world, repo, edge);
+  if (parsed.command === "ls") return await invokeCatalog(parsed, world, repo, home);
+  if (parsed.command === "status") return await invokeStatus(parsed, world, repo);
   if (repo === undefined) throw new Error(`${parsed.command} requires a resolved Repo`);
   if (parsed.command === "region") return invokeRegion(parsed, world, repo);
   const scope = cwd;
-  const configuration = await settingsAt(world ?? undefined, edge.environment);
-  const hooks = selectedHooks(configuration);
+  const configuration = await settingsAt(world ?? undefined, home);
+  const hooks = consumeSettings(() => worktreeHooksFrom({ settings: configuration }));
 
   if (parsed.command === "show") {
     const selected = await selectContract(repo, parsed.contract, scope);

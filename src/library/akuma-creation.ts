@@ -49,6 +49,7 @@ export type CallInput = Readonly<{
   cwd?: string;
   mode?: "wait" | "detach";
   timeoutMs?: number;
+  home?: string;
   settings?: Settings;
   contract?: Keiyaku;
   alias?: AkumaAlias;
@@ -78,7 +79,6 @@ export type ForkInput = Readonly<{
   path: WorldRoot;
   akuma: string;
   at: string;
-  settings?: Settings;
   repo?: Repo;
 }>;
 
@@ -104,6 +104,18 @@ function settingsOption(value: unknown): Settings | undefined {
     throw new TypeError("settings must be a Settings");
   }
   return value as Settings;
+}
+
+function homeOption(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return nonblank(value, "home");
+}
+
+function akumaWorld(path: WorldRoot, home?: string, settings?: Settings) {
+  return Akuma.of(path, {
+    ...(home === undefined ? {} : { home }),
+    ...(settings === undefined ? {} : { settings }),
+  });
 }
 
 function onlyKeys(values: Record<string, unknown>, allowed: readonly string[], label: string): void {
@@ -246,7 +258,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const values = requireInput(input, "Keiyaku.call input");
   onlyKeys(
     values,
-    ["path", "archetype", "body", "cwd", "mode", "timeoutMs", "settings", "contract", "alias"],
+    ["path", "archetype", "body", "cwd", "mode", "timeoutMs", "home", "settings", "contract", "alias"],
     "Keiyaku.call input",
   );
   const path = nonblank(values.path, "path") as WorldRoot;
@@ -255,6 +267,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
   const mode = callMode(values.mode);
   const timeoutMs = callTimeout(values.timeoutMs, mode);
+  const home = homeOption(values.home);
   const settings = settingsOption(values.settings);
   const alias: AkumaAlias | undefined = values.alias === undefined
     ? undefined
@@ -266,7 +279,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     ...(seat === undefined ? {} : { contract: values.contract as Keiyaku }),
   });
 
-  const handle = await Akuma.of(path, settings).call({
+  const handle = await akumaWorld(path, home, settings).call({
     archetype,
     body,
     cwd: execution.cwd,
@@ -301,20 +314,16 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
 
 export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
   const values = requireInput(input, "Keiyaku.fork input");
-  onlyKeys(values, ["path", "akuma", "at", "settings", "repo"], "Keiyaku.fork input");
+  onlyKeys(values, ["path", "akuma", "at", "repo"], "Keiyaku.fork input");
   const path = nonblank(values.path, "path") as WorldRoot;
   const at = nonblank(values.at, "at");
-  const settings = settingsOption(values.settings);
   const akuma = (await addressAkuma({
     path,
     akuma: nonblank(values.akuma, "akuma"),
-    ...(settings === undefined ? {} : { settings }),
   })).id;
   const repository = values.repo === undefined ? undefined : scopeForRepo(values.repo);
 
-  const receipt = await Akuma.of(path, settings)
-    .of({ id: akuma })
-    .fork({ at });
+  const receipt = await Akuma.of(path).of({ id: akuma }).fork({ at });
   if (receipt.kind !== "forked") return { ...receipt, parent: akuma };
   const dispatch = repository === undefined
     ? { kind: "none" as const }
