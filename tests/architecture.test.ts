@@ -136,6 +136,14 @@ test("architecture policy separates Heart schema, fact statements, and SQLite co
   });
   assert.deepEqual(typedRows, []);
 
+  const typedTimeline = check({
+    "akuma/heart/timeline.ts": [
+      'import type { DatabaseSync } from "node:sqlite";',
+      "export function read(database: DatabaseSync): void { void database; }",
+    ].join("\n"),
+  });
+  assert.deepEqual(typedTimeline, []);
+
   const runtimeRows = check({
     "akuma/heart/rows.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
   });
@@ -145,6 +153,11 @@ test("architecture policy separates Heart schema, fact statements, and SQLite co
     "akuma/heart/schema.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
   });
   assert.ok(rules(runtimeSchema).includes("architecture/capability-import"));
+
+  const runtimeTimeline = check({
+    "akuma/heart/timeline.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
+  });
+  assert.ok(rules(runtimeTimeline).includes("architecture/capability-import"));
 
   const statementInJudge = check({
     "akuma/heart/index.ts": 'export function judge(database: { prepare(sql: string): void }): void { database.prepare("SELECT 1"); }',

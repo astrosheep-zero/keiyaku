@@ -25,7 +25,7 @@ export type AkumaWaitResult = Readonly<{
   statuses: readonly AkumaStatusView[];
 }>;
 
-export type AkumaStatusView = AkumaStatus & Readonly<{ contractId?: ContractId }>;
+export type AkumaStatusView = Readonly<{ status: AkumaStatus; contractId?: ContractId }>;
 
 export type AkumaKillResult = Readonly<{
   results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence; observation: AkumaStatusView }>[];
@@ -34,7 +34,7 @@ export type AkumaKillResult = Readonly<{
 export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string }>;
 export type AkumaTellResult = Readonly<{ akuma: AkumaStatus["id"]; tell: TellResult; observation: AkumaStatusView }>;
 export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string }>;
-export type AkumaInterruptResult = Readonly<{ id: AkumaStatus["id"]; receipt: InterruptReceipt; observation: AkumaStatusView; contractId?: ContractId }>;
+export type AkumaInterruptResult = Readonly<{ id: AkumaStatus["id"]; receipt: InterruptReceipt; observation: AkumaStatusView }>;
 export type AkumaHistoryInput = AkumaAddressInput & Readonly<{
   before?: number;
   since?: number;
@@ -56,7 +56,7 @@ function contractFor(repo: Repo | undefined, id: AkumaStatus["id"]): ContractId 
 
 function statusView(status: AkumaStatus, repo?: Repo): AkumaStatusView {
   const contractId = contractFor(repo, status.id);
-  return contractId === undefined ? status : { ...status, contractId };
+  return contractId === undefined ? { status } : { status, contractId };
 }
 
 function timeout(value: unknown): number | undefined {
@@ -205,9 +205,8 @@ export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaI
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const addressed = addressAkuma(directAddress(values));
-  const contractId = contractFor(values.repo as Repo | undefined, addressed.id);
   const receipt = await source(addressed.path, addressed.settings).of({ id: addressed.id }).interrupt(values.body);
-  return { id: addressed.id, receipt, observation: statusView(readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined), ...(contractId === undefined ? {} : { contractId }) };
+  return { id: addressed.id, receipt, observation: statusView(readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined) };
 }
 
 export function historyAkuma(input: AkumaHistoryInput): AkumaHistoryResult {

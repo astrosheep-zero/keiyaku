@@ -169,15 +169,18 @@ type AkumaKillResult = {
   }[];
 };
 
-type AkumaStatusView = AkumaStatus & {
+type AkumaStatusView = {
+  status: AkumaStatus;
   contractId?: ContractId;
 };
 ```
 
-The optional `repo` coordinate enables this read-only Dispatch projection.
-Without it, Fleet returns the ordinary Akuma status unchanged. With it, Fleet
-adds only the associated `contractId`; Akuma core still knows no Contract,
-Dispatch, or Repo, and renderers perform no lookup.
+The optional `repo` coordinate enables this read-only Dispatch composition.
+`status` is always the unmodified Akuma observation; the optional neighboring
+`contractId` comes only from Dispatch. Fleet never intersects the association
+into `AkumaStatus`, and every Fleet observation keeps the association in this
+one location. Akuma core still knows no Contract, Dispatch, or Repo, and
+renderers perform no lookup.
 
 Wait and kill freeze their subject set at entry. A one-member wait defaults to
 `all`; a multi-member wait requires `completion: "any" | "all"`. Any returns
@@ -196,7 +199,8 @@ caused; `observation` gives the flagship current life, activity, outcomes, and
 the two-state tell projection. Facade code never derives delivery or receipt
 facts from that observation. Direct verbs accept only AkuId or Alias.
 Their result carries the resolved AkuId, so an adapter never resolves a movable
-Alias twice. `history({ last: true })` is the distinct last-answer arm: it reads
+Alias twice. History carries the same optional association beside its
+history-specific value rather than inside it. `history({ last: true })` is the distinct last-answer arm: it reads
 only the last answered turn by durable sequence and never reads status or
 activity history. Its typed result is either `{ kind: "last", answer }`
 (including an empty answer) or `{ kind: "no-answer" }`.

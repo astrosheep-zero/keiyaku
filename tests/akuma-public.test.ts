@@ -5,7 +5,7 @@ import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
-import { projectActivityHistory, selectActivitySnapshot } from "../src/akuma/activity.js";
+import { projectActivityHistory, selectActivitySnapshot } from "../src/akuma/projection.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {

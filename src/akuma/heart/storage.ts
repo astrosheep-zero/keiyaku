@@ -17,7 +17,8 @@ import {
   soulFact,
   stopFact,
 } from "./rows.js";
-import { insertTellFact, pruneActivityFacts } from "./tells.js";
+import { insertTellFact } from "./tells.js";
+import { pruneActivityFacts } from "./timeline.js";
 
 const ACTIVITY_LIMIT = 5_000;
 

@@ -39,7 +39,7 @@ import {
   selectActivitySnapshot,
   type ActivityHistory,
   type ActivitySnapshot,
-} from "./activity.js";
+} from "./projection.js";
 import { listArchetypes as readArchetypes, loadArchetype } from "./archetype.js";
 import { publishAkuma } from "./publication.js";
 import { providerNamed } from "./providers/index.js";
@@ -68,7 +68,7 @@ export type AkumaStatus = Readonly<{
   timeline: ActivitySnapshot;
   strandedReason?: "resume-unsupported";
 }>;
-export type { ActivityHistory, ActivityRow, ActivitySnapshot, ActivitySnapshotEntry } from "./activity.js";
+export type { ActivityHistory, ActivityRow, ActivitySnapshot, ActivitySnapshotEntry } from "./projection.js";
 
 export type UnbornAkumaListRow = Readonly<{
   id: AkuId;

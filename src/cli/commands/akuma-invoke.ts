@@ -21,9 +21,9 @@ export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "interrupt"; result: Awaited<ReturnType<typeof Keiyaku.interrupt>>; body: string; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "page"; history: ActivityHistory; historyResult: AkumaHistoryResult; contractId?: import("../../core/facts/types.js").ContractId; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "last"; answer: string; historyResult: AkumaHistoryResult; contractId?: import("../../core/facts/types.js").ContractId; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "no-answer"; historyResult: AkumaHistoryResult; contractId?: import("../../core/facts/types.js").ContractId; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "page"; history: ActivityHistory; historyResult: AkumaHistoryResult; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "last"; answer: string; historyResult: AkumaHistoryResult; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "no-answer"; historyResult: AkumaHistoryResult; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "fork"; receipt: ForkResult }>
   | Readonly<{ kind: "akuma"; action: "kill"; result: AkumaKillResult; alias?: string }>;
 
@@ -84,7 +84,6 @@ function invokeHistory(command: Extract<ParsedAkumaCommand, { command: "history"
     action: "history",
     akuma: result.id,
     historyResult: result,
-    ...(result.contractId === undefined ? {} : { contractId: result.contractId }),
     ...(inputAlias(command.akuma) === undefined ? {} : { alias: command.akuma }),
     ...(result.kind === "history"
       ? { mode: "page" as const, history: result.history }

@@ -94,7 +94,10 @@ older heart fails the existing schema gate; no migration or compatibility
 decoder exists. Absence is stored as SQL `NULL` and omitted from public values.
 
 Heart custody owns its fact vocabulary, schema gates, row codecs, connections,
-transactions, conditional judgments, custody verbs, and public projections.
+transactions, conditional judgments, custody verbs, and durable timeline
+reads. The shared timeline owns ordering, slicing, and retention across every
+row kind; Tell owns only Tell admission, delivery, receipt, fence, and pending
+state. The public semantic timeline has one pure projector outside custody.
 Consumers do not access its SQLite handles or row statements. Custody is one
 authority boundary; its private file layout is not law.
 

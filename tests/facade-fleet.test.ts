@@ -71,14 +71,14 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
     const reviewer = await answered(root, "reviewer", "00000001");
     await moveAlias({ world: root, alias: "@review", akuId: reviewer.id });
 
-    assert.equal(Keiyaku.status({ path: root, akuma: "@review" }).id, reviewer.id);
+    assert.equal(Keiyaku.status({ path: root, akuma: "@review" }).status.id, reviewer.id);
     const waited = await Keiyaku.wait({
       path: root,
       akuma: ["aku/*/*", "@review", worker.id],
       completion: "all",
       timeoutMs: 0,
     });
-    assert.deepEqual(waited.statuses.map((status) => status.id), [reviewer.id, worker.id]);
+    assert.deepEqual(waited.statuses.map((view) => view.status.id), [reviewer.id, worker.id]);
 
     const killed = await Keiyaku.kill({ path: root, akuma: ["@review", worker.id] });
     assert.deepEqual(killed.results.map((member) => member.id), [reviewer.id, worker.id]);
@@ -152,23 +152,23 @@ test("plural wait shares one detail budget without dropping pinned rows", async 
       timeoutMs: 0,
     });
     const fifth = waited.statuses[4]!;
-    const ordinary = waited.statuses.flatMap((status) => status.timeline.entries.filter((entry) =>
+    const ordinary = waited.statuses.flatMap((view) => view.status.timeline.entries.filter((entry) =>
       entry.kind === "row"
         && !((entry.row.kind === "tool" && entry.row.state === "running")
           || (entry.row.kind === "tell" && entry.row.state === "pending"))));
     assert.equal(ordinary.length, 32);
-    assert.deepEqual(fifth.timeline.entries.map((entry) => entry.kind === "gap"
+    assert.deepEqual(fifth.status.timeline.entries.map((entry) => entry.kind === "gap"
       ? `gap:${entry.count}`
       : entry.row.kind === "said" || entry.row.kind === "note" ? entry.row.text : entry.row.kind), [
       "gap:11",
       "tool",
       "tell",
     ]);
-    assert.equal(fifth.timeline.entries.some((entry) => entry.kind === "row"
+    assert.equal(fifth.status.timeline.entries.some((entry) => entry.kind === "row"
       && entry.row.kind === "tool" && entry.row.state === "running"), true);
-    assert.equal(fifth.timeline.entries.some((entry) => entry.kind === "row"
+    assert.equal(fifth.status.timeline.entries.some((entry) => entry.kind === "row"
       && entry.row.kind === "tell" && entry.row.state === "pending"), true);
-    assert.deepEqual(waited.statuses[5]!.timeline.entries.map((entry) =>
+    assert.deepEqual(waited.statuses[5]!.status.timeline.entries.map((entry) =>
       entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:5", "tool"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -183,8 +183,8 @@ test("facade tell preserves mutation authority beside a separate observation", a
     assert.equal(result.akuma, source.id);
     assert.equal(result.tell.admission.fact, "recorded");
     assert.equal(typeof result.tell.admission.tellId, "string");
-    assert.equal(result.observation.id, source.id);
-    assert.ok(result.observation.timeline.entries.some((entry) => entry.kind === "row"
+    assert.equal(result.observation.status.id, source.id);
+    assert.ok(result.observation.status.timeline.entries.some((entry) => entry.kind === "row"
       && entry.row.kind === "tell" && entry.row.tellId === result.tell.admission.tellId));
     assert.equal("receipt" in result, false);
     assert.equal("status" in result, false);
@@ -403,8 +403,10 @@ test("fleet status projects Dispatch association without changing Akuma core", a
 
   const plain = Keiyaku.status({ path: repository.path, akuma: source.id });
   assert.equal("contractId" in plain, false);
+  assert.equal(plain.status.id, source.id);
   const projected = Keiyaku.status({ path: repository.path, akuma: source.id, repo: Repo.at({ path: repository.path }) });
   assert.equal(projected.contractId, owner);
+  assert.equal(projected.status.id, source.id);
   const waited = await Keiyaku.wait({
     path: repository.path,
     akuma: [source.id],

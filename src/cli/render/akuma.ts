@@ -106,10 +106,10 @@ function snapshotItems(entries: readonly ActivitySnapshotEntry[]): readonly Spin
   });
 }
 
-function snapshotText(status: AkumaStatusView, context: TextRenderContext, options: Readonly<{ alias?: string; contractId?: ContractId; facts?: readonly string[]; tail?: readonly SpineItem[] }> = {}): string {
+function snapshotText(view: AkumaStatusView, context: TextRenderContext, options: Readonly<{ alias?: string; contractId?: ContractId; facts?: readonly string[]; tail?: readonly SpineItem[] }> = {}): string {
+  const status = view.status;
   const items = [...snapshotItems(status.timeline.entries), ...(options.tail ?? [])];
-  if (items.length === 0) items.push({ kind: "row", label: "", text: "no activity", spine: status.life === "running" ? "frontier" : "normal", snapshotLines: 1 });
-  return [ruler(identity(status.id, options.alias), context.columns, options.contractId ?? status.contractId), ...(options.facts ?? []), ...renderSpine(items, context), status.life === "running" ? "" : ""].filter(Boolean).join("\n");
+  return [ruler(identity(status.id, options.alias), context.columns, options.contractId ?? view.contractId), ...(options.facts ?? []), ...renderSpine(items, context)].filter(Boolean).join("\n");
 }
 
 function historyText(command: Extract<ParsedCommand, { command: "history" }>, result: Extract<AkumaInvocationResult, { action: "history" }>, context: TextRenderContext): string {
@@ -117,7 +117,8 @@ function historyText(command: Extract<ParsedCommand, { command: "history" }>, re
   if (result.mode !== "page") throw new Error("history result lacks page");
   const history = result.history;
   const rows = history.rows.map((row) => rowItem(row, false, false));
-  const scope = result.contractId === undefined ? "history" : `history · ${result.contractId}`;
+  const contractId = result.historyResult.contractId;
+  const scope = contractId === undefined ? "history" : `history · ${contractId}`;
   return [ruler(identity(result.akuma, result.alias), context.columns, scope), ...renderSpine(rows, context, "history")].join("\n");
 }
 
@@ -140,7 +141,7 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   if (result.result.alias.kind === "failed") facts.push(`alias failed ${result.result.alias.failure.kind} ${safeText(result.result.alias.failure.diagnostic)}`);
   if (result.result.observation.kind === "detached") return [head, ...facts].join("\n");
   if (result.result.observation.kind === "failed") return [head, ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
-  return snapshotText(result.result.observation.status, context, { ...(alias === undefined ? {} : { alias }), ...(contractId === undefined ? {} : { contractId }), facts });
+  return snapshotText({ status: result.result.observation.status, ...(contractId === undefined ? {} : { contractId }) }, context, { ...(alias === undefined ? {} : { alias }), facts });
 }
 
 export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
@@ -148,7 +149,7 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
     case "call": return callText(result, context);
     case "status": return snapshotText(result.status, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) });
     case "wait": return result.result.statuses.map((status) => snapshotText(status, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) })).join("\n\n");
-    case "tell": return result.mode === "ordinary" ? tellText(result, context) : snapshotText(result.result.observation, context, { ...(result.alias === undefined ? {} : { alias: result.alias }), ...(result.result.contractId === undefined ? {} : { contractId: result.result.contractId }) });
+    case "tell": return result.mode === "ordinary" ? tellText(result, context) : snapshotText(result.result.observation, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) });
     case "history": return historyText(command as Extract<ParsedCommand, { command: "history" }>, result, context);
     case "fork": {
       if (result.receipt.kind !== "forked") return result.receipt.kind === "unknown-history" ? `${result.receipt.at} has no matching retained answered turn` : result.receipt.kind === "provider-cannot-fork" ? `${result.receipt.provider} cannot fork` : result.receipt.kind === "fork-failed" ? result.receipt.diagnostic : result.receipt.diagnostic;

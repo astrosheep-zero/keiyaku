@@ -286,7 +286,7 @@ propagates a parent Dispatch; CLI never reads Dispatch or Alias files.
 ## Akuma Text Surface
 
 Akuma text is one pure projection over public values. Provider adapters retain
-facts, the Akuma activity read model folds and selects rows, and the CLI only
+facts, the Akuma timeline projection folds and selects rows, and the CLI only
 lays those rows onto one ruler and spine. No CLI branch repairs, reselects, or
 reinterprets activity. JSON exposes the same public value with complete ISO
 `at` values and no text-only time suppression.
@@ -311,6 +311,8 @@ answered. Text never prints the storage words
 row's spine glyph with `●`; there is no separate running footer and ordinary
 rows pay no extra prefix width. Activity labels use one fixed six-column field.
 A future longer label may extend its own row but never widens or shifts the page.
+An empty status snapshot adds no placeholder or negative historical claim; the
+header and available typed life evidence remain the complete observation.
 
 ```text
 aku/worker/1234abcd (@review) ───────────────────────────── kei/provider-core

@@ -51,16 +51,18 @@ import {
 } from "./rows.js";
 import type { ActivityFact } from "./rows.js";
 import {
-  activityFactSlice,
   insertTellDeliveryFact,
   insertTellFact,
   insertTellReceiptFact,
   pendingTellFacts,
-  pruneActivityFacts,
   tellFact,
   tellIdsForFence,
-  type ActivityFactSlice,
 } from "./tells.js";
+import {
+  activityFactSlice,
+  pruneActivityFacts,
+  type ActivityFactSlice,
+} from "./timeline.js";
 import { readSealFromLeash, transaction, withHeart } from "./storage.js";
 export { HeldAkumaLeash, initializeHeart, probeLeash } from "./storage.js";
 
@@ -137,7 +139,7 @@ export function appendActivity(
 export type ActivitySliceInput = Readonly<{ before?: number; since?: number; limit?: number }>;
 export type ActivitySlice = ActivityFactSlice;
 export type { ActivityFact };
-export type { TimelineFact } from "./tells.js";
+export type { TimelineFact } from "./timeline.js";
 
 export function activitySlice(paths: AkumaPaths, input: ActivitySliceInput = {}): ActivitySlice {
   const limit = input.limit ?? ACTIVITY_LIMIT;

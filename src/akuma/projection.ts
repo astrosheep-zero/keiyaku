@@ -97,7 +97,7 @@ function narrationRow(
 }
 
 /** Project the complete retained fact window in persisted timeline order. */
-export function projectActivity(facts: readonly TimelineFact[]): readonly ActivityRow[] {
+export function projectTimeline(facts: readonly TimelineFact[]): readonly ActivityRow[] {
   const state: ProjectionState = { rows: [], running: new Map() };
   for (const fact of facts) {
     if (fact.kind === "turn-start") state.rows.push({ settled: false, row: { kind: "turn", sequence: fact.sequence, turnSequence: fact.sequence, bodySequence: fact.bodySequence, at: fact.startedAt } });
@@ -159,7 +159,7 @@ export function selectActivitySnapshot(
     profile?: ActivitySnapshotProfile;
   }> = {},
 ): ActivitySnapshot {
-  const projected = projectActivity(facts);
+  const projected = projectTimeline(facts);
   const ended = new Set(projected.filter((row) => row.kind === "outcome").map((row) => row.turnSequence));
   const openTurn = projected.findLast((row): row is Extract<ActivityRow, { kind: "turn" }> =>
     row.kind === "turn" && !ended.has(row.turnSequence));
@@ -196,7 +196,7 @@ export function projectActivityHistory(
   slice: ActivitySlice,
   input: Readonly<{ before?: number; since?: number; limit: number }>,
 ): ActivityHistory {
-  const projected = projectActivity(slice.rows);
+  const projected = projectTimeline(slice.rows);
   const eligible = projected.filter((row) => input.before !== undefined
     ? row.sequence < input.before
     : input.since !== undefined ? row.sequence > input.since : true);
