@@ -163,8 +163,8 @@ The Akuma section renders every public fleet row because bare status is its text
 discovery surface in this cut. Lost and failed rows come first, running rows
 next, and idle or terminal rows last, with source order stable inside each
 class. Each row starts with its mark, complete AkuId, and adjacent life word:
-`running` is active, `asleep` and `killed` are idle, `stranded` and `headless` are
-lost, `unborn` is unknown, and `stillborn` is failed. Running and lost rows may
+`running` is active, `asleep` and `killed` are idle, `stranded`, `hung`, and
+`untidy` are lost, `unborn` is unknown, and `stillborn` is failed. Running and lost rows may
 continue with pending count and confinement. `asleep` and `killed` rows are
 always single-line. A stillborn row may continue with its
 public seal evidence after

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
-import { terminateProcessTree } from "./run.js";
+import { terminateOwnedProcess } from "./run.js";
 
 export type StdioProcessExit = Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>;
 export type StdioProcess = Readonly<{
@@ -40,7 +40,7 @@ export function spawnStdioProcess(input: Readonly<{
   };
   const forceClose = async (): Promise<void> => {
     forced ??= (async () => {
-      if (child.pid !== undefined) await terminateProcessTree(child.pid, true);
+      await terminateOwnedProcess(child, true);
       await exited;
     })();
     await forced;
@@ -57,7 +57,7 @@ export function spawnStdioProcess(input: Readonly<{
   const close = async (force = false): Promise<void> => {
     endInput();
     if (force) { await forceClose(); return; }
-    if (child.pid !== undefined) await terminateProcessTree(child.pid, false);
+    await terminateOwnedProcess(child, false);
     await exited;
   };
   return { input: child.stdin, output: child.stdout, exited, endInputAndDrain, close };

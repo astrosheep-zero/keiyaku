@@ -15,7 +15,12 @@ function world(): string { const root = mkdtempSync(join(tmpdir(), "keiyaku-task
 async function runMain(argv: readonly string[]): Promise<Readonly<{ exit: number; stdout: string; stderr: string }>> {
   let stdout = "", stderr = "";
   const writeStdout = process.stdout.write, writeStderr = process.stderr.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
+  const forwardStdout = writeStdout.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    if (typeof chunk !== "string") return forwardStdout(chunk);
+    stdout += chunk;
+    return true;
+  }) as typeof process.stdout.write;
   process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
   try { return { exit: await main(argv), stdout, stderr }; }
   finally { process.stdout.write = writeStdout; process.stderr.write = writeStderr; }

@@ -41,18 +41,12 @@ export type Soul = Readonly<{
 
 export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "confinement">;
 
-export type Collar = Readonly<{
-  pid: number;
-  processGroup: number;
-  spawnedAt: string;
-}>;
-
 export type BodyEnd = "exited" | "broke-off" | "put-down";
 
 export type BodyFact = Readonly<{
   sequence: number;
-  collar: Collar;
   leashTakenAt: string;
+  hung?: Readonly<{ diagnostic: string; at: string }>;
   end?: BodyEnd;
   endedAt?: string;
 }>;
@@ -155,18 +149,14 @@ export type RequestFact = RequestInput & Readonly<{ admittedAt: string }> & (
   | Readonly<{ state: "voided"; evidence: string }>
 );
 
-export type KillEvidence = "killed" | "already-killed" | "alive-after-sigkill" | "unavailable";
+export type KillEvidence = "killed" | "already-killed" | "already-stopped" | "hung" | "untidy" | "unavailable";
 export type KillFact = Readonly<{ sequence: number; bodySequence: number; evidence: "killed"; at: string }>;
 export type StopFact = Readonly<{ bodySequence: number; requestedAt: string }>;
+export type PauseFact = Readonly<{ bodySequence: number; requestedAt: string }>;
 export type SealFact = Readonly<{ evidence: string; at: string }>;
 export type LeashProbe = "held" | "free";
 
-export type CollarProbe =
-  | Readonly<{ kind: "gone"; end: BodyEnd | null }>
-  | Readonly<{ kind: "alive" }>
-  | Readonly<{ kind: "unverifiable"; diagnostic: string }>;
-
-export type AkumaLife = "running" | "asleep" | "stranded" | "headless" | "killed";
+export type AkumaLife = "running" | "asleep" | "stranded" | "hung" | "untidy" | "killed";
 
 export type HeartSnapshot = Readonly<{
   soul: Soul | null;
@@ -174,16 +164,17 @@ export type HeartSnapshot = Readonly<{
   latestSession: SessionFact | null;
   pending: readonly TellFact[];
   latestKill: KillFact | null;
+  stop: StopFact | null;
+  pause: PauseFact | null;
 }>;
 
-export function life(
-  leashProbe: LeashProbe,
-  collarProbe: CollarProbe,
-  latestBody: BodyFact | null,
-  latestKill: KillFact | null,
-): AkumaLife {
-  if (leashProbe === "held") return "running";
-  if (collarProbe.kind !== "gone") return "headless";
-  if (latestBody !== null && latestKill?.bodySequence === latestBody.sequence) return "killed";
-  return collarProbe.end === "exited" ? "asleep" : "stranded";
+export function life(input: Readonly<{
+  leash: LeashProbe;
+  body: BodyFact | null;
+  kill: KillFact | null;
+}>): AkumaLife {
+  if (input.leash === "held") return input.body?.hung === undefined ? "running" : "hung";
+  if (input.body === null || input.body.end === undefined) return "untidy";
+  if (input.kill?.bodySequence === input.body.sequence) return "killed";
+  return input.body.end === "exited" ? "asleep" : "stranded";
 }

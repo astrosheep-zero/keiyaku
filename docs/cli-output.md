@@ -115,8 +115,16 @@ budgets are fixed by semantic kind: `say` at most three lines, `tell` one, and
 every other activity row two. Text clipping and receipt presentation never alter
 the public value serialized by `--json`.
 
+Akuma life words are rendered verbatim from the public union. `hung` means the
+latest Body durably recorded provider custody that did not retire; a public
+timeout with only a held leash remains `running`. `untidy` means the leash is
+free but the latest Body has no explicit end. Both use the conservative `?`
+mark. Mutation renderers preserve `hung`, `untidy`, and `unavailable` evidence
+and return failure status without inventing an external termination attempt.
+
 Snapshot omission is reported by the typed snapshot count; history retains its
-own cursor, gap, and loss metadata. Text is clipped by terminal display width without splitting grapheme clusters; quoted
+own cursor, gap, and loss metadata. Text is clipped by terminal display width
+without splitting grapheme clusters; quoted
 voice keeps balanced delimiters. A `run` command remains one row and preserves
 recognizable head and tail when clipped; its outcome is shown only when space
 allows. History uses the same presentation vocabulary without snapshot budgets.
@@ -143,7 +151,7 @@ as an independent footer outside the displayed-minute groups. Nonempty activity
 and the footer have one blank line between them; with no activity, the footer
 directly follows the identity and association facts. The footer reads the public
 status life directly and uses the existing fleet vocabulary: `● running`, `○
-asleep`, `× killed`, `? stranded`, and `? headless`. A row mark remains local
+asleep`, `× killed`, `? stranded`, `? hung`, and `? untidy`. A row mark remains local
 to that event, so a failed command followed by `● running` means the command
 failed while the Akuma continues running. Ordinary and interrupt tell output
 omits the footer because it is an input mutation receipt. History also has no

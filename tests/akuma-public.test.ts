@@ -15,7 +15,6 @@ import {
   initializeHeart,
   pauseRequested,
   readHeart,
-  recordBody,
   recordTell,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
@@ -107,9 +106,7 @@ async function answeredSource(root: string, suffix: string) {
     },
     initialBody: "work",
   }, provider, {
-    collar: { pid: 999_979, processGroup: 999_979, spawnedAt: `fork-${suffix}` },
     now: () => "2026-08-08T00:00:00.000Z",
-    async putDownOwnTree() {},
   });
   return allocated;
 }
@@ -250,9 +247,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
       },
       initialBody: "work",
     }, noPointProvider, {
-      collar: { pid: 999_978, processGroup: 999_978, spawnedAt: "no-fork-point" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
 
     const handle = (await akumaAt(root)).of({ id: allocated.id });
@@ -274,7 +269,7 @@ test("fork publishes a sleeping child with lineage and its native birth session"
     const source = await answeredSource(root, "f0a10001");
     const world = (await akumaAt(root));
     const worldRoot = await World.at(root);
-    assert.equal(await world.of({ id: source.id }).kill(), "killed");
+    assert.equal(await world.of({ id: source.id }).kill(), "already-stopped");
     let nativeInput: Parameters<NonNullable<ProviderAdapter["fork"]>>[0] | undefined;
     mutable.fork = async (input) => {
       nativeInput = input;
@@ -373,9 +368,7 @@ test("status names a durable session that the adapter cannot resume", async () =
     });
     assert.equal(admitted.kind, "recorded");
     await driveAkumaBody({ paths: source.paths }, claudeProvider, {
-      collar: { pid: 999_976, processGroup: 999_976, spawnedAt: "resume-unsupported" },
       now: () => "2026-08-08T00:00:02.000Z",
-      async putDownOwnTree() {},
     });
     const status = handle.status();
     assert.equal(status.life, "stranded");
@@ -419,9 +412,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
       initialBody: "work",
     };
     await driveAkumaBody(launch, provider, {
-      collar: { pid: 999_997, processGroup: 999_997, spawnedAt: "public-fixture" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
 
     const handle = world.of({ id: allocated.id });
@@ -451,11 +442,11 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.deepEqual(status.timeline.entries, []);
     assert.deepEqual(await handle.wait((candidate) => candidate.timeline.kind === "idle"
       && candidate.timeline.outcome?.outcome.kind === "answered"), status);
-    assert.equal(await handle.kill(), "killed");
-    assert.equal(handle.status().life, "killed");
+    assert.equal(await handle.kill(), "already-stopped");
+    assert.equal(handle.status().life, "asleep");
     assert.equal(handle.status().timeline.kind === "idle"
       && handle.status().timeline.outcome?.outcome.kind === "answered", true);
-    assert.equal(await handle.kill(), "already-killed");
+    assert.equal(await handle.kill(), "already-stopped");
     assert.equal(pauseRequested(allocated.paths), false);
     assert.deepEqual(timeline(allocated.paths).find((fact) => fact.kind === "turn-end")?.outcome, {
       kind: "answered",
@@ -468,7 +459,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
   }
 });
 
-test("tell after kill wakes the same Akuma through its retained session", async () => {
+test("tell after an already stopped Body wakes the same Akuma through its retained session", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-kill-resume-"));
   const seat = join(root, "seat");
   try {
@@ -488,14 +479,12 @@ test("tell after kill wakes the same Akuma through its retained session", async 
       },
       initialBody: "first",
     }, provider, {
-      collar: { pid: 999_975, processGroup: 999_975, spawnedAt: "kill-resume-first" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
 
     const handle = (await akumaAt(root)).of({ id: allocated.id });
-    assert.equal(await handle.kill(), "killed");
-    assert.equal(handle.status().life, "killed");
+    assert.equal(await handle.kill(), "already-stopped");
+    assert.equal(handle.status().life, "asleep");
 
     rmSync(seat, { recursive: true, force: true });
     const told = await handle.tell("continue");
@@ -518,12 +507,13 @@ test("tell after kill wakes the same Akuma through its retained session", async 
       },
     };
     await driveAkumaBody({ paths: allocated.paths }, successor, {
-      collar: { pid: 999_974, processGroup: 999_974, spawnedAt: "kill-resume-successor" },
       now: () => "2026-08-08T00:00:02.000Z",
-      async putDownOwnTree() {},
     });
 
-    assert.deepEqual(resumed, {
+    assert.notEqual(resumed, undefined);
+    const { signal, ...resumedInput } = resumed!;
+    assert.equal(signal.aborted, false);
+    assert.deepEqual(resumedInput, {
       body: "",
       launchTells: [{ id: told.admission.tellId, text: "continue" }],
       cwd: seat,
@@ -562,9 +552,7 @@ test("interrupt records a tell only after taking an idle leash", async () => {
       },
       initialBody: "first",
     }, provider, {
-      collar: { pid: 999_988, processGroup: 999_988, spawnedAt: "interrupt-idle" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     rmSync(seat, { recursive: true, force: true });
 
@@ -623,9 +611,7 @@ test("interrupt waits for a running body to self-abort before recording the tell
         };
       },
     }, {
-      collar: { pid: 999_987, processGroup: 999_987, spawnedAt: "interrupt-running" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
     rmSync(seat, { recursive: true, force: true });
@@ -643,7 +629,7 @@ test("interrupt waits for a running body to self-abort before recording the tell
   }
 });
 
-test("interrupt leaves pause behind and records no tell when a held leash has no collar", async () => {
+test("interrupt reports untidy when a free leash has no clean Body settlement", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-interrupt-unstoppable-"));
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0003" });
@@ -659,22 +645,20 @@ test("interrupt leaves pause behind and records no tell when a held leash has no
       cwd: root,
       createdAt: "2026-08-08T00:00:00.000Z",
     });
-    try {
-      assert.deepEqual(await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded"), {
-        kind: "unstoppable",
-        evidence: "no-collar",
-      });
-      assert.equal(pauseRequested(allocated.paths), true);
-      assert.deepEqual(readHeart(allocated.paths).pending, []);
-    } finally {
-      holder.release();
-    }
+    holder.recordBody(allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
+    holder.release();
+    assert.deepEqual(await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded"), {
+      kind: "unavailable",
+      evidence: "untidy",
+    });
+    assert.equal(pauseRequested(allocated.paths), false);
+    assert.deepEqual(readHeart(allocated.paths).pending, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("physical put-down evidence is not success while the leash remains held", async () => {
+test("interrupt reports hung when the Body does not release its held leash", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-interrupt-held-"));
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0005" });
@@ -690,15 +674,21 @@ test("physical put-down evidence is not success while the leash remains held", a
       cwd: root,
       createdAt: "2026-08-08T00:00:00.000Z",
     });
-    recordBody(allocated.paths, {
-      collar: { pid: 999_985, processGroup: 999_985, spawnedAt: "already-gone" },
+    const body = holder.recordBody(allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
+    holder.recordBodyHung(allocated.paths, {
+      sequence: body.sequence,
+      diagnostic: "provider custody remained live",
+      at: "2026-08-08T00:00:01.000Z",
+    });
     try {
-      assert.deepEqual(await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded"), {
-        kind: "unstoppable",
-        evidence: "leash-held-after-put-down",
+      const handle = (await akumaAt(root)).of({ id: allocated.id });
+      assert.deepEqual(await handle.interrupt("never recorded"), {
+        kind: "unavailable",
+        evidence: "hung",
       });
+      assert.equal(handle.status().life, "hung");
       assert.equal(pauseRequested(allocated.paths), true);
       assert.deepEqual(readHeart(allocated.paths).pending, []);
     } finally {
@@ -890,9 +880,7 @@ test("a failed turn is durable public evidence and never masquerades as provider
         };
       },
     }, {
-      collar: { pid: 999_995, processGroup: 999_995, spawnedAt: "failed-turn" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     const handle = (await akumaAt(root)).of({ id: allocated.id });
     assert.equal(handle.status().timeline.kind === "idle"
@@ -937,7 +925,7 @@ test("activity is persistent narration and old raw events fail the public hard c
   }
 });
 
-test("kill gives the body a stop grace before putting down its process tree", async () => {
+test("kill gives the Body a grace window to abort its owned provider session", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-kill-"));
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "fedcba98" });
@@ -981,9 +969,7 @@ test("kill gives the body a stop grace before putting down its process tree", as
       initialBody: "keep working",
     };
     const body = driveAkumaBody(launch, running, {
-      collar: { pid: 999_996, processGroup: 999_996, spawnedAt: "kill-fixture" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
 

@@ -10,14 +10,10 @@ import {
   type AllocatedAkuma,
   type AkumaPaths,
 } from "./identity.js";
-import { probeProcessTree, type ProcessCollar } from "../runtime/proc/run.js";
+import { abortableDelay } from "./abort.js";
 
 const POLL_MS = 25;
 export const BIRTH_TIMEOUT_MS = 5_000;
-
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -34,16 +30,17 @@ function settleTimedOutBirth(paths: AkumaPaths): Soul | null {
   return soul;
 }
 
-async function awaitBirth(paths: AkumaPaths): Promise<Soul> {
+async function awaitBirth(paths: AkumaPaths, signal?: AbortSignal): Promise<Soul> {
   const deadline = performance.now() + BIRTH_TIMEOUT_MS;
   for (;;) {
+    signal?.throwIfAborted();
     const soul = readSoul(paths);
     if (soul !== null) return soul;
     if (performance.now() >= deadline) {
       const settled = settleTimedOutBirth(paths);
       if (settled !== null) return settled;
     }
-    await wait(POLL_MS);
+    await abortableDelay(POLL_MS, signal);
   }
 }
 
@@ -52,11 +49,11 @@ async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<Held
     const leash = HeldAkumaLeash.try(paths);
     if (leash !== null) return leash;
     if (performance.now() >= deadline) return null;
-    await wait(POLL_MS);
+    await abortableDelay(POLL_MS);
   }
 }
 
-async function awaitAsleepBirth(paths: AkumaPaths, collar: ProcessCollar): Promise<void> {
+async function awaitAsleepBirth(paths: AkumaPaths): Promise<void> {
   const leash = await takeLeashUntil(paths, performance.now() + BIRTH_TIMEOUT_MS);
   if (leash === null) throw new Error("Forked Akuma did not finish its birth body");
   try {
@@ -64,18 +61,6 @@ async function awaitAsleepBirth(paths: AkumaPaths, collar: ProcessCollar): Promi
       throw new Error("Forked Akuma birth body did not exit cleanly");
     }
   } finally { leash.release(); }
-  const deadline = performance.now() + BIRTH_TIMEOUT_MS;
-  for (;;) {
-    const probe = probeProcessTree(collar);
-    if (probe.kind === "gone") return;
-    if (performance.now() >= deadline) {
-      if (probe.kind === "unverifiable") {
-        throw new Error(`Forked Akuma birth collar is unverifiable: ${probe.diagnostic}`);
-      }
-      throw new Error("Forked Akuma birth process did not exit");
-    }
-    await wait(POLL_MS);
-  }
 }
 
 function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): void {
@@ -93,20 +78,24 @@ export async function publishAkuma(input: Readonly<{
   archetype: string;
   awaitAsleep?: boolean;
   reserve?(allocated: AllocatedAkuma): void;
-  launch(allocated: AllocatedAkuma): Promise<ProcessCollar>;
+  launch(allocated: AllocatedAkuma): Promise<void>;
+  signal?: AbortSignal;
 }>): Promise<AllocatedAkuma> {
+  input.signal?.throwIfAborted();
   const allocated = allocateAkumaDirectory({ worldRoot: input.worldPath, archetype: input.archetype });
-  let collar: ProcessCollar;
   try {
     initializeHeart(allocated.paths);
+    input.signal?.throwIfAborted();
     input.reserve?.(allocated);
-    collar = await input.launch(allocated);
+    input.signal?.throwIfAborted();
+    await input.launch(allocated);
+    input.signal?.throwIfAborted();
   } catch (error) {
     sealLocalFailure(allocated, error);
     throw error;
   }
-  const soul = await awaitBirth(allocated.paths);
+  const soul = await awaitBirth(allocated.paths, input.signal);
   if (soul.id !== allocated.id) throw new Error("Akuma birth returned a different identity");
-  if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths, collar);
+  if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths);
   return allocated;
 }

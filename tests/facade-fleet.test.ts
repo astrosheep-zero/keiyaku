@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { appendActivity, beginTurn, endTurn, initializeHeart, recordBody, recordSession, recordTell } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, appendActivity, beginTurn, endTurn, initializeHeart, recordSession, recordTell } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -59,9 +59,7 @@ async function answered(root: string, archetype: string, suffix: string) {
     },
     initialBody: "work",
   }, provider, {
-    collar: { pid: 999_970, processGroup: 999_970, spawnedAt: suffix },
     now: () => "2026-08-11T00:00:00.000Z",
-    async putDownOwnTree() {},
   });
   return allocated;
 }
@@ -84,7 +82,7 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
 
     const killed = await Keiyaku.kill({ path: root, akuma: ["@review", worker.id] });
     assert.deepEqual(killed.results.map((member) => member.id), [reviewer.id, worker.id]);
-    assert.deepEqual(killed.results.map((member) => member.evidence), ["killed", "killed"]);
+    assert.deepEqual(killed.results.map((member) => member.evidence), ["already-stopped", "already-stopped"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -378,10 +376,11 @@ test("history last selects exactly one latest answered TurnFact by durable seque
   try {
     const source = allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "00000001" });
     initializeHeart(source.paths);
-    const body = recordBody(source.paths, {
-      collar: { pid: 999_969, processGroup: 999_969, spawnedAt: "fixture" },
+    const bodyLeash = HeldAkumaLeash.try(source.paths)!;
+    const body = bodyLeash.recordBody(source.paths, {
       leashTakenAt: "2026-08-11T00:00:00.000Z",
     });
+    bodyLeash.release();
     for (const sessionId of ["session-1", "session-2", "session-3"]) {
       recordSession(source.paths, {
         provider: "claude",

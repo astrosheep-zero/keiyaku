@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { checkArchitecture, type Diagnostic, type SourceInput } from "../scripts/architecture/engine.js";
 import { KEIYAKU_ARCHITECTURE_POLICY } from "../scripts/architecture/policy.js";
-import { productionLineBudgetDiagnostic } from "../scripts/check-architecture.js";
+import { PRODUCTION_LINE_LIMIT, productionLineBudgetDiagnostic } from "../scripts/check-architecture.js";
 
 function check(files: Readonly<Record<string, string>>): readonly Diagnostic[] {
   const inputs: SourceInput[] = Object.entries(files).map(([path, source]) => ({ path, source }));
@@ -13,18 +13,19 @@ function rules(diagnostics: readonly Diagnostic[]): readonly string[] {
   return diagnostics.map((diagnostic) => diagnostic.rule);
 }
 
-test("production TypeScript has a hard 30000-line architecture budget", () => {
+test("production TypeScript has a hard architecture budget", () => {
   const atLimit = productionLineBudgetDiagnostic([
-    { path: "core/limit.ts", source: "x\n".repeat(30_000) },
+    { path: "core/limit.ts", source: "x\n".repeat(PRODUCTION_LINE_LIMIT) },
     { path: "scripts/ignored.ts", source: "x\n".repeat(10_000) },
   ]);
   assert.equal(atLimit, null);
 
   const overLimit = productionLineBudgetDiagnostic([
-    { path: "core/over.ts", source: "x\n".repeat(30_001) },
+    { path: "core/over.ts", source: "x\n".repeat(PRODUCTION_LINE_LIMIT + 1) },
   ]);
   assert.equal(overLimit?.rule, "architecture/production-line-budget");
-  assert.equal(overLimit?.detail, "production TypeScript is 30001 lines; limit is 30000");
+  assert.equal(overLimit?.detail,
+    `production TypeScript is ${PRODUCTION_LINE_LIMIT + 1} lines; limit is ${PRODUCTION_LINE_LIMIT}`);
 });
 
 test("architecture policy accepts public command adapters", () => {

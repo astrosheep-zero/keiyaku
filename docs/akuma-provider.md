@@ -76,6 +76,14 @@ boundary through `launchTells`; an adapter without resume starts fresh only
 when no durable resume promise exists. There is no capability registry,
 declaration table, probe, independent `SteerControl`, or `ExecutionObserver`.
 
+Every adapter implements the same setup and Session custody contract. Setup
+accepts the Body signal and disposes any native session or OS child that arrives
+after cancellation. Session `abort()` fulfills only after every child and
+native session the adapter created or may still create is disposed; a late
+resource is never delivered. Streams, receipts, Tell promises, and iterators
+are not separate custody duties. Provider-specific cancellation is an
+implementation detail and does not create provider-specific lifecycle law.
+
 `Session` owns only one live native execution. A live `tell` returns `accepted`
 with a provider submission fence, or `turn-ended` when the adapter has already
 observed terminal native evidence and submitted nothing. The adapter is the sole

@@ -152,12 +152,13 @@ the same argv, cwd, and environment but no timeout and returns the same process
 outcome without a `timeout` arm in practice. It never runs an unbounded user
 command directly; managed-worktree Hook runners are its sole consumer.
 
-The same domain-free runtime owns detached spawn and process-tree custody for
-long-lived callers. `spawnDetachedProcess` returns a collar containing pid,
-process group, and observed start identity. `probeProcessTree` returns `gone`,
-`alive`, or `unverifiable`; `putDownProcessTree` returns typed terminal
-evidence without importing Akuma facts. A start-identity mismatch is never
-group-killed blindly.
+The same domain-free runtime owns direct spawn and live process custody for
+long-lived callers. `spawnDetachedProcess` returns an `OwnedProcess` capability
+closed over the actual `ChildProcess`: diagnostic `pid`, `terminate(force?)`,
+and `release()`. Termination requires the live child handle; `release()` gives
+up that authority. There is no process identity probe, start token, external
+put-down primitive, or reconstruction of authority from persisted numeric
+coordinates.
 
 Each declaration has only its optional Markdown timeout, written with an
 explicit `ms`, `s`, `m`, or `h` unit; omission is unbounded.
@@ -168,7 +169,8 @@ environment variable. Execution starts detached on every platform. For timeout,
 POSIX execution starts a new session and process group, sends that group a
 graceful signal, waits a bounded grace interval, then force-kills the group. Windows uses
 `taskkill /PID <pid> /T /F`. The portable process-tree guarantee covers the
-observed tree. A subprocess that escapes the tree, or remains after SIGKILL,
+tree rooted at the directly spawned child while that caller still owns its
+handle. A subprocess that escapes the tree, or remains after SIGKILL,
 harness loss, or a Node crash, lies outside that guarantee.
 
 The runtime result is transient. Only its bounded terminal diagnostic rendering
@@ -179,10 +181,13 @@ a different declaration selection.
 Disposing the scratch worktree is post-admission physical cleanup. A failed
 destroy command is returned separately from a worktree-removal leak; neither
 throws over an accepted admission or changes an outcome arm. These transient
-reports never become reconcile input or a cleanup ledger. Reconciliation may
-independently remove a registered scratch path whose encoded owner process is
-provably gone or replaced, using fresh Git topology only; it never recovers the
-run or executes candidate commands.
+reports never become reconcile input or a cleanup ledger. Verification holds
+an exclusive SQLite ownership transaction for the scratch lifetime.
+Reconciliation may independently remove a registered scratch path only after
+nonblocking acquisition of that path's exact sidecar ownership lock, using
+fresh Git topology only; lock acquisition proves the owner released or died.
+Scratch names are random and encode no pid or process identity. Reconciliation
+never recovers the run or executes candidate commands.
 
 ## Ownership
 

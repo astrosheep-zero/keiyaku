@@ -149,10 +149,12 @@ primitive executes managed commands under this marker policy and scratch
 commands without it; there is no mode switch or second recovery loop.
 Reconciliation never resumes scratch provisioning or runs its repository
 commands. From fresh registered-worktree topology, it removes only scratch
-paths in Keiyaku's exact namespace whose encoded owner process is provably gone
-or replaced. An alive or unverifiable owner is retained. This is physical
-garbage collection, not command recovery, and reads no transient Verification
-result.
+paths in Keiyaku's exact random namespace after nonblocking acquisition of that
+path's exact `.<name>.owner.sqlite` exclusive transaction lock. Verification
+holds the same lock from before worktree creation until disposal completes; OS
+death releases it. Failure to acquire retains the worktree. No scratch name or
+fact contains a pid, start token, or process identity. This is physical garbage
+collection, not command recovery, and reads no transient Verification result.
 
 ```ts
 type ReconcileResult = Readonly<{

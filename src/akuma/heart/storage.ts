@@ -1,10 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
 import type { AkumaPaths } from "../identity.js";
-import type { LeashProbe, SessionFact, Soul, StopFact, TellFact } from "./facts.js";
+import type { BodyFact, LeashProbe, SessionFact, Soul, StopFact, TellFact } from "./facts.js";
 import { HEART_SCHEMA, LEASH_SCHEMA, assertHeartSchemaVersion, assertLeashSchemaVersion } from "./schema.js";
 import {
   deletePauseControl,
   deleteStopControl,
+  insertBodyFact,
   insertKillFact,
   insertSealFact,
   insertSessionFact,
@@ -12,6 +13,7 @@ import {
   killFactForBody,
   latestBodyFact,
   latestKillFact,
+  markBodyHung,
   sealExists,
   sealFact,
   soulFact,
@@ -68,6 +70,7 @@ export function initializeHeart(paths: AkumaPaths): void {
 
 export class HeldAkumaLeash {
   private closed = false;
+  private bodySequence: number | undefined;
 
   private constructor(private readonly database: DatabaseSync) {}
 
@@ -104,6 +107,24 @@ export class HeldAkumaLeash {
   }
 
   clearPause(paths: AkumaPaths): void { withHeart(paths, deletePauseControl); }
+  clearStop(paths: AkumaPaths): void { withHeart(paths, deleteStopControl); }
+
+  recordBody(paths: AkumaPaths, input: Readonly<{ leashTakenAt: string }>): BodyFact {
+    if (this.closed || this.bodySequence !== undefined) throw new Error("Akuma leash cannot start another Body");
+    const sequence = withHeart(paths, (heart) => insertBodyFact(heart, input));
+    this.bodySequence = sequence;
+    return { sequence, leashTakenAt: input.leashTakenAt };
+  }
+
+  recordBodyHung(
+    paths: AkumaPaths,
+    input: Readonly<{ sequence: number; diagnostic: string; at: string }>,
+  ): void {
+    if (this.closed || this.bodySequence !== input.sequence) {
+      throw new Error(`Akuma Body ${input.sequence} is not owned by this leash`);
+    }
+    withHeart(paths, (heart) => markBodyHung(heart, input));
+  }
 
   settleStop(paths: AkumaPaths, expectedBodySequence?: number): Readonly<{ target: StopFact; result: "recorded" | "already-killed" }> | null {
     return withHeart(paths, (heart) => transaction(heart, () => {
@@ -118,6 +139,7 @@ export class HeldAkumaLeash {
       }
       const latest = latestBodyFact(heart);
       if (latest?.sequence !== target.bodySequence) throw new Error("Akuma stop target is not the latest Body");
+      if (latest.end !== "put-down") return null;
       const result = latestKillFact(heart)?.bodySequence === target.bodySequence
         ? "already-killed" as const
         : (insertKillFact(heart, target.bodySequence, target.requestedAt), "recorded" as const);

@@ -5,8 +5,8 @@ This chapter owns Akuma durable facts, custody, schemas, and projections.
 ## Turn Timeline
 
 The retained Heart timeline sequence is the only order visible to public Akuma
-projections. A Body owns process, leash,
-collar, stop, pause, kill, and Body Request facts. A Turn is one provider start
+projections. A Body owns its live descendant handles and holds the leash;
+Heart owns Body, stop, pause, kill, and Body Request facts. A Turn is one provider start
 or resume within that Body, and one Body may contain many Turns.
 
 Every admitted Turn has a `turn-start` coordinate before provider invocation.
@@ -44,8 +44,9 @@ dies; their existence does not depend on a current control-flow reader.
 - **soul** — one row, written at birth: id, archetype, optional description,
   resolved provider execution, admitted options, summon cwd, origin,
   confinement, created-at.
-- **bodies** — one row per body: collar, leash-taken-at, end (exited /
-  broke-off / put-down).
+- **bodies** — one row per Body: sequence, leash-taken-at, and optional explicit
+  end (`exited` / `broke-off` / `put-down`). No process coordinate or
+  reconstructable termination authority is durable.
 - **turns** — one row per admitted Turn, keyed by its `turn-start` timeline
   sequence. It may remain open or carry exactly one `turn-end` outcome. An
   answered outcome carries the complete answer and may carry an exact
@@ -89,11 +90,13 @@ dies; their existence does not depend on a current control-flow reader.
   and `voided` are terminal.
 - **stop / pause** — distinct transient control rows. Stop freezes the current
   Body sequence and asks that Body to end for `kill`; pause asks it to yield for
-  `interrupt`. A leash holder must physically settle the frozen predecessor,
-  write its kill witness, and clear stop before creating a successor Body.
+  `interrupt`. Only that live Body may terminate its descendants through owned
+  handles. A later leash holder may clear abandoned control but cannot claim
+  physical custody of the predecessor.
 - **kills** — immutable witnesses that `kill` stopped one exact Body sequence.
-  Only the latest Body's witness projects `killed`; a successor Body supersedes
-  it without deleting history.
+  A witness is admitted only after the same Body explicitly ended `put-down`
+  and released the leash. Only the latest Body's witness projects `killed`; a
+  successor Body supersedes it without deleting history.
 
 The seal is the one row that must not live in `heart.db`: the birth claim is a leash
 transaction, and "check the seal in the same claim" is only atomic if the
@@ -102,9 +105,11 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed `heart/` custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `11`; leash schema version remains `4`. Version 11
-separates successful completion from the optional exact provider fork point;
-session and complete answer remain required for an answered Turn. Older hearts
+Heart schema version is `13`; leash schema version remains `4`. Version 13
+removes process coordinates from Body facts and adds the Body-owned hung
+custody diagnostic. Successful completion remains
+separate from the optional exact provider fork point; session and complete
+answer remain required for an answered Turn. Older hearts
 fail the schema gate; no migration or compatibility decoder exists. Absence is
 stored as SQL `NULL` and omitted from public values.
 
@@ -194,10 +199,11 @@ no member diagnostic or partial marker.
 One judge per question:
 
 - Birth vs seal: both live under the same leash claim. Judge: the leash.
-- Kill vs Body replacement: the killer acquires the leash after physical stop,
-  re-reads the latest Body, and records a witness for that exact sequence in one
-  Heart transaction. A repeated witness is idempotent; a stale sequence is
-  rejected. Judge: leash ownership plus the Heart transaction.
+- Kill vs Body replacement: the killer waits for the target Body to release the
+  leash, re-reads that exact Body's explicit `put-down` end, and records its
+  witness in one Heart transaction. A repeated witness is idempotent; a stale,
+  untidy, or superseded sequence is rejected. Judge: leash ownership plus the
+  Heart transaction.
 - Body exit vs concurrent tell: the heart and the leash are two locks, so
   neither alone may judge. The exit check (no pending tells, same
   transaction) is necessary but not sufficient; the waker closes the gap —
@@ -206,4 +212,7 @@ One judge per question:
   by looking across databases. The parent heart only remembers where to
   look.
 
-No cross-database atomicity is claimed anywhere. No clock enters the law.
+No cross-database atomicity is claimed anywhere. A held leash alone proves only
+that a Body remains live. `hung` requires that Body's durable diagnostic that
+owned provider custody did not retire within the response window. Elapsed time
+at a public boundary never constructs that fact or grants process authority.

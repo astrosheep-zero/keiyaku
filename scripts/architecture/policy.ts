@@ -5,6 +5,7 @@ const types = (target: string) => ({ target, mode: "type-only" as const });
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
+    { source: "akuma/abort.ts", allow: [] },
     { source: "duration.ts", allow: [] },
     { source: "settings.ts", allow: [] },
     { source: "world.ts", allow: [] },
@@ -24,23 +25,24 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "akuma/provider.ts", allow: [types("akuma/heart/index.ts"), any("akuma/coordinate.ts")] },
     { source: "akuma/projection.ts", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts")] },
     { source: "akuma/providers/index.ts", allow: [types("akuma/heart/index.ts"), types("akuma/provider.ts"), any("akuma/providers/acp/index.ts"), any("akuma/providers/claude/index.ts"), any("akuma/providers/codex-app-server/index.ts"), any("akuma/providers/opencode-sdk/index.ts"), any("akuma/providers/pi/index.ts")] },
-    { source: "akuma/providers/claude/index.ts", allow: [any("akuma/provider.ts"), any("akuma/providers/claude/events.ts"), any("akuma/providers/claude/input.ts")] },
-    { source: "akuma/providers/pi/index.ts", allow: [any("akuma/providers/pi/events.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts"), types("akuma/coordinate.ts")] },
+    { source: "akuma/providers/claude/index.ts", allow: [any("akuma/abort.ts"), any("akuma/provider.ts"), any("akuma/providers/claude/events.ts"), any("akuma/providers/claude/input.ts")] },
+    { source: "akuma/providers/pi/index.ts", allow: [any("akuma/abort.ts"), any("akuma/providers/pi/events.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts"), types("akuma/coordinate.ts")] },
     { source: "akuma/providers/pi/events.ts", allow: [any("akuma/provider.ts")] },
     { source: "akuma/providers/codex-app-server/index.ts", allow: [any("akuma/providers/codex-app-server/events.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts"), any("runtime/proc/line-rpc.ts")] },
-    { source: "akuma/providers/acp/index.ts", allow: [any("akuma/providers/acp/events.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts"), any("runtime/proc/stdio.ts")] },
+    { source: "akuma/providers/acp/index.ts", allow: [any("akuma/abort.ts"), any("akuma/providers/acp/events.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts"), any("runtime/proc/stdio.ts")] },
     { source: "akuma/providers/codex-app-server/events.ts", allow: [any("akuma/provider.ts"), types("runtime/proc/line-rpc.ts")] },
-    { source: "akuma/providers/opencode-sdk/index.ts", allow: [any("akuma/providers/opencode-sdk/events.ts"), any("akuma/providers/opencode-sdk/session.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts")] },
-    { source: "akuma/providers/opencode-sdk/session.ts", allow: [types("akuma/heart/index.ts"), any("runtime/proc/run.ts")] },
+    { source: "akuma/providers/opencode-sdk/index.ts", allow: [any("akuma/abort.ts"), any("akuma/providers/opencode-sdk/events.ts"), any("akuma/providers/opencode-sdk/session.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts")] },
+    { source: "akuma/providers/opencode-sdk/session.ts", allow: [any("akuma/abort.ts"), types("akuma/heart/index.ts"), any("runtime/proc/run.ts")] },
     { source: "akuma/providers/**", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts"), any("runtime/proc/line-rpc.ts")] },
     { source: "akuma/archetype.ts", allow: [types("akuma/heart/index.ts"), any("akuma/identity.ts"), any("akuma/provider.ts", ["ProviderAdapter", "ProviderOptions", "decodeProviderOptions"]), any("akuma/providers/index.ts"), types("settings.ts")] },
     {
       source: "akuma/publication.ts",
-      allow: [any("akuma/heart/index.ts"), any("akuma/identity.ts"), any("runtime/proc/run.ts")],
+      allow: [any("akuma/abort.ts"), any("akuma/heart/index.ts"), any("akuma/identity.ts"), any("runtime/proc/run.ts")],
     },
     {
       source: "akuma/requests.ts",
       allow: [
+        any("akuma/abort.ts"),
         any("akuma/heart/index.ts"),
         any("akuma/identity.ts"),
         any("akuma/provider.ts"),
@@ -52,9 +54,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "akuma/body.ts",
       allow: [
+        any("akuma/abort.ts"),
         any("akuma/heart/index.ts"),
         types("akuma/identity.ts"),
-        any("akuma/provider.ts", ["encodeAgentEvent", "ProviderAdapter", "Session", "TurnResult"]),
+        any("akuma/provider.ts", ["AgentEvent", "encodeAgentEvent", "ProviderAdapter", "Session", "TurnResult"]),
         any("akuma/providers/index.ts"),
         any("akuma/requests.ts"),
         any("runtime/proc/run.ts"),
@@ -217,7 +220,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/target-placement.ts"),
         any("git/terminal-seal.ts"),
         any("git/workspace.ts", ["deliveryWorktreePath"]),
-        any("git/scratch.ts", ["orphanedScratchWorktrees"]),
+        any("git/scratch.ts", ["collectableScratchWorktrees"]),
       ],
     },
     {
@@ -242,7 +245,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "git/hooks.ts", allow: [any("coordination/durable-file.ts"), any("coordination/sqlite-transaction-lock.ts"), any("runtime/proc/run.ts"), any("settings.ts", ["Settings", "SettingsError"])] },
     {
       source: "git/scratch.ts",
-      allow: [any("git/identity.ts"), any("git/repository.ts"), types("core/facts/types.ts"), any("runtime/proc/run.ts", ["currentProcessIdentity", "probeProcessIdentity", "ProcessIdentity"])],
+      allow: [any("coordination/sqlite-transaction-lock.ts"), any("git/identity.ts"), any("git/repository.ts"), types("core/facts/types.ts")],
     },
     {
       source: "protocol/attempt.ts",
@@ -728,7 +731,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       owners: [
         { source: "git/repository.ts", symbols: ["execFileSync"] },
         { source: "git/read-observation.ts", symbols: ["ChildProcessWithoutNullStreams", "spawn"] },
-        { source: "runtime/proc/**", symbols: ["ChildProcessWithoutNullStreams", "execFile", "spawn", "spawnSync"] },
+        { source: "runtime/proc/**", symbols: ["ChildProcess", "ChildProcessWithoutNullStreams", "execFile", "spawn"] },
         { source: "scripts/model-change-impact.ts", symbols: ["execFileSync"] },
       ],
     },
@@ -856,7 +859,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "process-cwd", owners: ["git/repository.ts", "cli/main.ts", "kanshi/read.ts", "library/repo.ts", "task/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-environment", owners: ["akuma/providers/acp/index.ts", "akuma/providers/claude/index.ts", "akuma/providers/codex-app-server/index.ts", "akuma/providers/opencode-sdk/session.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "git/repository.ts", "protocol/operations.ts", "runtime/proc/**"] },
     { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
-    { capability: "process-pid", owners: ["git/scratch.ts", "runtime/proc/**"] },
+    { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },
     { capability: "type-error-construction", owners: ["world.ts", "akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/archetype.ts", "akuma/provider.ts", "akuma/providers/index.ts", "akuma/providers/acp/index.ts", "alias/index.ts", "body/**", "cli/actor.ts", "git/hooks.ts", "kanshi/**", "library/configuration.ts", "library/contract.ts", "library/input.ts", "library/repo.ts", "library/akuma-creation.ts", "library/address.ts", "library/fleet.ts", "library/catalog.ts", "identity/coordinates.ts", "identity/selector.ts", "settings.ts", "task/**"] },
   ],

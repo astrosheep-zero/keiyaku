@@ -5,9 +5,9 @@ import type {
   BodyEnd,
   BodyFact,
   CallFact,
-  Collar,
   Confinement,
   KillFact,
+  PauseFact,
   ProviderExecution,
   ProviderOptions,
   RequestFact,
@@ -39,10 +39,9 @@ export type SealRow = Readonly<{ evidence: string; at: string }>;
 
 export type BodyRow = Readonly<{
   sequence: number;
-  pid: number;
-  process_group: number;
-  spawned_at: string;
   leash_taken_at: string;
+  hung_diagnostic: string | null;
+  hung_at: string | null;
   end: BodyEnd | null;
   ended_at: string | null;
 }>;
@@ -182,8 +181,8 @@ export function decodeSessionRow(row: SessionRow): SessionFact {
 export function decodeBodyRow(row: BodyRow): BodyFact {
   return {
     sequence: row.sequence,
-    collar: { pid: row.pid, processGroup: row.process_group, spawnedAt: row.spawned_at },
     leashTakenAt: row.leash_taken_at,
+    ...(row.hung_diagnostic === null ? {} : { hung: { diagnostic: row.hung_diagnostic, at: row.hung_at! } }),
     ...(row.end === null ? {} : { end: row.end }),
     ...(row.ended_at === null ? {} : { endedAt: row.ended_at }),
   };
@@ -285,10 +284,9 @@ export function sealFact(database: DatabaseSync): Readonly<{ evidence: string; a
 
 export function insertBodyFact(
   database: DatabaseSync,
-  input: Readonly<{ collar: Collar; leashTakenAt: string }>,
+  input: Readonly<{ leashTakenAt: string }>,
 ): number {
-  const result = database.prepare(`INSERT INTO bodies(pid, process_group, spawned_at, leash_taken_at)
-    VALUES (?, ?, ?, ?)`).run(input.collar.pid, input.collar.processGroup, input.collar.spawnedAt, input.leashTakenAt);
+  const result = database.prepare("INSERT INTO bodies(leash_taken_at) VALUES (?)").run(input.leashTakenAt);
   return Number(result.lastInsertRowid);
 }
 
@@ -364,7 +362,10 @@ export function insertStopControl(database: DatabaseSync, bodySequence: number, 
 }
 
 export function insertPauseControl(database: DatabaseSync, at: string): void {
-  database.prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('pause', '{}', ?)").run(at);
+  const body = latestBodyFact(database);
+  if (body === null) throw new Error("Akuma has no Body to interrupt");
+  database.prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('pause', ?, ?)")
+    .run(json({ bodySequence: body.sequence }), at);
 }
 
 export function stopFact(database: DatabaseSync): StopFact | null {
@@ -377,8 +378,14 @@ export function stopFact(database: DatabaseSync): StopFact | null {
   return { bodySequence: value.bodySequence as number, requestedAt: row.at };
 }
 
-export function pauseExists(database: DatabaseSync): boolean {
-  return database.prepare("SELECT kind FROM control WHERE kind = 'pause'").get() !== undefined;
+export function pauseFact(database: DatabaseSync): PauseFact | null {
+  const row = database.prepare("SELECT value_json, at FROM control WHERE kind = 'pause'").get() as ControlRow | undefined;
+  if (row === undefined) return null;
+  const value = parsed<{ bodySequence: unknown }>(row.value_json);
+  if (!Number.isSafeInteger(value.bodySequence) || (value.bodySequence as number) <= 0) {
+    throw new Error("Akuma pause control has an invalid Body sequence");
+  }
+  return { bodySequence: value.bodySequence as number, requestedAt: row.at };
 }
 
 export function insertKillFact(database: DatabaseSync, bodySequence: number, at: string): void {
@@ -392,6 +399,16 @@ export function endBodyFact(
 ): void {
   database.prepare("UPDATE bodies SET end = ?, ended_at = ? WHERE sequence = ? AND end IS NULL")
     .run(input.end, input.at, input.sequence);
+}
+
+export function markBodyHung(
+  database: DatabaseSync,
+  input: Readonly<{ sequence: number; diagnostic: string; at: string }>,
+): void {
+  const result = database.prepare(`UPDATE bodies SET hung_diagnostic = ?, hung_at = ?
+    WHERE sequence = ? AND end IS NULL AND hung_diagnostic IS NULL`)
+    .run(input.diagnostic, input.at, input.sequence);
+  if (result.changes !== 1) throw new Error(`Akuma Body ${input.sequence} cannot record hung custody`);
 }
 
 export function insertTurnStartFact(
@@ -431,7 +448,7 @@ export function finishBodyFact(database: DatabaseSync, input: Readonly<{ sequenc
 }
 
 export function latestBodyFact(database: DatabaseSync): BodyFact | null {
-  const row = database.prepare(`SELECT sequence, pid, process_group, spawned_at, leash_taken_at, end, ended_at
+  const row = database.prepare(`SELECT sequence, leash_taken_at, hung_diagnostic, hung_at, end, ended_at
     FROM bodies ORDER BY sequence DESC LIMIT 1`).get() as BodyRow | undefined;
   return row === undefined ? null : decodeBodyRow(row);
 }

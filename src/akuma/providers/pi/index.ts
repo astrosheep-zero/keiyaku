@@ -6,6 +6,7 @@ import {
   SessionManager,
   type CreateAgentSessionOptions,
 } from "@earendil-works/pi-coding-agent";
+import { abortable } from "../../abort.js";
 import type { ProviderExecution } from "../../heart/index.js";
 import type { ResumeCoordinate } from "../../coordinate.js";
 import { AgentEventChannel, type ProviderAdapter, type ProviderOptions, type Session, type TurnResult } from "../../provider.js";
@@ -68,9 +69,20 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
 
 type PiDriveInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 
-async function drivePi(sdk: PiSdk, input: PiDriveInput): Promise<Session> {
-  const created = await sdk.createAgentSession(await piCreateOptions(sdk, input));
+type PiCreatedSession = Awaited<ReturnType<PiSdk["createAgentSession"]>>;
+
+async function createPiSession(sdk: PiSdk, input: PiDriveInput, signal: AbortSignal): Promise<PiCreatedSession> {
+  const setup = piCreateOptions(sdk, input).then(async (options) => await sdk.createAgentSession(options));
+  return await abortable(setup, signal, (created) => created.session.dispose());
+}
+
+async function drivePi(sdk: PiSdk, input: PiDriveInput, signal: AbortSignal): Promise<Session> {
+  const created = await createPiSession(sdk, input, signal);
   const native = created.session;
+  if (signal.aborted) {
+    native.dispose();
+    signal.throwIfAborted();
+  }
   if (native.sessionFile === undefined || native.sessionFile.trim().length === 0) {
     native.dispose();
     throw new Error("Pi session admitted without sessionFile");
@@ -80,6 +92,7 @@ async function drivePi(sdk: PiSdk, input: PiDriveInput): Promise<Session> {
   let terminalFailure: string | null = null;
   let disposed = false;
   let abortRequest: Promise<void> | undefined;
+  let aborting = false;
   let settled = false;
   const dispose = (): void => {
     if (disposed) return;
@@ -104,6 +117,10 @@ async function drivePi(sdk: PiSdk, input: PiDriveInput): Promise<Session> {
   void (async () => {
     try {
       await native.prompt([input.body, ...input.launchTells.map((tell) => tell.text)].join("\n\n"));
+      if (aborting) {
+        settle({ kind: "failed", diagnostic: "Pi session aborted" });
+        return;
+      }
       if (terminalFailure !== null) {
         settle({ kind: "failed", diagnostic: terminalFailure });
         return;
@@ -118,15 +135,19 @@ async function drivePi(sdk: PiSdk, input: PiDriveInput): Promise<Session> {
         answer: state.answer,
         ...(historyId === null ? {} : { historyId }),
       });
-    } catch (error) { settle({ kind: "failed", diagnostic: diagnostic(error) }); }
+    } catch (error) {
+      settle(aborting
+        ? { kind: "failed", diagnostic: "Pi session aborted" }
+        : { kind: "failed", diagnostic: diagnostic(error) });
+    }
   })();
   return {
     admission: { fence: native.sessionId }, events, completion,
     abort: () => {
       abortRequest ??= (async () => {
-        try {
-          void native.abort().catch(() => undefined);
-        } catch { /* best effort: local settlement already owns lifecycle */ }
+        if (settled) return;
+        aborting = true;
+        try { await native.abort(); } catch { /* prompt settlement still proves local cleanup */ }
         settle({ kind: "failed", diagnostic: "Pi session aborted" });
       })();
       return abortRequest;
@@ -153,6 +174,11 @@ export function createPiProvider(
   execution: ProviderExecution = { name: "pi", kind: "pi" },
   load: () => Promise<PiSdk> = async () => defaultSdk,
 ): ProviderAdapter {
+  const drive = async (input: PiDriveInput): Promise<Session> => {
+    const signal = input.signal ?? new AbortController().signal;
+    signal.throwIfAborted();
+    return drivePi(await abortable(load(), signal), input, signal);
+  };
   return {
     confinement: ({ cwd }) => ({ kind: "declared", writableRoots: [cwd] }),
     admitOptions(options) {
@@ -160,10 +186,10 @@ export function createPiProvider(
       if (execution.env !== undefined && Object.keys(execution.env).length > 0) return { kind: "refused", diagnostic: "env injection not supported for provider pi" };
       return admitPiOptions(options);
     },
-    start: async (input) => drivePi(await load(), input),
+    start: drive,
     resume: async (input) => {
       piSessionFile(input.session.coordinate);
-      return drivePi(await load(), input);
+      return drive(input);
     },
     fork: async (input) => {
       piSessionFile(input.session);

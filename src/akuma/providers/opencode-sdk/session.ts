@@ -1,5 +1,6 @@
 import net from "node:net";
-import { spawnDetachedProcess, putDownProcessTree, type ProcessCollar } from "../../../runtime/proc/run.js";
+import { abortable } from "../../abort.js";
+import { spawnDetachedProcess } from "../../../runtime/proc/run.js";
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
 import type { ProviderExecution, ResumeCoordinate } from "../../heart/index.js";
 
@@ -28,7 +29,7 @@ async function waitReady(client: OpencodeClient, cwd: string, signal: AbortSigna
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (signal.aborted) throw new Error("OpenCode startup aborted");
     try {
-      await client.session.list({ query: { directory: cwd }, throwOnError: true });
+      await abortable(client.session.list({ query: { directory: cwd }, throwOnError: true }), signal);
       return;
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -64,7 +65,7 @@ export async function loadOpencode(
     return { client: loaded.client, close: async () => { await loaded.close?.(); } };
   }
   const port = await availablePort();
-  const collar: ProcessCollar = await spawnDetachedProcess({
+  const owned = await spawnDetachedProcess({
     argv: [execution.executable ?? "opencode", "serve", "--hostname", "127.0.0.1", "--port", String(port)],
     cwd,
     env: { ...process.env, ...(execution.env ?? {}) },
@@ -74,10 +75,10 @@ export async function loadOpencode(
   try {
     await waitReady(client, cwd, signal);
   } catch (error) {
-    await putDownProcessTree(collar);
+    await owned.terminate();
     throw error;
   }
-  return { client, close: async () => { await putDownProcessTree(collar); } };
+  return { client, close: async () => { await owned.terminate(); } };
 }
 
 export function coordinate(sessionId: string): ResumeCoordinate { return { sessionId }; }

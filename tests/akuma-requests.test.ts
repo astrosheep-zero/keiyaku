@@ -15,6 +15,7 @@ import {
   type Soul,
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
+import { publishAkuma } from "../src/akuma/publication.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import {
   AkumaBodyRequestError,
@@ -45,6 +46,38 @@ async function fixture() {
   return { root, parent, soul, leash, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
+test("aborted publication keeps an in-flight launch lexically owned", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-abort-")));
+  const controller = new AbortController();
+  let started!: () => void;
+  const launchStarted = new Promise<void>((resolve) => { started = resolve; });
+  let release!: () => void;
+  const launchGate = new Promise<void>((resolve) => { release = resolve; });
+  let childPaths: ReturnType<typeof allocateAkumaDirectory>["paths"] | undefined;
+  try {
+    const publication = publishAkuma({
+      worldPath: root,
+      archetype: "worker",
+      signal: controller.signal,
+      async launch(allocated) {
+        childPaths = allocated.paths;
+        started();
+        await launchGate;
+      },
+    });
+    await launchStarted;
+    let settled = false;
+    void publication.finally(() => { settled = true; }).catch(() => {});
+    controller.abort(new Error("cancelled publication"));
+    await Promise.resolve();
+    assert.equal(settled, false);
+    release();
+    await assert.rejects(publication, /cancelled publication/u);
+    assert.equal(settled, true);
+    assert.equal(childPaths === undefined ? null : readSeal(childPaths)?.evidence, "cancelled publication");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("a declared drive serves Body Requests through transport while Heart remains authoritative", async () => {
   const value = await fixture();
   const priorHome = process.env.HOME;
@@ -58,11 +91,11 @@ test("a declared drive serves Body Requests through transport while Heart remain
     parent: value.soul,
     bodySequence: 1,
     now: () => "2026-08-09T00:00:01.000Z",
+    signal: new AbortController().signal,
     async spawn(launch) {
       const child = HeldAkumaLeash.try(launch.paths)!;
       child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
       child.release();
-      return { pid: 999_991, processGroup: 999_991, spawnedAt: "request-child" };
     },
   });
   try {

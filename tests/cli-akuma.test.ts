@@ -8,6 +8,7 @@ import { driveAkumaBody } from "../src/akuma/body.js";
 import { beginTurn, endTurn, initializeHeart, readSoul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
+import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
@@ -94,7 +95,6 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   const status = {
     id: "aku/worker/1234abcd",
     life: "running" as const,
-    collar: { kind: "alive" as const },
     timeline: {
       kind: "open" as const,
       turn: { kind: "turn" as const, sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
@@ -125,7 +125,6 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   const answered = {
     ...status,
     life: "asleep" as const,
-    collar: { kind: "gone" as const, end: "exited" as const },
     timeline: { kind: "idle" as const, entries: [], omitted: 0, outcome: { kind: "outcome" as const, sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", outcome: { kind: "answered" as const, answer: "first answer", historyId: "history-1", session: { sessionId: "session-1" } } } },
   };
   const other = {
@@ -200,7 +199,6 @@ test("Akuma snapshot rows use fixed semantic line budgets", () => {
     id: "aku/worker/1234abcd" as const,
     archetype: "worker",
     life: "running" as const,
-    collar: { kind: "alive" as const },
     confinement: { kind: "unconfined" as const },
     pending: [],
   };
@@ -286,7 +284,6 @@ test("ordinary tell leads with mutation authority before an asleep observation",
     id: "aku/worker/1234abcd" as const,
     archetype: "worker",
     life: "asleep" as const,
-    collar: { kind: "gone" as const, end: "exited" as const },
     confinement: { kind: "unconfined" as const },
     pending: [],
     timeline: { kind: "idle" as const, entries: [], omitted: 0 },
@@ -312,7 +309,6 @@ test("Akuma voice is bounded and active tools carry the live mark", () => {
   const status = {
     id: "aku/worker/1234abcd",
     life: "running" as const,
-    collar: { kind: "alive" as const },
     timeline: { kind: "open" as const, turn: { kind: "turn" as const, sequence: 0, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" }, entries: [
       { kind: "row" as const, row: {
         kind: "said" as const, sequence: 1, turnSequence: 1,
@@ -358,7 +354,6 @@ test("Akuma snapshot life uses the fleet vocabulary independently of activity", 
   const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
   const base = {
     id: "aku/worker/1234abcd" as const,
-    collar: { kind: "gone" as const, end: null },
     timeline: { kind: "idle" as const, entries: [], omitted: 0 },
   };
   const cases = [
@@ -366,7 +361,8 @@ test("Akuma snapshot life uses the fleet vocabulary independently of activity", 
     ["asleep", "○ asleep"],
     ["killed", "× killed"],
     ["stranded", "? stranded"],
-    ["headless", "? headless"],
+    ["hung", "? hung"],
+    ["untidy", "? untidy"],
   ] as const;
   for (const [life, expected] of cases) {
     const text = renderAkumaText(command, {
@@ -383,7 +379,6 @@ test("Akuma status-oriented commands include life while tell excludes it", () =>
   const status = {
     id,
     life: "running" as const,
-    collar: { kind: "alive" as const },
     timeline: { kind: "idle" as const, entries: [], omitted: 0 },
   };
   const observation = { status };
@@ -414,7 +409,7 @@ test("Akuma status-oriented commands include life while tell excludes it", () =>
     {
       name: "kill",
       command: parseArgv(["kill", id]).command,
-      result: { kind: "akuma" as const, action: "kill" as const, result: { results: [{ id, evidence: "alive-after-sigkill" as const, observation }] } },
+      result: { kind: "akuma" as const, action: "kill" as const, result: { results: [{ id, evidence: "hung" as const, observation }] } },
       hasLife: true,
     },
     {
@@ -435,7 +430,12 @@ test("Akuma status-oriented commands include life while tell excludes it", () =>
       },
       hasLife: false,
     },
-  ];
+  ] satisfies readonly Readonly<{
+    name: string;
+    command: ReturnType<typeof parseArgv>["command"];
+    result: AkumaInvocationResult;
+    hasLife: boolean;
+  }>[];
   for (const item of cases) {
     assert.equal(renderAkumaText(item.command, item.result).includes("● running"), item.hasLife, item.name);
   }
@@ -494,7 +494,6 @@ test("Akuma header shows a complete associated Contract without truncating ident
       id: "aku/worker/1234abcd",
       archetype: "worker",
       life: "running",
-      collar: { kind: "alive" },
       confinement: { kind: "unconfined" },
       pending: [],
       timeline: { kind: "unborn", entries: [], omitted: 0 },
@@ -510,7 +509,6 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
   const status = {
     id: "aku/worker/1234abcd",
     life: "running" as const,
-    collar: { kind: "alive" as const },
     timeline: { kind: "open" as const, turn: { kind: "turn" as const, sequence: 0, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" }, entries: [{ kind: "row" as const, row: {
       kind: "tool" as const, sequence: 1, turnSequence: 1,
       at: "2026-08-10T16:42:00.000Z", name: "Shell",
@@ -651,7 +649,6 @@ test("akuma call renders optional integration stages and maps partial success", 
         status: {
           id: akuma,
           life: "asleep" as const,
-          collar: { kind: "gone" as const, end: "exited" as const },
           timeline: {
             kind: "idle" as const,
             entries: [],
@@ -749,7 +746,6 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
       observation: { status: {
         id: "aku/claude/1d1e0004" as const,
         life: "asleep" as const,
-        collar: { kind: "gone" as const, end: "put-down" as const },
         timeline: { entries: [], lowestRetained: null, highest: null },
       }, contractId: "kei/provider-core-review" as const },
     },
@@ -775,15 +771,15 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
   assert.match(renderAkumaText(parsed.command, wakeFailed), /^aku\/claude\/1d1e0004/u);
   assert.equal(akumaExitCode(wakeFailed), 0);
 
-  const unstoppable = {
+  const unavailable = {
     ...interrupted,
     result: {
       ...interrupted.result,
-      receipt: { kind: "unstoppable" as const, evidence: "leash-held-after-put-down" as const },
+      receipt: { kind: "unavailable" as const, evidence: "hung" as const },
     },
   };
-  assert.match(renderAkumaText(parsed.command, unstoppable), /^aku\/claude\/1d1e0004/u);
-  assert.equal(akumaExitCode(unstoppable), 1);
+  assert.match(renderAkumaText(parsed.command, unavailable), /^aku\/claude\/1d1e0004/u);
+  assert.equal(akumaExitCode(unavailable), 1);
 });
 
 test("Akuma status, wait, and history share public observations without embedding history", async () => {
@@ -821,9 +817,7 @@ test("Akuma status, wait, and history share public observations without embeddin
       },
       initialBody: "work",
     }, provider, {
-      collar: { pid: 999_990, processGroup: 999_990, spawnedAt: "cli-status" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
 
     const parsedStatus = parseArgv(["-C", root, "status", allocated.id]);
@@ -926,9 +920,7 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
     },
     initialBody: "work",
   }, provider, {
-    collar: { pid: 999_991, processGroup: 999_991, spawnedAt: "shared-world" },
     now: () => "2026-08-14T00:00:00.000Z",
-    async putDownOwnTree() {},
   });
 
   const fromLinked = await invoke(parseArgv(["-C", linked, "status", allocated.id]));

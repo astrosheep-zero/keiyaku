@@ -30,10 +30,23 @@ a.status()                                 // current state + bounded activity
 a.wait(predicate?, { timeoutMs? })         // same status carrier on either outcome
 a.history({ before?, since?, limit? })      // persistent execution-history page
 a.tell(body)                               // typed mutation result
-a.interrupt(body)                         // synchronous put-down, then tell
+a.interrupt(body)                         // bounded pause, leash proof, then tell
 a.fork({ at: historyId })                 // exact retained native fork point
-a.kill()                                   // evidence: four values
+a.kill()                                   // typed settlement evidence
 ```
+
+The public lifecycle unions are closed:
+
+```ts
+type AkumaLife = "running" | "hung" | "untidy" | "asleep" | "stranded" | "killed";
+type InterruptPutDown = "was-idle" | "self-aborted";
+type InterruptUnavailable = "hung" | "untidy" | "unavailable";
+type KillEvidence = "killed" | "already-killed" | "already-stopped"
+  | "hung" | "untidy" | "unavailable";
+```
+
+None contains process coordinates or a capability to signal a described
+process.
 
 A rerouted call that reaches a terminal non-served request throws
 `AkumaBodyRequestError`. Its closed fields are `kind: "akuma-body-request"`,
@@ -96,14 +109,14 @@ empty answer.
 
 An Akuma that answered and whose latest Body was later killed keeps both facts
 visible on their independent axes: life remains killed while the answered Turn
-remains in the timeline. What to do about a stranded or headless Akuma is the
+remains in the timeline. What to do about a stranded, hung, or untidy Akuma is the
 flagship's decision; the surface puts the state and available verbs in front of
 her and says nothing more.
 
 `list()` is the compact fleet scan, not a smaller `status()`. Born fleet rows expose id,
-Archetype and description snapshots, life, collar evidence,
+Archetype and description snapshots, life,
 confinement, and pending tell count, but no activity, history, or latest outcome. The public
-types share `id`, `life`, and `collar` by coincidence, not by inheritance. The id is
+types share `id` and `life` by coincidence, not by inheritance. The id is
 projected verbatim and has no endpoint-state interpretation here. Unborn/stillborn rows retain
 their existing evidence. This keeps a fleet read from scanning the complete
 turn history of every akuma. A corrupt member is silently skipped at this

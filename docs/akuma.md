@@ -29,9 +29,8 @@ and go; the heart stays.
   At most one body at a time; most of the time, none.
 - **leash** — an exclusive transaction in `leash.db`. Whoever holds it is the
   body. Held for the body's whole life; the OS releases it on death. The same
-  database holds the seal, so birth and sealing have one judge.
-- **collar** — the body's recorded process coordinates: pid, process group,
-  spawn time. The only safe grip for putting a body down.
+  database holds the seal, so birth and sealing have one judge. It is the sole
+  execution-seat and liveness authority.
 - **seal** — a control row that closes a coordinate forever: a sealed
   directory will never be born.
   Written only under the leash; a late body's birth claim checks the seal
@@ -43,7 +42,7 @@ and go; the heart stays.
 The dependency direction is fixed:
 
 ```text
-cli -> akuma -> {body, heart, identity, archetype, provider(codec), publication, requests, providers(map), settings, runtime/proc(collar)}
+cli -> akuma -> {body, heart, identity, archetype, provider(codec), publication, requests, providers(map), settings}
 archetype -> {identity, provider, providers(map), settings}
 body -> {heart, provider, providers, requests, runtime/proc}
 requests -> {heart, identity, provider, providers(map), publication}
@@ -57,38 +56,32 @@ runtime/proc/stdio -> runtime/proc/run
 kanshi -> akuma public values
 ```
 
-The two process-tree duties are distinct. The body puts down a predecessor
-before driving; the public `kill` verb is the killer and performs its own
-collar duty. Both consume domain-free `runtime/proc` evidence, and neither
-moves lifecycle adjudication out of the heart.
+Process custody is a live capability, not a durable description. The Body may
+terminate only provider descendants represented by handles it directly owns.
+The public lifecycle verbs write control and wait for the leash; they never
+signal from a persisted pid, process group, start token, or reconstructed
+identity. A successor does not inherit its predecessor's process capabilities.
 
 ## Life
 
-Five states for a born akuma, all computed from two probes — try the leash,
-check the collar. Never from a clock, never from a pid table, never from
-trust.
+Six states for a born akuma are computed only from a leash probe and durable
+Heart facts:
 
-| state    | leash | collar               | meaning                                     |
-| -------- | ----- | -------------------- | ------------------------------------------- |
-| running  | held  | —                    | a body is driving a turn                    |
-| asleep   | free  | proven gone          | last turn completed; tell and fork ready    |
-| stranded | free  | proven gone          | last turn broke off; that work is lost, typed |
-| headless | free  | **not proven gone**  | tree alive, or collar unverifiable — the
-                                                evidence says which; wait or kill          |
-| killed   | free  | proven gone          | `kill` stopped the latest body              |
+| state    | leash | Heart evidence | meaning |
+| -------- | ----- | -------------- | ------- |
+| running  | held  | no hung diagnostic for the latest Body | a Body owns the execution seat |
+| hung     | held  | latest Body records provider custody that did not retire | the owner cannot yield cleanly |
+| untidy   | free  | no explicit end for the latest Body | physical death released the seat without clean settlement |
+| asleep   | free  | latest Body ended `exited` | last turn completed; tell and fork ready |
+| stranded | free  | latest Body ended `broke-off` or `put-down` | that drive did not complete normally |
+| killed   | free  | latest Body has a kill witness | `kill` witnessed that Body's clean self-termination |
 
-`headless` never claims more than the probe can prove: it carries the collar
-evidence (`alive` / `unverifiable`). A recycled pid is never group-killed
-blind; unverifiable stays unverifiable until the flagship acts or the tree
-exits.
-
-A headless akuma whose collar stays unverifiable is an in-model dead end:
-`tell` refuses (waking requires putting the predecessor down first) and
-`kill` reports `unavailable`. The escape is documented, not automated —
-fork the work out of retained history; once a human confirms the tree is
-gone, remove the run directory by hand. Rare (same-user process identity
-is readable on every supported platform in the normal case), but the law
-names the dead end rather than pretending it isn't there.
+`hung` is constructed only by the live Body from failed provider-custody
+retirement, never by a public timeout. `hung` and `untidy` are conservative
+truth, not permission to reconstruct a process grip. A description can
+diagnose, refuse, wait, or report; it cannot authorize signaling a non-child. A
+later Body may take a free leash and supersede untidy history without claiming
+that it terminated the predecessor.
 
 Before birth a directory is **unborn**: either being born or abandoned by a
 crashed caller — indistinguishable by reading, and no fact about the akuma
@@ -137,7 +130,8 @@ downstream layers do not reinterpret relative paths.
 
 Stillborn residue is visible in `list()` with its evidence. No automatic
 cleaner ships until a real reader needs one; manual removal is safe because
-a body must not outlive its heart (ENOENT -> kill own tree, exit).
+a body must not outlive its heart (ENOENT -> abort through its live provider
+handles, exit).
 
 `list()` reads the complete compact fleet. `list({ archetype })` is the same
 Akuma-owned read with one optional Archetype selection: Akuma validates the
@@ -221,7 +215,7 @@ completed native turn id, and native fork is `thread/fork` at that exact pair.
 The frozen `config` object is supplied to native thread start/resume.
 Each app-server instance is a detached helper process tree. Drive completion
 awaits termination of that complete tree, so provider descendants cannot outlive
-the body turn or leave an answered Akuma headless.
+the Body turn or leave an answered Akuma untidy.
 
 Provider kind `opencode-sdk` runs the selected executable, defaulting to
 `opencode`, through the official public V1 Session API. It consumes `model` and

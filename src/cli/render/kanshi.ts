@@ -155,7 +155,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): string {
 }
 
 function isLost(life: string): boolean {
-  return life === "stranded" || life === "headless";
+  return life === "stranded" || life === "hung" || life === "untidy";
 }
 
 function akumaPriority(row: AkumaKanshiRow): number {

@@ -303,7 +303,7 @@ separated, and one final `N/M` footer counts settled members over the total.
 No `came back first`, `N of M done`, or elapsed clocks. JSON remains
 `AkumaWaitResult`. Status, wait, observed call, and kill text ends with the
 public Akuma life as a separate footer outside the activity minute groups: `●
-running`, `○ asleep`, `× killed`, `? stranded`, or `? headless`. This footer
+running`, `○ asleep`, `× killed`, `? stranded`, `? hung`, or `? untidy`. This footer
 and each event row state independent facts; `! run` followed by `● running`
 means that command failed while the Akuma continues running. With activity
 present, one blank line separates the footer; with no activity, it directly
@@ -337,9 +337,11 @@ mutation/observation separation as `{ akuma, tell, observation }` without adding
 a CLI-only diagnostic projection. No output asks the caller to query a TellId.
 
 `tell --interrupt` selects the Library's fenced interrupt composition. It is
-one CLI input action, not a standalone lifecycle verb: the current Body is put
-down before the same stdin bytes are durably recorded and woken for its
-successor. Text uses the same refreshed snapshot as the other Akuma mutations.
+one CLI input action, not a standalone lifecycle verb: the current Body is
+asked to yield through its owned capability, the leash proves clean settlement,
+and only then are the same stdin bytes durably recorded and woken for its
+successor. A hung or untidy result is reported without external process
+signaling. Text uses the same refreshed snapshot as the other Akuma mutations.
 JSON returns the Library result unchanged; the CLI does not infer a second
 receipt or observation.
 

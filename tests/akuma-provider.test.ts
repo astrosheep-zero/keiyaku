@@ -284,10 +284,12 @@ test("ACP cancellation closes its owned process tree after standard session/canc
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-function controlledAcpProcess(): Readonly<{
+function controlledAcpProcess(options: Readonly<{ stallInitialize?: boolean; assistant?: string }> = {}): Readonly<{
   process: StdioProcess;
+  initializeStarted: Promise<void>;
   cleanupStarted: Promise<void>;
   forcedCleanup(): number;
+  emitAssistant(text: string): Promise<void>;
   resolveCleanup(): void;
   rejectCleanup(error: Error): void;
 }> {
@@ -298,17 +300,28 @@ function controlledAcpProcess(): Readonly<{
   let resolveCleanup!: () => void;
   let rejectCleanup!: (error: Error) => void;
   let forcedCleanup = 0;
+  let startInitialize!: () => void;
+  const initializeStarted = new Promise<void>((resolve) => { startInitialize = resolve; });
+  let emitAssistant!: (text: string) => Promise<void>;
   const cleanup = new Promise<void>((resolve, reject) => {
     resolveCleanup = resolve;
     rejectCleanup = reject;
   });
   acp.agent({ name: "controlled-acp" })
-    .onRequest(acp.methods.agent.initialize, ({ params }) => ({
-      protocolVersion: params.protocolVersion,
-      agentCapabilities: { loadSession: true },
-    }))
+    .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+      startInitialize();
+      if (options.stallInitialize === true) await new Promise(() => undefined);
+      return { protocolVersion: params.protocolVersion, agentCapabilities: { loadSession: true } };
+    })
     .onRequest(acp.methods.agent.session.new, () => ({ sessionId: "controlled-session" }))
-    .onRequest(acp.methods.agent.session.prompt, () => ({ stopReason: "end_turn" }))
+    .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
+      emitAssistant = async (text) => await client.notify(acp.methods.client.session.update, {
+        sessionId: params.sessionId,
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+      });
+      if (options.assistant !== undefined) await emitAssistant(options.assistant);
+      return { stopReason: "end_turn" };
+    })
     .connect(acp.ndJsonStream(
       Writable.toWeb(outbound) as WritableStream<Uint8Array>,
       Readable.toWeb(inbound) as ReadableStream<Uint8Array>,
@@ -329,8 +342,10 @@ function controlledAcpProcess(): Readonly<{
         }
       },
     },
+    initializeStarted,
     cleanupStarted,
     forcedCleanup: () => forcedCleanup,
+    emitAssistant: async (text) => await emitAssistant(text),
     resolveCleanup,
     rejectCleanup,
   };
@@ -375,6 +390,38 @@ test("ACP abort upgrades an in-flight graceful drain to forced cleanup", async (
   await drive.abort();
   assert.equal(controlled.forcedCleanup(), 1);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "" });
+});
+
+test("ACP setup abort closes a child stalled during initialization", async () => {
+  const controlled = controlledAcpProcess({ stallInitialize: true });
+  const controller = new AbortController();
+  const setup = createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
+    body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" }, signal: controller.signal,
+  });
+  await controlled.initializeStarted;
+  controller.abort(new Error("controlled setup cancellation"));
+  await assert.rejects(setup, /controlled setup cancellation/);
+  assert.equal(controlled.forcedCleanup(), 1);
+});
+
+test("ACP ignores assistant updates after terminal prompt evidence", async () => {
+  const controlled = controlledAcpProcess({ assistant: "before" });
+  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start({
+    body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" },
+  });
+  const events = (async () => {
+    const observed = [];
+    for await (const event of drive.events) observed.push(event);
+    return observed;
+  })();
+  await controlled.cleanupStarted;
+  await controlled.emitAssistant(" after");
+  controlled.resolveCleanup();
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "before" });
+  assert.deepEqual(await events, [
+    { type: "session", coordinate: { sessionId: "controlled-session" } },
+    { type: "assistant", text: "before" },
+  ]);
 });
 
 test("ACP mapper preserves buffered state for an unknown runtime update discriminant", () => {
@@ -512,8 +559,11 @@ test("OpenCode V1 start waits for native prompt admission", async () => {
     async promptAsync() { await admitted; return { data: undefined }; },
     async abort() { return { data: true }; },
   } as unknown as OpencodeSdkSession;
+  let closeStream!: () => void;
+  const streamClosed = new Promise<void>((resolve) => { closeStream = resolve; });
   const provider = createOpencodeProvider({ loader: async () => ({
-    client: { session, event: { async subscribe() { return { stream: (async function* () { await new Promise<void>(() => undefined); })() }; } } as never },
+    client: { session, event: { async subscribe() { return { stream: (async function* () { await streamClosed; })() }; } } as never },
+    close: () => { closeStream(); },
   }) });
   let returned = false;
   const starting = provider.start({ body: "wait", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } })
@@ -555,16 +605,39 @@ test("OpenCode V1 refuses a Pi coordinate before loading its native runtime", as
 
 test("OpenCode V1 abort cleanup does not await an uncooperative native abort", async () => {
   let closed = 0;
+  let closeStream!: () => void;
+  const streamClosed = new Promise<void>((resolve) => { closeStream = resolve; });
   const session = {
     async create() { return { data: { id: "session-stuck-abort" } }; },
     async promptAsync() { return { data: undefined }; },
     async abort() { await new Promise<void>(() => undefined); },
   } as unknown as OpencodeSdkSession;
-  const provider = createOpencodeProvider({ loader: async () => ({ client: { session, event: { async subscribe() { return { stream: (async function* () { await new Promise<void>(() => undefined); })() }; } } as never }, close: () => { closed += 1; } }) });
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { session, event: { async subscribe() { return { stream: (async function* () { await streamClosed; })() }; } } as never }, close: () => { closed += 1; closeStream(); } }) });
   const drive = await provider.start({ body: "interrupt", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
   await drive.abort();
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "OpenCode session interrupted" });
   assert.equal(closed, 1);
+});
+
+test("OpenCode abort releases native custody without waiting for its event iterator", async () => {
+  const session = {
+    async create() { return { data: { id: "session-stuck-stream" } }; },
+    async promptAsync() { return { data: undefined }; },
+    async abort() { return { data: true }; },
+  } as unknown as OpencodeSdkSession;
+  const iterator = {
+    next: async () => await new Promise<IteratorResult<unknown>>(() => undefined),
+    return: async () => await new Promise<IteratorResult<unknown>>(() => undefined),
+  };
+  const provider = createOpencodeProvider({ loader: async () => ({
+    client: { session, event: { async subscribe() { return { stream: { [Symbol.asyncIterator]: () => iterator } }; } } as never },
+    close() {},
+  }) });
+  const drive = await provider.start({
+    body: "interrupt", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" },
+  });
+  await drive.abort();
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "OpenCode session interrupted" });
 });
 
 test("OpenCode V1 rejects failed prompt admission and cleans up", async () => {
@@ -851,16 +924,35 @@ test("Pi adapter disposes once on failure and repeated abort", async () => {
   assert.deepEqual(await abortedDrive.completion, { kind: "failed", diagnostic: "Pi session aborted" });
 });
 
-test("Pi abort closes the adapter when native prompt and abort never settle", async () => {
+test("Pi keeps abort pending when native cleanup refuses to settle", async () => {
   const fake = fakePiSdk({ promptNeverSettles: true, abortNeverSettles: true });
   const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
     body: "wait", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
   });
-  await drive.abort();
-  for await (const _event of drive.events) { /* drain */ }
-  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Pi session aborted" });
+  let settled = false;
+  void drive.abort().then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 75));
+  assert.equal(settled, false);
   assert.equal(fake.seen.aborted, 1);
-  assert.equal(fake.seen.disposed, 1);
+  assert.equal(fake.seen.disposed, 0);
+});
+
+test("Pi and Claude setup loading observe the Body AbortSignal", async () => {
+  for (const provider of [
+    createPiProvider({ name: "pi", kind: "pi" }, async () => await new Promise<PiSdk>(() => undefined)),
+    createClaudeProvider(async () => await new Promise(() => undefined)),
+  ]) {
+    const controller = new AbortController();
+    const starting = provider.start({
+      body: "wait", launchTells: [], cwd: "/work", options: {}, signal: controller.signal,
+      session: { kind: "fresh" },
+    });
+    controller.abort(new Error("cancelled setup"));
+    await Promise.race([
+      assert.rejects(starting, /cancelled setup/u),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("setup ignored abort")), 500)),
+    ]);
+  }
 });
 
 test("Pi fails a prompt without assistant evidence", async () => {
@@ -2075,7 +2167,7 @@ test("Codex app-server refuses a Pi coordinate before starting a native process"
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("Codex app-server abort requests native interruption and waits for terminal proof", async () => {
+test("Codex app-server abort interrupts and releases its owned child", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-abort-"));
   try {
     const fake = fakeCodex(root, "interrupt");
@@ -2085,11 +2177,7 @@ test("Codex app-server abort requests native interruption and waits for terminal
     });
     await drive.abort();
     for await (const _event of drive.events) { /* drain */ }
-    assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "codex app-server turn ended interrupted" });
-    assert.deepEqual(fake.requests().find((request) => request.method === "turn/interrupt")?.params, {
-      threadId: "thread-fresh",
-      turnId: "turn-1",
-    });
+    assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "codex app-server interrupted" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -13,4 +13,8 @@ export const FILE_LINE_EXEMPTIONS = Object.freeze([
     file: "src/git/repository.ts",
     reason: "The centralized Git plumbing owner keeps repository coordinates and object/ref operations coherent; splitting thin wrappers would obscure that boundary.",
   },
+  {
+    file: "src/akuma/body.ts",
+    reason: "The Body is the single live supervisor for provider setup, turn consumption, durable control, and owned descendant cleanup.",
+  },
 ]);

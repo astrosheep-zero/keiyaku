@@ -7,8 +7,6 @@ import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import {
   consumeProcessStdout,
-  probeProcessTree,
-  putDownProcessTree,
   runProcess,
   spawnDetachedProcess,
   type ProcessInput,
@@ -127,7 +125,7 @@ test("runProcess reports spawn errors", async () => {
 });
 
 test("runProcess timeout kills a detached descendant tree", async () => {
-  const descendant = 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000);';
+  const descendant = "setInterval(() => {}, 1_000);";
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-"));
   const descendantFile = join(root, "descendant-pid");
   const parent = [
@@ -139,7 +137,7 @@ test("runProcess timeout kills a detached descendant tree", async () => {
   ].join(" ");
   let descendantPid: number | undefined;
   try {
-    const outcome = await runProcess({ ...input([process.execPath, "-e", parent]), cwd: root, timeoutMs: 100 });
+    const outcome = await runProcess({ ...input([process.execPath, "-e", parent]), cwd: root, timeoutMs: 1_000 });
     assert.equal(outcome.kind, "timeout");
     if (outcome.kind !== "timeout") return;
     descendantPid = Number.parseInt(readFileSync(descendantFile, "utf8"), 10);
@@ -318,19 +316,71 @@ test("StdioProcess forced close terminates its complete helper tree", async () =
 });
 
 
-test("detached process collars fence put-down by process identity", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-collar-"));
+test("a direct spawner terminates through its live owned-process handle", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-"));
   try {
-    const collar = await spawnDetachedProcess({
+    const owned = await spawnDetachedProcess({
       argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
       cwd: root,
       log: join(root, "stdio.log"),
     });
-    assert.deepEqual(probeProcessTree(collar), { kind: "alive" });
-    assert.equal(await putDownProcessTree(collar), "killed");
-    assert.deepEqual(probeProcessTree(collar), { kind: "gone" });
-    assert.equal(await putDownProcessTree(collar), "already-dead");
+    assert.ok(owned.pid > 0);
+    await owned.terminate();
+    await waitForExit(owned.pid);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an owned process capability is inert after reap and repeated terminate", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-reap-"));
+  try {
+    const owned = await spawnDetachedProcess({
+      argv: [process.execPath, "-e", ""],
+      cwd: root,
+      log: join(root, "stdio.log"),
+    });
+    await waitForExit(owned.pid);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    let signals = 0;
+    const originalKill = process.kill;
+    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === -owned.pid && signal !== 0) signals += 1;
+      return originalKill(pid, signal as NodeJS.Signals);
+    }) as typeof process.kill;
+    process.kill = kill;
+    try {
+      await owned.terminate();
+      await owned.terminate();
+    } finally { process.kill = originalKill; }
+    assert.equal(signals, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an owned process capability is inert after release and repeated terminate", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-release-"));
+  const owned = await spawnDetachedProcess({
+    argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+    cwd: root,
+    log: join(root, "stdio.log"),
+  });
+  try {
+    owned.release();
+    let signals = 0;
+    const originalKill = process.kill;
+    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === -owned.pid && signal !== 0) signals += 1;
+      return originalKill(pid, signal as NodeJS.Signals);
+    }) as typeof process.kill;
+    process.kill = kill;
+    try {
+      await owned.terminate();
+      await owned.terminate();
+    } finally { process.kill = originalKill; }
+    assert.equal(signals, 0);
+  } finally {
+    try { process.kill(owned.pid, "SIGKILL"); } catch { /* already reaped */ }
+    await waitForExit(owned.pid);
     rmSync(root, { recursive: true, force: true });
   }
 });

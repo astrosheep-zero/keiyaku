@@ -11,6 +11,7 @@ import {
   activitySlice,
   appendActivity,
   beginTurn,
+  breakBody,
   endTurn,
   finishBodyIfIdle,
   initializeHeart,
@@ -21,7 +22,6 @@ import {
   readForkPoint,
   readNonterminalRequests,
   readRequest,
-  recordBody,
   recordSession,
   recordTell,
   recordTellDeliveries,
@@ -123,8 +123,7 @@ test("tell admission shares activity order and delivery witnesses fold without m
   try {
     const body = HeldAkumaLeash.try(value.allocated.paths)!;
     body.birth(value.allocated.paths, value.soul);
-    const bodyFact = recordBody(value.allocated.paths, {
-      collar: { pid: 1, processGroup: 1, spawnedAt: "tell-witness" },
+    const bodyFact = body.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     const turn = beginTurn(value.allocated.paths, {
@@ -183,8 +182,7 @@ test("live receipts are terminal only under their exact Heart correlation", () =
   try {
     const body = HeldAkumaLeash.try(value.allocated.paths)!;
     body.birth(value.allocated.paths, value.soul);
-    const firstBody = recordBody(value.allocated.paths, {
-      collar: { pid: 1, processGroup: 1, spawnedAt: "receipt-1" },
+    const firstBody = body.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     const firstTurn = beginTurn(value.allocated.paths, {
@@ -237,8 +235,7 @@ test("kill witnesses one stopped Body without burning pending work", () => {
   try {
     const leash = HeldAkumaLeash.try(value.allocated.paths)!;
     leash.birth(value.allocated.paths, value.soul);
-    const firstBody = recordBody(value.allocated.paths, {
-      collar: { pid: 1, processGroup: 1, spawnedAt: "kill-1" },
+    const firstBody = leash.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     const pending = recordTell(value.allocated.paths, {
@@ -262,19 +259,29 @@ test("kill witnesses one stopped Body without burning pending work", () => {
       kind: "requested",
       body: firstBody,
     });
+    breakBody(value.allocated.paths, {
+      sequence: firstBody.sequence,
+      end: "put-down",
+      at: "2026-08-08T00:00:03.500Z",
+    });
     assert.deepEqual(leash.settleStop(value.allocated.paths), {
       target: { bodySequence: firstBody.sequence, requestedAt: "2026-08-08T00:00:03.000Z" },
       result: "recorded",
     });
-    assert.deepEqual(requestStop(value.allocated.paths, "later"), { kind: "already-killed", body: firstBody });
+    assert.equal(requestStop(value.allocated.paths, "later").kind, "already-killed");
     let snapshot = readHeart(value.allocated.paths);
     assert.equal(snapshot.latestKill?.bodySequence, firstBody.sequence);
     assert.deepEqual(snapshot.pending.map((tell) => tell.id), ["tell-pending"]);
     assert.equal(readRequest(value.allocated.paths, request.id)?.state, "admitted");
-    assert.equal(life("free", { kind: "gone", end: "put-down" }, firstBody, snapshot.latestKill), "killed");
+    assert.equal(life({
+      leash: "free",
+      body: { ...firstBody, end: "put-down" },
+      kill: snapshot.latestKill,
+    }), "killed");
 
-    const secondBody = recordBody(value.allocated.paths, {
-      collar: { pid: 2, processGroup: 2, spawnedAt: "kill-2" },
+    leash.release();
+    const successor = HeldAkumaLeash.try(value.allocated.paths)!;
+    const secondBody = successor.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:04.000Z",
     });
     const secondTurn = beginTurn(value.allocated.paths, {
@@ -282,7 +289,11 @@ test("kill witnesses one stopped Body without burning pending work", () => {
       startedAt: "2026-08-08T00:00:04.000Z",
     });
     snapshot = readHeart(value.allocated.paths);
-    assert.equal(life("free", { kind: "gone", end: "exited" }, secondBody, snapshot.latestKill), "asleep");
+    assert.equal(life({
+      leash: "free",
+      body: { ...secondBody, end: "exited" },
+      kill: snapshot.latestKill,
+    }), "asleep");
     recordTellDeliveries(value.allocated.paths, [{
       tellId: "tell-pending",
       route: "launch",
@@ -292,7 +303,7 @@ test("kill witnesses one stopped Body without burning pending work", () => {
     }]);
     assert.deepEqual(readHeart(value.allocated.paths).pending, []);
     assert.equal(readRequest(value.allocated.paths, request.id)?.state, "admitted");
-    leash.release();
+    successor.release();
   } finally { value.close(); }
 });
 
@@ -301,8 +312,7 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
   try {
     const leash = HeldAkumaLeash.try(value.allocated.paths)!;
     leash.birth(value.allocated.paths, value.soul);
-    const body = recordBody(value.allocated.paths, {
-      collar: { pid: 1, processGroup: 1, spawnedAt: "retention" },
+    const body = leash.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     const admitted = recordTell(value.allocated.paths, {
@@ -397,7 +407,7 @@ test("Body Request facts have one idempotent monotonic authority", () => {
   } finally { value.close(); }
 });
 
-test("heart schema version 11 and leash schema version 4 hard-refuse old authority", () => {
+test("heart schema version 13 and leash schema version 4 hard-refuse old authority", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -407,7 +417,7 @@ test("heart schema version 11 and leash schema version 4 hard-refuse old authori
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 11/u);
+    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 13/u);
     assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -417,8 +427,7 @@ test("answered Turns persist without a provider fork point", () => {
   try {
     const claim = HeldAkumaLeash.try(value.allocated.paths)!;
     claim.birth(value.allocated.paths, value.soul);
-    const body = recordBody(value.allocated.paths, {
-      collar: { pid: 1, processGroup: 1, spawnedAt: "optional-fork-point" },
+    const body = claim.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     const turn = beginTurn(value.allocated.paths, {
@@ -450,16 +459,18 @@ test("pause remains distinct from stop and can be cleared only under the leash",
   try {
     const body = HeldAkumaLeash.try(value.allocated.paths)!;
     body.birth(value.allocated.paths, value.soul);
-    body.release();
-    const firstBody = recordBody(value.allocated.paths, {
-      collar: { pid: 1, processGroup: 1, spawnedAt: "pause-stop" },
+    const firstBody = body.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
+    body.release();
     assert.deepEqual(requestStop(value.allocated.paths, "2026-08-08T00:00:01.000Z"), {
       kind: "requested",
       body: firstBody,
     });
-    assert.deepEqual(requestPause(value.allocated.paths, "2026-08-08T00:00:02.000Z"), { kind: "requested" });
+    assert.deepEqual(requestPause(value.allocated.paths, "2026-08-08T00:00:02.000Z"), {
+      kind: "requested",
+      body: firstBody,
+    });
     assert.equal(stopRequested(value.allocated.paths), true);
     assert.equal(pauseRequested(value.allocated.paths), true);
 
@@ -469,7 +480,10 @@ test("pause remains distinct from stop and can be cleared only under the leash",
     assert.equal(pauseRequested(value.allocated.paths), false);
     assert.equal(stopRequested(value.allocated.paths), true);
 
-    assert.deepEqual(requestPause(value.allocated.paths, "2026-08-08T00:00:04.000Z"), { kind: "requested" });
+    assert.deepEqual(requestPause(value.allocated.paths, "2026-08-08T00:00:04.000Z"), {
+      kind: "requested",
+      body: firstBody,
+    });
     assert.equal(pauseRequested(value.allocated.paths), true);
   } finally { value.close(); }
 });
@@ -479,8 +493,7 @@ test("normal body completion refuses while a tell remains pending", () => {
   try {
     const claim = HeldAkumaLeash.try(value.allocated.paths)!;
     claim.birth(value.allocated.paths, value.soul);
-    const body = recordBody(value.allocated.paths, {
-      collar: { pid: 1, processGroup: 1, spawnedAt: "token" },
+    const body = claim.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     recordSession(value.allocated.paths, {
@@ -558,13 +571,60 @@ test("fork birth admits the child session in the soul birth transaction", () => 
   } finally { value.close(); }
 });
 
-test("life is the sole five-state interpretation", () => {
-  const body = { sequence: 1, collar: { pid: 1, processGroup: 1, spawnedAt: "life" }, leashTakenAt: "life" };
+test("Body idle settlement atomically obeys current control", () => {
+  const value = fixture();
+  try {
+    const leash = HeldAkumaLeash.try(value.allocated.paths)!;
+    leash.birth(value.allocated.paths, value.soul);
+    const body = leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
+    requestPause(value.allocated.paths, "2026-08-08T00:00:01.000Z");
+    assert.deepEqual(finishBodyIfIdle(value.allocated.paths, {
+      sequence: body.sequence,
+      at: "2026-08-08T00:00:02.000Z",
+    }), { kind: "controlled" });
+    assert.equal(readHeart(value.allocated.paths).latestBody?.end, "put-down");
+    leash.release();
+  } finally { value.close(); }
+});
+
+test("life is the sole leash and settlement interpretation", () => {
+  const body = { sequence: 1, leashTakenAt: "2026-08-08T00:00:00.000Z" };
   const kill = { sequence: 1, bodySequence: 1, evidence: "killed" as const, at: "life" };
-  assert.equal(life("held", { kind: "gone", end: null }, body, kill), "running");
-  assert.equal(life("free", { kind: "gone", end: "exited" }, body, null), "asleep");
-  assert.equal(life("free", { kind: "gone", end: "broke-off" }, body, null), "stranded");
-  assert.equal(life("free", { kind: "alive" }, body, null), "headless");
-  assert.equal(life("free", { kind: "unverifiable", diagnostic: "denied" }, body, null), "headless");
-  assert.equal(life("free", { kind: "gone", end: "put-down" }, body, kill), "killed");
+  const project = (input: Partial<Parameters<typeof life>[0]>) => life({
+    leash: "free", body, kill: null, ...input,
+  });
+  assert.equal(project({ leash: "held", kill }), "running");
+  assert.equal(project({ leash: "held" }), "running");
+  assert.equal(project({ leash: "held", body: {
+    ...body,
+    hung: { diagnostic: "provider custody remained live", at: "2026-08-08T00:00:02.000Z" },
+  } }), "hung");
+  assert.equal(project({}), "untidy");
+  assert.equal(project({ body: { ...body, end: "exited" } }), "asleep");
+  assert.equal(project({ body: { ...body, end: "broke-off" } }), "stranded");
+  assert.equal(project({ body: { ...body, end: "put-down" }, kill }), "killed");
+});
+
+test("Body hung custody evidence round trips through Heart", () => {
+  const value = fixture();
+  try {
+    const leash = HeldAkumaLeash.try(value.allocated.paths)!;
+    leash.birth(value.allocated.paths, value.soul);
+    const body = leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
+    leash.recordBodyHung(value.allocated.paths, {
+      sequence: body.sequence,
+      diagnostic: "provider custody remained live",
+      at: "2026-08-08T00:00:01.000Z",
+    });
+    assert.deepEqual(readHeart(value.allocated.paths).latestBody?.hung, {
+      diagnostic: "provider custody remained live",
+      at: "2026-08-08T00:00:01.000Z",
+    });
+    leash.release();
+    assert.throws(() => leash.recordBodyHung(value.allocated.paths, {
+      sequence: body.sequence,
+      diagnostic: "late fabricated custody",
+      at: "2026-08-08T00:00:02.000Z",
+    }), /not owned by this leash/u);
+  } finally { value.close(); }
 });

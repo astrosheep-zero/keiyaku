@@ -164,6 +164,14 @@ type AkumaTellResult = {
   observation: AkumaStatusView;
 };
 
+type AkumaInterruptResult = {
+  id: AkuId;
+  receipt:
+    | { kind: "interrupted"; putDown: "was-idle" | "self-aborted"; tell: TellResult }
+    | { kind: "unavailable"; evidence: "hung" | "untidy" | "unavailable" };
+  observation: AkumaStatusView;
+};
+
 type AkumaKillResult = {
   results: readonly {
     id: AkuId;
@@ -209,8 +217,13 @@ activity history. Its typed result is either `{ kind: "last", answer }`
 (including an empty answer) or `{ kind: "no-answer" }`.
 
 `Keiyaku.interrupt` remains a Library composition over one addressed Akuma:
-pause the current Body, obtain its leash, atomically clear pause plus record the
-Tell, then wake a successor. It is not an Akuma storage primitive and the CLI
+pause the current Body, wait a bounded window for that Body to abort through
+its owned live handles, obtain its leash, require an explicit end for the same
+Body, atomically clear pause plus record the Tell, then wake a successor. A
+held leash without the Body's durable failed-custody diagnostic reports
+`unavailable`; the diagnostic reports `hung`; a free leash without clean
+settlement reports `untidy`. It never signals from stored process coordinates.
+This remains a composition rather than an Akuma storage primitive, and the CLI
 exposes it only as `tell --interrupt`.
 
 The Catalog facet owns one selected identity directory:

@@ -451,7 +451,7 @@ test("Kanshi text keeps complete identities in the new fixed section grammar", a
   assert.match(text, /Investigate status\s+rendering/u);
   assert.match(text, /keiyaku kei\/.*\(active\)/u);
   assert.match(text, /akuma 1/u);
-  assert.match(text, /\? aku\/watcher\/a0000001 stranded/u);
+  assert.match(text, /\? aku\/watcher\/a0000001 untidy/u);
 });
 
 function attentionReport(): KanshiReport {
@@ -527,13 +527,13 @@ function attentionReport(): KanshiReport {
       value: {
         searched: ["/repo/.keiyaku/akuma/run"],
         rows: [
-          { id: "aku/worker/a0000001", archetype: "worker", life: "running", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: [] },
-          { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: [] },
-          { id: "aku/worker/a0000003", archetype: "worker", life: "killed", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: [] },
+          { id: "aku/worker/a0000001", archetype: "worker", life: "running", confinement: { kind: "unconfined" }, pending: [] },
+          { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", confinement: { kind: "unconfined" }, pending: [] },
+          { id: "aku/worker/a0000003", archetype: "worker", life: "killed", confinement: { kind: "unconfined" }, pending: [] },
           { id: "aku/worker/a0000004", life: "stillborn", seal: { at: "2026-08-10T00:00:00.000Z", evidence: "\u001b[31mstillborn seal evidence is deliberately much longer than a narrow terminal\nsecond line must not render" } },
           { id: "aku/worker/a0000005", life: "unborn" },
-          { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: ["pending"] },
-          { id: "aku/worker/a0000007", archetype: "worker", life: "headless", collar: { kind: "alive" }, confinement: { kind: "unconfined" }, pending: [] },
+          { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", confinement: { kind: "unconfined" }, pending: ["pending"] },
+          { id: "aku/worker/a0000007", archetype: "worker", life: "hung", confinement: { kind: "unconfined" }, pending: [] },
         ],
       },
     },
@@ -576,7 +576,7 @@ test("bare Kanshi text triages every section without changing its report", () =>
   assert.match(text, /akuma 7/u);
   assert.match(text, /^! aku\/worker\/a0000004 stillborn$/mu);
   assert.match(text, /^\? aku\/worker\/a0000006 stranded$/mu);
-  assert.match(text, /^\? aku\/worker\/a0000007 headless$/mu);
+  assert.match(text, /^\? aku\/worker\/a0000007 hung$/mu);
   assert.match(text, /^● aku\/worker\/a0000001 running$/mu);
   assert.match(text, /^○ aku\/worker\/a0000002 asleep$/mu);
   assert.match(text, /^× aku\/worker\/a0000003 killed$/mu);
@@ -648,7 +648,7 @@ test("Kanshi wraps complete Task titles and neutralizes continuation facts", () 
       ...report.akuma,
       value: {
         ...report.akuma.value,
-        rows: report.akuma.value.rows.map((row) => row.life === "headless"
+        rows: report.akuma.value.rows.map((row) => row.life === "hung"
           ? { ...row, confinement: { kind: "declared", writableRoots: ["/one/12345", "/two/12345", "/repo/\u001b[31m\nforged"] } }
           : row),
       },

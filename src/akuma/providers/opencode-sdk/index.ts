@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { abortable } from "../../abort.js";
 import { AgentEventChannel, type ProviderAdapter, type ProviderOptions, type Session, type TurnResult } from "../../provider.js";
 import type { ProviderExecution, ResumeCoordinate } from "../../heart/index.js";
 import { createEventState, mapEvent } from "./events.js";
@@ -188,19 +189,18 @@ async function observeTurn(input: Readonly<{
 
 function terminalSettlement(
   events: AgentEventChannel,
-  iterator: AsyncIterator<unknown>,
   close: () => Promise<void>,
 ): Readonly<{ completion: Promise<TurnResult>; finish: (result: TurnResult) => Promise<void> }> {
   let finish!: (result: TurnResult) => Promise<void>;
   const completion = new Promise<TurnResult>((resolve) => {
-    let settled = false;
-    finish = async (result): Promise<void> => {
-      if (settled) return;
-      settled = true;
-      events.end();
-      stopIterator(iterator);
-      try { await close(); resolve(result); }
-      catch (error) { resolve({ kind: "failed", diagnostic: `OpenCode cleanup failed: ${diagnostic(error)}` }); }
+    let settlement: Promise<void> | undefined;
+    finish = (result): Promise<void> => {
+      settlement ??= (async () => {
+        events.end();
+        await close();
+        resolve(result);
+      })();
+      return settlement;
     };
   });
   return { completion, finish };
@@ -208,23 +208,31 @@ function terminalSettlement(
 
 async function drive(execution: ProviderExecution, input: Input, loader?: OpencodeSdkLoader): Promise<Session> {
   admit(input.options);
+  const signal = input.signal ?? new AbortController().signal;
   const resumeSessionId = input.session.kind === "resume"
     ? opencodeSessionId(input.session.coordinate)
     : undefined;
   const abortController = new AbortController();
-  const runtime = await loadOpencode(execution, input.cwd, abortController.signal, loader);
-  let closed = false;
+  const abortSetup = () => abortController.abort(signal.reason);
+  signal.addEventListener("abort", abortSetup, { once: true });
+  signal.throwIfAborted();
+  const runtime = await abortable(
+    loadOpencode(execution, input.cwd, abortController.signal, loader),
+    abortController.signal,
+    async (late) => await late.close(),
+  );
+  let closing: Promise<void> | undefined;
   let iterator: AsyncIterator<unknown> | undefined;
-  const closeOnce = async (): Promise<void> => {
-    if (closed) return;
-    closed = true;
-    await runtime.close();
+  const closeOnce = (): Promise<void> => {
+    closing ??= runtime.close();
+    return closing;
   };
   try {
     const session = runtime.client.session;
-    const sessionResponse = input.session.kind === "fresh"
-      ? await session.create({ query: { directory: input.cwd }, throwOnError: true })
-      : await session.get({ path: { id: resumeSessionId! }, query: { directory: input.cwd }, throwOnError: true });
+    const sessionResponse = await abortable(input.session.kind === "fresh"
+      ? session.create({ query: { directory: input.cwd }, throwOnError: true })
+      : session.get({ path: { id: resumeSessionId! }, query: { directory: input.cwd }, throwOnError: true }),
+    abortController.signal);
     const info = object(object(sessionResponse)?.data) ?? object(sessionResponse);
     const sessionId = text(info?.id) ?? resumeSessionId;
     if (sessionId === undefined) throw new Error("OpenCode did not return a session id");
@@ -234,20 +242,25 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
     const messageID = `msg_${randomUUID().replaceAll("-", "")}`;
     const submissionState = { started: false };
     events.emit({ type: "session", coordinate: coordinate(sessionId) });
-    const streamResult = await runtime.client.event.subscribe({ query: { directory: input.cwd } });
+    const streamResult = await abortable(
+      runtime.client.event.subscribe({ query: { directory: input.cwd } }),
+      abortController.signal,
+      async (late) => { await late.stream[Symbol.asyncIterator]().return?.(undefined); },
+    );
     iterator = streamResult.stream[Symbol.asyncIterator]();
-    const { completion, finish } = terminalSettlement(events, iterator, closeOnce);
+    const { completion, finish } = terminalSettlement(events, closeOnce);
     const observation = observeTurn({
       iterator, session, sessionId, cwd: input.cwd, messageID, events, state, submissionState,
     });
     submissionState.started = true;
-    await session.promptAsync({
+    await abortable(session.promptAsync({
       path: { id: sessionId },
       query: { directory: input.cwd },
       body: promptBody(input, messageID),
       throwOnError: true,
-    });
+    }), abortController.signal);
     void observation.then(finish);
+    signal.removeEventListener("abort", abortSetup);
     return {
       admission: { fence: sessionId },
       events,
@@ -259,8 +272,9 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
       },
     };
   } catch (error) {
+    signal.removeEventListener("abort", abortSetup);
     stopIterator(iterator);
-    try { await closeOnce(); } catch (cleanupError) { throw new Error(`OpenCode setup failed: ${diagnostic(error)}; cleanup failed: ${diagnostic(cleanupError)}`); }
+    await closeOnce();
     throw error;
   }
 }

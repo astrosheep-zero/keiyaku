@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { spawnAkumaBody } from "./body.js";
+import { CONTROL_RESPONSE_MS, spawnAkumaBody } from "./body.js";
 import {
   HeldAkumaLeash,
   activitySlice,
@@ -17,8 +17,6 @@ import {
   requestPause,
   requestStop,
   type AkumaLife,
-  type CollarProbe,
-  type HeartSnapshot,
   type KillEvidence,
   type ResumeCoordinate,
   type SessionFact,
@@ -45,19 +43,16 @@ import { listArchetypes as readArchetypes, loadArchetype } from "./archetype.js"
 import { publishAkuma } from "./publication.js";
 import { providerNamed } from "./providers/index.js";
 import { injectedBodyRequests, requestBodyCall } from "./requests.js";
-import { probeProcessTree, putDownProcessTree } from "../runtime/proc/run.js";
 import { settings as readSettings, type Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 
 const POLL_MS = 25;
-const KILL_GRACE_MS = 1_000;
 
 export type AkumaListRow = Readonly<{
   id: AkuId;
   archetype: string;
   description?: string;
   life: AkumaLife;
-  collar: CollarProbe;
   confinement: Soul["confinement"];
   pending: readonly string[];
 }>;
@@ -65,7 +60,6 @@ export type AkumaListRow = Readonly<{
 export type AkumaStatus = Readonly<{
   id: AkuId;
   life: AkumaLife;
-  collar: CollarProbe;
   timeline: ActivitySnapshot;
   strandedReason?: "resume-unsupported";
 }>;
@@ -93,17 +87,12 @@ export type TellResult = Readonly<{
 
 export type InterruptReceipt =
   | Readonly<{
-      kind: "unstoppable";
-      evidence:
-        | "no-collar"
-        | "collar-unverifiable"
-        | "unavailable"
-        | "alive-after-sigkill"
-        | "leash-held-after-put-down";
+      kind: "unavailable";
+      evidence: "hung" | "untidy" | "unavailable";
     }>
   | Readonly<{
       kind: "interrupted";
-      putDown: "was-idle" | "self-aborted" | "collar";
+      putDown: "was-idle" | "self-aborted";
       tell: TellResult;
     }>;
 
@@ -157,23 +146,18 @@ async function wakeTell(paths: AkumaPaths, tellId: string): Promise<TellResult> 
   }
 }
 
-function collarProbe(snapshot: HeartSnapshot): CollarProbe {
-  if (snapshot.latestBody === null) return { kind: "gone", end: null };
-  const probe = probeProcessTree(snapshot.latestBody.collar);
-  if (probe.kind === "gone") return { kind: "gone", end: snapshot.latestBody.end ?? null };
-  return probe;
-}
-
 function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot = readHeart(paths)): AkumaListRow {
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   if (snapshot.soul.id !== expected) throw new Error("Akuma soul does not match its coordinate");
-  const collar = collarProbe(snapshot);
   return {
     id: snapshot.soul.id,
     archetype: snapshot.soul.archetype,
     ...(snapshot.soul.description === undefined ? {} : { description: snapshot.soul.description }),
-    life: life(probeLeash(paths), collar, snapshot.latestBody, snapshot.latestKill),
-    collar,
+    life: life({
+      leash: probeLeash(paths),
+      body: snapshot.latestBody,
+      kill: snapshot.latestKill,
+    }),
     confinement: snapshot.soul.confinement,
     pending: snapshot.pending.map((tell) => tell.id),
   };
@@ -189,7 +173,6 @@ function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
   return {
     id: current.id,
     life: current.life,
-    collar: current.collar,
     ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
     timeline: (() => {
       const slice = activitySlice(paths, { limit: Number.MAX_SAFE_INTEGER });
@@ -268,30 +251,30 @@ export class AkumaHandle {
   }
 
   async interrupt(body: string): Promise<InterruptReceipt> {
-    if (requestPause(this.paths, new Date().toISOString()).kind === "not-born") {
+    const request = requestPause(this.paths, new Date().toISOString());
+    if (request.kind === "not-born") {
       throw new AkumaNotBornError(this.id);
     }
 
-    let putDown: "was-idle" | "self-aborted" | "collar" = "was-idle";
+    let putDown: "was-idle" | "self-aborted" = "was-idle";
     let leash = HeldAkumaLeash.try(this.paths);
     if (leash === null) {
-      leash = await takeLeashUntil(this.paths, performance.now() + KILL_GRACE_MS);
+      leash = await takeLeashUntil(this.paths, performance.now() + CONTROL_RESPONSE_MS);
       putDown = "self-aborted";
     }
     if (leash === null) {
-      const current = readHeart(this.paths).latestBody;
-      if (current === null) return { kind: "unstoppable", evidence: "no-collar" };
-      if (probeProcessTree(current.collar).kind === "unverifiable") {
-        return { kind: "unstoppable", evidence: "collar-unverifiable" };
-      }
-      const evidence = await putDownProcessTree(current.collar);
-      if (evidence === "unavailable" || evidence === "alive-after-sigkill") {
-        return { kind: "unstoppable", evidence };
-      }
-      leash = await takeLeashUntil(this.paths, performance.now() + KILL_GRACE_MS);
-      if (leash === null) return { kind: "unstoppable", evidence: "leash-held-after-put-down" };
-      putDown = "collar";
+      const body = readHeart(this.paths).latestBody;
+      return { kind: "unavailable", evidence: body?.sequence === request.body.sequence && body.hung !== undefined
+        ? "hung"
+        : "unavailable" };
     }
+
+    const settledBody = readHeart(this.paths).latestBody;
+    if (settledBody?.sequence !== request.body.sequence || settledBody.end === undefined) {
+      try { leash.clearPause(this.paths); } finally { leash.release(); }
+      return { kind: "unavailable", evidence: "untidy" };
+    }
+    if (request.body.end !== undefined || settledBody.end !== "put-down") putDown = "was-idle";
 
     let recorded: Readonly<{ kind: "recorded"; tellId: string }>;
     try {
@@ -364,20 +347,26 @@ export class AkumaHandle {
   async kill(): Promise<KillEvidence> {
     const at = new Date().toISOString();
     const request = requestStop(this.paths, at);
-    if (request.kind === "already-killed") return "already-killed";
+    if (request.kind !== "requested") return request.kind;
     const target = request.body;
-    const graceDeadline = performance.now() + KILL_GRACE_MS;
-    while (probeLeash(this.paths) === "held" && performance.now() < graceDeadline) await wait(POLL_MS);
-    if (readKill(this.paths, target.sequence) !== null) return "killed";
-    const targetProbe = probeProcessTree(target.collar);
-    if (targetProbe.kind === "unverifiable") return "unavailable";
-    if (targetProbe.kind === "alive") {
-      const evidence = await putDownProcessTree(target.collar);
-      if (evidence === "unavailable" || evidence === "alive-after-sigkill") return evidence;
+    const graceDeadline = performance.now() + CONTROL_RESPONSE_MS;
+    const leash = await takeLeashUntil(this.paths, graceDeadline);
+    if (readKill(this.paths, target.sequence) !== null) {
+      leash?.release();
+      return "killed";
     }
-    const leash = await takeLeashUntil(this.paths, performance.now() + KILL_GRACE_MS);
-    if (leash === null) return readKill(this.paths, target.sequence) === null ? "unavailable" : "killed";
+    if (leash === null) {
+      if (readKill(this.paths, target.sequence) !== null) return "killed";
+      const body = readHeart(this.paths).latestBody;
+      return body?.sequence === target.sequence && body.hung !== undefined ? "hung" : "unavailable";
+    }
     try {
+      const settledBody = readHeart(this.paths).latestBody;
+      if (settledBody?.sequence !== target.sequence) return readKill(this.paths, target.sequence) === null ? "unavailable" : "killed";
+      if (settledBody.end !== "put-down") {
+        leash.clearStop(this.paths);
+        return "untidy";
+      }
       const settled = leash.settleStop(this.paths, target.sequence);
       if (settled === null) return "unavailable";
       return "killed";

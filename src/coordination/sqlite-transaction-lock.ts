@@ -118,3 +118,18 @@ export async function acquireSqliteTransactionLock(input: {
     }
   }
 }
+
+export function tryAcquireSqliteTransactionLock(input: {
+  path: string;
+  mode: SqliteTransactionLockMode;
+}): HeldSqliteTransactionLock | null {
+  if (input.path.length === 0) {
+    throw new SqliteTransactionLockError("SQLite lock path must be valid", "invalid");
+  }
+  try {
+    return openLock(input.path, input.mode);
+  } catch (error) {
+    if (isBusy(error)) return null;
+    throw error;
+  }
+}

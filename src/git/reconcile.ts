@@ -37,7 +37,7 @@ import {
   type WorktreeHooks,
 } from "./hooks.js";
 import { deliveryWorktreePath } from "./workspace.js";
-import { orphanedScratchWorktrees } from "./scratch.js";
+import { collectableScratchWorktrees } from "./scratch.js";
 import {
   terminalSealExpectations as decodeTerminalSealExpectations,
   terminalSealSnapshots,
@@ -204,16 +204,20 @@ function removeWorktree(
   return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
 }
 
-function removeOrphanedScratch(
+function removeCollectableScratch(
   repository: GitRepository,
   topology: WorktreeTopology,
   effects: Effect[],
   lag: ReconcileLag[],
 ): void {
-  for (const path of orphanedScratchWorktrees(topology.paths)) {
-    const removal = removeWorktree(repository, topology, path, true);
-    effects.push(removal.effect);
-    if (removal.retained) lag.push({ kind: "worktree-retained", path });
+  for (const scratch of collectableScratchWorktrees(topology.paths)) {
+    try {
+      const removal = removeWorktree(repository, topology, scratch.path, true);
+      effects.push(removal.effect);
+      if (removal.retained) lag.push({ kind: "worktree-retained", path: scratch.path });
+    } finally {
+      scratch.release();
+    }
   }
 }
 
@@ -420,7 +424,7 @@ async function reconcileWithTopology(
   const effects: Effect[] = [];
   const lag: ReconcileLag[] = [];
   try {
-    removeOrphanedScratch(repository, topology, effects, lag);
+    removeCollectableScratch(repository, topology, effects, lag);
     if (!state) return complete(effects, lag);
     const targetCheckouts = await reconcileTargetCheckouts(repository, state);
     effects.push(...targetCheckouts.effects);

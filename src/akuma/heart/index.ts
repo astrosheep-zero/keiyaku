@@ -3,7 +3,6 @@ import type { AkuId, AkumaPaths } from "../identity.js";
 import type {
   BodyEnd,
   BodyFact,
-  Collar,
   ForkPoint,
   HeartSnapshot,
   KillFact,
@@ -26,7 +25,6 @@ import {
   endBodyFact,
   finishBodyFact,
   insertActivityFact,
-  insertBodyFact,
   insertTurnEndFact,
   insertTurnStartFact,
   insertPauseControl,
@@ -39,7 +37,7 @@ import {
   latestSessionFact,
   lastAnsweredTurnFact,
   nonterminalRequestFacts,
-  pauseExists,
+  pauseFact,
   requestFact,
   sessionFactForCoordinate,
   soulFact,
@@ -72,8 +70,6 @@ export type {
   AkumaOrigin,
   BodyEnd,
   BodyFact,
-  Collar,
-  CollarProbe,
   Confinement,
   HeartSnapshot,
   ForkPoint,
@@ -82,6 +78,7 @@ export type {
   LeashProbe,
   ProviderOptions,
   ProviderExecution,
+  PauseFact,
   RequestFact,
   RequestInput,
   RequestRecipe,
@@ -112,12 +109,6 @@ export function heartExists(paths: AkumaPaths): boolean { return existsSync(path
 export function readSeal(paths: AkumaPaths): SealFact | null {
   if (!existsSync(paths.leash)) return null;
   return readSealFromLeash(paths);
-}
-
-export function recordBody(paths: AkumaPaths, input: Readonly<{ collar: Collar; leashTakenAt: string }>): BodyFact {
-  return withHeart(paths, (heart) => {
-    return { sequence: insertBodyFact(heart, input), collar: input.collar, leashTakenAt: input.leashTakenAt };
-  });
 }
 
 export function recordSession(paths: AkumaPaths, input: Omit<SessionFact, "sequence">): SessionFact {
@@ -279,12 +270,14 @@ export function readKill(paths: AkumaPaths, bodySequence: number): KillFact | nu
 export function requestStop(
   paths: AkumaPaths,
   at: string,
-): Readonly<{ kind: "requested"; body: BodyFact }> | Readonly<{ kind: "already-killed"; body: BodyFact }> {
+): Readonly<{ kind: "requested"; body: BodyFact }>
+  | Readonly<{ kind: "already-killed" | "already-stopped"; body: BodyFact }> {
   return withHeart(paths, (heart) =>
     transaction(heart, () => {
       const body = latestBodyFact(heart);
       if (body === null) throw new Error("Akuma has no Body to kill");
       if (latestKillFact(heart)?.bodySequence === body.sequence) return { kind: "already-killed", body };
+      if (body.end !== undefined) return { kind: "already-stopped", body };
       const existing = stopFact(heart);
       if (existing !== null && existing.bodySequence !== body.sequence) {
         throw new Error("Akuma stop target is not the latest Body");
@@ -297,12 +290,14 @@ export function requestStop(
 export function requestPause(
   paths: AkumaPaths,
   at: string,
-): Readonly<{ kind: "not-born" } | { kind: "requested" }> {
+): Readonly<{ kind: "not-born" } | { kind: "requested"; body: BodyFact }> {
   return withHeart(paths, (heart) =>
     transaction(heart, () => {
       if (soulFact(heart) === null) return { kind: "not-born" };
+      const body = latestBodyFact(heart);
+      if (body === null) throw new Error("Akuma has no Body to interrupt");
       insertPauseControl(heart, at);
-      return { kind: "requested" };
+      return { kind: "requested", body };
     }));
 }
 
@@ -313,7 +308,12 @@ export function stopRequested(paths: AkumaPaths, bodySequence?: number): boolean
   });
 }
 
-export function pauseRequested(paths: AkumaPaths): boolean { return withHeart(paths, pauseExists); }
+export function pauseRequested(paths: AkumaPaths, bodySequence?: number): boolean {
+  return withHeart(paths, (heart) => {
+    const target = pauseFact(heart);
+    return target !== null && (bodySequence === undefined || target.bodySequence === bodySequence);
+  });
+}
 
 export function breakBody(paths: AkumaPaths, input: Readonly<{ sequence: number; end: Exclude<BodyEnd, "exited">; at: string }>): void {
   withHeart(paths, (heart) => endBodyFact(heart, input));
@@ -342,9 +342,13 @@ export function endTurn(
 }
 
 export function finishBodyIfIdle(paths: AkumaPaths, input: Readonly<{ sequence: number; at: string }>):
-Readonly<{ kind: "finished" } | { kind: "pending"; tells: readonly string[] }> {
+Readonly<{ kind: "controlled" | "finished" } | { kind: "pending"; tells: readonly string[] }> {
   return withHeart(paths, (heart) =>
     transaction(heart, () => {
+      if (stopFact(heart)?.bodySequence === input.sequence || pauseFact(heart)?.bodySequence === input.sequence) {
+        endBodyFact(heart, { ...input, end: "put-down" });
+        return { kind: "controlled" };
+      }
       const pending = pendingTellFacts(heart);
       if (pending.length > 0) return { kind: "pending", tells: pending.map((tell) => tell.id) };
       finishBodyFact(heart, input);
@@ -354,7 +358,7 @@ Readonly<{ kind: "finished" } | { kind: "pending"; tells: readonly string[] }> {
 
 export function readHeart(paths: AkumaPaths): HeartSnapshot {
   if (!existsSync(paths.heart)) {
-    return { soul: null, latestBody: null, latestSession: null, pending: [], latestKill: null };
+    return { soul: null, latestBody: null, latestSession: null, pending: [], latestKill: null, stop: null, pause: null };
   }
   return withHeart(paths, (heart) => ({
       soul: soulFact(heart),
@@ -362,6 +366,8 @@ export function readHeart(paths: AkumaPaths): HeartSnapshot {
       latestSession: latestSessionFact(heart),
       pending: pendingTellFacts(heart),
       latestKill: latestKillFact(heart),
+      stop: stopFact(heart),
+      pause: pauseFact(heart),
   }));
 }
 

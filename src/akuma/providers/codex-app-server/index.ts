@@ -20,18 +20,6 @@ export { CODEX_ITEM_DISPOSITIONS, CODEX_NOTIFICATION_DISPOSITIONS } from "./even
 type StartInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 type ForkInput = Parameters<NonNullable<ProviderAdapter["fork"]>>[0];
 type Finish = (result: TurnResult) => void;
-const INTERRUPT_TIMEOUT_MS = 1_000;
-
-function interrupt(server: LineRpcProcess, threadId: string, turnId: string): Promise<unknown> {
-  const request = server.request("turn/interrupt", { threadId, turnId });
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("codex app-server interrupt timed out")), INTERRUPT_TIMEOUT_MS);
-    void request.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (error: unknown) => { clearTimeout(timer); reject(error); },
-    );
-  });
-}
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -147,25 +135,14 @@ async function forkCodex(execution: ProviderExecution, input: ForkInput): Promis
 async function abortTurn(
   server: LineRpcProcess,
   state: CodexTurnState,
-  completion: Promise<TurnResult>,
   settle: Finish,
 ): Promise<void> {
-  if (state.settled) {
-    await completion;
-    return;
-  }
-  if (state.threadId !== undefined && state.turnId !== undefined) {
-    try {
-      await interrupt(server, state.threadId, state.turnId);
-      await completion;
-    } catch (error) { settle({ kind: "failed", diagnostic: diagnostic(error) }); }
-  } else {
-    settle({ kind: "failed", diagnostic: "codex app-server aborted before turn admission" });
-  }
-  await completion;
+  if (!state.settled) settle({ kind: "failed", diagnostic: "codex app-server interrupted" });
+  await server.close(true);
 }
 
 async function startCodex(execution: ProviderExecution, input: StartInput): Promise<Session> {
+  const signal = input.signal ?? new AbortController().signal;
   if (input.session.kind === "resume" && !("sessionId" in input.session.coordinate)) throw new Error("Codex app-server resume requires sessionId");
   const events = new AgentEventChannel();
   const server = new LineRpcProcess({
@@ -208,14 +185,26 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
     kind: "failed",
     diagnostic: `codex app-server made forbidden interactive request ${request.method}`,
   }));
-  try { await admitTurn(server, input, state, events, execution.config); }
-  catch (error) { finish({ kind: "failed", diagnostic: diagnostic(error) }); }
+  const abortSetup = () => { void server.close(true); };
+  signal.addEventListener("abort", abortSetup, { once: true });
+  try {
+    signal.throwIfAborted();
+    await admitTurn(server, input, state, events, execution.config);
+  }
+  catch (error) {
+    if (signal.aborted) {
+      await server.close(true);
+      throw signal.reason;
+    }
+    finish({ kind: "failed", diagnostic: diagnostic(error) });
+  }
+  finally { signal.removeEventListener("abort", abortSetup); }
   if (state.turnId === undefined) throw new Error("codex app-server did not admit a turn");
   return {
     admission: { fence: state.turnId },
     events,
     completion,
-    abort: () => abortTurn(server, state, completion, finish),
+    abort: () => abortTurn(server, state, finish),
     tell: (tell) => steerTurn(server, state, tell),
   };
 }

@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { readActionFeedbackStatus } from "../src/akuma/akuma.js";
+import { CONTROL_RESPONSE_MS } from "../src/akuma/body.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
-import { HeldAkumaLeash, activitySlice, admitRequest, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, recordTell, requestPause, requestStop, stopRequested, type AkuId, type ProviderOptions } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, activitySlice, admitRequest, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, recordSession, recordTell, requestPause, requestStop, reserveRequest, stopRequested, type AkuId, type ProviderOptions } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { AgentEvent, ProviderAdapter, TurnResult } from "../src/akuma/provider.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
@@ -87,9 +89,7 @@ test("body births, admits native session, records the turn, and exits only when 
       ],
       result: { kind: "answered", answer: "done", historyId: "history-1" },
     }), {
-      collar: { pid: 999_999, processGroup: 999_999, spawnedAt: "fixture" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
 
     const first = readHeart(allocated.paths);
@@ -123,9 +123,7 @@ test("body births, admits native session, records the turn, and exits only when 
       events: [{ type: "action", note: "Started" }],
       result: { kind: "answered", answer: "adjusted", historyId: "history-2" },
     }), {
-      collar: { pid: 999_998, processGroup: 999_998, spawnedAt: "fixture-2" },
       now: () => "2026-08-08T00:00:02.000Z",
-      async putDownOwnTree() {},
     });
 
     const second = readHeart(allocated.paths);
@@ -208,9 +206,7 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
       },
       initialBody: "work",
     }, live, {
-      collar: { pid: 999_978, processGroup: 999_978, spawnedAt: "live-tell" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
     recordTell(allocated.paths, {
@@ -265,9 +261,7 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
       },
       initialBody: "work",
     }, live, {
-      collar: { pid: 999_977, processGroup: 999_977, spawnedAt: "live-ack" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
     recordTell(allocated.paths, {
@@ -337,9 +331,7 @@ test("a Tell after Session terminality stays pending without replacing the answe
       },
       initialBody: "work",
     }, provider, {
-      collar: { pid: 999_976, processGroup: 999_976, spawnedAt: "terminal-tell" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     await started;
     recordTell(allocated.paths, {
@@ -408,9 +400,7 @@ test("Claude settles a live Tell in the current Body through its result receipt"
       },
       initialBody: "initial work",
     }, provider, {
-      collar: { pid: 999_975, processGroup: 999_975, spawnedAt: "claude-live-tell" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
     recordTell(allocated.paths, {
@@ -475,9 +465,7 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
         };
       },
     }, {
-      collar: { pid: 999_977, processGroup: 999_977, spawnedAt: "receipt-failure" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
 
     await body;
@@ -565,14 +553,11 @@ test("a declared drive drains Body Requests before recording its terminal turn",
       },
       initialBody: "parent work",
     }, provider, {
-      collar: { pid: 999_997, processGroup: 999_997, spawnedAt: "body-request-parent" },
       now: () => "2026-08-09T00:00:00.000Z",
-      async putDownOwnTree() {},
       async spawnChild(launch) {
         const child = HeldAkumaLeash.try(launch.paths)!;
         child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:01.000Z" });
         child.release();
-        return { pid: 999_996, processGroup: 999_996, spawnedAt: "body-request-child" };
       },
     });
 
@@ -627,9 +612,7 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
       events: [],
       result: { kind: "failed", diagnostic: "must not start" },
     }), {
-      collar: { pid: 999_980, processGroup: 999_980, spawnedAt: "fork-birth" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     assert.deepEqual(starts, []);
     assert.deepEqual(outcomes(allocated.paths), []);
@@ -641,9 +624,7 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
       events: [],
       result: { kind: "answered", answer: "continued", historyId: "history-2" },
     }), {
-      collar: { pid: 999_981, processGroup: 999_981, spawnedAt: "fork-wake" },
       now: () => "2026-08-08T00:00:02.000Z",
-      async putDownOwnTree() {},
     });
     assert.deepEqual(starts, [{
       body: "",
@@ -685,9 +666,7 @@ test("the soul retains the summon cwd before native session admission", async ()
       events: [],
       result: { kind: "failed", diagnostic: "failed before session" },
     }), {
-      collar: { pid: 999_995, processGroup: 999_995, spawnedAt: "seat-fixture" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     assert.equal(readHeart(allocated.paths).soul?.cwd, join(root, "custom-seat"));
     assert.deepEqual(outcomes(allocated.paths)[0], {
@@ -720,9 +699,7 @@ test("an answer without an admitted or resumed session is retained as a failed t
       events: [],
       result: { kind: "answered", answer: "unforkable", historyId: "missing-session" },
     }), {
-      collar: { pid: 999_991, processGroup: 999_991, spawnedAt: "sessionless-answer" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     assert.deepEqual(outcomes(allocated.paths)[0], {
       kind: "failed",
@@ -734,57 +711,51 @@ test("an answer without an admitted or resumed session is retained as a failed t
   }
 });
 
-test("a successor settles an abandoned Body-scoped stop before creating its Body", async () => {
+test("a successor admits through the leash without reconstructing custody of an untidy predecessor", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-orphan-stop-"));
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "a1b2c3d4" });
     initializeHeart(allocated.paths);
-    const base: BodyLaunch = {
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "claude",
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
-        cwd: root,
-      },
-      initialBody: "first",
+    const soul = {
+      id: allocated.id,
+      archetype: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" as const },
+      options: {},
+      origin: { kind: "direct" as const },
+      confinement: { kind: "unconfined" as const },
+      cwd: root,
+      createdAt: "2026-08-08T00:00:00.000Z",
     };
-    await driveAkumaBody(base, adapter({
-      starts: [],
-      events: [{ type: "session", coordinate: { sessionId: "orphan-session" } }],
-      result: { kind: "answered", answer: "first", historyId: "orphan-history-1" },
-    }), {
-      collar: { pid: 999_994, processGroup: 999_994, spawnedAt: "orphan-1" },
-      now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
+    const predecessorLeash = HeldAkumaLeash.try(allocated.paths)!;
+    predecessorLeash.birth(allocated.paths, soul);
+    const predecessor = predecessorLeash.recordBody(allocated.paths, { leashTakenAt: soul.createdAt });
+    recordSession(allocated.paths, {
+      provider: "claude",
+      coordinate: { sessionId: "orphan-session" },
+      cwd: root,
+      options: {},
+      admittedAt: soul.createdAt,
     });
+    predecessorLeash.release();
+
     const stopped = requestStop(allocated.paths, "2026-08-08T00:00:01.000Z");
     assert.equal(stopped.kind, "requested");
-    assert.deepEqual(requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), { kind: "requested" });
     assert.equal(stopRequested(allocated.paths), true);
-    assert.equal(pauseRequested(allocated.paths), true);
     recordTell(allocated.paths, {
       id: "orphan-tell",
       body: "continue",
       recordedAt: "2026-08-08T00:00:02.000Z",
     });
-    const wake: BodyLaunch = { paths: base.paths };
+    const wake: BodyLaunch = { paths: allocated.paths };
     await driveAkumaBody(wake, adapter({
       starts: [], events: [], result: { kind: "answered", answer: "continued", historyId: "orphan-history-2" },
     }), {
-      collar: { pid: 999_993, processGroup: 999_993, spawnedAt: "orphan-2" },
       now: () => "2026-08-08T00:00:03.000Z",
-      async putDownOwnTree() {},
     });
     assert.equal(stopRequested(allocated.paths), false);
-    assert.equal(pauseRequested(allocated.paths), false);
     const snapshot = readHeart(allocated.paths);
-    assert.equal(snapshot.latestKill?.bodySequence, stopped.body.sequence);
-    assert.equal(snapshot.latestBody?.sequence, stopped.body.sequence + 1);
-    assert.notEqual(snapshot.latestKill?.bodySequence, snapshot.latestBody?.sequence);
+    assert.equal(snapshot.latestKill, null);
+    assert.equal(snapshot.latestBody?.sequence, predecessor.sequence + 1);
     assert.deepEqual(outcomes(allocated.paths).at(-1), {
       kind: "answered",
       answer: "continued",
@@ -795,6 +766,102 @@ test("a successor settles an abandoned Body-scoped stop before creating its Body
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("pause aborts stalled provider setup and records clean Body settlement", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-setup-pause-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffed00" });
+    initializeHeart(allocated.paths);
+    let setupStarted!: () => void;
+    const started = new Promise<void>((resolve) => { setupStarted = resolve; });
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start(input) {
+        setupStarted();
+        await new Promise<void>((_resolve, reject) => {
+          input.signal.addEventListener("abort", () => reject(input.signal.reason), { once: true });
+        });
+        throw new Error("unreachable setup continuation");
+      },
+    }, {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
+    await started;
+    const current = readHeart(allocated.paths).latestBody!;
+    const requestedAt = performance.now();
+    requestPause(allocated.paths, "2026-08-08T00:00:01.000Z");
+    await Promise.race([
+      body,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Body did not abort stalled setup")), 500)),
+    ]);
+    assert.ok(performance.now() - requestedAt < CONTROL_RESPONSE_MS);
+    assert.equal(readHeart(allocated.paths).latestBody?.sequence, current.sequence);
+    assert.equal(readHeart(allocated.paths).latestBody?.end, "put-down");
+    assert.deepEqual(outcomes(allocated.paths), []);
+    assert.equal(probeLeash(allocated.paths), "free");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("pause interrupts pre-drive request settlement within the control window", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-request-settlement-pause-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffed01" });
+    initializeHeart(allocated.paths);
+    const soul = {
+      id: allocated.id,
+      archetype: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" } as const,
+      options: {},
+      origin: { kind: "direct" } as const,
+      confinement: { kind: "unconfined" } as const,
+      cwd: root,
+      createdAt: "2026-08-08T00:00:00.000Z",
+    };
+    const birth = HeldAkumaLeash.try(allocated.paths)!;
+    birth.birth(allocated.paths, soul);
+    birth.release();
+    const requestId = "00000000-0000-4000-8000-000000000099";
+    admitRequest(allocated.paths, {
+      id: requestId, archetype: "worker", body: "wait", world: root,
+      recipe: { provider: soul.provider, options: {}, confinement: soul.confinement },
+      admittedAt: "2026-08-08T00:00:01.000Z",
+    });
+    const child = allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "c0ffed02" });
+    initializeHeart(child.paths);
+    reserveRequest(allocated.paths, requestId, child.id);
+    const childLeash = HeldAkumaLeash.try(child.paths)!;
+    try {
+      const body = driveAkumaBody({ paths: allocated.paths }, undefined, {
+        now: () => new Date().toISOString(),
+      });
+      while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+      const requestedAt = performance.now();
+      requestPause(allocated.paths, new Date().toISOString());
+      await Promise.race([
+        body,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Body did not interrupt request settlement")), 500)),
+      ]);
+      assert.ok(performance.now() - requestedAt < CONTROL_RESPONSE_MS);
+      assert.equal(readHeart(allocated.paths).latestBody?.end, "put-down");
+      assert.equal(probeLeash(allocated.paths), "free");
+    } finally { childLeash.release(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("pause aborts the current drive and records the body as put down", async () => {
@@ -840,12 +907,14 @@ test("pause aborts the current drive and records the body as put down", async ()
       },
       initialBody: "work",
     }, running, {
-      collar: { pid: 999_989, processGroup: 999_989, spawnedAt: "pause-fixture" },
       now: () => "2026-08-08T00:00:00.000Z",
-      async putDownOwnTree() {},
     });
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
-    assert.deepEqual(requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), { kind: "requested" });
+    const current = readHeart(allocated.paths).latestBody!;
+    assert.deepEqual(requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), {
+      kind: "requested",
+      body: current,
+    });
     await body;
     assert.equal(aborted, true);
     assert.equal(readHeart(allocated.paths).latestBody?.end, "put-down");
@@ -856,12 +925,132 @@ test("pause aborts the current drive and records the body as put down", async ()
   }
 });
 
-test("a body aborts and buries its process tree when the heart disappears during a drive", async () => {
+test("durable control aborts an owned session while a live tell is stalled", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-stalled-tell-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee01" });
+    initializeHeart(allocated.paths);
+    let aborted = false;
+    let tellStarted!: () => void;
+    const started = new Promise<void>((resolve) => { tellStarted = resolve; });
+    let releaseTell!: () => void;
+    const tellReleased = new Promise<void>((resolve) => { releaseTell = resolve; });
+    let settle!: (result: TurnResult) => void;
+    const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        return {
+          admission: { fence: "stalled-tell-turn" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              while (!aborted) await new Promise((resolve) => setTimeout(resolve, 10));
+            },
+          },
+          completion,
+          async tell() {
+            tellStarted();
+            await tellReleased;
+            return { kind: "turn-ended" as const };
+          },
+          async abort() {
+            aborted = true;
+            releaseTell();
+            settle({ kind: "failed", diagnostic: "paused" });
+          },
+        };
+      },
+    }, {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
+    while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    recordTell(allocated.paths, {
+      id: "stalled-live-tell",
+      body: "steer",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await started;
+    const requestedAt = performance.now();
+    requestPause(allocated.paths, "2026-08-08T00:00:02.000Z");
+    await Promise.race([
+      (async () => { while (!aborted) await new Promise((resolve) => setTimeout(resolve, 5)); })(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Body did not abort stalled tell")), 500)),
+    ]);
+    assert.ok(performance.now() - requestedAt < CONTROL_RESPONSE_MS);
+    await body;
+    assert.equal(readHeart(allocated.paths).latestBody?.end, "put-down");
+    assert.equal(probeLeash(allocated.paths), "free");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a stalled Tell is fenced by Body cancellation before leash release", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-violating-tell-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee02" });
+    initializeHeart(allocated.paths);
+    let aborted = false;
+    let tellStarted!: () => void;
+    const started = new Promise<void>((resolve) => { tellStarted = resolve; });
+    let releaseTell!: () => void;
+    const tellReleased = new Promise<void>((resolve) => { releaseTell = resolve; });
+    let settle!: (result: TurnResult) => void;
+    const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id, archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" }, options: {},
+        origin: { kind: "direct" }, confinement: { kind: "unconfined" }, cwd: root,
+      },
+      initialBody: "work",
+    }, {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        return {
+          admission: { fence: "violating-tell-turn" },
+          events: { async *[Symbol.asyncIterator]() {
+            while (!aborted) await new Promise((resolve) => setTimeout(resolve, 10));
+          } },
+          completion,
+          async tell() { tellStarted(); await tellReleased; return { kind: "turn-ended" as const }; },
+          async abort() { aborted = true; settle({ kind: "failed", diagnostic: "paused" }); },
+        };
+      },
+    }, { now: () => new Date().toISOString() });
+    while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    recordTell(allocated.paths, { id: "violating-live-tell", body: "steer", recordedAt: new Date().toISOString() });
+    await started;
+    requestPause(allocated.paths, new Date().toISOString());
+    await body;
+    assert.equal(probeLeash(allocated.paths), "free");
+    assert.equal(readHeart(allocated.paths).latestBody?.end, "put-down");
+    releaseTell();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(readHeart(allocated.paths).pending.length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a body aborts its owned provider session when the heart disappears during a drive", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-gone-"));
   const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "bad0cafe" });
   initializeHeart(allocated.paths);
   let aborted = false;
-  let buried = false;
   const failing: ProviderAdapter = {
     confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
@@ -892,11 +1081,49 @@ test("a body aborts and buries its process tree when the heart disappears during
     },
     initialBody: "start",
   }, failing, {
-    collar: { pid: 999_992, processGroup: 999_992, spawnedAt: "heart-gone" },
     now: () => "2026-08-08T00:00:00.000Z",
-    async putDownOwnTree() { buried = true; },
   });
   assert.equal(aborted, true);
-  assert.equal(buried, true);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("heart loss wakes a Body stalled on provider observation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-gone-stalled-"));
+  const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "bad0caff" });
+  initializeHeart(allocated.paths);
+  let aborted = false;
+  const body = driveAkumaBody({
+    paths: allocated.paths,
+    seed: {
+      id: allocated.id,
+      archetype: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: {},
+      origin: { kind: "direct" },
+      confinement: { kind: "unconfined" },
+      cwd: root,
+    },
+    initialBody: "start",
+  }, {
+    confinement: () => ({ kind: "unconfined" }),
+    admitOptions(options) { return { kind: "admitted", options }; },
+    async start() {
+      return {
+        admission: { fence: "heart-gone-stalled-turn" },
+        events: { async *[Symbol.asyncIterator]() { await new Promise(() => undefined); } },
+        completion: new Promise(() => undefined),
+        async abort() { aborted = true; },
+      };
+    },
+  }, { now: () => "2026-08-08T00:00:00.000Z" });
+  while (readHeart(allocated.paths).latestBody === null) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  rmSync(allocated.paths.directory, { recursive: true, force: true });
+  await Promise.race([
+    body,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Body did not observe Heart loss")), 1_000)),
+  ]);
+  assert.equal(aborted, true);
   rmSync(root, { recursive: true, force: true });
 });

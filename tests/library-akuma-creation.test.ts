@@ -89,11 +89,11 @@ function requestPump(root: string) {
     parent: soul,
     bodySequence: 1,
     now: () => "2026-08-11T00:00:01.000Z",
+    signal: new AbortController().signal,
     async spawn(launch) {
       const child = HeldAkumaLeash.try(launch.paths)!;
       child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-11T00:00:02.000Z" });
       child.release();
-      return { pid: 999_981, processGroup: 999_981, spawnedAt: "creation-test" };
     },
   });
   return { pump, leash };
@@ -263,9 +263,7 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
       };
     },
   }, {
-    collar: { pid: 999_982, processGroup: 999_982, spawnedAt: "fork-source" },
     now: () => "2026-08-11T01:00:00.000Z",
-    async putDownOwnTree() {},
   });
   publishDispatch({ repository: git, akuId: source.id, contractId: owner });
   const alias = parseAkumaAlias("@parent");

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { abortable } from "../../abort.js";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   AgentEventChannel,
@@ -245,7 +246,10 @@ async function driveClaude(
   drive: ClaudeDriveInput,
 ): Promise<Session> {
   if (drive.session.kind === "resume") claudeSessionId(drive.session.coordinate);
-  const sdk = await load();
+  const signal = drive.signal ?? new AbortController().signal;
+  signal.throwIfAborted();
+  const sdk = await abortable(load(), signal);
+  signal.throwIfAborted();
   const events = new AgentEventChannel();
   const receipts = new ReceiptChannel();
   const input = createClaudeInput();
@@ -259,11 +263,19 @@ async function driveClaude(
     prompt: input.iterable,
     options: claudeQueryOptions(drive, execution, abortController),
   });
+  const shutDown = (error: unknown): void => {
+    abortController.abort(error);
+    input.fail(error);
+    query.close();
+  };
+  const abortSetup = () => shutDown(signal.reason);
+  signal.addEventListener("abort", abortSetup, { once: true });
   const observed = observeClaudeQuery({
     query, input, events, receipts, accepted,
     state: { get openSubmissions() { return openSubmissions; } },
   });
-  await Promise.all([launchAcknowledged, observed.admission]);
+  try { await Promise.all([launchAcknowledged, observed.admission]); }
+  finally { signal.removeEventListener("abort", abortSetup); }
 
   return {
     admission: { fence: `claude:${run}:0` },
@@ -296,11 +308,7 @@ async function driveClaude(
       });
     },
     async abort(): Promise<void> {
-      const error = new Error("Claude query aborted");
-      abortController.abort(error);
-      input.fail(error);
-      query.close();
-      await observed.completion;
+      shutDown(new Error("Claude query aborted"));
     },
   };
 }

@@ -227,7 +227,7 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
   }
 });
 
-test("reconcile removes dead-owner scratch without commands and preserves active scratch", async () => {
+test("reconcile acquires a death-released scratch lock and preserves an actively held lock", async () => {
   const repository = repositoryWithMain();
   const git = repositoryAt(repository.path);
   const commandRan = join(repository.path, "orphan-command-ran");
@@ -285,34 +285,5 @@ test("reconcile removes dead-owner scratch without commands and preserves active
   } finally {
     const leak = active.dispose();
     if (leak !== null) throw new Error(leak.diagnostic);
-  }
-});
-
-test("scratch refuses creation when its process owner identity is unavailable", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-scratch-identity-"));
-  try {
-    const ps = join(root, "ps");
-    writeFileSync(ps, "#!/bin/sh\nexit 1\n");
-    chmodSync(ps, 0o755);
-    const module = pathToFileURL(join(process.cwd(), "src", "git", "scratch.ts")).href;
-    const childSource = [
-      `const { materializeScratchCandidate } = await import(${JSON.stringify(module)});`,
-      'materializeScratchCandidate({}, "0000000000000000000000000000000000000000");',
-    ].join(" ");
-    const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
-    const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", childSource], {
-      cwd: process.cwd(),
-      env: { ...process.env, PATH: root },
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
-    const code = await new Promise<number | null>((resolve) => child.once("close", resolve));
-    assert.notEqual(code, 0);
-    assert.match(stderr, /cannot read process start identity/u);
-    assert.doesNotMatch(stderr, /git worktree add/u);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
   }
 });

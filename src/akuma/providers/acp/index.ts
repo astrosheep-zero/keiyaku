@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { Readable, Writable } from "node:stream";
+import { abortable } from "../../abort.js";
 import { AgentEventChannel, type ProviderAdapter, type ProviderOptionAdmission, type ProviderOptions, type Session, type TurnResult } from "../../provider.js";
 import type { ProviderExecution } from "../../heart/index.js";
 import { spawnStdioProcess, type StdioProcess } from "../../../runtime/proc/stdio.js";
@@ -99,11 +100,10 @@ function createAcpTurn(connection: acp.ClientConnection) {
   const events = new AgentEventChannel();
   let state = EMPTY_ACP_EVENT_STATE;
   let terminal = false;
-  let settled = false;
   let resolveCompletion!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => { resolveCompletion = resolve; });
   const update = (next: acp.SessionUpdate): void => {
-    if (settled) return;
+    if (terminal) return;
     const mapped = mapAcpUpdate(next, state);
     state = mapped.state;
     for (const event of mapped.events) events.emit(event);
@@ -117,7 +117,6 @@ function createAcpTurn(connection: acp.ClientConnection) {
     };
     try { await cleanup(); } catch (error) { failCleanup(error); }
     try { connection.close(); } catch (error) { failCleanup(error); }
-    settled = true;
     const flushed = flushAcpEvents(state);
     for (const event of flushed.events) events.emit(event);
     events.end();
@@ -164,6 +163,8 @@ async function startAcpSession(
   input: StartInput,
   dependencies: AcpDependencies,
 ): Promise<Session> {
+  const signal = input.signal ?? new AbortController().signal;
+  signal.throwIfAborted();
   const child = (dependencies.spawnProcess ?? spawnStdioProcess)({
     argv: argv(execution, config, input.options),
     cwd: input.cwd,
@@ -179,7 +180,7 @@ async function startAcpSession(
   ));
   turn = createAcpTurn(connection);
   try {
-    sessionId = await establishSession(connection.agent, input);
+    sessionId = await abortable(establishSession(connection.agent, input), signal);
     turn.events.emit({ type: "session", coordinate: { sessionId } });
     return beginAcpPrompt(connection.agent, child, turn, sessionId, input);
   } catch (error) {

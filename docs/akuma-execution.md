@@ -13,7 +13,7 @@ loss may leave the Turn open and do not synthesize a provider result.
 
 ## The body
 
-Wake -> take the leash (checking the seal) -> put down the predecessor ->
+Wake -> take the leash (checking the seal) -> judge any abandoned control ->
 write the body row -> resume the provider from the latest session fact
 (fresh at `soul.cwd` when none exists) -> pump. The pump is
 the whole job: heart rows become provider actions; provider events become
@@ -31,32 +31,52 @@ The pursuit is only as alive as its pursuers: a reboot can kill body and
 waker together, leaving a recorded tell honestly pending — served at the
 next wake, visible until then. No daemon wakes anyone spontaneously.
 
-**Put down.** Before doing anything else, a new body settles its
-predecessor by the collar: verify the tree is gone; kill it (process group /
-`taskkill /T /F`, via `runtime/proc`) if alive; refuse with `unavailable`
-if the collar cannot be verified — the spawn time must match; a recycled
-pid is never group-killed blind.
+**Succession.** A new Body never reconstructs custody of its predecessor. A
+held leash means wait. A free leash with an explicitly ended predecessor is
+settled history. A free leash with no explicit Body end is `untidy`; abandoned
+stop control may be adjudicated under the leash before the successor records
+its own Body. An outstanding pause makes an ordinary successor yield so the
+interrupt composition can judge and clear it. This admits future work without
+claiming that the successor physically terminated anything.
 
 A body must not outlive its heart: heart directory gone (ENOENT on tick) ->
-kill own provider tree, exit. The world ended; the body follows.
+abort the live provider session through its owned handles, exit. The world
+ended; the body follows.
 
-The Body also reads stop control only when it names that Body sequence. It
-aborts the drive, records `put-down`, and releases the leash. If the killer
-vanishes, the next leash holder first settles the frozen predecessor, writes
-its kill witness, and clears stop before creating a successor Body.
+The Body has one lifetime control observer, one Body-owned `AbortSignal`, and
+one obedience decision. Setup, request recovery, and the active drive do not
+create their own watchers or register duties. Each phase uses lexical cleanup
+with the shared signal. One observation round reads one Heart snapshot and
+publishes that same snapshot to stop, pause, and pending-Tell consumers.
+
+A provider Session's `abort()` fulfills only after the adapter has disposed
+every OS child and native session it created or may still create, including
+late resources after cancellation. Streams, receipts, Tell promises, and
+iterators are not custody. The Body revokes its delegated Heart-write and
+spawn authorities before cleanup, then uses its private settlement authority
+for `put-down` or a custody diagnostic.
+
+`hung` has one source: a named external provider child or native session that
+the adapter has not disposed within the public control response window. The
+Body keeps the leash and records the durable Body diagnostic plus diagnostic
+activity naming that custody. Local request recovery and request-pump
+cancellation cannot produce `hung`.
 
 The detached launch carries a soul seed only before birth. Once birth returns,
 including `already-born`, the persisted soul is the only source for provider,
 cwd, origin, and confinement; an existing-soul wake carries only heart paths.
 
-If the heart disappears while a drive is live, the body aborts that drive,
-puts down its own provider process group, and exits. It never leaves a detached
-provider tree running without observable custody.
+If the heart disappears while a drive is live, the Body aborts that drive
+through the provider capability it owns and exits.
 
-The body owns the provider process tree, spawned in its own process group,
-collar recorded in the body row before the provider starts. The leash
-proves the body; the collar answers for the tree. Neither claim is asked of
-the other.
+Process descriptions are diagnostic only. Runtime direct spawn returns a
+closure-backed live handle to the caller that spawned the child. The Body and
+provider adapter retain those handles while supervising and may terminate only
+through them. Child exit or close, successful termination settlement, and
+explicit release each make the capability inert. Repeated termination after
+reap cannot signal again. Releasing a handle gives up that authority. No pid,
+process group, start token, or reconstructed identity is stored in the Body
+row.
 
 For each turn the body tracks the actual resumable session: it begins with the
 session passed to `resume()`, when any, and advances when the provider emits a
@@ -175,62 +195,59 @@ listArchetypes, list, status, wait, tell, interrupt, history, fork, and kill.
 
 ## Interrupt
 
-`interrupt(body)` is the high-level composition "synchronously put down this
-turn, then tell". Its sequence is fixed: write pause; wait one grace window for
-the Body to abort and release the leash; if still held, put down the current
-verified collar; acquire the leash proving the old Body stopped; in one Heart
+`interrupt(body)` is the high-level composition "ask this turn to yield, then
+tell". Its sequence is fixed: write pause for the current Body; wait one bounded
+response window for that Body to abort its owned session and release the leash;
+acquire the leash; require an explicit end for the same Body; in one Heart
 transaction clear pause and record the Tell; release the leash; then spawn the
 ordinary wake. The old Body can never consume the interrupting Tell.
 
 Pause and stop are separate control kinds. The Body polls pause beside stop,
-aborts its drive, records the existing `put-down` body end, and exits. A new
-leash holder clears an orphan pause before driving, just as it clears an orphan
-stop. Self-abort remains a Body effect; collar fallback remains the
-interruptor's public-boundary effect.
+aborts its drive, records the existing `put-down` Body end, and exits. There is
+no public-boundary fallback that signals a described process.
 
 The receipt is a sum because later steps may never lawfully begin:
 
 ```ts
 type InterruptReceipt =
   | {
-      kind: "unstoppable";
-      evidence: "no-collar" | "collar-unverifiable" | "unavailable"
-        | "alive-after-sigkill" | "leash-held-after-put-down";
+      kind: "unavailable";
+      evidence: "hung" | "untidy" | "unavailable";
     }
   | {
       kind: "interrupted";
-      putDown: "was-idle" | "self-aborted" | "collar";
+      putDown: "was-idle" | "self-aborted";
       tell: TellResult;
     };
 ```
 
-`unstoppable` means the interruptor did not obtain the leash within its bounded
-windows: no recorded collar, an
-unverifiable collar, an unavailable or surviving physical put-down, or a collar
-reported gone while the leash still remained held. The pause remains, and no
-tell or wake is written. The asynchronous pause signal may still be
-observed after this return and cause the body to self-abort; unproven is not
-retracted. The next leash holder clears that abandoned pause.
+`hung` requires the target Body's durable diagnostic that its owned external
+provider custody did not retire within the response window. A held leash
+without that diagnostic remains `running` and reports `unavailable` here.
+`untidy` means the leash is free without the required clean Body end. None of
+these results records the interrupting Tell or invents process authority.
 
 `interrupted` is possible only while the interruptor itself holds the leash.
 `putDown` states how it acquired that proof: immediately (`was-idle`), after
-the body honored pause (`self-aborted`), or after collar fallback (`collar`). It
-then clears pause and records the Tell in one transaction. Physical
-killed/already-gone evidence without subsequent leash ownership is
-`leash-held-after-put-down`, never success.
+the Body honored pause (`self-aborted`). It then clears pause and records the
+Tell in one transaction.
 
 ## Kill
 
-In one Heart transaction, freeze the latest Body sequence into stop -> grace ->
-put down that frozen collar -> acquire the leash -> record a kill witness for
-that same sequence and clear stop. A successor that acquires the leash first
-must complete the same settlement before creating its Body. The witness preserves
-Soul, session, history, pending Tells, and Body Requests. A later Tell wakes a
+Freeze the latest Body sequence into stop, then wait one response window for
+that live Body to abort descendants through capabilities it owns and release
+the leash. Only an explicit `put-down` end for that same Body permits the leash
+holder to record a kill witness and clear stop. The witness preserves Soul,
+session, history, pending Tells, and Body Requests. A later Tell wakes a
 successor Body on the retained session; that Body supersedes the killed life
 projection.
 
-Synchronous evidence has four values: `killed`, `already-killed`,
-`alive-after-sigkill`, `unavailable`.
+Synchronous evidence is `killed`, `already-killed`, `already-stopped`, `hung`,
+`untidy`, or `unavailable`. `hung` retains the stop request and requires the
+target Body's durable failed-custody diagnostic. A held leash without that
+diagnostic is unproved and reports `unavailable`. `untidy` reports a free leash
+without the required clean Body end. `unavailable` also covers a changed or
+otherwise unprovable target. None authorizes external signaling.
 
 ## Fork
 
@@ -259,7 +276,7 @@ local allocation/birth/publication, then success. A provider without the
 capability is categorical and is refused before reading `at`. Native rejection
 before a child coordinate exists is `fork-failed` and claims no upstream or
 local effect. There is no life-state or abort arm: fork only reads the parent
-Heart, so running, asleep, killed, stranded, and headless sources may all fork
+Heart, so running, asleep, killed, stranded, hung, and untidy sources may all fork
 retained history.
 
 Fork is a provider primitive, not something ordinary resume can compose.

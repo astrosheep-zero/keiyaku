@@ -322,6 +322,7 @@ export type Session = Readonly<{
   events: AsyncIterable<AgentEvent>;
   receipts?: AsyncIterable<TellReceipt>;
   completion: Promise<TurnResult>;
+  /** Fulfills after every adapter-owned OS child or native session is disposed. */
   abort(): Promise<void>;
   tell?(tell: Readonly<{ id: string; text: string }>): Promise<TellSubmission>;
 }>;
@@ -331,6 +332,7 @@ export type DriveInput = Readonly<{
   launchTells: readonly Readonly<{ id: string; text: string }>[];
   cwd: string;
   options: ProviderOptions;
+  signal: AbortSignal;
   requests?: Readonly<{ dir: string }>;
 }>;
 

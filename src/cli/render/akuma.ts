@@ -146,7 +146,8 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
 
 export function akumaExitCode(result: AkumaInvocationResult): number {
   if (result.action === "call" && (result.result.dispatch.kind === "failed" || result.result.alias.kind === "failed" || result.result.observation.kind === "failed")) return 2;
-  if (result.action === "kill" && result.result.results.some((member) => member.evidence === "unavailable" || member.evidence === "alive-after-sigkill")) return 1;
+  if (result.action === "kill" && result.result.results.some((member) =>
+    member.evidence === "unavailable" || member.evidence === "hung" || member.evidence === "untidy")) return 1;
   if (result.action === "tell" && result.mode === "ordinary" && typeof result.result.tell.wake !== "string") return 2;
   if (result.action === "tell" && result.mode === "interrupt" && result.result.receipt.kind !== "interrupted") return 1;
   if (result.action === "fork" && result.receipt.kind !== "forked") return result.receipt.kind === "upstream-forked" ? 2 : 1;
