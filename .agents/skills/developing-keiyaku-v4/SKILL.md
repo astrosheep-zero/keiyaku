@@ -52,8 +52,8 @@ workflow. Every dispatch uses `-C` (or `--cwd`) for the v4 repository and has
 an explicit bounded brief:
 
 ```bash
-keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 call worker \
-  --detach --alias @<alias> --workdir <path> - <<'EOF'
+keiyaku -C <contract-worktree> call worker \
+  --detach --alias @<alias> - <<'EOF'
 <bounded implementation brief, exact files, tests, and forbidden scope>
 EOF
 ```

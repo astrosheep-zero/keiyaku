@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import { type AkuId, type ActivityHistory } from "../../akuma/index.js";
 import {
   Keiyaku,
@@ -135,9 +134,7 @@ export async function invokeAkuma(
         archetype: command.archetype,
         body: input.readStdin(),
         settings: input.settings,
-        cwd: command.workdir === undefined
-          ? input.executionCwd
-          : resolve(input.executionCwd, command.workdir),
+        cwd: input.executionCwd,
         mode: command.mode,
         ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
         ...(input.contract === undefined ? {} : { contract: input.contract }),

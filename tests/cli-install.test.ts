@@ -103,7 +103,7 @@ test("workflow delegates bind authorship to the bind skill", () => {
 test("bundled Akuma instructions use the current hard-cut call surface", () => {
   const plugin = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
   const call = renderAkumaUsage("call").slice("usage: keiyaku ".length);
-  const canonical = `keiyaku -C <repo> ${call}`;
+  const canonical = `keiyaku -C <cwd> ${call}`;
   const rootSkill = readFileSync(join(plugin, "keiyaku", "SKILL.md"), "utf8");
   const akumaSkill = readFileSync(join(plugin, "keiyaku-akuma", "SKILL.md"), "utf8");
   assert.equal(rootSkill.includes(canonical), true);

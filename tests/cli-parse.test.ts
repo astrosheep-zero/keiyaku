@@ -33,7 +33,7 @@ test("bind accepts boolean --here and preserves -C outside the contract command"
   });
 });
 
-test("global cwd has two spellings and is independent of command position", () => {
+test("global coordinates are independent of command position", () => {
   assert.deepEqual(parseArgv(["task", "ls", "-C", "/repo/caller"]), {
     cwd: "/repo/caller",
     command: { command: "task", action: "ls", output: "text", positionals: [], flags: {} },
@@ -41,6 +41,21 @@ test("global cwd has two spellings and is independent of command position", () =
   assert.deepEqual(parseArgv(["settings", "--cwd", "/repo/caller"]), {
     cwd: "/repo/caller",
     command: { command: "settings", output: "text" },
+  });
+  assert.deepEqual(parseArgv(["--repo", "../delivery", "status", "-C", "/repo/caller"]), {
+    cwd: "/repo/caller",
+    repo: "../delivery",
+    command: { command: "status", output: "text" },
+  });
+  assert.throws(() => parseArgv(["status", "--repo"]), /--repo requires a path/u);
+  assert.throws(() => parseArgv(["--repo", "/one", "status", "--repo", "/two"]), /--repo may appear only once/u);
+});
+
+test("global path tokens remain opaque at the parser edge", () => {
+  assert.deepEqual(parseArgv(["-C", "C:\\work tree", "status", "--repo", "..\\delivery"]), {
+    cwd: "C:\\work tree",
+    repo: "..\\delivery",
+    command: { command: "status", output: "text" },
   });
 });
 
@@ -60,7 +75,7 @@ test("unknown command syntax is refused with the exact command usage", () => {
     (error: unknown) => error instanceof CliUsageError
       && error.message.includes("usage: keiyaku bind [--task <task/...>] [--target <ref>]"),
   );
-  assert.throws(() => parseArgv(["unknown"]), /usage: keiyaku \[-C <path>\] <command>/);
+  assert.throws(() => parseArgv(["unknown"]), /usage: keiyaku \[-C <path>\] \[--repo <path>\] <command>/);
 });
 
 test("existing selectors are optional and review stdin is a distinct summary source", () => {

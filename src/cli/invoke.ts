@@ -25,7 +25,7 @@ type InvokeRuntime = Readonly<{
 }>;
 
 type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "show" | "ls" | "reconcile" | "settings" | "task" | "install" }>;
-type NonInstallExecution = Readonly<{ cwd?: string; command: Exclude<ParsedCommand, { command: "install" }> }>;
+type NonInstallExecution = Readonly<{ cwd?: string; repo?: string; command: Exclude<ParsedCommand, { command: "install" }> }>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin: () => string;
@@ -39,18 +39,22 @@ function settingsAt(root: WorldRoot | undefined, environment: NodeJS.ProcessEnv)
   return settings({ ...(root === undefined ? {} : { root }), ...(home === undefined || home.length === 0 ? {} : { home }) });
 }
 
-function locateWorld(coordinate: string | undefined): WorldRoot | null {
-  try { return World.locate(resolve(coordinate ?? ".")); }
+function locateWorld(coordinate: string): WorldRoot | null {
+  try { return World.locate(coordinate); }
   catch (error) {
     if (error instanceof WorldError) throw new CliUsageError(error.message);
     throw error;
   }
 }
 
-function establishWorld(coordinate: string | undefined): WorldRoot {
-  const located = locateWorld(coordinate);
+function canonicalInvocationCwd(input: string): string {
+  try { return realpathSync(input); }
+  catch { throw new CliUsageError(`invocation cwd is not an existing directory: ${input}`); }
+}
+
+function establishWorld(coordinate: string, located: WorldRoot | null): WorldRoot {
   if (located !== null) return located;
-  try { return World.at(resolve(coordinate ?? ".")); }
+  try { return World.at(coordinate); }
   catch (error) {
     if (error instanceof WorldError) throw new CliUsageError(error.message);
     throw error;
@@ -91,15 +95,61 @@ function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv
   return resolved;
 }
 
-function repoAt(coordinate: string | undefined): Repo {
-  return coordinate === undefined ? Repo.at() : Repo.at({ path: coordinate });
+function repoAt(coordinate: string): Repo {
+  return Repo.at({ path: coordinate });
 }
 
-function optionalRepoAt(coordinate: string | undefined): Repo | undefined {
+function optionalRepoAt(coordinate: string): Repo | undefined {
   try { return repoAt(coordinate); }
   catch (error) {
     if (error instanceof NoGitWorldError) return undefined;
     throw error;
+  }
+}
+
+type RepoUse = "none" | "optional" | "required";
+
+function repoUse(command: ParsedCommand): RepoUse {
+  switch (command.command) {
+    case "bind":
+    case "amend":
+    case "deliver":
+    case "review":
+    case "arc":
+    case "abandon":
+    case "audit":
+    case "reconcile":
+    case "show":
+      return "required";
+    case "ls":
+      return command.query.kind === "contracts" ? "required" : "none";
+    case "status":
+    case "tell":
+    case "history":
+    case "fork":
+      return "optional";
+    case "wait":
+    case "kill":
+      return command.akuma.some((selector) => selector.startsWith("kei/")) ? "required" : "optional";
+    case "call":
+      return command.contract === undefined ? "none" : "required";
+    case "settings":
+    case "task":
+    case "install":
+      return "none";
+  }
+}
+
+function refuseUnusedRepo(command: ParsedCommand): never {
+  if (command.command === "call") throw new CliUsageError("--repo has no consumer without --contract");
+  throw new CliUsageError(`--repo has no consumer for ${command.command}`);
+}
+
+function repoFor(use: RepoUse, coordinate: string): Repo | undefined {
+  switch (use) {
+    case "none": return undefined;
+    case "optional": return optionalRepoAt(coordinate);
+    case "required": return repoAt(coordinate);
   }
 }
 
@@ -283,15 +333,19 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
   }
 }
 
-async function invokeAkumaCommand(
-  parsed: ParsedAkumaCommand,
-  path: WorldRoot,
-  executionCwd: string,
-  configuration: Settings,
-  edge: InvocationEdge,
-): Promise<AkumaInvocationResult> {
+type AkumaEdgeInput = Readonly<{
+  path: WorldRoot;
+  executionCwd: string;
+  repo?: Repo;
+  configuration: Settings;
+  edge: InvocationEdge;
+}>;
+
+async function invokeAkumaCommand(parsed: ParsedAkumaCommand, input: AkumaEdgeInput): Promise<AkumaInvocationResult> {
+  const { path, executionCwd, repo, configuration, edge } = input;
   if (parsed.command === "call" && parsed.contract !== undefined) {
-    const selected = contractFromInput(repoAt(path), parsed.contract);
+    if (repo === undefined) throw new Error("call with Contract requires a resolved Repo");
+    const selected = contractFromInput(repo, parsed.contract);
     return await invokeAkuma(parsed, {
       path,
       executionCwd,
@@ -300,9 +354,6 @@ async function invokeAkumaCommand(
       readStdin: edge.readStdin,
     });
   }
-  let repo: Repo | undefined;
-  try { repo = repoAt(path); }
-  catch (error) { if (!(error instanceof NoGitWorldError)) throw error; }
   return await invokeAkuma(parsed, {
     path,
     executionCwd,
@@ -312,15 +363,27 @@ async function invokeAkumaCommand(
   });
 }
 
-async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, path: WorldRoot, executionCwd: string, configuration: Settings, edge: InvocationEdge) {
-  try { return await invokeAkumaCommand(parsed, path, executionCwd, configuration, edge); }
+async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, input: AkumaEdgeInput) {
+  try { return await invokeAkumaCommand(parsed, input); }
   catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
 }
 
-async function invokeCatalog(parsed: Extract<ParsedCommand, { command: "ls" }>, coordinate: string | undefined, edge: InvocationEdge) {
+function akumaWorldFor(parsed: ParsedAkumaCommand, cwd: string, located: WorldRoot | null): WorldRoot {
+  const world = parsed.command === "call" ? establishWorld(cwd, located) : located;
+  if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
+  return world;
+}
+
+async function invokeCatalog(
+  parsed: Extract<ParsedCommand, { command: "ls" }>,
+  world: WorldRoot | null,
+  repo: Repo | undefined,
+  edge: InvocationEdge,
+) {
   try {
     if (parsed.query.kind === "contracts") {
-      return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, repo: repoAt(coordinate) }) };
+      if (repo === undefined) throw new Error("Contract catalog requires a resolved Repo");
+      return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, repo }) };
     }
     if (parsed.query.kind === "archetypes") {
       return {
@@ -328,7 +391,6 @@ async function invokeCatalog(parsed: Extract<ParsedCommand, { command: "ls" }>, 
         catalog: await Keiyaku.ls({ query: parsed.query, settings: settingsAt(undefined, edge.environment) }),
       };
     }
-    const world = locateWorld(coordinate);
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
     if (parsed.query.kind === "tasks") {
       return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, path: world }) };
@@ -340,9 +402,12 @@ async function invokeCatalog(parsed: Extract<ParsedCommand, { command: "ls" }>, 
   }
 }
 
-async function invokeStatus(parsed: Extract<ParsedCommand, { command: "status" }>, coordinate: string | undefined, edge: InvocationEdge) {
-  const world = locateWorld(coordinate);
-  const repo = optionalRepoAt(coordinate);
+async function invokeStatus(
+  parsed: Extract<ParsedCommand, { command: "status" }>,
+  world: WorldRoot | null,
+  repo: Repo | undefined,
+  edge: InvocationEdge,
+) {
   const configuration = settingsAt(world ?? undefined, edge.environment);
   if (parsed.akuma === true) {
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
@@ -375,38 +440,49 @@ async function invokeStatus(parsed: Extract<ParsedCommand, { command: "status" }
   return { kind: "status" as const, report: selectKanshi({ report, contract }), selection: "contract" as const };
 }
 
-async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRuntime): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
-  const coordinate = invocation.cwd ?? runtime.cwd;
+async function invokeParsed(
+  invocation: NonInstallExecution,
+  runtime: InvokeRuntime,
+  use: RepoUse,
+): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
+  const processCwd = resolve(runtime.cwd ?? ".");
+  const cwd = canonicalInvocationCwd(resolve(processCwd, invocation.cwd ?? "."));
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
     readStdin: runtime.readStdin ?? (() => readFileSync(0, "utf8")),
   };
   const parsed = invocation.command;
+  const repoCoordinate = resolve(cwd, invocation.repo ?? ".");
+  const repo = repoFor(use, repoCoordinate);
+  const world = locateWorld(cwd);
   if (parsed.command === "settings") {
-    const world = locateWorld(coordinate);
     return { kind: "settings", value: settingsAt(world ?? undefined, edge.environment) };
   }
   if (parsed.command === "task") {
     try {
       return await invokeTask(parsed, {
-        world: locateWorld(coordinate),
-        establish: () => establishWorld(coordinate),
+        world,
+        establish: () => establishWorld(cwd, world),
         readStdin: edge.readStdin,
       });
     }
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
   }
   if (isParsedAkumaCommand(parsed)) {
-    const world = parsed.command === "call" ? establishWorld(coordinate) : locateWorld(coordinate);
-    if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-    const configuration = settingsAt(world, edge.environment);
-    return await invokeAkumaFromEdge(parsed, world, realpathSync(resolve(coordinate ?? ".")), configuration, edge);
+    const akumaWorld = akumaWorldFor(parsed, cwd, world);
+    const configuration = settingsAt(akumaWorld, edge.environment);
+    return await invokeAkumaFromEdge(parsed, {
+      path: akumaWorld,
+      executionCwd: cwd,
+      ...(repo === undefined ? {} : { repo }),
+      configuration,
+      edge,
+    });
   }
-  if (parsed.command === "ls") return await invokeCatalog(parsed, coordinate, edge);
-  if (parsed.command === "status") return await invokeStatus(parsed, coordinate, edge);
-  const repo = repoAt(coordinate);
-  const scope = coordinate ?? repo.root;
-  const world = locateWorld(coordinate);
+  if (parsed.command === "ls") return await invokeCatalog(parsed, world, repo, edge);
+  if (parsed.command === "status") return await invokeStatus(parsed, world, repo, edge);
+  if (repo === undefined) throw new Error(`${parsed.command} requires a resolved Repo`);
+  const scope = cwd;
   const configuration = settingsAt(world ?? undefined, edge.environment);
   const hooks = selectedHooks(configuration);
 
@@ -437,8 +513,14 @@ async function invokeInstall(command: Extract<ParsedCommand, { command: "install
 export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult | InstallInvocationResult> {
   try {
     const command = invocation.command;
+    const use = repoUse(command);
+    if (invocation.repo !== undefined && use === "none") refuseUnusedRepo(command);
     if (command.command === "install") return await invokeInstall(command, runtime);
-    return await invokeParsed({ ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }), command }, runtime);
+    return await invokeParsed({
+      ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+      ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
+      command,
+    }, runtime, use);
   } catch (error) {
     if (error instanceof CliUsageError && error.projection === undefined) {
       throw new CliUsageError(error.diagnostic, renderCommandUsage(invocation.command));

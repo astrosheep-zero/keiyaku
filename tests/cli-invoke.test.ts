@@ -68,6 +68,15 @@ async function invokeWithDocument(repositoryPath: string, argv: readonly string[
   });
 }
 
+test("a missing invocation cwd is a typed usage refusal", async () => {
+  const repository = repositoryWithMain();
+  await assert.rejects(
+    () => invoke(parseArgv(["-C", "missing", "settings"]), { cwd: repository.path, environment: {} }),
+    (error: unknown) => error instanceof CliUsageError
+      && /invocation cwd is not an existing directory/u.test(error.message),
+  );
+});
+
 function acceptedContract(result: Awaited<ReturnType<typeof invoke>>): ContractId {
   if (result.kind !== "accepted") throw new Error(`expected accepted result, got ${result.kind}`);
   return result.contract;

@@ -31,9 +31,12 @@ keiyaku -C <repo> review [<contract>|@<contract>] --satisfied
 ```
 
 ```bash
-keiyaku -C <repo> call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -
+keiyaku -C <cwd> call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -
 keiyaku -C <repo> wait <aku/...>
 keiyaku -C <repo> tell <aku/...> -
 ```
+
+`-C` is the invocation and Akuma execution cwd. Add `--repo <path>` only when
+a Contract or Dispatch reader must use a different Git repository.
 
 Use text by default; add `--json` when a script needs structured output.

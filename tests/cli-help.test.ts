@@ -28,6 +28,7 @@ test("help resolves the longest legal command-word prefix before syntax scanning
 
 test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderRootHelp(), /-C, --cwd <path>  Set the invocation working directory\./u);
+  assert.match(renderRootHelp(), /--repo <path>     Select the Git repository coordinate\./u);
   assert.match(renderRootHelp(), /task \.\.\.\n    Task coordination; see `keiyaku task --help`\./u);
   assert.match(renderContractHelp("bind"), /usage: keiyaku bind \[--task <task\/\.\.\.>\]/u);
   assert.match(renderContractHelp("deliver"), /--message <text>\] \[--include-dirty\]/u);
@@ -54,17 +55,11 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.equal(renderAkumaHelp("call"), [
     "Call an Akuma from an Archetype and stdin body.",
     "",
-    "usage: keiyaku call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -",
+    "usage: keiyaku call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -",
   ].join("\n"));
 });
 
 test("syntax refusal retains the deepest reached grammar", () => {
-  assert.throws(
-    () => parseArgv(["call", "--workdir", "/tmp", "-"]),
-    (error: unknown) => error instanceof CliUsageError
-      && error.diagnostic === "call has invalid positional arguments"
-      && error.projection === "usage: keiyaku call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -",
-  );
   assert.throws(
     () => parseArgv(["task", "unknown"]),
     (error: unknown) => error instanceof CliUsageError

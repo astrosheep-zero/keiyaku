@@ -5,39 +5,46 @@ renders their public results. It owns neither
 document decoding, lifecycle decisions, Git discovery, delivery preparation,
 Verification execution, or reconciliation semantics.
 
-## Akuma Timeline
-
-Akuma text is an agent-facing view of the public timeline. A Turn boundary is
-shown at the first visible row of a new Turn; frontier uses `⧖`, pending tell
-uses `⧗`, normal completion uses `✓ say`, and failure uses `! error`. There are
-no receipt banners, dynamic header life words, timestamp ordering, or derived
-asleep rows. `say` uses at most three lines, `tell` one, and other activity two.
-A run command remains one row with recognizable head and tail.
-
 ## Invocation And Scope
 
 The canonical spelling is:
 
 ```text
-keiyaku [-C <path>] <command> [<contract>|@<contract>] [--flag ...] [-]
+keiyaku [-C <path>] [--repo <path>] <command> [<contract>|@<contract>] [--flag ...] [-]
 ```
 
 `-C <path>` and `--cwd <path>` are two spellings of the one global invocation
-cwd and are never persisted. The canonical examples use `-C`. Either spelling
-may appear before or after the command, but the two spellings may not be
-combined or repeated in one invocation. An omitted value uses the process cwd.
-Contract commands supply the invocation cwd to the one `Repo.at` construction
-point. Read-only Task, Akuma, Settings, catalog, and status commands call
-`World.locate` once; a missing marker produces an absent or typed-empty section.
-Commands that create Task or Akuma facts call `World.locate` and then
-`World.at` when no marker exists. A Contract invocation constructs exactly one
-`Repo`. It derives selector reads, contract handles and verbs, and reconciliation
-from that value: `Keiyaku.list({ repo })`, `repo.root`, `Keiyaku.of({ repo, id })`,
-`Keiyaku.bind({ repo, ... })`, and the selected public reconcile method. It
-uses only public `Repo`, `Keiyaku`, and `Delivery` values. Neither Keiyaku
-construction call resolves a path or reads the working directory again.
+cwd and are never persisted as a product coordinate. The canonical examples
+use `-C`. Either spelling may appear before or after the command, but the two
+spellings may not be combined or repeated in one invocation. The value is
+resolved against the process cwd; omission means the process cwd. The resulting
+canonical invocation cwd is the sole input to `World.locate`, the base for every
+relative argv path, the fallback Repo-discovery input, and the Akuma execution
+cwd supplied by the CLI.
 
-The parser performs argv lexing and syntax only. It extracts the one global cwd,
+`--repo <path>` is the one explicit Git coordinate. Its value is resolved
+against the invocation cwd and supplied to `Repo.at`; it may name any path
+inside the intended repository because it uses the same discovery operation as
+the cwd fallback. It replaces that fallback input and does not change World,
+Task, Settings, or Akuma execution cwd.
+
+The edge calls `World.locate` once and reuses the resulting `WorldRoot` across
+every reader in the invocation. A Task or Akuma creation command may call
+`World.at` after that observation when no marker exists; it never locates a
+second time. The edge likewise constructs at most one `Repo` and reuses it for
+selector reads, Contract handles, verbs, reconciliation, Dispatch, and composite
+observation. All Contract verbs and `reconcile` require that Repo. Composite
+`status` and `ls` consume an optional Repo and retain typed-absent Git sections
+when discovery finds none. `call --contract`, `fork` Dispatch inheritance, and
+`wait` or `kill` with a complete `kei/...` selector require Repo. Fleet reads
+may consume the optional Repo only for public Dispatch association. Task,
+Settings, install, Contract-free call, and non-Contract catalogs do not consume
+Repo. An unused explicit `--repo` is a typed usage refusal.
+
+The CLI uses only public `Repo`, `Keiyaku`, and `Delivery` values. No package
+operation resolves a path or reads the working directory again.
+
+The parser performs argv lexing and syntax only. It extracts the two global path inputs,
 then recognizes command words, an optional contract positional, flags, and a final `-`; it
 checks arity, missing values, duplicates, unknown flags, and mutual exclusion.
 It emits pure parsed data without reading Git, folding state, resolving actors,
@@ -101,7 +108,7 @@ reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
 install <codex|claude|opencode|pi> [--json]
        install --all [--json]
-call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -
+call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -
 wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]
 tell <aku/...|@alias> [--interrupt] [--json] -
 history <aku/...|@alias> [--before <index> | --since <index> | --last] [--json]
@@ -224,10 +231,9 @@ handle from the invocation Repo, and asks the package-root call to publish
 Dispatch after birth. It is not a lifecycle gate and does not accept an
 omitted or `@` Contract selector. `--alias` accepts the sole `@name` grammar and
 asks that same call to move the world-local Alias after any Dispatch succeeds.
-Both flags are optional. `--workdir` selects the immutable summon seat and is
-resolved to an absolute path against the invocation cwd at the CLI boundary;
-an absolute value remains unchanged, while omission uses the
-invocation cwd. Call waits on the born Akuma by default and returns the public
+Both flags are optional. The canonical invocation cwd is the immutable execution
+cwd supplied to the public call; the CLI has no separate execution-cwd option.
+Call waits on the born Akuma by default and returns the public
 status carrier when it stops running or after five minutes. `--wait` explicitly
 selects that default mode, while `--timeout` replaces the five-minute duration.
 `-d` and `--detach` are identical and return after birth plus Dispatch and Alias

@@ -44,8 +44,8 @@ Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.
 `cwd` is the optional execution cwd and defaults to that world for direct
-library calls. The CLI always supplies its invocation cwd or the explicit
-`--workdir` override. `mode` defaults to `"wait"`; wait mode observes the born handle
+library calls. The CLI always supplies its canonical invocation cwd and has no
+separate execution-cwd option. `mode` defaults to `"wait"`; wait mode observes the born handle
 until it stops running or `timeoutMs`, which defaults to 300,000 milliseconds.
 Detach mode returns after the post-birth integration stages and rejects a
 supplied `timeoutMs` as contradictory caller input. `archetype` remains the TypeScript input name for

@@ -11,7 +11,7 @@ An Akuma is a durable callable worker projection. Its complete id is
 ## Choose A Verb
 
 ```bash
-keiyaku -C <repo> call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -
+keiyaku -C <cwd> call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -
 keiyaku -C <repo> wait <aku/...> [--timeout <duration>]
 keiyaku -C <repo> tell <aku/...> -
 keiyaku -C <repo> tell <aku/...> --interrupt -
@@ -21,7 +21,9 @@ keiyaku -C <repo> kill <aku/...>
 ```
 
 `call` starts from an Archetype, requires a final stdin body, and waits up to
-five minutes by default. Use `-d` or `--detach` to return after birth. `tell` continues
+five minutes by default. Its execution cwd is exactly `-C` (or the process cwd
+when omitted). Use `--repo <path>` only with a Contract or Dispatch reader that
+must use a different Git repository. Use `-d` or `--detach` to return after birth. `tell` continues
 the same projection, including after it has answered. `fork` starts a child
 from one exact retained answered-turn coordinate and leaves the source alone.
 `tell --interrupt` puts down the current Body synchronously, then records the

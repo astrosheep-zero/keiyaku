@@ -10,7 +10,6 @@ export type ParsedAkumaCommand = Output & (
   | Readonly<{
       command: "call";
       archetype: string;
-      workdir?: string;
       contract?: string;
       alias?: AkumaAlias;
       mode: "wait" | "detach";
@@ -40,13 +39,12 @@ const AKUMA_COMMAND_SPECS = {
     flags: {
       contract: "value",
       alias: "value",
-      workdir: "value",
       wait: "boolean",
       timeout: "value",
       detach: "boolean",
       json: "boolean",
     },
-    usage: "call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -",
+    usage: "call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -",
     purpose: "Call an Akuma from an Archetype and stdin body.",
   },
   wait: {
@@ -270,7 +268,6 @@ function parseCall(
     archetype: positionals[0]!,
     ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
     ...(alias === undefined ? {} : { alias }),
-    ...(typeof flags.workdir === "string" ? { workdir: flags.workdir } : {}),
     mode,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     output,

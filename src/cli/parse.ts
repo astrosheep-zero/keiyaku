@@ -22,7 +22,7 @@ export { CliUsageError } from "./usage.js";
 
 export type { Command };
 
-const ROOT_USAGE = "usage: keiyaku [-C <path>] <command> [<contract>|@<contract>] [--flag ...] [-]";
+const ROOT_USAGE = "usage: keiyaku [-C <path>] [--repo <path>] <command> [<contract>|@<contract>] [--flag ...] [-]";
 
 export function renderRootHelp(): string {
   return [
@@ -30,6 +30,7 @@ export function renderRootHelp(): string {
     "",
     "global options:",
     "  -C, --cwd <path>  Set the invocation working directory.",
+    "  --repo <path>     Select the Git repository coordinate.",
     "",
     "commands:",
     ...Object.values(CONTRACT_COMMAND_SPECS).flatMap((spec) => [`  ${spec.usage}`, `    ${spec.purpose}`]),
@@ -135,7 +136,7 @@ export type CliHelpCoordinate =
   | Readonly<{ kind: "install" }>
   | Readonly<{ kind: "akuma"; action: AkumaAction }>;
 
-export type ParsedExecution = Readonly<{ cwd?: string; command: ParsedCommand }>;
+export type ParsedExecution = Readonly<{ cwd?: string; repo?: string; command: ParsedCommand }>;
 export type ParsedInvocation = ParsedExecution | Readonly<{ help: CliHelpCoordinate }>;
 
 function optionalFlag(flags: Readonly<Record<string, string | true | readonly string[]>>, name: string): string | undefined {
@@ -350,27 +351,38 @@ function parseLs(parts: ParsedParts): ParsedLs {
   }
 }
 
-function invocationOptions(argv: readonly string[]): Readonly<{ cwd?: string; commandArgv: readonly string[] }> {
+function invocationOptions(argv: readonly string[]): Readonly<{ cwd?: string; repo?: string; commandArgv: readonly string[] }> {
   let cwd: string | undefined;
+  let repo: string | undefined;
   let stdinSeen = false;
   const commandArgv: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!;
-    if (token !== "-C" && token !== "--cwd") {
+    if (token !== "-C" && token !== "--cwd" && token !== "--repo") {
       commandArgv.push(token);
       if (token === "-") stdinSeen = true;
       continue;
     }
     if (stdinSeen) throw new CliUsageError("stdin marker '-' must be the final argument", renderRootHelp());
-    if (cwd !== undefined) throw new CliUsageError("-C/--cwd may appear only once", renderRootHelp());
+    if (token === "--repo" && repo !== undefined) {
+      throw new CliUsageError("--repo may appear only once", renderRootHelp());
+    }
+    if (token !== "--repo" && cwd !== undefined) {
+      throw new CliUsageError("-C/--cwd may appear only once", renderRootHelp());
+    }
     const value = argv[index + 1];
     if (value === undefined || value === "-" || value.startsWith("-")) {
       throw new CliUsageError(`${token} requires a path`, renderRootHelp());
     }
-    cwd = value;
+    if (token === "--repo") repo = value;
+    else cwd = value;
     index += 1;
   }
-  return { ...(cwd === undefined ? {} : { cwd }), commandArgv };
+  return {
+    ...(cwd === undefined ? {} : { cwd }),
+    ...(repo === undefined ? {} : { repo }),
+    commandArgv,
+  };
 }
 
 function helpCoordinate(argv: readonly string[]): CliHelpCoordinate | null {
@@ -444,6 +456,7 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
     : undefined;
   return {
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+    ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
     command: task ?? akuma ?? install ?? parseCommand(scanArgv(invocation.commandArgv)),
   };
 }

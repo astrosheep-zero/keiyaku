@@ -15,9 +15,9 @@ import { akumaExitCode, akumaJsonValue, renderAkumaJson, renderAkumaText } from 
 import { displayColumns } from "../src/cli/render/terminal.js";
 
 test("Akuma CLI parses root verbs without the removed namespace", () => {
-  assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "--workdir", "/work", "-"]), {
+  assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "-"]), {
     cwd: "/world",
-    command: { command: "call", archetype: "claude", workdir: "/work", mode: "wait", output: "text" },
+    command: { command: "call", archetype: "claude", mode: "wait", output: "text" },
   });
   assert.deepEqual(parseArgv(["call", "claude", "--contract", "kei/delivery", "--alias", "@review", "-d", "-"]), {
     command: {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { moveAlias, resolveAlias } from "../src/alias/index.js";
@@ -121,17 +121,19 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     const bound = await Keiyaku.bind({ repo, markdown: markdown("Akuma dispatch"), workspace: "here" });
     const owner = (await bound.keiyaku.state()).id;
     const alias = parseAkumaAlias("@worker");
+    const executionCwd = join(raw.path, "nested-worktree");
+    mkdirSync(executionCwd);
     const invoked = await invoke(parseArgv([
       "-C",
-      raw.path,
+      executionCwd,
       "call",
       "worker",
+      "--repo",
+      "..",
       "--contract",
       owner,
       "--alias",
       alias,
-      "--workdir",
-      "nested-worktree",
       "-",
     ]), {
       environment: { ...process.env, KEIYAKU_HOME: configured.home },
@@ -152,7 +154,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.equal(associated.observation.kind, "observed");
     assert.equal(
       readSoul(pathsForAkuId(world, associated.akuma))?.cwd,
-      join(world, "nested-worktree"),
+      realpathSync(executionCwd),
     );
 
     writeFileSync(join(raw.path, ".keiyaku", "akuma", "alias.json"), "broken\n");
