@@ -259,7 +259,10 @@ mtime is never read.
 input is a typed expression tree, never a shell string. The predicate fields
 are `state`, `priority`, `title`, `id`, `parent`, recursive `under`, `needs`,
 reverse `blocks`, `ready`, `blocked`, `created`, and `updated`; boolean nodes
-are `and`, `or`, and `not`. The evaluator rejects unknown fields, incompatible
+are `and`, `or`, and `not`. For a candidate row `R`, `blocks=X` is true if and
+only if `X` is in `R.blocks`, equivalently if and only if `R.id` is in
+`X.needs`; `blocks!=X` is only the negation of this condition. The evaluator
+rejects unknown fields, incompatible
 operators, malformed TaskIds, and invalid timestamps before reading authority.
 It returns the same bounded page shape as the named views: `rows`, complete
 `total`, `returned`, and `truncated`. Filtering precedes limiting, and sorting
