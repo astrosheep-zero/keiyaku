@@ -100,7 +100,8 @@ function renderMiddleEllipsis(first: string, text: string, suffix: string, colum
   const remaining = columns - prefixWidth;
   const suffixWidth = displayColumns(suffix);
   const withSuffix = remaining - suffixWidth;
-  const showSuffix = suffix.length > 0 && withSuffix >= 3;
+  // `$ ` + one head char + ellipsis + tail; cue and ellipsis alone are not a subject.
+  const showSuffix = suffix.length > 0 && withSuffix >= 6;
   return `${first}${truncateMiddleDisplayText(text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`;
 }
 

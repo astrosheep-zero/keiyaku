@@ -8,6 +8,7 @@ import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-age
 import * as acp from "@agentclientprotocol/sdk";
 import {
   AGENT_EVENT_TEXT_LIMIT,
+  AgentEventChannel,
   decodeAgentEvent,
   encodeAgentEvent,
   noteEvent,
@@ -20,15 +21,18 @@ import {
   CLAUDE_SYSTEM_DISPOSITIONS,
   createClaudeProvider,
 } from "../src/akuma/providers/claude/index.js";
+import { emitClaudeMessage } from "../src/akuma/providers/claude/events.js";
 import {
   CODEX_ITEM_DISPOSITIONS,
   CODEX_NOTIFICATION_DISPOSITIONS,
   createCodexAppServerProvider,
 } from "../src/akuma/providers/codex-app-server/index.js";
+import { codexNotificationResult } from "../src/akuma/providers/codex-app-server/events.js";
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
 import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/events.js";
 import type { OpencodeSdkLoader, OpencodeSdkSession } from "../src/akuma/providers/opencode-sdk/session.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
+import { translatePiEvent } from "../src/akuma/providers/pi/events.js";
 import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
 import { createGrokBuildProvider } from "../src/akuma/providers/grok-build/index.js";
 import { resolveProviderExecution } from "../src/akuma/providers/index.js";
@@ -1362,7 +1366,12 @@ test("provider activity codec round trips every closed event and tool-call arm",
     { type: "unknown", kind: "future/event" },
     { type: "tool", phase: "started", id: "run", name: "Bash", call: { kind: "run", command: "npm test" } },
     { type: "tool", phase: "completed", id: "read", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } },
+    { type: "tool", phase: "started", id: "ranged", name: "Read", call: { kind: "read", path: "src/a.ts", offset: 10, limit: 20 } },
     { type: "tool", phase: "started", id: "search", name: "Search", call: { kind: "search", query: "TODO" } },
+    {
+      type: "tool", phase: "started", id: "scoped", name: "Grep",
+      call: { kind: "search", query: "TODO", scope: "content", path: "src", glob: "*.ts" },
+    },
     { type: "tool", phase: "completed", id: "change", name: "Edit", call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] }, result: { status: "ok" } },
     { type: "tool", phase: "started", id: "other", name: "MCP", call: { kind: "other", display: "server/tool" } },
   ];
@@ -1383,6 +1392,178 @@ test("provider activity codec round trips every closed event and tool-call arm",
     () => decodeAgentEvent({ type: "session", coordinate: { sessionFile: "/x", extra: true } }),
     /invalid event shape/u,
   );
+  assert.deepEqual(
+    decodeAgentEvent({
+      type: "tool", phase: "started", id: "old-read", name: "Read",
+      call: { kind: "read", path: "README.md" },
+    }),
+    { type: "tool", phase: "started", id: "old-read", name: "Read", call: { kind: "read", path: "README.md" } },
+  );
+  assert.deepEqual(
+    decodeAgentEvent({
+      type: "tool", phase: "started", id: "old-search", name: "Search",
+      call: { kind: "search", query: "TODO" },
+    }),
+    { type: "tool", phase: "started", id: "old-search", name: "Search", call: { kind: "search", query: "TODO" } },
+  );
+  assert.throws(
+    () => decodeAgentEvent({
+      type: "tool", phase: "started", id: "bad-offset", name: "Read",
+      call: { kind: "read", path: "README.md", offset: 0 },
+    }),
+    /invalid event shape/u,
+  );
+  assert.throws(
+    () => decodeAgentEvent({
+      type: "tool", phase: "started", id: "bad-scope", name: "Search",
+      call: { kind: "search", query: "TODO", scope: "workspace" },
+    }),
+    /invalid event shape/u,
+  );
+});
+
+class CollectingChannel extends AgentEventChannel {
+  readonly collected: AgentEvent[] = [];
+  override emit(event: AgentEvent): void {
+    this.collected.push(event);
+  }
+}
+
+function claudeToolCall(name: string, input: unknown): Extract<AgentEvent, { type: "tool" }>["call"] {
+  const events = new CollectingChannel();
+  emitClaudeMessage({
+    type: "assistant",
+    uuid: "assistant-tools",
+    session_id: "session-tools",
+    parent_tool_use_id: null,
+    message: { content: [{ type: "tool_use", id: "tool-1", name, input }] },
+  } as unknown as SDKMessage, events, { tools: new Map() });
+  const event = events.collected[0];
+  assert.equal(event?.type, "tool");
+  return event.type === "tool" ? event.call : { kind: "other", display: "missing" };
+}
+
+function piToolCall(name: string, args: unknown): Extract<AgentEvent, { type: "tool" }>["call"] {
+  const [event] = translatePiEvent({
+    type: "tool_execution_start",
+    toolCallId: "tool-1",
+    toolName: name,
+    args,
+  } as never, { answer: "", assistantSeen: false, tools: new Map() });
+  assert.equal(event?.type, "tool");
+  return event.type === "tool" ? event.call : { kind: "other", display: "missing" };
+}
+
+function opencodeToolEvent(name: string, input: unknown): Extract<AgentEvent, { type: "tool" }> | undefined {
+  const observed: AgentEvent[] = [];
+  mapEvent({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "part-1", sessionID: "session-1", type: "tool", callID: "tool-1", tool: name,
+        state: { status: "running", input },
+      },
+    },
+  }, { emit(event) { observed.push(event); } }, createEventState("session-1"));
+  return observed[0]?.type === "tool" ? observed[0] : undefined;
+}
+
+function opencodeToolCall(name: string, input: unknown): Extract<AgentEvent, { type: "tool" }>["call"] {
+  const event = opencodeToolEvent(name, input);
+  assert.equal(event?.type, "tool");
+  return event?.type === "tool" ? event.call : { kind: "other", display: "missing" };
+}
+
+function collectCodexTools(...items: readonly Readonly<Record<string, unknown>>[]): readonly Extract<AgentEvent, { type: "tool" }>[] {
+  const events = new CollectingChannel();
+  const state = { settled: false, tools: new Map() };
+  for (const item of items) {
+    codexNotificationResult({ method: "item/started", params: { item } }, state, events);
+  }
+  return events.collected.flatMap((event) => event.type === "tool" ? [event] : []);
+}
+
+test("Claude, Pi, OpenCode, and Codex keep distinct native read ranges and search facts", () => {
+  const claudeNear = claudeToolCall("Read", { file_path: "src/a.ts", offset: 10, limit: 20 });
+  const claudeFar = claudeToolCall("Read", { file_path: "src/a.ts", offset: 80, limit: 5 });
+  assert.deepEqual(claudeNear, { kind: "read", path: "src/a.ts", offset: 10, limit: 20 });
+  assert.deepEqual(claudeFar, { kind: "read", path: "src/a.ts", offset: 80, limit: 5 });
+  assert.notDeepEqual(claudeNear, claudeFar);
+  assert.deepEqual(
+    claudeToolCall("Read", { file_path: "src/a.ts", offset: 0, limit: -3 }),
+    { kind: "read", path: "src/a.ts" },
+  );
+  assert.deepEqual(
+    claudeToolCall("Grep", { pattern: "TODO", path: "src", glob: "*.ts" }),
+    { kind: "search", query: "TODO", scope: "content", path: "src", glob: "*.ts" },
+  );
+  assert.deepEqual(
+    claudeToolCall("Glob", { pattern: "*.md", path: "docs", glob: "ignored" }),
+    { kind: "search", query: "*.md", scope: "files", path: "docs" },
+  );
+  assert.deepEqual(
+    claudeToolCall("WebSearch", { query: "keiyaku", path: "ignored" }),
+    { kind: "search", query: "keiyaku", scope: "web" },
+  );
+  assert.deepEqual(
+    claudeToolCall("DatabaseSearch", { query: "TODO", path: "src" }),
+    { kind: "other", display: "DatabaseSearch" },
+  );
+
+  assert.deepEqual(
+    piToolCall("read", { path: "src/a.ts", offset: 4, limit: 8 }),
+    { kind: "read", path: "src/a.ts", offset: 4, limit: 8 },
+  );
+  assert.deepEqual(
+    piToolCall("grep", { pattern: "TODO", path: "src", glob: "*.ts" }),
+    { kind: "search", query: "TODO", scope: "content", path: "src", glob: "*.ts" },
+  );
+  assert.deepEqual(
+    piToolCall("find", { pattern: "*.md", path: "docs", glob: "ignored" }),
+    { kind: "search", query: "*.md", scope: "files", path: "docs" },
+  );
+
+  const opencodeNear = opencodeToolCall("read", { filePath: "src/a.ts", offset: 2, limit: 3 });
+  const opencodeFar = opencodeToolCall("read", { path: "src/a.ts", offset: 40 });
+  assert.deepEqual(opencodeNear, { kind: "read", path: "src/a.ts", offset: 2, limit: 3 });
+  assert.deepEqual(opencodeFar, { kind: "read", path: "src/a.ts", offset: 40 });
+  assert.notDeepEqual(opencodeNear, opencodeFar);
+  assert.deepEqual(
+    opencodeToolCall("grep", { pattern: "TODO", path: "src", glob: "*.ts" }),
+    { kind: "search", query: "TODO", scope: "content", path: "src", glob: "*.ts" },
+  );
+  assert.deepEqual(
+    opencodeToolCall("glob", { pattern: "*.md", path: "docs", glob: "ignored" }),
+    { kind: "search", query: "*.md", scope: "files", path: "docs" },
+  );
+  assert.deepEqual(
+    opencodeToolCall("search", { query: "TODO" }),
+    { kind: "search", query: "TODO", scope: "content" },
+  );
+  assert.equal(opencodeToolEvent("read", {}), undefined);
+  assert.equal(opencodeToolEvent("grep", {}), undefined);
+  assert.equal(opencodeToolEvent("search", { path: "src" }), undefined);
+
+  const [web, missing, fuzzy] = collectCodexTools(
+    { id: "web-1", type: "webSearch", query: "keiyaku docs" },
+    { id: "web-2", type: "webSearch" },
+    { id: "fuzzy-1", type: "fuzzyFileSearch", query: "src" },
+  );
+  assert.deepEqual(web?.call, { kind: "search", query: "keiyaku docs", scope: "web" });
+  assert.deepEqual(missing?.call, { kind: "other", display: "web search" });
+  assert.equal(fuzzy, undefined);
+
+  const content = { type: "tool" as const, phase: "started" as const, id: "s1", name: "Grep",
+    call: { kind: "search" as const, query: "TODO", scope: "content" as const, path: "src", glob: "*.ts" } };
+  const files = { type: "tool" as const, phase: "started" as const, id: "s2", name: "Glob",
+    call: { kind: "search" as const, query: "*.md", scope: "files" as const, path: "docs" } };
+  const webSearch = { type: "tool" as const, phase: "started" as const, id: "s3", name: "WebSearch",
+    call: { kind: "search" as const, query: "keiyaku", scope: "web" as const } };
+  assert.notDeepEqual(content.call, files.call);
+  assert.notDeepEqual(files.call, webSearch.call);
+  for (const event of [content, files, webSearch]) {
+    assert.deepEqual(decodeAgentEvent(encodeAgentEvent(event)), event);
+  }
 });
 
 function fakeCodex(

@@ -1,4 +1,5 @@
 import type { ActivityRow, SnapshotRow } from "../../akuma/index.js";
+import { normalizeToolCommand } from "./akuma-tool-command.js";
 
 type ToolRow = Extract<ActivityRow | SnapshotRow, { kind: "tool" }>;
 
@@ -35,6 +36,30 @@ function result(row: ToolRow): string | undefined {
   return parts.length === 0 ? undefined : parts.join(" · ");
 }
 
+function readText(call: Extract<ToolRow["call"], { kind: "read" }>): string {
+  const path = oneLine(call.path);
+  if (call.offset !== undefined && call.limit !== undefined) {
+    return `${path} · L${call.offset}-${call.offset + call.limit - 1}`;
+  }
+  if (call.offset !== undefined) return `${path} · from L${call.offset}`;
+  if (call.limit !== undefined) return `${path} · ${call.limit} lines`;
+  return path;
+}
+
+function searchLabel(scope: Extract<ToolRow["call"], { kind: "search" }>["scope"]): string {
+  if (scope === "files") return "find";
+  if (scope === "web") return "web";
+  return "search";
+}
+
+function searchText(call: Extract<ToolRow["call"], { kind: "search" }>): string {
+  return [
+    oneLine(call.query),
+    ...(call.path === undefined ? [] : [oneLine(call.path)]),
+    ...(call.glob === undefined ? [] : [oneLine(call.glob)]),
+  ].join(" · ");
+}
+
 function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>): ToolRepr {
   const first = call.changes[0];
   if (first === undefined) return { label: "edit", text: "files" };
@@ -60,9 +85,9 @@ function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>): Too
 export function toolRepr(row: ToolRow): ToolRepr {
   let core: ToolRepr;
   switch (row.call.kind) {
-    case "run": core = { label: "run", text: `$ ${oneLine(row.call.command)}`, overflow: "middle-ellipsis" }; break;
-    case "read": core = { label: "read", text: oneLine(row.call.path) }; break;
-    case "search": core = { label: "search", text: oneLine(row.call.query) }; break;
+    case "run": core = { label: "run", text: `$ ${oneLine(normalizeToolCommand(row.call.command))}`, overflow: "middle-ellipsis" }; break;
+    case "read": core = { label: "read", text: readText(row.call) }; break;
+    case "search": core = { label: searchLabel(row.call.scope), text: searchText(row.call) }; break;
     case "fileChange": core = fileChange(row.call); break;
     case "other": core = { label: "use", text: oneLine(row.call.display || row.name) }; break;
   }

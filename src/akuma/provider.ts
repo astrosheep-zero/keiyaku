@@ -8,10 +8,18 @@ export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
 export const AGENT_EVENT_TEXT_LIMIT = 16_384;
 export const AGENT_THOUGHT_TEXT_LIMIT = 4_000;
 
+export type SearchScope = "content" | "files" | "web";
+
 export type ToolCall =
   | Readonly<{ kind: "run"; command: string }>
-  | Readonly<{ kind: "read"; path: string }>
-  | Readonly<{ kind: "search"; query: string }>
+  | Readonly<{ kind: "read"; path: string; offset?: number; limit?: number }>
+  | Readonly<{
+      kind: "search";
+      query: string;
+      scope?: SearchScope;
+      path?: string;
+      glob?: string;
+    }>
   | Readonly<{
       kind: "fileChange";
       changes: readonly Readonly<{
@@ -68,11 +76,54 @@ function eventType(value: unknown): value is AgentEvent["type"] {
   return typeof value === "string" && Object.hasOwn(AGENT_EVENT_TYPES, value);
 }
 
+const SEARCH_SCOPES = {
+  content: true,
+  files: true,
+  web: true,
+} as const satisfies Readonly<Record<SearchScope, true>>;
+
+function decodePositiveLine(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : null;
+}
+
+function decodeOptionalText(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "string" ? value : null;
+}
+
+function decodeSearchScope(value: unknown): SearchScope | null | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "string" && Object.hasOwn(SEARCH_SCOPES, value) ? value as SearchScope : null;
+}
+
 function decodeToolCall(value: unknown): ToolCall | null {
   const call = object(value);
   if (call?.kind === "run" && typeof call.command === "string") return { kind: "run", command: call.command };
-  if (call?.kind === "read" && typeof call.path === "string") return { kind: "read", path: call.path };
-  if (call?.kind === "search" && typeof call.query === "string") return { kind: "search", query: call.query };
+  if (call?.kind === "read" && typeof call.path === "string") {
+    const offset = decodePositiveLine(call.offset);
+    const limit = decodePositiveLine(call.limit);
+    if (offset === null || limit === null) return null;
+    return {
+      kind: "read",
+      path: call.path,
+      ...(offset === undefined ? {} : { offset }),
+      ...(limit === undefined ? {} : { limit }),
+    };
+  }
+  if (call?.kind === "search" && typeof call.query === "string") {
+    const scope = decodeSearchScope(call.scope);
+    const path = decodeOptionalText(call.path);
+    const glob = decodeOptionalText(call.glob);
+    if (scope === null || path === null || glob === null) return null;
+    return {
+      kind: "search",
+      query: call.query,
+      ...(scope === undefined ? {} : { scope }),
+      ...(path === undefined ? {} : { path }),
+      ...(glob === undefined ? {} : { glob }),
+    };
+  }
   if (call?.kind === "fileChange" && Array.isArray(call.changes)) {
     const changes = call.changes.map((value) => {
       const change = object(value);
@@ -152,8 +203,27 @@ export function decodeAgentEvent(value: unknown): AgentEvent {
 function boundedToolCall(call: ToolCall): Readonly<{ value: ToolCall; truncated: boolean }> {
   switch (call.kind) {
     case "run": return { value: { kind: call.kind, command: boundedEventText(call.command) }, truncated: call.command.length > AGENT_EVENT_TEXT_LIMIT };
-    case "read": return { value: { kind: call.kind, path: boundedEventText(call.path) }, truncated: call.path.length > AGENT_EVENT_TEXT_LIMIT };
-    case "search": return { value: { kind: call.kind, query: boundedEventText(call.query) }, truncated: call.query.length > AGENT_EVENT_TEXT_LIMIT };
+    case "read": return {
+      value: {
+        kind: call.kind,
+        path: boundedEventText(call.path),
+        ...(call.offset === undefined ? {} : { offset: call.offset }),
+        ...(call.limit === undefined ? {} : { limit: call.limit }),
+      },
+      truncated: call.path.length > AGENT_EVENT_TEXT_LIMIT,
+    };
+    case "search": return {
+      value: {
+        kind: call.kind,
+        query: boundedEventText(call.query),
+        ...(call.scope === undefined ? {} : { scope: call.scope }),
+        ...(call.path === undefined ? {} : { path: boundedEventText(call.path) }),
+        ...(call.glob === undefined ? {} : { glob: boundedEventText(call.glob) }),
+      },
+      truncated: call.query.length > AGENT_EVENT_TEXT_LIMIT
+        || (call.path !== undefined && call.path.length > AGENT_EVENT_TEXT_LIMIT)
+        || (call.glob !== undefined && call.glob.length > AGENT_EVENT_TEXT_LIMIT),
+    };
     case "fileChange": return {
       value: {
         kind: call.kind,

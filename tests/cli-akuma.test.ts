@@ -13,8 +13,11 @@ import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { akumaExitCode, akumaJsonValue, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
+import { toolRepr } from "../src/cli/render/akuma-tool.js";
+import { normalizeToolCommand } from "../src/cli/render/akuma-tool-command.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { makeGitRepository } from "./support/git.js";
+import type { ActivityRow } from "../src/akuma/index.js";
 
 test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "-"]), {
@@ -498,6 +501,89 @@ test("Akuma text renders only a none readonly restraint as an existing ! line", 
   assert.ok(!absent.includes("! "));
 });
 
+function toolRow(
+  call: Extract<ActivityRow, { kind: "tool" }>["call"],
+  state: Extract<ActivityRow, { kind: "tool" }>["state"] = { status: "ok" },
+  extra: Partial<Extract<ActivityRow, { kind: "tool" }>> = {},
+): Extract<ActivityRow, { kind: "tool" }> {
+  return {
+    kind: "tool",
+    sequence: 1,
+    turnSequence: 1,
+    at: "2026-08-10T16:42:00.000Z",
+    name: "Tool",
+    call,
+    state,
+    ...extra,
+  };
+}
+
+test("ToolRepr presents honest read ranges, search facts, outcomes, and transport unwrap", () => {
+  assert.deepEqual(toolRepr(toolRow({ kind: "read", path: "src/a.ts", offset: 10, limit: 20 })), {
+    label: "read",
+    text: "src/a.ts · L10-29 — ok",
+  });
+  assert.equal(toolRepr(toolRow({ kind: "read", path: "src/a.ts", offset: 10 })).text, "src/a.ts · from L10 — ok");
+  assert.equal(toolRepr(toolRow({ kind: "read", path: "src/a.ts", limit: 7 })).text, "src/a.ts · 7 lines — ok");
+  assert.equal(toolRepr(toolRow({ kind: "read", path: "src/a.ts" })).text, "src/a.ts — ok");
+  assert.deepEqual(
+    toolRepr(toolRow({ kind: "search", query: "TODO", scope: "content", path: "src", glob: "*.ts" })),
+    { label: "search", text: "TODO · src · *.ts — ok" },
+  );
+  assert.deepEqual(
+    toolRepr(toolRow({ kind: "search", query: "*.md", scope: "files", path: "docs" })),
+    { label: "find", text: "*.md · docs — ok" },
+  );
+  assert.deepEqual(
+    toolRepr(toolRow({ kind: "search", query: "keiyaku", scope: "web" })),
+    { label: "web", text: "keiyaku — ok" },
+  );
+  assert.deepEqual(toolRepr(toolRow({ kind: "search", query: "TODO" })), {
+    label: "search",
+    text: "TODO — ok",
+  });
+
+  assert.deepEqual(toolRepr(toolRow({ kind: "search", query: "active" }, "active")), {
+    label: "search",
+    text: "active",
+  });
+  assert.deepEqual(toolRepr(toolRow({ kind: "search", query: "unsettled" }, "unsettled")), {
+    label: "search",
+    text: "unsettled",
+  });
+
+  const completedRun = toolRepr(toolRow(
+    { kind: "run", command: "bash -lc 'npm test'" },
+    { status: "ok", exitCode: 0 },
+    { durationMs: 1_500 },
+  ));
+  assert.equal(completedRun.label, "run");
+  assert.equal(completedRun.text, "$ npm test");
+  assert.equal(completedRun.overflow, "middle-ellipsis");
+  assert.equal(completedRun.suffix, " — 2s · ok");
+
+  assert.equal(
+    toolRepr(toolRow({ kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", diffstat: { added: 3, removed: 1 } }] })).text,
+    "src/a.ts — +3 -1",
+  );
+  assert.equal(
+    toolRepr(toolRow({
+      kind: "fileChange",
+      changes: [
+        { op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 0 } },
+        { op: "add", path: "src/b.ts", diffstat: { added: 2, removed: 0 } },
+      ],
+    })).text,
+    "2 files · src/a.ts ... — +3 -0",
+  );
+
+  assert.equal(normalizeToolCommand("bash -c 'rg TODO src'"), "rg TODO src");
+  assert.equal(normalizeToolCommand("/bin/zsh -lc \"git status\""), "git status");
+  assert.equal(normalizeToolCommand("pwsh -NoLogo -NoProfile -Command Get-ChildItem"), "Get-ChildItem");
+  assert.equal(normalizeToolCommand("bash -c 'echo hi' && true"), "bash -c 'echo hi' && true");
+  assert.equal(normalizeToolCommand("npm test"), "npm test");
+});
+
 test("Akuma history distinguishes open active tools from closed unsettled tools", () => {
   const akuma = "aku/worker/1234abcd" as const;
   const command = parseArgv(["history", akuma]).command;
@@ -681,7 +767,7 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
   assert.ok(displayColumns(combiningHead) <= 24);
   assert.match(combiningHead, /界́/u);
 
-  const narrowCompleted = runLine(renderAkumaText(command, {
+  const narrowCompletedText = renderAkumaText(command, {
     kind: "akuma",
     action: "status",
     status: { status: {
@@ -692,11 +778,35 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
         durationMs: 41_000,
       } }] },
     } },
-  }, { columns: 30, color: false }));
-  assert.ok(displayColumns(narrowCompleted) <= 30);
+  }, { columns: 30, color: false });
+  const narrowCompleted = runLine(narrowCompletedText);
+  for (const line of narrowCompletedText.split("\n")) {
+    assert.ok(displayColumns(line) <= 30);
+  }
   assert.match(narrowCompleted, /\$ npm t/u);
   assert.match(narrowCompleted, /….*\.json$/u);
-  assert.doesNotMatch(narrowCompleted, /exit 1/u);
+  assert.doesNotMatch(narrowCompleted, /exit 1|41s/u);
+
+  const shortSuccessText = renderAkumaText(command, {
+    kind: "akuma",
+    action: "status",
+    status: { status: {
+      ...status,
+      timeline: { ...status.timeline, entries: [{ kind: "row", row: {
+        ...status.timeline.entries[0]!.row,
+        state: { status: "ok", exitCode: 0 },
+        durationMs: 1_000,
+      } }] },
+    } },
+  }, { columns: 28, color: false });
+  const shortSuccess = runLine(shortSuccessText);
+  for (const line of shortSuccessText.split("\n")) {
+    assert.ok(displayColumns(line) <= 28);
+  }
+  assert.match(shortSuccess, /\$ npm/u);
+  assert.match(shortSuccess, /….*json/u);
+  assert.doesNotMatch(shortSuccess, /\$…/u);
+  assert.doesNotMatch(shortSuccess, /ok|1s/u);
 });
 
 test("Akuma follow remains outside the unsettled CLI vocabulary", () => {

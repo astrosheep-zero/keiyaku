@@ -352,10 +352,18 @@ fresh fallback or delete the coordinate.
 
 Tool presentation is one pure function. A completed run prints immutable
 duration and then `ok`, `exit <code>`, or `error`; an unfinished run omits the
-suffix. One file change prints its operation and path. Multiple changes print
+suffix. At narrow width the outcome is omitted before the command subject is
+lost. Conservative bash/zsh and PowerShell transport unwrapping is
+display-only and leaves an ambiguous command unchanged. A read prints its path
+and, when present, `L<start>-<end>`, `from L<start>`, or a positive line count.
+Search scope chooses the label: `search` for content or an absent scope,
+`find` for files, and `web` for web. The body is the query plus supplied path
+and glob only; the internal scope token is never printed.
+One file change prints its operation and path. Multiple changes print
 `edit <n> files · <representative-path> ...`; an aggregate `+<n> -<n>` appears
 only when every change has a diffstat. Missing optional provider facts shorten
-the row and never produce placeholders.
+the row and never produce placeholders. The renderer does not reconstruct
+provider payloads, classify shell commands, or look up cwd or repository paths.
 
 History pages retain the same public row order and unbounded row text, rendered
 through the shared timeline presentation without a current-life observation.

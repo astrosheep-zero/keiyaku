@@ -47,12 +47,37 @@ function hasTextContent(content: unknown): boolean {
   });
 }
 
+function positiveLine(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
+}
+
+function optionalText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
 function toolCall(name: string, args: unknown): ToolCall {
   const value = record(args) ?? {};
   if (name === "bash" && typeof value.command === "string") return { kind: "run", command: value.command };
-  if (name === "read" && typeof value.path === "string") return { kind: "read", path: value.path };
+  if (name === "read" && typeof value.path === "string") {
+    const offset = positiveLine(value.offset);
+    const limit = positiveLine(value.limit);
+    return {
+      kind: "read",
+      path: value.path,
+      ...(offset === undefined ? {} : { offset }),
+      ...(limit === undefined ? {} : { limit }),
+    };
+  }
   if ((name === "grep" || name === "find") && typeof (value.pattern ?? value.query) === "string") {
-    return { kind: "search", query: (value.pattern ?? value.query) as string };
+    const path = optionalText(value.path);
+    const glob = optionalText(value.glob);
+    return {
+      kind: "search",
+      query: (value.pattern ?? value.query) as string,
+      scope: name === "find" ? "files" : "content",
+      ...(path === undefined ? {} : { path }),
+      ...(name === "grep" && glob !== undefined ? { glob } : {}),
+    };
   }
   if ((name === "edit" || name === "write") && typeof value.path === "string") {
     return { kind: "fileChange", changes: [{ op: name === "write" ? "add" : "update", path: value.path }] };

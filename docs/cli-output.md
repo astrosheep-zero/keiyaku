@@ -129,8 +129,10 @@ ellipsis in the glyph column, and the gap counts sum to the typed `omitted`
 total. History retains its own cursor and loss metadata and does not
 reinterpret snapshot gaps. Text is clipped by terminal display width without
 splitting grapheme clusters. A `run` command remains one row and preserves
-recognizable head and tail when clipped; its outcome is shown only when space
-allows. The time gutter is five columns. The first visible event and the first
+recognizable head and tail when clipped; the completed outcome is omitted
+before the command subject is lost. A cue and ellipsis alone are not a
+subject. Every rendered line fits the requested display width. Display-only transport unwrapping does not change persisted command
+bytes or timeline layout. The time gutter is five columns. The first visible event and the first
 event whose displayed minute differs from the preceding visible event print
 `HH:MM`; additional events in the same minute leave those five columns blank.
 One space follows the gutter, then the semantic glyph, one space, then a fixed

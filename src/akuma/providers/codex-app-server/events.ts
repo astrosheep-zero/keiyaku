@@ -207,7 +207,10 @@ function itemToolCall(item: Readonly<Record<string, unknown>>, kind: string): To
     return path === undefined ? { kind: "other", display: "image view" } : { kind: "read", path };
   }
   if (kind === "webSearch") {
-    return { kind: "search", query: codexText(item.query) ?? "web search" };
+    const query = codexText(item.query);
+    return query === undefined
+      ? { kind: "other", display: "web search" }
+      : { kind: "search", query, scope: "web" };
   }
   if (kind === "fileChange") {
     const changes = itemChanges(item);

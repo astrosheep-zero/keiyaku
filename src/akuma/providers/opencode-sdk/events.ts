@@ -73,13 +73,39 @@ function diagnostic(value: unknown): string {
   const nested = object(data?.data);
   return text(nested?.message) ?? text(data?.message) ?? "OpenCode session failed";
 }
-function callFor(name: string, input: unknown): ToolCall {
+function positiveLine(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
+}
+
+function callFor(name: string, input: unknown): ToolCall | undefined {
   const value = object(input);
   const lower = name.toLowerCase();
   if (lower === "bash" || lower === "shell") return { kind: "run", command: text(value?.command) ?? lower };
-  if (lower === "read") return { kind: "read", path: text(value?.filePath) ?? text(value?.path) ?? "file" };
+  if (lower === "read") {
+    const path = text(value?.filePath) ?? text(value?.path);
+    if (path === undefined) return undefined;
+    const offset = positiveLine(value?.offset);
+    const limit = positiveLine(value?.limit);
+    return {
+      kind: "read",
+      path,
+      ...(offset === undefined ? {} : { offset }),
+      ...(limit === undefined ? {} : { limit }),
+    };
+  }
   if (lower === "grep" || lower === "glob" || lower === "search") {
-    return { kind: "search", query: text(value?.pattern) ?? text(value?.query) ?? lower };
+    const query = text(value?.pattern) ?? text(value?.query);
+    if (query === undefined) return undefined;
+    const path = text(value?.path) ?? text(value?.filePath);
+    const glob = text(value?.glob);
+    const scope = lower === "glob" ? "files" as const : "content" as const;
+    return {
+      kind: "search",
+      query,
+      scope,
+      ...(path === undefined ? {} : { path }),
+      ...(scope === "content" && glob !== undefined ? { glob } : {}),
+    };
   }
   return { kind: "other", display: name };
 }
@@ -112,13 +138,18 @@ function mapToolPart(part: Part, events: Emitter, state: State): void {
   if (id === undefined || name === undefined || toolState === undefined) return;
   if ((toolState.status === "pending" || toolState.status === "running")
     && !state.tools.has(id) && !state.completedTools.has(id)) {
-    const observed = { name, call: callFor(name, toolState.input) };
+    const call = callFor(name, toolState.input);
+    if (call === undefined) return;
+    const observed = { name, call };
     state.tools.set(id, observed);
     events.emit({ type: "tool", phase: "started", id, ...observed });
     return;
   }
   if ((toolState.status !== "completed" && toolState.status !== "error") || state.completedTools.has(id)) return;
-  const observed = state.tools.get(id) ?? { name, call: callFor(name, toolState.input) };
+  const started = state.tools.get(id);
+  const call = started?.call ?? callFor(name, toolState.input);
+  if (call === undefined) return;
+  const observed = started ?? { name, call };
   if (!state.tools.has(id)) {
     state.tools.set(id, observed);
     events.emit({ type: "tool", phase: "started", id, ...observed });

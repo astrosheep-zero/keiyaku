@@ -161,8 +161,8 @@ type AgentEvent =
 
 type ToolCall =
   | { kind: "run"; command: string }
-  | { kind: "read"; path: string }
-  | { kind: "search"; query: string }
+  | { kind: "read"; path: string; offset?: number; limit?: number }
+  | { kind: "search"; query: string; scope?: "content" | "files" | "web"; path?: string; glob?: string }
   | {
       kind: "fileChange";
       changes: readonly {
@@ -199,37 +199,40 @@ agent narration of at most 16,384 characters, never deltas or summaries. The
 complete answer is stored separately in `TurnFact` and is never truncated.
 `tool` preserves the provider's stable tool id, one started/completed lifecycle
 per use, one provider-neutral call shape, and the typed result disposition.
-A nonterminal native update after the start may refine adapter-local observation
-but never creates another typed event; independent ids remain concurrent, and
-reuse follows completion. A started event carries no result; a completed event
-requires one. Result `message` is a bounded diagnostic, never stdout, stderr,
-or a native result body. `thought` is one completed reasoning summary
-or block bounded at 4,000 characters, never raw thinking text or a delta stream.
-`note` is one bounded line for non-tool plan, todo, retry, warning, or refusal
-narration. Every other persisted activity text field, including tool names,
-calls, diagnostics, and unknown native names, is bounded at 16,384 characters.
-The provider codec is the sole persistence-bound judge; session coordinates and
-tool pairing ids are never truncated. `unknown` contains only the unmapped native kind or method name
-and never carries the native payload.
+A read may carry a positive 1-based `offset` and/or `limit`; a search may carry
+`scope` (`content`, `files`, or `web`) plus optional `path` and `glob` when the
+native provider supplies them. Absent or invalid optional facts stay omitted.
+Provider options, opaque results, domains, fuzzy-file-search notifications, and
+unknown fields stay outside `ToolCall`. A nonterminal native update after the
+start may refine adapter-local observation but never creates another typed
+event; independent ids remain concurrent, and reuse follows completion. A
+started event carries no result; a completed event requires one. Result
+`message` is a bounded diagnostic, never stdout, stderr, or a native result body.
+`thought` is one completed reasoning summary or block bounded at 4,000
+characters, never raw thinking text or a delta stream. `note` is one bounded
+line for non-tool plan, todo, retry, warning, or refusal narration. Every other
+persisted activity text field, including tool names, calls, diagnostics, and
+unknown native names, is bounded at 16,384 characters. The provider codec is
+the sole persistence-bound judge; session coordinates and tool pairing ids are
+never truncated. `unknown` contains only the unmapped native kind or method
+name and never carries the native payload.
 
 When that codec shortens any persisted narration, tool name, call, result, or
 unknown-kind text, the typed event carries `truncated: true`; ordinary shorter
 events omit the field. Adapters provide their complete translated value and do
 not pre-truncate it, so the codec remains the only judge and the activity fold
-can preserve exact truncation evidence for public rendering.
-
-Activity is persistent execution narration. Deleting retained activity changes
-history and recent snapshots, but never recovery, resume, fork, outcome,
-failure, or life. Complete answer bytes and fork coordinates remain
-authoritative only in `TurnFact`; a session row remains the sole resume
-authority.
+can preserve exact truncation evidence for public rendering. Activity is
+persistent execution narration. Deleting retained activity changes history and
+recent snapshots, but never recovery, resume, fork, outcome, failure, or life.
+Complete answer bytes and fork coordinates remain authoritative only in `TurnFact`;
+a session row remains the sole resume authority.
 
 Every adapter owns a total disposition of its native events. Known native
 kinds are mapped or explicitly dropped, and every unrecognized kind becomes
 `unknown`. Tool, command, and file-change lifecycle maps to `tool`; bounded
 completed reasoning summaries map to `thought`; plan or todo updates and
-retry, warning, and refusal map to `note`. A native completion
-must provide the matching typed tool result. Partial and delta streams, input
+retry, warning, and refusal map to `note`. A native completion must provide
+the matching typed tool result. Partial and delta streams, input
 echoes, tool-result bodies and command output streams, raw thinking and
 reasoning deltas, and token, cost, and rate-limit telemetry are dropped. The Claude adapter's SDK
 union disposition is compile-time exhaustive with a runtime unknown fallback.
@@ -319,13 +322,13 @@ tell and receives pending text in the next launch input.
 
 File-change adapters preserve every available native operation, path, and
 per-change diffstat. Missing optional facts make the public row shorter; an
-adapter never invents a diffstat. Codex app-server derives diffstat only from a
-native unified patch and preserves the native change operation. Claude derives
-add/update from its named write/edit tool and omits diffstat when the SDK does
-not provide one. A multi-file public summary prints an aggregate only when
-every represented change supplies a diffstat. No terminal file ledger, event
-bus, subscription fan-out, usage or cost arm, raw-provider passthrough,
-severity taxonomy, or native output body belongs in this boundary.
+adapter never invents a diffstat. Claude, Pi, and OpenCode capture only known native names and those fields.
+A similarly named unknown tool stays `other`; a missing read path or search
+query omits the fact. Codex web search keeps only query and drops fuzzy search. Codex derives diffstat only from a native unified patch.
+Claude derives add/update from write/edit and omits missing diffstat. A
+multi-file public summary aggregates only when every change has a diffstat. No
+terminal file ledger, event bus, usage or cost arm, raw-provider passthrough,
+or native output body belongs in this boundary.
 
 An answered `TurnResult.historyId`, when present, is the provider-owned fork
 point, not a generic result identifier. Completion does not require one and no
@@ -391,7 +394,6 @@ accepted submission with no receipt stream and makes no safe-point-consumption
 or provider-deduplication claim. Request failure or terminal observation before
 acknowledgement yields no acceptance, so the durable Tell remains available to
 the Body's successor path. Grok has no fork.
-
 No other `x.ai` method, passthrough, probe, capability registry, extension bag,
 or registration schema exists. New dialect behavior must first satisfy an
 existing provider-neutral capability or receive a separate product ruling.

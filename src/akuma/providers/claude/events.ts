@@ -71,6 +71,31 @@ function number(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function positiveLine(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
+}
+
+function readRange(value: Readonly<Record<string, unknown>>): Readonly<{ offset?: number; limit?: number }> {
+  const offset = positiveLine(value.offset);
+  const limit = positiveLine(value.limit);
+  return {
+    ...(offset === undefined ? {} : { offset }),
+    ...(limit === undefined ? {} : { limit }),
+  };
+}
+
+function contentSearch(value: Readonly<Record<string, unknown>>, query: string): Extract<ToolCall, { kind: "search" }> {
+  const path = nonblank(value.path);
+  const glob = nonblank(value.glob);
+  return {
+    kind: "search",
+    query,
+    scope: "content",
+    ...(path === undefined ? {} : { path }),
+    ...(glob === undefined ? {} : { glob }),
+  };
+}
+
 const CLAUDE_SYSTEM_NOTES = {
   api_retry: (message) => {
     const attempt = number(message.attempt);
@@ -103,14 +128,31 @@ const CLAUDE_SYSTEM_NOTES = {
 
 function toolCall(name: string, input: unknown): ToolCall {
   const value = object(input) ?? {};
-  const command = nonblank(value.command);
-  if (command !== undefined) return { kind: "run", command };
-  const path = nonblank(value.file_path) ?? nonblank(value.path);
-  if (/^(?:read|view)/iu.test(name) && path !== undefined) return { kind: "read", path };
-  const query = nonblank(value.query) ?? nonblank(value.pattern);
-  if (/search|grep|glob/iu.test(name) && query !== undefined) return { kind: "search", query };
-  if (/write/iu.test(name) && path !== undefined) return { kind: "fileChange", changes: [{ op: "add", path }] };
-  if (/edit|notebook/iu.test(name) && path !== undefined) return { kind: "fileChange", changes: [{ op: "update", path }] };
+  if (name === "Bash") {
+    const command = nonblank(value.command);
+    return command === undefined ? { kind: "other", display: name } : { kind: "run", command };
+  }
+  const path = nonblank(value.file_path) ?? (name === "Read" ? nonblank(value.path) : undefined);
+  if (name === "Read" && path !== undefined) return { kind: "read", path, ...readRange(value) };
+  if (name === "Grep") {
+    const query = nonblank(value.pattern) ?? nonblank(value.query);
+    if (query !== undefined) return contentSearch(value, query);
+  }
+  if (name === "Glob") {
+    const query = nonblank(value.pattern);
+    const globPath = nonblank(value.path);
+    if (query !== undefined) {
+      return { kind: "search", query, scope: "files", ...(globPath === undefined ? {} : { path: globPath }) };
+    }
+  }
+  if (name === "WebSearch") {
+    const query = nonblank(value.query);
+    if (query !== undefined) return { kind: "search", query, scope: "web" };
+  }
+  if (name === "Write" && path !== undefined) return { kind: "fileChange", changes: [{ op: "add", path }] };
+  if ((name === "Edit" || name === "NotebookEdit") && path !== undefined) {
+    return { kind: "fileChange", changes: [{ op: "update", path }] };
+  }
   return { kind: "other", display: name };
 }
 
