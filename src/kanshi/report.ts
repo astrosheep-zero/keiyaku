@@ -1,5 +1,5 @@
-import type { ContractBoard, ContractDisposition, SnapshotId, TaskId } from "../library/contract.js";
-import type { TaskRef, TaskStatusRow } from "../task/index.js";
+import type { ContractBoard, ContractDisposition } from "../library/contract.js";
+import type { TaskId, TaskRef, TaskRow } from "../task/index.js";
 import type { AkumaList, AkumaListRow, UnbornAkumaListRow } from "../akuma/index.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
@@ -12,7 +12,7 @@ export type Section<Value> =
 export type ContractEndpointObservation = ContractDisposition | "missing" | "unavailable";
 
 export type ContractHolderObservation =
-  | Readonly<{ kind: "held"; taskId: TaskId; disposition: "held" }>
+  | Readonly<{ kind: "held"; taskId: TaskId }>
   | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "unavailable" }>;
 
@@ -24,7 +24,7 @@ export type ContractKanshiBoard = Omit<ContractBoard, "rows"> & Readonly<{
   rows: readonly ContractKanshiRow[];
 }>;
 
-export type TaskKanshiRow = TaskStatusRow & Readonly<{
+export type TaskKanshiRow = TaskRow & Readonly<{
   contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
   blockers?: readonly TaskRef[];
 }>;
@@ -47,7 +47,6 @@ export type KanshiReport = Readonly<{
   root: WorldRoot | null;
   observedAt: string;
   branch: string | null;
-  state: SnapshotId | null;
   contracts: Section<ContractKanshiBoard>;
   tasks: Section<TaskKanshiWorld>;
   akuma: Section<AkumaKanshiWorld>;

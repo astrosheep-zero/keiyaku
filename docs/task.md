@@ -190,9 +190,9 @@ explicit selections; `scope: "world"` escapes the current namespace. `ready`
 and `blocked` have the same scope rule. Rows sort by priority then TaskId bytes
 and contain TaskId, priority, disposition, and title.
 Blocked rows add unresolved blocker references only. File mtime is never read.
-The Task owner can project the complete world rows and these blocker references
-from one board snapshot for a composite reader; this projection does not read
-TaskHolder or Contract authority.
+The Task operations owner can project the complete world rows and these blocker
+references from one board snapshot for a composite reader; this observation
+does not expose Task persistence or read TaskHolder or Contract authority.
 
 ## Compose
 

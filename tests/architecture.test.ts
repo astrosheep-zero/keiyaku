@@ -385,6 +385,14 @@ test("architecture policy uses specific zone before catch-all for Contract front
   assert.deepEqual(diagnostics, []);
 });
 
+test("architecture policy keeps Kanshi off Task persistence", () => {
+  const diagnostics = check({
+    "task/store.ts": "export function readBoard(): void {}",
+    "kanshi/read.ts": 'import { readBoard } from "../task/store.js"; export function read(): void { readBoard(); }',
+  });
+  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
+});
+
 test("architecture policy matches recursive wildcards between exact path segments", () => {
   const policy = {
     ...KEIYAKU_ARCHITECTURE_POLICY,

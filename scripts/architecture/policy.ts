@@ -482,7 +482,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     { source: "settlement/settle.ts", allow: [any("world.ts"), types("git/reconcile.ts"), types("git/repository.ts"), any("core/facts/types.ts"), any("settlement/holder.ts"), any("task/context.ts"), any("task/operations.ts"), types("task/identity.ts"), types("task/store.ts")] },
-    { source: "kanshi/read.ts", allow: [types("world.ts"), any("akuma/index.ts"), any("alias/index.ts", ["readAliases"]), any("dispatch/index.ts", ["readDispatches"]), any("kanshi/**"), any("library/contract.ts", ["listKeiyaku", "taskHolderProjectionForRepo", "ContractBoard", "ContractDisposition"]), any("library/repo.ts", ["NoGitWorldError", "Repo", "scopeForRepo"]), types("settlement/holder.ts", ["TaskHolderProjection"]), types("task/index.ts", ["TaskStatusRow"]), any("task/store.ts", ["readTaskStatusRows"])] },
+    { source: "kanshi/read.ts", allow: [types("world.ts"), any("akuma/index.ts"), any("alias/index.ts", ["readAliases"]), any("dispatch/index.ts", ["readDispatches"]), any("kanshi/**"), any("library/contract.ts", ["listKeiyaku", "taskHolderProjectionForRepo", "ContractBoard", "ContractDisposition"]), any("library/repo.ts", ["NoGitWorldError", "Repo", "scopeForRepo"]), any("task/operations.ts", ["observeTaskStatusRows"])] },
     { source: "kanshi/report.ts", allow: [types("world.ts"), types("akuma/index.ts"), types("identity/selector.ts"), types("library/contract.ts"), types("task/index.ts")] },
     { source: "kanshi/**", allow: [any("index.ts"), any("kanshi/**"), any("task/index.ts")] },
     { source: "markdown/diff.ts", allow: [] },

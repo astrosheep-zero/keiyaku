@@ -86,7 +86,6 @@ function kanshiReport(contracts: KanshiReport["contracts"]): KanshiReport {
     root: "/repo",
     observedAt: "2026-08-12T00:00:00.000Z",
     branch: null,
-    state: contracts.kind === "present" ? contracts.value.state : null,
     contracts,
     tasks: { kind: "absent" },
     akuma: { kind: "absent" },

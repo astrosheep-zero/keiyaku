@@ -233,10 +233,11 @@ export function renderKanshiText(
   const branch = report.branch?.startsWith("refs/heads/") === true
     ? report.branch.slice("refs/heads/".length)
     : report.branch;
+  const state = report.contracts.kind === "present" ? report.contracts.value.state : null;
   return [
     [
       `kanshi ${report.root === null ? "none" : safeText(report.root)}`,
-      `state ${report.state?.slice(0, 8) ?? "none"} · ${branch === null ? "none" : safeText(branch)} · observed ${safeText(report.observedAt)}`,
+      `state ${state?.slice(0, 8) ?? "none"} · ${branch === null ? "none" : safeText(branch)} · observed ${safeText(report.observedAt)}`,
     ].join("\n"),
     renderContracts(report, context, selection),
     renderTasks(report, context),

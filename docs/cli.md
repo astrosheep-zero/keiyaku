@@ -516,8 +516,9 @@ without probing, reading history, or reclassifying them.
 JSON serializes that complete report without a text-specific projection or
 shortened value. Text chooses density without hiding a product identity that
 has no other text discovery surface. Its first line is `kanshi <root>`, followed
-by `state <short-state> · <branch> · observed <observedAt>`; absent state or
-branch renders as `none`, while JSON keeps full values. It has no ruler,
+by `state <short-state> · <branch> · observed <observedAt>`. The state is read
+from the present Contract board; absent Contract state or branch renders as
+`none`, while JSON keeps the full Contract-board value. It has no ruler,
 separate root line, or mark legend. The fixed `keiyaku`, `task`, and `akuma`
 sections follow in that order.
 

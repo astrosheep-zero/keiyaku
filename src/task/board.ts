@@ -5,7 +5,6 @@ export type TaskRef = Readonly<{ id: TaskId; title: string | null; state: TaskSt
 export type TaskDisposition = "ready" | "blocked" | "in_progress" | "on_hold" | "done" | "drop";
 export type TaskRow = Readonly<{ id: TaskId; title: string; state: TaskState; priority: TaskPriority; disposition: TaskDisposition }>;
 export type BlockedTaskRow = TaskRow & Readonly<{ blockers: readonly TaskRef[] }>;
-export type TaskStatusRow = TaskRow & Readonly<{ blockers?: readonly TaskRef[] }>;
 export type TaskDetailFacts = Readonly<{
   task: TaskDocument; needs: readonly (TaskRef & Readonly<{ released: boolean }>)[]; blockers: readonly TaskRef[];
   blocks: readonly TaskRef[]; parent: TaskRef | null; children: readonly TaskRef[];
@@ -73,7 +72,7 @@ export function projectBlocked(board: TaskBoard, scope: readonly string[] | null
   });
 }
 
-export function projectStatusRows(board: TaskBoard, scope: readonly string[] | null): readonly TaskStatusRow[] {
+export function projectStatusRows(board: TaskBoard, scope: readonly string[] | null) {
   const blockers = new Map(projectBlocked(board, scope).map((row) => [row.id, row.blockers]));
   return projectRows(board, scope, "all").map((row) => {
     const unresolved = blockers.get(row.id);

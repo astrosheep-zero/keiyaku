@@ -92,12 +92,12 @@ test("kanshi joins TaskHolder, Dispatch, and Alias without moving their authorit
   }
   if (report.contracts.kind !== "present" || report.tasks.kind !== "present") return;
   assert.equal(report.branch, "refs/heads/main");
-  assert.equal(report.state, readGit(repositoryAt(repository.path)).commit);
+  assert.equal(report.contracts.value.state, readGit(repositoryAt(repository.path)).commit);
+  assert.equal("state" in report, false);
   assert.equal(new Date(report.observedAt).toISOString(), report.observedAt);
   assert.deepEqual(report.contracts.value.rows.find((row) => row.id === contract.id)?.holder, {
     kind: "held",
     taskId,
-    disposition: "held",
   });
   assert.deepEqual(report.tasks.value.rows.find((row) => row.id === taskId)?.contract, {
     id: contract.id,
@@ -189,8 +189,7 @@ test("a failed branch observation does not suppress readable Contract state", as
     assert.equal(report.branch, null);
     assert.equal(report.contracts.kind, "present");
     if (report.contracts.kind === "present") {
-      assert.equal(report.state, report.contracts.value.state);
-      assert.notEqual(report.state, null);
+      assert.notEqual(report.contracts.value.state, null);
     }
   } finally {
     Repo.prototype.currentBranch = currentBranch;
@@ -279,7 +278,6 @@ function attentionReport(): KanshiReport {
     root: "/repo",
     observedAt: "2026-08-12T00:00:00.000Z",
     branch: "refs/heads/main",
-    state: "cccccccccccccccccccccccccccccccccccccccc",
     contracts: {
       kind: "present",
       value: {
@@ -312,7 +310,7 @@ function attentionReport(): KanshiReport {
             target: "refs/heads/main",
             delivery: { tenderSnapshot: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", integration: { predecessor: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", snapshot: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", changeId: "patch-a" }, method: "squash", policy: { requireBranchesToBeUpToDate: false } },
             targetObservation: { head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", drift: false },
-            holder: { kind: "held", taskId: "task/running", disposition: "held" },
+            holder: { kind: "held", taskId: "task/running" },
             gates: {
               satisfied: false,
               reports: [
@@ -570,7 +568,6 @@ test("Kanshi text neutralizes control characters from source diagnostics", () =>
     root: "/repo\u001b[31m\nforged",
     observedAt: "2026-08-12T00:00:00.000Z",
     branch: null,
-    state: null,
     contracts: { kind: "failed", failure: { message: "broken\u001b[2J\nforged\u2028again\u2029end" } },
     tasks: { kind: "absent" },
     akuma: { kind: "absent" },
@@ -589,7 +586,8 @@ test("default CLI status returns the Kanshi report instead of a generic observat
   if ("kind" in result && result.kind === "status") {
     assert.equal(result.selection, "world");
     assert.equal(result.report.contracts.kind, "present");
-    assert.equal(result.report.state?.length, 40);
+    if (result.report.contracts.kind === "present") assert.equal(result.report.contracts.value.state?.length, 40);
+    assert.equal("state" in result.report, false);
     assert.equal(new Date(result.report.observedAt).toISOString(), result.report.observedAt);
     assert.doesNotThrow(() => JSON.stringify(result.report));
   }

@@ -8,7 +8,7 @@ import { acquireSqliteTransactionLock, SqliteTransactionLockError, type HeldSqli
 import type { WorldRoot } from "../world.js";
 import { parseTaskDocument, type TaskDocument } from "./document.js";
 import { formatTaskId, parseTaskId, taskAuthorityPath, type TaskId } from "./identity.js";
-import { projectStatusRows, type TaskBoard, type TaskStatusRow } from "./board.js";
+import type { TaskBoard } from "./board.js";
 
 export type BoardSnapshot = Readonly<{ board: TaskBoard; bytes: ReadonlyMap<TaskId, Uint8Array> }>;
 
@@ -41,11 +41,6 @@ export function readBoard(world: WorldRoot): BoardSnapshot {
     tasks.set(id, parseTaskDocument(source, coordinate)); bytes.set(id, source);
   }
   return { board: { tasks }, bytes };
-}
-
-/** Read one complete Task board and retain blocker evidence on blocked rows. */
-export function readTaskStatusRows(world: WorldRoot): readonly TaskStatusRow[] {
-  return projectStatusRows(readBoard(world).board, null);
 }
 
 function equal(left: Uint8Array | null, right: Uint8Array | null): boolean {

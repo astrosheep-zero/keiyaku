@@ -21,7 +21,6 @@ type KanshiReport = {
   root: WorldRoot | null;
   observedAt: string;
   branch: string | null;
-  state: SnapshotId | null;
   contracts: Section<ContractKanshiBoard>;
   tasks: Section<TaskKanshiWorld>;
   akuma: Section<AkumaKanshiWorld>;
@@ -30,10 +29,10 @@ type KanshiReport = {
 
 `observedAt` is one canonical ISO timestamp sampled before any section read.
 `branch` is the invocation Repo's attached branch, or `null` without a Repo,
-for detached HEAD, or when that observation fails. `state` is the immutable
-`refs/heads/keiyaku-state` commit copied from the Contract board, not the
-invocation worktree HEAD; it is `null` when no state snapshot is present or the
-Contract section cannot be read.
+for detached HEAD, or when that observation fails. The immutable
+`refs/heads/keiyaku-state` commit remains represented once as
+`ContractBoard.state`, not copied into another report field. It is not the
+invocation worktree HEAD.
 
 ## Contract endpoints
 
@@ -50,7 +49,7 @@ The same holder read is reverse-projected onto Kanshi-owned Contract rows as:
 
 ```ts
 type ContractHolderObservation =
-  | { kind: "held"; taskId: TaskId; disposition: "held" }
+  | { kind: "held"; taskId: TaskId }
   | { kind: "none" }
   | { kind: "unavailable" };
 ```
@@ -67,12 +66,14 @@ the base Contract section remains present with `unavailable` holder
 observations, and the Akuma section remains independently observable. Task and
 Akuma products do not import Contract lifecycle or Git behavior.
 
-Kanshi reads the complete Task board once. A row present in the Task owner's
+Kanshi obtains the complete Task board projection from one Task-owner
+observation operation. A row present in the Task owner's
 blocked projection copies its ordered unresolved `TaskRef[]` as `blockers`;
 this includes open `blocked` and `in_progress` rows with unresolved needs. A
 row outside that projection has no `blockers` field. Missing need targets
 remain structured refs with `title: null` and `state: "missing"`. Kanshi does
-not reread the Task board or derive blockers from text.
+not import Task persistence, reread the Task board, or derive blockers from
+text.
 
 Kanshi reads Dispatch and Alias through their concrete owners after the compact
 Akuma fleet read. Each Akuma row carries its current world-local Alias list and,

@@ -1,6 +1,6 @@
 import { documentDiff } from "../markdown/diff.js";
 import { installNamespaceContext, readNamespaceContext } from "./context.js";
-import { relationProblem, projectBlocked, projectReady, projectRows, type BlockedTaskRow, type TaskBoard, type TaskRow } from "./board.js";
+import { relationProblem, projectBlocked, projectReady, projectRows, projectStatusRows, type BlockedTaskRow, type TaskBoard, type TaskRow } from "./board.js";
 import { parseTaskCreationDocument, serializeTaskDocument, type TaskCreationDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import {
@@ -195,6 +195,10 @@ export function readyTasks(world: WorldRoot, scope?: "namespace" | "world"): Tas
 export function blockedTasks(world: WorldRoot, scope?: "namespace" | "world"): TaskOutcome<readonly BlockedTaskRow[]> {
   const selected = readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
   return { kind: "accepted", value: projectBlocked(readBoard(world).board, selected as readonly string[] | null) };
+}
+/** Internal composite observation from one complete Task board read. */
+export function observeTaskStatusRows(world: WorldRoot) {
+  return projectStatusRows(readBoard(world).board, null);
 }
 export function setCurrentNamespace(world: WorldRoot, namespace: readonly string[]): void { installNamespaceContext(world, namespace); }
 export function currentNamespace(world: WorldRoot): readonly string[] | TaskRefusal {
