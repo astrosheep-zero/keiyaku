@@ -166,7 +166,7 @@ type ToolCall =
   | {
       kind: "fileChange";
       changes: readonly {
-        op: "add" | "update" | "delete";
+        op: "add" | "update" | "delete" | "unspecified";
         path: string;
         diffstat?: { added: number; removed: number };
       }[];
@@ -290,6 +290,9 @@ per-change diffstat. Missing optional facts make the public row shorter; an
 adapter never invents a diffstat. Diffstat may be derived from a provider-native
 unified patch, never from workspace observation or prose. Claude, Pi, and
 OpenCode capture only known native names and those fields.
+`unspecified` applies only when the provider reports a file edit and path but
+no add, update, or delete subtype. It records that native absence; it is never
+an inference failure or compatibility value.
 A similarly named unknown tool stays `other`; a missing read path or search
 query omits the fact. Codex web search keeps only query and drops fuzzy search.
 Claude derives add/update from write/edit and omits missing diffstat. Pi edit
@@ -348,6 +351,11 @@ failure is a failed Turn.
 launch and every `x.ai` literal; generic ACP and the shared core do not. A live
 Grok session maps provider-neutral tell to exactly one `x.ai/interject` using
 the session id, unchanged text, and TellId as `interjectionId`.
+
+Every Grok dialect payload branch requires either its serializer in pinned
+reference source or a captured real provider transcript. Fixtures alone are
+insufficient evidence. Unsupported payloads remain `other`, and Heart retains
+their encoded event bytes opaquely.
 
 Only a successful `queued` response acknowledges admission. It yields an
 accepted submission with no receipt stream and makes no safe-point-consumption

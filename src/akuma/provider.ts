@@ -23,7 +23,7 @@ export type ToolCall =
   | Readonly<{
       kind: "fileChange";
       changes: readonly Readonly<{
-        op: "add" | "update" | "delete";
+        op: "add" | "update" | "delete" | "unspecified";
         path: string;
         diffstat?: Readonly<{ added: number; removed: number }>;
       }>[];
@@ -148,7 +148,8 @@ function decodeFileChangeMember(
   value: unknown,
 ): Extract<ToolCall, { kind: "fileChange" }>["changes"][number] | null {
   const change = object(value);
-  if (change === null || (change.op !== "add" && change.op !== "update" && change.op !== "delete")
+  if (change === null || (change.op !== "add" && change.op !== "update"
+    && change.op !== "delete" && change.op !== "unspecified")
     || typeof change.path !== "string") return null;
   const diffstat = decodeDiffstat(change.diffstat);
   if (diffstat === null) return null;

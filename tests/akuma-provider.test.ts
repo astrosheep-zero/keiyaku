@@ -34,7 +34,7 @@ import type { OpencodeSdkLoader, OpencodeSdkSession } from "../src/akuma/provide
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import { translatePiEvent } from "../src/akuma/providers/pi/events.js";
 import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
-import { createGrokBuildProvider } from "../src/akuma/providers/grok-build/index.js";
+import { createGrokBuildProvider, interpretGrokTool } from "../src/akuma/providers/grok-build/index.js";
 import { resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
 import { projectTurns } from "../src/akuma/projection.js";
@@ -695,6 +695,138 @@ test("ACP tool progress retains narration boundaries without another start", () 
     { type: "thought", text: "second block" },
     { type: "tool", phase: "completed", id: "tool-a", name: "Read `/tmp/a`", call: { kind: "other", display: "Read `/tmp/a`" }, result: { status: "ok" } },
   ]);
+});
+
+function mapAcpSeries(
+  updates: readonly Parameters<typeof mapAcpUpdate>[0][],
+  interpret?: Parameters<typeof mapAcpUpdate>[2],
+): readonly AgentEvent[] {
+  let state = EMPTY_ACP_EVENT_STATE;
+  const events: AgentEvent[] = [];
+  for (const update of updates) {
+    const mapped = mapAcpUpdate(update, state, interpret);
+    events.push(...mapped.events);
+    state = mapped.state;
+  }
+  return events;
+}
+
+test("Grok maps only payloads backed by pinned emitters", () => {
+  type GrokUpdate = Parameters<typeof interpretGrokTool>[0];
+  const cases: readonly Readonly<{ update: GrokUpdate; call: ReturnType<typeof interpretGrokTool> }>[] = [
+    {
+      // reference/grok-build@eb267feff13129e568df38fb6fdf0ceb65f735d6
+      // grok_build/read_file/mod.rs:117
+      update: { sessionUpdate: "tool_call", toolCallId: "read", name: "read_file", rawInput: { target_file: "src/a.ts" } },
+      call: { kind: "read", path: "src/a.ts" },
+    },
+    {
+      // Captured Grok Build 1.0.3 transcript: byte offset 105746100, length 2200.
+      update: { sessionUpdate: "tool_call", toolCallId: "captured-read", toolName: "read_file", rawInput: { path: "src/main.rs" } } as GrokUpdate,
+      call: { kind: "read", path: "src/main.rs" },
+    },
+    {
+      // reference/grok-build@eb267feff13129e568df38fb6fdf0ceb65f735d6
+      // grok_build_hashline/read_file.rs:108
+      update: { sessionUpdate: "tool_call", toolCallId: "hash-read", name: "hashline_read", rawInput: { target_file: "src/b.ts" } },
+      call: { kind: "read", path: "src/b.ts" },
+    },
+    {
+      // reference/grok-build@eb267feff13129e568df38fb6fdf0ceb65f735d6
+      // grok_build/grep/mod.rs:48
+      update: { sessionUpdate: "tool_call", toolCallId: "grep", name: "grep", rawInput: { pattern: "TODO", path: "src", glob: "*.ts" } },
+      call: { kind: "search", query: "TODO", scope: "content", path: "src", glob: "*.ts" },
+    },
+    {
+      // reference/grok-build@eb267feff13129e568df38fb6fdf0ceb65f735d6
+      // grok_build_hashline/grep.rs:163
+      update: { sessionUpdate: "tool_call", toolCallId: "hash-grep", name: "hashline_grep", rawInput: { pattern: "FIXME" } },
+      call: { kind: "search", query: "FIXME", scope: "content" },
+    },
+    {
+      // reference/grok-build@eb267feff13129e568df38fb6fdf0ceb65f735d6
+      // grok_build/bash/mod.rs:261
+      update: { sessionUpdate: "tool_call", toolCallId: "run", name: "run_terminal_cmd", rawInput: { command: "npm test" } },
+      call: { kind: "run", command: "npm test" },
+    },
+    {
+      // reference/grok-build@eb267feff13129e568df38fb6fdf0ceb65f735d6
+      // grok_build/web_search/mod.rs:17
+      update: { sessionUpdate: "tool_call", toolCallId: "web", name: "web_search", rawInput: { query: "Keiyaku" } },
+      call: { kind: "search", query: "Keiyaku", scope: "web" },
+    },
+    {
+      // reference/grok-build@eb267feff13129e568df38fb6fdf0ceb65f735d6
+      // grok_build/search_replace/mod.rs:74
+      update: { sessionUpdate: "tool_call", toolCallId: "edit", name: "search_replace", rawInput: { file_path: "src/a.ts" } },
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/a.ts" }] },
+    },
+  ];
+  for (const { update, call } of cases) assert.deepEqual(interpretGrokTool(update), call);
+  assert.equal(interpretGrokTool({
+    sessionUpdate: "tool_call",
+    toolCallId: "future",
+    name: "future_tool",
+    rawInput: { path: "src/unknown.ts" },
+  }), undefined);
+});
+
+test("Grok evidence-backed calls survive sparse completion without duplicate lifecycle rows", () => {
+  const events = mapAcpSeries([
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: "replace-1",
+      title: "Search and replace",
+      name: "search_replace",
+      kind: "edit",
+      status: "in_progress",
+      rawInput: { file_path: "src/a.ts" },
+    },
+    { sessionUpdate: "tool_call_update", toolCallId: "replace-1", status: "in_progress" },
+    { sessionUpdate: "tool_call_update", toolCallId: "replace-1", status: "completed" },
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: "future-1",
+      title: "Future tool",
+      name: "future_tool",
+      status: "in_progress",
+      rawInput: { path: "src/unknown.ts" },
+    },
+    { sessionUpdate: "tool_call_update", toolCallId: "future-1", status: "completed" },
+  ], interpretGrokTool);
+  assert.deepEqual(events, [
+    {
+      type: "tool",
+      phase: "started",
+      id: "replace-1",
+      name: "search_replace",
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/a.ts" }] },
+    },
+    {
+      type: "tool",
+      phase: "completed",
+      id: "replace-1",
+      name: "search_replace",
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/a.ts" }] },
+      result: { status: "ok" },
+    },
+    {
+      type: "tool",
+      phase: "started",
+      id: "future-1",
+      name: "future_tool",
+      call: { kind: "other", display: "future_tool" },
+    },
+    {
+      type: "tool",
+      phase: "completed",
+      id: "future-1",
+      name: "future_tool",
+      call: { kind: "other", display: "future_tool" },
+      result: { status: "ok" },
+    },
+  ]);
+  for (const event of events) assert.deepEqual(decodeAgentEvent(encodeAgentEvent(event)), event);
 });
 
 function fakePiSdk(input: {
@@ -1373,6 +1505,7 @@ test("provider activity codec round trips every closed event and tool-call arm",
       call: { kind: "search", query: "TODO", scope: "content", path: "src", glob: "*.ts" },
     },
     { type: "tool", phase: "completed", id: "change", name: "Edit", call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] }, result: { status: "ok" } },
+    { type: "tool", phase: "started", id: "unspecified", name: "Edit", call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/b.ts" }] } },
     { type: "tool", phase: "started", id: "other", name: "MCP", call: { kind: "other", display: "server/tool" } },
   ];
   for (const event of events) assert.deepEqual(decodeAgentEvent(encodeAgentEvent(event)), event);
@@ -1448,6 +1581,10 @@ test("provider activity codec rejects malformed tool-call optionals and unknown 
         kind: "fileChange",
         changes: [{ op: "delete", path: "gone.ts", diffstat: { added: 0, removed: 4 } }],
       },
+    },
+    {
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: "edited.ts" }] },
+      decoded: { kind: "fileChange", changes: [{ op: "unspecified", path: "edited.ts" }] },
     },
     { call: { kind: "other", display: "mcp/tool" }, decoded: { kind: "other", display: "mcp/tool" } },
   ];

@@ -140,9 +140,8 @@ before the command subject is lost. A cue and ellipsis alone are not a
 subject. Every timeline rendered line fits the requested display width. Mutation
 receipt opaque tokens may physically exceed it when indivisibility requires.
 Display-only transport unwrapping does not change persisted command
-bytes or timeline layout. The time gutter is five columns. The first visible event and the first
-event whose displayed minute differs from the preceding visible event print
-`HH:MM`; additional events in the same minute leave those five columns blank.
+bytes or timeline layout. The five-column gutter prints `HH:MM` on the first
+visible event and when its displayed minute changes; otherwise it stays blank.
 One space follows the gutter, then the semantic glyph, one space, then a fixed
 verb field sufficient for `say`, `think`, `note`, `tell`, and tool labels; body
 text begins at one stable column. Say, think, tell, and answered-outcome bodies
@@ -153,7 +152,8 @@ remain: ordinary voice, note, and told rows use `·`, completed success uses
 `✓`, completed failure uses `!`, active tool uses `⧖`, pending tell uses `⧗`,
 and unsettled tool uses `?`. There is no aggregate omission token on the first
 row, standalone minute divider, second rule between relation and activity, or
-changed snapshot selection.
+changed snapshot selection. One `fileChange` with one `unspecified` change
+renders as `edit` with its path.
 
 ```text
 ─────

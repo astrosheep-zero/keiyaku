@@ -8,13 +8,22 @@ import {
   type Session,
   type TurnResult,
 } from "../../provider.js";
-import { EMPTY_ACP_EVENT_STATE, flushAcpEvents, mapAcpUpdate } from "./events.js";
+import {
+  EMPTY_ACP_EVENT_STATE,
+  flushAcpEvents,
+  mapAcpUpdate,
+  type AcpToolInterpreter,
+  type AcpToolUpdate,
+} from "./events.js";
+
+export type { AcpToolInterpreter, AcpToolUpdate };
 
 export type AcpStartInput = Parameters<ProviderAdapter["start"]>[0]
   | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 
 export type AcpDependencies = Readonly<{
   spawnProcess?: typeof spawnStdioProcess;
+  interpretTool?: AcpToolInterpreter;
 }>;
 
 export type AcpLiveSession = Readonly<{
@@ -68,7 +77,7 @@ async function establishSession(agent: acp.ClientContext, input: AcpStartInput):
   return sessionId;
 }
 
-function createAcpTurn(connection: acp.ClientConnection) {
+function createAcpTurn(connection: acp.ClientConnection, interpret?: AcpToolInterpreter) {
   const events = new AgentEventChannel();
   let state = EMPTY_ACP_EVENT_STATE;
   let terminal = false;
@@ -76,7 +85,7 @@ function createAcpTurn(connection: acp.ClientConnection) {
   const completion = new Promise<TurnResult>((resolve) => { resolveCompletion = resolve; });
   const update = (next: acp.SessionUpdate): void => {
     if (terminal) return;
-    const mapped = mapAcpUpdate(next, state);
+    const mapped = mapAcpUpdate(next, state, interpret);
     state = mapped.state;
     for (const event of mapped.events) events.emit(event);
   };
@@ -157,7 +166,7 @@ export async function startAcpSession(
     Writable.toWeb(child.input) as WritableStream<Uint8Array>,
     Readable.toWeb(child.output) as ReadableStream<Uint8Array>,
   ));
-  turn = createAcpTurn(connection);
+  turn = createAcpTurn(connection, dependencies.interpretTool);
   try {
     sessionId = await abortable(establishSession(connection.agent, input), signal);
     turn.events.emit({ type: "session", coordinate: { sessionId } });

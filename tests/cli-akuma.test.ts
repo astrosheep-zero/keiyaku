@@ -867,6 +867,10 @@ test("ToolRepr presents honest read ranges, search facts, outcomes, and transpor
     toolRepr(toolRow({ kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", diffstat: { added: 3, removed: 1 } }] })).text,
     "src/a.ts — +3 -1",
   );
+  assert.deepEqual(
+    toolRepr(toolRow({ kind: "fileChange", changes: [{ op: "unspecified", path: "src/edited.ts" }] })),
+    { label: "edit", text: "src/edited.ts" },
+  );
   assert.equal(
     toolRepr(toolRow({
       kind: "fileChange",
