@@ -170,21 +170,55 @@ test("task query keeps text and JSON membership on one typed page", async () => 
   assert.equal(parsed.value.value.total, 1);
 });
 
-test("Task world reads distinguish absent, present-empty, and failed", async () => {
+test("Task world reads distinguish absent authority from a present empty world", async () => {
   const absent = mkdtempSync(join(tmpdir(), "keiyaku-task-cli-absent-"));
   const present = world();
-  const missing = await runMain(["-C", absent, "task", "ls", "--json"]);
-  assert.deepEqual(missing, { exit: 1, stdout: '{"kind":"absent"}\n', stderr: "" });
-  const empty = await runMain(["-C", present, "task", "ls", "--json"]);
-  assert.equal(empty.exit, 0);
-  assert.deepEqual(JSON.parse(empty.stdout), { kind: "present", value: { kind: "accepted", value: { rows: [], total: 0, returned: 0, truncated: false } } });
+  const emptyPage = { kind: "accepted", value: { rows: [], total: 0, returned: 0, truncated: false } };
+  for (const action of ["ls", "ready", "blocked", "query", "doctor"] as const) {
+    const command = parseArgv(["task", action]).command;
+    if (command.command !== "task") throw new Error("not a task command");
 
-  const tasksDirectory = join(present, ".keiyaku", "tasks");
-  mkdirSync(tasksDirectory);
-  writeFileSync(join(tasksDirectory, "broken.md"), "not Task authority\n");
-  const failed = await runMain(["-C", present, "task", "ls", "--json"]);
-  assert.equal(failed.exit, 3);
-  assert.equal(JSON.parse(failed.stdout).kind, "failed");
+    const missing = await invoke(parseArgv(["-C", absent, "task", action])) as TaskInvocationResult;
+    assert.deepEqual(missing, { kind: "absent" });
+    assert.equal(renderTaskText(command, missing), "task world absent");
+    assert.equal(taskExitCode(missing), 1);
+    const missingText = await runMain(["-C", absent, "task", action]);
+    assert.deepEqual(missingText, { exit: 1, stdout: "task world absent\n", stderr: "" });
+    const missingJson = await runMain(["-C", absent, "task", action, "--json"]);
+    assert.deepEqual(missingJson, { exit: 1, stdout: '{"kind":"absent"}\n', stderr: "" });
+
+    const observed = await invoke(parseArgv(["-C", present, "task", action])) as TaskInvocationResult;
+    assert.equal((observed as { kind: string }).kind, "present");
+    if ((observed as { kind: string }).kind !== "present") throw new Error("expected present observation");
+    const value = (observed as { value: unknown }).value;
+    assert.deepEqual(value, action === "doctor" ? { issues: [] } : emptyPage);
+    assert.equal(renderTaskText(command, observed), action === "doctor" ? "healthy" : `0 ${action}`);
+    assert.equal(taskExitCode(observed), 0);
+  }
+});
+
+test("Task world reads retain failed observations", async () => {
+  const root = world();
+  const path = join(root, ".keiyaku", "tasks");
+  mkdirSync(path);
+  writeFileSync(join(path, "broken.md"), "not Task authority\n");
+  for (const action of ["ls", "ready", "blocked", "query", "doctor"] as const) {
+    const command = parseArgv(["task", action]).command;
+    if (command.command !== "task") throw new Error("not a task command");
+
+    const result = await invoke(parseArgv(["-C", root, "task", action])) as TaskInvocationResult;
+    assert.equal((result as { kind: string }).kind, "failed");
+    assert.match(renderTaskText(command, result), /^task world failed\n/u);
+    assert.equal(taskExitCode(result), 3);
+    const text = await runMain(["-C", root, "task", action]);
+    assert.equal(text.exit, 3);
+    assert.match(text.stdout, /^task world failed\n/u);
+    assert.equal(text.stderr, "");
+    const json = await runMain(["-C", root, "task", action, "--json"]);
+    assert.equal(json.exit, 3);
+    assert.equal(json.stderr, "");
+    assert.equal(JSON.parse(json.stdout).kind, "failed");
+  }
 });
 
 test("task doctor renders graph disease and controls exit status", async () => {

@@ -131,7 +131,7 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
   if (world === null) return missingWorld(command);
   const tasks = Tasks.of(world);
   if (isWorldObservation(command)) return observeWorldRead(tasks, command);
-  if (["show", "tree"].includes(command.action)) return invokeRead(tasks, command);
+  if (command.action === "show" || command.action === "tree") return invokeRead(tasks, command);
   if (command.action === "add") return await invokeAdd(tasks, command, input.readStdin);
   if (command.action === "update") return await invokeUpdate(tasks, command, input.readStdin);
   const id = command.positionals[0]!;

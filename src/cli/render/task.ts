@@ -26,6 +26,12 @@ type TaskFailure =
   | Extract<TaskMutationResult, { kind: "refused" | "retry" }>
   | Extract<TaskCompositionResult, { kind: "refused" }>;
 
+function isWorldObservation(result: TaskInvocationResult): result is TaskWorldObservation {
+  return typeof result === "object" && result !== null
+    && "kind" in result
+    && (result.kind === "present" || result.kind === "absent" || result.kind === "failed");
+}
+
 function row(value: TaskRow | TaskView): string {
   const disposition = "disposition" in value ? value.disposition : value.state;
   return `${value.id} - P${value.priority} - ${disposition} - ${value.title}`;
@@ -82,10 +88,6 @@ export function renderTaskText(command: ParsedTaskCommand, result: TaskInvocatio
   return renderTaskValue(command, result);
 }
 
-function isWorldObservation(result: TaskInvocationResult): result is TaskWorldObservation {
-  return typeof result === "object" && result !== null && "kind" in result
-    && (result.kind === "present" || result.kind === "absent" || result.kind === "failed");
-}
 function renderTaskWorldObservation(command: ParsedTaskCommand, result: TaskWorldObservation): string {
   if (result.kind === "absent") return "task world absent";
   if (result.kind === "failed") return `task world failed\n  ${result.failure.message}`;

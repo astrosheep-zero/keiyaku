@@ -61,7 +61,8 @@ do not consume stdin for notes.
 `ls`, `ready`, `blocked`, and `query` use current namespace unless `--world` is present.
 Their observations are bounded and carry the complete matching `total`; ready
 and blocked may additionally select recursive descendants of a complete parent
-TaskId. `show`, `tree`, update, and lifecycle use complete IDs and never infer
+TaskId. `ready` selects only open Tasks whose every `needs` target is terminal.
+`show`, `tree`, update, and lifecycle use complete IDs and never infer
 from namespace. `tree` is parent decomposition traversal. Text rows are
 `TaskId - P<n> - <disposition> - title`.
 
@@ -92,18 +93,28 @@ usage refusals. A missing `under`/`parent` target is a Task refusal, not an
 empty result. Query reads only Task persisted and Task-derived facts; it never
 reads Contract, Akuma, Git, or prose-inferred urgency.
 
+`ls`, `ready`, `blocked`, `query`, and `doctor` are Task-world observations.
+Their JSON and native results preserve `{ kind: "present", value }`,
+`{ kind: "absent" }`, or `{ kind: "failed", failure: { message } }`; an absent
+world is not an empty accepted result. Text renders `task world absent` or
+`task world failed` with the diagnostic for those cases. Only a present empty
+page may render a zero-row board, and only a present doctor report without
+issues renders `healthy`. Absent exits `1`, failed exits `3`, and a present
+result follows its native exit rule.
+
 `task doctor` scans the complete Task world and renders every graph issue. It
-does not repair authority. A healthy report renders `healthy` and exits `0`; a
-report containing issues exits `1`. An absent world is not a healthy empty
-world: Task observations distinguish `present`, `absent`, and `failed` in
-native values, JSON, text, and exit status. Only `present` may render an empty
-board.
+does not repair authority. A present healthy report exits `0`; a present report
+containing issues exits `1`.
 
 Accepted update and compose render native whole-document diffs; the CLI never
 computes them. An incomplete compose writes only its reusable draft to stdout,
 writes its diagnostic and admitted diffs to stderr, and exits `1`. JSON writes
 the unchanged result object to stdout. Task refusal exits `1`, retry exits `2`,
 and corruption or infrastructure failure exits `3`.
+
+Compose admits Task documents independently. Each admitted document is its own
+commit point, so partial admission is possible; compose has no cross-file
+atomicity or rollback.
 
 The status board renders one public `KanshiReport`. Default and selected status
 have the same report shape. An explicit Contract selector projects the already
