@@ -51,6 +51,17 @@ call.
 
 ## Publication
 
+Dispatch publications in one repository share one publication seat at:
+
+```text
+<common Git directory>/keiyaku/locks/dispatch.sqlite
+```
+
+That seat covers the complete existing publication section. Worktrees of the
+same repository share it; distinct repositories do not. Git CAS remains the
+sole publication adjudicator. Non-Dispatch writers of `keiyaku-state` keep
+their existing outcomes.
+
 Publication observes the current private Git root, writes one blob and tree,
 and moves only `refs/heads/keiyaku-state` by CAS. It uses the existing Git
 format marker when establishing an empty private root. A same-AkuId,
@@ -83,7 +94,8 @@ rolls back an already born Akuma.
 ## Boundary
 
 Dispatch imports only the Akuma identity parser, Contract identity parser,
-`AuthorityCorruptionError`, and concrete Git primitives. Git treats its bytes
-as ordinary private-tree bytes and does not decode Dispatch. Neither Akuma nor
-core, protocol, Task, Alias, or Settings imports Dispatch. There is no generic
-association registry, event bus, VCS backend, or provider interface.
+`AuthorityCorruptionError`, concrete Git primitives, and the existing SQLite
+transaction lock. Git treats its bytes as ordinary private-tree bytes and
+does not decode Dispatch. Neither Akuma nor core, protocol, Task, Alias, or
+Settings imports Dispatch. There is no generic association registry, event
+bus, VCS backend, or provider interface.

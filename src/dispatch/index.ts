@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
+import { acquireSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import {
   GIT_FORMAT_BYTES,
   GIT_FORMAT_PATH,
@@ -162,47 +164,54 @@ export async function publishDispatch(input: Readonly<{
   const owner = contractId(input.contractId);
   const intended: Dispatch = { akuId, contractId: owner, dispatchedAt: new Date().toISOString() };
   const path = pathFor(akuId);
+  const held = await acquireSqliteTransactionLock({
+    path: join(input.repository.commonDirectory, "keiyaku", "locks", "dispatch.sqlite"),
+    mode: "immediate",
+  });
+  try {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      const snapshot = await readGitPaths(input.repository, [path]);
+      const current = await dispatchFromSnapshot(input.repository, snapshot, akuId);
+      if (current !== null) {
+        return current.contractId === owner
+          ? { kind: "dispatched", dispatch: current }
+          : { kind: "failed", failure: { kind: "conflict", current } };
+      }
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-    const snapshot = await readGitPaths(input.repository, [path]);
-    const current = await dispatchFromSnapshot(input.repository, snapshot, akuId);
-    if (current !== null) {
-      return current.contractId === owner
-        ? { kind: "dispatched", dispatch: current }
-        : { kind: "failed", failure: { kind: "conflict", current } };
-    }
+      const changes = new Map<string, TreeChange>();
+      if (snapshot.commit === null) {
+        changes.set(GIT_FORMAT_PATH, { oid: await writeBlob(input.repository, GIT_FORMAT_BYTES) });
+      }
+      changes.set(path, { oid: await writeBlob(input.repository, bytesFor(intended)) });
+      const tree = await updateGitTree(input.repository, snapshot.tree, changes);
+      const commit = await writeCommit({
+        repository: input.repository,
+        tree,
+        parent: snapshot.commit,
+        message: `dispatch ${akuId}`,
+        at: intended.dispatchedAt,
+      });
+      const publication = await updateRefsAtomically(input.repository, [{
+        ref: GIT_REF,
+        newOid: commit,
+        expectedOid: snapshot.commit,
+      }]);
+      if (publication.kind === "published") return { kind: "dispatched", dispatch: intended };
 
-    const changes = new Map<string, TreeChange>();
-    if (snapshot.commit === null) {
-      changes.set(GIT_FORMAT_PATH, { oid: await writeBlob(input.repository, GIT_FORMAT_BYTES) });
-    }
-    changes.set(path, { oid: await writeBlob(input.repository, bytesFor(intended)) });
-    const tree = await updateGitTree(input.repository, snapshot.tree, changes);
-    const commit = await writeCommit({
-      repository: input.repository,
-      tree,
-      parent: snapshot.commit,
-      message: `dispatch ${akuId}`,
-      at: intended.dispatchedAt,
-    });
-    const publication = await updateRefsAtomically(input.repository, [{
-      ref: GIT_REF,
-      newOid: commit,
-      expectedOid: snapshot.commit,
-    }]);
-    if (publication.kind === "published") return { kind: "dispatched", dispatch: intended };
-
-    const observed = await observedPublication(input.repository, akuId, owner);
-    if (observed !== null) return observed;
-    if (publication.kind === "non-published") {
-      const fresh = await readGitPaths(input.repository, [path]);
-      if (fresh.commit === snapshot.commit) {
-        return {
-          kind: "failed",
-          failure: { kind: "publication-failed", diagnostic: diagnostic(publication.error) },
-        };
+      const observed = await observedPublication(input.repository, akuId, owner);
+      if (observed !== null) return observed;
+      if (publication.kind === "non-published") {
+        const fresh = await readGitPaths(input.repository, [path]);
+        if (fresh.commit === snapshot.commit) {
+          return {
+            kind: "failed",
+            failure: { kind: "publication-failed", diagnostic: diagnostic(publication.error) },
+          };
+        }
       }
     }
+    return { kind: "failed", failure: { kind: "contention" } };
+  } finally {
+    held.close();
   }
-  return { kind: "failed", failure: { kind: "contention" } };
 }

@@ -91,6 +91,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "dispatch/index.ts",
       allow: [
         any("akuma/identity.ts", ["parseAkuId", "AkuId"]),
+        any("coordination/sqlite-transaction-lock.ts"),
         any("core/facts/errors.ts"),
         any("core/facts/types.ts"),
         any("git/read-observation.ts"),
