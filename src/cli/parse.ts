@@ -16,99 +16,11 @@ import {
 } from "./commands/akuma.js";
 import type { CatalogQuery } from "../index.js";
 import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
+import { CONTRACT_COMMAND_SPECS, type ContractCommand as Command, type ContractCommandSpec as CommandSpec } from "./commands/contract.js";
 import { CliUsageError, usageLine } from "./usage.js";
 export { CliUsageError } from "./usage.js";
 
-type FlagKind = "boolean" | "value" | "repeat-value";
-type CommandSpec = Readonly<{
-  positional: "none" | "optional";
-  stdin: "none" | "optional" | "required";
-  flags: Readonly<Record<string, FlagKind>>;
-  usage: string;
-  purpose: string;
-}>;
-
-const CONTRACT_COMMAND_SPECS = {
-  bind: {
-    positional: "none",
-    stdin: "required",
-    flags: { actor: "value", task: "value", target: "value", here: "boolean", after: "repeat-value", gates: "value", json: "boolean" },
-    usage: "bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -",
-    purpose: "Create one Contract from stdin Markdown.",
-  },
-  amend: {
-    positional: "optional",
-    stdin: "required",
-    flags: { actor: "value", after: "repeat-value", "clear-after": "boolean", gates: "value", json: "boolean" },
-    usage: "amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -",
-    purpose: "Apply stdin amendment operations to one Contract.",
-  },
-  deliver: {
-    positional: "optional",
-    stdin: "none",
-    flags: { actor: "value", message: "value", "include-dirty": "boolean", json: "boolean" },
-    usage: "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--actor <actor>] [--json]",
-    purpose: "Deliver one Contract candidate.",
-  },
-  review: {
-    positional: "optional",
-    stdin: "optional",
-    flags: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
-    usage: "review [<contract>|@<contract>] (--satisfied | --unsatisfied) [--summary <text>] [--actor <actor>] [--json] [-]",
-    purpose: "Record one review verdict.",
-  },
-  arc: {
-    positional: "optional",
-    stdin: "required",
-    flags: { actor: "value", json: "boolean" },
-    usage: "arc [<contract>|@<contract>] [--actor <actor>] [--json] -",
-    purpose: "Record stdin arc Markdown for one Contract.",
-  },
-  abandon: {
-    positional: "optional",
-    stdin: "none",
-    flags: { actor: "value", note: "value", json: "boolean" },
-    usage: "abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]",
-    purpose: "Abandon one Contract with an optional note.",
-  },
-  status: {
-    positional: "optional",
-    stdin: "none",
-    flags: { json: "boolean" },
-    usage: "status [<contract>|@name|<aku/...>] [--json]",
-    purpose: "Read the world status board or one Contract projection.",
-  },
-  ls: {
-    positional: "optional",
-    stdin: "none",
-    flags: { json: "boolean" },
-    usage: "ls task/ [--json]\n       keiyaku ls kei/ [--json]\n       keiyaku ls aku/ [--json]\n       keiyaku ls aku/<archetype>/ [--json]\n       keiyaku ls aku/*/* [--json]",
-    purpose: "List one identity directory.",
-  },
-  audit: {
-    positional: "optional",
-    stdin: "none",
-    flags: { "show-diff-body": "boolean", actor: "value", json: "boolean" },
-    usage: "audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]",
-    purpose: "Audit one Contract without mutation.",
-  },
-  reconcile: {
-    positional: "optional",
-    stdin: "none",
-    flags: { "retry-hooks": "boolean", json: "boolean" },
-    usage: "reconcile [<contract>|@<contract>] [--retry-hooks] [--json]",
-    purpose: "Reconcile one Contract or the invocation world.",
-  },
-  settings: {
-    positional: "none",
-    stdin: "none",
-    flags: { json: "boolean" },
-    usage: "settings [--json]",
-    purpose: "Read user and project Settings resources.",
-  },
-} as const satisfies Readonly<Record<string, CommandSpec>>;
-
-export type Command = keyof typeof CONTRACT_COMMAND_SPECS;
+export type { Command };
 
 const ROOT_USAGE = "usage: keiyaku [-C <path>] <command> [<contract>|@<contract>] [--flag ...] [-]";
 
@@ -207,6 +119,7 @@ export type ParsedCommand =
   | ParsedArc
   | ParsedAbandon
   | ParsedStatus
+  | (Output & Readonly<{ command: "show"; contract?: string }>)
   | ParsedLs
   | ParsedAudit
   | ParsedReconcile
@@ -418,6 +331,11 @@ function parseStatus(parts: ParsedParts): ParsedStatus {
   };
 }
 
+function parseShow(parts: ParsedParts): Extract<ParsedCommand, { command: "show" }> {
+  const contract = parts.positionals[0];
+  return { command: "show", ...(contract === undefined ? {} : { contract }), output: parts.output };
+}
+
 function parseLs(parts: ParsedParts): ParsedLs {
   const path = parts.positionals[0]!;
   if (path === "task/") return { command: "ls", query: { kind: "tasks" }, output: parts.output };
@@ -481,6 +399,7 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
     case "arc": return parseArc(parts);
     case "abandon": return parseAbandon(parts);
     case "status": return parseStatus(parts);
+    case "show": return parseShow(parts);
     case "ls": return parseLs(parts);
     case "audit": {
       const contract = parts.positionals[0];

@@ -7,6 +7,7 @@ import type { TextRenderContext } from "./terminal.js";
 import { renderCatalogText } from "./catalog.js";
 
 export function renderText(result: InvocationResult, context?: TextRenderContext): string {
+  if (result.kind === "guidance") return result.guidance;
   if (result.kind === "status") return renderKanshiText(result.report, context, result.selection);
   if (result.kind === "catalog") return renderCatalogText(result.catalog);
   if (result.kind === "accepted") return renderAccepted(result);

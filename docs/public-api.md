@@ -244,6 +244,7 @@ renderers may present these discriminants but never re-evaluate them.
 
 ```ts
 keiyaku.state(): Promise<ContractState>
+keiyaku.guidance(): Promise<string>
 keiyaku.delivery(): Promise<Delivery | null>
 keiyaku.amend(input: {
   markdown: string
@@ -293,7 +294,9 @@ cannot become ready returns the typed Verification stop from
 timeouts are instead unsatisfied attestation facts. Caller cancellation is a
 nonterminal stop and admits no attestation.
 
-`state()` observes and folds afresh for each call. Worktree paths are projected
+`state()` and `guidance()` observe and fold afresh for each call. `guidance()`
+returns the canonical derived bytes owned by [workspace.md](workspace.md).
+Worktree paths are projected
 by `status()` for selectors and board views; a contract handle has no duplicate
 path getter.
 

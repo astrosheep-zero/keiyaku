@@ -24,7 +24,7 @@ type InvokeRuntime = Readonly<{
   readStdin?: () => string;
 }>;
 
-type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "ls" | "reconcile" | "settings" | "task" | "install" }>;
+type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "show" | "ls" | "reconcile" | "settings" | "task" | "install" }>;
 type NonInstallExecution = Readonly<{ cwd?: string; command: Exclude<ParsedCommand, { command: "install" }> }>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
@@ -32,6 +32,7 @@ type InvocationEdge = Readonly<{
 }>;
 
 export type SettingsInvocationResult = Readonly<{ kind: "settings"; value: Settings }>;
+export type GuidanceInvocationResult = Readonly<{ kind: "guidance"; contract: ContractId; guidance: string }>;
 
 function settingsAt(root: WorldRoot | undefined, environment: NodeJS.ProcessEnv): Settings {
   const home = environment.KEIYAKU_HOME?.trim();
@@ -411,6 +412,11 @@ async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRunt
   const world = locateWorld(coordinate);
   const configuration = settingsAt(world ?? undefined, edge.environment);
   const hooks = selectedHooks(configuration);
+
+  if (parsed.command === "show") {
+    const selected = await selectContract(repo, parsed.contract, scope);
+    return { kind: "guidance", contract: selected.id, guidance: await selected.contract.guidance() };
+  }
 
   switch (parsed.command) {
     case "reconcile": {

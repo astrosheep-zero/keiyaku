@@ -36,10 +36,10 @@ function document(title: string, region: readonly string[]): string {
   ].join("\n");
 }
 
-async function bind(repository: TestGitRepository, title: string, region: readonly string[]) {
+async function bind(repository: TestGitRepository, title: string, region: readonly string[], workspace: "worktree" | "here" = "here") {
   const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: document(title, region),
-    workspace: "here",
+    workspace,
   });
   return result;
 }
@@ -49,7 +49,7 @@ test("bind and amend expose only live-peer Region witnesses from one document re
   const first = await bind(repository, "First", ["src/**"]);
   const firstId = (await first.keiyaku.state()).id;
 
-  const second = await bind(repository, "Second", ["src/api/**"]);
+  const second = await bind(repository, "Second", ["src/api/**"], "worktree");
   const secondId = (await second.keiyaku.state()).id;
   assert.deepEqual(second.overlaps, [{
     contract: firstId,
@@ -101,7 +101,7 @@ test("post-admission observation failure preserves the admitted Contract without
       { KEIYAKU_REGION_MARKER: marker, KEIYAKU_REGION_BATCH_PID: batchPid },
       () => Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
         markdown: document("Observed failure", ["docs/**"]),
-        workspace: "here",
+        workspace: "worktree",
       }),
   );
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind"]);

@@ -5,6 +5,11 @@ import type { InvocationResult } from "../src/cli/result.js";
 import { renderText } from "../src/cli/render/text.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 
+test("guidance text is the exact Markdown projection", () => {
+  const guidance = "---\ncontract: kei/show\n---\n\n# Show\n";
+  assert.equal(renderText({ kind: "guidance", contract: contractId("kei/show"), guidance }), guidance);
+});
+
 test("accepted text keeps facts before observed effect facts", () => {
   const contract = contractId("kei/render-effect");
   const result: InvocationResult = {

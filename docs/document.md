@@ -90,9 +90,11 @@ name.
 
 ## Reserved Sections
 
-The normalized H2 titles `Gates`, `Pipeline`, and `After` are refused with
-the ordinary invalid-document `TypeError`. They are not extensions and they do
-not encode structured operation inputs.
+The normalized H2 titles `Gates`, `Pipeline`, `After`, `Arc`, and `Fulfillment`
+are refused with the ordinary invalid-document `TypeError`. They are not
+extensions. `Gates`, `Pipeline`, and `After` do not encode structured operation
+inputs. `Arc` and `Fulfillment` are reserved for the derived guidance owned by
+[workspace.md](workspace.md).
 
 ## Amend Operations
 

@@ -71,6 +71,12 @@ export type ObservationResult = Readonly<{
   [key: string]: unknown;
 }>;
 
+export type GuidanceResult = Readonly<{
+  kind: "guidance";
+  contract: ContractId;
+  guidance: string;
+}>;
+
 export type StatusResult = Readonly<{
   kind: "status";
   report: KanshiReport;
@@ -79,4 +85,4 @@ export type StatusResult = Readonly<{
 
 export type CatalogResult = Readonly<{ kind: "catalog"; catalog: Catalog }>;
 
-export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | ObservationResult | StatusResult | CatalogResult;
+export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | ObservationResult | GuidanceResult | StatusResult | CatalogResult;

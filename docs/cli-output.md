@@ -2,6 +2,12 @@
 
 This chapter owns help, rendering, and exit status.
 
+`show` is a raw Contract read. Text writes the exact guidance Markdown with no
+status header or explanatory wrapper. JSON is exactly
+`{ "contract": ContractId, "guidance": string }`. Its bytes come from the
+workspace renderer owned by [workspace.md](workspace.md); the CLI does not
+assemble a second projection. Audit remains unchanged and omits guidance.
+
 The installed executable is `keiyaku`. The package declares no alternate or
 versioned command name.
 

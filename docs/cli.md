@@ -52,6 +52,7 @@ The command vocabulary is:
 | `abandon` | Calls `keiyaku.abandon`. |
 | `arc` | Calls `keiyaku.arc` with arc Markdown. |
 | `status` | Calls Kanshi or one exact Akuma status according to its selector. |
+| `show` | Calls `keiyaku.guidance()` for one selected Contract. |
 | `ls` | Lists exactly one selected Task, Contract, Archetype, or Akuma identity directory. |
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
@@ -61,18 +62,16 @@ The command vocabulary is:
 | `call`, `fork` | Call the package-root Akuma facet so Dispatch and Alias integration is not reimplemented at the edge. |
 | `wait`, `tell`, `history`, `kill` | Call the corresponding package-root Akuma facade capability as root verbs; `tell --interrupt` selects the composed interrupt capability. |
 
-`bind` accepts no contract positional. Commands addressing an existing contract
-accept a full `kei/<contract-segment>` identity or an active short
-`@<contract-segment>` reference. The short reference is the deterministic
-managed-worktree name when that worktree exists. It resolves as a pure function
-over `ContractBoard` rows and is never stored.
+`bind` accepts no contract positional. Existing Contract commands accept a full
+`kei/<contract-segment>` or active `@<contract-segment>` reference. The short
+reference resolves over `ContractBoard` rows and is never stored.
 
 An omitted contract selector is valid only when the invocation coordinate matches
 the reported `worktreePath` of exactly one active worktree contract. A here
 workspace never supplies omitted-selector inference. The adapter issues a
 typed usage refusal when this test has no unique match.
 
-The command-specific syntax is:
+Command syntax:
 
 ```text
 bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -
@@ -82,6 +81,7 @@ review [<contract>|@<contract>] (--satisfied | --unsatisfied) [--summary <text>]
 abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
 status [<contract>|@name|<aku/...>] [--json]
+show [<contract>|@<contract>] [--json]
 ls task/ [--json]
 ls kei/ [--json]
 ls aku/ [--json]
@@ -182,7 +182,7 @@ Dirty submodule internals still refuse because no review projection can seal
 them. `abandon` accepts optional `--note`, `--actor`, and `--json`; it has no
 reason flag or hidden reason classification. `arc` and `audit` accept
 `--actor` and `--json`; audit also accepts
-`--show-diff-body`. `status` and `reconcile` accept `--json`.
+`--show-diff-body`. `status`, `show`, and `reconcile` accept `--json`.
 `--json` is output-only.
 
 `install` is the one edge command that does not read a repository or Git. It
@@ -377,14 +377,10 @@ registry, or orchestrator. Package-root call and fork are not reimplemented
 through direct Akuma product calls at this edge.
 
 Contract commands accept no task coordinate and never interpret or perform a
-Task mutation. Their package-root operations may return the post-admission
-coordination defined only by [settlement.md](settlement.md); the CLI merely
-renders that public result.
+Task mutation; the CLI merely renders package-root results.
 
 The surface has no interactive mode, input envelope, independent JSON schema,
-per-command JSON payload, configurable attempt count, command alias, or other
-top-level command.
+configurable attempt count, or command alias.
 
 The report `root` remains the invocation world coordinate. There is no
-`scope` or `region` command; cross-contract fact relationships and a world
-Region report are outside the day-one surface.
+`scope` or `region` command.

@@ -281,8 +281,12 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   assert.equal(state.terms.document.bytes, markdown("Markdown input"));
   assert.deepEqual(state.terms.after, []);
   assert.deepEqual(state.terms.gates, []);
+  const guidance = await bound.keiyaku.guidance();
+  assert.ok(guidance.startsWith("---\ncontract: kei/markdown-input\n---\n\n"));
+  assert.ok(guidance.includes(markdown("Markdown input")));
+  assert.equal(guidance.match(/^## Fulfillment$/gmu)?.length, 1);
 
-  const sameTitle = await Keiyaku.bind({ repo, markdown: markdown("Markdown input"), workspace: "here" });
+  const sameTitle = await Keiyaku.bind({ repo, markdown: markdown("Markdown input"), workspace: "worktree" });
   assert.match((await sameTitle.keiyaku.state()).id, /^kei\/markdown-input-[0-9a-f]{16}$/);
 
   assert.equal(repo.root, resolve(repo.root));
@@ -308,14 +312,14 @@ test("bind canonicalizes branch targets and refuses invalid names before birth",
   const gitBefore = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
   for (const target of ["bad..name", "keiyaku-state", "refs/tags/main"]) {
     await assert.rejects(
-      Keiyaku.bind({ repo, markdown: markdown("Invalid target"), target, workspace: "here" }),
+      Keiyaku.bind({ repo, markdown: markdown("Invalid target"), target, workspace: "worktree" }),
       (error: unknown) => error instanceof KeiyakuRefused && error.code === "invalid-target",
     );
     assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), gitBefore);
   }
 
   await assert.rejects(
-    Keiyaku.bind({ repo, markdown: markdown("Missing target"), target: "missing", workspace: "here" }),
+    Keiyaku.bind({ repo, markdown: markdown("Missing target"), target: "missing", workspace: "worktree" }),
     (error: unknown) => error instanceof KeiyakuRefused && error.code === "target-missing",
   );
   assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), gitBefore);
@@ -329,14 +333,14 @@ test("public amend rejects a transitive prerequisite cycle without moving its he
 
   const amended = await Keiyaku.bind({ repo,
     markdown: markdown("Amended"),
-    workspace: "here",
+    workspace: "worktree",
     after: [prerequisiteId],
   });
   const amendedId = (await amended.keiyaku.state()).id;
 
   const dependent = await Keiyaku.bind({ repo,
     markdown: markdown("Dependent"),
-    workspace: "here",
+    workspace: "worktree",
     after: [amendedId],
   });
   const dependentId = (await dependent.keiyaku.state()).id;

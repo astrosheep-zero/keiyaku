@@ -81,7 +81,7 @@ test("contract Markdown rejects frontmatter, duplicate sections, and missing str
   );
 });
 
-test("Verification uses direct fenced executors and retired H2s are refused", () => {
+test("Verification uses direct fenced executors and reserved H2s are refused", () => {
   const verified = decodeContractDocument(`${document()}\n## Verification\n\`\`\`bash\ntrue\n\`\`\`\n`);
   assert.deepEqual(verified.verification, [{ executor: "bash", script: "true" }]);
   const timed = decodeContractDocument(`${document()}\n## Verification\n~~~bash timeout=25ms\ntrue\n~~~\n`);
@@ -100,7 +100,7 @@ test("Verification uses direct fenced executors and retired H2s are refused", ()
     );
   }
   assert.throws(() => decodeContractDocument(`${document()}\n## Verification\n~~~bash timeout=0s\ntrue\n~~~\n`), /must be positive/);
-  for (const name of ["Gates", "Pipeline", "After"]) {
+  for (const name of ["Gates", "Pipeline", "After", "Arc", "Fulfillment"]) {
     assert.throws(
       () => decodeContractDocument(`${document()}\n## ${name}\n- declaration\n`),
       (error: unknown) => error instanceof TypeError && error.message.includes(`${name.toLowerCase()} is not a contract Markdown section`),

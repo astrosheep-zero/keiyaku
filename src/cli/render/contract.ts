@@ -2,6 +2,7 @@ import type { AcceptedResult, Effect, Lag, RetryResult } from "../result.js";
 
 function effectLine(effect: Effect): string {
   if (effect.kind === "worktree") return `effect worktree ${effect.action} ${effect.path}`.trimEnd();
+  if (effect.kind === "contract-file") return `effect contract-file ${effect.action} ${effect.path}`;
   if (effect.kind === "target-checkout") {
     return `effect target-checkout ${effect.action} ${effect.target} ${effect.path}`;
   }
@@ -20,6 +21,9 @@ function lagLine(lag: Lag): string {
   }
   if (lag.kind === "worktree-hook-failed") {
     return `lag worktree-hook-failed ${lag.phase} ${lag.path} command=${lag.command} ${JSON.stringify(lag.failure)}`;
+  }
+  if (lag.kind === "contract-file-failed") {
+    return `lag contract-file-failed ${lag.worktree} ${lag.path} ${lag.diagnostic}`;
   }
   return `lag reconcile-failed ${lag.stage} ${lag.diagnostic}`;
 }

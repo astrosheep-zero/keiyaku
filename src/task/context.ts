@@ -2,7 +2,7 @@ import {
   lstatSync, mkdirSync, readFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { replaceFileDurably } from "../coordination/durable-file.js";
+import { repairDerivedFile, replaceFileDurably } from "../coordination/durable-file.js";
 import { normalizeIdentityStem } from "../identity/normalize.js";
 
 export type NamespaceContextRead = readonly string[] | "absent" | "malformed";
@@ -41,10 +41,7 @@ export function installNamespaceContext(root: string, segments: readonly string[
 }
 
 function installIgnore(root: string): void {
-  const ignore = ignorePath(root);
-  const stat = lstatSync(ignore, { throwIfNoEntry: false });
-  if (stat !== undefined && (!stat.isFile() || stat.isSymbolicLink())) throw new Error(`namespace ignore is not a regular file: ${ignore}`);
-  if (stat === undefined || readFileSync(ignore, "utf8") !== "*\n") replaceFileDurably(ignore, "*\n");
+  repairDerivedFile(ignorePath(root), "*\n");
 }
 
 export function repairNamespaceContext(root: string, segments: readonly string[]): "kept" | "installed" {

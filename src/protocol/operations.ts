@@ -12,7 +12,12 @@ import {
   observeContractWorld,
   observeContractsForAdmissionAt,
 } from "../git/observe.js";
-import { reconcile, reconcileBatch, reconcileObservationFailure, type ReconcileResult } from "../git/reconcile.js";
+import {
+  reconcile,
+  reconcileBatch,
+  reconcileObservationFailure,
+  type ReconcileResult,
+} from "../git/reconcile.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import { NoGitWorldError, repositoryAt, type GitRepository } from "../git/repository.js";
 import { withGitReadObservation, type GitDecodeChannel, type GitTreeSelection } from "../git/read-observation.js";

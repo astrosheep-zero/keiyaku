@@ -49,6 +49,17 @@ function renderHelp(coordinate: CliHelpCoordinate): string {
   }
 }
 
+function writeGuidance(command: ParsedCommand, result: Extract<InvocationResult, { kind: "guidance" }>): number {
+  if (command.output === "json") process.stdout.write(`${JSON.stringify({ contract: result.contract, guidance: result.guidance })}\n`);
+  else process.stdout.write(result.guidance.endsWith("\n") ? result.guidance : `${result.guidance}\n`);
+  return 0;
+}
+
+function writeCatalog(command: ParsedCommand, result: Extract<InvocationResult, { kind: "catalog" }>): number {
+  process.stdout.write(`${command.output === "json" ? JSON.stringify(result.catalog) : renderCatalogText(result.catalog)}\n`);
+  return 0;
+}
+
 function writeResult(command: ParsedCommand, result: unknown): number {
   if (command.command === "install") {
     const value = result as InstallInvocationResult;
@@ -66,10 +77,8 @@ function writeResult(command: ParsedCommand, result: unknown): number {
     return writeAkuma(command, result as AkumaInvocationResult);
   }
   const contractResult = result as InvocationResult;
-  if (contractResult.kind === "catalog") {
-    process.stdout.write(`${command.output === "json" ? JSON.stringify(contractResult.catalog) : renderCatalogText(contractResult.catalog)}\n`);
-    return 0;
-  }
+  if (contractResult.kind === "guidance") return writeGuidance(command, contractResult);
+  if (contractResult.kind === "catalog") return writeCatalog(command, contractResult);
   const output = command.output === "json"
     ? JSON.stringify(contractResult.kind === "status" ? contractResult.report : contractResult)
     : renderText(contractResult, {

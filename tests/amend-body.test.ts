@@ -201,7 +201,7 @@ test("amend keeps criterion and extension targets indexed across ordered mutatio
 });
 
 test("amend cannot add a reserved H2 as an extension", () => {
-  for (const title of ["Gates", "Pipeline", "After"]) {
+  for (const title of ["Gates", "Pipeline", "After", "Arc", "Fulfillment"]) {
     assert.throws(
       () => applyAmendOperations(`## Add: ${title}\nvalue\n`, body),
       (error: unknown) => error instanceof TypeError

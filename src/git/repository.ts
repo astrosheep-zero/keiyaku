@@ -149,6 +149,10 @@ export function worktreeGitDirectory(repository: GitRepository, worktree: string
   return absoluteGitPath(scoped, ["--git-dir"], "worktree Git directory");
 }
 
+export function worktreeRoot(repository: GitRepository): string {
+  return absoluteGitPath(repository, ["--show-toplevel"], "worktree root");
+}
+
 function commandError(command: readonly string[], error: unknown): GitPlumbingError {
   const candidate = error as {
     message?: string;

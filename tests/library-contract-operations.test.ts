@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -7,6 +7,44 @@ import { repositoryAt } from "../src/git/repository.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
+
+function appoint(repositoryPath: string, contract: string): string {
+  const root = realpathSync(repositoryPath);
+  const path = resolve(root, ".keiyaku", "KEIYAKU.md");
+  mkdirSync(resolve(root, ".keiyaku"), { recursive: true });
+  writeFileSync(path, `---\ncontract: ${contract}\n---\n`);
+  return path;
+}
+
+test("here bind preserves and refuses an appointment whose journal is missing", async () => {
+  const repository = repositoryWithMain();
+  const contract = "kei/missing-appointment";
+  const path = appoint(repository.path, contract);
+  const before = readFileSync(path, "utf8");
+
+  await assert.rejects(
+    Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
+    refused({ kind: "here-worktree-appointed", path, contract }),
+  );
+
+  assert.equal(readFileSync(path, "utf8"), before);
+});
+
+test("here bind preserves and refuses a residual terminal appointment", async () => {
+  const repository = repositoryWithMain();
+  const terminal = await bind(repository);
+  const contract = (await terminal.state()).id;
+  await terminal.abandon();
+  const path = appoint(repository.path, contract);
+  const before = readFileSync(path, "utf8");
+
+  await assert.rejects(
+    Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
+    refused({ kind: "here-worktree-appointed", path, contract }),
+  );
+
+  assert.equal(readFileSync(path, "utf8"), before);
+});
 
 test("Delivery.diff freshly reads its pinned candidate diff", async () => {
   const repository = repositoryWithMain();

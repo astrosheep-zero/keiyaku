@@ -3,6 +3,12 @@ import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
 import {
+  projectContractWorktree,
+  renderContractGuidance,
+  type ContractFileEffect,
+  type ContractFileLag,
+} from "../contract-worktree.js";
+import {
   actorOption,
   contractTerms,
   documentDerivation,
@@ -30,7 +36,6 @@ import {
   amendOperation,
   arcOperation,
   auditOperation,
-  bindOperation,
   contractObservationOperation,
   contractsOperation,
   deliveryDiffOperation,
@@ -49,9 +54,6 @@ import {
   type ContractRow,
   type DeliverValue,
   type FactKind,
-  type IntentOutcome,
-  type IntentRefusal,
-  type IntentRetry,
   type PlacementStop,
   type ReconcileReport as ProtocolReconcileReport,
   type RepositoryScope,
@@ -62,7 +64,6 @@ import {
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { settle, type SettlementReport } from "../settlement/settle.js";
 import {
-  claimTaskHolder,
   claimTaskHolderWithFence,
   releaseTaskHolder,
   releaseTaskHolderWithFence,
@@ -74,9 +75,17 @@ import { Delivery, deliveryHandle } from "./delivery.js";
 import {
   completeHolderMutation,
   completeMutation,
-  type AcceptedIntent,
   type MutationResult,
 } from "./mutation.js";
+import { admitBindWithAppointment } from "./bind.js";
+import { KeiyakuRefused, requireAccepted } from "./refusal.js";
+export {
+  KeiyakuRefused,
+  KeiyakuRetry,
+  type ContractAppointmentRefusal,
+  type KeiyakuRefusal,
+  type KeiyakuRetryReason,
+} from "./refusal.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "./configuration.js";
 export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks } from "./configuration.js";
 
@@ -103,41 +112,21 @@ export type Fact = JournalEntry;
 export type ActorId = string;
 export type AttestationVerdict = "satisfied" | "unsatisfied";
 export type Review = ReviewValue;
-export type KeiyakuRefusal = IntentRefusal;
-export type KeiyakuRetryReason = IntentRetry;
 export type { PlacementStop, VerificationStop };
 
-export type TopologyEffect = ProtocolReconcileReport["effects"][number];
-export type Lag = ProtocolReconcileReport["lag"][number];
+export type TopologyEffect = ProtocolReconcileReport["effects"][number] | ContractFileEffect;
+export type Lag = ProtocolReconcileReport["lag"][number] | ContractFileLag;
 export type { MutationResult };
 export { Delivery };
 
 export type BindResult = Readonly<Omit<MutationResult<Keiyaku>, "value"> & { keiyaku: Keiyaku } & RegionObservation>;
 export type AmendResult = Readonly<MutationResult<void> & RegionObservation & { documentDiff: string }>;
-export type ReconcileReport = Readonly<ProtocolReconcileReport & { settlement: SettlementReport }>;
+export type ReconcileReport = Readonly<{
+  effects: readonly TopologyEffect[];
+  lag: readonly Lag[];
+  settlement: SettlementReport;
+}>;
 export type { SettlementAction, SettlementLag, SettlementReport } from "../settlement/settle.js";
-
-export class KeiyakuRefused extends Error {
-  constructor(readonly refusal: KeiyakuRefusal) {
-    super(`Keiyaku refused: ${refusal.kind}`);
-    this.name = "KeiyakuRefused";
-  }
-
-  get code(): KeiyakuRefusal["kind"] {
-    return this.refusal.kind;
-  }
-}
-
-export class KeiyakuRetry extends Error {
-  constructor(readonly reason: KeiyakuRetryReason) {
-    super(reason.kind === "publication-failed" ? reason.diagnostic : `Keiyaku retry required: ${reason.kind}`);
-    this.name = "KeiyakuRetry";
-  }
-
-  get code(): KeiyakuRetryReason["kind"] {
-    return this.reason.kind;
-  }
-}
 
 export type BindInput = Readonly<{
   repo: Repo;
@@ -180,12 +169,6 @@ export type DeliverInput = ActorOptions & Readonly<{
 }>;
 export type AuditInput = ActorOptions & Readonly<{ signal?: AbortSignal }>;
 
-function requireAccepted<Value, Refusal extends KeiyakuRefusal>(result: IntentOutcome<Value, Refusal>): AcceptedIntent<Value> {
-  if (result.kind === "refused") throw new KeiyakuRefused(result.refusal);
-  if (result.kind === "retry") throw new KeiyakuRetry(result.reason);
-  return result;
-}
-
 function taskOption(value: unknown): TaskId | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw new TypeError("task must be a TaskId");
@@ -221,6 +204,14 @@ export class KeiyakuHandle {
       channel,
       contractId: this.id,
     }));
+  }
+
+  async guidance(): Promise<string> {
+    return withGitDecodeChannel(this.scope, async (channel) => {
+      const observed = await contractObservationOperation({ scope: this.scope, channel, contractId: this.id });
+      if (observed.kind === "missing") throw new KeiyakuRefused({ kind: "contract-missing", contractId: this.id });
+      return renderContractGuidance(await stateOperation({ scope: this.scope, channel, contractId: this.id }));
+    });
   }
 
   async delivery(): Promise<Delivery | null> {
@@ -413,6 +404,7 @@ export class KeiyakuHandle {
     const options = reconcileInput(input);
     return withGitDecodeChannel(this.scope, async (channel) => {
       const retained = await reconcileOperation({ scope: this.scope, channel, contractId: this.id, ...options, retainTerminalWorktree: true });
+      const projection = projectContractWorktree(this.scope, retained.state);
       const settlement = await settle({ repository: this.scope, channel, state: retained.state, effects: retained.report.effects });
       const deferRemoval = retained.state !== null && retained.state.terminal !== null
         && retained.state.coordinates.workspace === "worktree";
@@ -420,8 +412,8 @@ export class KeiyakuHandle {
         ? await reconcileOperation({ scope: this.scope, channel, contractId: this.id, ...options })
         : null;
       return {
-        effects: [...retained.report.effects, ...(cleanup?.report.effects ?? [])],
-        lag: [...retained.report.lag, ...(cleanup?.report.lag ?? [])],
+        effects: [...retained.report.effects, ...projection.effects, ...(cleanup?.report.effects ?? [])],
+        lag: [...retained.report.lag, ...projection.lag, ...(cleanup?.report.lag ?? [])],
         settlement,
       };
     });
@@ -498,7 +490,7 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     normalizedList(values.after, "after", contractId),
   );
   return withGitDecodeChannel(scope, async (channel) => {
-    const bind = () => bindOperation({
+    const admitCandidate = () => admitBindWithAppointment({
       scope,
       channel,
       title: document.title,
@@ -506,13 +498,11 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
       verification: documentDerivation(document, terms.gates).verification,
       workspace,
       ...(target === undefined ? {} : { target }),
-      ...(task === undefined ? {} : {
-        decorateOffer: ({ contractId: owner }) => [claimTaskHolder(task, owner)],
-      }),
+      ...(task === undefined ? {} : { task }),
       ...actor,
     });
-    const admission = task === undefined ? null : await claimTaskHolderWithFence(scope, task, bind);
-    const accepted = requireAccepted(admission === null ? await bind() : admission.result);
+    const admission = task === undefined ? null : await claimTaskHolderWithFence(scope, task, admitCandidate);
+    const accepted = requireAccepted(admission === null ? await admitCandidate() : admission.result);
     const id = accepted.value.contractId;
     const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku => new KeiyakuHandle(contract, scope);
     const result = admission === null

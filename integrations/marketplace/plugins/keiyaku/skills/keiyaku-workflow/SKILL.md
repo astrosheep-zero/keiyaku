@@ -44,6 +44,40 @@ keiyaku status [<contract>|@<contract>]
 current satisfied, `!` current unsatisfied, `?` stale because the patch or
 document changed after the evidence, and `○` missing.
 
+## Commission A Contract
+
+When another agent will fulfill or review the Contract, the commissioning
+harness must pass one explicit seat and one exact worktree. `--contract` or an
+equivalent association identifies the Contract; it does not appoint a seat.
+Never ask the worker to infer either value.
+
+Use this minimum handoff in the dispatch body, regardless of harness:
+
+```text
+Contract: kei/...
+Seat: Deliverer | Reviewer
+Worktree: /absolute/path/from-the-bind-receipt
+Read first:
+- .keiyaku/KEIYAKU.md
+- <owner documents governing this delivery>
+- <source files named or selected from the Contract Region for this work>
+Objective:
+<bounded assignment>
+```
+
+Every `Read first` path is relative to `Worktree` unless it is absolute. The
+worker starts by reading `.keiyaku/KEIYAKU.md` in that worktree, confirms its
+frontmatter names `Contract`, then reads the listed owner documents and source
+files before acting. Do not substitute a generic repository tour for the files
+that actually govern the assignment.
+
+A `Deliverer` implements and verifies the terms, keeps all work in `Worktree`,
+and reports the candidate, checks run, and unmet terms. A `Reviewer` reads the
+same worktree and Contract, judges the current candidate with direct evidence,
+and does not modify it. If `Seat`, `Worktree`, or the required reading list is
+missing or contradictory, the worker stops and asks the caller instead of
+guessing.
+
 ## Arcs For Large Deliveries
 
 When one Contract carries several coherent chunks, record each chunk as an arc

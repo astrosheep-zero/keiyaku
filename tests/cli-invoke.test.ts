@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { GIT_REF, readRef, repositoryAt } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
-import { Delivery, Keiyaku, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
+import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
@@ -72,6 +72,26 @@ function acceptedContract(result: Awaited<ReturnType<typeof invoke>>): ContractI
   if (result.kind !== "accepted") throw new Error(`expected accepted result, got ${result.kind}`);
   return result.contract;
 }
+
+test("show returns the canonical Contract guidance in text and JSON projections", async () => {
+  const repository = repositoryWithMain();
+  const source = contractDocument("Show Guidance");
+  const bound = await invokeWithDocument(repository.path, ["bind", "-"], source);
+  const id = acceptedContract(bound);
+  const expected = await Keiyaku.of({ repo: Repo.at({ path: repository.path }), id }).guidance();
+
+  const text = await invokeWithDocument(repository.path, ["show", id], "");
+  assert.deepEqual(text, { kind: "guidance", contract: id, guidance: expected });
+
+  const json = await invokeWithDocument(repository.path, ["show", `@${id.slice("kei/".length)}`, "--json"], "");
+  assert.deepEqual(json, { kind: "guidance", contract: id, guidance: expected });
+
+  await assert.rejects(
+    () => invokeWithDocument(repository.path, ["show", "kei/missing"], ""),
+    (error: unknown) => error instanceof KeiyakuRefused
+      && assert.deepEqual(error.refusal, { kind: "contract-missing", contractId: "kei/missing" }) === undefined,
+  );
+});
 
 test("one CLI invocation reuses its Repo for selector, settings, and contract lookup", async () => {
   const repository = repositoryWithMain();

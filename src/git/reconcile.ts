@@ -275,7 +275,7 @@ async function reconcileTargetCheckouts(repository: GitRepository, state: Contra
 }
 
 function reconcileHereWorkspaceRefs(
-  repository: GitRepository,
+  { repository }: ReconcileEffectsInput,
   state: ContractState,
   { effects, lag }: ReconcileAccumulation,
 ): ReconcileResult {
@@ -425,7 +425,7 @@ async function reconcileWithTopology(
     const targetCheckouts = await reconcileTargetCheckouts(repository, state);
     effects.push(...targetCheckouts.effects);
     lag.push(...targetCheckouts.lag);
-    if (state.coordinates.workspace === "here") return reconcileHereWorkspaceRefs(repository, state, { effects, lag });
+    if (state.coordinates.workspace === "here") return reconcileHereWorkspaceRefs(input, state, { effects, lag });
     if (state.terminal) return await reconcileTerminalManagedWorktree(input, state, topology, { effects, lag });
     return await reconcileActiveManagedWorktree(input, state, topology, { effects, lag });
   } catch (error) {

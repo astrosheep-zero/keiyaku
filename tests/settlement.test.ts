@@ -263,7 +263,7 @@ test("a superseded Contract cannot release or settle a newer holder", async () =
   const world = repository(), repo = Repo.at({ path: world.path });
   const taskId = await task(world.path, "Superseded Holder");
   const first = await Keiyaku.bind({ repo, task: taskId, markdown: document("Old holder"), workspace: "here" });
-  const second = await Keiyaku.bind({ repo, task: taskId, markdown: document("Current holder"), workspace: "here", gates: [] });
+  const second = await Keiyaku.bind({ repo, task: taskId, markdown: document("Current holder"), workspace: "worktree", gates: [] });
 
   const abandoned = await first.keiyaku.abandon();
   assert.deepEqual(abandoned.settlement.actions, []);
@@ -280,7 +280,7 @@ test("abandon refuses corrupted authority that assigns one Contract multiple Tas
   const firstTask = await task(world.path, "First holder");
   const secondTask = await task(world.path, "Second holder");
   const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("First holder"), workspace: "here" });
-  await Keiyaku.bind({ repo, task: secondTask, markdown: document("Second holder"), workspace: "here" });
+  await Keiyaku.bind({ repo, task: secondTask, markdown: document("Second holder"), workspace: "worktree" });
   const firstId = (await first.keiyaku.state()).id;
   const git = repositoryAt(world.path);
   const snapshot = readGit(git);
@@ -308,7 +308,7 @@ test("fenced settlement validates the complete current holder projection", async
   const firstTask = await task(world.path, "Fenced holder");
   const secondTask = await task(world.path, "Conflicting holder");
   const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("Fenced holder"), workspace: "here", gates: [] });
-  await Keiyaku.bind({ repo, task: secondTask, markdown: document("Conflicting holder"), workspace: "here" });
+  await Keiyaku.bind({ repo, task: secondTask, markdown: document("Conflicting holder"), workspace: "worktree" });
   writeFileSync(`${world.path}/fenced.txt`, "fenced\n");
   await first.keiyaku.deliver({ includeDirty: true });
   replaceTaskState(world.path, firstTask, "done", "open");

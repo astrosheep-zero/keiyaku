@@ -11,12 +11,17 @@ import { optionalNonblank, requireInput } from "./input.js";
 import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
 import type { ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
+import { projectContractWorktree, type ContractFileEffect, type ContractFileLag } from "../contract-worktree.js";
 
 export { NoGitWorldError };
 
 export type RepoAtInput = Readonly<{ path?: string }>;
 export type ReconcileInput = Readonly<{ hooks?: WorktreeHooks; retryHooks?: boolean }>;
-export type RepoContractReconcileReport = Readonly<ProtocolReconcileReport & { settlement: SettlementReport }>;
+export type RepoContractReconcileReport = Readonly<{
+  effects: readonly (ProtocolReconcileReport["effects"][number] | ContractFileEffect)[];
+  lag: readonly (ProtocolReconcileReport["lag"][number] | ContractFileLag)[];
+  settlement: SettlementReport;
+}>;
 export type RepoReconcileReport = Readonly<{
   contracts: readonly Readonly<{ contractId: ContractId; report: RepoContractReconcileReport }>[];
 }>;
@@ -79,11 +84,12 @@ export class Repo {
       return {
         contracts: retained.contracts.map((contract, index) => {
           const report = later?.get(contract.contractId);
+          const projection = projectContractWorktree(scope, contract.state);
           return {
             contractId: contract.contractId,
             report: {
-              effects: [...contract.report.effects, ...(report?.effects ?? [])],
-              lag: [...contract.report.lag, ...(report?.lag ?? [])],
+              effects: [...contract.report.effects, ...projection.effects, ...(report?.effects ?? [])],
+              lag: [...contract.report.lag, ...projection.lag, ...(report?.lag ?? [])],
               settlement: settlements[index]!,
             },
           };

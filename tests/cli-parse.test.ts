@@ -95,6 +95,16 @@ test("status parses one folded board and preserves its optional contract filter"
   assert.throws(() => parseArgv(["status", "--fast"]), /not valid for status/);
 });
 
+test("show parses one optional Contract selector and JSON output", () => {
+  assert.deepEqual(parseArgv(["show", "kei/example", "--json"]), {
+    command: { command: "show", contract: "kei/example", output: "json" },
+  });
+  assert.deepEqual(parseArgv(["show", "@example"]), {
+    command: { command: "show", contract: "@example", output: "text" },
+  });
+  assert.throws(() => parseArgv(["show", "kei/one", "kei/two"]), /at most one contract/);
+});
+
 test("ls parses only canonical identity directories", () => {
   assert.deepEqual(parseArgv(["ls", "task/"]), {
     command: { command: "ls", query: { kind: "tasks" }, output: "text" },

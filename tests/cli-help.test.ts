@@ -32,6 +32,11 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderContractHelp("bind"), /usage: keiyaku bind \[--task <task\/\.\.\.>\]/u);
   assert.match(renderContractHelp("deliver"), /--message <text>\] \[--include-dirty\]/u);
   assert.match(renderContractHelp("review"), /usage: keiyaku review .*--satisfied \| --unsatisfied/u);
+  assert.equal(renderContractHelp("show"), [
+    "Read one Contract guidance projection.",
+    "",
+    "usage: keiyaku show [<contract>|@<contract>] [--json]",
+  ].join("\n"));
   assert.equal(renderContractHelp("ls"), [
     "List one identity directory.",
     "",

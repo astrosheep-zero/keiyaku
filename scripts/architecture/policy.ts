@@ -99,7 +99,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/eligibility.ts", ["samePrerequisites"]),
         any("core/facts/errors.ts"),
         any("core/facts/gate.ts"),
-        types("core/facts/types.ts"),
+        any("core/facts/types.ts"),
       ],
     },
     { source: "core/facts/gate.ts", allow: [any("core/subject.ts"), types("core/facts/types.ts")] },
@@ -200,6 +200,16 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/terminal-seal.ts"),
         any("git/workspace.ts", ["deliveryWorktreePath"]),
         any("git/verification.ts", ["orphanedScratchWorktrees"]),
+      ],
+    },
+    {
+      source: "contract-worktree.ts",
+      allow: [
+        any("coordination/durable-file.ts"),
+        any("coordination/sqlite-transaction-lock.ts"),
+        any("core/facts/types.ts"),
+        any("git/repository.ts"),
+        any("git/workspace.ts", ["deliveryWorktreePath"]),
       ],
     },
     {
@@ -370,11 +380,26 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
+      source: "library/bind.ts",
+      allow: [
+        any("contract-worktree.ts"),
+        any("core/facts/types.ts"),
+        types("git/read-observation.ts", ["GitDecodeChannel"]),
+        any("identity/normalize.ts", ["fitIdentityStem", "normalizeIdentityStem"]),
+        any("protocol/operations.ts"),
+        any("settlement/holder.ts", ["claimTaskHolder"]),
+        types("task/identity.ts", ["TaskId"]),
+        types("verification/declaration.ts", ["VerificationDeclarationPreparation"]),
+        types("library/refusal.ts", ["KeiyakuRefusal"]),
+      ],
+    },
+    {
       source: "library/contract.ts",
       allow: [
         any("body/amend.ts"), any("markdown/diff.ts"),
         any("body/arc.ts"),
         any("body/decode.ts"),
+        any("contract-worktree.ts"),
         any("body/render.ts"),
         types("body/types.ts"),
         any("core/facts/errors.ts"),
@@ -382,6 +407,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/operations.ts"),
         any("git/read-observation.ts", ["GitDecodeChannel", "withGitDecodeChannel"]),
         any("library/delivery.ts"),
+        any("library/bind.ts", ["admitBindWithAppointment"]),
+        any("library/refusal.ts"),
         any("library/mutation.ts"),
         any("library/input.ts"),
         any("library/region.ts"),
@@ -401,6 +428,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "library/mutation.ts",
       allow: [
+        any("contract-worktree.ts", ["projectContractWorktree", "ContractFileEffect", "ContractFileLag"]),
         types("core/facts/types.ts"),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
         any("protocol/operations.ts", ["reconcileOperation", "IntentOutcome", "ReconcileReport", "RepositoryScope"]),
@@ -410,8 +438,17 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
+      source: "library/refusal.ts",
+      allow: [
+        types("core/facts/types.ts", ["ContractId"]),
+        types("protocol/operations.ts", ["IntentOutcome", "IntentRefusal", "IntentRetry"]),
+        types("library/mutation.ts", ["AcceptedIntent"]),
+      ],
+    },
+    {
       source: "library/repo.ts",
       allow: [
+        any("contract-worktree.ts", ["projectContractWorktree", "ContractFileEffect", "ContractFileLag"]),
         any("core/facts/types.ts"),
         any("protocol/operations.ts"),
         any("git/read-observation.ts", ["withGitDecodeChannel"]),
@@ -674,7 +711,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "task/context.ts", symbols: ["closeSync", "fsyncSync", "lstatSync", "mkdirSync", "openSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"] },
         { source: "task/store.ts", symbols: ["closeSync", "existsSync", "fsyncSync", "lstatSync", "mkdirSync", "openSync", "readFileSync", "readdirSync", "renameSync", "unlinkSync", "writeFileSync"] },
         { source: "world.ts", symbols: ["existsSync", "mkdirSync", "realpathSync", "statSync"] },
-        { source: "coordination/durable-file.ts", symbols: ["closeSync", "fsyncSync", "openSync", "renameSync", "unlinkSync", "writeFileSync"] }, { source: "coordination/sqlite-transaction-lock.ts", symbols: ["lstatSync", "mkdirSync"] },
+        { source: "coordination/durable-file.ts", symbols: ["closeSync", "fsyncSync", "lstatSync", "mkdirSync", "openSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"] }, { source: "coordination/sqlite-transaction-lock.ts", symbols: ["lstatSync", "mkdirSync"] },
+        { source: "contract-worktree.ts", symbols: ["chmodSync", "lstatSync", "readFileSync", "unlinkSync"] },
         { source: "akuma/identity.ts", symbols: ["mkdirSync", "writeFileSync"] },
         { source: "akuma/heart/index.ts", symbols: ["existsSync"] },
         { source: "akuma/akuma.ts", symbols: ["readdirSync"] },
@@ -696,6 +734,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "settlement/fence.ts", symbols: ["createHash"] },
         { source: "settlement/holder.ts", symbols: ["createHash"] },
         { source: "protocol/bind.ts", symbols: ["randomBytes"] },
+        { source: "library/bind.ts", symbols: ["randomBytes"] },
         { source: "protocol/attempt.ts", symbols: ["randomBytes"] },
         { source: "body/keys.ts", symbols: ["createHash"] },
         { source: "task/context.ts", symbols: ["randomBytes"] },

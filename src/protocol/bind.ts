@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { normalizeTargetBranch, observeBindCoordinates } from "../git/observe.js";
 import { gitObjectIdForSnapshot } from "../git/identity.js";
 import type { GitRefAssertion, GitRepository } from "../git/repository.js";
@@ -7,11 +6,11 @@ import type { BindData, ActorId, ContractId } from "../core/facts/types.js";
 import { contractIdFromSegment } from "../core/facts/types.js";
 import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
 export type { BindRefusal } from "../core/verbs/bind.js";
-import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js";
 import type { VerificationDeclarationPreparation, VerificationDeclarationRefusal } from "../verification/declaration.js";
 import { admitIntent } from "./intent.js";
 import { complete, type IntentOutcome } from "./outcome.js";
 import type { CompanionDecorator } from "./run.js";
+import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js";
 
 export type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
@@ -20,7 +19,8 @@ export type TargetInputRefusal =
       kind: "here-target-mismatch";
       target: string;
       branch: string | null;
-    }>;
+    }>
+  ;
 
 type BindOperationInput = Readonly<{
   scope: GitRepository;
@@ -32,18 +32,13 @@ type BindOperationInput = Readonly<{
   workspace: "worktree" | "here";
   actor?: ActorId;
   decorateOffer?: CompanionDecorator;
+  contractId?: ContractId;
 }>;
 
-const CONTRACT_ID_STEM_BYTES = 48;
 const COLLISION_ATTEMPTS = 3;
-
-function mintCollisionSuffix(): string {
-  return randomBytes(8).toString("hex");
-}
-
-function contractIdFromStem(stem: string, suffix?: string): ContractId {
-  const fitted = fitIdentityStem({ stem, maxBytes: CONTRACT_ID_STEM_BYTES });
-  return contractIdFromSegment(suffix === undefined ? fitted : `${fitted}-${suffix}`);
+function contractIdFor(title: string, suffix?: string): ContractId {
+  const stem = fitIdentityStem({ stem: normalizeIdentityStem({ source: title }) || "contract", maxBytes: 48 });
+  return contractIdFromSegment(suffix === undefined ? stem : `${stem}-${suffix}`);
 }
 
 type BindRefusalUnion = BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal;
@@ -94,31 +89,30 @@ export async function bindOperation(
     if (normalized === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
     target = normalized;
   }
-  const stem = normalizeIdentityStem({ source: input.title }) || "contract";
   const at = new Date().toISOString();
-  const attempt = async (id: ContractId): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusalUnion>> => complete(
-    await admitIntent<BindInput<VerificationDeclarationRefusal>, BindRefusalUnion, BindSeed>(
-      input.channel,
-      input.scope,
-      {
-        contractId: id,
-        ...(input.actor === undefined ? {} : { actor: input.actor }),
-        at,
-      } satisfies BindSeed,
-      decideBind,
-      {
-        observedContracts: [id, ...input.terms.after],
-        prepareInput: (_observation, original) => bindPreparation(input, target, original),
-        ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
-      },
-    ),
-    { contractId: id },
-  );
-  let outcome = await attempt(contractIdFromStem(stem));
-  for (let collision = 0;
-    collision < COLLISION_ATTEMPTS && outcome.kind === "refused" && outcome.refusal.kind === "contract-exists";
-    collision += 1) {
-    outcome = await attempt(contractIdFromStem(stem, mintCollisionSuffix()));
+  const attempt = async (id: ContractId) => complete(
+        await admitIntent<BindInput<VerificationDeclarationRefusal>, BindRefusalUnion, BindSeed>(
+          input.channel,
+          input.scope,
+          {
+            contractId: id,
+            ...(input.actor === undefined ? {} : { actor: input.actor }),
+            at,
+          } satisfies BindSeed,
+          decideBind,
+          {
+            observedContracts: [id, ...input.terms.after],
+            prepareInput: (_observation, original) => bindPreparation(input, target, original),
+            ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
+          },
+        ),
+        { contractId: id },
+      );
+  if (input.contractId !== undefined) return attempt(input.contractId);
+  let result = await attempt(contractIdFor(input.title));
+  for (let collision = 0; collision < COLLISION_ATTEMPTS && result.kind === "refused" && result.refusal.kind === "contract-exists"; collision += 1) {
+    result = await attempt(contractIdFor(input.title, randomBytes(8).toString("hex")));
   }
-  return outcome;
+  return result;
 }
+import { randomBytes } from "node:crypto";
