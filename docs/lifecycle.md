@@ -63,9 +63,13 @@ in [git.md](git.md).
 It uses Git's compute-only integration projection to capture the ChangeId that
 the current target and worktree bytes produce, plus the document key projected
 by its decision observation; this is not a decoded-document derivation. Its
-subject has no snapshot identity. The reviewed producer boundary owns the
-`reviewed` token whether or not it is listed in `terms.gates`. A satisfied
-review requests placement; an unsatisfied review records judgment only.
+subject has no snapshot identity. Ordinary dirty workspace bytes do not require
+review authorization: the reviewer observes the projection in front of it, while
+delivery authorization remains owned by `deliver`. If those bytes later become
+the delivered candidate, currentness is proven by the same ChangeId; if they
+change or are cleaned away, the review is stale. The reviewed producer boundary
+owns the `reviewed` token whether or not it is listed in `terms.gates`. A
+satisfied review requests placement; an unsatisfied review records judgment only.
 Optional `summary` is opaque testimony and does not participate in a gate.
 
 `abandon` admits one `abandoned` terminal fact with `{ note? }`. Optional

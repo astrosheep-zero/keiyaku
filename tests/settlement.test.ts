@@ -94,7 +94,7 @@ test("accepted claim synchronously settles its current held Task", async () => {
   }]);
   writeFileSync(`${world.path}/candidate.txt`, "candidate\n");
 
-  const delivered = await bound.keiyaku.deliver();
+  const delivered = await bound.keiyaku.deliver({ includeDirty: true });
 
   assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
   assert.equal(await taskState(world.path, taskId), "done");
@@ -119,7 +119,7 @@ test("contract and world reconcile replay settlement from current authority", as
   const firstTask = await task(world.path, "Contract Replay Task");
   const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("Contract replay"), workspace: "here", gates: [] });
   writeFileSync(`${world.path}/first.txt`, "first\n");
-  await first.keiyaku.deliver();
+  await first.keiyaku.deliver({ includeDirty: true });
   replaceTaskState(world.path, firstTask, "done", "open");
 
   const local = await first.keiyaku.reconcile();
@@ -128,7 +128,7 @@ test("contract and world reconcile replay settlement from current authority", as
   const secondTask = await task(world.path, "World Replay Task");
   const second = await Keiyaku.bind({ repo, task: secondTask, markdown: document("World replay"), workspace: "here", gates: [] });
   writeFileSync(`${world.path}/second.txt`, "second\n");
-  await second.keiyaku.deliver();
+  await second.keiyaku.deliver({ includeDirty: true });
   const secondId = (await second.keiyaku.state()).id;
   replaceTaskState(world.path, secondTask, "done", "open");
 
@@ -144,10 +144,10 @@ test("batch settlement reads one locator and one fenced snapshot per Contract", 
   const secondTask = await task(world.path, "Second batch holder");
   const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("First batch"), workspace: "here", gates: [] });
   writeFileSync(`${world.path}/first-batch.txt`, "first\n");
-  await first.keiyaku.deliver();
+  await first.keiyaku.deliver({ includeDirty: true });
   const second = await Keiyaku.bind({ repo, task: secondTask, markdown: document("Second batch"), workspace: "here", gates: [] });
   writeFileSync(`${world.path}/second-batch.txt`, "second\n");
-  await second.keiyaku.deliver();
+  await second.keiyaku.deliver({ includeDirty: true });
   const log = join(world.path, "holder-reads.log");
   const states = await Promise.all([first.keiyaku.state(), second.keiyaku.state()]);
 
@@ -214,7 +214,7 @@ test("a superseded Contract cannot release or settle a newer holder", async () =
   assert.equal(await taskState(world.path, taskId), "open");
 
   writeFileSync(`${world.path}/current.txt`, "current\n");
-  const claimed = await second.keiyaku.deliver();
+  const claimed = await second.keiyaku.deliver({ includeDirty: true });
   assert.deepEqual(claimed.settlement.actions, [{ kind: "task", taskId, action: "done" }]);
   assert.equal(await taskState(world.path, taskId), "done");
 });
@@ -254,7 +254,7 @@ test("fenced settlement validates the complete current holder projection", async
   const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("Fenced holder"), workspace: "here", gates: [] });
   await Keiyaku.bind({ repo, task: secondTask, markdown: document("Conflicting holder"), workspace: "here" });
   writeFileSync(`${world.path}/fenced.txt`, "fenced\n");
-  await first.keiyaku.deliver();
+  await first.keiyaku.deliver({ includeDirty: true });
   replaceTaskState(world.path, firstTask, "done", "open");
 
   const git = repositoryAt(world.path);
@@ -314,7 +314,7 @@ test("a missing holder target remains an explicit Task settlement lag", async ()
   const missing = "task/missing" as const;
   const bound = await Keiyaku.bind({ repo, task: missing, markdown: document("Missing holder target"), workspace: "here", gates: [] });
   writeFileSync(`${world.path}/missing.txt`, "missing\n");
-  const claimed = await bound.keiyaku.deliver();
+  const claimed = await bound.keiyaku.deliver({ includeDirty: true });
   assert.equal(claimed.settlement.lags.length, 1);
   assert.deepEqual(claimed.settlement.lags[0], {
     kind: "settlement-failed",

@@ -161,13 +161,20 @@ omitted and uses `[]` when that entry is absent; amend retains its current
 public value when its flag is omitted. A malformed Settings scope, malformed
 selected entry, or explicitly selected unknown name is a typed usage refusal.
 
-`deliver` accepts an optional materialized-commit `--message`, `--actor`, and
-`--json`. Its up-to-date policy comes from the settings consumer at
-`git.requireBranchesToBeUpToDate`; there is no per-deliver policy flag.
+`deliver` accepts an optional materialized-commit `--message`, `--actor`,
+`--include-dirty`, and `--json`. It requires a clean workspace by default.
+`--include-dirty` authorizes one complete capture of all non-ignored staged,
+unstaged, and untracked final bytes; it is not a staged-only mode or path
+selector. Dirty submodule internals still refuse. Its up-to-date policy comes
+from the settings consumer at `git.requireBranchesToBeUpToDate`; there is no
+per-deliver policy flag.
 `review` requires exactly one of
 `--satisfied` or `--unsatisfied`, with optional `--summary`, `--actor`, and
-`--json`. `abandon` accepts optional `--note`, `--actor`, and `--json`; it has
-no reason flag or hidden reason classification. `arc` and `audit` accept
+`--json`. It has no dirty authorization flag; if the observed projection is
+dirty, the accepted result discloses the ordinary dirty paths and short stat.
+Dirty submodule internals still refuse because no review projection can seal
+them. `abandon` accepts optional `--note`, `--actor`, and `--json`; it has no
+reason flag or hidden reason classification. `arc` and `audit` accept
 `--actor` and `--json`; audit also accepts
 `--show-diff-body`. `status` and `reconcile` accept `--json`.
 `--json` is output-only.

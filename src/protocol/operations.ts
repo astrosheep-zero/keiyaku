@@ -3,6 +3,7 @@ import {
   prepareReview,
   type DeliveryPreparationRefusal,
   type ReviewPreparationRefusal,
+  type WorkspaceDirtyDelta,
 } from "../git/delivery.js";
 import {
   currentBranch,
@@ -236,6 +237,7 @@ type DeliverOperationInput = OperationInput & Readonly<{
   derivation?: DocumentDerivation;
   message?: string;
   requireBranchesToBeUpToDate: boolean;
+  includeDirty: boolean;
 }>;
 
 function deliverAttempt(input: DeliverOperationInput, attempt: Parameters<typeof admitDecidedOffer>[2]): AttemptDecision<DeliveryIdentity> {
@@ -258,6 +260,7 @@ function deliverAttempt(input: DeliverOperationInput, attempt: Parameters<typeof
       title: input.derivation.title,
       ...(input.message === undefined ? {} : { message: input.message }),
       requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+      includeDirty: input.includeDirty,
     });
     preparation = prepared.kind === "refused"
       ? { kind: "refused", document: input.derivation.document, refusal: prepared.refusal }
@@ -386,15 +389,16 @@ export function arcOperation(
 
 type ReviewOperationInput = OperationInput & Readonly<{ verdict: AttestationData["verdict"]; summary?: string }>;
 
-export type ReviewValue = Readonly<{ placement?: PlacementStop }>;
+export type ReviewValue = Readonly<{ placement?: PlacementStop; workspace?: WorkspaceDirtyDelta }>;
 
 function reviewAttempt(
   input: ReviewOperationInput,
   attempt: Parameters<typeof admitDecidedOffer>[2],
-): AttemptDecision<void, ReviewRefusal> {
+): AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal> {
   const decisionObservation = observeContractsForAdmission(input.scope, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
   let preparation: AttestationInput<ReviewRefusal>["preparation"];
+  let workspace: WorkspaceDirtyDelta | undefined;
   if (state !== null) {
     const prepared = prepareReview(input.scope, { contractId: state.id, coordinates: state.coordinates });
     preparation = prepared.kind === "refused"
@@ -405,12 +409,13 @@ function reviewAttempt(
           gate: REVIEWED,
           subject: dependencyKeySet([
             { kind: "document", value: state.terms.document.key },
-            { kind: "change", value: prepared.data },
+            { kind: "change", value: prepared.data.changeId },
           ]),
           verdict: input.verdict,
           ...(input.summary === undefined ? {} : { summary: input.summary }),
         },
       };
+    if (prepared.kind === "prepared") workspace = prepared.data.workspace;
   }
   const decisionInput: AttestationInput<ReviewRefusal> = {
     contractId: input.contractId,
@@ -427,7 +432,10 @@ function reviewAttempt(
     decision.offer,
     input.contractId,
   );
-  if (admitted.kind === "accepted") return { ...admitted, value: undefined };
+  if (admitted.kind === "accepted") return {
+    ...admitted,
+    value: workspace === undefined ? {} : { workspace },
+  };
   return admitted;
 }
 
@@ -436,7 +444,7 @@ export async function reviewOperation(
 ): Promise<IntentOutcome<ReviewValue, ReviewRefusal>> {
   const git = input.scope;
   const attempts = mintAttempts({ entryCount: 2 });
-  let review: Extract<AttemptDecision<void, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
+  let review: Extract<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
     const result = reviewAttempt(input, attempts[index]!);
     if (result.kind === "accepted" || result.kind === "refused") {
@@ -448,7 +456,7 @@ export async function reviewOperation(
   }
   if (review === null) return { kind: "retry", reason: { kind: "exhausted" } };
   if (review.kind !== "accepted") return review;
-  if (input.verdict !== "satisfied") return admitted(review, {});
+  if (input.verdict !== "satisfied") return admitted(review, review.value);
 
   const placement = await admitPlacement(git, {
     contractId: input.contractId,
@@ -457,7 +465,7 @@ export async function reviewOperation(
   });
   const stopped = placementStop(placement);
   const admission = placement.kind === "accepted" ? mergeAdmissions(review, placement) : review;
-  return admitted(admission, stopped === undefined ? {} : { placement: stopped });
+  return admitted(admission, { ...review.value, ...(stopped === undefined ? {} : { placement: stopped }) });
 }
 
 export async function auditOperation(

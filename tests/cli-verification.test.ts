@@ -123,7 +123,7 @@ test("dirty --here delivery materializes and lands the verified candidate cleanl
     .filter((line) => line.startsWith("worktree "));
   const indexBefore = setup.raw.run(["diff", "--cached", "--binary"]);
   const result = await invoke(parseArgv([
-    "deliver", bound.contract, "--actor", "external-test", "--message", "Verified dirty candidate",
+    "deliver", bound.contract, "--include-dirty", "--actor", "external-test", "--message", "Verified dirty candidate",
   ]), {
     cwd: setup.raw.path,
     environment: {},

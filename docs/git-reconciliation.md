@@ -54,19 +54,30 @@ recovery reports `recovered`; an incompatible shape reports
 `target-checkout-retained` and leaves every byte untouched. A checkout already
 at the candidate needs no recovery effect.
 
-A pending tender keeps its candidate reachable through a Keiyaku-owned pin in
-either workspace mode. Cleanup never moves the target ref.
+A pending tender keeps its tender and integration reachable through
+Keiyaku-owned refs in either workspace mode. Cleanup never moves the target ref.
 
-Terminal removal of a managed worktree is legal only when its status, including
-untracked files, is clean and one of two commit arms holds: `HEAD` is the last
-accepted candidate and its tree matches that candidate's tree, or `HEAD` is the
-creation start and its tree matches the start tree. An abandonment with no
-delivery uses the start arm. Every such removal uses `git worktree remove`
-without `--force`; Keiyaku never invokes `git worktree remove --force`. When
-the test does not hold, reconciliation retains the worktree and its
-Keiyaku-owned reachability refs and pins, then reports the typed
-`worktree-retained` cleanup lag. Retention never reverses or changes an
-accepted outcome.
+Terminal removal of a managed worktree begins by capturing its complete
+non-ignored workspace tree through the same private-index mechanism as delivery.
+The tree must equal one of the journal-sealed trees and `HEAD` must independently
+name one of the journal-sealed commit identities. With no delivery, only start
+is sealed. With a delivery, tender and integration trees are sealed, while
+start, tender, and integration are permitted `HEAD` identities. Dirty submodule
+internals are never sealed. This proof permits the ordinary base-`HEAD` plus
+dirty tender-bytes shape, but rejects a later same-tree commit and every byte not
+represented by a sealed tree.
+
+Failure retains the worktree and every required reachability ref, then reports
+`unsealed-bytes` with the least differing path set and, when applicable, the
+unsealed `HEAD`. Destroy hooks run only after the initial proof, and Keiyaku
+repeats the complete proof after the hooks return. An eligible worktree is then
+removed with `git worktree remove --force`; force is legal here only because the
+complete byte and `HEAD` proof has already succeeded twice. Removal precedes ref
+cleanup. Each Keiyaku-owned ref deletion atomically verifies its surviving
+custodian ref. Integration custody requires the exact integration commit;
+tender custody requires the exact tender tree and may therefore pass to the
+claimed integration when their trees match. Nonredundant custody remains.
+Retention never reverses or changes an accepted outcome.
 
 ### Managed Worktree Hooks
 
@@ -115,14 +126,14 @@ recovery state exists.
 
 The create order is worktree add, marker freeze, then create commands. A create
 failure retains the worktree and does not reverse or abandon the accepted
-Contract. The destroy order is the existing cleanliness and HEAD/tree gate,
-then frozen destroy commands, worktree removal, and ref cleanup. A destroy
-failure retains the worktree and all reachability refs. Settings changes affect
-only a future worktree whose marker has not yet been frozen. Git does not expose
-a generic hook registry, lifecycle event bus, backend interface, or hook fact.
-Hook commands must not recursively invoke a mutation or reconciliation for the
-same Contract: the outer effect decision owns that Contract's lock until the
-command returns.
+Contract. The destroy order is initial sealed-byte proof, frozen destroy
+commands, repeated sealed-byte proof, worktree removal, and atomic ref cleanup.
+A destroy failure retains the worktree and all reachability refs. Settings
+changes affect only a future worktree whose marker has not yet been frozen. Git
+does not expose a generic hook registry, lifecycle event bus, backend interface,
+or hook fact. Hook commands must not recursively invoke a mutation or
+reconciliation for the same Contract: the outer effect decision owns that
+Contract's lock until the command returns.
 
 ```ts
 type ReconcileResult = Readonly<{
@@ -132,6 +143,12 @@ type ReconcileResult = Readonly<{
 
 type ReconcileLag =
   | Readonly<{ kind: "worktree-retained"; path: string }>
+  | Readonly<{
+      kind: "unsealed-bytes"
+      path: string
+      paths: readonly string[]
+      head?: SnapshotId
+    }>
   | Readonly<{
       kind: "target-checkout-retained"
       path: string

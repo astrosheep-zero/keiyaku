@@ -419,6 +419,65 @@ test("bind freezes the selected gate snapshot", async () => {
   );
 });
 
+test("dirty CLI delivery reports classified paths, short stats, and the explicit authorization", async () => {
+  const repository = repositoryWithMain();
+  const bound = await invokeWithDocument(
+    repository.path,
+    ["bind", "--here", "--actor", "external-test", "-"],
+    contractDocument("Explicit dirty CLI"),
+  );
+  const id = acceptedContract(bound);
+  writeFileSync(resolve(repository.path, "candidate.txt"), "candidate\n");
+
+  const refused = await invokeWithDocument(repository.path, ["deliver", id, "--json"], "");
+  assert.deepEqual(refused, {
+    kind: "refused",
+    verb: "deliver",
+    contract: id,
+    refusal: {
+      kind: "dirty-workspace",
+      contractId: id,
+      staged: [],
+      unstaged: [],
+      untracked: ["candidate.txt"],
+      submodules: [],
+      shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+      option: { flag: "--include-dirty", available: true },
+    },
+  });
+
+  const delivered = await invokeWithDocument(
+    repository.path,
+    ["deliver", id, "--include-dirty", "--actor", "external-test"],
+    "",
+  );
+  assert.equal(delivered.kind, "accepted");
+  assert.deepEqual(delivered.kind === "accepted" ? delivered.facts.map((fact) => fact.kind) : [], ["deliver"]);
+});
+
+test("dirty CLI review discloses its workspace projection without an authorization option", async () => {
+  const repository = repositoryWithMain();
+  const bound = await invokeWithDocument(
+    repository.path,
+    ["bind", "--here", "--actor", "external-test", "-"],
+    contractDocument("Dirty CLI review"),
+  );
+  const id = acceptedContract(bound);
+  writeFileSync(resolve(repository.path, "candidate.txt"), "candidate\n");
+
+  const reviewed = await invokeWithDocument(repository.path, ["review", id, "--satisfied", "--json"], "");
+
+  assert.equal(reviewed.kind, "accepted");
+  if (reviewed.kind !== "accepted") return;
+  assert.deepEqual(reviewed.workspace, {
+    staged: [],
+    unstaged: [],
+    untracked: ["candidate.txt"],
+    shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+  });
+  assert.equal(JSON.stringify(reviewed).includes("--include-dirty"), false);
+});
+
 test("audit --show-diff-body retains its Delivery across a terminal transition", async () => {
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(
@@ -428,7 +487,7 @@ test("audit --show-diff-body retains its Delivery across a terminal transition",
   );
   const id = acceptedContract(bound);
   writeFileSync(resolve(repository.path, "candidate.txt"), "candidate\n");
-  const delivered = await invokeWithDocument(repository.path, ["deliver", id, "--actor", "external-test"], "");
+  const delivered = await invokeWithDocument(repository.path, ["deliver", id, "--include-dirty", "--actor", "external-test"], "");
   assert.equal(delivered.kind, "accepted");
 
   const contract = Keiyaku.of({ repo: Repo.at({ path: repository.path }), id });
@@ -601,8 +660,11 @@ test("managed abandonment cleans terminal resources from its own worktree cwd", 
   assert.equal("lag" in abandoned, false);
   assert.equal(observeContract(repositoryAt(repository.path), id).state?.terminal?.kind, "abandoned");
   assert.equal(observeContract(repositoryAt(repository.path), id).state?.terminal?.data.note, "scope changed");
-  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)), null);
-  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), null);
+  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)) !== null, true);
+  assert.equal(
+    readRef(repositoryAt(repository.path), candidatePinRefFor(id)),
+    observeContract(repositoryAt(repository.path), id).state?.delivery?.data.integration.snapshot,
+  );
   assert.equal(existsSync(path), false);
 });
 
@@ -715,7 +777,7 @@ test("--here delivers in place without owning a managed worktree", async () => {
   );
   const abandoned = await command(["abandon", id, "--actor", "external-test"]);
   assert.equal(abandoned.kind, "accepted");
-  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), null);
+  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), state?.delivery?.data.integration.snapshot);
   assert.equal(readRef(repositoryAt(repository.path), "refs/heads/main"), main);
   assert.equal(readRef(repositoryAt(repository.path), "refs/heads/feature"), candidate);
   assert.equal(repository.run(["symbolic-ref", "--short", "HEAD"]).trim(), "feature");

@@ -153,6 +153,14 @@ type ExistingSeat = Readonly<{
   hooks: WorktreeHooks;
 }>;
 
+function deliverRefusal(refusal: unknown): unknown {
+  if (typeof refusal !== "object" || refusal === null || !("kind" in refusal) || refusal.kind !== "dirty-workspace") {
+    return refusal;
+  }
+  const submodules = "submodules" in refusal && Array.isArray(refusal.submodules) ? refusal.submodules : [];
+  return { ...refusal, option: { flag: "--include-dirty", available: submodules.length === 0 } };
+}
+
 async function invokeDeliver(
   parsed: Extract<ExistingCommand, { command: "deliver" }>,
   seat: ExistingSeat,
@@ -162,9 +170,11 @@ async function invokeDeliver(
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
     ...(parsed.message === undefined ? {} : { message: parsed.message }),
     requireBranchesToBeUpToDate,
+    includeDirty: parsed.includeDirty,
     hooks: seat.hooks,
   }), {
     coordinate: seat.id,
+    projectRefusal: deliverRefusal,
     project: (result) => ({
       obligations: {
         ...(result.value.verification === undefined ? {} : { verification: result.value.verification }),
@@ -190,6 +200,7 @@ async function invokeReview(
     coordinate: seat.id,
     project: (result) => ({
       obligations: result.value.placement === undefined ? {} : { placement: result.value.placement },
+      workspace: result.value.workspace,
     }),
   });
 }

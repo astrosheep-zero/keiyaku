@@ -111,33 +111,42 @@ not stored in the Contract journal, and there is no legacy-path fallback.
 
 ## Delivery Preparation And Placement
 
-Preparation consumes only the state coordinates projected from that attempt, a
-pure `requireBranchesToBeUpToDate` value, and a title stamped with the
-`DocumentKey` from which it was derived. It does not observe, fold, or judge
-contract lifecycle state, decode a document, request a callback, import
-Settings, or import a protocol body. For a target contract, Git observes the
-current target head and constructs one squash integration against it. For a
+Preparation consumes only the state coordinates projected from that attempt,
+pure `requireBranchesToBeUpToDate` and `includeDirty` values, and a title
+stamped with the `DocumentKey` from which it was derived. It does not observe,
+fold, or judge contract lifecycle state, decode a document, request a callback,
+import Settings, or import a protocol body. For a target contract, Git observes
+the current target head and constructs one squash integration against it. For a
 targetless contract, the supplied `start` coordinate is the integration
-predecessor, the tender is also the integration snapshot, and there is no
-target ref operation.
+predecessor, the tender is also the integration snapshot, and there is no target
+ref operation.
 
 Preparation uses the one core mechanical-result primitive. Delivery returns
-`Preparation<DeliverData, DeliveryPreparationFailure>` and review returns
-`Preparation<ChangeId, ReviewPreparationFailure>`; the prepared payload field
-is always `data`. Git defines neither bespoke delivery/review preparation
-unions nor a wrapper supertype. Delivery's data contains the tender snapshot,
-complete integration identity, squash method, and frozen policy; review's data
-is the captured integration ChangeId. A mechanical preparation failure is data
-for the attempt's completed legal decision, not a lifecycle refusal. The
-tender is the selected workspace content: the
-deterministic managed worktree in worktree mode or the pinned caller worktree
-in here mode. Clean content uses its existing `HEAD`. Dirty content, including
-untracked files, is captured through a private index and materialized as a
-deterministic tender commit/tree without changing the caller's index or
-worktree. Its commit message defaults to `<contract-id>: <title>` followed by
+`Preparation<DeliverData, DeliveryPreparationFailure>` and review returns a
+prepared review projection; the prepared payload field is always `data`. Git
+defines neither bespoke delivery/review preparation unions nor a wrapper
+supertype. Delivery's data contains the tender snapshot, complete integration
+identity, squash method, and frozen policy; review's data contains the captured
+integration ChangeId and any dirty workspace disclosure for that observation. A
+mechanical preparation failure is data for the attempt's completed legal
+decision, not a lifecycle refusal. The tender is the selected workspace
+content: the deterministic managed worktree in worktree mode or the pinned
+caller worktree in here mode. Clean content uses its existing `HEAD`. A dirty
+workspace refuses before delivery or Verification unless `includeDirty` is
+true. Review is observation, not delivery authorization: ordinary dirty bytes
+do not refuse review, but the accepted review result discloses every
+non-ignored staged, unstaged, and untracked path plus insertion/deletion totals
+for the complete final tree relative to `HEAD`. Dirty submodule internals
+always refuse because the superproject tree cannot seal or observe those bytes.
+
+When `includeDirty` is true, Git captures all non-ignored staged, unstaged, and
+untracked final bytes through one private index and materializes a deterministic
+tender commit/tree without changing the real `HEAD`, index, branch, or files.
+It is complete-workspace authorization, not a staged-only mode or path selector.
+Its commit message defaults to `<contract-id>: <title>` followed by
 `Keiyaku-Contract: <contract-id>`. A caller-supplied `message` replaces the
-message bytes only; tender tree, parent, identity rules, and lifecycle
-meaning do not change.
+message bytes only; tender tree, parent, identity rules, and lifecycle meaning
+do not change.
 
 Git uses commit identity for `SnapshotId` and one stable patch-ID
 method for `ChangeId`: `patch-id --stable` over the diff from the integration
@@ -269,16 +278,25 @@ delivery ref names the tender snapshot and the candidate pin names the
 integration snapshot. The target makes a claimed integration reachable. Git
 retains no additional Keiyaku diff blob, permanent ref, or state index.
 
-Terminal cleanup releases the delivery ref, candidate pin, and managed
-worktree only after the applicable cleanup rule succeeds. A managed worktree
-is removable only when clean and its `HEAD` is either the tender snapshot or
-the contract start with the matching tree. A retained worktree
-retains its reachability topology. Once the topology is released, Git pruning
-may make a recorded tender, predecessor, or integration snapshot unavailable.
-That availability is Git state, while delivery identities remain durable
-contract facts. The
-public `Delivery.diff()` contract and its git-unavailable result are
-defined in [public-api.md](public-api.md).
+Terminal cleanup removes an eligible managed worktree before releasing any
+redundant ref. It compares the complete private-index workspace tree with the
+journal-sealed start, tender, or integration trees and separately requires
+`HEAD` to be a sealed start, tender, or integration commit identity. Matching
+bytes therefore remain removable even when ordinary status is dirty, while a
+new same-tree commit remains user work and is retained. No-delivery abandon
+permits only the start tree and start `HEAD`. Dirty submodule internals are
+never sealed by this proof.
+
+Every Keiyaku-owned ref deletion is one atomic transaction that verifies its
+surviving custodian ref. A candidate pin is released only when that ref preserves
+the exact integration commit. A delivery ref may be released when the surviving
+claimed integration preserves the exact tender tree; otherwise the tender ref
+remains. Equal trees therefore suffice only for tender-byte custody, never as a
+substitute for integration commit identity. A retained worktree retains its
+reachability topology. Git pruning may make only identities whose custody has
+lawfully ended unavailable. Identity facts remain durable Contract state. The
+public `Delivery.diff()` contract and its git-unavailable result are defined in
+[public-api.md](public-api.md).
 
 No cleanup operation rewrites a target ref. A targetless claimed contract and a
 targeted contract whose target later moves share the same byte-custody rule.

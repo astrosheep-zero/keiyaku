@@ -129,6 +129,20 @@ type DeliveryWorkspaceRefusal = Readonly<{
   branch: string | null
 }>
 
+type DirtyWorkspaceRefusal = Readonly<{
+  kind: "dirty-workspace"
+  contractId: ContractId
+  staged: readonly string[]
+  unstaged: readonly string[]
+  untracked: readonly string[]
+  submodules: readonly string[]
+  shortStat: Readonly<{
+    filesChanged: number
+    insertions: number
+    deletions: number
+  }>
+}>
+
 type DocumentMovedRefusal = Readonly<{
   kind: "document-moved"
   contractId: ContractId
@@ -206,8 +220,15 @@ derivation and does not expose `document-moved`; its testimony remains keyed to
 the subject actually reviewed. `KeiyakuRefusal` therefore includes
 `terms-moved` for amend, `DocumentMovedRefusal` for deliver and audit, and
 `DeliveryWorkspaceRefusal` for a here deliver whose caller workspace left its
-target. That refusal ends the invocation; it does not trigger a reread,
-auto-retry, or adoption of a new document revision.
+target. It also includes `DirtyWorkspaceRefusal` when delivery lacks explicit
+dirty authorization or when dirty submodule internals cannot be sealed or
+observed. Ordinary dirty review is accepted and returns a `workspace`
+disclosure instead of a refusal. One path may appear in both staged and
+unstaged arrays when the index and worktree each differ. `shortStat` describes
+the complete final tree relative to `HEAD`; binary entries count as changed
+files with zero textual insertions/deletions. These refusals end the
+invocation; they do not trigger a reread, auto-retry, or adoption of a new
+document revision.
 
 `TargetInputRefusal` is the `KeiyakuRefusal` member for `Keiyaku.bind` target
 validation, existence, and the targeted-here branch relationship. It has no

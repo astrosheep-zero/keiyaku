@@ -43,6 +43,15 @@ export type DeliveryPreparationRefusal =
       kind: "target-missing" | "worktree-missing";
       contractId: ContractId;
     }>
+  | Readonly<{
+      kind: "dirty-workspace";
+      contractId: ContractId;
+      staged: readonly string[];
+      unstaged: readonly string[];
+      untracked: readonly string[];
+      submodules: readonly string[];
+      shortStat: Readonly<{ filesChanged: number; insertions: number; deletions: number }>;
+    }>
   | IntegrationPreparationRefusal
   | WorkspaceNotOnTargetRefusal;
 
@@ -51,23 +60,37 @@ export type ReviewPreparationRefusal =
       kind: "target-missing" | "worktree-missing";
       contractId: ContractId;
     }>
-  | IntegrationPreparationRefusal;
+  | IntegrationPreparationRefusal
+  | Extract<DeliveryPreparationRefusal, { kind: "dirty-workspace" }>;
 
 export type DeliveryPreparationCoordinates = Readonly<{
   contractId: ContractId;
   coordinates: ContractCoordinates;
 }>;
 
+export type WorkspaceDirtyDelta = Readonly<{
+  staged: readonly string[];
+  unstaged: readonly string[];
+  untracked: readonly string[];
+  shortStat: Readonly<{ filesChanged: number; insertions: number; deletions: number }>;
+}>;
+
 type TenderContent = Readonly<{
   tree: GitObjectId;
   head: SnapshotId;
   dirty: boolean;
+  changes: ReturnType<typeof captureWorkspaceTree>["changes"];
 }>;
 
 type IntegrationTree = Readonly<{
   predecessor: SnapshotId;
   tree: GitObjectId;
   changeId: ChangeId;
+}>;
+
+export type ReviewPreparation = Readonly<{
+  changeId: ChangeId;
+  workspace?: WorkspaceDirtyDelta;
 }>;
 
 function workspaceExists(repository: GitRepository, workspace: "worktree" | "here", path: string): boolean {
@@ -285,22 +308,79 @@ function observedTender(repository: GitRepository, input: DeliveryPreparationCoo
   return { kind: "prepared", data: captureWorkspaceTree(repository, workspace) };
 }
 
+function dirtyShortStat(
+  repository: GitRepository,
+  tender: TenderContent,
+): WorkspaceDirtyDelta["shortStat"] {
+  const fields = runGit(repository, [
+    "diff",
+    "--numstat",
+    "-z",
+    gitObjectIdForSnapshot(tender.head),
+    tender.tree,
+  ]).toString("utf8").split("\0");
+  if (fields.at(-1) !== "") throw new Error("Git numstat output is not NUL terminated");
+  let filesChanged = 0;
+  let insertions = 0;
+  let deletions = 0;
+  for (let index = 0; index < fields.length - 1; index += 1) {
+    const field = fields[index]!;
+    const [added, deleted, path, extra] = field.split("\t");
+    if (added === undefined || deleted === undefined || path === undefined || extra !== undefined) {
+      throw new Error("Git numstat output is malformed");
+    }
+    if (path.length === 0) {
+      if (fields[index + 1] === undefined || fields[index + 2] === undefined) {
+        throw new Error("Git rename numstat output is missing paths");
+      }
+      index += 2;
+    }
+    filesChanged += 1;
+    insertions += added === "-" ? 0 : Number.parseInt(added, 10);
+    deletions += deleted === "-" ? 0 : Number.parseInt(deleted, 10);
+  }
+  return { filesChanged, insertions, deletions };
+}
+
+function dirtyWorkspaceRefusal(
+  repository: GitRepository,
+  contractId: ContractId,
+  tender: TenderContent,
+): Extract<DeliveryPreparationRefusal, { kind: "dirty-workspace" }> {
+  return {
+    kind: "dirty-workspace",
+    contractId,
+    ...tender.changes,
+    shortStat: dirtyShortStat(repository, tender),
+  };
+}
+
+function dirtyWorkspaceDelta(repository: GitRepository, tender: TenderContent): WorkspaceDirtyDelta | undefined {
+  if (!tender.dirty) return undefined;
+  const { staged, unstaged, untracked } = tender.changes;
+  return { staged, unstaged, untracked, shortStat: dirtyShortStat(repository, tender) };
+}
+
 export function prepareReview(
   repository: GitRepository,
   input: DeliveryPreparationCoordinates,
-): Preparation<ChangeId, ReviewPreparationRefusal> {
+): Preparation<ReviewPreparation, ReviewPreparationRefusal> {
   const tender = observedTender(repository, input);
   if (tender.kind === "refused") return tender;
+  if (tender.data.changes.submodules.length > 0) {
+    return { kind: "refused", refusal: dirtyWorkspaceRefusal(repository, input.contractId, tender.data) };
+  }
   const integration = integrationTree(repository, input, tender.data, false);
+  const workspace = dirtyWorkspaceDelta(repository, tender.data);
   return integration.kind === "refused"
     ? integration
-    : { kind: "prepared", data: integration.data.changeId };
+    : { kind: "prepared", data: { changeId: integration.data.changeId, ...(workspace === undefined ? {} : { workspace }) } };
 }
 
 export function prepareDelivery(
   repository: GitRepository,
   stage: DeliveryPreparationCoordinates,
-  input: Readonly<{ title: string; message?: string; requireBranchesToBeUpToDate: boolean }>,
+  input: Readonly<{ title: string; message?: string; requireBranchesToBeUpToDate: boolean; includeDirty?: boolean }>,
 ): Preparation<DeliverData, DeliveryPreparationRefusal> {
   const id = stage.contractId;
   const coordinates = stage.coordinates;
@@ -315,6 +395,9 @@ export function prepareDelivery(
   }
   const tender = observedTender(repository, stage);
   if (tender.kind === "refused") return tender;
+  if ((tender.data.dirty && input.includeDirty !== true) || tender.data.changes.submodules.length > 0) {
+    return { kind: "refused", refusal: dirtyWorkspaceRefusal(repository, id, tender.data) };
+  }
   const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
   const message = commitMessage(id, input.title, input.message);
   const tenderSnapshot = tender.data.dirty

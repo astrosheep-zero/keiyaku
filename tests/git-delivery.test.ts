@@ -108,7 +108,7 @@ test("permissive targeted delivery integrates tender bytes over the observed tar
   if (review.kind !== "prepared" || delivery.kind !== "prepared") return;
   assert.equal(delivery.data.tenderSnapshot, tenderHead);
   assert.equal(delivery.data.integration.predecessor, targetHead);
-  assert.equal(delivery.data.integration.changeId, review.data);
+  assert.equal(delivery.data.integration.changeId, review.data.changeId);
   assert.equal(repository.run(["rev-parse", `${delivery.data.integration.snapshot}^`]).trim(), targetHead);
   assert.equal(repository.run(["show", `${delivery.data.integration.snapshot}:target.txt`]), "target advance\n");
   assert.equal(repository.run(["show", `${delivery.data.integration.snapshot}:tender.txt`]), "tender\n");
@@ -257,13 +257,91 @@ test("dirty delivery materializes a candidate without changing the caller index"
   assert.equal("documentKey" in review, false);
   const indexBefore = repository.run(["diff", "--cached", "--binary"]);
 
-  const prepared = prepareDelivery(git, preparationCoordinates(state), { title: "Patch identity" });
+  const prepared = prepareDelivery(git, preparationCoordinates(state), { title: "Patch identity", includeDirty: true });
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind !== "prepared") throw new Error("delivery preparation was refused");
-  assert.equal(prepared.data.integration.changeId, review.data);
+  assert.equal(prepared.data.integration.changeId, review.data.changeId);
+  assert.deepEqual(review.data.workspace, {
+    staged: [],
+    unstaged: [],
+    untracked: ["candidate.txt"],
+    shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+  });
   assert.equal(repository.run(["diff", "--cached", "--binary"]), indexBefore);
   assert.match(repository.run(["show", "-s", "--format=%B", prepared.data.integration.snapshot]), /kei\/.*: Patch identity/);
   assert.match(repository.run(["show", "-s", "--format=%B", prepared.data.integration.snapshot]), /Keiyaku-Contract: /);
+});
+
+test("dirty delivery refuses classified paths unless the complete workspace is authorized", async () => {
+  const { repository, id } = await boundContract();
+  writeFileSync(join(repository.path, ".gitignore"), "ignored.txt\n");
+  writeFileSync(join(repository.path, "staged.txt"), "staged\n");
+  repository.run(["add", ".gitignore", "staged.txt"]);
+  repository.run(["commit", "--quiet", "-m", "tracked inputs"]);
+  writeFileSync(join(repository.path, "staged.txt"), "staged final\n");
+  repository.run(["add", "staged.txt"]);
+  writeFileSync(join(repository.path, "staged.txt"), "unstaged final\n");
+  writeFileSync(join(repository.path, "untracked.txt"), "untracked\n");
+  writeFileSync(join(repository.path, "ignored.txt"), "ignored\n");
+  const git = repositoryAt(repository.path);
+  const state = observeContract(git, id).state;
+  if (state === null) throw new Error("contract was not observed");
+  const headBefore = repository.run(["rev-parse", "HEAD"]);
+  const indexBefore = repository.run(["diff", "--cached", "--binary"]);
+  const statusBefore = repository.run(["status", "--porcelain=v2", "--untracked-files=all"]);
+
+  assert.deepEqual(prepareDelivery(git, preparationCoordinates(state), { title: "Explicit dirty" }), {
+    kind: "refused",
+    refusal: {
+      kind: "dirty-workspace",
+      contractId: id,
+      staged: ["staged.txt"],
+      unstaged: ["staged.txt"],
+      untracked: ["untracked.txt"],
+      submodules: [],
+      shortStat: { filesChanged: 2, insertions: 2, deletions: 1 },
+    },
+  });
+  const prepared = prepareDelivery(git, preparationCoordinates(state), { title: "Explicit dirty", includeDirty: true });
+  assert.equal(prepared.kind, "prepared");
+  if (prepared.kind !== "prepared") return;
+  assert.equal(repository.run(["show", `${prepared.data.tenderSnapshot}:staged.txt`]), "unstaged final\n");
+  assert.equal(repository.run(["show", `${prepared.data.tenderSnapshot}:untracked.txt`]), "untracked\n");
+  assert.throws(() => repository.run(["show", `${prepared.data.tenderSnapshot}:ignored.txt`]));
+  assert.equal(repository.run(["rev-parse", "HEAD"]), headBefore);
+  assert.equal(repository.run(["diff", "--cached", "--binary"]), indexBefore);
+  assert.equal(repository.run(["status", "--porcelain=v2", "--untracked-files=all"]), statusBefore);
+});
+
+test("review observes dirty bytes but refuses dirty submodule internals", async () => {
+  const child = makeGitRepository();
+  child.run(["config", "user.name", "Test User"]);
+  child.run(["config", "user.email", "test@example.com"]);
+  writeFileSync(join(child.path, "child.txt"), "child\n");
+  child.run(["add", "child.txt"]);
+  child.run(["commit", "--quiet", "-m", "child"]);
+  const { repository, id } = await boundContract();
+  repository.run(["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", child.path, "module"]);
+  repository.run(["commit", "--quiet", "-am", "submodule"]);
+  writeFileSync(join(repository.path, "module", "child.txt"), "dirty child\n");
+  const git = repositoryAt(repository.path);
+  const state = observeContract(git, id).state;
+  if (state === null) throw new Error("contract was not observed");
+  const expected = {
+    kind: "refused" as const,
+    refusal: {
+      kind: "dirty-workspace" as const,
+      contractId: id,
+      staged: [],
+      unstaged: ["module"],
+      untracked: [],
+      submodules: ["module"],
+      shortStat: { filesChanged: 0, insertions: 0, deletions: 0 },
+    },
+  };
+
+  assert.deepEqual(prepareReview(git, preparationCoordinates(state)), expected);
+  assert.deepEqual(prepareDelivery(git, preparationCoordinates(state), { title: "Submodule", includeDirty: true }), expected);
 });
 
 test("delivery preparation refuses an unregistered directory at the managed worktree path", async () => {
@@ -472,7 +550,7 @@ test("delivery diff leaves probe diagnostics as Git errors", async () => {
   );
 });
 
-test("a terminal cleanup can leave a delivery diff unavailable after Git prunes its tender", async () => {
+test("targetless terminal cleanup retains tender custody for Delivery.diff", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
@@ -498,7 +576,7 @@ test("a terminal cleanup can leave a delivery diff unavailable after Git prunes 
 
   const recovered = await bound.keiyaku.delivery();
   assert.ok(recovered);
-  assert.equal(await recovered.diff(), null);
+  assert.match(await recovered.diff() ?? "", /candidate\.txt/);
 });
 
 test("terminal reconcile retains an untracked managed worktree and its reachability refs", async () => {
@@ -517,7 +595,7 @@ test("terminal reconcile retains an untracked managed worktree and its reachabil
 
   const reconciled = await bound.keiyaku.reconcile();
 
-  assert.deepEqual(reconciled.lag, [{ kind: "worktree-retained", path }]);
+  assert.deepEqual(reconciled.lag, [{ kind: "unsealed-bytes", path, paths: ["untracked-agent-work.txt"] }]);
   assert.equal(existsSync(path), true);
   assert.equal(repository.run(["-C", path, "status", "--porcelain", "--untracked-files=all"]), "?? untracked-agent-work.txt\n");
   assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor((await bound.keiyaku.state()).id)), candidate);
@@ -541,11 +619,36 @@ test("terminal reconcile retains a clean managed worktree whose HEAD is not the 
 
   const reconciled = await bound.keiyaku.reconcile();
 
-  assert.deepEqual(reconciled.lag, [{ kind: "worktree-retained", path }]);
+  assert.deepEqual(reconciled.lag, [{ kind: "unsealed-bytes", path, paths: [], head: later }]);
   assert.equal(repository.run(["-C", path, "status", "--porcelain", "--untracked-files=all"]), "");
   assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), later);
   assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor((await bound.keiyaku.state()).id)), candidate);
   assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor((await bound.keiyaku.state()).id)), candidate);
+});
+
+test("terminal reconcile removes a delivered managed worktree reset to its sealed start", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const start = repository.run(["rev-parse", "HEAD"]).trim();
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
+  await bound.keiyaku.reconcile();
+  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  writeFileSync(join(path, "candidate.txt"), "candidate\n");
+  repository.run(["-C", path, "add", "candidate.txt"]);
+  repository.run(["-C", path, "commit", "--quiet", "-m", "tendered candidate"]);
+  const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
+  await bound.keiyaku.deliver();
+  repository.run(["-C", path, "reset", "--hard", start]);
+
+  const abandoned = await bound.keiyaku.abandon();
+
+  assert.deepEqual(abandoned.lags, []);
+  assert.equal(abandoned.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"), true);
+  assert.equal(existsSync(path), false);
+  assert.equal(repository.run(["cat-file", "-e", `${start}^{commit}`]), "");
+  assert.equal(repository.run(["cat-file", "-e", `${candidate}^{commit}`]), "");
 });
 
 test("a clean no-delivery abandonment releases the managed worktree from its start", async () => {

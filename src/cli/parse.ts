@@ -46,8 +46,8 @@ const CONTRACT_COMMAND_SPECS = {
   deliver: {
     positional: "optional",
     stdin: "none",
-    flags: { actor: "value", message: "value", json: "boolean" },
-    usage: "deliver [<contract>|@<contract>] [--message <text>] [--actor <actor>] [--json]",
+    flags: { actor: "value", message: "value", "include-dirty": "boolean", json: "boolean" },
+    usage: "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--actor <actor>] [--json]",
     purpose: "Deliver one Contract candidate.",
   },
   review: {
@@ -167,6 +167,7 @@ export type ParsedDeliver = Output & Actor & Readonly<{
   command: "deliver";
   contract?: string;
   message?: string;
+  includeDirty: boolean;
 }>;
 export type ParsedReview = Output & Actor & Readonly<{
   command: "review";
@@ -355,6 +356,7 @@ function parseDeliver(parts: ParsedParts): ParsedDeliver {
     ...(contract === undefined ? {} : { contract }),
     ...(parts.actor === undefined ? {} : { actor: parts.actor }),
     ...(message === undefined ? {} : { message }),
+    includeDirty: parts.flags["include-dirty"] === true,
     output: parts.output,
   };
 }

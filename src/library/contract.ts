@@ -9,7 +9,9 @@ import {
   documentDerivation,
   normalizedGates,
   normalizedList,
+  optionalBoolean,
   optionalNonblank,
+  rejectUnknownFields,
   requireInput,
   requireMarkdown,
 } from "./input.js";
@@ -21,7 +23,6 @@ import {
   type ContractHead,
   type ContractId,
   type ContractState,
-  type JournalEntry,
   type SnapshotId,
 } from "../core/facts/types.js";
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -51,14 +52,9 @@ import {
   type DeliverValue,
   type FactKind,
   type IntentOutcome,
-  type IntentRefusal,
-  type IntentRetry,
-  type PlacementStop,
   type ReconcileReport as ProtocolReconcileReport,
   type RepositoryScope,
-  type ReviewValue,
   type TimelineEntry,
-  type VerificationStop,
 } from "../protocol/operations.js";
 import { deferredTaskHolderSettlement, settle, type SettlementReport } from "../settlement/settle.js";
 import {
@@ -70,6 +66,32 @@ import {
 } from "../settlement/holder.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
+import {
+  deliveryHandle,
+  KeiyakuRefused,
+  KeiyakuRetry,
+  type ActorId,
+  type AttestationVerdict,
+  type Delivery,
+  type Fact,
+  type KeiyakuRefusal,
+  type MutationResult,
+  type Review,
+} from "./contract-values.js";
+export { Delivery, KeiyakuRefused, KeiyakuRetry } from "./contract-values.js";
+export type {
+  ActorId,
+  AttestationVerdict,
+  Fact,
+  KeiyakuRefusal,
+  KeiyakuRetryReason,
+  Lag,
+  MutationResult,
+  PlacementStop,
+  Review,
+  TopologyEffect,
+  VerificationStop,
+} from "./contract-values.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
 export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks, WorktreeHooksFromInput } from "./configuration.js";
 
@@ -92,51 +114,10 @@ export type {
 export type { TaskId };
 export type { RegionOverlap };
 
-export type Fact = JournalEntry;
-export type ActorId = string;
-export type AttestationVerdict = "satisfied" | "unsatisfied";
-export type Review = ReviewValue;
-export type KeiyakuRefusal = IntentRefusal;
-export type KeiyakuRetryReason = IntentRetry;
-export type { PlacementStop, VerificationStop };
-
-export type TopologyEffect = ProtocolReconcileReport["effects"][number];
-export type Lag = ProtocolReconcileReport["lag"][number];
-export type MutationResult<Value> = Readonly<{
-  facts: readonly Fact[];
-  head: ContractHead;
-  value: Value;
-  effects: readonly TopologyEffect[];
-  lags: readonly Lag[];
-  settlement: SettlementReport;
-}>;
-
 export type BindResult = Readonly<Omit<MutationResult<Keiyaku>, "value"> & { keiyaku: Keiyaku } & RegionObservation>;
 export type AmendResult = Readonly<MutationResult<void> & RegionObservation & { documentDiff: string }>;
 export type ReconcileReport = Readonly<ProtocolReconcileReport & { settlement: SettlementReport }>;
 export type { SettlementAction, SettlementLag, SettlementReport } from "../settlement/settle.js";
-
-export class KeiyakuRefused extends Error {
-  constructor(readonly refusal: KeiyakuRefusal) {
-    super(`Keiyaku refused: ${refusal.kind}`);
-    this.name = "KeiyakuRefused";
-  }
-
-  get code(): KeiyakuRefusal["kind"] {
-    return this.refusal.kind;
-  }
-}
-
-export class KeiyakuRetry extends Error {
-  constructor(readonly reason: KeiyakuRetryReason) {
-    super(reason.kind === "publication-failed" ? reason.diagnostic : `Keiyaku retry required: ${reason.kind}`);
-    this.name = "KeiyakuRetry";
-  }
-
-  get code(): KeiyakuRetryReason["kind"] {
-    return this.reason.kind;
-  }
-}
 
 export type BindInput = Readonly<{
   repo: Repo;
@@ -171,7 +152,11 @@ export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type KeiyakuOfInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type ReviewInput = ActorOptions & Readonly<{ verdict: AttestationVerdict; summary?: string }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
-export type DeliverInput = ActorOptions & Readonly<{ message?: string; requireBranchesToBeUpToDate?: boolean }>;
+export type DeliverInput = ActorOptions & Readonly<{
+  message?: string;
+  requireBranchesToBeUpToDate?: boolean;
+  includeDirty?: boolean;
+}>;
 export type AuditInput = ActorOptions;
 
 type AcceptedIntent<Value> = Readonly<{
@@ -197,6 +182,15 @@ function taskOption(value: unknown): TaskId | undefined {
     throw new TypeError(error instanceof Error ? error.message : "task must be a TaskId");
   }
   return value as TaskId;
+}
+
+function contractIdOption(value: unknown): ContractId {
+  if (typeof value !== "string") throw new TypeError("contract ID must be a string");
+  try {
+    return contractId(value);
+  } catch (error) {
+    throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
+  }
 }
 
 async function mutationResult<Value, PublicValue>(
@@ -235,43 +229,6 @@ async function holderMutationResult<Value, PublicValue, Refusal extends KeiyakuR
     settlement: deferredTaskHolderSettlement({ contractId: id, taskId: admission.taskId, diagnostic: admission.diagnostic }),
   };
 }
-
-class DeliveryHandle {
-  declare readonly verification?: DeliverValue["verification"];
-  declare readonly placement?: DeliverValue["placement"];
-  declare readonly leak?: DeliverValue["leak"];
-
-  constructor(
-    identity: Pick<DeliverValue, "tenderSnapshot" | "integration" | "method" | "policy">,
-    private readonly readDiff: () => Promise<string | null>,
-    outcomes: Partial<Pick<DeliverValue, "verification" | "placement" | "leak">> = {},
-  ) {
-    this.tenderSnapshot = identity.tenderSnapshot;
-    this.integration = identity.integration;
-    this.method = identity.method;
-    this.policy = identity.policy;
-    Object.assign(this, outcomes);
-  }
-
-  declare readonly tenderSnapshot: SnapshotId;
-  declare readonly integration: DeliverValue["integration"];
-  declare readonly method: DeliverValue["method"];
-  declare readonly policy: DeliverValue["policy"];
-
-  diff(): Promise<string | null> {
-    return this.readDiff();
-  }
-}
-
-export type Delivery = DeliveryHandle;
-type HandleType<T extends object> = Readonly<{
-  prototype: T;
-  [Symbol.hasInstance](value: unknown): boolean;
-}>;
-function handleType<T extends object>(prototype: T, hasInstance: (value: unknown) => boolean): HandleType<T> {
-  return Object.freeze({ prototype, [Symbol.hasInstance]: hasInstance });
-}
-export const Delivery = handleType(DeliveryHandle.prototype, (value) => value instanceof DeliveryHandle);
 
 export class KeiyakuHandle {
   constructor(
@@ -340,22 +297,18 @@ export class KeiyakuHandle {
     const values = input === undefined ? undefined : requireInput(input, "deliver input");
     const hooks = worktreeHooksOption(values?.hooks);
     const message = optionalNonblank(values?.message, "deliver message");
-    if (values?.requireBranchesToBeUpToDate !== undefined && typeof values.requireBranchesToBeUpToDate !== "boolean") {
-      throw new TypeError("requireBranchesToBeUpToDate must be a boolean");
-    }
+    const requireBranchesToBeUpToDate = optionalBoolean(values?.requireBranchesToBeUpToDate, "requireBranchesToBeUpToDate");
+    const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty");
     const actor = actorOption(values?.actor);
-    const state = readStateOperation({ scope: this.scope, contractId: this.id });
-    const derivation = state === null
-      ? undefined
-      : documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
     const accepted = requireAccepted(
       await deliverOperation({
         scope: this.scope,
         contractId: this.id,
-        ...(derivation === undefined ? {} : { derivation }),
         ...actor,
+        ...this.currentDerivationOption(),
         ...(message === undefined ? {} : { message }),
-        requireBranchesToBeUpToDate: values?.requireBranchesToBeUpToDate ?? false,
+        requireBranchesToBeUpToDate: requireBranchesToBeUpToDate ?? false,
+        includeDirty: includeDirty ?? false,
       }),
     );
     return mutationResult(this.scope, this.id, accepted, (delivery) => this.deliveryHandle(delivery), hooks);
@@ -413,15 +366,11 @@ export class KeiyakuHandle {
     const values = input === undefined ? undefined : requireInput(input, "audit input");
     const hooks = worktreeHooksOption(values?.hooks);
     const actor = actorOption(values?.actor);
-    const state = readStateOperation({ scope: this.scope, contractId: this.id });
-    const derivation = state === null
-      ? undefined
-      : documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
     const accepted = requireAccepted(
       await auditOperation({
         scope: this.scope,
         contractId: this.id,
-        ...(derivation === undefined ? {} : { derivation }),
+        ...this.currentDerivationOption(),
         ...actor,
       }),
     );
@@ -438,7 +387,7 @@ export class KeiyakuHandle {
   }
 
   private deliveryHandle(delivery: DeliverValue): Delivery {
-    return new DeliveryHandle(
+    return deliveryHandle(
       delivery,
       () => deliveryDiffOperation({
         scope: this.scope,
@@ -447,6 +396,13 @@ export class KeiyakuHandle {
       }),
       delivery,
     );
+  }
+
+  private currentDerivationOption(): Readonly<{ derivation?: ReturnType<typeof documentDerivation> }> {
+    const state = readStateOperation({ scope: this.scope, contractId: this.id });
+    return state === null
+      ? {}
+      : { derivation: documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id) };
   }
 
 }
@@ -466,28 +422,20 @@ export type Keiyaku = KeiyakuHandle;
 export function keiyakuOf(input: KeiyakuOfInput): Keiyaku {
   const values = requireInput(input, "Keiyaku.of input");
   const scope = scopeForRepo(values.repo);
-  if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
-  return new KeiyakuHandle(contractId(values.id), scope);
+  return new KeiyakuHandle(contractIdOption(values.id), scope);
 }
 
 export async function listKeiyaku(input: ContractListInput): Promise<ContractBoard> {
   const values = requireInput(input, "Keiyaku.list input");
-  for (const key of Object.keys(values)) if (key !== "repo") throw new TypeError(`Keiyaku.list input has unknown field: ${key}`);
+  rejectUnknownFields(values, ["repo"], "Keiyaku.list input");
   return await contractsOperation({ scope: scopeForRepo(values.repo) });
 }
 
 export async function observeKeiyaku(input: ContractObservationInput): Promise<ContractObservation> {
   const values = requireInput(input, "Keiyaku.observe input");
-  for (const key of Object.keys(values)) if (key !== "repo" && key !== "id") throw new TypeError(`Keiyaku.observe input has unknown field: ${key}`);
+  rejectUnknownFields(values, ["repo", "id"], "Keiyaku.observe input");
   const scope = scopeForRepo(values.repo);
-  if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
-  let id: ContractId;
-  try {
-    id = contractId(values.id);
-  } catch (error) {
-    throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
-  }
-  return contractObservationOperation({ scope, contractId: id });
+  return contractObservationOperation({ scope, contractId: contractIdOption(values.id) });
 }
 
 export async function bindKeiyaku(input: BindInput): Promise<BindResult> {

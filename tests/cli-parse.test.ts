@@ -65,7 +65,10 @@ test("unknown command syntax is refused with the exact command usage", () => {
 
 test("existing selectors are optional and review stdin is a distinct summary source", () => {
   assert.deepEqual(parseArgv(["deliver", "--actor", "external-test"]), {
-    command: { command: "deliver", output: "text", actor: "external-test" },
+    command: { command: "deliver", output: "text", actor: "external-test", includeDirty: false },
+  });
+  assert.deepEqual(parseArgv(["deliver", "kei/example", "--include-dirty", "--json"]), {
+    command: { command: "deliver", contract: "kei/example", includeDirty: true, output: "json" },
   });
   assert.deepEqual(parseArgv(["review", "@managed-worktree", "--satisfied", "-"]), {
     command: {

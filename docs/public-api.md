@@ -256,6 +256,7 @@ keiyaku.deliver(input?: {
   actor?: ActorId
   message?: string
   requireBranchesToBeUpToDate?: boolean
+  includeDirty?: boolean
   hooks?: WorktreeHooks
 }): Promise<MutationResult<Delivery>>
 keiyaku.review(input: {
@@ -275,6 +276,12 @@ keiyaku.reconcile(input?: ReconcileInput): Promise<ReconcileReport>
 
 delivery.diff(): Promise<string | null>
 ```
+
+`deliver` uses a clean-workspace default. `includeDirty: true` explicitly
+authorizes the complete non-ignored staged, unstaged, and untracked final tree;
+it does not select only staged paths and never includes dirty submodule
+internals. Omission and `false` are identical. Git performs the capture without
+changing the caller's real `HEAD`, index, branch, or files.
 
 `state()` observes and folds afresh for each call. Worktree paths are projected
 by `status()` for selectors and board views; a contract handle has no duplicate
@@ -300,7 +307,10 @@ mutation cannot silently retry a failed external command.
 existing delivery fact. It captures the current worktree's integration-aware
 ChangeId and the document key projected by its lifecycle observation. It
 receives no decoded-document derivation. It records the owned `reviewed`
-testimony even when that token is absent from `terms.gates`.
+testimony even when that token is absent from `terms.gates`. If the observed
+projection includes ordinary dirty workspace bytes, `Review` exposes a
+`workspace` disclosure with staged, unstaged, untracked, and `shortStat` fields;
+that disclosure is not testimony and does not authorize delivery.
 
 `delivery()` freshly observes the journal and returns the most recent tender.
 It returns `null` only when the contract has never tendered. A returned

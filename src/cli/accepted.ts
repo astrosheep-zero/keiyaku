@@ -25,6 +25,7 @@ type ResultOptions = Readonly<{
   coordinate?: ContractId;
   target?: string | null;
   report?: import("../index.js").AuditReport;
+  workspace?: AcceptedResult["workspace"];
   obligations?: Pick<AcceptedResult, "verification" | "placement" | "leak">;
   diff?: AcceptedResult["diff"];
 }>;
@@ -32,6 +33,7 @@ type ResultOptions = Readonly<{
 type MutationCallOptions<Result extends MutationObservation> = Readonly<{
   coordinate?: ContractId;
   project?: (result: Result) => ResultOptions | Promise<ResultOptions>;
+  projectRefusal?: (refusal: unknown) => unknown;
 }>;
 
 function resultFromMutation(
@@ -59,6 +61,7 @@ function resultFromMutation(
     ...(hasOverlapFailure(result) ? { overlapFailure: result.overlapFailure } : {}),
     ...(hasDocumentDiff(result) ? { diff: result.documentDiff } : {}),
     ...(options.report === undefined ? {} : { report: options.report }),
+    ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
     ...(options.diff === undefined ? {} : { diff: options.diff }),
     ...(result.lags.length === 0 ? {} : { lag: result.lags }),
   };
@@ -82,7 +85,7 @@ export async function resultFromMutationCall<Result extends MutationObservation 
         kind: "refused",
         verb,
         ...(options.coordinate === undefined ? {} : { contract: options.coordinate }),
-        refusal: error.refusal,
+        refusal: options.projectRefusal === undefined ? error.refusal : options.projectRefusal(error.refusal),
       };
     }
     if (error instanceof KeiyakuRetry) {

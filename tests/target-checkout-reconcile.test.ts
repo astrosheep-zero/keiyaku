@@ -257,7 +257,7 @@ test("dirty here placement commits staged unstaged and untracked bytes without r
   writeFileSync(resolve(repository.path, "local.txt"), "unstaged candidate\n");
   writeFileSync(resolve(repository.path, "untracked.txt"), "untracked candidate\n");
 
-  const delivered = await bound.keiyaku.deliver();
+  const delivered = await bound.keiyaku.deliver({ includeDirty: true });
 
   assert.equal(repository.run(["status", "--porcelain"]), "");
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "staged candidate\n");
@@ -306,7 +306,7 @@ test("targeted here bind refuses a foreign branch before Contract birth", async 
 });
 
 async function admitClaimWithoutFollow(repository: TestGitRepository, contract: Awaited<ReturnType<typeof managedCandidate>>["contract"]): Promise<void> {
-  await contract.deliver();
+  await contract.deliver({ includeDirty: true });
   await contract.review({ verdict: "unsatisfied" });
   const git = repositoryAt(repository.path);
   const state = observeContract(git, contract.id).state;

@@ -31,9 +31,10 @@ bind inputs, and read the receipt. Continue here from that receipt.
 
 ## Work In The Contract Worktree
 
-Change and test code in the worktree the bind receipt names. You do not need
-to commit: `deliver` captures dirty and untracked bytes as they stand. Check
-where you are at any point:
+Change and test code in the worktree the bind receipt names. `deliver` accepts
+a clean worktree by default. You may commit first, or explicitly include all
+non-ignored staged, unstaged, and untracked final bytes with
+`deliver --include-dirty`. Check where you are at any point:
 
 ```bash
 keiyaku status [<contract>|@<contract>]
@@ -76,9 +77,12 @@ old Contract onto a different delivery.
 keiyaku deliver <contract>
 ```
 
-`deliver` tenders the current worktree bytes as the candidate, runs the
-declared `Verification`, records the candidate, and requests placement. Read
-the receipt:
+`deliver` tenders the clean `HEAD`, runs the declared `Verification`, records
+the candidate, and requests placement. If the workspace is dirty, the refusal
+lists staged, unstaged, and untracked paths, a short statistic, and the
+`--include-dirty` option. Use that option only when the complete current
+workspace is the intended delivery; dirty submodule internals cannot be
+included. Read the receipt:
 
 - When every gate is current, the receipt shows placement and `claimed`; the
   delivery is done.
@@ -99,6 +103,9 @@ Have an independent reviewer read the exact Contract worktree first; the
 `review` command records the gate-visible verdict. `--satisfied` requests
 placement. If the same patch is already delivered and the other gates are
 current, the receipt shows `claimed`. Review works before or after deliver.
+When the reviewed projection includes ordinary dirty workspace bytes, the
+review receipt discloses those paths and stats; delivery still needs
+`deliver --include-dirty` before those bytes become the candidate.
 
 Fixing findings changes the patch, which turns earlier evidence stale (`?` in
 `status`): review the current patch again. Record `--unsatisfied` only when the

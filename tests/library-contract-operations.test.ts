@@ -29,7 +29,7 @@ test("one public handle reuses its resolved repository scope", async () => {
   const initial = await bind(repository);
   const id = (await initial.state()).id;
   commitCandidate(repository);
-  const log = resolve(repository.path, "scope-discovery.log");
+  const log = resolve(repository.path, ".git", "scope-discovery.log");
   writeFileSync(log, "");
 
   const operations = withGitShim(
@@ -140,10 +140,19 @@ test("review records before delivery and the same patch can be placed", async ()
 
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
+  assert.deepEqual(reviewed.value.workspace, {
+    staged: [],
+    unstaged: [],
+    untracked: ["candidate.txt"],
+    shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+  });
   assert.equal(reviewed.value.placement?.refusal.kind, "delivery-missing");
   const subject = (await result.keiyaku.state()).attestations.at(-1)?.data.subject;
+  const testimony = JSON.stringify((await result.keiyaku.state()).attestations.at(-1)?.data);
+  assert.equal(testimony.includes("workspace"), false);
+  assert.equal(testimony.includes("dirty"), false);
 
-  const delivered = await result.keiyaku.deliver();
+  const delivered = await result.keiyaku.deliver({ includeDirty: true });
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "claimed"]);
   assert.equal((await result.keiyaku.state()).attestations.at(-1)?.data.subject, subject);
   assert.equal((await result.keiyaku.state()).terminal?.kind, "claimed");
@@ -154,9 +163,10 @@ test("a changed worktree patch leaves the reviewed placement pending", async () 
   const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
   writeFileSync(`${repository.path}/candidate.txt`, "first\n");
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
+  assert.deepEqual(reviewed.value.workspace?.untracked, ["candidate.txt"]);
   writeFileSync(`${repository.path}/candidate.txt`, "second\n");
 
-  const delivered = await result.keiyaku.deliver();
+  const delivered = await result.keiyaku.deliver({ includeDirty: true });
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver"]);
   assert.equal(delivered.value.placement?.refusal.kind, "gates-unsatisfied");
   assert.equal((await result.keiyaku.state()).terminal, null);
@@ -172,7 +182,7 @@ test("a changed document leaves an otherwise unchanged reviewed patch pending", 
     markdown: "## Replace: Objective\nRequire review of the current contract document.\n",
   });
 
-  const delivered = await result.keiyaku.deliver();
+  const delivered = await result.keiyaku.deliver({ includeDirty: true });
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver"]);
   assert.equal(delivered.value.placement?.refusal.kind, "gates-unsatisfied");
   assert.equal((await result.keiyaku.state()).terminal, null);
@@ -186,6 +196,6 @@ test("review testimony is recorded when reviewed is not a placement gate", async
   const reviewed = await result.keiyaku.review({ verdict: "unsatisfied" });
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
   assert.equal(reviewed.value.placement, undefined);
+  assert.deepEqual(reviewed.value.workspace?.untracked, ["candidate.txt"]);
   assert.equal((await result.keiyaku.state()).attestations.at(-1)?.data.gate, "reviewed");
 });
-

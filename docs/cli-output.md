@@ -79,13 +79,43 @@ form is one direct line per member:
 
 ```text
 lag worktree-retained <path>
+lag unsealed-bytes <path> [head=<snapshot>] [paths=<path>,...]
 lag target-checkout-retained <target> <path> <diagnostic>
 lag worktree-hook-failed <create|destroy> <path> command=<index> <failure-json>
 ```
 
-JSON exposes that same `lag` array. A `worktree-retained` or
+JSON exposes that same `lag` array. An `unsealed-bytes` or
 `target-checkout-retained` lag does not turn an accepted result into a refusal
 or alter its exit status.
+
+A dirty-workspace refusal uses one line per classified path, followed by the
+complete-tree short statistic and the authorization option:
+
+```text
+refused deliver <contract> dirty-workspace
+dirty staged <path>
+dirty unstaged <path>
+dirty untracked <path>
+dirty submodule <path>
+shortstat files=<count> insertions=<count> deletions=<count>
+option --include-dirty <available|unavailable>
+```
+
+The option is unavailable exactly when dirty submodule internals are present;
+otherwise the line exposes the flag that can authorize the listed ordinary
+workspace bytes. JSON carries the same refusal facts plus the CLI-owned option
+projection. The renderer does not run Git or infer another path classification.
+
+An accepted review that observed ordinary dirty workspace bytes prints one
+structured disclosure line:
+
+```text
+workspace {"staged":[...],"unstaged":[...],"untracked":[...],"shortStat":{...}}
+```
+
+The line has no authorization option because review observes a projection; it
+does not authorize delivery. JSON carries the same `workspace` object. Dirty
+submodule internals still refuse before review admission.
 
 Text presents all accepted `facts`, then independent obligation stops, Region
 observation, effects, and flat lag. It does not replace observed data with a

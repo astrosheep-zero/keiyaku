@@ -76,6 +76,60 @@ test("typed refusal text preserves the refusal object", () => {
   );
 });
 
+test("dirty refusal text exposes classified paths, short stats, and the authorization flag", () => {
+  const contract = contractId("kei/render-dirty");
+  const result: InvocationResult = {
+    kind: "refused",
+    verb: "deliver",
+    contract,
+    refusal: {
+      kind: "dirty-workspace",
+      contractId: contract,
+      staged: ["both.txt"],
+      unstaged: ["both.txt"],
+      untracked: ["new.txt"],
+      submodules: [],
+      shortStat: { filesChanged: 2, insertions: 3, deletions: 1 },
+      option: { flag: "--include-dirty", available: true },
+    },
+  };
+
+  assert.equal(renderText(result), [
+    "refused deliver kei/render-dirty dirty-workspace",
+    "dirty staged both.txt",
+    "dirty unstaged both.txt",
+    "dirty untracked new.txt",
+    "shortstat files=2 insertions=3 deletions=1",
+    "option --include-dirty available",
+  ].join("\n"));
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+});
+
+test("accepted review text exposes dirty workspace observation without an authorization option", () => {
+  const contract = contractId("kei/render-dirty-review");
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "review",
+    contract,
+    head: "0123456789abcdef0123456789abcdef01234567",
+    facts: [{ contract, entry: "01J00000000000000000000000", kind: "attestation" }],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+    workspace: {
+      staged: ["tracked.txt"],
+      unstaged: [],
+      untracked: ["new.txt"],
+      shortStat: { filesChanged: 2, insertions: 3, deletions: 1 },
+    },
+  };
+
+  assert.equal(renderText(result), [
+    "accepted review kei/render-dirty-review head=0123456789abcdef0123456789abcdef01234567",
+    "fact kei/render-dirty-review 01J00000000000000000000000 attestation",
+    'workspace {"staged":["tracked.txt"],"unstaged":[],"untracked":["new.txt"],"shortStat":{"filesChanged":2,"insertions":3,"deletions":1}}',
+  ].join("\n"));
+});
+
 test("bind retry text has no contract segment", () => {
   const result: InvocationResult = {
     kind: "retry",

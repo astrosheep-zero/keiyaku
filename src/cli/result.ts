@@ -6,6 +6,7 @@ import type {
   PlacementStop,
   ReconcileReport,
   RegionOverlap,
+  Review,
   SettlementReport,
   SnapshotId,
   VerificationStop,
@@ -44,6 +45,7 @@ export type AcceptedResult = Readonly<{
   overlaps?: readonly RegionOverlap[];
   overlapFailure?: string;
   report?: AuditReport;
+  workspace?: Review["workspace"];
   diff?: string | DiffUnavailable;
   lag?: readonly Lag[];
 }>;
