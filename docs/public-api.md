@@ -221,6 +221,7 @@ type ContractRow = Readonly<{
 
 type ContractBoard = Readonly<{
   root: string
+  state: SnapshotId | null
   rows: readonly ContractRow[]
 }>
 
@@ -229,6 +230,8 @@ type ContractObservation =
   | Readonly<{ kind: "present"; row: ContractRow }>
 ```
 
+`state` is the immutable commit observed from `refs/heads/keiyaku-state` in the
+same Git read that produced the rows. It is `null` when that ref is absent.
 Lifecycle phase, disposition, candidate currency, every gate report, and the
 aggregate `gates.satisfied` are interpreted only by the Contract read surface.
 The aggregate calls the same core judgment as claimed admission. A stale prior

@@ -33,6 +33,11 @@ function hotFirst<Row>(rows: readonly Row[], hot: (row: Row) => boolean): readon
   return [...rows.filter(hot), ...rows.filter((row) => !hot(row))];
 }
 
+function stablePriority<Row>(rows: readonly Row[], priority: (row: Row) => number): readonly Row[] {
+  const priorities = [...new Set(rows.map(priority))].sort((left, right) => left - right);
+  return priorities.flatMap((value) => rows.filter((row) => priority(row) === value));
+}
+
 function wrapChain(parts: readonly string[], columns: number): readonly string[] {
   if (parts.length === 0) return [];
   const lines: string[] = [];
@@ -86,7 +91,11 @@ function renderContracts(report: KanshiReport, context: TextRenderContext, selec
   const section = report.contracts;
   if (section.kind === "absent") return "keiyaku absent";
   if (section.kind === "failed") return failure("keiyaku", section, context);
-  const rows = hotFirst(section.value.rows, (row) => row.phase === "waiting" || row.phase === "pending-delivery");
+  const rows = stablePriority(section.value.rows, (row) => {
+    if (row.holder.kind === "unavailable") return 0;
+    if (row.phase === "waiting" || row.phase === "pending-delivery") return 1;
+    return 2;
+  });
   const lines = [`keiyaku ${rows.length}`];
   for (const row of rows) {
     const deliveryFacts = row.delivery === null
@@ -114,6 +123,8 @@ function renderContracts(report: KanshiReport, context: TextRenderContext, selec
     lines.push(`${contractMark(row.phase)} ${safeText(row.id)} ${row.phase}`);
     lines.push(...wrapChain(facts, context.columns));
     lines.push(...renderGates(row.gates.reports, context, selection === "contract"));
+    if (row.holder.kind === "held") lines.push(...wrapChain([`held by ${row.holder.taskId}`], context.columns));
+    if (row.holder.kind === "unavailable") lines.push(...wrapChain(["holder unavailable"], context.columns));
   }
   return lines.join("\n");
 }
@@ -135,6 +146,9 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): string {
     lines.push(`${taskMark(row)} ${safeText(row.id)} ${row.disposition}`);
     lines.push(...renderTextBlock(row.title, "  ", context.columns));
     lines.push(...wrapChain([`P${row.priority}`, ...contract], context.columns));
+    for (const blocker of row.blockers ?? []) {
+      lines.push(...wrapChain([`blocked by ${blocker.id} (${blocker.state})`], context.columns));
+    }
   }
   return lines.join("\n");
 }
@@ -216,8 +230,14 @@ export function renderKanshiText(
   context: TextRenderContext = { columns: 80, color: false },
   selection: "world" | "contract" = "world",
 ): string {
+  const branch = report.branch?.startsWith("refs/heads/") === true
+    ? report.branch.slice("refs/heads/".length)
+    : report.branch;
   return [
-    `kanshi ${report.root === null ? "none" : safeText(report.root)}`,
+    [
+      `kanshi ${report.root === null ? "none" : safeText(report.root)}`,
+      `state ${report.state?.slice(0, 8) ?? "none"} · ${branch === null ? "none" : safeText(branch)} · observed ${safeText(report.observedAt)}`,
+    ].join("\n"),
     renderContracts(report, context, selection),
     renderTasks(report, context),
     renderAkuma(report, context),

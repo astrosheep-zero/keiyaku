@@ -515,9 +515,11 @@ without probing, reading history, or reclassifying them.
 
 JSON serializes that complete report without a text-specific projection or
 shortened value. Text chooses density without hiding a product identity that
-has no other text discovery surface. Its first line is `kanshi <root>`; it has
-no ruler, separate root line, or mark legend. The fixed `keiyaku`, `task`, and
-`akuma` sections follow in that order.
+has no other text discovery surface. Its first line is `kanshi <root>`, followed
+by `state <short-state> · <branch> · observed <observedAt>`; absent state or
+branch renders as `none`, while JSON keeps full values. It has no ruler,
+separate root line, or mark legend. The fixed `keiyaku`, `task`, and `akuma`
+sections follow in that order.
 
 Bare status renders every Contract row. Waiting and pending-delivery rows come
 before other Contracts, with source order stable inside each class. A row starts
@@ -531,6 +533,11 @@ unsatisfied attestation, and `?` when there is no current verdict, including
 stale and missing reports. Bare status omits opaque gate summaries so testimony
 prose cannot drown the world board; exact Contract status renders each
 available current summary beneath the chain and names its gate.
+After these facts, a current reverse holder renders as `held by <TaskId>`.
+An unavailable holder observation renders `holder unavailable`; a confirmed
+absence adds no line. Contracts needing attention are ordered before other
+Contracts: unavailable holder evidence first, then waiting or
+pending-delivery, with source order stable inside each class.
 
 The Task heading block counts only nonterminal Tasks and carries the exact
 `ready` and `on_hold` counts; at narrow widths those counts continue on an
@@ -544,6 +551,9 @@ prints the current title, priority, and optional Contract endpoint as
 incremental facts. Identity and description stay distinct: a title update does
 not move the immutable TaskId, so the coordinate cannot stand in for the
 current title.
+Each blocked row then renders every structured blocker in Task-owner order as
+`blocked by <TaskId> (<state>)`; missing targets retain the literal `missing`
+state. Nonblocked rows render no blocker evidence.
 
 The Akuma section renders every public fleet row because bare status is its text
 discovery surface in this cut. Lost and failed rows come first, running rows

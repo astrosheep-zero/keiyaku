@@ -1,12 +1,21 @@
-import { listKeiyaku, taskHoldersForRepo } from "../library/contract.js";
+import { listKeiyaku, taskHolderProjectionForRepo } from "../library/contract.js";
 import { Repo } from "../library/repo.js";
 import type { ContractBoard, ContractDisposition } from "../library/contract.js";
-import { Tasks, type TaskRow } from "../task/index.js";
+import type { TaskHolderProjection } from "../settlement/holder.js";
+import type { TaskStatusRow } from "../task/index.js";
+import { readTaskStatusRows } from "../task/store.js";
 import { Akuma } from "../akuma/index.js";
 import { readAliases } from "../alias/index.js";
 import { readDispatches } from "../dispatch/index.js";
 import { scopeForRepo } from "../library/repo.js";
-import type { AkumaKanshiWorld, KanshiReport, Section, TaskKanshiRow, TaskKanshiWorld } from "./report.js";
+import type {
+  AkumaKanshiWorld,
+  ContractKanshiBoard,
+  KanshiReport,
+  Section,
+  TaskKanshiRow,
+  TaskKanshiWorld,
+} from "./report.js";
 import type { WorldRoot } from "../world.js";
 
 export type KanshiInput = Readonly<{ world: WorldRoot | null; repo?: Repo }>;
@@ -31,28 +40,74 @@ function coordinate(input: KanshiInput): KanshiInput {
   return input;
 }
 
-type ContractRead = Readonly<{ section: Section<ContractBoard>; repo?: Repo }>;
+type ContractRead = Readonly<{
+  branch: string | null;
+  section: Section<ContractBoard>;
+  repo?: Repo;
+}>;
 
 async function readContracts(repo?: Repo): Promise<ContractRead> {
-  if (repo === undefined) return { section: { kind: "absent" } };
+  if (repo === undefined) return { branch: null, section: { kind: "absent" } };
+  let branch: string | null = null;
   try {
-    return { repo, section: { kind: "present", value: await listKeiyaku({ repo }) } };
+    branch = await repo.currentBranch();
+  } catch { /* optional invocation metadata remains unavailable */ }
+  try {
+    return { branch, repo, section: { kind: "present", value: await listKeiyaku({ repo }) } };
   } catch (error) {
-    return { repo, section: { kind: "failed", failure: { message: diagnostic(error) } } };
+    return { branch, repo, section: { kind: "failed", failure: { message: diagnostic(error) } } };
   }
 }
 
-function joinTasks(
-  rows: readonly TaskRow[],
-  holders: ReturnType<typeof taskHoldersForRepo>,
+type HolderRead =
+  | Readonly<{ kind: "present"; value: TaskHolderProjection }>
+  | Readonly<{ kind: "absent" }>
+  | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>;
+
+function readHolders(repo?: Repo): HolderRead {
+  if (repo === undefined) return { kind: "absent" };
+  try {
+    return { kind: "present", value: taskHolderProjectionForRepo(repo) };
+  } catch (error) {
+    return { kind: "failed", failure: { message: diagnostic(error) } };
+  }
+}
+
+function decorateContracts(
   contracts: Section<ContractBoard>,
+  holders: HolderRead,
+): Section<ContractKanshiBoard> {
+  if (contracts.kind !== "present") return contracts;
+  return {
+    kind: "present",
+    value: {
+      ...contracts.value,
+      rows: contracts.value.rows.map((row) => {
+        if (holders.kind === "failed") return { ...row, holder: { kind: "unavailable" as const } };
+        const holder = holders.kind === "present" ? holders.value.get(row.id) : undefined;
+        return holder?.disposition === "held"
+          ? { ...row, holder: { kind: "held" as const, taskId: holder.taskId, disposition: "held" as const } }
+          : { ...row, holder: { kind: "none" as const } };
+      }),
+    },
+  };
+}
+
+function joinTasks(
+  rows: readonly TaskStatusRow[],
+  holders: HolderRead,
+  contracts: Section<ContractKanshiBoard>,
 ): readonly TaskKanshiRow[] {
   const dispositions = contracts.kind === "present"
     ? new Map<string, ContractDisposition>(contracts.value.rows.map((row) => [row.id, row.disposition]))
     : null;
-  const associations = new Map(holders
-    .filter((holder) => holder.disposition === "held")
-    .map((holder) => [holder.taskId, holder.contractId]));
+  const associations = new Map(
+    holders.kind === "present"
+      ? [...holders.value.values()]
+        .filter((holder) => holder.disposition === "held")
+        .map((holder) => [holder.taskId, holder.contractId] as const)
+      : [],
+  );
   return rows.map((row) => {
     const contractId = associations.get(row.id);
     if (contractId === undefined) return row;
@@ -63,21 +118,23 @@ function joinTasks(
   });
 }
 
-async function readTasks(path: WorldRoot, contracts: Section<ContractBoard>, repo?: Repo): Promise<Section<TaskKanshiWorld>> {
+function readTasks(
+  path: WorldRoot,
+  contracts: Section<ContractKanshiBoard>,
+  holders: HolderRead,
+): Section<TaskKanshiWorld> {
+  if (holders.kind === "failed") return holders;
   try {
-    const tasks = Tasks.of(path);
-    const result = await tasks.list({ selection: "all", scope: "world" });
-    if (result.kind !== "accepted") return { kind: "failed", failure: { message: diagnostic(result) } };
     return {
       kind: "present",
-      value: { root: tasks.root, rows: joinTasks(result.value, repo === undefined ? [] : taskHoldersForRepo(repo), contracts) },
+      value: { root: path, rows: joinTasks(readTaskStatusRows(path), holders, contracts) },
     };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
   }
 }
 
-function readAkuma(path: WorldRoot, contracts: Section<ContractBoard>, repo?: Repo): Section<AkumaKanshiWorld> {
+function readAkuma(path: WorldRoot, contracts: Section<ContractKanshiBoard>, repo?: Repo): Section<AkumaKanshiWorld> {
   try {
     const source = Akuma.of(path).list();
     const aliases = readAliases(path);
@@ -115,12 +172,17 @@ function readAkuma(path: WorldRoot, contracts: Section<ContractBoard>, repo?: Re
 }
 
 export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
+  const observedAt = new Date().toISOString();
   const { world, repo } = coordinate(input);
   const contractRead = await readContracts(repo);
-  const contracts = contractRead.section;
-  const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, contracts, contractRead.repo);
+  const holders = readHolders(contractRead.repo);
+  const contracts = decorateContracts(contractRead.section, holders);
+  const tasks = world === null ? { kind: "absent" as const } : readTasks(world, contracts, holders);
   return {
     root: world,
+    observedAt,
+    branch: contractRead.branch,
+    state: contracts.kind === "present" ? contracts.value.state : null,
     contracts,
     tasks,
     akuma: world === null ? { kind: "absent" } : readAkuma(world, contracts, contractRead.repo),

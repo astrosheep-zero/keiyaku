@@ -349,6 +349,7 @@ test("architecture policy rejects capability use outside declared owners", () =>
   const accepted = check({
     "protocol/attempt.ts": "export function stamp(): number { return Date.now(); }",
     "library/contract.ts": "export function reject(): never { throw new TypeError('bad input'); }",
+    "kanshi/read.ts": "export function observedAt(): string { return new Date().toISOString(); }",
   });
   assert.deepEqual(rules(accepted).filter((r) => r === "architecture/capability-use"), []);
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -21,6 +21,7 @@ import {
 } from "../src/git/repository.js";
 import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
 import { Tasks } from "../src/task/index.js";
+import { authorityPath } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import { moveAlias } from "../src/alias/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
@@ -60,6 +61,7 @@ async function populatedWorld() {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const tasks = Tasks.of(World.at(repository.path));
   const added = await tasks.add({ title: "Render status", priority: 0 });
@@ -89,7 +91,14 @@ test("kanshi joins TaskHolder, Dispatch, and Alias without moving their authorit
     assert.deepEqual(row?.contract, { id: contract.id, observed: "active" });
   }
   if (report.contracts.kind !== "present" || report.tasks.kind !== "present") return;
-  assert.equal(report.contracts.value.rows.some((row) => row.id === contract.id), true);
+  assert.equal(report.branch, "refs/heads/main");
+  assert.equal(report.state, readGit(repositoryAt(repository.path)).commit);
+  assert.equal(new Date(report.observedAt).toISOString(), report.observedAt);
+  assert.deepEqual(report.contracts.value.rows.find((row) => row.id === contract.id)?.holder, {
+    kind: "held",
+    taskId,
+    disposition: "held",
+  });
   assert.deepEqual(report.tasks.value.rows.find((row) => row.id === taskId)?.contract, {
     id: contract.id,
     observed: "active",
@@ -148,6 +157,79 @@ test("a malformed TaskHolder root fails only the Kanshi Task section", async () 
   assert.equal(report.tasks.kind, "failed");
   assert.equal(report.akuma.kind, "present");
   if (report.tasks.kind === "failed") assert.match(report.tasks.failure.message, /TaskHolder authority root is not a tree/u);
+  if (report.contracts.kind === "present") {
+    assert.equal(report.contracts.value.rows.every((row) => row.holder.kind === "unavailable"), true);
+  }
+});
+
+test("kanshi samples observedAt before section reads", async () => {
+  const { repository } = await populatedWorld();
+  const original = Date.prototype.toISOString;
+  const currentBranch = Repo.prototype.currentBranch;
+  let sampled = false;
+  Date.prototype.toISOString = function() { sampled = true; return original.call(this); };
+  Repo.prototype.currentBranch = async function() {
+    assert.equal(sampled, true);
+    return currentBranch.call(this);
+  };
+  try {
+    await observe(repository.path, Repo.at({ path: repository.path }));
+  } finally {
+    Date.prototype.toISOString = original;
+    Repo.prototype.currentBranch = currentBranch;
+  }
+});
+
+test("a failed branch observation does not suppress readable Contract state", async () => {
+  const { repository } = await populatedWorld();
+  const currentBranch = Repo.prototype.currentBranch;
+  Repo.prototype.currentBranch = async function() { throw new Error("branch unavailable"); };
+  try {
+    const report = await observe(repository.path, Repo.at({ path: repository.path }));
+    assert.equal(report.branch, null);
+    assert.equal(report.contracts.kind, "present");
+    if (report.contracts.kind === "present") {
+      assert.equal(report.state, report.contracts.value.state);
+      assert.notEqual(report.state, null);
+    }
+  } finally {
+    Repo.prototype.currentBranch = currentBranch;
+  }
+});
+
+test("blocked Kanshi rows preserve ordered structured Task blocker refs", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-blockers-"));
+  const tasks = Tasks.of(World.at(root));
+  const first = await tasks.add({ title: "First blocker" });
+  const second = await tasks.add({ title: "Second blocker", state: "in_progress" });
+  assert.equal(first.kind, "accepted");
+  assert.equal(second.kind, "accepted");
+  if (first.kind !== "accepted" || second.kind !== "accepted") return;
+  const blocked = await tasks.add({ title: "Blocked work", needs: [second.value.id, first.value.id] });
+  assert.equal(blocked.kind, "accepted");
+  if (blocked.kind !== "accepted") return;
+  unlinkSync(authorityPath(root, first.value.id));
+
+  const report = await observe(root);
+
+  assert.equal(report.tasks.kind, "present");
+  if (report.tasks.kind !== "present") return;
+  assert.deepEqual(report.tasks.value.rows.find((row) => row.id === blocked.value.id)?.blockers, [
+    { id: second.value.id, title: "Second blocker", state: "in_progress" },
+    { id: first.value.id, title: null, state: "missing" },
+  ]);
+  assert.equal("blockers" in report.tasks.value.rows.find((row) => row.id === second.value.id)!, false);
+
+  await tasks.task({ id: blocked.value.id }).start();
+  const running = await observe(root);
+  assert.equal(running.tasks.kind, "present");
+  if (running.tasks.kind === "present") {
+    assert.equal(running.tasks.value.rows.find((row) => row.id === blocked.value.id)?.disposition, "in_progress");
+    assert.deepEqual(running.tasks.value.rows.find((row) => row.id === blocked.value.id)?.blockers, [
+      { id: second.value.id, title: "Second blocker", state: "in_progress" },
+      { id: first.value.id, title: null, state: "missing" },
+    ]);
+  }
 });
 
 test("malformed Alias fails only the Kanshi Akuma section", async () => {
@@ -195,10 +277,14 @@ test("Kanshi text keeps complete identities in the new fixed section grammar", a
 function attentionReport(): KanshiReport {
   return {
     root: "/repo",
+    observedAt: "2026-08-12T00:00:00.000Z",
+    branch: "refs/heads/main",
+    state: "cccccccccccccccccccccccccccccccccccccccc",
     contracts: {
       kind: "present",
       value: {
         root: "/repo",
+        state: "cccccccccccccccccccccccccccccccccccccccc",
         rows: [
           {
             id: "kei/terminal-contract",
@@ -209,6 +295,7 @@ function attentionReport(): KanshiReport {
             target: "refs/heads/main",
             delivery: { tenderSnapshot: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", integration: { predecessor: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", snapshot: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", changeId: "patch-b" }, method: "squash", policy: { requireBranchesToBeUpToDate: false } },
             targetObservation: { head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", drift: false },
+            holder: { kind: "none" },
             gates: {
               satisfied: true,
               reports: [
@@ -225,6 +312,7 @@ function attentionReport(): KanshiReport {
             target: "refs/heads/main",
             delivery: { tenderSnapshot: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", integration: { predecessor: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", snapshot: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", changeId: "patch-a" }, method: "squash", policy: { requireBranchesToBeUpToDate: false } },
             targetObservation: { head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", drift: false },
+            holder: { kind: "held", taskId: "task/running", disposition: "held" },
             gates: {
               satisfied: false,
               reports: [
@@ -243,7 +331,10 @@ function attentionReport(): KanshiReport {
       value: {
         root: "/repo",
         rows: [
-          { id: "task/blocked", title: "Blocked by release evidence", state: "open", priority: 0, disposition: "blocked" },
+          { id: "task/blocked", title: "Blocked by release evidence", state: "open", priority: 0, disposition: "blocked", blockers: [
+            { id: "task/release", title: "Release", state: "in_progress" },
+            { id: "task/missing", title: null, state: "missing" },
+          ] },
           { id: "task/running", title: "Investigate failed Linux verification", state: "in_progress", priority: 0, disposition: "in_progress" },
           { id: "task/held", title: "Held", state: "on_hold", priority: 1, disposition: "on_hold" },
           { id: "task/ready", title: "Ready", state: "open", priority: 1, disposition: "ready" },
@@ -276,23 +367,27 @@ test("bare Kanshi text triages every section without changing its report", () =>
   const text = renderKanshiText(report, { columns: 120, color: false });
 
   assert.match(text, /^kanshi \/repo$/mu);
+  assert.match(text, /^state cccccccc · main · observed 2026-08-12T00:00:00\.000Z$/mu);
   assert.doesNotMatch(text, /marks |root |─/u);
   assert.match(text, /keiyaku 2/u);
   assert.match(text, /^⧗ kei\/active-contract pending-delivery$/mu);
   assert.match(text, /^  worktree · integration aaaaaaaa · -> refs\/heads\/main$/mu);
   assert.match(text, /^  ✓ reviewed · ! verified · \? security · \? manual$/mu);
+  assert.match(text, /^  held by task\/running$/mu);
   assert.ok(text.indexOf("kei/active-contract") < text.indexOf("kei/terminal-contract"));
   assert.doesNotMatch(text, /integration a{9}/u);
-  assert.doesNotMatch(text, /stale|missing/u);
+  assert.doesNotMatch(text, /stale/u);
   assert.doesNotMatch(text, /world summary should stay hidden/u);
   assert.doesNotMatch(text, /terminal review summary/u);
 
   assert.match(text, /^task 4 · 1 ready · 1 held$/mu);
   assert.match(text, /^⧗ task\/blocked blocked$/mu);
   assert.match(text, /^● task\/running in_progress$/mu);
-  assert.ok(text.indexOf("task/blocked") < text.indexOf("task/running"));
+  assert.ok(text.indexOf("⧗ task/blocked") < text.indexOf("● task/running"));
   assert.match(text, /Investigate failed Linux verification/u);
   assert.match(text, /Blocked by release evidence/u);
+  assert.match(text, /^  blocked by task\/release \(in_progress\)$/mu);
+  assert.match(text, /^  blocked by task\/missing \(missing\)$/mu);
   assert.doesNotMatch(text, /^\+ /mu);
   assert.doesNotMatch(text, /task\/held/u);
   assert.doesNotMatch(text, /task\/ready/u);
@@ -415,10 +510,13 @@ test("Kanshi narrow wrapping exceeds columns only for indivisible scan and coord
   assert.ok(overflow.length > 0);
   assert.ok(overflow.every((line) =>
     /^kanshi \/repository/u.test(line)
+    || /^state /u.test(line)
     || /^[●○⧗✓!?×] /u.test(line)
     || line.includes(longRef)
     || line.includes(longGate)
     || line.includes("integration")
+    || line.includes("blocked by")
+    || line.includes("held by")
     || /keiyaku kei\//u.test(line)));
   assert.equal(text.includes(longId), true);
   assert.equal(text.includes(longRef), true);
@@ -470,6 +568,9 @@ test("Kanshi selection is a projection that preserves source presence", async ()
 test("Kanshi text neutralizes control characters from source diagnostics", () => {
   const text = renderKanshiText({
     root: "/repo\u001b[31m\nforged",
+    observedAt: "2026-08-12T00:00:00.000Z",
+    branch: null,
+    state: null,
     contracts: { kind: "failed", failure: { message: "broken\u001b[2J\nforged\u2028again\u2029end" } },
     tasks: { kind: "absent" },
     akuma: { kind: "absent" },
@@ -488,6 +589,8 @@ test("default CLI status returns the Kanshi report instead of a generic observat
   if ("kind" in result && result.kind === "status") {
     assert.equal(result.selection, "world");
     assert.equal(result.report.contracts.kind, "present");
+    assert.equal(result.report.state?.length, 40);
+    assert.equal(new Date(result.report.observedAt).toISOString(), result.report.observedAt);
     assert.doesNotThrow(() => JSON.stringify(result.report));
   }
 });

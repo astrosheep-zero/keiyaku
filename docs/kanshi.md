@@ -19,11 +19,21 @@ The report is:
 ```ts
 type KanshiReport = {
   root: WorldRoot | null;
-  contracts: Section<ContractBoard>;
+  observedAt: string;
+  branch: string | null;
+  state: SnapshotId | null;
+  contracts: Section<ContractKanshiBoard>;
   tasks: Section<TaskKanshiWorld>;
   akuma: Section<AkumaKanshiWorld>;
 };
 ```
+
+`observedAt` is one canonical ISO timestamp sampled before any section read.
+`branch` is the invocation Repo's attached branch, or `null` without a Repo,
+for detached HEAD, or when that observation fails. `state` is the immutable
+`refs/heads/keiyaku-state` commit copied from the Contract board, not the
+invocation worktree HEAD; it is `null` when no state snapshot is present or the
+Contract section cannot be read.
 
 ## Contract endpoints
 
@@ -36,11 +46,33 @@ public disposition when found, `missing` when a present board lacks the id, and
 `unavailable` when the Contract section is absent or failed. Corruption and IO
 are never collapsed into `missing`.
 
+The same holder read is reverse-projected onto Kanshi-owned Contract rows as:
+
+```ts
+type ContractHolderObservation =
+  | { kind: "held"; taskId: TaskId; disposition: "held" }
+  | { kind: "none" }
+  | { kind: "unavailable" };
+```
+
+`none` means the holder authority was read successfully and has no current
+`held` fact for that Contract. `unavailable` means the holder read failed; it
+is not absence. This decoration does not add Task knowledge to `ContractRow`
+or change `ContractBoard`.
+
 The join is one hop. Kanshi does not validate associations, infer them from cwd
 or origin, follow Task associations to derive an Akuma association, or persist
 the joined view. A malformed or unreadable holder fails only the Task section;
-Contract and Akuma sections remain independently observable. Task and Akuma
-products do not import Contract lifecycle or Git behavior.
+the base Contract section remains present with `unavailable` holder
+observations, and the Akuma section remains independently observable. Task and
+Akuma products do not import Contract lifecycle or Git behavior.
+
+Kanshi reads the complete Task board once. A row present in the Task owner's
+blocked projection copies its ordered unresolved `TaskRef[]` as `blockers`;
+this includes open `blocked` and `in_progress` rows with unresolved needs. A
+row outside that projection has no `blockers` field. Missing need targets
+remain structured refs with `title: null` and `state: "missing"`. Kanshi does
+not reread the Task board or derive blockers from text.
 
 Kanshi reads Dispatch and Alias through their concrete owners after the compact
 Akuma fleet read. Each Akuma row carries its current world-local Alias list and,

@@ -28,6 +28,7 @@ export type ContractRow = Readonly<{
 
 export type ContractBoard = Readonly<{
   root: string;
+  state: SnapshotId | null;
   rows: readonly ContractRow[];
 }>;
 
@@ -70,7 +71,7 @@ export function readContractBoard(repository: GitRepository): ContractBoard {
     if (value.state === null) continue;
     rows.push(rowFor(repository, value.state));
   }
-  return { root: repository.primaryWorktree, rows };
+  return { root: repository.primaryWorktree, state: observed.snapshot, rows };
 }
 
 /** Observe one Contract without enumerating the Contract world. */

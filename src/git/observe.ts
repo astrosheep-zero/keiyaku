@@ -49,6 +49,7 @@ type GitJournalRecord = Readonly<{
 }>;
 
 type GitObservation = Readonly<{
+  snapshot: SnapshotId | null;
   contracts: ReadonlyMap<ContractId, GitJournalRecord>;
 }>;
 
@@ -231,7 +232,10 @@ export function observeGit(
 ): GitObservation {
   const git = readGit(repository);
   const observed = observeFrozenGitSnapshot(repository, git, requested);
-  return { contracts: observed.contracts };
+  return {
+    snapshot: git.commit === null ? null : mintSnapshotId(git.commit),
+    contracts: observed.contracts,
+  };
 }
 
 function observeFrozenGitSnapshot(
@@ -259,7 +263,10 @@ export function observeContracts(
 ): GitObservation {
   const git = readGitPaths(repository, ids.map((id) => contractJournalPath(id)));
   const observed = observeFrozenContractsSnapshot(repository, git, ids);
-  return { contracts: observed.contracts };
+  return {
+    snapshot: git.commit === null ? null : mintSnapshotId(git.commit),
+    contracts: observed.contracts,
+  };
 }
 
 function observeFrozenContractsSnapshot(
@@ -282,7 +289,7 @@ function observeFrozenContractsSnapshot(
   };
 }
 
-function decisionProjection(observation: GitObservation): ContractsObservation {
+function decisionProjection(observation: Pick<GitObservation, "contracts">): ContractsObservation {
   return new Map([...observation.contracts].map(([id, record]) => [id, record.state]));
 }
 

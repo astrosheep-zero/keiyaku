@@ -1,6 +1,6 @@
 import type { WorldRoot } from "../world.js";
 export type { WorldRoot } from "../world.js";
-import { buildTree, diagnoseBoard, projectDetailFacts, type BlockedTaskRow, type TaskDetailFacts, type TaskDoctorIssue, type TaskRow, type TaskTreeNode } from "./board.js";
+import { buildTree, diagnoseBoard, projectDetailFacts, type BlockedTaskRow, type TaskDetailFacts, type TaskDoctorIssue, type TaskRef, type TaskRow, type TaskStatusRow, type TaskTreeNode } from "./board.js";
 import { composeTasks, type TaskCompositionResult } from "./compose.js";
 import { TaskAuthorityCorruptionError, type TaskPriority, type TaskState } from "./document.js";
 import { isTaskSegment, parseTaskId, type TaskId } from "./identity.js";
@@ -17,7 +17,7 @@ export type BlockedTaskList = TaskOutcome<readonly BlockedTaskRow[]>;
 export type TaskNamespaceResult = TaskOutcome<readonly string[]>;
 export type TaskDoctorReport = Readonly<{ issues: readonly TaskDoctorIssue[] }>;
 export type TaskDependencyTree = TaskOutcome<TaskTreeNode>;
-export type { AddTaskDocumentInput, AddTaskInput, BlockedTaskRow, TaskBatchResult, TaskCompositionResult, TaskDoctorIssue, TaskId, TaskMutationResult, TaskOutcome, TaskPriority, TaskRefusal, TaskRetry, TaskRow, TaskState, TaskUpdateResult, TaskView, UpdateTaskInput };
+export type { AddTaskDocumentInput, AddTaskInput, BlockedTaskRow, TaskBatchResult, TaskCompositionResult, TaskDoctorIssue, TaskId, TaskMutationResult, TaskOutcome, TaskPriority, TaskRef, TaskRefusal, TaskRetry, TaskRow, TaskState, TaskStatusRow, TaskUpdateResult, TaskView, UpdateTaskInput };
 export { TaskAuthorityCorruptionError };
 
 function record(value: unknown, label: string): Record<string, unknown> {

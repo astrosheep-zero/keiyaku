@@ -11,6 +11,7 @@ const here = "kei/here-contract" as ContractId;
 function board(): ContractBoard {
   return {
     root: "/repo",
+    state: null,
     rows: [
       {
         id: active,
@@ -83,6 +84,9 @@ test("selectors use disposition rather than reinterpreting terminal phases", () 
 function kanshiReport(contracts: KanshiReport["contracts"]): KanshiReport {
   return {
     root: "/repo",
+    observedAt: "2026-08-12T00:00:00.000Z",
+    branch: null,
+    state: contracts.kind === "present" ? contracts.value.state : null,
     contracts,
     tasks: { kind: "absent" },
     akuma: { kind: "absent" },

@@ -65,7 +65,7 @@ import {
   type VerificationStop,
 } from "../protocol/operations.js";
 import { settle, type SettlementReport } from "../settlement/settle.js";
-import { claimTaskHolder, readTaskHolders, releaseTaskHolder, type TaskHolder } from "../settlement/holder.js";
+import { claimTaskHolder, readTaskHolderProjection, releaseTaskHolder, type TaskHolderProjection } from "../settlement/holder.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
@@ -514,6 +514,6 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
 }
 
 /** Internal package composition read used by Kanshi; not a package-root export. */
-export function taskHoldersForRepo(repo: Repo): readonly TaskHolder[] {
-  return readTaskHolders(scopeForRepo(repo));
+export function taskHolderProjectionForRepo(repo: Repo): TaskHolderProjection {
+  return readTaskHolderProjection(scopeForRepo(repo));
 }

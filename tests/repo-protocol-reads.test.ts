@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
-import { repositoryAt } from "../src/git/repository.js";
+import { readGit, repositoryAt } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import {
   bindOperation,
@@ -68,6 +68,13 @@ test("git repository resolution rejects omitted and empty coordinates", () => {
   assert.throws(() => repositoryAt(""), /repository path must be a nonempty string/);
 });
 
+test("Contract board keeps an absent Keiyaku state snapshot explicit", () => {
+  const repository = repositoryWithMain();
+  const report = contractsOperation({ scope: scopeOperation({ coordinate: repository.path }) });
+  assert.equal(report.state, null);
+  assert.deepEqual(report.rows, []);
+});
+
 test("Contract reads return plain pinned data from one git snapshot", () => {
   const repository = repositoryWithMain();
   const first = bind(repository, "First status row", "here");
@@ -88,6 +95,7 @@ test("Contract reads return plain pinned data from one git snapshot", () => {
   assert.equal(scope.primaryWorktree, git.primaryWorktree);
   assert.equal(git.effectiveCwd, resolve(repository.path));
   assert.equal(report.root, git.primaryWorktree);
+  assert.equal(report.state, readGit(git).commit);
   assert.deepEqual(report.rows.find((contract) => contract.id === first), {
     id: first,
     phase: "bound",

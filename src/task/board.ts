@@ -1,10 +1,11 @@
 import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
 import { parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 
-type TaskRef = Readonly<{ id: TaskId; title: string | null; state: TaskState | "missing" }>;
-type TaskDisposition = "ready" | "blocked" | "in_progress" | "on_hold" | "done" | "drop";
+export type TaskRef = Readonly<{ id: TaskId; title: string | null; state: TaskState | "missing" }>;
+export type TaskDisposition = "ready" | "blocked" | "in_progress" | "on_hold" | "done" | "drop";
 export type TaskRow = Readonly<{ id: TaskId; title: string; state: TaskState; priority: TaskPriority; disposition: TaskDisposition }>;
 export type BlockedTaskRow = TaskRow & Readonly<{ blockers: readonly TaskRef[] }>;
+export type TaskStatusRow = TaskRow & Readonly<{ blockers?: readonly TaskRef[] }>;
 export type TaskDetailFacts = Readonly<{
   task: TaskDocument; needs: readonly (TaskRef & Readonly<{ released: boolean }>)[]; blockers: readonly TaskRef[];
   blocks: readonly TaskRef[]; parent: TaskRef | null; children: readonly TaskRef[];
@@ -44,7 +45,10 @@ export function projectDetailFacts(board: TaskBoard, id: TaskId): TaskDetailFact
   const task = board.tasks.get(id); if (task === undefined) return null;
   const needs = task.needs.map((need) => ({ ...taskRef(board, need), released: board.tasks.has(need) && terminal(board.tasks.get(need)!.state) }));
   return {
-    task, needs, blockers: needs.filter((need) => !need.released), blocks: reverse(board, id, "needs"),
+    task,
+    needs,
+    blockers: needs.filter((need) => !need.released).map(({ released: _released, ...ref }) => ref),
+    blocks: reverse(board, id, "needs"),
     parent: task.parent === null ? null : taskRef(board, task.parent), children: children(board, id),
     supersedes: task.supersedes.map((target) => taskRef(board, target)), supersededBy: reverse(board, id, "supersedes"),
     related: related(board, task),
@@ -66,6 +70,14 @@ export function projectBlocked(board: TaskBoard, scope: readonly string[] | null
     if (row.state !== "open" && row.state !== "in_progress") return [];
     const blockers = projectDetailFacts(board, row.id)!.blockers;
     return blockers.length === 0 ? [] : [{ ...row, blockers }];
+  });
+}
+
+export function projectStatusRows(board: TaskBoard, scope: readonly string[] | null): readonly TaskStatusRow[] {
+  const blockers = new Map(projectBlocked(board, scope).map((row) => [row.id, row.blockers]));
+  return projectRows(board, scope, "all").map((row) => {
+    const unresolved = blockers.get(row.id);
+    return unresolved === undefined ? row : { ...row, blockers: unresolved };
   });
 }
 
