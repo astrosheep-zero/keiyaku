@@ -584,6 +584,70 @@ test("ToolRepr presents honest read ranges, search facts, outcomes, and transpor
   assert.equal(normalizeToolCommand("npm test"), "npm test");
 });
 
+test("normalizeToolCommand preserves exact bytes unless a complete transport unwraps", () => {
+  const cases = [
+    ["bash -c 'rg TODO src'", "rg TODO src"],
+    ["/bin/zsh -lc \"git status\"", "git status"],
+    ["pwsh -NoLogo -NoProfile -Command Get-ChildItem", "Get-ChildItem"],
+    ["powershell -nologo -Command Get-ChildItem", "Get-ChildItem"],
+    ["pwsh -c Get-ChildItem", "Get-ChildItem"],
+    ["C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe -Command Get-ChildItem", "Get-ChildItem"],
+    ["/usr/bin/pwsh -NoProfile -Command Get-ChildItem", "Get-ChildItem"],
+    ["/usr/bin/bash -c 'rg TODO src'", "rg TODO src"],
+    ["bash -c foo\\ bar", "foo bar"],
+    ["bash -c \"git \\\"status\\\"\"", "git \"status\""],
+    ["bash -c \"foo\\\\bar\"", "foo\\bar"],
+    ["bash -c \"foo\\$bar\"", "foo$bar"],
+    ["bash -c \"foo\\`bar\"", "foo`bar"],
+    ["bash -c \"foo\\nbar\"", "foo\\nbar"],
+    ["bash -c \"\"foo\"\"", "foo"],
+    ["bash -c ' '", " "],
+    ["  bash\t-c\t'rg TODO src'  ", "rg TODO src"],
+    ["npm test", "npm test"],
+    ["bash -c 'echo hi' && true", "bash -c 'echo hi' && true"],
+    ["bash -c 'echo hi' || true", "bash -c 'echo hi' || true"],
+    ["bash -c 'echo hi'; true", "bash -c 'echo hi'; true"],
+    ["bash -c 'echo hi' | true", "bash -c 'echo hi' | true"],
+    ["bash -c $(echo hi)", "bash -c $(echo hi)"],
+    ["bash -c `echo hi`", "bash -c `echo hi`"],
+    ["bash -c <file", "bash -c <file"],
+    ["bash -c >file", "bash -c >file"],
+    ["bash -c (echo hi)", "bash -c (echo hi)"],
+    ["bash -c \"echo $HOME\"", "bash -c \"echo $HOME\""],
+    ["bash -c \"echo `date`\"", "bash -c \"echo `date`\""],
+    ["bash -c 'unclosed", "bash -c 'unclosed"],
+    ["bash -c \"unclosed", "bash -c \"unclosed"],
+    ["bash -c foo\\", "bash -c foo\\"],
+    ["bash -c \"foo\\", "bash -c \"foo\\"],
+    ["bash -c 'line\nbreak'", "line\nbreak"],
+    ["bash -c \"line\nbreak\"", "line\nbreak"],
+    ["bash -c 'line\rbreak'", "line\rbreak"],
+    ["bash -c foo\nbar", "bash -c foo\nbar"],
+    ["bash -c foo\\\nbar", "bash -c foo\\\nbar"],
+    ["bash -c 'foo'\nbar", "bash -c 'foo'\nbar"],
+    ["bash -c ''", "bash -c ''"],
+    ["bash -c \"\"", "bash -c \"\""],
+    ["bash -lc 'npm test' extra", "bash -lc 'npm test' extra"],
+    ["bash -l 'npm test'", "bash -l 'npm test'"],
+    ["./bash -c 'rg TODO src'", "./bash -c 'rg TODO src'"],
+    ["/bin/sh -c 'rg TODO src'", "/bin/sh -c 'rg TODO src'"],
+    ["Bash -c 'rg TODO src'", "Bash -c 'rg TODO src'"],
+    ["pwsh.exe -Command Get-ChildItem", "pwsh.exe -Command Get-ChildItem"],
+    ["powershell.exe -Command Get-ChildItem", "powershell.exe -Command Get-ChildItem"],
+    ["PowerShell -Command Get-ChildItem", "Get-ChildItem"],
+    ["pwsh -NoLogo -NoLogo -Command Get-ChildItem", "pwsh -NoLogo -NoLogo -Command Get-ChildItem"],
+    ["pwsh -File script.ps1", "pwsh -File script.ps1"],
+    ["pwsh -Command Get-ChildItem extra", "pwsh -Command Get-ChildItem extra"],
+    ["pwsh -Command", "pwsh -Command"],
+    ["pwsh Get-ChildItem", "pwsh Get-ChildItem"],
+    ["pwsh -Command ''", "pwsh -Command ''"],
+    ["pwsh -Command Get-ChildItem -NoLogo", "pwsh -Command Get-ChildItem -NoLogo"],
+  ] as const;
+  for (const [command, expected] of cases) {
+    assert.equal(normalizeToolCommand(command), expected);
+  }
+});
+
 test("Akuma history distinguishes open active tools from closed unsettled tools", () => {
   const akuma = "aku/worker/1234abcd" as const;
   const command = parseArgv(["history", akuma]).command;

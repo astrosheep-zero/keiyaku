@@ -6,7 +6,7 @@ import {
   type KillEvidence,
   type TellResult,
 } from "../akuma/index.js";
-import { readActionFeedbackStatus } from "../akuma/akuma.js";
+import { readActionFeedbackStatus, readBudgetedStatus } from "../akuma/akuma.js";
 import type { ContractId } from "../core/facts/types.js";
 import { readDispatch } from "../dispatch/index.js";
 import type { Settings } from "../settings.js";
@@ -72,6 +72,26 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+const SHARED_ORDINARY_BUDGET = 30;
+
+async function observeWaitStatuses(
+  path: WorldRoot,
+  ids: readonly AkumaStatus["id"][],
+  settings?: Settings,
+): Promise<readonly AkumaStatus[]> {
+  if (ids.length <= 1) {
+    return await Promise.all(ids.map(async (id) => await source(path, settings).of({ id }).status()));
+  }
+  let remaining = SHARED_ORDINARY_BUDGET;
+  const statuses: AkumaStatus[] = [];
+  for (const id of ids) {
+    const observed = await readBudgetedStatus(path, id, { ordinaryBudget: remaining });
+    statuses.push(observed.status);
+    remaining -= observed.ordinarySelected;
+  }
+  return statuses;
+}
+
 function directAddress(values: Record<string, unknown>): AkumaAddressInput {
   return {
     path: values.path as WorldRoot,
@@ -110,10 +130,9 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
   if (completion !== undefined && completion !== "any" && completion !== "all") throw new TypeError("completion must be any or all");
   const selected = completion ?? "all";
   const timeoutMs = timeout(values.timeoutMs);
-  const handles = addressed.ids.map((id) => source(addressed.path, addressed.settings).of({ id }));
   const deadline = timeoutMs === undefined ? undefined : performance.now() + timeoutMs;
   for (;;) {
-    const statuses = await Promise.all(handles.map(async (handle) => await handle.status()));
+    const statuses = await observeWaitStatuses(addressed.path, addressed.ids, addressed.settings);
     const settled = statuses.map((status) => status.life !== "running");
     if ((selected === "any" ? settled.some(Boolean) : settled.every(Boolean))
       || (deadline !== undefined && performance.now() >= deadline)) {

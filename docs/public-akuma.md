@@ -207,7 +207,8 @@ Wait and kill freeze their subject set at entry. A one-member wait defaults to
 after one member satisfies the ordinary Akuma wait predicate; all returns after
 every member does. Timeout returns one complete aggregate of fresh statuses
 and is not a streaming or partial result. A plural aggregate carries one shared
-32-row ordinary-detail budget, equal to four complete `3 + 5` snapshots. After
+30-row ordinary-detail budget, equal to five complete default `3 + 3` snapshots.
+Each member uses the same `tail=3`, `voice=3` selector as ordinary status. After
 that budget is spent, later members retain life, outcome, every running tool and
 pending tell while ordinary detail collapses into typed gaps. When only part of
 one member fits, its newest ordinary detail consumes the remainder. Kill returns one

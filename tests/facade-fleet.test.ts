@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { HeldAkumaLeash, appendActivity, beginTurn, endTurn, initializeHeart, recordSession, recordTell } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, appendActivity, beginTurn, endTurn, initializeHeart, readHeart, recordSession, recordTell } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -52,6 +52,63 @@ const provider: ProviderAdapter = {
 async function completeTurn(paths: Parameters<typeof beginTurn>[0], bodySequence: number, outcome: Parameters<typeof endTurn>[1]["outcome"], completedAt: string): Promise<void> {
   const turn = await beginTurn(paths, { bodySequence, startedAt: completedAt });
   await endTurn(paths, { turnSequence: turn.sequence, outcome, completedAt });
+}
+
+async function openOrdinary(
+  paths: Parameters<typeof beginTurn>[0],
+  stamp: string,
+  spec: Readonly<{
+    prefix: string;
+    voices?: number;
+    notes?: number;
+    tool?: boolean;
+    tellId?: string;
+  }>,
+): Promise<void> {
+  const bodySequence = (await readHeart(paths)).latestBody?.sequence;
+  assert.equal(typeof bodySequence, "number");
+  const turn = await beginTurn(paths, { bodySequence: bodySequence!, startedAt: stamp });
+  const second = stamp.slice(0, 17);
+  const voices = spec.voices ?? 0;
+  for (let index = 0; index < voices; index += 1) {
+    await appendActivity(paths, {
+      turnSequence: turn.sequence,
+      event: { type: "assistant", text: `${spec.prefix}-voice-${index}` },
+      at: `${second}${String(index + 1).padStart(2, "0")}.000Z`,
+    });
+  }
+  const notes = spec.notes ?? 0;
+  for (let index = 0; index < notes; index += 1) {
+    await appendActivity(paths, {
+      turnSequence: turn.sequence,
+      event: { type: "note", text: `${spec.prefix}-note-${index}` },
+      at: `${second}${String(voices + index + 1).padStart(2, "0")}.000Z`,
+    });
+  }
+  if (spec.tool === true) {
+    await appendActivity(paths, {
+      turnSequence: turn.sequence,
+      event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } },
+      at: `${second}${String(voices + notes + 1).padStart(2, "0")}.000Z`,
+    });
+  }
+  if (spec.tellId !== undefined) {
+    await recordTell(paths, { id: spec.tellId, body: "continue", recordedAt: `${second}59.000Z` });
+  }
+}
+
+function ordinaryEntries(view: Awaited<ReturnType<typeof Keiyaku.wait>>["statuses"][number]) {
+  return view.status.timeline.entries.filter((entry) =>
+    entry.kind === "row"
+      && !(entry.row.kind === "tool" && entry.row.state === "active")
+      && !(entry.row.kind === "tell" && entry.row.state === "pending"));
+}
+
+function hasPinned(view: Awaited<ReturnType<typeof Keiyaku.wait>>["statuses"][number]): boolean {
+  return view.status.timeline.entries.some((entry) =>
+    entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active")
+    && view.status.timeline.entries.some((entry) =>
+      entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending");
 }
 
 async function answered(root: string, archetype: string, suffix: string) {
@@ -113,46 +170,26 @@ test("facade requires an explicit completion mode for a plural wait", async () =
   }
 });
 
-test("plural wait shares one detail budget without dropping pinned rows", async () => {
+test("plural wait shares one 30-row budget across five complete members", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-budget-"));
   try {
     const sources = [];
     for (let member = 1; member <= 5; member += 1) {
       const source = await answered(root, "worker", String(member).padStart(8, "0"));
-      for (let index = 0; index < 5; index += 1) {
-        await appendActivity(source.paths, {
-          turnSequence: 1,
-          event: { type: "assistant", text: `member-${member}-voice-${index}` },
-          at: `2026-08-11T00:00:${String(index + 1).padStart(2, "0")}.000Z`,
-        });
-      }
-      for (let index = 0; index < (member === 5 ? 3 : 2); index += 1) {
-        await appendActivity(source.paths, {
-          turnSequence: 1,
-          event: { type: "note", text: `member-${member}-note-${index}` },
-          at: `2026-08-11T00:00:${String(index + 6).padStart(2, "0")}.000Z`,
-        });
-      }
+      await openOrdinary(source.paths, `2026-08-11T00:0${member}:00.000Z`, {
+        prefix: `member-${member}`,
+        voices: 5,
+        notes: 2,
+        ...(member === 5 ? { tool: true, tellId: "complete-pending" } : {}),
+      });
       sources.push(source);
     }
-    await appendActivity(sources[4]!.paths, {
-      turnSequence: 1,
-      event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } },
-      at: "2026-08-11T00:01:00.000Z",
-    });
-    await recordTell(sources[4]!.paths, { id: "pending", body: "continue", recordedAt: "2026-08-11T00:01:01.000Z" });
     const exhausted = await answered(root, "worker", "00000006");
-    for (let index = 0; index < 2; index += 1) {
-      await appendActivity(exhausted.paths, {
-        turnSequence: 1,
-        event: { type: "note", text: `exhausted-${index}` },
-        at: `2026-08-11T00:02:0${index}.000Z`,
-      });
-    }
-    await appendActivity(exhausted.paths, {
-      turnSequence: 1,
-      event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } },
-      at: "2026-08-11T00:02:02.000Z",
+    await openOrdinary(exhausted.paths, "2026-08-11T00:06:00.000Z", {
+      prefix: "exhausted",
+      notes: 2,
+      tool: true,
+      tellId: "pending",
     });
     sources.push(exhausted);
 
@@ -162,25 +199,74 @@ test("plural wait shares one detail budget without dropping pinned rows", async 
       completion: "all",
       timeoutMs: 0,
     });
-    const fifth = waited.statuses[4]!;
-    const ordinary = waited.statuses.flatMap((view) => view.status.timeline.entries.filter((entry) =>
-      entry.kind === "row"
-        && !((entry.row.kind === "tool" && entry.row.state === "running")
-          || (entry.row.kind === "tell" && entry.row.state === "pending"))));
-    assert.equal(ordinary.length, 32);
-    assert.deepEqual(fifth.status.timeline.entries.map((entry) => entry.kind === "gap"
-      ? `gap:${entry.count}`
-      : entry.row.kind === "said" || entry.row.kind === "note" ? entry.row.text : entry.row.kind), [
-      "gap:11",
-      "tool",
-      "tell",
-    ]);
-    assert.equal(fifth.status.timeline.entries.some((entry) => entry.kind === "row"
-      && entry.row.kind === "tool" && entry.row.state === "running"), true);
-    assert.equal(fifth.status.timeline.entries.some((entry) => entry.kind === "row"
-      && entry.row.kind === "tell" && entry.row.state === "pending"), true);
+    const ordinary = waited.statuses.flatMap(ordinaryEntries);
+    assert.equal(ordinary.length, 30);
+    assert.deepEqual(waited.statuses.slice(0, 5).map((view) => ordinaryEntries(view).length), [6, 6, 6, 6, 6]);
+    assert.equal(hasPinned(waited.statuses[4]!), true);
+    assert.equal(waited.statuses[5]!.status.timeline.kind, "open");
+    assert.equal(ordinaryEntries(waited.statuses[5]!).length, 0);
+    assert.equal(hasPinned(waited.statuses[5]!), true);
     assert.deepEqual(waited.statuses[5]!.status.timeline.entries.map((entry) =>
-      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:5", "tool"]);
+      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:2", "tool", "tell"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("plural wait carries unused allowance and keeps pins after exhaustion", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-budget-flow-"));
+  try {
+    const sparse = await answered(root, "worker", "00000001");
+    await openOrdinary(sparse.paths, "2026-08-11T00:01:00.000Z", { prefix: "sparse", notes: 2 });
+    const complete = [];
+    for (let member = 2; member <= 5; member += 1) {
+      const source = await answered(root, "worker", String(member).padStart(8, "0"));
+      await openOrdinary(source.paths, `2026-08-11T00:0${member}:00.000Z`, {
+        prefix: `member-${member}`,
+        voices: 5,
+        notes: 2,
+      });
+      complete.push(source);
+    }
+    const partial = await answered(root, "worker", "00000006");
+    await openOrdinary(partial.paths, "2026-08-11T00:06:00.000Z", {
+      prefix: "partial",
+      voices: 5,
+      notes: 2,
+      tool: true,
+      tellId: "partial-pending",
+    });
+    const exhausted = await answered(root, "worker", "00000007");
+    await openOrdinary(exhausted.paths, "2026-08-11T00:07:00.000Z", {
+      prefix: "exhausted",
+      voices: 5,
+      notes: 2,
+      tool: true,
+      tellId: "exhausted-pending",
+    });
+
+    const waited = await Keiyaku.wait({
+      path: root,
+      akuma: [sparse.id, ...complete.map((source) => source.id), partial.id, exhausted.id],
+      completion: "all",
+      timeoutMs: 0,
+    });
+    assert.equal(waited.statuses.flatMap(ordinaryEntries).length, 30);
+    assert.equal(ordinaryEntries(waited.statuses[0]!).length, 2);
+    assert.deepEqual(waited.statuses.slice(1, 5).map((view) => ordinaryEntries(view).length), [6, 6, 6, 6]);
+    const later = waited.statuses[5]!;
+    assert.deepEqual(
+      ordinaryEntries(later).map((entry) => entry.kind === "row" && (entry.row.kind === "said" || entry.row.kind === "note")
+        ? entry.row.text
+        : entry.kind),
+      ["partial-voice-3", "partial-voice-4", "partial-note-0", "partial-note-1"],
+    );
+    assert.equal(hasPinned(later), true);
+    assert.equal(ordinaryEntries(waited.statuses[6]!).length, 0);
+    assert.equal(hasPinned(waited.statuses[6]!), true);
+    assert.equal(waited.statuses[6]!.status.timeline.kind, "open");
+    assert.deepEqual(waited.statuses[6]!.status.timeline.entries.map((entry) =>
+      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:7", "tool", "tell"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

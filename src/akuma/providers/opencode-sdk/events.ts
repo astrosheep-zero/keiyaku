@@ -77,36 +77,48 @@ function positiveLine(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
 }
 
+function runCall(name: string, value: Record<string, unknown> | undefined): ToolCall | undefined {
+  return name === "bash" || name === "shell"
+    ? { kind: "run", command: text(value?.command) ?? name }
+    : undefined;
+}
+
+function readCall(name: string, value: Record<string, unknown> | undefined): ToolCall | undefined {
+  if (name !== "read") return undefined;
+  const path = text(value?.filePath) ?? text(value?.path);
+  if (path === undefined) return undefined;
+  const offset = positiveLine(value?.offset);
+  const limit = positiveLine(value?.limit);
+  return {
+    kind: "read",
+    path,
+    ...(offset === undefined ? {} : { offset }),
+    ...(limit === undefined ? {} : { limit }),
+  };
+}
+
+function searchCall(name: string, value: Record<string, unknown> | undefined): ToolCall | undefined {
+  if (name !== "grep" && name !== "glob" && name !== "search") return undefined;
+  const query = text(value?.pattern) ?? text(value?.query);
+  if (query === undefined) return undefined;
+  const path = text(value?.path) ?? text(value?.filePath);
+  const glob = text(value?.glob);
+  const scope = name === "glob" ? "files" as const : "content" as const;
+  return {
+    kind: "search",
+    query,
+    scope,
+    ...(path === undefined ? {} : { path }),
+    ...(scope === "content" && glob !== undefined ? { glob } : {}),
+  };
+}
+
 function callFor(name: string, input: unknown): ToolCall | undefined {
   const value = object(input);
   const lower = name.toLowerCase();
-  if (lower === "bash" || lower === "shell") return { kind: "run", command: text(value?.command) ?? lower };
-  if (lower === "read") {
-    const path = text(value?.filePath) ?? text(value?.path);
-    if (path === undefined) return undefined;
-    const offset = positiveLine(value?.offset);
-    const limit = positiveLine(value?.limit);
-    return {
-      kind: "read",
-      path,
-      ...(offset === undefined ? {} : { offset }),
-      ...(limit === undefined ? {} : { limit }),
-    };
-  }
-  if (lower === "grep" || lower === "glob" || lower === "search") {
-    const query = text(value?.pattern) ?? text(value?.query);
-    if (query === undefined) return undefined;
-    const path = text(value?.path) ?? text(value?.filePath);
-    const glob = text(value?.glob);
-    const scope = lower === "glob" ? "files" as const : "content" as const;
-    return {
-      kind: "search",
-      query,
-      scope,
-      ...(path === undefined ? {} : { path }),
-      ...(scope === "content" && glob !== undefined ? { glob } : {}),
-    };
-  }
+  if (lower === "bash" || lower === "shell") return runCall(lower, value);
+  if (lower === "read") return readCall(lower, value);
+  if (lower === "grep" || lower === "glob" || lower === "search") return searchCall(lower, value);
   return { kind: "other", display: name };
 }
 function belongs(part: Part, state: State): boolean {

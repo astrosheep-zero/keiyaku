@@ -544,7 +544,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "library/fleet.ts",
       allow: [
         any("akuma/index.ts"),
-        any("akuma/akuma.ts", ["readActionFeedbackStatus"]),
+        any("akuma/akuma.ts", ["readActionFeedbackStatus", "readBudgetedStatus"]),
         types("core/facts/types.ts", ["ContractId"]),
         any("dispatch/index.ts", ["readDispatch"]),
         types("settings.ts"),

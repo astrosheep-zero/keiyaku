@@ -1422,6 +1422,64 @@ test("provider activity codec round trips every closed event and tool-call arm",
   );
 });
 
+test("provider activity codec rejects malformed tool-call optionals and unknown kinds", () => {
+  const started = (
+    id: string,
+    name: string,
+    call: unknown,
+  ): Readonly<Record<string, unknown>> => ({ type: "tool", phase: "started", id, name, call });
+  const accepted: readonly Readonly<{
+    call: unknown;
+    decoded: Extract<AgentEvent, { type: "tool" }>["call"];
+  }>[] = [
+    { call: { kind: "run", command: "npm test" }, decoded: { kind: "run", command: "npm test" } },
+    { call: { kind: "read", path: "src/a.ts", limit: 8 }, decoded: { kind: "read", path: "src/a.ts", limit: 8 } },
+    { call: { kind: "search", query: "TODO", path: "src" }, decoded: { kind: "search", query: "TODO", path: "src" } },
+    {
+      call: { kind: "fileChange", changes: [] },
+      decoded: { kind: "fileChange", changes: [] },
+    },
+    {
+      call: {
+        kind: "fileChange",
+        changes: [{ op: "delete", path: "gone.ts", diffstat: { added: 0, removed: 4 } }],
+      },
+      decoded: {
+        kind: "fileChange",
+        changes: [{ op: "delete", path: "gone.ts", diffstat: { added: 0, removed: 4 } }],
+      },
+    },
+    { call: { kind: "other", display: "mcp/tool" }, decoded: { kind: "other", display: "mcp/tool" } },
+  ];
+  const rejected: readonly unknown[] = [
+    { kind: "mystery", display: "no" },
+    { kind: "run" },
+    { kind: "read", path: "README.md", limit: 0 },
+    { kind: "search", query: "TODO", path: 1 },
+    { kind: "search", query: "TODO", glob: 1 },
+    { kind: "fileChange", changes: { op: "add", path: "a.ts" } },
+    { kind: "fileChange", changes: [{ op: "patch", path: "a.ts" }] },
+    { kind: "fileChange", changes: [{ op: "add" }] },
+    { kind: "fileChange", changes: [{ op: "add", path: "a.ts", diffstat: { added: -1, removed: 0 } }] },
+    { kind: "fileChange", changes: [{ op: "add", path: "a.ts", diffstat: "1,0" }] },
+    { kind: "other" },
+    null,
+  ];
+  for (const { call, decoded } of accepted) {
+    assert.deepEqual(
+      decodeAgentEvent(started("ok", "Tool", call)),
+      { type: "tool", phase: "started", id: "ok", name: "Tool", call: decoded },
+    );
+  }
+  for (const call of rejected) {
+    assert.throws(() => decodeAgentEvent(started("bad", "Tool", call)), /invalid event shape/u);
+  }
+  assert.throws(
+    () => decodeAgentEvent({ type: "tool", phase: "started", id: "bad", name: "Tool" }),
+    /invalid event shape/u,
+  );
+});
+
 class CollectingChannel extends AgentEventChannel {
   readonly collected: AgentEvent[] = [];
   override emit(event: AgentEvent): void {
@@ -1563,6 +1621,56 @@ test("Claude, Pi, OpenCode, and Codex keep distinct native read ranges and searc
   assert.notDeepEqual(files.call, webSearch.call);
   for (const event of [content, files, webSearch]) {
     assert.deepEqual(decodeAgentEvent(encodeAgentEvent(event)), event);
+  }
+});
+
+test("Claude, Pi, and OpenCode keep native fallbacks and name precedence", () => {
+  const claude: readonly Readonly<{ name: string; input: unknown; call: Extract<AgentEvent, { type: "tool" }>["call"] }>[] = [
+    { name: "Bash", input: { command: "npm test" }, call: { kind: "run", command: "npm test" } },
+    { name: "Bash", input: { command: "   " }, call: { kind: "other", display: "Bash" } },
+    { name: "Read", input: { path: "src/a.ts" }, call: { kind: "read", path: "src/a.ts" } },
+    { name: "Read", input: { file_path: "   " }, call: { kind: "other", display: "Read" } },
+    { name: "Grep", input: { query: "TODO" }, call: { kind: "search", query: "TODO", scope: "content" } },
+    { name: "Grep", input: { path: "src" }, call: { kind: "other", display: "Grep" } },
+    { name: "Glob", input: { path: "docs" }, call: { kind: "other", display: "Glob" } },
+    { name: "WebSearch", input: { path: "ignored" }, call: { kind: "other", display: "WebSearch" } },
+    { name: "Write", input: { file_path: "src/a.ts" }, call: { kind: "fileChange", changes: [{ op: "add", path: "src/a.ts" }] } },
+    { name: "Edit", input: { file_path: "src/a.ts" }, call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] } },
+    { name: "NotebookEdit", input: { file_path: "n.ipynb" }, call: { kind: "fileChange", changes: [{ op: "update", path: "n.ipynb" }] } },
+    { name: "Write", input: {}, call: { kind: "other", display: "Write" } },
+  ];
+  for (const { name, input, call } of claude) assert.deepEqual(claudeToolCall(name, input), call);
+
+  const pi: readonly Readonly<{ name: string; args: unknown; call: Extract<AgentEvent, { type: "tool" }>["call"] }>[] = [
+    { name: "bash", args: { command: "npm test" }, call: { kind: "run", command: "npm test" } },
+    { name: "bash", args: { command: 1 }, call: { kind: "other", display: "bash" } },
+    { name: "grep", args: { query: "TODO", path: "src" }, call: { kind: "search", query: "TODO", scope: "content", path: "src" } },
+    { name: "find", args: { query: "*.md" }, call: { kind: "search", query: "*.md", scope: "files" } },
+    { name: "write", args: { path: "src/a.ts" }, call: { kind: "fileChange", changes: [{ op: "add", path: "src/a.ts" }] } },
+    { name: "edit", args: { path: "src/a.ts" }, call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] } },
+    { name: "edit", args: {}, call: { kind: "other", display: "edit" } },
+  ];
+  for (const { name, args, call } of pi) assert.deepEqual(piToolCall(name, args), call);
+
+  const opencode: readonly Readonly<{
+    name: string;
+    input: unknown;
+    call?: Extract<AgentEvent, { type: "tool" }>["call"];
+  }>[] = [
+    { name: "Bash", input: { command: "npm test" }, call: { kind: "run", command: "npm test" } },
+    { name: "SHELL", input: {}, call: { kind: "run", command: "shell" } },
+    { name: "read", input: { filePath: "src/a.ts" }, call: { kind: "read", path: "src/a.ts" } },
+    { name: "search", input: { query: "TODO", filePath: "src", glob: "*.ts" },
+      call: { kind: "search", query: "TODO", scope: "content", path: "src", glob: "*.ts" } },
+    { name: "Glob", input: { pattern: "*.md", filePath: "docs", glob: "ignored" },
+      call: { kind: "search", query: "*.md", scope: "files", path: "docs" } },
+    { name: "DatabaseSearch", input: { query: "TODO" }, call: { kind: "other", display: "DatabaseSearch" } },
+    { name: "read", input: {} },
+    { name: "grep", input: { glob: "*.ts" } },
+  ];
+  for (const { name, input, call } of opencode) {
+    if (call === undefined) assert.equal(opencodeToolEvent(name, input), undefined);
+    else assert.deepEqual(opencodeToolCall(name, input), call);
   }
 });
 

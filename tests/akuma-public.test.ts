@@ -5,7 +5,7 @@ import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
-import { projectTurns, selectHistory, selectSnapshot } from "../src/akuma/projection.js";
+import { ordinarySelectedCount, ordinarySnapshotBudget, projectTurns, selectHistory, selectSnapshot } from "../src/akuma/projection.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
@@ -157,8 +157,8 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
   const snapshot = selectSnapshot(ledger, { tail: 1 });
   assert.equal(snapshot.kind, "open");
   if (snapshot.kind !== "open") return;
-  assert.deepEqual(snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:2", 7, 8]);
-  assert.equal(snapshot.omitted, 2);
+  assert.deepEqual(snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:1", 6, 7, 8]);
+  assert.equal(snapshot.omitted, 1);
   assert.equal(snapshot.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"), true);
   assert.equal(snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 2), false);
   assert.equal(ledger.rows.some((row) => row.kind === "tool" && row.sequence === 2 && row.state === "unsettled"), true);
@@ -225,6 +225,53 @@ test("open snapshot independently retains pre-tail voice and actionable pins", (
   if (pinnedOnly.kind !== "open") return;
   assert.deepEqual(pinnedOnly.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:6", 8, 9, "gap:3"]);
   assert.equal(pinnedOnly.omitted, 9);
+});
+
+test("budgeted snapshot spends newest tail first under the public 3 + 3 proportions", () => {
+  assert.deepEqual(ordinarySnapshotBudget(0), { tail: 0, voice: 0 });
+  assert.deepEqual(ordinarySnapshotBudget(2), { tail: 2, voice: 0 });
+  assert.deepEqual(ordinarySnapshotBudget(4), { tail: 3, voice: 1 });
+  assert.deepEqual(ordinarySnapshotBudget(6), { tail: 3, voice: 3 });
+  assert.deepEqual(ordinarySnapshotBudget(30), { tail: 3, voice: 3 });
+
+  const ledger = projectTurns([
+    { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
+    { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "assistant", text: "old voice" } },
+    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "assistant", text: "kept voice" } },
+    { kind: "activity" as const, sequence: 4, turnSequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "note", text: "tail note" } },
+    { kind: "activity" as const, sequence: 5, turnSequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "note", text: "newest note" } },
+    { kind: "activity" as const, sequence: 6, turnSequence: 1, at: "2026-08-10T00:00:06.000Z", event: { type: "tool", phase: "started", id: "pin", name: "Search", call: { kind: "search", query: "pin" } } },
+    { kind: "tell" as const, sequence: 7, id: "tell-pin", body: "pin", recordedAt: "2026-08-10T00:00:07.000Z", state: "pending" as const, deliveries: [] },
+  ]);
+  const snapshot = selectSnapshot(ledger, ordinarySnapshotBudget(2));
+  assert.equal(snapshot.kind, "open");
+  if (snapshot.kind !== "open") return;
+  assert.deepEqual(snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:2", 4, 5, 6, 7]);
+  assert.equal(ordinarySelectedCount(snapshot), 2);
+});
+
+test("a newer running tool does not displace a complete 3 + 3 ordinary selection", () => {
+  const ledger = projectTurns([
+    { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
+    { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "assistant", text: "hidden voice" } },
+    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "note", text: "hidden note" } },
+    { kind: "activity" as const, sequence: 4, turnSequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "assistant", text: "voice one" } },
+    { kind: "activity" as const, sequence: 5, turnSequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "thought", text: "voice two" } },
+    { kind: "activity" as const, sequence: 6, turnSequence: 1, at: "2026-08-10T00:00:06.000Z", event: { type: "assistant", text: "voice three" } },
+    { kind: "activity" as const, sequence: 7, turnSequence: 1, at: "2026-08-10T00:00:07.000Z", event: { type: "note", text: "tail one" } },
+    { kind: "activity" as const, sequence: 8, turnSequence: 1, at: "2026-08-10T00:00:08.000Z", event: { type: "note", text: "tail two" } },
+    { kind: "activity" as const, sequence: 9, turnSequence: 1, at: "2026-08-10T00:00:09.000Z", event: { type: "note", text: "tail three" } },
+    { kind: "activity" as const, sequence: 10, turnSequence: 1, at: "2026-08-10T00:00:10.000Z", event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } } },
+    { kind: "tell" as const, sequence: 11, id: "pending", body: "continue", recordedAt: "2026-08-10T00:00:11.000Z", state: "pending" as const, deliveries: [] },
+  ]);
+  const snapshot = selectSnapshot(ledger, { tail: 3, voice: 3 });
+  assert.equal(snapshot.kind, "open");
+  if (snapshot.kind !== "open") return;
+  assert.deepEqual(snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), [
+    "gap:2", 4, 5, 6, 7, 8, 9, 10, 11,
+  ]);
+  assert.equal(ordinarySelectedCount(snapshot), 6);
+  assert.equal(snapshot.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"), true);
 });
 
 test("outcome folding preserves a truncated final voice equal to the answer", () => {

@@ -195,6 +195,9 @@ produces semantic rows before any budget is applied. A completed event whose
 start was pruned is a settled row without duration; a retained start without
 completion is in flight. The snapshot selector pins every in-flight tool and
 every pending tell outside the independent tail-three and voice-three budgets.
+Tail is the newest non-pinned ordinary window rows; voice is the newest eligible
+pre-tail ordinary said or thought rows. Active tools stay at their actual
+positions and do not occupy tail slots. Settled tool rows remain ordinary.
 Voice inside the tail does not consume the voice budget; `note`, `call`, `tell`,
 tool, and outcome rows are not voice candidates. It deduplicates the union,
 restores timeline order, and replaces each contiguous hidden run with a typed

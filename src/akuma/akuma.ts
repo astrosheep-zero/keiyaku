@@ -34,9 +34,12 @@ import {
   type AkumaPaths,
 } from "./identity.js";
 import {
+  ordinarySelectedCount,
+  ordinarySnapshotBudget,
   projectTurns,
   selectActivitySnapshot,
   selectHistory,
+  selectSnapshot,
   type ActivityHistory,
   type ActivitySnapshot,
 } from "./projection.js";
@@ -167,7 +170,11 @@ async function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot?: HeartS
   };
 }
 
-async function bornStatus(paths: AkumaPaths, expected: AkuId): Promise<AkumaStatus> {
+async function bornStatus(
+  paths: AkumaPaths,
+  expected: AkuId,
+  budget?: Readonly<{ tail: number; voice: number }>,
+): Promise<AkumaStatus> {
   const snapshot = await readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const current = await bornListRow(paths, expected, snapshot);
@@ -180,13 +187,37 @@ async function bornStatus(paths: AkumaPaths, expected: AkuId): Promise<AkumaStat
     life: current.life,
     ...(snapshot.soul.readonly === undefined ? {} : { readonly: snapshot.soul.readonly }),
     ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
-    timeline: selectActivitySnapshot(slice.rows),
+    timeline: budget === undefined
+      ? selectActivitySnapshot(slice.rows)
+      : selectSnapshot(projectTurns(slice.rows), budget),
   };
 }
 
 /** Package-internal action observation; it uses the same snapshot selector as status. */
 export async function readActionFeedbackStatus(worldPath: WorldRoot, id: AkuId): Promise<AkumaStatus> {
   return await bornStatus(pathsForAkuId(worldPath, id), id);
+}
+
+export type BudgetedStatusObservation = Readonly<{
+  status: AkumaStatus;
+  ordinarySelected: number;
+}>;
+
+/** Package-internal budgeted observation; Fleet allocates, Akuma still selects. */
+export async function readBudgetedStatus(
+  worldPath: WorldRoot,
+  id: AkuId,
+  input: Readonly<{ ordinaryBudget: number }>,
+): Promise<BudgetedStatusObservation> {
+  if (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0) {
+    throw new TypeError("ordinary budget must be a nonnegative safe integer");
+  }
+  const status = await bornStatus(
+    pathsForAkuId(worldPath, id),
+    id,
+    ordinarySnapshotBudget(input.ordinaryBudget),
+  );
+  return { status, ordinarySelected: ordinarySelectedCount(status.timeline) };
 }
 
 function diagnostic(error: unknown): string {

@@ -126,34 +126,57 @@ const CLAUDE_SYSTEM_NOTES = {
   worker_shutting_down: (message) => `Worker stopping: ${nonblank(message.reason) ?? "unknown reason"}`,
 } satisfies Partial<Record<ClaudeSystemSubtype, (message: Readonly<Record<string, unknown>>) => string>>;
 
-function toolCall(name: string, input: unknown): ToolCall {
-  const value = object(input) ?? {};
-  if (name === "Bash") {
-    const command = nonblank(value.command);
-    return command === undefined ? { kind: "other", display: name } : { kind: "run", command };
-  }
-  const path = nonblank(value.file_path) ?? (name === "Read" ? nonblank(value.path) : undefined);
-  if (name === "Read" && path !== undefined) return { kind: "read", path, ...readRange(value) };
+function runCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
+  if (name !== "Bash") return undefined;
+  const command = nonblank(value.command);
+  return command === undefined ? { kind: "other", display: name } : { kind: "run", command };
+}
+
+function readCall(
+  name: string,
+  path: string | undefined,
+  value: Readonly<Record<string, unknown>>,
+): ToolCall | undefined {
+  return name === "Read" && path !== undefined ? { kind: "read", path, ...readRange(value) } : undefined;
+}
+
+function searchCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
   if (name === "Grep") {
     const query = nonblank(value.pattern) ?? nonblank(value.query);
-    if (query !== undefined) return contentSearch(value, query);
+    return query === undefined ? undefined : contentSearch(value, query);
   }
   if (name === "Glob") {
     const query = nonblank(value.pattern);
     const globPath = nonblank(value.path);
-    if (query !== undefined) {
-      return { kind: "search", query, scope: "files", ...(globPath === undefined ? {} : { path: globPath }) };
-    }
+    return query === undefined
+      ? undefined
+      : { kind: "search", query, scope: "files", ...(globPath === undefined ? {} : { path: globPath }) };
   }
   if (name === "WebSearch") {
     const query = nonblank(value.query);
-    if (query !== undefined) return { kind: "search", query, scope: "web" };
+    return query === undefined ? undefined : { kind: "search", query, scope: "web" };
   }
-  if (name === "Write" && path !== undefined) return { kind: "fileChange", changes: [{ op: "add", path }] };
-  if ((name === "Edit" || name === "NotebookEdit") && path !== undefined) {
+  return undefined;
+}
+
+function fileChangeCall(name: string, path: string | undefined): ToolCall | undefined {
+  if (path === undefined) return undefined;
+  if (name === "Write") return { kind: "fileChange", changes: [{ op: "add", path }] };
+  if (name === "Edit" || name === "NotebookEdit") {
     return { kind: "fileChange", changes: [{ op: "update", path }] };
   }
-  return { kind: "other", display: name };
+  return undefined;
+}
+
+function toolCall(name: string, input: unknown): ToolCall {
+  const value = object(input) ?? {};
+  const run = runCall(name, value);
+  if (run !== undefined) return run;
+  const path = nonblank(value.file_path) ?? (name === "Read" ? nonblank(value.path) : undefined);
+  return readCall(name, path, value)
+    ?? searchCall(name, value)
+    ?? fileChangeCall(name, path)
+    ?? { kind: "other", display: name };
 }
 
 function assistantEvents(

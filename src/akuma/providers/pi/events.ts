@@ -55,34 +55,51 @@ function optionalText(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
+function runCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
+  return name === "bash" && typeof value.command === "string"
+    ? { kind: "run", command: value.command }
+    : undefined;
+}
+
+function readCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
+  if (name !== "read" || typeof value.path !== "string") return undefined;
+  const offset = positiveLine(value.offset);
+  const limit = positiveLine(value.limit);
+  return {
+    kind: "read",
+    path: value.path,
+    ...(offset === undefined ? {} : { offset }),
+    ...(limit === undefined ? {} : { limit }),
+  };
+}
+
+function searchCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
+  if (name !== "grep" && name !== "find") return undefined;
+  const query = value.pattern ?? value.query;
+  if (typeof query !== "string") return undefined;
+  const path = optionalText(value.path);
+  const glob = optionalText(value.glob);
+  return {
+    kind: "search",
+    query,
+    scope: name === "find" ? "files" : "content",
+    ...(path === undefined ? {} : { path }),
+    ...(name === "grep" && glob !== undefined ? { glob } : {}),
+  };
+}
+
+function fileChangeCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
+  if ((name !== "edit" && name !== "write") || typeof value.path !== "string") return undefined;
+  return { kind: "fileChange", changes: [{ op: name === "write" ? "add" : "update", path: value.path }] };
+}
+
 function toolCall(name: string, args: unknown): ToolCall {
   const value = record(args) ?? {};
-  if (name === "bash" && typeof value.command === "string") return { kind: "run", command: value.command };
-  if (name === "read" && typeof value.path === "string") {
-    const offset = positiveLine(value.offset);
-    const limit = positiveLine(value.limit);
-    return {
-      kind: "read",
-      path: value.path,
-      ...(offset === undefined ? {} : { offset }),
-      ...(limit === undefined ? {} : { limit }),
-    };
-  }
-  if ((name === "grep" || name === "find") && typeof (value.pattern ?? value.query) === "string") {
-    const path = optionalText(value.path);
-    const glob = optionalText(value.glob);
-    return {
-      kind: "search",
-      query: (value.pattern ?? value.query) as string,
-      scope: name === "find" ? "files" : "content",
-      ...(path === undefined ? {} : { path }),
-      ...(name === "grep" && glob !== undefined ? { glob } : {}),
-    };
-  }
-  if ((name === "edit" || name === "write") && typeof value.path === "string") {
-    return { kind: "fileChange", changes: [{ op: name === "write" ? "add" : "update", path: value.path }] };
-  }
-  return { kind: "other", display: name };
+  return runCall(name, value)
+    ?? readCall(name, value)
+    ?? searchCall(name, value)
+    ?? fileChangeCall(name, value)
+    ?? { kind: "other", display: name };
 }
 
 export type PiEventState = {

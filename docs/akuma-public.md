@@ -9,7 +9,8 @@ Turn ledger in persisted sequence order, then apply their snapshot or cursor
 policy. They do not join outcomes by timestamp or read a second Turn
 projection. A snapshot is current actionable observation: an open Turn exposes
 only that Turn's tail-three plus independent pre-tail voice-three union, active
-tools, and actionable pending tells; with
+tools, and actionable pending tells. Tail and voice are taken from ordinary
+window rows; an active tool does not occupy a tail slot. With
 no open Turn it exposes only the latest outcome and actionable pending tells.
 It never samples activity across closed Turns. Contiguous hidden open-Turn runs
 remain visible at their actual positions as typed read-time gap entries whose

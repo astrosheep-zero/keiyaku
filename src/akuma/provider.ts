@@ -97,54 +97,89 @@ function decodeSearchScope(value: unknown): SearchScope | null | undefined {
   return typeof value === "string" && Object.hasOwn(SEARCH_SCOPES, value) ? value as SearchScope : null;
 }
 
+function decodeRunCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
+  return typeof call.command === "string" ? { kind: "run", command: call.command } : null;
+}
+
+function decodeReadCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
+  if (typeof call.path !== "string") return null;
+  const offset = decodePositiveLine(call.offset);
+  const limit = decodePositiveLine(call.limit);
+  if (offset === null || limit === null) return null;
+  return {
+    kind: "read",
+    path: call.path,
+    ...(offset === undefined ? {} : { offset }),
+    ...(limit === undefined ? {} : { limit }),
+  };
+}
+
+function decodeSearchCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
+  if (typeof call.query !== "string") return null;
+  const scope = decodeSearchScope(call.scope);
+  const path = decodeOptionalText(call.path);
+  const glob = decodeOptionalText(call.glob);
+  if (scope === null || path === null || glob === null) return null;
+  return {
+    kind: "search",
+    query: call.query,
+    ...(scope === undefined ? {} : { scope }),
+    ...(path === undefined ? {} : { path }),
+    ...(glob === undefined ? {} : { glob }),
+  };
+}
+
+function decodeNonnegativeCount(value: unknown): number | null {
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;
+}
+
+function decodeDiffstat(
+  value: unknown,
+): Readonly<{ added: number; removed: number }> | null | undefined {
+  if (value === undefined) return undefined;
+  const diffstat = object(value);
+  if (diffstat === null) return null;
+  const added = decodeNonnegativeCount(diffstat.added);
+  const removed = decodeNonnegativeCount(diffstat.removed);
+  return added === null || removed === null ? null : { added, removed };
+}
+
+function decodeFileChangeMember(
+  value: unknown,
+): Extract<ToolCall, { kind: "fileChange" }>["changes"][number] | null {
+  const change = object(value);
+  if (change === null || (change.op !== "add" && change.op !== "update" && change.op !== "delete")
+    || typeof change.path !== "string") return null;
+  const diffstat = decodeDiffstat(change.diffstat);
+  if (diffstat === null) return null;
+  return {
+    op: change.op,
+    path: change.path,
+    ...(diffstat === undefined ? {} : { diffstat }),
+  };
+}
+
+function decodeFileChangeCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
+  if (!Array.isArray(call.changes)) return null;
+  const changes = call.changes.map(decodeFileChangeMember);
+  return changes.every((change) => change !== null) ? { kind: "fileChange", changes } : null;
+}
+
+function decodeOtherCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
+  return typeof call.display === "string" ? { kind: "other", display: call.display } : null;
+}
+
 function decodeToolCall(value: unknown): ToolCall | null {
   const call = object(value);
-  if (call?.kind === "run" && typeof call.command === "string") return { kind: "run", command: call.command };
-  if (call?.kind === "read" && typeof call.path === "string") {
-    const offset = decodePositiveLine(call.offset);
-    const limit = decodePositiveLine(call.limit);
-    if (offset === null || limit === null) return null;
-    return {
-      kind: "read",
-      path: call.path,
-      ...(offset === undefined ? {} : { offset }),
-      ...(limit === undefined ? {} : { limit }),
-    };
+  if (call === null) return null;
+  switch (call.kind) {
+    case "run": return decodeRunCall(call);
+    case "read": return decodeReadCall(call);
+    case "search": return decodeSearchCall(call);
+    case "fileChange": return decodeFileChangeCall(call);
+    case "other": return decodeOtherCall(call);
+    default: return null;
   }
-  if (call?.kind === "search" && typeof call.query === "string") {
-    const scope = decodeSearchScope(call.scope);
-    const path = decodeOptionalText(call.path);
-    const glob = decodeOptionalText(call.glob);
-    if (scope === null || path === null || glob === null) return null;
-    return {
-      kind: "search",
-      query: call.query,
-      ...(scope === undefined ? {} : { scope }),
-      ...(path === undefined ? {} : { path }),
-      ...(glob === undefined ? {} : { glob }),
-    };
-  }
-  if (call?.kind === "fileChange" && Array.isArray(call.changes)) {
-    const changes = call.changes.map((value) => {
-      const change = object(value);
-      if (change === null || (change.op !== "add" && change.op !== "update" && change.op !== "delete")
-        || typeof change.path !== "string") return null;
-      const rawDiffstat = change.diffstat;
-      const op = change.op as "add" | "update" | "delete";
-      if (rawDiffstat === undefined) return { op, path: change.path };
-      const diffstat = object(rawDiffstat);
-      if (diffstat === null || !Number.isSafeInteger(diffstat.added) || !Number.isSafeInteger(diffstat.removed)
-        || (diffstat.added as number) < 0 || (diffstat.removed as number) < 0) return null;
-      return {
-        op,
-        path: change.path,
-        diffstat: { added: diffstat.added as number, removed: diffstat.removed as number },
-      };
-    });
-    if (changes.every((change) => change !== null)) return { kind: "fileChange", changes };
-  }
-  if (call?.kind === "other" && typeof call.display === "string") return { kind: "other", display: call.display };
-  return null;
 }
 
 function decodeToolResult(value: unknown): ToolResult | null {

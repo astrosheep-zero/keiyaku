@@ -362,20 +362,37 @@ function openEntries(
   return result;
 }
 
+/** Split one nonnegative ordinary allowance into newest tail first, then pre-tail voice. */
+export function ordinarySnapshotBudget(ordinaryBudget: number): Readonly<{ tail: number; voice: number }> {
+  const tail = Math.min(DEFAULT_TAIL, Math.max(0, ordinaryBudget));
+  return { tail, voice: Math.min(DEFAULT_VOICE, Math.max(0, ordinaryBudget) - tail) };
+}
+
+/** Count selected ordinary rows; active tools and pending tells stay outside this total. */
+export function ordinarySelectedCount(snapshot: ActivitySnapshot): number {
+  return snapshot.entries.reduce((count, entry) => {
+    if (entry.kind !== "row") return count;
+    if (entry.row.kind === "tool" && entry.row.state === "active") return count;
+    if (entry.row.kind === "tell" && entry.row.state === "pending") return count;
+    return count + 1;
+  }, 0);
+}
+
 /** Select one current Turn, one latest outcome, or no focus; pending tells stay actionable. */
 export function selectSnapshot(ledger: TurnLedger, budget: Readonly<{ tail: number; voice?: number }> = { tail: DEFAULT_TAIL, voice: DEFAULT_VOICE }): ActivitySnapshot {
   if (ledger.turns.length === 0 && !ledger.rows.some((row) => row.kind === "tell")) return { kind: "unborn", entries: [], omitted: 0 };
   const pending = ledger.rows.filter((row): row is Extract<ActivityRow, { kind: "tell" }> => row.kind === "tell" && row.state === "pending");
   if (ledger.openTurn !== undefined) {
     const window = ledger.openTurn.rows;
+    const active = window.filter((row) => row.kind === "tool" && row.state === "active");
+    const ordinary = window.filter((row) => !(row.kind === "tool" && row.state === "active"));
     const tailCount = Math.max(0, budget.tail);
-    const tail = tailCount === 0 ? [] : window.slice(-tailCount);
+    const tail = tailCount === 0 ? [] : ordinary.slice(-tailCount);
     const tailSet = new Set(tail);
     const voiceCount = Math.max(0, budget.voice ?? DEFAULT_VOICE);
-    const voiceCandidates = window
+    const voiceCandidates = ordinary
       .filter((row) => !tailSet.has(row) && (row.kind === "said" || row.kind === "thought"));
     const voice = voiceCount === 0 ? [] : voiceCandidates.slice(-voiceCount);
-    const active = window.filter((row) => row.kind === "tool" && row.state === "active");
     const selected = new Set<ActivityRow>([...tail, ...voice, ...active, ...pending]);
     const omitted = window.filter((row) => !selected.has(row)).length;
     return { kind: "open", turn: ledger.openTurn.turn, entries: openEntries(ledger, window, selected), omitted };
