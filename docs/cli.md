@@ -94,7 +94,7 @@ Command syntax:
 bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -
 amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -
 deliver [<contract>|@<contract>] [--message <text>] [--actor <actor>] [--json]
-review [<contract>|@<contract>] (--satisfied | --unsatisfied) [--summary <text>] [--actor <actor>] [--json] [-]
+review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>] [--json]
 abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
 status [<contract>|@name|<aku/...>] [--json]
@@ -121,17 +121,23 @@ kill <akuma-selector>... [--json]
 
 A final bare `-` reads stdin. For `bind`, it reads one contract document; for
 `amend`, one amendment-operation document; for `arc`, one arc document; and for
-`review`, an optional summary. Review stdin and `--summary <text>` are mutually
-exclusive. No other Contract command reads stdin. Akuma and Task stdin entry
-points are specified by their command grammars below. The grammar of all
-document inputs is owned by [document.md](document.md).
+`review`, the required summary. Review takes exactly one summary source:
+`--summary <text>` or final `-`. Neither or both is a usage refusal. No other
+Contract command reads stdin. Akuma and Task stdin entry points are specified
+by their command grammars below. The grammar of all document inputs is owned
+by [document.md](document.md).
 
 The parser decides only whether stdin is syntactically required or allowed.
-Failure while acquiring bytes from stdin is an internal invocation failure and
-uses exit `3`; it is not converted into a usage error. A genuine
-`CliUsageError` raised by syntax or edge validation remains a usage refusal.
-Stdin acquisition is awaited and completes before command adaptation begins;
-no synchronous read, lazy stream wrapper, or background input queue exists.
+Source selection that can be decided from argv is refused during parsing,
+before stdin is acquired. Failure while acquiring bytes from stdin is an
+internal invocation failure and uses exit `3`; it is not converted into a
+usage error. A genuine `CliUsageError` raised by syntax or edge validation
+remains a usage refusal. Stdin acquisition is awaited and completes before
+command adaptation begins; no synchronous read, lazy stream wrapper, or
+background input queue exists. A selected required stdin source that is empty
+or Unicode-whitespace-only is usage after those bytes are acquired and before
+World, Repo, or package-root invocation. Valid acquired bytes pass through
+unchanged, including line endings and surrounding whitespace.
 
 After complete bind stdin has been acquired, a bind refusal or invalid Contract
 document preserves those exact bytes as a CLI receipt at
@@ -214,10 +220,13 @@ unstaged, and untracked final bytes; it is not a staged-only mode or path
 selector. Dirty submodule internals still refuse. Its up-to-date policy comes
 from the settings consumer at `git.requireBranchesToBeUpToDate`; there is no
 per-deliver policy flag.
-`review` requires exactly one of
-`--satisfied` or `--unsatisfied`, with optional `--summary`, `--actor`, and
-`--json`. It has no dirty authorization flag; if the observed projection is
-dirty, the accepted result discloses the ordinary dirty paths and short stat.
+`review` requires exactly one of `--satisfied` or `--unsatisfied`, exactly one
+summary source, and optional `--actor` and `--json`. Package-root review still
+treats summary as optional. Explicit empty or Unicode-whitespace-only
+`--target`, `--message`, `--note`, `--summary`, `--actor`, and other required
+argv operands are usage at parse time. It has no dirty authorization flag; if
+the observed projection is dirty, the accepted result discloses the ordinary
+dirty paths and short stat.
 Dirty submodule internals still refuse because no review projection can seal
 them. `abandon` accepts optional `--note`, `--actor`, and `--json`; it has no
 reason flag or hidden reason classification. `arc` accepts `--actor` and `--json`. `audit` accepts `--actor`, `--json`,
@@ -250,10 +259,10 @@ rollback occurs. Text prints one result per harness. JSON returns
 `failed` and a diagnostic on failure. Any failed harness makes the command exit
 `1`; successful installation exits `0`.
 
-`call` and `tell` each accept exactly one prompt source: one positional
-`<prompt>` argument, or a final `-` that reads stdin. Supplying both or neither
-is a usage refusal. The selected argument text or stdin bytes become the public
-body input. The `call` positional `<akuma-name>` names
+`call` and `tell` each accept exactly one nonblank prompt source: one
+positional `<prompt>` argument, or a final `-` that reads stdin. Supplying
+both, neither, or a blank selected source is a usage refusal. The selected
+argument text or stdin bytes become the public body input unchanged. The `call` positional `<akuma-name>` names
 `~/.keiyaku/akuma/<name>.md`; its provider must resolve through the
 Settings-backed provider interpretation. When no same-name Settings entry
 exists, the built-in fallback execution names are `claude` and

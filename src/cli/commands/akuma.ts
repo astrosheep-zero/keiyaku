@@ -1,4 +1,4 @@
-import { CliUsageError, usageLine } from "../usage.js";
+import { CliUsageError, isBlankInput, usageLine } from "../usage.js";
 import { archetypeName, parseAkuId } from "../../akuma/identity.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
@@ -157,8 +157,10 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
       if (action !== "call") fail(`option ${token} is not valid for ${action}`);
       if (flags.detach !== undefined) fail("duplicate option: --detach");
       flags.detach = true;
-    } else if (!token.startsWith("--")) positionals.push(token);
-    else {
+    } else if (!token.startsWith("--")) {
+      if (isBlankInput(token)) fail(`${action} requires a nonblank value`);
+      positionals.push(token);
+    } else {
       const name = token.slice(2);
       const kind = (spec.flags as Readonly<Record<string, "boolean" | "value">>)[name];
       if (kind === undefined) fail(`option ${token} is not valid for ${action}`);
@@ -169,6 +171,7 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
         if (value === undefined || value === "-" || value === "-d" || value.startsWith("--")) {
           fail(`${token} requires a value`);
         }
+        if (isBlankInput(value)) fail(`${token} requires a nonblank value`);
         flags[name] = value;
         index += 1;
       }
@@ -256,7 +259,6 @@ function parseAddressed(
   const akuma = validateDirect(rawSelectors[0]!, fail);
   if (action === "history") return parseHistory(akuma, flags, output, fail);
   const at = stringFlag(flags.at, "fork requires --at <historyId>", fail);
-  if (at.trim().length === 0) fail("fork requires --at <historyId>");
   return { command: action, akuma, at, output };
 }
 

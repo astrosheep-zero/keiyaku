@@ -9,6 +9,7 @@ import { bindFromCommand } from "./commands/bind.js";
 import { installHarnesses, type InstallInvocationResult } from "./commands/install.js";
 import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js";
 import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
+import { isBlankInput } from "./usage.js";
 import type { InvocationResult, RegionResult } from "./result.js";
 import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
 import { resolveNamedAddress } from "../library/address.js";
@@ -35,6 +36,42 @@ async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   return Buffer.concat(chunks).toString("utf8");
+}
+
+function selectedStdinDiagnostic(command: Exclude<ParsedCommand, { command: "install" }>): string | undefined {
+  switch (command.command) {
+    case "bind":
+    case "amend":
+    case "arc":
+      return `${command.command} requires a nonblank stdin document`;
+    case "review":
+      return command.summaryFromStdin === true ? "review requires a nonblank summary" : undefined;
+    case "call":
+    case "tell":
+      return command.prompt.kind === "stdin" ? `${command.command} requires a nonblank prompt` : undefined;
+    case "task":
+      switch (command.stdin) {
+        case "document": return "task add requires a nonblank stdin document";
+        case "compose": return "task compose requires a nonblank stdin document";
+        case "body": return "task update --body requires a nonblank value";
+        case "append": return "task update --append requires a nonblank value";
+        case "note": return "task update --note requires a nonblank value";
+        default: return undefined;
+      }
+    default:
+      return undefined;
+  }
+}
+
+async function withAcquiredStdin(
+  command: Exclude<ParsedCommand, { command: "install" }>,
+  runtime: InvokeRuntime,
+): Promise<InvokeRuntime> {
+  const diagnostic = selectedStdinDiagnostic(command);
+  if (diagnostic === undefined) return runtime;
+  const bytes = await (runtime.readStdin ?? readStdin)();
+  if (isBlankInput(bytes)) throw new CliUsageError(diagnostic);
+  return { ...runtime, readStdin: async () => bytes };
 }
 
 export type SettingsInvocationResult = Readonly<{ kind: "settings"; value: Settings }>;
@@ -499,7 +536,7 @@ export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime
       ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
       command,
-    }, runtime);
+    }, await withAcquiredStdin(command, runtime));
   } catch (error) {
     if (error instanceof CliUsageError && error.projection === undefined) {
       throw new CliUsageError(error.diagnostic, renderCommandUsage(invocation.command));

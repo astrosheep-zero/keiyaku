@@ -17,7 +17,7 @@ import {
 import type { CatalogQuery } from "../index.js";
 import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
 import { AMEND_MINIMAL_STDIN_HELP, CONTRACT_COMMAND_SPECS, type ContractCommand as Command, type ContractCommandSpec as CommandSpec } from "./commands/contract.js";
-import { CliUsageError, usageLine } from "./usage.js";
+import { CliUsageError, isBlankInput, usageLine } from "./usage.js";
 export { CliUsageError } from "./usage.js";
 
 export type { Command };
@@ -187,6 +187,7 @@ function scanOption(command: Command, argv: readonly string[], state: ScanState,
   }
   const value = argv[index + 1];
   if (value === undefined || value === "-" || value.startsWith("--")) refuse(command, `${token} requires a value`);
+  if (isBlankInput(value)) refuse(command, `${token} requires a nonblank value`);
   if (kind === "repeat-value") {
     const values = state.flags[name];
     state.flags[name] = [...(Array.isArray(values) ? values : values === undefined ? [] : [values]), value];
@@ -215,6 +216,7 @@ function scanArgv(argv: readonly string[]): ParsedParts {
       index = scanOption(command, argv, state, index);
       continue;
     }
+    if (isBlankInput(token)) refuse(command, `${command} requires a nonblank value`);
     state.positionals.push(token);
   }
 
@@ -284,7 +286,9 @@ function parseReview(parts: ParsedParts): ParsedReview {
     refuse("review", "review requires exactly one verdict flag");
   }
   const summary = optionalFlag(parts.flags, "summary");
-  if (parts.stdin && summary !== undefined) refuse("review", "review stdin '-' and --summary are mutually exclusive");
+  if (parts.stdin === (summary !== undefined)) {
+    refuse("review", "review requires exactly one of --summary <text> or stdin '-'");
+  }
   const contract = parts.positionals[0];
   return {
     command: "review",
@@ -389,7 +393,7 @@ function invocationOptions(argv: readonly string[]): Readonly<{ cwd?: string; re
       throw new CliUsageError("-C/--cwd may appear only once", renderRootHelp());
     }
     const value = argv[index + 1];
-    if (value === undefined || value === "-" || value.startsWith("-")) {
+    if (value === undefined || value === "-" || value.startsWith("-") || isBlankInput(value)) {
       throw new CliUsageError(`${token} requires a path`, renderRootHelp());
     }
     if (token === "--repo") repo = value;

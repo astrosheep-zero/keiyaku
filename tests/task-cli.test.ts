@@ -92,6 +92,27 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
   assert.throws(() => parseArgv(["task", "query", "--limit", "0"]), /--limit/u);
   assert.throws(() => parseArgv(["task", "ready", "--parent", "not-a-task"]), /--parent/u);
   assert.throws(() => parseArgv(["task", "tree", "task/area", "--full"]), /option --full is not valid for task tree/u);
+  const blankArgv: ReadonlyArray<readonly [argv: readonly string[], pattern: RegExp]> = [
+    [["task", "add", ""], /task add requires a nonblank value/],
+    [["task", "add", "Title", "--note", " "], /--note requires a nonblank value/],
+    [["task", "update", "task/a", "--body", ""], /--body requires a nonblank value/],
+    [["task", "drop", "task/a", "--note", "\t"], /--note requires a nonblank value/],
+    [["task", "show", " "], /task show requires a nonblank value/],
+    [["task", "update", "task/a", "--needs", "  "], /--needs requires a nonblank value/],
+    [["task", "namespace", "   "], /task namespace requires a nonblank value/],
+    [["task", "namespace", ""], /task namespace requires a nonblank value/],
+    [["task", "add", "Title", "--namespace", "   "], /--namespace requires a nonblank value/],
+    [["task", "add", "Title", "--namespace", ""], /--namespace requires a nonblank value/],
+  ];
+  assert.deepEqual(parseArgv(["task", "namespace", "/"]), {
+    command: { command: "task", action: "namespace", output: "text", positionals: ["/"], flags: {} },
+  });
+  assert.deepEqual(parseArgv(["task", "add", "Title", "--namespace", "/"]), {
+    command: { command: "task", action: "add", output: "text", positionals: ["Title"], flags: { namespace: "/" } },
+  });
+  for (const [argv, pattern] of blankArgv) {
+    assert.throws(() => parseArgv(argv), (error: unknown) => error instanceof CliUsageError && pattern.test(error.message));
+  }
 });
 
 test("Task commands reject the removed Contract association flags", () => {
@@ -122,6 +143,58 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   assert.equal((documentAdd as { kind: string }).kind, "accepted");
   const documentShown = await invoke(parseArgv(["-C", root, "task", "show", "task/from-document"])) as TaskInvocationResult;
   assert.equal((documentShown as { task: { state: string } }).task.state, "done");
+
+  const priorityOnly = await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--priority", "1"]), {
+    readStdin: () => { throw new Error("task update without body must not read stdin"); },
+  }) as TaskInvocationResult;
+  assert.equal((priorityOnly as { kind: string }).kind, "accepted");
+  const afterPriority = await invoke(parseArgv(["-C", root, "task", "show", "task/native-cli"])) as TaskInvocationResult;
+  assert.equal((afterPriority as { task: { body: string; priority: number } }).task.body, "body from stdin\n");
+  assert.equal((afterPriority as { task: { body: string; priority: number } }).task.priority, 1);
+
+  await assert.rejects(
+    () => invoke(parseArgv(["task", "add", "-"]), { cwd: "/absent/task-blank-stdin", readStdin: () => " \n" }),
+    (error: unknown) => error instanceof CliUsageError
+      && /task add requires a nonblank stdin document/.test(error.message)
+      && !/invocation cwd is not an existing directory/u.test(error.message),
+  );
+  const padded = "  keep body  \n";
+  const paddedUpdate = await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--body", "-"]), {
+    readStdin: () => padded,
+  }) as TaskInvocationResult;
+  assert.equal((paddedUpdate as { kind: string }).kind, "accepted");
+  const paddedShown = await invoke(parseArgv(["-C", root, "task", "show", "task/native-cli"])) as TaskInvocationResult;
+  assert.equal((paddedShown as { task: { body: string } }).task.body, padded);
+});
+
+test("literal slash namespace selects root; empty and whitespace-only namespace are usage", async () => {
+  const root = world();
+  await invoke(parseArgv(["-C", root, "task", "namespace", "contract/inside"]));
+  const added = await invoke(parseArgv(["-C", root, "task", "add", "Rooted", "--namespace", "/"])) as TaskInvocationResult;
+  assert.equal((added as { kind: string }).kind, "accepted");
+  const shown = await invoke(parseArgv(["-C", root, "task", "show", "task/rooted"])) as TaskInvocationResult;
+  assert.equal((shown as { task: { title: string; id: string } }).task.title, "Rooted");
+  assert.equal((shown as { task: { title: string; id: string } }).task.id, "task/rooted");
+  const current = await invoke(parseArgv(["-C", root, "task", "namespace"]));
+  assert.deepEqual(current, { kind: "accepted", value: ["contract", "inside"] });
+  const reset = await invoke(parseArgv(["-C", root, "task", "namespace", "/"]));
+  assert.deepEqual(reset, { kind: "accepted", value: [] });
+  await assert.rejects(
+    async () => invoke(parseArgv(["-C", root, "task", "namespace", ""])),
+    (error: unknown) => error instanceof CliUsageError && /task namespace requires a nonblank value/.test(error.message),
+  );
+  await assert.rejects(
+    async () => invoke(parseArgv(["-C", root, "task", "namespace", "   "])),
+    (error: unknown) => error instanceof CliUsageError && /task namespace requires a nonblank value/.test(error.message),
+  );
+  await assert.rejects(
+    async () => invoke(parseArgv(["-C", root, "task", "add", "Nope", "--namespace", ""])),
+    (error: unknown) => error instanceof CliUsageError && /--namespace requires a nonblank value/.test(error.message),
+  );
+  await assert.rejects(
+    async () => invoke(parseArgv(["-C", root, "task", "add", "Nope", "--namespace", "   "])),
+    (error: unknown) => error instanceof CliUsageError && /--namespace requires a nonblank value/.test(error.message),
+  );
 });
 
 test("Task, Settings, and Kanshi share the primary WorldRoot across Git worktrees", async () => {

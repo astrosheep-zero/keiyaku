@@ -165,7 +165,30 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.throws(() => parseArgv(["tell", "aku\/claude\/1234abcd", "--interrupt"]), /requires a prompt argument or stdin/u);
   assert.throws(() => parseArgv(["kill", "aku\/claude\/1234abcd", "-"]), /stdin marker .* not valid/);
   assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd"]), /requires --at/);
-  assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd", "--at", ""]), /requires --at/);
+  assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd", "--at", ""]), /--at requires a nonblank value/);
+  const blankSources: ReadonlyArray<readonly [argv: readonly string[], pattern: RegExp]> = [
+    [["call", "claude", "   "], /call requires a nonblank value/],
+    [["tell", "aku/claude/1234abcd", "\t"], /tell requires a nonblank value/],
+    [["fork", "aku/claude/1234abcd", "--at", " "], /--at requires a nonblank value/],
+    [["call", "worker", "--contract", " ", "prompt"], /--contract requires a nonblank value/],
+    [["wait", "aku/claude/1234abcd", " "], /wait requires a nonblank value/],
+  ];
+  for (const [argv, pattern] of blankSources) {
+    assert.throws(() => parseArgv(argv), (error: unknown) => error instanceof CliUsageError && pattern.test(error.message));
+  }
+});
+
+test("blank Akuma stdin is usage before World or package invocation", async () => {
+  await assert.rejects(
+    () => invoke(parseArgv(["call", "claude", "-"]), {
+      cwd: "/absent/akuma-blank-stdin",
+      environment: {},
+      readStdin: () => " \n",
+    }),
+    (error: unknown) => error instanceof CliUsageError
+      && /call requires a nonblank prompt/.test(error.message)
+      && !/invocation cwd is not an existing directory/u.test(error.message),
+  );
 });
 
 test("Akuma snapshots preserve activity and typed omission", () => {

@@ -38,7 +38,7 @@ function value(command: ParsedTaskCommand, name: string): string | undefined {
 function values(command: ParsedTaskCommand, name: string): readonly string[] | undefined {
   const item = command.flags[name]; return Array.isArray(item) ? item : undefined;
 }
-function namespace(raw: string | undefined): readonly string[] | undefined { return raw === undefined ? undefined : raw === "" ? [] : raw.split("/"); }
+function namespace(raw: string | undefined): readonly string[] | undefined { return raw === undefined ? undefined : raw === "/" ? [] : raw.split("/"); }
 function priority(raw: string | undefined): TaskPriority | undefined {
   if (raw === undefined) return undefined;
   const number = Number(raw); return number as TaskPriority;

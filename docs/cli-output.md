@@ -53,9 +53,11 @@ Keiyaku world.
 
 A syntax refusal carries the deepest grammar coordinate reached and renders
 that owner's stored usage, never an ancestor's. It writes stderr and exits `1`.
-A bare invocation remains an incomplete-call refusal whose body is the root
-projection; requesting root help produces that projection on stdout with exit
-`0`.
+Source-selection and nonblank refusals are that same usage class: they name
+the command or input and the accepted form, and they occur before World,
+Repo, or package-root invocation. A bare invocation remains an
+incomplete-call refusal whose body is the root projection; requesting root
+help produces that projection on stdout with exit `0`.
 
 The adapter chooses actor testimony in this order: explicit nonblank `--actor`,
 then `KEIYAKU_PROJECTION_ID`, then no actor. Explicit input wins over the

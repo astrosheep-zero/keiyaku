@@ -320,8 +320,8 @@ test("journal-writing commands preserve optional actor testimony", async () => {
 
   const beforeBlank = await readRef(await repositoryAt(repository.path), GIT_REF);
   await assert.rejects(
-    () => command(["bind", "--actor", " \t", "-"], { KEIYAKU_PROJECTION_ID: "aku/environment" }),
-    (error: unknown) => error instanceof CliUsageError && /actor must be a nonblank string/.test(error.message),
+    async () => command(["bind", "--actor", " \t", "-"], { KEIYAKU_PROJECTION_ID: "aku/environment" }),
+    (error: unknown) => error instanceof CliUsageError && /--actor requires a nonblank value/.test(error.message),
   );
   assert.equal(await readRef(await repositoryAt(repository.path), GIT_REF), beforeBlank);
 });
@@ -697,7 +697,7 @@ test("managed delivery reads without realigning its deterministic worktree", asy
   assert.equal(reconciled.result.effects.some((effect) => effect.kind === "worktree" && effect.action === "unchanged"), true);
   assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), target);
 
-  const satisfiedReview = await fromManaged(["review", id, "--satisfied", "--actor", "external-test"]);
+  const satisfiedReview = await fromManaged(["review", id, "--satisfied", "--summary", "accepted", "--actor", "external-test"]);
   assert.equal(satisfiedReview.kind, "accepted");
   assert.equal("lag" in satisfiedReview, false);
   assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)), null);
@@ -906,4 +906,37 @@ test("selector refusal does not use sole-active fallback and accepts only active
     () => invokeWithDocument(repository.path, ["deliver", "selector-check", "--actor", "external-test"], ""),
     (error: unknown) => error instanceof CliUsageError && /must be kei\//.test(error.message),
   );
+});
+
+test("blank acquired stdin is usage before World, Repo, or package invocation", async () => {
+  const missing = "/absent/keiyaku-blank-stdin";
+  const cases: ReadonlyArray<readonly [argv: readonly string[], stdin: string, pattern: RegExp]> = [
+    [["bind", "-"], " \n\t", /bind requires a nonblank stdin document/],
+    [["amend", "kei/example", "-"], "", /amend requires a nonblank stdin document/],
+    [["arc", "kei/example", "-"], "\u00a0", /arc requires a nonblank stdin document/],
+    [["review", "--satisfied", "-"], "  ", /review requires a nonblank summary/],
+    [["call", "worker", "-"], "\n", /call requires a nonblank prompt/],
+    [["tell", "aku/claude/1234abcd", "-"], " ", /tell requires a nonblank prompt/],
+    [["task", "add", "-"], "\t", /task add requires a nonblank stdin document/],
+    [["task", "compose", "-"], "", /task compose requires a nonblank stdin document/],
+    [["task", "update", "task/example", "--body", "-"], "   ", /task update --body requires a nonblank value/],
+    [["task", "update", "task/example", "--append", "-"], "\n", /task update --append requires a nonblank value/],
+    [["task", "update", "task/example", "--note", "-"], " ", /task update --note requires a nonblank value/],
+  ];
+  for (const [argv, stdin, pattern] of cases) {
+    await assert.rejects(
+      () => invoke(parseArgv(argv), { cwd: missing, environment: {}, readStdin: () => stdin }),
+      (error: unknown) => error instanceof CliUsageError
+        && pattern.test(error.message)
+        && !/invocation cwd is not an existing directory/u.test(error.message),
+    );
+  }
+});
+
+test("valid acquired stdin bytes pass through unchanged", async () => {
+  const repository = repositoryWithMain();
+  const source = `  \n${contractDocument("Keep Bytes")}\n`;
+  const bound = await invokeWithDocument(repository.path, ["bind", "-"], source);
+  const id = acceptedContract(bound);
+  assert.equal((await observeContract(await repositoryAt(repository.path), id)).state?.terms?.document.bytes, source);
 });

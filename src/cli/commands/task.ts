@@ -1,4 +1,4 @@
-import { CliUsageError, usageLine } from "../usage.js";
+import { CliUsageError, isBlankInput, usageLine } from "../usage.js";
 import {
   parseTaskQueryExpression,
   validateTaskLimit,
@@ -101,6 +101,7 @@ function setFlag(
   if (flags[name] !== undefined && kind !== "repeat") fail(`duplicate option: --${name}`);
   if (kind === "boolean") { flags[name] = true; return; }
   if (value === undefined) fail(`--${name} requires a value`);
+  if (isBlankInput(value)) fail(`--${name} requires a nonblank value`);
   if (kind === "repeat") {
     const current = flags[name]; flags[name] = [...(Array.isArray(current) ? current : []), value];
   } else flags[name] = value;
@@ -133,7 +134,11 @@ function scanTaskArgv(action: TaskAction, argv: readonly string[], fail: (messag
       if (index !== argv.length - 1 || stdin !== undefined || spec.stdin === undefined) fail("stdin marker '-' is not valid here");
       stdin = spec.stdin; continue;
     }
-    if (!token.startsWith("--")) { positionals.push(token); continue; }
+    if (!token.startsWith("--")) {
+      if (isBlankInput(token)) fail(`task ${action} requires a nonblank value`);
+      positionals.push(token);
+      continue;
+    }
     const scanned = scanTaskOption({ action, spec, argv, index, flags, ...(stdin === undefined ? {} : { stdin }) }, fail);
     index = scanned.index; stdin = scanned.stdin;
   }

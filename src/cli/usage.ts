@@ -5,6 +5,10 @@ export class CliUsageError extends Error {
   }
 }
 
+export function isBlankInput(value: string): boolean {
+  return value.trim().length === 0;
+}
+
 export function usageLine(usage: string): string {
   return usage.split("\n").map((line, index) => {
     if (index === 0) return `usage: keiyaku ${line}`;

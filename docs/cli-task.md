@@ -43,20 +43,31 @@ task compose [--json] -
 
 Literal `-` selects creation-document input for add, body or note input only
 after `--body`, `--append`, or `--note` for update, and composition input for
-compose. Unselected piped stdin is not consumed. Add document input rejects
+compose. Unselected piped stdin is not consumed. Add requires exactly one
+source: a nonblank TITLE or final `-`. Add document input rejects
 creation-owned identity, may declare its initial state, and cannot be combined
 with structured creation flags other than `--namespace`. Update requires at
-least one explicit patch.
+least one explicit patch and remains legal when it changes only non-body
+fields. Selected update `--body`, `--append`, `--note`, and `--title` values,
+and selected add TITLE, `--body`, and `--note`, must be nonblank. Done and
+drop `--note` are likewise nonblank when present.
 
 Selected stdin is acquired asynchronously and completely before the Task
 operation begins. The CLI does not expose a synchronous read or retain a
-background input queue.
+background input queue. A selected required stdin source that is empty or
+Unicode-whitespace-only is usage after those bytes are acquired and before
+World or Task package invocation. Valid acquired bytes pass through unchanged.
 
 Add `--note` sets the initial note. Update `--note` replaces the note and
 returns the native document diff. Done and drop `--note` replace the note for
 each addressed Task in that Task's independent atomic lifecycle mutation. Batch
 lifecycle commands preserve input order, continue after per-Task refusals, and
 do not consume stdin for notes.
+
+Omitted namespace keeps the current or default namespace. A nonblank
+namespace path selects that namespace. Literal `/` as `task namespace` or add
+`--namespace` selects the root namespace. Empty and Unicode-whitespace-only
+namespace values are usage.
 
 `ls`, `ready`, `blocked`, and `query` use current namespace unless `--world` is present.
 Their observations are bounded and carry the complete matching `total`; ready

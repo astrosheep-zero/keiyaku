@@ -96,7 +96,11 @@ test("existing selectors are optional and review stdin is a distinct summary sou
   });
   assert.throws(
     () => parseArgv(["review", "kei/example", "--satisfied", "--summary", "inline", "-"]),
-    /mutually exclusive/,
+    /review requires exactly one of --summary <text> or stdin '-'/,
+  );
+  assert.throws(
+    () => parseArgv(["review", "kei/example", "--satisfied"]),
+    /review requires exactly one of --summary <text> or stdin '-'/,
   );
 });
 
@@ -202,4 +206,57 @@ test("flag specs preserve value and boolean option behavior", () => {
     () => parseArgv(["audit", "kei/example", "--show-diff-body"]),
     /option --show-diff-body is not valid for audit/,
   );
+});
+
+test("exact-one source selection and nonblank argv fail at parse", () => {
+  const cases: ReadonlyArray<readonly [argv: readonly string[], pattern: RegExp]> = [
+    [["review", "--satisfied"], /review requires exactly one of --summary <text> or stdin '-'/],
+    [["review", "--satisfied", "--summary", "ok", "-"], /review requires exactly one of --summary <text> or stdin '-'/],
+    [["review", "--satisfied", "--summary", ""], /--summary requires a nonblank value/],
+    [["review", "--satisfied", "--summary", " \t"], /--summary requires a nonblank value/],
+    [["bind", "--target", "", "-"], /--target requires a nonblank value/],
+    [["deliver", "--message", "  "], /--message requires a nonblank value/],
+    [["abandon", "--note", "\n"], /--note requires a nonblank value/],
+    [["bind", "--actor", " ", "-"], /--actor requires a nonblank value/],
+    [["call", "worker"], /call requires a prompt argument or stdin/],
+    [["call", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
+    [["call", "worker", ""], /call requires a nonblank value/],
+    [["call", " ", "-"], /call requires a nonblank value/],
+    [["tell", "aku/claude/1234abcd", " \u00a0"], /tell requires a nonblank value/],
+    [["fork", "aku/claude/1234abcd", "--at", "  "], /--at requires a nonblank value/],
+    [["task", "add"], /task add requires either TITLE or final '-' input/],
+    [["task", "add", "Title", "-"], /task add requires either TITLE or final '-' input/],
+    [["task", "add", "  "], /task add requires a nonblank value/],
+    [["task", "add", "Title", "--body", ""], /--body requires a nonblank value/],
+    [["task", "add", "Title", "--note", "\t"], /--note requires a nonblank value/],
+    [["task", "update", "task/a", "--title", " "], /--title requires a nonblank value/],
+    [["task", "done", "task/a", "--note", ""], /--note requires a nonblank value/],
+    [["bind", "--after", "   ", "-"], /--after requires a nonblank value/],
+    [["bind", "--after", "kei/one", "--after", " ", "-"], /--after requires a nonblank value/],
+    [["call", "worker", "--contract", " ", "prompt"], /--contract requires a nonblank value/],
+    [["task", "show", " "], /task show requires a nonblank value/],
+    [["task", "add", "Title", "--needs", "task/a", "--needs", "\t"], /--needs requires a nonblank value/],
+    [["task", "hold", "task/a", "  "], /task hold requires a nonblank value/],
+    [["wait", "aku/claude/1234abcd", " "], /wait requires a nonblank value/],
+    [["region", "--path", "  "], /--path requires a nonblank value/],
+  ];
+  for (const [argv, pattern] of cases) {
+    assert.throws(() => parseArgv(argv), (error: unknown) => error instanceof CliUsageError && pattern.test(error.message));
+  }
+  assert.deepEqual(parseArgv(["review", "--unsatisfied", "--summary", "  keep  "]).command, {
+    command: "review",
+    verdict: "unsatisfied",
+    summary: "  keep  ",
+    output: "text",
+  });
+  const called = parseArgv(["call", "worker", "  keep  "]).command;
+  assert.equal(called.command, "call");
+  if (called.command === "call") assert.deepEqual(called.prompt, { kind: "argument", value: "  keep  " });
+  assert.deepEqual(parseArgv(["task", "update", "task/a", "--priority", "1"]).command, {
+    command: "task",
+    action: "update",
+    output: "text",
+    positionals: ["task/a"],
+    flags: { priority: "1" },
+  });
 });
