@@ -363,38 +363,33 @@ the body-owned request transport as one additional writable root and injects
 
 ## ACP
 
-`acp` is one stable protocol adapter, not a product-specific provider family.
-Its execution configuration is limited to process launch data, with fixed argv
-before and after declared portable option-to-argument mappings. An option
-without such a mapping remains provider-owned admission. ACP has no portable
-mechanism that removes task-surface mutation capability, so `readonly: true`
-is admitted with `none` enforcement and a concrete diagnostic; an empty system
-prompt needs no mapping because it changes no native input. Its process has the
-caller environment with the frozen execution overlay; ACP itself neither reads
-nor copies another product's credentials or configuration.
+`acp` is the standard protocol kind, not a product family. Its execution config
+owns launch argv and portable option mappings. Missing mappings remain typed
+admission refusals. It has no portable readonly enforcement, live tell, or
+fork, and it never gains behavior from the execution name.
 
-The adapter exposes no client-side filesystem, terminal, permission, or
-elicitation capability. An ACP execution is a self-contained agent and uses its
-own local tools; Keiyaku observes their session updates but does not become a
-second coding harness.
+The shared ACP core owns stdio custody, initialize, session new/load/prompt,
+event mapping, cancellation, and cleanup. Standard `acp` adds no wire methods.
+The core exposes no client-side filesystem, terminal, permission, or elicitation
+capability, and contains no product extension vocabulary.
 
-An ACP drive initializes one connection, creates or loads one session, and
-uses one `session/prompt` response as the sole terminal authority. The exact
-ACP session id is the resume coordinate. Chunks with one ACP message identity
-form one assistant message; an identity change starts another, while
-unidentified v1 chunks remain one message. The final assistant message is the
-complete answer while every message remains activity. Completion is published
-only after owned-process cleanup settles; cleanup failure is a typed failed
-Turn. ACP cancellation sends the standard session cancellation before
-connection and owned-process cleanup.
-There is no ACP live tell or fork surface, so pending tells travel once in the
-next launch prompt and answered turns have no fork coordinate.
+One ACP prompt response is the terminal authority. The exact session id is the
+resume coordinate. Message identity separates assistant messages; unidentified
+v1 chunks remain one message. The final message is the complete answer while all
+messages remain activity. Completion follows process cleanup, and cleanup
+failure is a failed Turn.
 
-`grok-build` is the built-in ACP execution profile for the official trusted
-noninteractive `grok agent stdio` launch. It is ordinary execution data,
-including its documented portable argument mappings and unconfined custody; it
-does not change ACP wire behavior, credentials, persistence, or Heart facts.
-Settings may shadow it with another ordinary ACP execution record.
+`grok-build` is a distinct ACP dialect kind. It owns the trusted noninteractive
+launch and every `x.ai` literal; generic ACP and the shared core do not. A live
+Grok session maps provider-neutral tell to exactly one `x.ai/interject` using
+the session id, unchanged text, and TellId as `interjectionId`.
 
-No `probe`, capability or plugin registry, or registration schema exists.
-Provider instance names are Settings data; built-in provider kinds stay closed.
+Only a successful `queued` response acknowledges admission. It yields an
+accepted submission with no receipt stream and makes no safe-point-consumption
+or provider-deduplication claim. Request failure or terminal observation before
+acknowledgement yields no acceptance, so the durable Tell remains available to
+the Body's successor path. Grok has no fork.
+
+No other `x.ai` method, passthrough, probe, capability registry, extension bag,
+or registration schema exists. New dialect behavior must first satisfy an
+existing provider-neutral capability or receive a separate product ruling.

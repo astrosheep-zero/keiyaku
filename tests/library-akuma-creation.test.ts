@@ -357,7 +357,7 @@ test("Keiyaku.call carries the CallResult restraint on detached and failed obser
     });
     assert.deepEqual(detached.readonly, {
       enforcement: "none",
-      diagnostic: "ACP cannot remove task-surface mutation capabilities",
+      diagnostic: "Grok Build cannot remove task-surface mutation capabilities",
     });
     assert.deepEqual(detached.observation, { kind: "detached" });
 

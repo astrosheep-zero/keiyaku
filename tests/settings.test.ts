@@ -170,28 +170,34 @@ test("Archetype resolves builtin and configured Pi executions", async () => {
   } finally { value.close(); }
 });
 
-test("Archetype resolves grok-build as the builtin ACP execution profile", async () => {
+test("Archetype resolves grok-build as its own builtin protocol execution", async () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: grok-build\nmodel: grok-4\neffort: high\n---\n");
     const loaded = await loadArchetype({ name: "grok", settings: await settings({ root: value.project, home: value.home }) });
     assert.deepEqual(loaded.provider, {
       name: "grok-build",
-      kind: "acp",
+      kind: "grok-build",
       executable: "grok",
-      config: {
-        argvBefore: ["agent", "--always-approve"],
-        argvAfter: ["stdio"],
-        modelArg: "--model",
-        effortArg: "--reasoning-effort",
-      },
     });
     assert.deepEqual(loaded.options, { model: "grok-4", effort: "high" });
     writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: grok-build\n---\nBuild.\n");
     await assert.rejects(
       loadArchetype({ name: "grok", settings: await settings({ root: value.project, home: value.home }) }),
-      /ACP provider has no systemPrompt argument mapping/u,
+      /Grok Build does not support the Archetype systemPrompt option/u,
     );
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: {
+      private: { kind: "grok-build", executable: "private-grok", env: { XAI_API_KEY: "test" } },
+    } }));
+    writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: private\neffort: high\n---\n");
+    const custom = await loadArchetype({ name: "grok", settings: await settings({ root: value.project, home: value.home }) });
+    assert.deepEqual(custom.provider, {
+      name: "private",
+      kind: "grok-build",
+      executable: "private-grok",
+      env: { XAI_API_KEY: "test" },
+    });
+    assert.deepEqual(custom.options, { effort: "high" });
   } finally { value.close(); }
 });
 

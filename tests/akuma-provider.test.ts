@@ -30,6 +30,7 @@ import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/
 import type { OpencodeSdkLoader, OpencodeSdkSession } from "../src/akuma/providers/opencode-sdk/session.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
+import { createGrokBuildProvider } from "../src/akuma/providers/grok-build/index.js";
 import { resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
@@ -290,12 +291,28 @@ test("ACP cancellation closes its owned process tree after standard session/canc
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-function controlledAcpProcess(options: Readonly<{ stallInitialize?: boolean; assistant?: string }> = {}): Readonly<{
+type ControlledInterject = Readonly<{
+  sessionId: string;
+  text: string;
+  interjectionId: string;
+}>;
+
+function controlledAcpProcess(options: Readonly<{
+  stallInitialize?: boolean;
+  stallPrompt?: boolean;
+  assistant?: string;
+  interject?: "queued" | "rejected" | "pending";
+}> = {}): Readonly<{
   process: StdioProcess;
   initializeStarted: Promise<void>;
   cleanupStarted: Promise<void>;
+  interjectStarted: Promise<void>;
+  interjections: readonly ControlledInterject[];
+  cancelled(): number;
   forcedCleanup(): number;
   emitAssistant(text: string): Promise<void>;
+  resolvePrompt(): void;
+  resolveInterject(): void;
   resolveCleanup(): void;
   rejectCleanup(error: Error): void;
 }> {
@@ -308,12 +325,20 @@ function controlledAcpProcess(options: Readonly<{ stallInitialize?: boolean; ass
   let forcedCleanup = 0;
   let startInitialize!: () => void;
   const initializeStarted = new Promise<void>((resolve) => { startInitialize = resolve; });
+  let finishPrompt!: () => void;
+  const prompt = new Promise<void>((resolve) => { finishPrompt = resolve; });
+  let finishInterject!: () => void;
+  const interject = new Promise<void>((resolve) => { finishInterject = resolve; });
+  let startInterject!: () => void;
+  const interjectStarted = new Promise<void>((resolve) => { startInterject = resolve; });
+  const interjections: ControlledInterject[] = [];
+  let cancelled = 0;
   let emitAssistant!: (text: string) => Promise<void>;
   const cleanup = new Promise<void>((resolve, reject) => {
     resolveCleanup = resolve;
     rejectCleanup = reject;
   });
-  acp.agent({ name: "controlled-acp" })
+  const app = acp.agent({ name: "controlled-acp" })
     .onRequest(acp.methods.agent.initialize, async ({ params }) => {
       startInitialize();
       if (options.stallInitialize === true) await new Promise(() => undefined);
@@ -326,9 +351,24 @@ function controlledAcpProcess(options: Readonly<{ stallInitialize?: boolean; ass
         update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
       });
       if (options.assistant !== undefined) await emitAssistant(options.assistant);
+      if (options.stallPrompt === true) await prompt;
       return { stopReason: "end_turn" };
     })
-    .connect(acp.ndJsonStream(
+    .onNotification(acp.methods.agent.session.cancel, () => { cancelled += 1; });
+  if (options.interject !== undefined) {
+    app.onRequest<ControlledInterject, { status: "queued" }>(
+      "x.ai/interject",
+      (value) => value as ControlledInterject,
+      async ({ params }) => {
+        interjections.push(params);
+        startInterject();
+        if (options.interject === "rejected") throw new acp.RequestError(-32603, "interject rejected");
+        if (options.interject === "pending") await interject;
+        return { status: "queued" };
+      },
+    );
+  }
+  app.connect(acp.ndJsonStream(
       Writable.toWeb(outbound) as WritableStream<Uint8Array>,
       Readable.toWeb(inbound) as ReadableStream<Uint8Array>,
     ));
@@ -350,8 +390,13 @@ function controlledAcpProcess(options: Readonly<{ stallInitialize?: boolean; ass
     },
     initializeStarted,
     cleanupStarted,
+    interjectStarted,
+    interjections,
+    cancelled: () => cancelled,
     forcedCleanup: () => forcedCleanup,
     emitAssistant: async (text) => await emitAssistant(text),
+    resolvePrompt: finishPrompt,
+    resolveInterject: finishInterject,
     resolveCleanup,
     rejectCleanup,
   };
@@ -363,6 +408,113 @@ const controlledAcpExecution = {
   executable: "controlled",
   config: { argvBefore: [], argvAfter: [] },
 };
+
+const controlledGrokExecution = {
+  name: "grok-build",
+  kind: "grok-build" as const,
+  executable: "grok",
+};
+
+test("an ACP execution named grok-build remains standard ACP without live tell", async () => {
+  const controlled = controlledAcpProcess();
+  const drive = await createAcpProvider({
+    ...controlledAcpExecution,
+    name: "grok-build",
+  }, { spawnProcess: () => controlled.process }).start({
+    body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" },
+  });
+  assert.equal(drive.tell, undefined);
+  await controlled.cleanupStarted;
+  controlled.resolveCleanup();
+  await drive.completion;
+});
+
+test("Grok Build uses fixed launch arguments and admits queued interject on the live ACP connection", async () => {
+  const controlled = controlledAcpProcess({ stallPrompt: true, interject: "queued" });
+  let spawned: readonly string[] = [];
+  const provider = createGrokBuildProvider(controlledGrokExecution, {
+    spawnProcess: (input) => {
+      spawned = input.argv;
+      return controlled.process;
+    },
+  });
+  assert.deepEqual(provider.admitOptions({ model: "grok-4.6", effort: "high", readonly: true }), {
+    kind: "admitted",
+    options: { model: "grok-4.6", effort: "high", readonly: true },
+    readonly: {
+      enforcement: "none",
+      diagnostic: "Grok Build cannot remove task-surface mutation capabilities",
+    },
+  });
+  const drive = await provider.start({
+    body: "build", launchTells: [], cwd: "/tmp", options: { model: "grok-4.6", effort: "high" }, session: { kind: "fresh" },
+  });
+  assert.equal(drive.receipts, undefined);
+  assert.ok(drive.tell);
+  assert.deepEqual(await drive.tell({ id: "tell-123", text: "change direction" }), {
+    kind: "accepted",
+    fence: "tell-123",
+  });
+  assert.deepEqual(controlled.interjections, [{
+    sessionId: "controlled-session",
+    text: "change direction",
+    interjectionId: "tell-123",
+  }]);
+  assert.deepEqual(spawned, [
+    "grok", "agent", "--always-approve", "--model", "grok-4.6",
+    "--reasoning-effort", "high", "stdio",
+  ]);
+  controlled.resolvePrompt();
+  await controlled.cleanupStarted;
+  controlled.resolveCleanup();
+  await drive.completion;
+});
+
+test("Grok Build rejects failed and unknown interject requests without admission", async () => {
+  for (const interject of ["rejected", undefined] as const) {
+    const controlled = controlledAcpProcess({ stallPrompt: true, ...(interject === undefined ? {} : { interject }) });
+    const drive = await createGrokBuildProvider(controlledGrokExecution, {
+      spawnProcess: () => controlled.process,
+    }).start({
+      body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" },
+    });
+    await assert.rejects(drive.tell!({ id: "tell-failed", text: "steer" }),
+      interject === undefined ? /Method not found/u : /interject rejected/u);
+    await drive.abort();
+    assert.equal(controlled.cancelled(), 1);
+    assert.equal(controlled.forcedCleanup(), 1);
+  }
+});
+
+test("Grok Build returns turn-ended when completion wins before interject acknowledgement", async () => {
+  const controlled = controlledAcpProcess({ stallPrompt: true, interject: "pending" });
+  const drive = await createGrokBuildProvider(controlledGrokExecution, {
+    spawnProcess: () => controlled.process,
+  }).start({
+    body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" },
+  });
+  const submission = drive.tell!({ id: "tell-late", text: "too late" });
+  await controlled.interjectStarted;
+  controlled.resolvePrompt();
+  await controlled.cleanupStarted;
+  controlled.resolveInterject();
+  assert.deepEqual(await submission, { kind: "turn-ended" });
+  controlled.resolveCleanup();
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "" });
+});
+
+test("Grok Build abort uses standard ACP cancellation and closes owned process custody", async () => {
+  const controlled = controlledAcpProcess({ stallPrompt: true, interject: "queued" });
+  const drive = await createGrokBuildProvider(controlledGrokExecution, {
+    spawnProcess: () => controlled.process,
+  }).start({
+    body: "build", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" },
+  });
+  await drive.abort();
+  assert.equal(controlled.cancelled(), 1);
+  assert.equal(controlled.forcedCleanup(), 1);
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "ACP turn cancelled" });
+});
 
 test("ACP completion waits for owned process cleanup", async () => {
   const controlled = controlledAcpProcess();
@@ -1125,6 +1277,12 @@ test("provider resolution validates kind config before constructing an adapter",
     kind: "pi",
     config: { tools: ["bash"] },
   }), /does not support executable or config/u);
+  assert.throws(() => resolveProviderExecution({
+    name: "grok-build",
+    kind: "grok-build",
+    executable: "grok",
+    config: { extension: true },
+  }), /does not support execution config/u);
 });
 
 test("provider activity codec round trips every closed event and tool-call arm", () => {

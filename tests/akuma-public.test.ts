@@ -816,7 +816,7 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
     const grok = await loadArchetype({ name: "grok-review", settings: settingsValue });
     assert.deepEqual(grok.readonly, {
       enforcement: "none",
-      diagnostic: "ACP cannot remove task-surface mutation capabilities",
+      diagnostic: "Grok Build cannot remove task-surface mutation capabilities",
     });
     assert.deepEqual(grok.options, { readonly: true });
     writeFileSync(join(home, "akuma", "unknown.md"), "---\nprovider: missing\n---\n");

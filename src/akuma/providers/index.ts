@@ -3,6 +3,7 @@ import { decodeProviderRecipe, type ProviderExecution } from "../provider-recipe
 import { createAcpProvider, decodeAcpConfig } from "./acp/index.js";
 import { claudeProvider, createClaudeProvider } from "./claude/index.js";
 import { createCodexAppServerProvider } from "./codex-app-server/index.js";
+import { createGrokBuildProvider } from "./grok-build/index.js";
 import { createOpencodeProvider } from "./opencode-sdk/index.js";
 import { createPiProvider } from "./pi/index.js";
 
@@ -26,6 +27,7 @@ function adapterFor(execution: ProviderExecution): ProviderAdapter {
       : createClaudeProvider(async () => await import("@anthropic-ai/claude-agent-sdk"), execution);
   }
   if (execution.kind === "codex-app-server") return createCodexAppServerProvider(execution);
+  if (execution.kind === "grok-build") return createGrokBuildProvider(execution);
   if (execution.kind === "opencode-sdk") return createOpencodeProvider(execution);
   if (execution.kind === "pi") return createPiProvider(execution);
   throw new TypeError(`unknown Akuma provider kind ${(execution as ProviderExecution).kind}`);

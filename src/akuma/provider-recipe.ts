@@ -13,7 +13,7 @@ export type ReadonlyRestraint = Readonly<
 
 export type ProviderExecution = Readonly<{
   name: string;
-  kind: "acp" | "claude-agent-sdk" | "codex-app-server" | "opencode-sdk" | "pi";
+  kind: "acp" | "claude-agent-sdk" | "codex-app-server" | "grok-build" | "opencode-sdk" | "pi";
   executable?: string;
   config?: Readonly<Record<string, unknown>>;
   env?: Readonly<Record<string, string>>;
@@ -86,7 +86,7 @@ export function decodeReadonlyRestraint(value: unknown): ReadonlyRestraint {
 }
 
 function providerKind(value: unknown): value is ProviderExecution["kind"] {
-  return value === "acp" || value === "claude-agent-sdk" || value === "codex-app-server"
+  return value === "acp" || value === "claude-agent-sdk" || value === "codex-app-server" || value === "grok-build"
     || value === "opencode-sdk" || value === "pi";
 }
 

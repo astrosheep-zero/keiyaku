@@ -196,14 +196,8 @@ const BUILTIN_EXECUTIONS = {
   "opencode-sdk": { kind: "opencode-sdk" },
   pi: { kind: "pi" },
   "grok-build": {
-    kind: "acp",
+    kind: "grok-build",
     executable: "grok",
-    config: {
-      argvBefore: ["agent", "--always-approve"],
-      argvAfter: ["stdio"],
-      modelArg: "--model",
-      effortArg: "--reasoning-effort",
-    },
   },
 } as const satisfies Readonly<Record<string, Omit<ProviderExecution, "name">>>;
 

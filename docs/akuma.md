@@ -1,10 +1,10 @@
 # Akuma
 
 This chapter owns Akuma identity, heart facts, life, detached bodies, provider
-boundaries, lifecycle verbs, and persistence. The current surface ships the
-ACP, Claude, Codex app-server, and OpenCode V1 providers, public handles, status, wait, interrupt,
-fork, Body Requests, CLI skin, and Kanshi rows. Body Requests reroute the
-existing call surface; they do not add a public verb.
+boundaries, lifecycle verbs, and persistence. The current surface ships ACP,
+Claude, Codex app-server, Grok Build, OpenCode V1, and Pi providers, public
+handles, status, wait, interrupt, fork, Body Requests, CLI skin, and Kanshi
+rows. Body Requests reroute the existing call surface; they add no public verb.
 
 An akuma is a summoned agent: useful, dangerous, and cheap. The
 flagship calls one, watches it, steers it, and collects what it brings back —
@@ -53,6 +53,8 @@ heart/soul -> {identity, provider-recipe, heart/facts}
 provider -> {heart types, provider-recipe}
 providers/map -> {provider-recipe, provider adapters}
 providers/* -> {provider, provider-recipe, runtime/proc/stdio}
+providers/{acp/index,grok-build} -> providers/acp/core
+providers/acp/core -> {provider, runtime/proc/stdio}
 providers/codex-app-server/index -> {events, provider, provider-recipe, runtime/proc/line-rpc}
 providers/codex-app-server/events -> {provider, runtime/proc/line-rpc(type)}
 runtime/proc/line-rpc -> runtime/proc/stdio
@@ -191,12 +193,11 @@ catalog, and other IO failures remain exceptions for both reads.
 A provider entry is one strict object with required `kind`, optional nonblank
 `description` and `executable`, optional object `config`, and optional `env`
 whose values are strings. The built-in kinds are `acp`, `claude-agent-sdk`,
-`codex-app-server`, `opencode-sdk`, and `pi`; each kind owns its optional
-configuration shape. When no same-name Settings entry exists, Archetype names
+`codex-app-server`, `grok-build`, `opencode-sdk`, and `pi`; each kind owns its
+optional configuration shape. When no same-name Settings entry exists, Archetype names
 `claude`, `codex-app-server`, `opencode-sdk`, `pi`, and `grok-build` select
-Akuma-owned default executions. `grok-build` is an ordinary data-only `acp`
-execution profile, not a provider kind or wire adapter. A configured same-name
-entry replaces that default wholly under Settings shadow law.
+Akuma-owned default executions. A configured same-name entry replaces that
+default wholly under Settings shadow law.
 
 Birth snapshots the Archetype name, optional description, complete provider
 execution, admitted options, and the adapter's optional readonly restraint into
@@ -239,6 +240,11 @@ resource loader. For `readonly: true`, its admitted tool set excludes `bash`,
 `edit`, and `write`, and records native enforcement. Its confinement is the
 call cwd. Resume and fork use the exact persisted session file. Native steer
 proves queueing only, so Pi does not expose live tell.
+
+Provider kind `grok-build` uses the shared ACP lifecycle under its own `x.ai`
+wire identity. Its fixed launch consumes `model` and `effort`; custom executions
+may replace only executable and environment. It exposes native live tell through
+`x.ai/interject`, has no fork, and makes no readonly enforcement claim.
 
 `readonly: true` promises only that the Akuma cannot mutate its task surface.
 Native enforcement means the session's reachable capabilities physically lack
