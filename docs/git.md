@@ -180,8 +180,17 @@ fold, or judge contract lifecycle state, decode a document, request a callback,
 import Settings, or import a protocol body. For a target contract, Git observes
 the current target head and constructs one squash integration against it. For a
 targetless contract, the supplied `start` coordinate is the integration
-predecessor, the tender is also the integration snapshot, and there is no target
-ref operation.
+predecessor and there is no target ref operation. The tender is also the
+integration snapshot only when no held-Task completion overlay is present.
+
+Protocol may supply one opaque path/byte replacement after Settlement selected
+a current holder and Task produced canonical completion bytes. Git reads the
+path from the already planned integration tree, preserves its mode, writes the
+replacement blob, and recomputes the integration tree and ChangeId. Git never
+imports Task, parses Markdown, or decides a lifecycle transition. Missing or
+non-blob input is returned to Protocol as mechanical evidence for the
+Task-owned refusal. Because the overlay occurs before snapshot materialization,
+review and delivery use the same final bytes without touching any worktree.
 
 Preparation uses the one core mechanical-result primitive. Delivery returns
 `Preparation<DeliverData, DeliveryPreparationFailure>` and review returns a
@@ -218,6 +227,11 @@ changing a worktree. A pure target rebase that leaves the integration patch
 unchanged therefore preserves review testimony; a conflict resolution that
 changes integration bytes does not.
 
+A targetless held-Task delivery still materializes a deterministic integration
+commit, parented by `start`, because its reviewed tree differs from the tender
+tree. Manual placement of that commit carries implementation and Task
+completion together; delivery preparation itself changes no world authority.
+
 `requireBranchesToBeUpToDate` is a delivery-attempt policy. When true, a
 targeted tender that does not descend from the observed target head returns
 `integration-failed` with reason `not-based-on-target`; it admits no delivery
@@ -248,6 +262,13 @@ that same fence. If the target moved after delivery admission or Verification,
 placement returns `target-moved` with the expected and freshly observed target
 coordinates. It appends no claimed fact, does not move the target, and never
 re-integrates or reuses Verification inside that attempt.
+
+Placement also observes the current TaskHolder projection in its fresh private
+state epoch when delivery preparation named a holder. If that holder moved or
+was released, or if the delivery ChangeId moved after preparation, placement
+refuses before publication. The private state ref assertion, target assertion,
+and target movement remain one atomic publication; no post-publication Task
+writer or bookkeeping commit follows it.
 
 When the target checkout is not the tender source, placement follows Git merge
 semantics. Before publication, each registered checkout of the target must

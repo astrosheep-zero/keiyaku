@@ -80,9 +80,7 @@ export function renderAccepted(result: AcceptedResult): string {
   for (const effect of result.effects) lines.push(effectLine(effect));
   for (const lag of result.lag ?? []) lines.push(lagLine(lag));
   for (const action of result.settlement.actions) {
-    lines.push(action.kind === "task"
-      ? `settlement task ${action.action} ${action.taskId}`
-      : `settlement namespace-context ${action.action} ${action.path}`);
+    lines.push(`settlement namespace-context ${action.action} ${action.path}`);
   }
   for (const lag of result.settlement.lags) lines.push(`settlement lag ${JSON.stringify(lag)}`);
   return lines.join("\n");

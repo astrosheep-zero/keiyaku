@@ -28,6 +28,14 @@ export type TaskHolder = Readonly<{
   disposition: "held" | "released";
 }>;
 
+export type TaskHolderBindRefusal = Readonly<{
+  kind: "task-already-held";
+  taskId: TaskId;
+  holder: ContractId;
+}>;
+
+type TaskHolderBindOutcome = Readonly<{ kind: "refused"; refusal: TaskHolderBindRefusal }>;
+
 function holderPath(taskId: TaskId): string {
   const digest = createHash("sha256").update(taskId).digest("hex");
   return `${HOLDER_PREFIX}${digest}${HOLDER_SUFFIX}`;
@@ -144,12 +152,25 @@ async function admitWithTaskHolderFence<T extends AdmissionOutcome>(
   return finishTaskHolderAdmission(taskId, result, () => held.close());
 }
 
-export function claimTaskHolderWithFence<T extends AdmissionOutcome>(
+export async function claimTaskHolderWithFence<T extends AdmissionOutcome>(
   repository: GitRepository,
+  channel: GitDecodeChannel,
   taskId: TaskId,
   action: () => T | Promise<T>,
-): Promise<TaskHolderAdmission<T>> {
-  return admitWithTaskHolderFence(repository, taskId, action);
+): Promise<TaskHolderAdmission<T | TaskHolderBindOutcome>> {
+  const held = await acquireTaskSettlementFence(repository, taskId);
+  let result: T | TaskHolderBindOutcome;
+  try {
+    const current = [...(await observeTaskHolderProjection(repository, channel)).values()]
+      .find((holder) => holder.taskId === taskId && holder.disposition === "held");
+    result = current === undefined
+      ? await action()
+      : { kind: "refused", refusal: { kind: "task-already-held", taskId, holder: current.contractId } };
+  } catch (error) {
+    try { held.close(); } catch { /* The operation failure remains decisive before admission. */ }
+    throw error;
+  }
+  return finishTaskHolderAdmission(taskId, result, () => held.close());
 }
 
 export async function releaseTaskHolder(

@@ -501,7 +501,7 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
       ...(task === undefined ? {} : { task }),
       ...actor,
     });
-    const admission = task === undefined ? null : await claimTaskHolderWithFence(scope, task, admitCandidate);
+    const admission = task === undefined ? null : await claimTaskHolderWithFence(scope, channel, task, admitCandidate);
     const accepted = requireAccepted(admission === null ? await admitCandidate() : admission.result);
     const id = accepted.value.contractId;
     const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku => new KeiyakuHandle(contract, scope);

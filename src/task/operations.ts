@@ -23,12 +23,6 @@ export type TaskMutationResult = TaskOutcome<TaskView>;
 export type TaskUpdateResult = TaskOutcome<Readonly<{ task: TaskView; documentDiff: string }>>;
 export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | "drop";
 export type TaskBatchResult = Readonly<{ items: readonly Readonly<{ id: TaskId; outcome: TaskMutationResult }>[] }>;
-export type SettledTaskAction = "done" | "reopened";
-export type SettledTaskResult =
-  | Readonly<{ kind: "changed"; task: TaskView; action: SettledTaskAction }>
-  | Readonly<{ kind: "unchanged" }>
-  | Readonly<{ kind: "refused"; refusal: TaskRefusal }>
-  | Readonly<{ kind: "retry"; reason: TaskRetry }>;
 export type AddTaskInput = Readonly<{
   title: string; namespace?: readonly string[]; body?: string; note?: string; state?: TaskState; priority?: TaskPriority; needs?: readonly TaskId[];
   parent?: TaskId | null; supersedes?: readonly TaskId[]; relates?: readonly TaskId[]; signal?: AbortSignal;
@@ -156,30 +150,6 @@ export async function batchTasks(world: WorldRoot, verb: "done" | "drop" | "hold
   const items = [];
   for (const id of ids) { signal?.throwIfAborted(); items.push({ id, outcome: await lifecycleTask(world, id, verb, signal, note) }); }
   return { items };
-}
-
-export async function settleTask(
-  world: WorldRoot,
-  id: TaskId,
-  desired: "done" | "open-from-done",
-): Promise<SettledTaskResult> {
-  const result = await withTaskLocks({ world, allocation: false, ids: [id] }, async (): Promise<SettledTaskResult> => {
-    const snapshot = readBoard(world), current = snapshot.board.tasks.get(id);
-    if (current === undefined) return { kind: "refused", refusal: { kind: "task-missing", taskId: id } };
-    if (desired === "done") {
-      if (current.state === "done") return { kind: "unchanged" };
-      if (current.state === "drop") {
-        return { kind: "refused", refusal: { kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb: "done" } };
-      }
-    } else if (current.state !== "done") return { kind: "unchanged" };
-    const state: TaskState = desired === "done" ? "done" : "open";
-    const next = { ...current, state, updatedAt: advancedTimestamp(current.updatedAt) };
-    const replaced = replaceAuthority({ path: authorityPath(world, id), expected: snapshot.bytes.get(id)!, next: serializeTaskDocument(next) });
-    return replaced === "replaced"
-      ? { kind: "changed", task: taskView(next), action: desired === "done" ? "done" : "reopened" }
-      : { kind: "retry", reason: "concurrent-modification" };
-  });
-  return result === "busy" ? { kind: "retry", reason: "busy" } : result;
 }
 
 function readScope(world: WorldRoot, scope: "namespace" | "world" | undefined): readonly string[] | null | TaskRefusal {

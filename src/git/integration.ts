@@ -7,10 +7,13 @@ import {
   readRef,
   runGit,
   runGitWithEnvironment,
+  readBlob,
+  readTreeEntries,
+  updateGitTree,
+  writeBlob,
   type GitRepository,
 } from "./repository.js";
 import type { TenderCapture } from "./tender.js";
-import type { WorkspaceDirtyDelta } from "./tender.js";
 
 const REQUIRED_GIT = "2.38" as const;
 
@@ -47,10 +50,28 @@ export type IntegrationPlan = Readonly<{
   changeId: ChangeId;
 }>;
 
-export type ReviewIntegration = Readonly<{
-  changeId: ChangeId;
-  workspace?: WorkspaceDirtyDelta;
-}>;
+export type IntegrationBlob = Readonly<{ bytes: Uint8Array; mode: string }>;
+
+export function readIntegrationBlob(
+  repository: GitRepository,
+  tree: GitObjectId,
+  path: string,
+): Readonly<{ kind: "present"; data: IntegrationBlob } | { kind: "missing" | "not-a-blob" }> {
+  const entry = readTreeEntries(repository, tree).get(path);
+  if (entry === undefined) return { kind: "missing" };
+  if (entry.type !== "blob") return { kind: "not-a-blob" };
+  return { kind: "present", data: { bytes: readBlob(repository, entry.oid), mode: entry.mode } };
+}
+
+export function updateIntegrationPlan(
+  repository: GitRepository,
+  plan: IntegrationPlan,
+  update: Readonly<{ path: string; bytes: Uint8Array; mode: string }>,
+): IntegrationPlan {
+  const blob = writeBlob(repository, update.bytes);
+  const tree = gitObjectId(updateGitTree(repository, plan.tree, new Map([[update.path, { oid: blob, mode: update.mode, type: "blob" }]])), "updated integration tree");
+  return { ...plan, tree, changeId: stablePatchId(repository, plan.predecessor, tree) };
+}
 
 function stablePatchId(repository: GitRepository, predecessor: SnapshotId, tree: GitObjectId): ChangeId {
   const diff = runGit(repository, ["diff", "--binary", gitObjectIdForSnapshot(predecessor), tree]);
@@ -242,20 +263,6 @@ export function planIntegration(
     },
   };
 }
-
-/** Prepare the integration-derived review subject from one captured tender. */
-export function prepareReviewIntegration(
-  repository: GitRepository,
-  input: IntegrationCoordinates,
-  tender: TenderCapture,
-  workspace?: WorkspaceDirtyDelta,
-): Preparation<ReviewIntegration, Readonly<{ kind: "target-missing"; contractId: ContractId }> | IntegrationPreparationRefusal> {
-  const integration = planIntegration(repository, input, tender, false);
-  return integration.kind === "refused"
-    ? integration
-    : { kind: "prepared", data: { changeId: integration.data.changeId, ...(workspace === undefined ? {} : { workspace }) } };
-}
-
 
 function deliverySnapshotAvailability(
   repository: GitRepository,

@@ -65,11 +65,13 @@ is authoritative; a manual move that breaks the witness is corruption.
 
 `priority` is `0 | 1 | 2 | 3` and defaults to `2`. Relation arrays are ordered,
 duplicate-free full TaskIds. `note` is a string and defaults to empty.
-`createdAt` and `updatedAt` are canonical UTC ISO
-timestamps. Product creation sets both to one captured time. A product mutation
-that changes Task authority preserves `createdAt` and advances `updatedAt` once;
-a no-op update preserves both. Manual writers own the truth of both timestamps
-when they edit authority. `parent` is nullable. V1 has no
+`createdAt` and `updatedAt` are canonical UTC ISO timestamps. Product creation
+sets both to one captured time. An ordinary Task product mutation preserves
+`createdAt` and advances `updatedAt` once; a no-op preserves both. Delivery
+completion is content materialization rather than a later Task event, so its
+canonical transition changes only `state` to `done` and preserves both
+timestamps byte-for-byte. Manual writers own the truth of both timestamps when
+they edit authority. `parent` is nullable. V1 has no
 cached readiness, counters, task log, NDJSON trace, private history ref, or
 `history <TaskId>`. Because manual, uncommitted Markdown edits remain
 authoritative, Task does not promise complete change-since-observation,
@@ -88,11 +90,6 @@ resume  on_hold                      -> open
 done    open | in_progress | on_hold -> done
 drop    open | in_progress | on_hold -> drop
 ```
-
-Settlement alone may apply the coordination-only transition `done -> open`
-for an abandoned current TaskHolder. It is not a public Task verb. Task itself
-does not observe Contract state or TaskHolder authority, or decide when that
-transition applies.
 
 Both terminal states release dependents. A task is ready when it is `open` and
 all `needs` targets are terminal. `blocked` contains open or in-progress tasks
@@ -290,5 +287,7 @@ sole write adjudicator against manual editors. Byte movement returns
 Task Markdown has no Contract association field and Task operations expose no
 association mutation. The current cross-product relationship is the
 TaskHolder authority defined by [settlement.md](settlement.md). Task contributes
-only its complete identity and the Task-owned state transition primitive used
-after settlement has judged that holder.
+only its complete identity and a pure canonical completion transform. Protocol
+invokes that transform for a holder selected by Settlement; Task never reads a
+Contract, TaskHolder, Git tree, clock, or placement state. Abandon never
+reopens Task authority.

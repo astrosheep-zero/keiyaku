@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseTaskCreationDocument, parseTaskDocument, serializeTaskDocument, TaskAuthorityCorruptionError } from "../src/task/document.js";
-import { deriveLocalStem, formatTaskId, parseTaskId } from "../src/task/identity.js";
+import {
+  completeTaskDocument,
+  parseTaskCreationDocument,
+  parseTaskDocument,
+  serializeTaskDocument,
+  TaskAuthorityCorruptionError,
+} from "../src/task/document.js";
+import { deriveLocalStem, formatTaskId, parseTaskId, taskAuthorityRelativePath } from "../src/task/identity.js";
 
 test("task identity normalizes titles, caps local IDs, and supports nested namespaces", () => {
   assert.equal(deriveLocalStem("  Ship Native Task!  "), "ship-native-task");
@@ -9,6 +15,35 @@ test("task identity normalizes titles, caps local IDs, and supports nested names
   const id = formatTaskId({ namespace: ["contract", "internal"], localId: "ship-native-task" });
   assert.equal(id, "task/contract/internal/ship-native-task");
   assert.deepEqual(parseTaskId(id), { namespace: ["contract", "internal"], localId: "ship-native-task" });
+  assert.equal(taskAuthorityRelativePath(id), ".keiyaku/tasks/contract/internal/ship-native-task.md");
+});
+
+test("delivery completion changes only Task state and preserves canonical content", () => {
+  const coordinate = { namespace: ["contract", "internal"], localId: "complete-me" } as const;
+  const document = {
+    ...parseTaskCreationDocument([
+      "---",
+      "title: Complete me",
+      "state: in_progress",
+      "priority: 1",
+      "note: Preserve this note",
+      "---",
+      "Body with trailing whitespace.  ",
+      "",
+    ].join("\n")),
+    id: formatTaskId(coordinate),
+    createdAt: "2026-08-07T01:02:03.004Z",
+    updatedAt: "2026-08-08T02:03:04.005Z",
+  };
+  const before = serializeTaskDocument(document);
+  const completed = completeTaskDocument(before, coordinate);
+
+  assert.equal(
+    Buffer.from(completed).toString("utf8"),
+    Buffer.from(before).toString("utf8").replace("state: in_progress\n", "state: done\n"),
+  );
+  assert.deepEqual(parseTaskDocument(completed, coordinate), { ...document, state: "done" });
+  assert.throws(() => completeTaskDocument(completed, coordinate), /terminal state: done/u);
 });
 
 test("creation and authority documents contain no Contract association", () => {

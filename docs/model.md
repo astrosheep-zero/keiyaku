@@ -217,6 +217,13 @@ blob, log ref, artifact store, or second authority.
 opaque `note`; it has no target snapshot, reason category, intent precursor, or
 reopen fact. Abandonment never reads or changes the target ref.
 
+For a held Task, `DeliverData.integration` identifies the commit whose tracked
+content already contains the canonical Task transition to `done`. The Contract
+journal does not copy the TaskId, add a settlement/completion fact, or retain a
+second Task state. TaskHolder remains the association authority, Task Markdown
+remains lifecycle authority, and `claimed` refers to the reviewed delivery that
+contains both implementation and completion bytes.
+
 The journal stores lifecycle facts and bounded intent data only. It stores no
 raw producer logs, reports, patches, artifacts, or blob evidence.
 Its `at` values are the contract timeline. Counts and elapsed intervals are

@@ -61,6 +61,13 @@ attempt's frozen up-to-date policy. A later tender replaces the current
 delivery on the read model. The tender and integration preparation rules live
 in [git.md](git.md).
 
+When Settlement's frozen projection names a current held Task, delivery and
+review materialize that Task's canonical `done` bytes into the integration
+before computing the ChangeId or snapshot. Those bytes are therefore part of
+the review subject, not a post-claim effect. Placement freshly rechecks holder
+currentness and atomically publishes `claimed` with the target integration.
+Abandon releases the association and never emits a Task transition.
+
 `review` is a contract operation and may record testimony before any `deliver`.
 It uses Git's compute-only integration projection to capture the ChangeId that
 the current target and worktree bytes produce, plus the document key projected
@@ -363,7 +370,8 @@ report defined by the owning public surface, but cleanup is not lifecycle
 authority and does not create a journal, recovery, or reconcile duty.
 
 After protocol admission, the public facade runs mandatory Git
-reconciliation and [settlement](settlement.md). Their failures are typed lags
+reconciliation and [settlement](settlement.md). Settlement may repair holder
+or namespace projections but never changes Task lifecycle authority. Their failures are typed lags
 on the successful public result, never a different lifecycle outcome. They do
 not change the protocol result to `refused` or `retry`, automatically append an
 `abandoned` fact, or hide the admitted Contract identity.
