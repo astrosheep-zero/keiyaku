@@ -21,6 +21,8 @@ task show <TaskId> [--json]
 task ls [--closed | --all] [--world] [--limit <n>] [--json]
 task ready [--world] [--parent <TaskId>] [--limit <n>] [--json]
 task blocked [--world] [--parent <TaskId>] [--limit <n>] [--json]
+task query [--where <expression>] [--world]
+  [--sort priority|created|updated|id] [--limit <n>] [--json]
 task tree <TaskId> [--full] [--json]
 task doctor [--json]
 task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
@@ -52,12 +54,39 @@ each addressed Task in that Task's independent atomic lifecycle mutation. Batch
 lifecycle commands preserve input order, continue after per-Task refusals, and
 do not consume stdin for notes.
 
-`ls`, `ready`, and `blocked` use current namespace unless `--world` is present.
+`ls`, `ready`, `blocked`, and `query` use current namespace unless `--world` is present.
 Their observations are bounded and carry the complete matching `total`; ready
 and blocked may additionally select recursive descendants of a complete parent
 TaskId. `show`, `tree`, update, and lifecycle use complete IDs and never infer
 from namespace. `tree` is parent decomposition traversal. Text rows are
 `TaskId - P<n> - <disposition> - title`.
+
+```text
+task query [--where <expression>] [--world]
+  [--sort priority|created|updated|id] [--limit <n>] [--json]
+```
+
+`query` is a read-only Task-owned predicate surface. Its expression is parsed
+at the CLI boundary into a typed AST; the Task evaluator never receives an
+unparsed shell string. Terms support `and`, `or`, `not`, and parentheses, with
+these predicates: `state`, `priority`, `title`, `id`, `parent`, `under`,
+`needs`, `blocks`, `ready`, `blocked`, `created`, and `updated`. String values
+use double quotes; TaskIds are complete coordinates. `under` selects recursive
+descendants and excludes the addressed parent. `ready` and `blocked` remain
+named high-frequency views backed by the same evaluator. With no `--where`,
+query matches active Tasks and excludes `done` and `drop`.
+
+The default limit is 100; explicit limits are integers from 1 through 1000.
+The default sort is priority ascending then TaskId bytes. `created` and
+`updated` sort by their persisted timestamps (ascending and descending
+respectively, with TaskId bytes as the tie-breaker); `id` sorts by TaskId bytes.
+Filtering happens against one observed board snapshot before `limit` is applied.
+Text reports `<returned> of <total>` and the active limit when truncated; JSON
+returns `{ rows, total, returned, truncated }` with no second result schema.
+Invalid syntax, fields, operators, values, or a nonpositive limit are typed
+usage refusals. A missing `under`/`parent` target is a Task refusal, not an
+empty result. Query reads only Task persisted and Task-derived facts; it never
+reads Contract, Akuma, Git, or prose-inferred urgency.
 
 `task doctor` scans the complete Task world and renders every graph issue. It
 does not repair authority. A healthy report renders `healthy` and exits `0`; a
@@ -87,12 +116,14 @@ without probing, reading history, or reclassifying them.
 
 JSON serializes that complete report without a text-specific projection or
 shortened value. Text chooses density without hiding a product identity that
-has no other text discovery surface. Its first line is `kanshi <root>`, followed
-by `state <short-state> · <branch> · observed <observedAt>`. The state is read
-from the present Contract board; absent Contract state or branch renders as
-`none`, while JSON keeps the full Contract-board value. It has no ruler,
-separate root line, or mark legend. The fixed `keiyaku`, `task`, and `akuma`
-sections follow in that order.
+has no other text discovery surface. For a present world its first line is the
+one-line Split Horizon signature defined by [cli-output.md](cli-output.md),
+followed by the fixed `keiyaku`, `akuma`, and `task` sections. Aggregate counts
+are derived from the assembled public sections; they are not persisted
+counters. The world side carries the real project/branch/head coordinate
+available to the report. Absent and failed sections remain explicit and are
+never rendered as zero. The signature is Kanshi-owned; ordinary commands have
+no global ruler.
 
 Bare status renders every Contract row. Waiting and pending-delivery rows come
 before other Contracts, with source order stable inside each class. A row starts

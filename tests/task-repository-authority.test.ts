@@ -9,6 +9,6 @@ test("repository Task authority is readable by the current hard-cut codec", asyn
   const result = await tasks.list({ selection: "all", scope: "world" });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  assert.ok(result.value.length > 0);
-  assert.ok(result.value.every((task) => task.id.startsWith("task/")));
+  assert.ok(result.value.rows.length > 0);
+  assert.ok(result.value.rows.every((task) => task.id.startsWith("task/")));
 });

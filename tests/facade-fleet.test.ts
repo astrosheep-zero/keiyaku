@@ -13,7 +13,9 @@ import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { settings } from "../src/settings.js";
-import { Tasks } from "../src/task/index.js";
+import { Tasks, type TaskId } from "../src/task/index.js";
+import { serializeTaskDocument } from "../src/task/document.js";
+import { authorityPath } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 import { matchesAkumaGlob, parseAkumaGlob } from "../src/identity/selector.js";
@@ -222,6 +224,38 @@ test("facade ls reads exactly one selected identity directory", async () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Task catalog does not inherit the Task list default page limit", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-page-"));
+  try {
+    const first = await Tasks.of(World.at(root)).add({ title: "Catalog 000" });
+    assert.equal(first.kind, "accepted");
+    for (let index = 1; index <= 100; index += 1) {
+      const suffix = String(index).padStart(3, "0");
+      const id = `task/catalog-${suffix}` as TaskId;
+      writeFileSync(authorityPath(World.at(root), id), serializeTaskDocument({
+        id,
+        title: `Catalog ${suffix}`,
+        body: "",
+        note: "",
+        state: "open",
+        priority: 2,
+        needs: [],
+        parent: null,
+        supersedes: [],
+        relates: [],
+        createdAt: "2026-08-14T00:00:00.000Z",
+        updatedAt: "2026-08-14T00:00:00.000Z",
+      }));
+    }
+
+    const catalog = await Keiyaku.ls({ query: { kind: "tasks" }, path: root });
+    assert.equal(catalog.kind, "tasks");
+    assert.equal(catalog.rows.length, 101);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

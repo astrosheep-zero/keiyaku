@@ -36,7 +36,7 @@ function related(board: TaskBoard, task: TaskDocument): readonly TaskRef[] {
   for (const candidate of board.tasks.values()) if (candidate.relates.includes(task.id)) ids.add(candidate.id);
   return sorted([...ids].map((id) => taskRef(board, id)));
 }
-function disposition(board: TaskBoard, task: TaskDocument): TaskDisposition {
+export function taskDisposition(board: TaskBoard, task: TaskDocument): TaskDisposition {
   if (task.state !== "open") return task.state;
   return task.needs.every((id) => { const target = board.tasks.get(id); return target !== undefined && terminal(target.state); }) ? "ready" : "blocked";
 }
@@ -58,7 +58,7 @@ export function projectRows(board: TaskBoard, scope: readonly string[] | null, s
   return [...board.tasks.values()].filter((task) => inScope(task, scope)).filter((task) => selection === "all"
     || (selection === "closed") === terminal(task.state)).map((task) => ({
       id: task.id, title: task.title, state: task.state, priority: task.priority,
-      disposition: disposition(board, task),
+      disposition: taskDisposition(board, task),
     })).sort((a, b) => a.priority - b.priority || Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
 }
 export function projectReady(board: TaskBoard, scope: readonly string[] | null): readonly TaskRow[] {

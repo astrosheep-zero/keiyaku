@@ -47,7 +47,7 @@ test("compose planning refusals write nothing", async () => {
   const result = await product.compose({ markdown: "+ Broken needs=@task/missing\n" });
   assert.equal(result.kind, "refused");
   const all = await product.list({ scope: "world", selection: "all" });
-  assert.deepEqual(all, { kind: "accepted", value: [] });
+  assert.deepEqual(all, { kind: "accepted", value: { rows: [], total: 0, returned: 0, truncated: false } });
   const duplicate = await product.compose({ markdown: "+ Duplicate relates=@task/a,@task/a\n" });
   assert.equal(duplicate.kind, "refused");
   const existing = await product.add({ title: "Existing" });

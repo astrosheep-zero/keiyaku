@@ -1,12 +1,13 @@
 import { documentDiff } from "../markdown/diff.js";
 import { installNamespaceContext, readNamespaceContext } from "./context.js";
-import { relationProblem, projectBlocked, projectReady, projectRows, projectStatusRows, type BlockedTaskRow, type TaskBoard, type TaskRow } from "./board.js";
+import { relationProblem, projectBlocked, projectRows, projectStatusRows, type BlockedTaskRow, type TaskBoard, type TaskRow } from "./board.js";
 import { parseTaskCreationDocument, serializeTaskDocument, type TaskCreationDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import {
   authorityPath, readBoard, replaceAuthority, withTaskLocks,
 } from "./store.js";
 import type { WorldRoot } from "../world.js";
+import { DEFAULT_TASK_LIMIT, projectPage, projectQuery, queryUnderTargets, type TaskPage, type TaskQueryExpression, type TaskQueryRow, type TaskQuerySort, underExpression } from "./query.js";
 
 export type TaskView = Readonly<TaskDocument & { namespace: readonly string[] }>;
 export type TaskRefusal =
@@ -184,21 +185,51 @@ export async function settleTask(
 function readScope(world: WorldRoot, scope: "namespace" | "world" | undefined): readonly string[] | null | TaskRefusal {
   if (scope === "world") return null; return context(world);
 }
-export function listTasks(world: WorldRoot, selection: "active" | "closed" | "all", scope?: "namespace" | "world"): TaskOutcome<readonly TaskRow[]> {
+export function listTasks(world: WorldRoot, selection: "active" | "closed" | "all", scope?: "namespace" | "world", limit = DEFAULT_TASK_LIMIT): TaskOutcome<TaskPage<TaskRow>> {
   const selected = readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
-  return { kind: "accepted", value: projectRows(readBoard(world).board, selected as readonly string[] | null, selection) };
+  return { kind: "accepted", value: projectPage(projectRows(readBoard(world).board, selected as readonly string[] | null, selection), limit) };
 }
-export function readyTasks(world: WorldRoot, scope?: "namespace" | "world"): TaskOutcome<readonly TaskRow[]> {
+export function readyTasks(world: WorldRoot, scope?: "namespace" | "world", parent?: TaskId, limit = DEFAULT_TASK_LIMIT): TaskOutcome<TaskPage<TaskRow>> {
   const selected = readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
-  return { kind: "accepted", value: projectReady(readBoard(world).board, selected as readonly string[] | null) };
+  const board = readBoard(world).board;
+  if (parent !== undefined && !board.tasks.has(parent)) return { kind: "refused", refusal: { kind: "task-missing", taskId: parent } };
+  const ready: TaskQueryExpression = { kind: "predicate", predicate: { field: "ready", operator: "=", value: true } };
+  const expression: TaskQueryExpression = parent === undefined ? ready : { kind: "and", terms: [ready, underExpression(parent)] };
+  const selectedRows = projectQuery(board, selected as readonly string[] | null, expression, "priority", Math.max(1, board.tasks.size)).rows;
+  const rows = selectedRows.map(({ parent: _parent, needs: _needs, blocks: _blocks, createdAt: _createdAt, updatedAt: _updatedAt, ...row }) => row);
+  return { kind: "accepted", value: projectPage(rows, limit) };
 }
-export function blockedTasks(world: WorldRoot, scope?: "namespace" | "world"): TaskOutcome<readonly BlockedTaskRow[]> {
+export function blockedTasks(world: WorldRoot, scope?: "namespace" | "world", parent?: TaskId, limit = DEFAULT_TASK_LIMIT): TaskOutcome<TaskPage<BlockedTaskRow>> {
   const selected = readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
-  return { kind: "accepted", value: projectBlocked(readBoard(world).board, selected as readonly string[] | null) };
+  const board = readBoard(world).board;
+  if (parent !== undefined && !board.tasks.has(parent)) return { kind: "refused", refusal: { kind: "task-missing", taskId: parent } };
+  const blocked: TaskQueryExpression = { kind: "predicate", predicate: { field: "blocked", operator: "=", value: true } };
+  const expression: TaskQueryExpression = parent === undefined ? blocked : { kind: "and", terms: [blocked, underExpression(parent)] };
+  const selectedRows = projectQuery(board, selected as readonly string[] | null, expression, "priority", Math.max(1, board.tasks.size)).rows;
+  const ids = new Set(selectedRows.map((row) => row.id));
+  return { kind: "accepted", value: projectPage(projectBlocked(board, selected as readonly string[] | null).filter((row) => ids.has(row.id)), limit) };
+}
+export function queryTasks(
+  world: WorldRoot,
+  expression: TaskQueryExpression,
+  scope?: "namespace" | "world",
+  sort: TaskQuerySort = "priority",
+  limit = DEFAULT_TASK_LIMIT,
+): TaskOutcome<TaskPage<TaskQueryRow>> {
+  const selected = readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
+  const board = readBoard(world).board;
+  for (const target of queryUnderTargets(expression)) if (!board.tasks.has(target)) {
+    return { kind: "refused", refusal: { kind: "task-missing", taskId: target } };
+  }
+  return { kind: "accepted", value: projectQuery(board, selected as readonly string[] | null, expression, sort, limit) };
 }
 /** Internal composite observation from one complete Task board read. */
 export function observeTaskStatusRows(world: WorldRoot) {
   return projectStatusRows(readBoard(world).board, null);
+}
+/** Internal identity catalog from one complete Task board read. */
+export function observeTaskCatalogRows(world: WorldRoot): readonly TaskRow[] {
+  return projectRows(readBoard(world).board, null, "all");
 }
 export function setCurrentNamespace(world: WorldRoot, namespace: readonly string[]): void { installNamespaceContext(world, namespace); }
 export function currentNamespace(world: WorldRoot): readonly string[] | TaskRefusal {

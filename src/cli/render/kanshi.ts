@@ -226,22 +226,44 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): string {
   return lines.join("\n");
 }
 
+function sectionCount(name: string, section: Section<{ rows: readonly unknown[] }>): string {
+  if (section.kind === "present") return `${section.value.rows.length} ${name}`;
+  return `${section.kind} ${name}`;
+}
+
+function worldCoordinate(report: KanshiReport): string {
+  const project = report.root;
+  const branch = report.branch?.startsWith("refs/heads/") === true
+    ? report.branch.slice("refs/heads/".length)
+    : report.branch;
+  const state = report.contracts.kind === "present" ? report.contracts.value.state ?? null : null;
+  return [project, branch, state].filter((part): part is string => part !== null && part.length > 0).map(safeText).join(" ");
+}
+
+function splitHorizon(report: KanshiReport, columns: number): readonly string[] {
+  if (report.root === null) return ["✗ keiyaku world absent"];
+  const aggregate = [
+    sectionCount("keiyaku", report.contracts),
+    sectionCount("akuma", report.akuma),
+    sectionCount("task", report.tasks),
+  ].join(" · ");
+  const world = worldCoordinate(report);
+  const minimum = `kanshi ─ ${aggregate} ─ ${world}`;
+  if (displayColumns(minimum) > columns) return [`kanshi ─ ${aggregate} ─ ${world}`];
+  const fill = columns - displayColumns(minimum);
+  const left = 1 + Math.floor(fill / 2), right = 1 + Math.ceil(fill / 2);
+  return [`kanshi ${"─".repeat(left)} ${aggregate} ${"─".repeat(right)} ${world}`];
+}
+
 export function renderKanshiText(
   report: KanshiReport,
   context: TextRenderContext = { columns: 80, color: false },
   selection: "world" | "contract" = "world",
 ): string {
-  const branch = report.branch?.startsWith("refs/heads/") === true
-    ? report.branch.slice("refs/heads/".length)
-    : report.branch;
-  const state = report.contracts.kind === "present" ? report.contracts.value.state : null;
   return [
-    [
-      `kanshi ${report.root === null ? "none" : safeText(report.root)}`,
-      `state ${state?.slice(0, 8) ?? "none"} · ${branch === null ? "none" : safeText(branch)} · observed ${safeText(report.observedAt)}`,
-    ].join("\n"),
+    splitHorizon(report, context.columns).join("\n"),
     renderContracts(report, context, selection),
-    renderTasks(report, context),
     renderAkuma(report, context),
+    renderTasks(report, context),
   ].join("\n\n");
 }

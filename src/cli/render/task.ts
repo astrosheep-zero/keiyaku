@@ -1,5 +1,6 @@
 import type {
   BlockedTaskList,
+  BlockedTaskRow,
   TaskBatchResult,
   TaskCompositionResult,
   TaskDependencyTree,
@@ -9,14 +10,17 @@ import type {
   TaskList,
   TaskMutationResult,
   TaskNamespaceResult,
+  TaskPage,
+  TaskQueryResult,
+  TaskQueryRow,
   TaskRow,
   TaskUpdateResult,
   TaskView,
 } from "../../task/index.js";
-import type { TaskInvocationResult } from "../commands/task-invoke.js";
+import type { TaskInvocationResult, TaskWorldObservation } from "../commands/task-invoke.js";
 import type { ParsedTaskCommand } from "../commands/task.js";
 
-type TaskReadOutcome = TaskList | BlockedTaskList | TaskDependencyTree | TaskNamespaceResult;
+type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDependencyTree | TaskNamespaceResult;
 type TaskDocumentChanges = Extract<TaskCompositionResult, { kind: "accepted" }>["documentChanges"];
 type TaskFailure =
   | Extract<TaskMutationResult, { kind: "refused" | "retry" }>
@@ -32,12 +36,20 @@ function changes(values: TaskDocumentChanges): string {
 function failure(result: TaskFailure): string {
   return result.kind === "retry" ? `retry ${JSON.stringify(result.reason)}` : `refused ${JSON.stringify(result.refusal)}`;
 }
-function renderRows(result: TaskList | BlockedTaskList): string {
+function renderListRow(item: TaskRow | BlockedTaskRow | TaskQueryRow): readonly string[] {
+  const lines = [row(item)];
+  if ("blockers" in item) {
+    for (const blocker of item.blockers) lines.push(`  needs ${blocker.id} (${blocker.state})`);
+  }
+  return lines;
+}
+function pageHeading(command: ParsedTaskCommand, page: TaskPage<TaskRow | TaskQueryRow>): string {
+  const count = page.truncated ? `${page.returned} of ${page.total}` : `${page.returned}`;
+  return `${count} ${command.action}${page.truncated ? ` · limit ${page.returned}` : ""}`;
+}
+function renderRows(command: ParsedTaskCommand, result: TaskList | BlockedTaskList | TaskQueryResult): string {
   if (result.kind !== "accepted") return failure(result);
-  return result.value.map((item) => {
-    const blockers = "blockers" in item ? item.blockers.map((blocker) => blocker.id).join(", ") : undefined;
-    return `${row(item)}${blockers === undefined ? "" : ` <- ${blockers}`}`;
-  }).join("\n");
+  return [pageHeading(command, result.value), ...result.value.rows.flatMap(renderListRow)].join("\n");
 }
 function renderShow(result: TaskDetail | TaskMutationResult): string {
   if ("kind" in result) return result.kind === "accepted" ? row(result.value) : failure(result);
@@ -66,8 +78,32 @@ function doctorIssue(issue: TaskDoctorIssue): string {
 }
 
 export function renderTaskText(command: ParsedTaskCommand, result: TaskInvocationResult): string {
+  if (isWorldObservation(result)) return renderTaskWorldObservation(command, result);
+  return renderTaskValue(command, result);
+}
+
+function isWorldObservation(result: TaskInvocationResult): result is TaskWorldObservation {
+  return typeof result === "object" && result !== null && "kind" in result
+    && (result.kind === "present" || result.kind === "absent" || result.kind === "failed");
+}
+function renderTaskWorldObservation(command: ParsedTaskCommand, result: TaskWorldObservation): string {
+  if (result.kind === "absent") return "task world absent";
+  if (result.kind === "failed") return `task world failed\n  ${result.failure.message}`;
+  return renderTaskValue(command, result.value);
+}
+
+function renderMutation(command: ParsedTaskCommand, result: TaskMutationResult | TaskUpdateResult): string {
+  if (result.kind !== "accepted") return failure(result);
+  if (command.action !== "update") {
+    return row((result as Extract<TaskMutationResult, { kind: "accepted" }>).value);
+  }
+  const value = (result as Extract<TaskUpdateResult, { kind: "accepted" }>).value;
+  return [row(value.task), value.documentDiff].filter((line) => line.length > 0).join("\n");
+}
+
+function renderTaskValue(command: ParsedTaskCommand, result: Exclude<TaskInvocationResult, TaskWorldObservation>): string {
   if (command.action === "show") return renderShow(result as TaskDetail | TaskMutationResult);
-  if (command.action === "ls" || command.action === "ready" || command.action === "blocked") return renderRows(result as TaskList | BlockedTaskList);
+  if (command.action === "ls" || command.action === "ready" || command.action === "blocked" || command.action === "query") return renderRows(command, result as TaskList | BlockedTaskList | TaskQueryResult);
   if (command.action === "tree") {
     const tree = result as TaskDependencyTree; return tree.kind === "accepted" ? treeLines(tree.value).join("\n") : failure(tree);
   }
@@ -85,13 +121,7 @@ export function renderTaskText(command: ParsedTaskCommand, result: TaskInvocatio
     const batch = result as TaskBatchResult;
     return batch.items.map((item) => item.outcome.kind === "accepted" ? `accepted ${item.id}` : `${item.id}: ${failure(item.outcome)}`).join("\n");
   }
-  const mutation = result as TaskMutationResult | TaskUpdateResult;
-  if (mutation.kind !== "accepted") return failure(mutation);
-  if (command.action === "update") {
-    const value = (mutation as Extract<TaskUpdateResult, { kind: "accepted" }>).value;
-    return [row(value.task), value.documentDiff].filter((line) => line.length > 0).join("\n");
-  }
-  return row((mutation as Extract<TaskMutationResult, { kind: "accepted" }>).value);
+  return renderMutation(command, result as TaskMutationResult | TaskUpdateResult);
 }
 
 export function renderTaskIncompleteDiagnostic(result: TaskCompositionResult): string {
@@ -100,6 +130,11 @@ export function renderTaskIncompleteDiagnostic(result: TaskCompositionResult): s
 }
 
 export function taskExitCode(result: TaskInvocationResult): number {
+  if (isWorldObservation(result)) {
+    if (result.kind === "absent") return 1;
+    if (result.kind === "failed") return 3;
+    result = result.value;
+  }
   if (typeof result === "object" && result !== null && "issues" in result) return (result as TaskDoctorReport).issues.length === 0 ? 0 : 1;
   if (typeof result === "object" && result !== null && "items" in result) {
     const kinds = (result as TaskBatchResult).items.map((item) => item.outcome.kind);

@@ -1,7 +1,8 @@
 import { Akuma, type AkumaList } from "../akuma/akuma.js";
 import { listArchetypeDefinitions, type ArchetypeCatalogRow } from "../akuma/archetype.js";
 import type { Settings } from "../settings.js";
-import { Tasks, type TaskRow } from "../task/index.js";
+import type { TaskRow } from "../task/index.js";
+import { observeTaskCatalogRows } from "../task/operations.js";
 import { listKeiyaku, type ContractBoard } from "./contract.js";
 import { requireInput } from "./input.js";
 import { Repo } from "./repo.js";
@@ -82,9 +83,7 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   }
   const path = worldRoot(values.path);
   if (query.kind === "tasks") {
-    const result = await Tasks.of(path).list({ selection: "all", scope: "world" });
-    if (result.kind !== "accepted") throw new Error(`Task catalog ${result.kind}: ${JSON.stringify(result)}`);
-    return { kind: "tasks", root: path, rows: result.value };
+    return { kind: "tasks", root: path, rows: observeTaskCatalogRows(path) };
   }
   const listed = Akuma.of(path).list(query.archetype === undefined ? undefined : { archetype: query.archetype });
   return {

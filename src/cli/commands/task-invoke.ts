@@ -11,6 +11,8 @@ import {
   type TaskMutationResult,
   type TaskNamespaceResult,
   type TaskPriority,
+  type TaskQueryResult,
+  type TaskQuerySort,
   type TaskState,
   type TaskUpdateResult,
 } from "../../task/index.js";
@@ -18,7 +20,14 @@ import type { ParsedTaskCommand } from "./task.js";
 import type { WorldRoot } from "../../world.js";
 
 export type TaskInvocationResult = TaskMutationResult | TaskUpdateResult | TaskBatchResult | TaskCompositionResult
-  | TaskDetail | TaskList | BlockedTaskList | TaskDependencyTree | TaskDoctorReport | TaskNamespaceResult;
+  | TaskDetail | TaskList | BlockedTaskList | TaskQueryResult | TaskDependencyTree | TaskDoctorReport | TaskNamespaceResult
+  | TaskWorldObservation;
+
+type TaskWorldRead = TaskList | BlockedTaskList | TaskQueryResult | TaskDoctorReport;
+export type TaskWorldObservation =
+  | Readonly<{ kind: "present"; value: TaskWorldRead }>
+  | Readonly<{ kind: "absent" }>
+  | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>;
 
 type TaskProduct = ReturnType<typeof Tasks.of>;
 type TaskInput = Readonly<{ world: WorldRoot | null; establish(): WorldRoot; readStdin(): string }>;
@@ -36,6 +45,7 @@ function priority(raw: string | undefined): TaskPriority | undefined {
 }
 function state(raw: string | undefined): TaskState | undefined { return raw as TaskState | undefined; }
 function ids(items: readonly string[] | undefined): readonly TaskId[] | undefined { return items as readonly TaskId[] | undefined; }
+function limit(command: ParsedTaskCommand): number | undefined { const raw = value(command, "limit"); return raw === undefined ? undefined : Number(raw); }
 
 function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => string): Promise<TaskMutationResult> {
   const selectedNamespace = namespace(value(command, "namespace"));
@@ -75,13 +85,28 @@ async function invokeRead(tasks: TaskProduct, command: ParsedTaskCommand): Promi
       const detail = await tasks.task({ id }).read();
       return detail ?? { kind: "refused", refusal: { kind: "task-missing", taskId: id as TaskId } };
     }
-    case "ls": return tasks.list({ selection: command.flags.all === true ? "all" : command.flags.closed === true ? "closed" : "active", ...(command.flags.world === true ? { scope: "world" } : {}) });
-    case "ready": return tasks.ready(command.flags.world === true ? { scope: "world" } : {});
-    case "blocked": return tasks.blocked(command.flags.world === true ? { scope: "world" } : {});
+    case "ls": return tasks.list({ selection: command.flags.all === true ? "all" : command.flags.closed === true ? "closed" : "active", ...(command.flags.world === true ? { scope: "world" } : {}), ...(limit(command) === undefined ? {} : { limit: limit(command)! }) });
+    case "ready": return tasks.ready({ ...(command.flags.world === true ? { scope: "world" as const } : {}), ...(value(command, "parent") === undefined ? {} : { parent: value(command, "parent")! }), ...(limit(command) === undefined ? {} : { limit: limit(command)! }) });
+    case "blocked": return tasks.blocked({ ...(command.flags.world === true ? { scope: "world" as const } : {}), ...(value(command, "parent") === undefined ? {} : { parent: value(command, "parent")! }), ...(limit(command) === undefined ? {} : { limit: limit(command)! }) });
+    case "query": return tasks.query({ ...(command.where === undefined ? {} : { where: command.where }), ...(command.flags.world === true ? { scope: "world" as const } : {}), ...(value(command, "sort") === undefined ? {} : { sort: value(command, "sort") as TaskQuerySort }), ...(limit(command) === undefined ? {} : { limit: limit(command)! }) });
     case "tree": return tasks.task({ id }).tree(command.flags.full === true ? { full: true } : {});
     case "doctor": return tasks.doctor();
     default: throw new Error(`task action is not a read: ${command.action}`);
   }
+}
+
+function isWorldObservation(command: ParsedTaskCommand): command is ParsedTaskCommand & Readonly<{
+  action: "ls" | "ready" | "blocked" | "query" | "doctor";
+}> {
+  return command.action === "ls" || command.action === "ready" || command.action === "blocked"
+    || command.action === "query" || command.action === "doctor";
+}
+
+function diagnostic(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+
+async function observeWorldRead(tasks: TaskProduct, command: ParsedTaskCommand): Promise<TaskWorldObservation> {
+  try { return { kind: "present", value: await invokeRead(tasks, command) as TaskWorldRead }; }
+  catch (error) { return { kind: "failed", failure: { message: diagnostic(error) } }; }
 }
 
 function missingWorld(command: ParsedTaskCommand): TaskInvocationResult {
@@ -89,10 +114,8 @@ function missingWorld(command: ParsedTaskCommand): TaskInvocationResult {
     kind: "refused",
     refusal: { kind: "task-missing", taskId: id as TaskId },
   });
-  if (command.action === "doctor") return { issues: [] };
-  if (command.action === "ls" || command.action === "ready" || command.action === "blocked" || command.action === "namespace") {
-    return { kind: "accepted", value: [] };
-  }
+  if (isWorldObservation(command)) return { kind: "absent" };
+  if (command.action === "namespace") return { kind: "accepted", value: [] };
   if (command.action === "hold" || command.action === "done" || command.action === "drop") {
     return { items: command.positionals.map((id) => ({ id: id as TaskId, outcome: missing(id) })) };
   }
@@ -107,7 +130,8 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
   }
   if (world === null) return missingWorld(command);
   const tasks = Tasks.of(world);
-  if (["show", "ls", "ready", "blocked", "tree", "doctor"].includes(command.action)) return invokeRead(tasks, command);
+  if (isWorldObservation(command)) return observeWorldRead(tasks, command);
+  if (["show", "tree"].includes(command.action)) return invokeRead(tasks, command);
   if (command.action === "add") return invokeAdd(tasks, command, input.readStdin);
   if (command.action === "update") return invokeUpdate(tasks, command, input.readStdin);
   const id = command.positionals[0]!;

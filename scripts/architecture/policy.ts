@@ -549,7 +549,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/akuma.ts", ["Akuma", "AkumaList"]),
         any("akuma/archetype.ts", ["ArchetypeCatalogRow", "listArchetypeDefinitions"]),
         types("settings.ts"),
-        any("task/index.ts", ["TaskRow", "Tasks"]),
+        types("task/index.ts", ["TaskRow"]),
+        any("task/operations.ts", ["observeTaskCatalogRows"]),
         any("library/contract.ts", ["ContractBoard", "listKeiyaku"]),
         any("library/input.ts", ["requireInput"]),
         any("library/repo.ts", ["Repo"]),
@@ -585,9 +586,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "task/document.ts", allow: [any("task/identity.ts")] },
     { source: "task/board.ts", allow: [types("task/document.ts"), any("task/identity.ts")] },
     { source: "task/store.ts", allow: [types("world.ts"), any("coordination/sqlite-transaction-lock.ts"), any("task/board.ts"), any("task/document.ts"), any("task/identity.ts")] },
-    { source: "task/operations.ts", allow: [types("world.ts"), any("markdown/diff.ts"), any("task/context.ts"), any("task/board.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/store.ts")] },
+    { source: "task/query.ts", allow: [any("task/board.ts"), types("task/document.ts"), any("task/identity.ts")] },
+    { source: "task/operations.ts", allow: [types("world.ts"), any("markdown/diff.ts"), any("task/context.ts"), any("task/board.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/query.ts"), any("task/store.ts")] },
     { source: "task/compose.ts", allow: [types("world.ts"), any("markdown/diff.ts"), any("task/context.ts"), any("task/board.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/operations.ts"), any("task/store.ts")] },
-    { source: "task/index.ts", allow: [types("world.ts"), any("task/board.ts"), any("task/compose.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/operations.ts"), any("task/store.ts")] },
+    { source: "task/index.ts", allow: [types("world.ts"), any("task/board.ts"), any("task/compose.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/operations.ts"), any("task/query.ts"), any("task/store.ts")] },
     {
       source: "settlement/fence.ts",
       allow: [any("coordination/sqlite-transaction-lock.ts"), any("git/repository.ts"), types("task/identity.ts")],
@@ -662,8 +664,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [any("cli/usage.ts"), any("runtime/proc/run.ts")],
     },
     {
+      source: "cli/commands/task-query.ts",
+      allow: [types("task/index.ts"), any("task/query.ts", ["MAX_TASK_LIMIT", "normalizeTaskQuery"])],
+    },
+    {
       source: "cli/commands/task.ts",
-      allow: [any("cli/usage.ts")],
+      allow: [any("cli/commands/task-query.ts"), any("cli/usage.ts")],
     },
     {
       source: "cli/commands/task-invoke.ts",

@@ -81,23 +81,26 @@ test("Tasks creates root and nested authority without Contract coupling", async 
   assert.equal(nestedId, "task/contract/inside/nested-task");
   assert.equal((await tasks.task({ id: nestedId }).read())?.task.state, "in_progress");
   assert.throws(() => tasks.add({ title: "Coupled", contractId: "kei/forbidden" } as never), /unknown field: contractId/u);
-  assert.deepEqual((await tasks.list()).kind === "accepted" ? (await tasks.list() as { kind: "accepted"; value: readonly { id: string }[] }).value.map((row) => row.id) : [], [nestedId]);
+  assert.deepEqual((await tasks.list()).kind === "accepted" ? (await tasks.list() as { kind: "accepted"; value: { rows: readonly { id: string }[] } }).value.rows.map((row) => row.id) : [], [nestedId]);
   const worldList = await tasks.list({ scope: "world", selection: "all" });
   assert.equal(worldList.kind, "accepted");
-  if (worldList.kind === "accepted") assert.deepEqual(worldList.value.map((row) => row.id).sort(), [nestedId, rootId].sort());
+  if (worldList.kind === "accepted") {
+    assert.deepEqual(worldList.value.rows.map((row) => row.id).sort(), [nestedId, rootId].sort());
+    assert.deepEqual({ total: worldList.value.total, returned: worldList.value.returned, truncated: worldList.value.truncated }, { total: 2, returned: 2, truncated: false });
+  }
 });
 
 test("lifecycle, readiness, blocked projection, update diff, and batch results compose", async () => {
   const { tasks } = world();
   const dependency = acceptedId(await tasks.add({ title: "Dependency" }));
   const dependent = acceptedId(await tasks.add({ title: "Dependent", needs: [dependency] }));
-  assert.deepEqual((await tasks.ready()).kind === "accepted" ? (await tasks.ready() as { kind: "accepted"; value: readonly { id: string }[] }).value.map((row) => row.id) : [], [dependency]);
+  assert.deepEqual((await tasks.ready()).kind === "accepted" ? (await tasks.ready() as { kind: "accepted"; value: { rows: readonly { id: string }[] } }).value.rows.map((row) => row.id) : [], [dependency]);
   assert.equal((await tasks.task({ id: dependent }).start()).kind, "accepted");
   const blocked = await tasks.blocked();
   assert.equal(blocked.kind, "accepted");
-  if (blocked.kind === "accepted") assert.deepEqual(blocked.value.map((row) => row.id), [dependent]);
+  if (blocked.kind === "accepted") assert.deepEqual(blocked.value.rows.map((row) => row.id), [dependent]);
   assert.equal((await tasks.task({ id: dependency }).done()).kind, "accepted");
-  assert.equal((await tasks.blocked()).kind === "accepted" ? (await tasks.blocked() as { kind: "accepted"; value: readonly unknown[] }).value.length : -1, 0);
+  assert.equal((await tasks.blocked()).kind === "accepted" ? (await tasks.blocked() as { kind: "accepted"; value: { rows: readonly unknown[] } }).value.rows.length : -1, 0);
   const updated = await tasks.task({ id: dependent }).update({ title: "Dependent renamed", appendBody: "body" });
   assert.equal(updated.kind, "accepted");
   if (updated.kind === "accepted") {
@@ -107,6 +110,51 @@ test("lifecycle, readiness, blocked projection, update diff, and batch results c
   }
   const batch = await tasks.batch({ verb: "done", ids: [dependent, "task/missing"] });
   assert.deepEqual(batch.items.map((item) => item.outcome.kind), ["accepted", "refused"]);
+});
+
+test("bounded Task query filters before limit and parent views recurse", async () => {
+  const { tasks } = world();
+  const parent = acceptedId(await tasks.add({ title: "Area", priority: 3 }));
+  const need = acceptedId(await tasks.add({ title: "Need", priority: 0, parent }));
+  const ready = acceptedId(await tasks.add({ title: "Ready auth", priority: 1, parent }));
+  const nested = acceptedId(await tasks.add({ title: "Nested", priority: 2, parent: ready, needs: [need] }));
+  assert.equal((await tasks.task({ id: nested }).start()).kind, "accepted");
+
+  const selected = await tasks.query({
+    scope: "world",
+    where: {
+      kind: "and",
+      terms: [
+        { kind: "predicate", predicate: { field: "under", operator: "=", value: parent } },
+        { kind: "predicate", predicate: { field: "priority", operator: "<=", value: 1 } },
+      ],
+    },
+    limit: 1,
+  });
+  assert.equal(selected.kind, "accepted");
+  if (selected.kind === "accepted") {
+    assert.deepEqual(selected.value.rows.map((row) => row.id), [need]);
+    assert.deepEqual({ total: selected.value.total, returned: selected.value.returned, truncated: selected.value.truncated }, { total: 2, returned: 1, truncated: true });
+  }
+
+  const descendants = await tasks.ready({ scope: "world", parent });
+  assert.equal(descendants.kind, "accepted");
+  if (descendants.kind === "accepted") assert.deepEqual(descendants.value.rows.map((row) => row.id), [need, ready]);
+  const blocked = await tasks.blocked({ scope: "world", parent });
+  assert.equal(blocked.kind, "accepted");
+  if (blocked.kind === "accepted") assert.deepEqual(blocked.value.rows.map((row) => row.id), [nested]);
+  assert.deepEqual(await tasks.ready({ parent: "task/missing" }), { kind: "refused", refusal: { kind: "task-missing", taskId: "task/missing" } });
+  assert.deepEqual(await tasks.query({ where: { kind: "predicate", predicate: { field: "under", operator: "=", value: "task/missing" } } }), { kind: "refused", refusal: { kind: "task-missing", taskId: "task/missing" } });
+});
+
+test("Task query defaults to active Tasks", async () => {
+  const { tasks } = world();
+  const active = acceptedId(await tasks.add({ title: "Active" }));
+  acceptedId(await tasks.add({ title: "Finished", state: "done" }));
+  acceptedId(await tasks.add({ title: "Dropped", state: "drop" }));
+  const result = await tasks.query();
+  assert.equal(result.kind, "accepted");
+  if (result.kind === "accepted") assert.deepEqual(result.value.rows.map((row) => row.id), [active]);
 });
 
 test("graph mutation admits cycles, doctor diagnoses them, and lifecycle writers serialize", async () => {

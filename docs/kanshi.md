@@ -5,6 +5,14 @@ shape, section availability, read-time association joins, and Contract
 selection. It is a reader, never authority: it writes, caches, repairs, and
 reconciles nothing.
 
+Its text identity is the Split Horizon signature owned by
+[cli-output.md](cli-output.md). The renderer derives its three aggregate facts
+only from the assembled `contracts`, `akuma`, and `tasks` sections and derives
+the world label only from `root`, `branch`, and the present Contract-board state
+coordinate. It performs no additional read. An absent or failed section is
+named as such and is never counted as zero; a present empty section is zero.
+The signature does not add persisted counters or another report field.
+
 ## Report
 
 `kanshi({ world, repo? })` consumes one already resolved world coordinate and

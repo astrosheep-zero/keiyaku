@@ -1,7 +1,13 @@
 import { CliUsageError, usageLine } from "../usage.js";
+import {
+  parseTaskQueryExpression,
+  validateTaskLimit,
+  validateTaskParent,
+  type TaskQueryExpression,
+} from "./task-query.js";
 
 export type TaskAction = "add" | "show" | "ls" | "ready" | "blocked" | "tree" | "doctor" | "update"
-  | "start" | "stop" | "hold" | "resume" | "done" | "drop" | "namespace" | "compose";
+  | "query" | "start" | "stop" | "hold" | "resume" | "done" | "drop" | "namespace" | "compose";
 type TaskFlagValue = string | true | readonly string[];
 type TaskStdin = "document" | "body" | "append" | "note" | "compose";
 
@@ -12,6 +18,7 @@ export type ParsedTaskCommand = Readonly<{
   positionals: readonly string[];
   flags: Readonly<Record<string, TaskFlagValue>>;
   stdin?: TaskStdin;
+  where?: TaskQueryExpression;
 }>;
 
 type TaskCommandSpec = Readonly<{
@@ -36,9 +43,11 @@ task add [--namespace <ns>] [--json] -`,
     purpose: "Create one Task from flags or a canonical stdin document.",
   },
   show: { arity: [1, 1], flags: COMMON, usage: "task show <TaskId> [--json]", purpose: "Read one Task and its relationships." },
-  ls: { arity: [0, 0], flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean" }, usage: "task ls [--closed | --all] [--world] [--json]", purpose: "List Tasks in the selected scope." },
-  ready: { arity: [0, 0], flags: { ...COMMON, world: "boolean" }, usage: "task ready [--world] [--json]", purpose: "List Tasks whose dependencies are satisfied." },
-  blocked: { arity: [0, 0], flags: { ...COMMON, world: "boolean" }, usage: "task blocked [--world] [--json]", purpose: "List Tasks blocked by dependencies." },
+  ls: { arity: [0, 0], flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" }, usage: "task ls [--closed | --all] [--world] [--limit <n>] [--json]", purpose: "List Tasks in the selected scope." },
+  ready: { arity: [0, 0], flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" }, usage: "task ready [--world] [--parent <TaskId>] [--limit <n>] [--json]", purpose: "List open Tasks whose every need is terminal." },
+  blocked: { arity: [0, 0], flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" }, usage: "task blocked [--world] [--parent <TaskId>] [--limit <n>] [--json]", purpose: "List Tasks blocked by dependencies." },
+  query: { arity: [0, 0], flags: { ...COMMON, where: "value", world: "boolean", sort: "value", limit: "value" }, usage: `task query [--where <expression>] [--world]
+  [--sort priority|created|updated|id] [--limit <n>] [--json]`, purpose: "Query Task facts with a typed boolean expression." },
   tree: { arity: [1, 1], flags: { ...COMMON, full: "boolean" }, usage: "task tree <TaskId> [--full] [--json]", purpose: "Read one Task dependency tree." },
   doctor: { arity: [0, 0], flags: COMMON, usage: "task doctor [--json]", purpose: "Inspect Task authority without repairing it." },
   update: {
@@ -138,13 +147,32 @@ function validateUpdate(scanned: ScannedTask, fail: (message: string) => never):
   if (Object.keys(flags).every((name) => name === "json")) fail("task update requires at least one patch option");
 }
 
+function validateTaskReadFlags(
+  action: TaskAction,
+  flags: Readonly<Record<string, TaskFlagValue>>,
+  fail: (message: string) => never,
+): void {
+  if (action === "ls" && flags.closed === true && flags.all === true) fail("--closed and --all are mutually exclusive");
+  if (typeof flags.limit === "string") {
+    try { validateTaskLimit(flags.limit); }
+    catch (error) { fail(error instanceof Error ? error.message : String(error)); }
+  }
+  if (typeof flags.sort === "string" && flags.sort !== "priority" && flags.sort !== "created" && flags.sort !== "updated" && flags.sort !== "id") {
+    fail("--sort must be priority, created, updated, or id");
+  }
+  if ((action === "ready" || action === "blocked") && typeof flags.parent === "string") {
+    try { validateTaskParent(flags.parent); }
+    catch (error) { fail(error instanceof Error ? error.message : String(error)); }
+  }
+}
+
 function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (message: string) => never): void {
   const spec = TASK_COMMAND_SPECS[action], { positionals, flags, stdin } = scanned;
   if (positionals.length < spec.arity[0] || positionals.length > spec.arity[1]) fail(`task ${action} has invalid positional arguments`);
   if (action === "add" && (stdin === "document") === (positionals.length === 1)) fail("task add requires either TITLE or final '-' input");
   if (action === "add" && stdin === "document" && Object.keys(flags).some((name) => name !== "json" && name !== "namespace")) fail("task add document input owns its creation fields");
   if (action === "compose" && stdin !== "compose") fail("task compose requires final '-' input");
-  if (action === "ls" && flags.closed === true && flags.all === true) fail("--closed and --all are mutually exclusive");
+  validateTaskReadFlags(action, flags, fail);
   if (action === "update") validateUpdate(scanned, fail);
 }
 
@@ -155,5 +183,10 @@ export function parseTaskCommand(argv: readonly string[]): ParsedTaskCommand {
   const fail = (message: string): never => { throw new CliUsageError(message, renderTaskUsage(action)); };
   const scanned = scanTaskArgv(action, argv, fail);
   validateTaskScan(action, scanned, fail);
-  return { command: "task", action, output: scanned.flags.json === true ? "json" : "text", ...scanned };
+  let where: TaskQueryExpression | undefined;
+  if (action === "query" && typeof scanned.flags.where === "string") {
+    try { where = parseTaskQueryExpression(scanned.flags.where); }
+    catch (error) { fail(error instanceof Error ? error.message : String(error)); }
+  }
+  return { command: "task", action, output: scanned.flags.json === true ? "json" : "text", ...scanned, ...(where === undefined ? {} : { where }) };
 }

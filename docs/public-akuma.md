@@ -227,6 +227,9 @@ selector, Alias selector, or cross-product fallback.
 Each query invokes only its selected owner. Task queries read the Task board,
 Contract queries read the Contract board, Archetype queries decode definition
 catalog metadata, and Akuma queries delegate to `Akuma.list({ archetype? })`.
+The Task Catalog consumes one complete Task-owned catalog snapshot rather than a
+bounded Task list page, so it never silently omits identities or invents a second
+Task query evaluator.
 Akuma validates and applies the optional selection while decoding physical
 identities; Catalog does not read or filter fleet rows. A selected-owner failure fails
 the query; an unselected owner is never read and therefore cannot suppress it.

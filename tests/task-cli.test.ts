@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { invoke } from "../src/cli/invoke.js";
+import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "../src/cli/render/task.js";
 import type { TaskInvocationResult } from "../src/cli/commands/task-invoke.js";
 
 function world(): string { const root = mkdtempSync(join(tmpdir(), "keiyaku-task-cli-")); mkdirSync(join(root, ".keiyaku")); return root; }
+
+async function runMain(argv: readonly string[]): Promise<Readonly<{ exit: number; stdout: string; stderr: string }>> {
+  let stdout = "", stderr = "";
+  const writeStdout = process.stdout.write, writeStderr = process.stderr.write;
+  process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
+  try { return { exit: await main(argv), stdout, stderr }; }
+  finally { process.stdout.write = writeStdout; process.stderr.write = writeStderr; }
+}
 
 test("task parser owns subcommand arity, repeat flags, and selected stdin", () => {
   assert.deepEqual(parseArgv(["-C", "/tmp/project", "task", "add", "Ship task", "--namespace", "contract/inside", "--state", "in_progress", "--needs", "task/a", "--needs", "task/b", "--json"]), {
@@ -26,6 +36,13 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
   assert.throws(() => parseArgv(["task", "add", "--state", "done", "-"]), CliUsageError);
   assert.throws(() => parseArgv(["task", "ls", "--closed", "--all"]), CliUsageError);
   assert.throws(() => parseArgv(["task", "update", "task/a"]), CliUsageError);
+  const query = parseArgv(["task", "query", "--where", "priority <= 1 and not state = done", "--sort", "updated", "--limit", "10"]);
+  assert.equal(query.command.command, "task");
+  if (query.command.command === "task") assert.equal(query.command.where?.kind, "and");
+  assert.throws(() => parseArgv(["task", "query", "--where", "prioty = 1"]), /unknown query field/u);
+  assert.throws(() => parseArgv(["task", "query", "--where", "title ~ auth"]), /double quotes/u);
+  assert.throws(() => parseArgv(["task", "query", "--limit", "0"]), /--limit/u);
+  assert.throws(() => parseArgv(["task", "ready", "--parent", "not-a-task"]), /--parent/u);
 });
 
 test("Task commands reject the removed Contract association flags", () => {
@@ -89,8 +106,49 @@ test("task compose and views flow through native results", async () => {
   const listed = await invoke(parseArgv(["-C", root, "task", "ls"])) as TaskInvocationResult;
   const command = parseArgv(["task", "ls"]).command;
   if (command.command !== "task") throw new Error("not a task command");
-  assert.match(renderTaskText(command, listed), /task\/parent - P2 - ready - Parent/u);
+  assert.match(renderTaskText(command, listed), /^2 ls$/mu);
+  assert.match(renderTaskText(command, listed), /^task\/parent - P2 - ready - Parent$/mu);
   assert.equal(taskExitCode(listed), 0);
+});
+
+test("task query keeps text and JSON membership on one typed page", async () => {
+  const root = world();
+  await invoke(parseArgv(["-C", root, "task", "add", "Critical auth", "--priority", "0"]));
+  await invoke(parseArgv(["-C", root, "task", "add", "Routine docs", "--priority", "2"]));
+  const argv = ["-C", root, "task", "query", "--where", "priority <= 1 and title ~ \"auth\"", "--limit", "1"] as const;
+  const result = await invoke(parseArgv(argv)) as TaskInvocationResult;
+  const command = parseArgv(argv).command;
+  if (command.command !== "task") throw new Error("not a task command");
+  assert.match(renderTaskText(command, result), /^1 query$/mu);
+  assert.match(renderTaskText(command, result), /^task\/critical-auth - P0 - ready - Critical auth$/mu);
+  const hostileArgv = ["-C", root, "task", "query", "--where", "title ~ \"auth\nforged heading\""] as const;
+  const hostile = await invoke(parseArgv(hostileArgv)) as TaskInvocationResult;
+  const hostileCommand = parseArgv(hostileArgv).command;
+  if (hostileCommand.command !== "task") throw new Error("not a task command");
+  assert.equal(renderTaskText(hostileCommand, hostile), "0 query");
+  const json = await runMain([...argv, "--json"]);
+  assert.equal(json.exit, 0);
+  const parsed = JSON.parse(json.stdout) as { kind: string; value: { kind: string; value: { rows: readonly { id: string }[]; total: number } } };
+  assert.equal(parsed.kind, "present");
+  assert.deepEqual(parsed.value.value.rows.map((row) => row.id), ["task/critical-auth"]);
+  assert.equal(parsed.value.value.total, 1);
+});
+
+test("Task world reads distinguish absent, present-empty, and failed", async () => {
+  const absent = mkdtempSync(join(tmpdir(), "keiyaku-task-cli-absent-"));
+  const present = world();
+  const missing = await runMain(["-C", absent, "task", "ls", "--json"]);
+  assert.deepEqual(missing, { exit: 1, stdout: '{"kind":"absent"}\n', stderr: "" });
+  const empty = await runMain(["-C", present, "task", "ls", "--json"]);
+  assert.equal(empty.exit, 0);
+  assert.deepEqual(JSON.parse(empty.stdout), { kind: "present", value: { kind: "accepted", value: { rows: [], total: 0, returned: 0, truncated: false } } });
+
+  const tasksDirectory = join(present, ".keiyaku", "tasks");
+  mkdirSync(tasksDirectory);
+  writeFileSync(join(tasksDirectory, "broken.md"), "not Task authority\n");
+  const failed = await runMain(["-C", present, "task", "ls", "--json"]);
+  assert.equal(failed.exit, 3);
+  assert.equal(JSON.parse(failed.stdout).kind, "failed");
 });
 
 test("task doctor renders graph disease and controls exit status", async () => {

@@ -136,6 +136,7 @@ tasks.addDocument(input: AddTaskDocumentInput): Promise<TaskMutationResult>
 tasks.list(input?: { selection?: "active" | "closed" | "all"; scope?: "namespace" | "world"; limit?: number }): Promise<TaskList>
 tasks.ready(input?: { scope?: "namespace" | "world"; parent?: string; limit?: number }): Promise<TaskList>
 tasks.blocked(input?: { scope?: "namespace" | "world"; parent?: string; limit?: number }): Promise<BlockedTaskList>
+tasks.query(input?: { where?: TaskQueryExpression; scope?: "namespace" | "world"; sort?: "priority" | "created" | "updated" | "id"; limit?: number }): Promise<TaskQueryResult>
 tasks.doctor(): Promise<TaskDoctorReport>
 tasks.batch(input: { verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }): Promise<TaskBatchResult>
 tasks.compose(input: { markdown: string; signal?: AbortSignal }): Promise<TaskCompositionResult>
@@ -151,9 +152,10 @@ task.done(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutation
 task.drop(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult>
 ```
 
-`TaskList` and `BlockedTaskList` accepted values carry `rows`, the complete
-matching `total`, and whether the requested limit truncated the rows. A limit
-must be a positive integer. The fixed priority-then-TaskId order is stable for
+`TaskList`, `BlockedTaskList`, and `TaskQueryResult` accepted values carry
+`rows`, the complete matching `total`, `returned`, and whether the requested
+limit truncated the rows. The default limit is 100 and a caller may select an
+integer from 1 through 1000. The fixed priority-then-TaskId order is stable for
 one observed board snapshot; Task owns no continuation cursor or observer
 session.
 
@@ -211,6 +213,20 @@ and title. Every list result is bounded by its optional `limit` and carries an
 honest `total` for the complete matching set; no result requires title/body
 prose inference. Blocked rows add unresolved blocker references only. File
 mtime is never read.
+
+`query` is the general read surface over one Task board snapshot. Its public
+input is a typed expression tree, never a shell string. The predicate fields
+are `state`, `priority`, `title`, `id`, `parent`, recursive `under`, `needs`,
+reverse `blocks`, `ready`, `blocked`, `created`, and `updated`; boolean nodes
+are `and`, `or`, and `not`. The evaluator rejects unknown fields, incompatible
+operators, malformed TaskIds, and invalid timestamps before reading authority.
+It returns the same bounded page shape as the named views: `rows`, complete
+`total`, `returned`, and `truncated`. Filtering precedes limiting, and sorting
+is deterministic with a TaskId byte tie-breaker. Query has no cursor, session,
+claim, assignment, scheduler, Contract, Akuma, Git, or prose-inferred field.
+`under` and the named-view `parent` selector require an existing parent and
+select recursive descendants only; a missing parent is a typed Task refusal.
+An omitted query expression selects active Tasks, excluding `done` and `drop`.
 The Task operations owner can project the complete world rows and these blocker
 references from one board snapshot for a composite reader; this observation
 does not expose Task persistence or read TaskHolder or Contract authority.

@@ -440,8 +440,11 @@ test("Kanshi text keeps complete identities in the new fixed section grammar", a
   const report = await observe(repository.path, Repo.at({ path: repository.path }));
   const text = renderKanshiText(report, { columns: 20, color: false });
   const world = World.at(repository.path);
-  assert.match(text, new RegExp(`^kanshi ${world.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "mu"));
-  assert.doesNotMatch(text, /marks |root |─/u);
+  const signature = text.split("\n", 1)[0]!;
+  assert.match(signature, /^kanshi ─ 1 keiyaku · 1 akuma · 1 task ─ /u);
+  assert.equal(signature.includes(world), true);
+  assert.equal(report.contracts.kind, "present");
+  if (report.contracts.kind === "present") assert.equal(signature.includes(report.contracts.value.state!), true);
   assert.equal(text.includes(contract.id), true);
   assert.equal(text.includes(taskId), true);
   assert.match(text, new RegExp(`^● ${taskId} in_progress$`, "mu"));
@@ -542,9 +545,9 @@ test("bare Kanshi text triages every section without changing its report", () =>
   const before = structuredClone(report);
   const text = renderKanshiText(report, { columns: 120, color: false });
 
-  assert.match(text, /^kanshi \/repo$/mu);
-  assert.match(text, /^state cccccccc · main · observed 2026-08-12T00:00:00\.000Z$/mu);
-  assert.doesNotMatch(text, /marks |root |─/u);
+  const signature = text.split("\n", 1)[0]!;
+  assert.equal(displayColumns(signature), 120);
+  assert.match(signature, /^kanshi ─+ 2 keiyaku · 7 akuma · 6 task ─+ \/repo main c{40}$/u);
   assert.match(text, /keiyaku 2/u);
   assert.match(text, /^⧗ kei\/active-contract pending-delivery$/mu);
   assert.match(text, /^  worktree · integration aaaaaaaa · -> refs\/heads\/main$/mu);
@@ -584,7 +587,20 @@ test("bare Kanshi text triages every section without changing its report", () =>
   assert.match(text, /^  unconfined$/mu);
   assert.match(text, /\? aku\/worker\/a0000005\s+unborn/u);
   assert.doesNotMatch(text, /searched \/repo/u);
+  assert.ok(text.indexOf("\nkeiyaku 2\n") < text.indexOf("\nakuma 7\n"));
+  assert.ok(text.indexOf("\nakuma 7\n") < text.indexOf("\ntask 4 · 1 ready · 1 held\n"));
   assert.deepEqual(report, before);
+});
+
+test("Kanshi Split Horizon stays one line at standard widths", () => {
+  const report = attentionReport();
+  for (const columns of [80, 120]) {
+    const text = renderKanshiText(report, { columns, color: false });
+    const [signature, following] = text.split("\n", 2);
+    assert.equal(following, "");
+    assert.ok(displayColumns(signature!) >= columns);
+    assert.match(signature!, /^kanshi ─+ 2 keiyaku · 7 akuma · 6 task ─+ \/repo main c{40}$/u);
+  }
 });
 
 test("exact Contract Kanshi text keeps terminal gates and testimony summaries", () => {
@@ -685,8 +701,8 @@ test("Kanshi narrow wrapping exceeds columns only for indivisible scan and coord
   assert.match(text, /^  1 held$/mu);
   assert.ok(overflow.length > 0);
   assert.ok(overflow.every((line) =>
-    /^kanshi \/repository/u.test(line)
-    || /^state /u.test(line)
+    /^kanshi ─ /u.test(line)
+    || /^  ─ /u.test(line)
     || /^[●○⧗✓!?×] /u.test(line)
     || line.includes(longRef)
     || line.includes(longGate)

@@ -253,7 +253,7 @@ Task, Archetype, or Akuma state. The accepted path grammar is closed and uses
 the canonical directory spellings above; missing trailing slashes, exact
 identities, Alias selectors, and other paths are usage errors.
 
-`ls task/` lists Task rows, `ls kei/` lists Contract rows whose persisted
+`ls task/` lists Task rows from one complete Task-owned catalog snapshot. `ls kei/` lists Contract rows whose persisted
 identities remain `kei/...`, and `ls aku/` lists Archetype definitions with
 name, optional model, and complete description. `ls aku/<archetype>/` lists
 compact instances of that Archetype, while `ls aku/*/*` explicitly lists all

@@ -5,19 +5,21 @@ import { composeTasks, type TaskCompositionResult } from "./compose.js";
 import { TaskAuthorityCorruptionError, type TaskPriority, type TaskState } from "./document.js";
 import { isTaskSegment, parseTaskId, type TaskId } from "./identity.js";
 import {
-  addTask, addTaskDocument, batchTasks, blockedTasks, currentNamespace, lifecycleTask, listTasks, readyTasks,
+  addTask, addTaskDocument, batchTasks, blockedTasks, currentNamespace, lifecycleTask, listTasks, queryTasks, readyTasks,
   setCurrentNamespace, taskView, updateTask, type AddTaskDocumentInput, type AddTaskInput, type TaskBatchResult,
   type TaskMutationResult, type TaskOutcome, type TaskRefusal, type TaskRetry, type TaskUpdateResult, type TaskView, type UpdateTaskInput,
 } from "./operations.js";
 import { readBoard } from "./store.js";
+import { isValidTaskLimit, normalizeTaskQuery, type TaskPage, type TaskQueryExpression, type TaskQueryPredicate, type TaskQueryRow, type TaskQuerySort, MAX_TASK_LIMIT, DEFAULT_TASK_LIMIT } from "./query.js";
 
 export type TaskDetail = Omit<TaskDetailFacts, "task"> & Readonly<{ task: TaskView }>;
-export type TaskList = TaskOutcome<readonly TaskRow[]>;
-export type BlockedTaskList = TaskOutcome<readonly BlockedTaskRow[]>;
+export type TaskList = TaskOutcome<TaskPage<TaskRow>>;
+export type BlockedTaskList = TaskOutcome<TaskPage<BlockedTaskRow>>;
+export type TaskQueryResult = TaskOutcome<TaskPage<TaskQueryRow>>;
 export type TaskNamespaceResult = TaskOutcome<readonly string[]>;
 export type TaskDoctorReport = Readonly<{ issues: readonly TaskDoctorIssue[] }>;
 export type TaskDependencyTree = TaskOutcome<TaskTreeNode>;
-export type { AddTaskDocumentInput, AddTaskInput, BlockedTaskRow, TaskBatchResult, TaskCompositionResult, TaskDoctorIssue, TaskId, TaskMutationResult, TaskOutcome, TaskPriority, TaskRef, TaskRefusal, TaskRetry, TaskRow, TaskState, TaskUpdateResult, TaskView, UpdateTaskInput };
+export type { AddTaskDocumentInput, AddTaskInput, BlockedTaskRow, TaskBatchResult, TaskCompositionResult, TaskDoctorIssue, TaskId, TaskMutationResult, TaskOutcome, TaskPriority, TaskRef, TaskRefusal, TaskRetry, TaskRow, TaskState, TaskUpdateResult, TaskView, UpdateTaskInput, TaskPage, TaskQueryExpression, TaskQueryPredicate, TaskQueryRow, TaskQuerySort };
 export { TaskAuthorityCorruptionError };
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -46,6 +48,12 @@ function namespace(value: unknown): readonly string[] | undefined {
 }
 function text(value: unknown, label: string): string | undefined { if (value === undefined) return undefined; if (typeof value !== "string") throw new TypeError(`${label} must be a string`); return value; }
 function priority(value: unknown): TaskPriority | undefined { if (value === undefined) return undefined; if (!Number.isInteger(value) || typeof value !== "number" || value < 0 || value > 3) throw new TypeError("priority must be 0..3"); return value as TaskPriority; }
+function limit(value: unknown): number | undefined { if (value === undefined) return undefined; if (typeof value !== "number" || !isValidTaskLimit(value)) throw new TypeError(`limit must be an integer from 1 to ${MAX_TASK_LIMIT}`); return value; }
+function sort(value: unknown): TaskQuerySort | undefined {
+  if (value === undefined) return undefined;
+  if (value !== "priority" && value !== "created" && value !== "updated" && value !== "id") throw new TypeError("sort is invalid");
+  return value;
+}
 function state(value: unknown): TaskState | undefined {
   if (value === undefined) return undefined;
   if (value !== "open" && value !== "in_progress" && value !== "on_hold" && value !== "done" && value !== "drop") throw new TypeError("state is invalid");
@@ -117,9 +125,10 @@ class TasksHandle {
   task(input: Readonly<{ id: string }>): Task { const v = record(input, "task input"); closed(v, ["id"], "task input"); return new TaskHandle(id(v.id), this.world); }
   add(input: AddTaskInput): Promise<TaskMutationResult> { return addTask(this.world, addInput(input)); }
   addDocument(input: AddTaskDocumentInput): Promise<TaskMutationResult> { const v = record(input, "addDocument input"); closed(v, ["markdown", "namespace", "signal"], "addDocument input"); const markdown = text(v.markdown, "markdown"); if (markdown === undefined) throw new TypeError("markdown is required"); const ns = namespace(v.namespace), abort = signal(v.signal); return addTaskDocument(this.world, { markdown, ...(ns === undefined ? {} : { namespace: ns }), ...(abort === undefined ? {} : { signal: abort }) }); }
-  async list(input: Readonly<{ selection?: "active" | "closed" | "all"; scope?: "namespace" | "world" }> = {}): Promise<TaskList> { const v = record(input, "list input"); closed(v, ["selection", "scope"], "list input"); if (v.selection !== undefined && v.selection !== "active" && v.selection !== "closed" && v.selection !== "all") throw new TypeError("selection must be active, closed, or all"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return listTasks(this.world, v.selection ?? "active", v.scope as "namespace" | "world" | undefined); }
-  async ready(input: Readonly<{ scope?: "namespace" | "world" }> = {}): Promise<TaskList> { const v = record(input, "ready input"); closed(v, ["scope"], "ready input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return readyTasks(this.world, v.scope as "namespace" | "world" | undefined); }
-  async blocked(input: Readonly<{ scope?: "namespace" | "world" }> = {}): Promise<BlockedTaskList> { const v = record(input, "blocked input"); closed(v, ["scope"], "blocked input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return blockedTasks(this.world, v.scope as "namespace" | "world" | undefined); }
+  async list(input: Readonly<{ selection?: "active" | "closed" | "all"; scope?: "namespace" | "world"; limit?: number }> = {}): Promise<TaskList> { const v = record(input, "list input"); closed(v, ["selection", "scope", "limit"], "list input"); if (v.selection !== undefined && v.selection !== "active" && v.selection !== "closed" && v.selection !== "all") throw new TypeError("selection must be active, closed, or all"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return listTasks(this.world, v.selection ?? "active", v.scope as "namespace" | "world" | undefined, limit(v.limit) ?? DEFAULT_TASK_LIMIT); }
+  async ready(input: Readonly<{ scope?: "namespace" | "world"; parent?: string; limit?: number }> = {}): Promise<TaskList> { const v = record(input, "ready input"); closed(v, ["scope", "parent", "limit"], "ready input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); const parent = v.parent === undefined ? undefined : id(v.parent); return readyTasks(this.world, v.scope as "namespace" | "world" | undefined, parent, limit(v.limit) ?? DEFAULT_TASK_LIMIT); }
+  async blocked(input: Readonly<{ scope?: "namespace" | "world"; parent?: string; limit?: number }> = {}): Promise<BlockedTaskList> { const v = record(input, "blocked input"); closed(v, ["scope", "parent", "limit"], "blocked input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); const parent = v.parent === undefined ? undefined : id(v.parent); return blockedTasks(this.world, v.scope as "namespace" | "world" | undefined, parent, limit(v.limit) ?? DEFAULT_TASK_LIMIT); }
+  async query(input: Readonly<{ where?: TaskQueryExpression; scope?: "namespace" | "world"; sort?: TaskQuerySort; limit?: number }> = {}): Promise<TaskQueryResult> { const v = record(input, "query input"); closed(v, ["where", "scope", "sort", "limit"], "query input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); const expression = v.where === undefined ? { kind: "and", terms: [{ kind: "predicate", predicate: { field: "state", operator: "!=", value: "done" } }, { kind: "predicate", predicate: { field: "state", operator: "!=", value: "drop" } }] } as const : normalizeTaskQuery(v.where); return queryTasks(this.world, expression, v.scope as "namespace" | "world" | undefined, sort(v.sort) ?? "priority", limit(v.limit) ?? DEFAULT_TASK_LIMIT); }
   async doctor(): Promise<TaskDoctorReport> { return { issues: diagnoseBoard(readBoard(this.world).board) }; }
   batch(input: Readonly<{ verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }>): Promise<TaskBatchResult> { const v = record(input, "batch input"); closed(v, ["verb", "ids", "note", "signal"], "batch input"); const verb = v.verb; if (verb !== "done" && verb !== "drop" && verb !== "hold") throw new TypeError("batch verb is invalid"); const note = text(v.note, "note"); if (note !== undefined && verb !== "done" && verb !== "drop") throw new TypeError("batch note is valid only for done or drop"); return batchTasks(this.world, verb, taskIds(v.ids, "ids") ?? [], signal(v.signal), note); }
   compose(input: Readonly<{ markdown: string; signal?: AbortSignal }>): Promise<TaskCompositionResult> { const v = record(input, "compose input"); closed(v, ["markdown", "signal"], "compose input"); const markdown = text(v.markdown, "markdown"); if (markdown === undefined) throw new TypeError("markdown is required"); return composeTasks(this.world, markdown, signal(v.signal)); }

@@ -67,6 +67,35 @@ carry the decision-relevant product facts. `--json` is an explicit secondary
 projection for debugging or non-interactive bulk scripting; its availability
 never excuses missing, opaque, or degraded text output.
 
+## Shared Scanner Grammar
+
+Text surfaces share a small scanner grammar, not a shared layout. Renderer words
+are lowercase; `·` separates facts on a summary line; evidence is indented by
+two spaces; a glyph is paired with its word; and a complete coordinate remains
+copyable and is never truncated. Confirmed absence has no placeholder row, while
+an observed empty collection is represented by its honest zero. Numeric counts
+and ages align to the right when a surface uses columns. These rules are
+presentation laws only: they do not add facts to JSON, journal authority, or
+read models.
+
+Kanshi is the one aggregate surface with a brand signature. Its first line is
+one responsive Split Horizon geometry:
+
+```text
+kanshi ─── <keiyaku-count> keiyaku · <akuma-count> akuma · <task-count> task ─── <world>
+```
+
+The left word identifies the observer, the middle is the aggregate fact, and the
+right side is the observed world coordinate. The two horizontal segments use
+`U+2500` and flex to the available display width, with at least one character
+on each side; they never hide or shorten the facts. When the complete coordinate
+makes the minimum signature wider than the viewport, the signature remains one
+scan line and exceeds the viewport rather than folding or truncating. A present
+empty board keeps
+all three zero counts. An absent world has no signature because there is no
+observed world to frame. Other commands start directly with their operation
+identity and do not receive a global banner.
+
 Every invocation renders exactly one plain result object:
 
 | Kind | Product content | Exit |
