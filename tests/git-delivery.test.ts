@@ -476,6 +476,24 @@ test("a displaced directory with large ignored contents refuses at the directory
   assert.equal(readFileSync(join(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
 });
 
+test("a displaced directory with large untracked contents refuses at the directory", async () => {
+  const { contract, repository } = await directoryReplacementContract("");
+  for (let index = 0; index < 4_400; index += 1) {
+    const name = `untracked-${String(index).padStart(4, "0")}-${"x".repeat(220)}.txt`;
+    writeFileSync(join(repository.path, "artifact", name), "untracked\n");
+  }
+  const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
+
+  const delivered = await contract.deliver();
+
+  assert.equal(delivered.value.placement?.refusal?.kind, "checkout-not-followable");
+  if (delivered.value.placement?.refusal?.kind !== "checkout-not-followable") return;
+  assert.equal(delivered.value.placement.refusal.reason, "untracked");
+  assert.deepEqual(delivered.value.placement.refusal.paths, ["artifact"]);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
+  assert.equal(readFileSync(join(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
+});
+
 test("a failed displaced-directory observation leaves the target untouched", async () => {
   const { contract, repository } = await directoryReplacementContract();
   writeFileSync(join(repository.path, "artifact", "ignored.tmp"), "ignored\n");

@@ -136,7 +136,10 @@ function changedPaths(
   ]);
 }
 
-function dryRunRefusal(input: CheckoutObservation): CheckoutNotFollowableRefusal {
+async function dryRunRefusal(
+  input: CheckoutObservation,
+  scopes: readonly PhysicalScope[],
+): Promise<CheckoutNotFollowableRefusal> {
   const { repository, contractId, target, path, predecessor, candidate } = input;
   const changed = changedPaths(repository, path, predecessor, candidate);
   const pathspecs = changed.map(literalPath);
@@ -159,16 +162,8 @@ function dryRunRefusal(input: CheckoutObservation): CheckoutNotFollowableRefusal
   const unmerged = gitPaths(repository, path, ["diff", "--name-only", "--diff-filter=U", "-z", "--", ...pathspecs]);
   if (unmerged.length > 0) return checkoutRefusal(contractId, target, path, "conflict", unmerged);
 
-  const untracked = boundedUntrackedPaths({ ...input, writes: changed.filter((value) => {
-    return changedPaths(repository, path, predecessor, candidate, "ACMRT").includes(value);
-  }) });
-  return checkoutRefusal(
-    contractId,
-    target,
-    path,
-    untracked.length > 0 ? "untracked" : "conflict",
-    untracked,
-  );
+  return await untrackedRefusalWithinScopes(input, scopes, false)
+    ?? checkoutRefusal(contractId, target, path, "conflict", []);
 }
 
 type PhysicalScope = Readonly<{
@@ -225,26 +220,29 @@ function destructionScopes(
   return [...scopes.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
-const IGNORED_UNTRACKED_ARGS = [
-  "ls-files",
-  "--others",
-  "--ignored",
-  "--exclude-standard",
-  "--directory",
-  "--no-empty",
-  "-z",
-] as const;
+function untrackedArgs(ignored: boolean): readonly string[] {
+  return [
+    "ls-files",
+    "--others",
+    ...(ignored ? ["--ignored"] : []),
+    "--exclude-standard",
+    "--directory",
+    "--no-empty",
+    "-z",
+  ];
+}
 
-async function ignoredCustodyRefusal(
+async function untrackedRefusalWithinScopes(
   input: CheckoutObservation,
-  writes: readonly string[],
+  scopes: readonly PhysicalScope[],
+  ignored: boolean,
 ): Promise<CheckoutNotFollowableRefusal | null> {
-  const { repository, contractId, target, path, candidate } = input;
-  const scopes = destructionScopes(repository, path, candidate, writes);
+  const { repository, contractId, target, path } = input;
+  const args = untrackedArgs(ignored);
   const leaves = scopes.filter((scope) => scope.kind === "leaf");
   if (leaves.length > 0) {
     const collisions = gitPaths(repository, path, [
-      ...IGNORED_UNTRACKED_ARGS,
+      ...args,
       "--",
       ...leaves.map((scope) => literalPath(scope.path)),
     ]);
@@ -257,7 +255,7 @@ async function ignoredCustodyRefusal(
     await consumeGitStdout(repository, [
       "-C",
       path,
-      ...IGNORED_UNTRACKED_ARGS,
+      ...args,
       "--",
       literalPath(scope.path),
     ], (chunk) => {
@@ -300,16 +298,17 @@ async function ordinaryPrecheck(
   const predecessor = gitObjectIdForSnapshot(target.expectedOid);
   const candidate = gitObjectIdForSnapshot(target.newOid);
   const observation = { repository, contractId, target, path, predecessor, candidate };
+  let dryRunFailed = false;
   try {
     runGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
   } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;
-    return dryRunRefusal(observation);
+    dryRunFailed = true;
   }
-  return ignoredCustodyRefusal(
-    observation,
-    changedPaths(repository, path, predecessor, candidate, "ACMRT"),
-  );
+  const writes = changedPaths(repository, path, predecessor, candidate, "ACMRT");
+  const scopes = destructionScopes(repository, path, candidate, writes);
+  if (dryRunFailed) return dryRunRefusal(observation, scopes);
+  return untrackedRefusalWithinScopes(observation, scopes, true);
 }
 
 export async function acquireTargetPlacementFence(
