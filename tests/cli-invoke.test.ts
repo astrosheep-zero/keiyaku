@@ -179,7 +179,7 @@ test("composite status refuses an explicit Repo that could create a mixed-World 
 
 test("an explicit status selector projects one Kanshi report without changing section shape", async () => {
   const repository = repositoryWithMain();
-  const tasks = Tasks.of(World.at(repository.path));
+  const tasks = Tasks.of(await World.at(repository.path));
   const associated = await tasks.add({ title: "Associated" });
   const unrelated = await tasks.add({ title: "Unrelated" });
   assert.equal(associated.kind, "accepted");

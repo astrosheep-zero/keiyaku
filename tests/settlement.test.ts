@@ -61,7 +61,7 @@ function document(title: string): string {
 }
 
 async function task(path: string, title: string, state: "open" | "done" | "drop" = "open") {
-  const result = await Tasks.of(World.at(path)).add({ title, state });
+  const result = await Tasks.of(await World.at(path)).add({ title, state });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("Task creation was not accepted");
   return result.value.id;
@@ -72,7 +72,7 @@ function taskPath(id: string): string {
 }
 
 async function taskState(path: string, id: string) {
-  const detail = await Tasks.of(World.at(path)).task({ id }).read();
+  const detail = await Tasks.of(await World.at(path)).task({ id }).read();
   assert.ok(detail);
   return detail.task;
 }

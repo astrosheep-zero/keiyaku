@@ -16,18 +16,20 @@ type WorldResolutionInput = {
 
 type WorldResolution = {
   root: WorldRoot | null
-  establish(): WorldRoot
+  establish(): Promise<WorldRoot>
 }
 
-World.resolve(input: string | WorldResolutionInput): WorldResolution
-World.locate(input: string | WorldResolutionInput): WorldRoot | null
-World.at(path: string): WorldRoot
+World.resolve(input: string | WorldResolutionInput): Promise<WorldResolution>
+World.locate(input: string | WorldResolutionInput): Promise<WorldRoot | null>
+World.at(path: string): Promise<WorldRoot>
 ```
 
 `World.resolve` resolves the invocation directory once and returns the current
 root plus the creating operation for that same resolution. Reading `root`
 never changes the filesystem; `establish()` creates only the selected marker.
 `World.locate` is the read-only projection of `root`.
+
+Each operation completes its filesystem observation before its Promise resolves.
 
 When `repositoryRoot` is supplied, that canonical Git primary worktree is the
 WorldRoot; the marker is not consulted and no filesystem is changed. Without

@@ -53,7 +53,7 @@ function markdown(title: string): string {
   ].join("\n");
 }
 
-function repositoryFixture() {
+async function repositoryFixture() {
   const raw = makeGitRepository();
   raw.run(["config", "user.name", "Test User"]);
   raw.run(["config", "user.email", "test@example.com"]);
@@ -62,11 +62,11 @@ function repositoryFixture() {
   return { raw, repo: Repo.at({ path: raw.path }), git: repositoryAt(raw.path) };
 }
 
-function archetypeSettings(root: string) {
+async function archetypeSettings(root: string) {
   const home = join(root, ".test-settings");
   mkdirSync(join(home, "akuma"), { recursive: true });
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-  return { home, value: settings({ root, home }) };
+  return { home, value: await settings({ root, home }) };
 }
 
 function requestPump(root: string) {
@@ -100,9 +100,9 @@ function requestPump(root: string) {
 }
 
 test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () => {
-  const { raw, repo, git } = repositoryFixture();
-  const world = World.at(raw.path);
-  const configured = archetypeSettings(world);
+  const { raw, repo, git } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await archetypeSettings(world);
   const { pump, leash } = requestPump(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   process.env[AKUMA_REQUESTS_ENV] = pump.directory;
@@ -200,9 +200,9 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
 });
 
 test("Keiyaku.call observes for five minutes by default", async () => {
-  const { raw } = repositoryFixture();
-  const world = World.at(raw.path);
-  const configured = archetypeSettings(world);
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await archetypeSettings(world);
   const { pump, leash } = requestPump(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   const originalWait = AkumaHandle.prototype.wait;
@@ -234,8 +234,8 @@ test("Keiyaku.call observes for five minutes by default", async () => {
 type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapter[Key] };
 
 test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async () => {
-  const { raw, repo, git } = repositoryFixture();
-  const world = World.at(raw.path);
+  const { raw, repo, git } = await repositoryFixture();
+  const world = await World.at(raw.path);
   const bound = await Keiyaku.bind({ repo, markdown: markdown("Fork dispatch"), workspace: "here" });
   const owner = (await bound.keiyaku.state()).id;
   const source = allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "face0001" });

@@ -135,13 +135,13 @@ function readTasks(
   }
 }
 
-function joinAkuma(
+async function joinAkuma(
   path: WorldRoot,
   observeContract: ObserveContractEndpoint,
   dispatches: readonly Dispatch[],
-): Section<AkumaKanshiWorld> {
+): Promise<Section<AkumaKanshiWorld>> {
   try {
-    const source = Akuma.of(path).list();
+    const source = await Akuma.of(path).list();
     const aliases = readAliases(path);
     const aliasById = new Map<string, typeof aliases>();
     for (const binding of aliases) aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
@@ -195,7 +195,7 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
       branch,
       contracts,
       tasks: world === null ? { kind: "absent" } : readTasks(world, holders, observeContract),
-      akuma: world === null ? { kind: "absent" } : joinAkuma(world, observeContract, []),
+      akuma: world === null ? { kind: "absent" } : await joinAkuma(world, observeContract, []),
     };
   }
   try {
@@ -219,7 +219,7 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
           ? { kind: "absent" as const }
           : dispatches.kind === "failed"
             ? dispatches
-            : joinAkuma(world, observeContract, dispatches.value),
+            : await joinAkuma(world, observeContract, dispatches.value),
       };
     }));
   } catch (error) {

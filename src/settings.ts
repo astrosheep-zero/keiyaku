@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -71,9 +71,9 @@ function bounded(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 500);
 }
 
-function readScope(path: string): LoadedScope {
+async function readScope(path: string): Promise<LoadedScope> {
   let bytes: string;
-  try { bytes = readFileSync(path, "utf8"); }
+  try { bytes = await readFile(path, "utf8"); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { state: { kind: "absent", path } };
     return { state: { kind: "failed", path, diagnostic: bounded(error) } };
@@ -136,7 +136,7 @@ function settingsFromScopes(project: LoadedScope, user: LoadedScope): Settings {
   });
 }
 
-export function settings(input: SettingsInput = {}): Settings {
+export async function settings(input: SettingsInput = {}): Promise<Settings> {
   if (!object(input)) throw new TypeError("settings input must be an object");
   if (input.root !== undefined && (typeof input.root !== "string" || input.root.trim().length === 0)) {
     throw new TypeError("settings root must be a nonblank string");
@@ -146,16 +146,16 @@ export function settings(input: SettingsInput = {}): Settings {
   }
   const project = input.root === undefined
     ? { state: { kind: "absent" as const } }
-    : readScope(join(resolve(input.root), ".keiyaku", "settings.json"));
-  const user = readScope(join(resolve(input.home ?? join(homedir(), ".keiyaku")), "settings.json"));
+    : await readScope(join(resolve(input.root), ".keiyaku", "settings.json"));
+  const user = await readScope(join(resolve(input.home ?? join(homedir(), ".keiyaku")), "settings.json"));
   return settingsFromScopes(project, user);
 }
 
 /** Read only the project scope owned by a materialized candidate snapshot. */
-export function projectSettings(root: string): Settings {
+export async function projectSettings(root: string): Promise<Settings> {
   if (typeof root !== "string" || root.trim().length === 0) throw new TypeError("settings root must be a nonblank string");
   return settingsFromScopes(
-    readScope(join(resolve(root), ".keiyaku", "settings.json")),
+    await readScope(join(resolve(root), ".keiyaku", "settings.json")),
     { state: { kind: "absent" } },
   );
 }

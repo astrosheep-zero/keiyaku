@@ -79,13 +79,13 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
     return { kind: "contracts", root: board.root, state: board.state, rows: board.rows };
   }
   if (query.kind === "archetypes") {
-    return { kind: "archetypes", rows: listArchetypeDefinitions({ settings: settingsValue(values.settings) }) };
+    return { kind: "archetypes", rows: await listArchetypeDefinitions({ settings: settingsValue(values.settings) }) };
   }
   const path = worldRoot(values.path);
   if (query.kind === "tasks") {
     return { kind: "tasks", root: path, rows: observeTaskCatalogRows(path) };
   }
-  const listed = Akuma.of(path).list(query.archetype === undefined ? undefined : { archetype: query.archetype });
+  const listed = await Akuma.of(path).list(query.archetype === undefined ? undefined : { archetype: query.archetype });
   return {
     kind: "akuma",
     root: path,

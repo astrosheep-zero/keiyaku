@@ -136,7 +136,7 @@ export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<Read
     throw new TypeError("Contract Akuma selector requires repo");
   }
   const fleetIds = selectors.some((selector) => selector.kind === "glob")
-    ? idsFromFleet(world(path, settings).list())
+    ? idsFromFleet(await world(path, settings).list())
     : [];
   const aliases = selectors.some((selector) => selector.kind === "alias")
     ? new Map(readAliases(path).map((binding) => [binding.alias, binding.akuId]))

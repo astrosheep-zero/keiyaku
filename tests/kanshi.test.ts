@@ -29,8 +29,8 @@ import { moveAlias } from "../src/alias/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
-function observe(path: string, repo?: Repo) {
-  return kanshi({ world: World.at(path), ...(repo === undefined ? {} : { repo }) });
+async function observe(path: string, repo?: Repo) {
+  return kanshi({ world: await World.at(path), ...(repo === undefined ? {} : { repo }) });
 }
 
 function document(title = "Kanshi contract"): string {
@@ -65,7 +65,7 @@ async function populatedWorld() {
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const tasks = Tasks.of(World.at(repository.path));
+  const tasks = Tasks.of(await World.at(repository.path));
   const added = await tasks.add({ title: "Render status", priority: 0 });
   assert.equal(added.kind, "accepted");
   if (added.kind !== "accepted") throw new Error("task add failed");
@@ -97,7 +97,7 @@ async function observedGitInvocations(repository: ReturnType<typeof makeGitRepos
   await withGitShim(
     "printf '%s\\n' \"$*\" >> \"$KEIYAKU_KANSHI_GIT_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_KANSHI_GIT_LOG: log },
-    () => observe(repository.path, Repo.at({ path: repository.path })),
+    async () => observe(repository.path, Repo.at({ path: repository.path })),
   );
   return gitInvocations(log);
 }
@@ -108,7 +108,7 @@ function deleteLooseObject(repository: ReturnType<typeof makeGitRepository>, oid
 
 test("one-target Kanshi observation has a seven-process Git topology", async () => {
   const { repository } = await populatedWorld();
-  const tasks = Tasks.of(World.at(repository.path));
+  const tasks = Tasks.of(await World.at(repository.path));
   const added = await tasks.add({ title: "Second status row" });
   assert.equal(added.kind, "accepted");
   if (added.kind !== "accepted") return;
@@ -170,7 +170,7 @@ test("a dead shared Kanshi batch fails every Git-backed owner without restarting
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_KANSHI_GIT_LOG: log },
-    () => observe(repository.path, Repo.at({ path: repository.path })),
+    async () => observe(repository.path, Repo.at({ path: repository.path })),
   );
 
   assert.equal(report.contracts.kind, "failed");
@@ -283,7 +283,7 @@ test("kanshi keeps absent Contract and Task worlds explicit", async () => {
 
 test("a Task world without Git has no invented Contract endpoint", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-task-only-"));
-  const tasks = Tasks.of(World.at(root));
+  const tasks = Tasks.of(await World.at(root));
   const added = await tasks.add({ title: "Standalone Task" });
   assert.equal(added.kind, "accepted");
   const report = await observe(root);
@@ -376,7 +376,7 @@ test("a failed branch observation does not suppress readable Contract state", as
 
 test("blocked Kanshi rows preserve ordered structured Task blocker refs", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-blockers-"));
-  const tasks = Tasks.of(World.at(root));
+  const tasks = Tasks.of(await World.at(root));
   const first = await tasks.add({ title: "First blocker" });
   const second = await tasks.add({ title: "Second blocker", state: "in_progress" });
   assert.equal(first.kind, "accepted");
@@ -439,7 +439,7 @@ test("Kanshi text keeps complete identities in the new fixed section grammar", a
   const { repository, contract, taskId } = await populatedWorld();
   const report = await observe(repository.path, Repo.at({ path: repository.path }));
   const text = renderKanshiText(report, { columns: 20, color: false });
-  const world = World.at(repository.path);
+  const world = await World.at(repository.path);
   const signature = text.split("\n", 1)[0]!;
   assert.match(signature, /^kanshi ─ 1 keiyaku · 1 akuma · 1 task ─ /u);
   assert.equal(signature.includes(world), true);

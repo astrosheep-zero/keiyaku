@@ -53,7 +53,7 @@ async function attemptCandidates(input: BindAttemptInput): Promise<IntentOutcome
     const id = candidateId(input.title, collision);
     let reserved = false;
     if (input.workspace === "here") {
-      const reservation = reserveContractWorktree(input.scope, id);
+      const reservation = await reserveContractWorktree(input.scope, id);
       if (reservation.kind !== "reserved") {
         return { kind: "refused", refusal: {
           kind: "here-worktree-appointed",
@@ -65,13 +65,13 @@ async function attemptCandidates(input: BindAttemptInput): Promise<IntentOutcome
     }
     const result = await attempt(input, id);
     if (result.kind === "accepted") return result;
-    if (reserved) releaseContractWorktree(input.scope, id);
+    if (reserved) await releaseContractWorktree(input.scope, id);
     if (result.kind !== "refused" || result.refusal.kind !== "contract-exists") return result;
   }
   throw new Error("contract identity collision attempts exhausted");
 }
 
-export function admitBindWithAppointment(input: BindAttemptInput) {
+export async function admitBindWithAppointment(input: BindAttemptInput) {
   const action = () => attemptCandidates(input);
-  return input.workspace === "here" ? withContractWorktreeAppointment(input.scope, action) : action();
+  return input.workspace === "here" ? await withContractWorktreeAppointment(input.scope, action) : action();
 }

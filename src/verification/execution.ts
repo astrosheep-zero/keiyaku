@@ -45,7 +45,7 @@ export type ExecuteVerificationInput = Readonly<{
   declarations: readonly VerificationDeclaration[];
   environment: NodeJS.ProcessEnv;
   materializeScratchCandidate: (repository: GitRepository, candidate: SnapshotId) => MaterializedScratchCandidate;
-  projectSettings: (root: string) => Settings;
+  projectSettings: (root: string) => Promise<Settings>;
   signal?: AbortSignal;
 }>;
 
@@ -121,7 +121,7 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
   let destroy: readonly HookCommand[] | undefined;
   try {
     try {
-      const hooks = worktreeHooksFrom({ settings: input.projectSettings(scratch.cwd) });
+      const hooks = worktreeHooksFrom({ settings: await input.projectSettings(scratch.cwd) });
       destroy = hooks.destroy;
       const readiness = await runHookCommands(scratch.cwd, hooks.create, input.signal);
       outcome = readiness.kind === "cancelled"

@@ -28,7 +28,7 @@ function input(root: string, declarations: readonly VerificationDeclaration[], o
     declarations,
     environment: process.env,
     materializeScratchCandidate: () => scratch,
-    projectSettings: () => settings({ root }),
+    projectSettings: async () => await settings({ root }),
     ...overrides,
   };
 }

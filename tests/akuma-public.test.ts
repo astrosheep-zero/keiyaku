@@ -26,8 +26,8 @@ import { World } from "../src/world.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
-function akumaAt(root: string, value?: ReturnType<typeof settings>) {
-  return Akuma.of(World.at(root), value);
+async function akumaAt(root: string, value?: Awaited<ReturnType<typeof settings>>) {
+  return Akuma.of(await World.at(root), value);
 }
 
 function timeline(paths: Parameters<typeof activitySlice>[0]) {
@@ -56,7 +56,7 @@ test("tell refuses an unborn address without leaving durable input", async () =>
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10004" });
     initializeHeart(allocated.paths);
-    await assert.rejects(akumaAt(root).of({ id: allocated.id }).tell("future input"), AkumaNotBornError);
+    await assert.rejects((await akumaAt(root)).of({ id: allocated.id }).tell("future input"), AkumaNotBornError);
     assert.deepEqual(readHeart(allocated.paths).pending, []);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -68,7 +68,7 @@ test("interrupt refuses an unborn address without leaving durable input or contr
     initializeHeart(allocated.paths);
     const holder = HeldAkumaLeash.try(allocated.paths)!;
     try {
-      await assert.rejects(akumaAt(root).of({ id: allocated.id }).interrupt("future input"), AkumaNotBornError);
+      await assert.rejects((await akumaAt(root)).of({ id: allocated.id }).interrupt("future input"), AkumaNotBornError);
       assert.deepEqual(readHeart(allocated.paths).pending, []);
       assert.equal(pauseRequested(allocated.paths), false);
     } finally { holder.release(); }
@@ -94,7 +94,7 @@ const provider: ProviderAdapter = {
 };
 
 async function answeredSource(root: string, suffix: string) {
-  const world = World.at(root);
+  const world = await World.at(root);
   const allocated = allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
   initializeHeart(allocated.paths);
   await driveAkumaBody({
@@ -162,7 +162,7 @@ test("wait timeout returns the same running status carrier", async () => {
     const source = await answeredSource(root, "de1ad100");
     const leash = HeldAkumaLeash.try(source.paths)!;
     try {
-      const handle = akumaAt(root).of({ id: source.id });
+      const handle = (await akumaAt(root)).of({ id: source.id });
       const expected = handle.status();
       assert.equal(expected.life, "running");
       assert.deepEqual(await handle.wait(undefined, { timeoutMs: 0 }), expected);
@@ -178,7 +178,7 @@ test("wait refuses invalid public timeoutMs values", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wait-invalid-timeout-"));
   try {
     const source = await answeredSource(root, "de1ad101");
-    const handle = akumaAt(root).of({ id: source.id });
+    const handle = (await akumaAt(root)).of({ id: source.id });
     for (const timeoutMs of [-1, Number.POSITIVE_INFINITY, Number.NaN]) {
       await assert.rejects(
         handle.wait(undefined, { timeoutMs }),
@@ -230,7 +230,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
       async putDownOwnTree() {},
     });
 
-    const handle = akumaAt(root).of({ id: allocated.id });
+    const handle = (await akumaAt(root)).of({ id: allocated.id });
     assert.deepEqual(handle.lastAnswer(), { kind: "answer", answer: "complete without fork" });
     assert.deepEqual(handle.history().rows.find((row) => row.kind === "outcome")?.outcome, {
       kind: "answered",
@@ -247,8 +247,8 @@ test("fork publishes a sleeping child with lineage and its native birth session"
   const originalFork = mutable.fork;
   try {
     const source = await answeredSource(root, "f0a10001");
-    const world = akumaAt(root);
-    const worldRoot = World.at(root);
+    const world = (await akumaAt(root));
+    const worldRoot = await World.at(root);
     assert.equal(await world.of({ id: source.id }).kill(), "killed");
     let nativeInput: Parameters<NonNullable<ProviderAdapter["fork"]>>[0] | undefined;
     mutable.fork = async (input) => {
@@ -292,7 +292,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
   const originalFork = mutable.fork;
   try {
     const source = await answeredSource(root, "f0a10002");
-    const handle = akumaAt(root).of({ id: source.id });
+    const handle = (await akumaAt(root)).of({ id: source.id });
 
     mutable.fork = undefined;
     assert.deepEqual(await handle.fork({ at: "missing" }), { kind: "provider-cannot-fork", provider: "claude" });
@@ -323,7 +323,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
     try {
       const unborn = allocateAkumaDirectory({ worldRoot: unbornRoot, archetype: "claude", draw: () => "f0a10003" });
       await assert.rejects(
-        akumaAt(unbornRoot).of({ id: unborn.id }).fork({ at: "anything" }),
+        (await akumaAt(unbornRoot)).of({ id: unborn.id }).fork({ at: "anything" }),
         AkumaNotBornError,
       );
     } finally { rmSync(unbornRoot, { recursive: true, force: true }); }
@@ -340,7 +340,7 @@ test("status names a durable session that the adapter cannot resume", async () =
   try {
     const source = await answeredSource(root, "f0a10003");
     mutable.resume = undefined;
-    const handle = akumaAt(root).of({ id: source.id });
+    const handle = (await akumaAt(root)).of({ id: source.id });
     const admitted = recordTell(source.paths, {
       id: "resume-unsupported-tell",
       body: "continue",
@@ -356,7 +356,7 @@ test("status names a durable session that the adapter cannot resume", async () =
     assert.equal(status.life, "stranded");
     assert.equal(status.strandedReason, "resume-unsupported");
     assert.equal(status.timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "outcome" && entry.row.outcome.kind === "failed"), false);
-    const listed = akumaAt(root).list().rows[0]!;
+    const listed = (await (await akumaAt(root)).list()).rows[0]!;
     assert.equal("pending" in listed && listed.pending.includes("resume-unsupported-tell"), true);
     assert.equal(timeline(source.paths).filter((fact) => fact.kind === "turn-start").length, 1);
     assert.equal(timeline(source.paths).find((fact) => fact.kind === "turn-end")?.outcome.kind, "answered");
@@ -369,15 +369,15 @@ test("status names a durable session that the adapter cannot resume", async () =
 test("public Akuma handles separate compact list rows from full status and wait", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-public-"));
   try {
-    const world = akumaAt(root);
-    assert.deepEqual(world.list().rows, []);
+    const world = (await akumaAt(root));
+    assert.deepEqual((await world.list()).rows, []);
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
     initializeHeart(allocated.paths);
-    assert.equal(world.list().rows[0]?.life, "unborn");
-    assert.equal(world.list({ archetype: "claude" }).rows[0]?.id, allocated.id);
-    assert.deepEqual(world.list({ archetype: "reviewer" }).rows, []);
-    assert.throws(() => world.list({ archetype: "not/a-name" }), /Akuma archetype/);
-    assert.throws(() => world.list({ unknown: true } as never), /unknown field: unknown/);
+    assert.equal((await world.list()).rows[0]?.life, "unborn");
+    assert.equal((await world.list({ archetype: "claude" })).rows[0]?.id, allocated.id);
+    assert.deepEqual((await world.list({ archetype: "reviewer" })).rows, []);
+    await assert.rejects(world.list({ archetype: "not/a-name" }), /Akuma archetype/);
+    await assert.rejects(world.list({ unknown: true } as never), /unknown field: unknown/);
 
     const launch: BodyLaunch = {
       paths: allocated.paths,
@@ -400,7 +400,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
     });
 
     const handle = world.of({ id: allocated.id });
-    const listed = world.list().rows[0]!;
+    const listed = (await world.list()).rows[0]!;
     assert.equal(listed.life, "asleep");
     assert.equal("history" in listed, false);
     assert.equal("answer" in listed, false);
@@ -467,7 +467,7 @@ test("tell after kill wakes the same Akuma through its retained session", async 
       async putDownOwnTree() {},
     });
 
-    const handle = akumaAt(root).of({ id: allocated.id });
+    const handle = (await akumaAt(root)).of({ id: allocated.id });
     assert.equal(await handle.kill(), "killed");
     assert.equal(handle.status().life, "killed");
 
@@ -541,7 +541,7 @@ test("interrupt records a tell only after taking an idle leash", async () => {
     });
     rmSync(seat, { recursive: true, force: true });
 
-    const receipt = await akumaAt(root).of({ id: allocated.id }).interrupt("next");
+    const receipt = await (await akumaAt(root)).of({ id: allocated.id }).interrupt("next");
     assert.equal(receipt.kind, "interrupted");
     if (receipt.kind !== "interrupted" || "kind" in receipt.tell) return;
     assert.equal(receipt.putDown, "was-idle");
@@ -603,7 +603,7 @@ test("interrupt waits for a running body to self-abort before recording the tell
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
     rmSync(seat, { recursive: true, force: true });
 
-    const receipt = await akumaAt(root).of({ id: allocated.id }).interrupt("replace it");
+    const receipt = await (await akumaAt(root)).of({ id: allocated.id }).interrupt("replace it");
     await body;
     assert.equal(receipt.kind, "interrupted");
     if (receipt.kind !== "interrupted") return;
@@ -633,7 +633,7 @@ test("interrupt leaves pause behind and records no tell when a held leash has no
       createdAt: "2026-08-08T00:00:00.000Z",
     });
     try {
-      assert.deepEqual(await akumaAt(root).of({ id: allocated.id }).interrupt("never recorded"), {
+      assert.deepEqual(await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded"), {
         kind: "unstoppable",
         evidence: "no-collar",
       });
@@ -668,7 +668,7 @@ test("physical put-down evidence is not success while the leash remains held", a
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     try {
-      assert.deepEqual(await akumaAt(root).of({ id: allocated.id }).interrupt("never recorded"), {
+      assert.deepEqual(await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded"), {
         kind: "unstoppable",
         evidence: "leash-held-after-put-down",
       });
@@ -682,11 +682,11 @@ test("physical put-down evidence is not success while the leash remains held", a
   }
 });
 
-test("Archetype Markdown is strict call-time input with a durable option shape", () => {
+test("Archetype Markdown is strict call-time input with a durable option shape", async () => {
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-"));
   try {
     mkdirSync(join(home, "akuma"));
-    const settingsValue = settings({ home });
+    const settingsValue = await settings({ home });
     writeFileSync(join(home, "akuma", "reviewer.md"), [
       "---",
       "provider: claude",
@@ -702,7 +702,7 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
       "Review the change from first principles.",
       "",
     ].join("\n"));
-    const loaded = loadArchetype({ name: "reviewer", settings: settingsValue });
+    const loaded = await loadArchetype({ name: "reviewer", settings: settingsValue });
     const { adapter, ...definition } = loaded;
     assert.equal(typeof adapter.start, "function");
     assert.deepEqual(definition, {
@@ -718,20 +718,20 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
       },
     });
     writeFileSync(join(home, "akuma", "invalid.md"), "---\nprovider: claude\naccess: execute\n---\n");
-    assert.throws(
-      () => loadArchetype({ name: "invalid", settings: settingsValue }),
+    await assert.rejects(
+      loadArchetype({ name: "invalid", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.searched[0] === join(home, "akuma", "invalid.md"),
     );
     writeFileSync(join(home, "akuma", "unknown.md"), "---\nprovider: missing\n---\n");
-    assert.throws(
-      () => loadArchetype({ name: "unknown", settings: settingsValue }),
+    await assert.rejects(
+      loadArchetype({ name: "unknown", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.reason === "uses unknown provider missing"
         && error.searched[0] === join(home, "akuma", "unknown.md"),
     );
-    assert.throws(
-      () => loadArchetype({ name: "missing", settings: settingsValue }),
+    await assert.rejects(
+      loadArchetype({ name: "missing", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.kind === "akuma-archetype"
         && error.searched[0] === join(home, "akuma", "missing.md"),
@@ -741,12 +741,12 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
   }
 });
 
-test("Archetype catalog lists canonical files in byte order without admitting contents", () => {
+test("Archetype catalog lists canonical files in byte order without admitting contents", async () => {
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-catalog-"));
   try {
-    const settingsValue = settings({ home });
-    const world = akumaAt(home, settingsValue);
-    assert.deepEqual(world.listArchetypes(), []);
+    const settingsValue = await settings({ home });
+    const world = (await akumaAt(home, settingsValue));
+    assert.deepEqual(await world.listArchetypes(), []);
 
     mkdirSync(join(home, "akuma"));
     writeFileSync(join(home, "akuma", "zeta.md"), "not Archetype Markdown\n");
@@ -755,9 +755,9 @@ test("Archetype catalog lists canonical files in byte order without admitting co
     writeFileSync(join(home, "akuma", "notes.txt"), "ignored\n");
     mkdirSync(join(home, "akuma", "directory.md"));
 
-    assert.deepEqual(world.listArchetypes(), ["alpha", "zeta"]);
-    assert.throws(
-      () => loadArchetype({ name: "zeta", settings: settingsValue }),
+    assert.deepEqual(await world.listArchetypes(), ["alpha", "zeta"]);
+    await assert.rejects(
+      loadArchetype({ name: "zeta", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError && error.kind === "akuma-archetype",
     );
   } finally {
@@ -765,11 +765,11 @@ test("Archetype catalog lists canonical files in byte order without admitting co
   }
 });
 
-test("Archetype definition catalog decodes metadata without provider admission", () => {
+test("Archetype definition catalog decodes metadata without provider admission", async () => {
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-definition-catalog-"));
   try {
     mkdirSync(join(home, "akuma"));
-    const settingsValue = settings({ home });
+    const settingsValue = await settings({ home });
     writeFileSync(join(home, "akuma", "reviewer.md"), [
       "---",
       "provider: provider-that-does-not-exist",
@@ -779,15 +779,15 @@ test("Archetype definition catalog decodes metadata without provider admission",
       "prompt",
       "",
     ].join("\n"));
-    assert.deepEqual(listArchetypeDefinitions({ settings: settingsValue }), [{
+    assert.deepEqual(await listArchetypeDefinitions({ settings: settingsValue }), [{
       name: "reviewer",
       model: "reviewer-model",
       description: "A complete description that is not truncated by the owner.",
     }]);
 
     writeFileSync(join(home, "akuma", "broken.md"), "not frontmatter\n");
-    assert.throws(
-      () => listArchetypeDefinitions({ settings: settingsValue }),
+    await assert.rejects(
+      listArchetypeDefinitions({ settings: settingsValue }),
       (error: unknown) => error instanceof AkumaArchetypeError
         && error.searched[0] === join(home, "akuma", "broken.md")
         && /must begin with YAML frontmatter/u.test(error.reason),
@@ -797,7 +797,26 @@ test("Archetype definition catalog decodes metadata without provider admission",
   }
 });
 
-test("list distinguishes sealed residue from an unclaimed birth", () => {
+test("Archetype definition catalog reports the first invalid definition in byte order", async () => {
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-definition-catalog-first-invalid-"));
+  try {
+    mkdirSync(join(home, "akuma"));
+    const settingsValue = await settings({ home });
+    // alpha is first in byte order but slower to read, so a completion race would report bravo.
+    writeFileSync(join(home, "akuma", "alpha.md"), "not frontmatter\n".repeat(100_000));
+    writeFileSync(join(home, "akuma", "bravo.md"), "not frontmatter\n");
+    await assert.rejects(
+      listArchetypeDefinitions({ settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError
+        && error.searched[0] === join(home, "akuma", "alpha.md")
+        && /must begin with YAML frontmatter/u.test(error.reason),
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("list distinguishes sealed residue from an unclaimed birth", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-seal-"));
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "abcdef12" });
@@ -807,7 +826,7 @@ test("list distinguishes sealed residue from an unclaimed birth", () => {
       evidence: "fixture-abandonment",
       at: "2026-08-08T00:00:00.000Z",
     }), "sealed");
-    assert.deepEqual(akumaAt(root).list().rows, [{
+    assert.deepEqual((await (await akumaAt(root)).list()).rows, [{
       id: allocated.id,
       life: "stillborn",
       seal: { evidence: "fixture-abandonment", at: "2026-08-08T00:00:00.000Z" },
@@ -848,7 +867,7 @@ test("a failed turn is durable public evidence and never masquerades as provider
       now: () => "2026-08-08T00:00:00.000Z",
       async putDownOwnTree() {},
     });
-    const handle = akumaAt(root).of({ id: allocated.id });
+    const handle = (await akumaAt(root)).of({ id: allocated.id });
     assert.equal(handle.status().timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "outcome" && entry.row.outcome.kind === "failed"), true);
     const settled = await handle.wait();
     assert.equal(settled.life, "stranded");
@@ -867,7 +886,7 @@ test("activity is persistent narration and old raw events fail the public hard c
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-activity-law-"));
   try {
     const source = await answeredSource(root, "ac710001");
-    const handle = akumaAt(root).of({ id: source.id });
+    const handle = (await akumaAt(root)).of({ id: source.id });
     const before = handle.status();
     const heart = new DatabaseSync(source.paths.heart);
     try {
@@ -940,7 +959,7 @@ test("kill gives the body a stop grace before putting down its process tree", as
     });
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
 
-    const handle = akumaAt(root).of({ id: allocated.id });
+    const handle = (await akumaAt(root)).of({ id: allocated.id });
     const waited = handle.wait();
     assert.equal(await handle.kill(), "killed");
     await body;
@@ -953,21 +972,21 @@ test("kill gives the body a stop grace before putting down its process tree", as
   }
 });
 
-test("Akuma projects the already resolved WorldRoot without a second discovery", () => {
+test("Akuma projects the already resolved WorldRoot without a second discovery", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-relative-"));
   try {
     const coordinate = relative(process.cwd(), root);
-    const world = World.at(coordinate);
-    assert.equal(Akuma.of(world).list().searched[0], resolve(world, ".keiyaku", "akuma", "run"));
+    const world = await World.at(coordinate);
+    assert.equal((await Akuma.of(world).list()).searched[0], resolve(world, ".keiyaku", "akuma", "run"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("status reports a missing coordinate as not born without creating heart residue", () => {
+test("status reports a missing coordinate as not born without creating heart residue", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-not-born-"));
   try {
-    const handle = akumaAt(root).of({ id: "aku/claude/1234abcd" });
+    const handle = (await akumaAt(root)).of({ id: "aku/claude/1234abcd" });
     assert.throws(() => handle.status(), { name: "AkumaNotBornError" });
     assert.equal(existsSync(join(root, ".keiyaku", "akuma", "run", "claude-1234abcd")), false);
   } finally {

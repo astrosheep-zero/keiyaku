@@ -760,7 +760,16 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     { module: "fs", owners: [] },
-    { module: "node:fs/promises", owners: [] },
+    {
+      module: "node:fs/promises",
+      owners: [
+        { source: "world.ts", symbols: ["mkdir", "realpath", "stat"] },
+        { source: "settings.ts", symbols: ["readFile"] },
+        { source: "cli/coordinates.ts", symbols: ["realpath"] },
+        { source: "akuma/archetype.ts", symbols: ["readFile", "readdir"] },
+        { source: "akuma/akuma.ts", symbols: ["readdir"] },
+      ],
+    },
     { module: "fs/promises", owners: [] },
     {
       module: "node:crypto",

@@ -24,10 +24,10 @@ import {
 } from "../src/akuma/requests.js";
 import { World } from "../src/world.js";
 
-function akumaAt(root: string) { return Akuma.of(World.at(root)); }
+async function akumaAt(root: string) { return Akuma.of(await World.at(root)); }
 
-function fixture() {
-  const root = World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-")));
+async function fixture() {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-")));
   const parent = allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
   initializeHeart(parent.paths);
   const soul: Soul = {
@@ -46,7 +46,7 @@ function fixture() {
 }
 
 test("a declared drive serves Body Requests through transport while Heart remains authoritative", async () => {
-  const value = fixture();
+  const value = await fixture();
   const priorHome = process.env.HOME;
   const priorRequests = process.env[AKUMA_REQUESTS_ENV];
   const home = join(value.root, "home");
@@ -67,7 +67,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
   });
   try {
     process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-    const childId = (await akumaAt(value.root).call({
+    const childId = (await (await akumaAt(value.root)).call({
       archetype: "worker",
       body: "build",
     })).id;
@@ -82,7 +82,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
       requestId,
     });
 
-    const unassociated = (await akumaAt(value.root).call({ archetype: "worker", body: "separate" })).id;
+    const unassociated = (await (await akumaAt(value.root)).call({ archetype: "worker", body: "separate" })).id;
     delete process.env[AKUMA_REQUESTS_ENV];
 
     const malformedId = "00000000-0000-4000-8000-000000000001";
@@ -124,7 +124,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
 });
 
 test("a new body settles old requests by observation without replay", async () => {
-  const value = fixture();
+  const value = await fixture();
   try {
     const admittedId = "00000000-0000-4000-8000-000000000011";
     admitRequest(value.parent.paths, {

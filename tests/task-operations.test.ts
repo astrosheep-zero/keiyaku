@@ -10,9 +10,9 @@ import { parseTaskId } from "../src/task/identity.js";
 import { replaceAuthority, withTaskLocks } from "../src/task/store.js";
 import { World } from "../src/world.js";
 
-function world(): { root: string; tasks: ReturnType<typeof Tasks.of> } {
+async function world(): { root: string; tasks: ReturnType<typeof Tasks.of> } {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-tasks-")); mkdirSync(join(root, ".keiyaku"));
-  return { root, tasks: Tasks.of(World.at(root)) };
+  return { root, tasks: Tasks.of(await World.at(root)) };
 }
 function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Tasks.of>["add"]>>): TaskId {
   assert.equal(result.kind, "accepted");
@@ -21,7 +21,7 @@ function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Tasks.of>["add"
 }
 
 test("note is replaceable authority and product timestamps advance only on change", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   const added = await tasks.add({ title: "Timestamped", note: "first" });
   assert.equal(added.kind, "accepted");
   if (added.kind !== "accepted") return;
@@ -46,7 +46,7 @@ test("note is replaceable authority and product timestamps advance only on chang
 });
 
 test("done and drop replace note while preserving creation time", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   const one = acceptedId(await tasks.add({ title: "One", note: "old" }));
   const before = await tasks.task({ id: one }).read();
   const done = await tasks.task({ id: one }).done({ note: "finished" });
@@ -73,7 +73,7 @@ test("done and drop replace note while preserving creation time", async () => {
 });
 
 test("Tasks creates root and nested authority without Contract coupling", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   const rootId = acceptedId(await tasks.add({ title: "Root task" }));
   assert.equal(rootId, "task/root-task");
   await tasks.setNamespace({ namespace: ["contract", "inside"] });
@@ -91,7 +91,7 @@ test("Tasks creates root and nested authority without Contract coupling", async 
 });
 
 test("lifecycle, readiness, blocked projection, update diff, and batch results compose", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   const dependency = acceptedId(await tasks.add({ title: "Dependency" }));
   const dependent = acceptedId(await tasks.add({ title: "Dependent", needs: [dependency] }));
   assert.deepEqual((await tasks.ready()).kind === "accepted" ? (await tasks.ready() as { kind: "accepted"; value: { rows: readonly { id: string }[] } }).value.rows.map((row) => row.id) : [], [dependency]);
@@ -113,7 +113,7 @@ test("lifecycle, readiness, blocked projection, update diff, and batch results c
 });
 
 test("bounded Task query filters before limit and parent views recurse", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   const parent = acceptedId(await tasks.add({ title: "Area", priority: 3 }));
   const need = acceptedId(await tasks.add({ title: "Need", priority: 0, parent }));
   const ready = acceptedId(await tasks.add({ title: "Ready auth", priority: 1, parent }));
@@ -148,7 +148,7 @@ test("bounded Task query filters before limit and parent views recurse", async (
 });
 
 test("Task query defaults to active Tasks", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   const active = acceptedId(await tasks.add({ title: "Active" }));
   acceptedId(await tasks.add({ title: "Finished", state: "done" }));
   acceptedId(await tasks.add({ title: "Dropped", state: "drop" }));
@@ -158,7 +158,7 @@ test("Task query defaults to active Tasks", async () => {
 });
 
 test("graph mutation admits cycles, doctor diagnoses them, and lifecycle writers serialize", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   const first = acceptedId(await tasks.add({ title: "First" })), second = acceptedId(await tasks.add({ title: "Second", needs: [first] }));
   const cycle = await tasks.task({ id: first }).update({ needs: [second] });
   assert.equal(cycle.kind, "accepted");
@@ -170,7 +170,7 @@ test("graph mutation admits cycles, doctor diagnoses them, and lifecycle writers
 });
 
 test("concurrent same-title creation allocates stable unique suffixes", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   const outcomes = await Promise.all(Array.from({ length: 6 }, () => tasks.add({ title: "Collision" })));
   assert.ok(outcomes.every((outcome) => outcome.kind === "accepted"));
   const ids = outcomes.flatMap((outcome) => outcome.kind === "accepted" ? [outcome.value.id] : []);
@@ -178,7 +178,7 @@ test("concurrent same-title creation allocates stable unique suffixes", async ()
 });
 
 test("reverse dependency writers both admit and leave diagnosis to doctor", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   const first = acceptedId(await tasks.add({ title: "First" })), second = acceptedId(await tasks.add({ title: "Second" }));
   const outcomes = await Promise.all([
     tasks.task({ id: first }).update({ needs: [second] }),
@@ -189,7 +189,7 @@ test("reverse dependency writers both admit and leave diagnosis to doctor", asyn
 });
 
 test("relation mutation rejects only newly declared missing and self targets", async () => {
-  const { tasks } = world(), id = acceptedId(await tasks.add({ title: "Subject" }));
+  const { tasks } = await world(), id = acceptedId(await tasks.add({ title: "Subject" }));
   const missing = await tasks.task({ id }).update({ needs: ["task/missing"] });
   assert.equal(missing.kind, "refused");
   if (missing.kind === "refused") assert.equal(missing.refusal.kind, "invalid-graph");
@@ -199,7 +199,7 @@ test("relation mutation rejects only newly declared missing and self targets", a
 });
 
 test("existing graph disease does not adjudicate an unrelated relation addition", async () => {
-  const { root, tasks } = world();
+  const { root, tasks } = await world();
   const subject = acceptedId(await tasks.add({ title: "Subject" }));
   const valid = acceptedId(await tasks.add({ title: "Valid target" }));
   const path = join(root, ".keiyaku", "tasks", "subject.md");
@@ -211,7 +211,7 @@ test("existing graph disease does not adjudicate an unrelated relation addition"
 });
 
 test("different task IDs and different worlds do not share task locks", async () => {
-  const firstWorld = world(), secondWorld = world();
+  const firstWorld = await world(), secondWorld = await world();
   const firstA = acceptedId(await firstWorld.tasks.add({ title: "A" }));
   const firstB = acceptedId(await firstWorld.tasks.add({ title: "B" }));
   const secondA = acceptedId(await secondWorld.tasks.add({ title: "A" }));
@@ -224,7 +224,7 @@ test("different task IDs and different worlds do not share task locks", async ()
 });
 
 test("allocation contention does not block relation updates", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   const first = acceptedId(await tasks.add({ title: "First" }));
   const second = acceptedId(await tasks.add({ title: "Second" }));
   const path = join(tasks.root, ".keiyaku", "locks", "task-allocation.sqlite");
@@ -234,7 +234,7 @@ test("allocation contention does not block relation updates", async () => {
 });
 
 test("task lock cancellation propagates and exceptional actions release held locks", async () => {
-  const { tasks } = world(), id = acceptedId(await tasks.add({ title: "Cancel" }));
+  const { tasks } = await world(), id = acceptedId(await tasks.add({ title: "Cancel" }));
   const path = join(tasks.root, ".keiyaku", "locks", "task", "cancel.sqlite");
   const held = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 100 });
   const controller = new AbortController();
@@ -246,7 +246,7 @@ test("task lock cancellation propagates and exceptional actions release held loc
 });
 
 test("task writers classify the fixed three-second lock wait as busy", async () => {
-  const { tasks } = world(), id = acceptedId(await tasks.add({ title: "Busy" }));
+  const { tasks } = await world(), id = acceptedId(await tasks.add({ title: "Busy" }));
   const path = join(tasks.root, ".keiyaku", "locks", "task", "busy.sqlite");
   const held = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 100 });
   const started = performance.now();
@@ -257,7 +257,7 @@ test("task writers classify the fixed three-second lock wait as busy", async () 
 });
 
 test("manual predecessor movement is refused and idle lock deletion never changes authority", async () => {
-  const { tasks } = world(), id = acceptedId(await tasks.add({ title: "Manual" }));
+  const { tasks } = await world(), id = acceptedId(await tasks.add({ title: "Manual" }));
   const path = join(tasks.root, ".keiyaku", "tasks", "manual.md"), original = readFileSync(path), manual = Buffer.concat([original, Buffer.from("manual edit\n")]);
   writeFileSync(path, manual);
   assert.equal(replaceAuthority({ path, expected: original, next: Buffer.from("replacement") }), "concurrent-modification");
@@ -271,7 +271,7 @@ test("manual predecessor movement is refused and idle lock deletion never change
 });
 
 test("malformed current namespace refuses context consumers but not explicit TaskId reads", async () => {
-  const { root, tasks } = world();
+  const { root, tasks } = await world();
   const id = acceptedId(await tasks.add({ title: "Existing" }));
   mkdirSync(join(root, ".keiyaku", "namespace"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "namespace", "current"), "Bad Namespace\n");
@@ -288,7 +288,7 @@ test("malformed current namespace refuses context consumers but not explicit Tas
 });
 
 test("public inputs reject unknown fields before observing authority", async () => {
-  const { tasks } = world();
+  const { tasks } = await world();
   assert.throws(() => tasks.add({ title: "Bad", extra: true } as never), /unknown field/u);
   assert.throws(() => tasks.add({ title: "Bad", namespace: ["nested/escape"] }), /canonical segments/u);
   assert.throws(() => tasks.add({ title: "Bad", needs: ["task/a", "task/a"] }), /must not contain duplicates/u);

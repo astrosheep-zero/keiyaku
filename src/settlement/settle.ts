@@ -48,13 +48,13 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function settleNamespace(state: ContractState, effects: readonly Effect[], actions: SettlementAction[], lags: SettlementLag[]): void {
+async function settleNamespace(state: ContractState, effects: readonly Effect[], actions: SettlementAction[], lags: SettlementLag[]): Promise<void> {
   if (state.terminal !== null || state.coordinates.workspace !== "worktree") return;
   const worktrees = effects.filter((effect): effect is Extract<Effect, { kind: "worktree" }> =>
     effect.kind === "worktree" && effect.action !== "removed");
   for (const effect of worktrees) {
     try {
-      const world = World.at(effect.path);
+      const world = await World.at(effect.path);
       actions.push({
         kind: "namespace-context",
         path: effect.path,
@@ -72,10 +72,10 @@ function settleNamespace(state: ContractState, effects: readonly Effect[], actio
   }
 }
 
-function settleObserved(input: SettlementInput): SettlementReport {
+async function settleObserved(input: SettlementInput): Promise<SettlementReport> {
   if (input.state === null) return { actions: [], lags: [] };
   const actions: SettlementAction[] = [], lags: SettlementLag[] = [];
-  settleNamespace(input.state, input.effects, actions, lags);
+  await settleNamespace(input.state, input.effects, actions, lags);
   return { actions, lags };
 }
 
@@ -85,10 +85,10 @@ function onPrimaryWorktree(repository: GitRepository): GitRepository {
 
 export async function settle(input: SettlementInput): Promise<SettlementReport> {
   const repository = onPrimaryWorktree(input.repository);
-  return settleObserved({ ...input, repository });
+  return await settleObserved({ ...input, repository });
 }
 
 export async function settleAll(input: SettlementBatchInput): Promise<readonly SettlementReport[]> {
   const repository = onPrimaryWorktree(input.repository);
-  return input.contracts.map((contract) => settleObserved({ repository, channel: input.channel, ...contract }));
+  return await Promise.all(input.contracts.map((contract) => settleObserved({ repository, channel: input.channel, ...contract })));
 }

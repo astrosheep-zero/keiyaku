@@ -19,7 +19,7 @@ function fixture() {
   return { root, home, project, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-test("Settings resolves opaque entries by whole-record project shadow", () => {
+test("Settings resolves opaque entries by whole-record project shadow", async () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({
@@ -29,7 +29,7 @@ test("Settings resolves opaque entries by whole-record project shadow", () => {
     writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({
       providers: { codex: { kind: "codex-app-server", env: { A: "project" } } },
     }));
-    const loaded = settings({ root: value.project, home: value.home });
+    const loaded = await settings({ root: value.project, home: value.home });
     assert.equal(loaded.scopes.user.kind, "read");
     assert.equal(loaded.scopes.project.kind, "read");
     assert.deepEqual(loaded.namespace("gates"), {
@@ -53,25 +53,25 @@ test("Settings resolves opaque entries by whole-record project shadow", () => {
   } finally { value.close(); }
 });
 
-test("Settings isolates malformed namespaces but never falls through a failed higher scope", () => {
+test("Settings isolates malformed namespaces but never falls through a failed higher scope", async () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({
       gates: { default: ["reviewed"] },
       providers: [],
     }));
-    let loaded = settings({ root: value.project, home: value.home });
+    let loaded = await settings({ root: value.project, home: value.home });
     assert.deepEqual(gatesFrom({ settings: loaded }), ["reviewed"]);
     assert.equal(loaded.namespace("providers").kind, "failed");
 
     writeFileSync(join(value.project, ".keiyaku", "settings.json"), "{");
-    loaded = settings({ root: value.project, home: value.home });
+    loaded = await settings({ root: value.project, home: value.home });
     assert.equal(loaded.namespace("gates").kind, "failed");
     assert.throws(() => gatesFrom({ settings: loaded }), SettingsError);
   } finally { value.close(); }
 });
 
-test("gatesFrom admits custom words, empty sets, and no implicit default", () => {
+test("gatesFrom admits custom words, empty sets, and no implicit default", async () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ gates: {
@@ -80,7 +80,7 @@ test("gatesFrom admits custom words, empty sets, and no implicit default", () =>
       duplicate: ["reviewed", "reviewed"],
       invalid: ["Security"],
     } }));
-    const loaded = settings({ home: value.home });
+    const loaded = await settings({ home: value.home });
     assert.deepEqual(gatesFrom({ settings: loaded }), []);
     assert.deepEqual(gatesFrom({ settings: loaded, name: "empty" }), []);
     assert.deepEqual(gatesFrom({ settings: loaded, name: "custom" }), ["reviewed", "security-audited"]);
@@ -90,21 +90,21 @@ test("gatesFrom admits custom words, empty sets, and no implicit default", () =>
   } finally { value.close(); }
 });
 
-test("git policy defaults false and accepts only the ruled boolean", () => {
+test("git policy defaults false and accepts only the ruled boolean", async () => {
   const value = fixture();
   try {
-    let loaded = settings({ root: value.project, home: value.home });
+    let loaded = await settings({ root: value.project, home: value.home });
     assert.equal(requireBranchesToBeUpToDateFrom({ settings: loaded }), false);
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ git: { requireBranchesToBeUpToDate: true } }));
-    loaded = settings({ root: value.project, home: value.home });
+    loaded = await settings({ root: value.project, home: value.home });
     assert.equal(requireBranchesToBeUpToDateFrom({ settings: loaded }), true);
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ git: { requireBranchesToBeUpToDate: "yes" } }));
-    loaded = settings({ root: value.project, home: value.home });
+    loaded = await settings({ root: value.project, home: value.home });
     assert.throws(() => requireBranchesToBeUpToDateFrom({ settings: loaded }), SettingsError);
   } finally { value.close(); }
 });
 
-test("Archetype resolves one provider execution without dotenv loading", () => {
+test("Archetype resolves one provider execution without dotenv loading", async () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, ".env"), "INTRUDER=dotenv\n");
@@ -117,7 +117,7 @@ test("Archetype resolves one provider execution without dotenv loading", () => {
       },
     } }));
     writeFileSync(join(value.home, "akuma", "reviewer.md"), "---\nprovider: codex-for\nmodel: gpt-test\n---\nReview.\n");
-    const loaded = loadArchetype({ name: "reviewer", settings: settings({ root: value.project, home: value.home }) });
+    const loaded = await loadArchetype({ name: "reviewer", settings: await settings({ root: value.project, home: value.home }) });
     assert.deepEqual(loaded.provider, {
       name: "codex-for",
       kind: "codex-app-server",
@@ -132,14 +132,14 @@ test("Archetype resolves one provider execution without dotenv loading", () => {
   } finally { value.close(); }
 });
 
-test("Archetype resolves the OpenCode V1 provider execution as one frozen recipe", () => {
+test("Archetype resolves the OpenCode V1 provider execution as one frozen recipe", async () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: {
       local: { kind: "opencode-sdk", executable: "opencode-custom", env: { LITERAL: "yes" } },
     } }));
     writeFileSync(join(value.home, "akuma", "builder.md"), "---\nprovider: local\nmodel: openai/test\n---\n");
-    const loaded = loadArchetype({ name: "builder", settings: settings({ root: value.project, home: value.home }) });
+    const loaded = await loadArchetype({ name: "builder", settings: await settings({ root: value.project, home: value.home }) });
     assert.deepEqual(loaded.provider, {
       name: "local",
       kind: "opencode-sdk",
@@ -152,19 +152,19 @@ test("Archetype resolves the OpenCode V1 provider execution as one frozen recipe
   } finally { value.close(); }
 });
 
-test("Archetype resolves builtin and configured Pi executions", () => {
+test("Archetype resolves builtin and configured Pi executions", async () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, "akuma", "pi-worker.md"), "---\nprovider: pi\nmodel: openai/gpt\neffort: high\n---\nWork.\n");
-    let loaded = loadArchetype({ name: "pi-worker", settings: settings({ root: value.project, home: value.home }) });
+    let loaded = await loadArchetype({ name: "pi-worker", settings: await settings({ root: value.project, home: value.home }) });
     assert.deepEqual(loaded.provider, { name: "pi", kind: "pi" });
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: { kind: "pi", env: {} } } }));
     writeFileSync(join(value.home, "akuma", "pi-worker.md"), "---\nprovider: local\nmodel: openai/gpt\n---\nWork.\n");
-    loaded = loadArchetype({ name: "pi-worker", settings: settings({ root: value.project, home: value.home }) });
+    loaded = await loadArchetype({ name: "pi-worker", settings: await settings({ root: value.project, home: value.home }) });
     assert.deepEqual(loaded.provider, { name: "local", kind: "pi", env: {} });
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: { kind: "pi", env: { A: "x" } } } }));
-    assert.throws(
-      () => loadArchetype({ name: "pi-worker", settings: settings({ root: value.project, home: value.home }) }),
+    await assert.rejects(
+      loadArchetype({ name: "pi-worker", settings: await settings({ root: value.project, home: value.home }) }),
       /env injection not supported for provider pi/u,
     );
   } finally { value.close(); }

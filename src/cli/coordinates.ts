@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { NoGitWorldError, Repo } from "../index.js";
 import { World, WorldError, type WorldRoot } from "../world.js";
@@ -15,7 +15,7 @@ export type CliCoordinates = Readonly<{
   cwd: string;
   repo?: Repo;
   world: WorldRoot | null;
-  establishWorld: () => WorldRoot;
+  establishWorld: () => Promise<WorldRoot>;
 }>;
 
 export type CliCoordinateInput = Readonly<{
@@ -25,8 +25,8 @@ export type CliCoordinateInput = Readonly<{
   command: ParsedCommand;
 }>;
 
-function canonicalInvocationCwd(input: string): string {
-  try { return realpathSync(input); }
+async function canonicalInvocationCwd(input: string): Promise<string> {
+  try { return await realpath(input); }
   catch { throw new CliUsageError(`invocation cwd is not an existing directory: ${input}`); }
 }
 
@@ -91,13 +91,13 @@ function repoFor(use: RepoUse, discovery: RepoDiscovery): Repo | undefined {
   return undefined;
 }
 
-function resolveWorld(cwd: string, repo: Repo | undefined) {
+async function resolveWorld(cwd: string, repo: Repo | undefined) {
   try {
-    const resolution = World.resolve({ cwd, ...(repo === undefined ? {} : { repositoryRoot: repo.root }) });
+    const resolution = await World.resolve({ cwd, ...(repo === undefined ? {} : { repositoryRoot: repo.root }) });
     return {
       root: resolution.root,
-      establish(): WorldRoot {
-        try { return resolution.establish(); }
+      async establish(): Promise<WorldRoot> {
+        try { return await resolution.establish(); }
         catch (error) {
           if (error instanceof WorldError) throw new CliUsageError(error.message);
           throw error;
@@ -110,16 +110,16 @@ function resolveWorld(cwd: string, repo: Repo | undefined) {
   }
 }
 
-export function resolveCliCoordinates(input: CliCoordinateInput): CliCoordinates {
+export async function resolveCliCoordinates(input: CliCoordinateInput): Promise<CliCoordinates> {
   const processCwd = resolve(input.processCwd ?? ".");
-  const cwd = canonicalInvocationCwd(resolve(processCwd, input.cwd ?? "."));
+  const cwd = await canonicalInvocationCwd(resolve(processCwd, input.cwd ?? "."));
   const invocationRepo = discoverRepoAt(cwd);
   const selectedRepo = input.repo === undefined
     ? invocationRepo
     : discoverRepoAt(resolve(cwd, input.repo));
   const worldRepo = invocationRepo.kind === "present" ? invocationRepo.repo : undefined;
   const repo = repoFor(repoPolicy(input.command).use, selectedRepo);
-  const world = resolveWorld(cwd, worldRepo);
+  const world = await resolveWorld(cwd, worldRepo);
   return {
     cwd,
     ...(repo === undefined ? {} : { repo }),

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawnAkumaBody } from "./body.js";
 import {
@@ -406,21 +406,21 @@ export class Akuma {
     return new Akuma(root, settings);
   }
 
-  private settings(): Settings {
-    return this.configuredSettings ?? readSettings({ root: this.path });
+  private async settings(): Promise<Settings> {
+    return this.configuredSettings ?? await readSettings({ root: this.path });
   }
 
   of(input: Readonly<{ id: string }>): AkumaHandle {
     return new AkumaHandle(parseAkuId(input.id).id, this.path);
   }
 
-  listArchetypes(): readonly string[] {
-    return readArchetypes({ settings: this.settings() });
+  async listArchetypes(): Promise<readonly string[]> {
+    return readArchetypes({ settings: await this.settings() });
   }
 
   async call(input: Readonly<{ archetype: string; body: string; cwd?: string }>): Promise<AkumaHandle> {
     const name = archetypeName(input.archetype);
-    const archetype = loadArchetype({ name, settings: this.settings() });
+    const archetype = await loadArchetype({ name, settings: await this.settings() });
     const provider = archetype.adapter;
     const cwd = resolve(input.cwd ?? this.path);
     const recipe = Object.freeze({
@@ -463,7 +463,7 @@ export class Akuma {
     return new AkumaHandle(published.id, this.path);
   }
 
-  list(input: AkumaListInput = {}): AkumaList {
+  async list(input: AkumaListInput = {}): Promise<AkumaList> {
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
       throw new TypeError("Akuma list input must be an object");
     }
@@ -473,7 +473,7 @@ export class Akuma {
     const runRoot = akumaRunRoot(this.path);
     let names: string[];
     try {
-      names = readdirSync(runRoot, { withFileTypes: true })
+      names = (await readdir(runRoot, { withFileTypes: true }))
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name)
         .sort();

@@ -18,8 +18,8 @@ const world = Akuma.of(root, settings?); // root is already resolved; no climbin
 
 const a = await world.call({ archetype, body, cwd? }); // returns after birth
 world.of({ id });
-world.listArchetypes();                    // canonical names in byte order
-world.list();                              // compact fleet rows; no history scan
+await world.listArchetypes();              // canonical names in byte order
+await world.list();                        // compact fleet rows; no history scan
 
 a.id                                       // aku/<archetype>/<hex8>
 a.status()                                 // current state + bounded activity

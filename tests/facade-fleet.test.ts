@@ -200,7 +200,7 @@ test("facade ls reads exactly one selected identity directory", async () => {
   const home = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-home-"));
   try {
     const source = await answered(root, "worker", "00000001");
-    const task = await Tasks.of(World.at(root)).add({ title: "Catalog task" });
+    const task = await Tasks.of(await World.at(root)).add({ title: "Catalog task" });
     assert.equal(task.kind, "accepted");
     mkdirSync(join(home, "akuma"));
     writeFileSync(join(home, "akuma", "reviewer.md"), [
@@ -215,7 +215,7 @@ test("facade ls reads exactly one selected identity directory", async () => {
       priority: 2,
       disposition: "ready",
     }]);
-    assert.deepEqual(await Keiyaku.ls({ query: { kind: "archetypes" }, settings: settings({ root, home }) }), {
+    assert.deepEqual(await Keiyaku.ls({ query: { kind: "archetypes" }, settings: await settings({ root, home }) }), {
       kind: "archetypes",
       rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
     });
@@ -230,12 +230,12 @@ test("facade ls reads exactly one selected identity directory", async () => {
 test("Task catalog does not inherit the Task list default page limit", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-page-"));
   try {
-    const first = await Tasks.of(World.at(root)).add({ title: "Catalog 000" });
+    const first = await Tasks.of(await World.at(root)).add({ title: "Catalog 000" });
     assert.equal(first.kind, "accepted");
     for (let index = 1; index <= 100; index += 1) {
       const suffix = String(index).padStart(3, "0");
       const id = `task/catalog-${suffix}` as TaskId;
-      writeFileSync(authorityPath(World.at(root), id), serializeTaskDocument({
+      writeFileSync(authorityPath(await World.at(root), id), serializeTaskDocument({
         id,
         title: `Catalog ${suffix}`,
         body: "",
@@ -268,7 +268,7 @@ test("CLI ls invokes each selected identity directory and emits selected JSON", 
     repository.run(["config", "user.email", "test@example.com"]);
     repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const world = World.at(repository.path);
+    const world = await World.at(repository.path);
     const task = await Tasks.of(world).add({ title: "Listed task" });
     assert.equal(task.kind, "accepted");
     const bound = await Keiyaku.bind({
@@ -343,8 +343,9 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   const source = await answered(repository.path, "worker", "00000001");
   await moveAlias({ world: repository.path, alias: "@review", akuId: source.id });
   const contracts = (await Keiyaku.list({ repo })).rows;
+  const path = await World.at(repository.path);
   assert.throws(
-    () => resolveNamedAddress({ path: World.at(repository.path), selector: "@review", contracts }),
+    () => resolveNamedAddress({ path, selector: "@review", contracts }),
     /ambiguous selector matches Contract and Akuma/u,
   );
 });

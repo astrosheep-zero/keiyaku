@@ -30,7 +30,7 @@ export type TaskWorldObservation =
   | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>;
 
 type TaskProduct = ReturnType<typeof Tasks.of>;
-type TaskInput = Readonly<{ world: WorldRoot | null; establish(): WorldRoot; readStdin(): string }>;
+type TaskInput = Readonly<{ world: WorldRoot | null; establish(): Promise<WorldRoot>; readStdin(): string }>;
 
 function value(command: ParsedTaskCommand, name: string): string | undefined {
   const item = command.flags[name]; return typeof item === "string" ? item : undefined;
@@ -126,7 +126,7 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
   let world = input.world;
   if (world === null && (command.action === "add" || command.action === "compose"
     || (command.action === "namespace" && command.positionals.length > 0))) {
-    world = input.establish();
+    world = await input.establish();
   }
   if (world === null) return missingWorld(command);
   const tasks = Tasks.of(world);

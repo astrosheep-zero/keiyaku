@@ -38,7 +38,7 @@ export async function completeMutation<Value, PublicValue>(
 ): Promise<MutationResult<PublicValue>> {
   const { scope, channel, contractId, accepted, value, hooks } = input;
   const retained = await reconcileOperation({ scope, channel, contractId, hooks, retryHooks: false, retainTerminalWorktree: true });
-  const projection = projectContractWorktree(scope, retained.state);
+  const projection = await projectContractWorktree(scope, retained.state);
   const settlement = await settle({ repository: scope, channel, state: retained.state, effects: retained.report.effects });
   const deferRemoval = retained.state !== null && retained.state.terminal !== null
     && retained.state.coordinates.workspace === "worktree";

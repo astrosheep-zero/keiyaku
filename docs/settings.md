@@ -8,7 +8,7 @@ namespace name or record-internal schema.
 ## Public Resource
 
 ```ts
-settings(input?: { root?: string; home?: string }): Settings
+settings(input?: { root?: string; home?: string }): Promise<Settings>
 
 type Settings = Readonly<{
   scopes: Readonly<{

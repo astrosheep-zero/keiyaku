@@ -7,13 +7,13 @@ import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 
-function tasks() {
+async function tasks() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-compose-")); mkdirSync(join(root, ".keiyaku"));
-  return Tasks.of(World.at(root));
+  return Tasks.of(await World.at(root));
 }
 
 test("compose allocates nested tasks, resolves parents, and returns native diffs", async () => {
-  const product = tasks();
+  const product = await tasks();
   const result = await product.compose({ markdown: "ns=feature/inside\n+ Parent pri=1\nParent body\n  + Child needs=@task/feature/inside/parent\n\\+ literal body\n" });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
@@ -28,7 +28,7 @@ test("compose allocates nested tasks, resolves parents, and returns native diffs
 });
 
 test("compose updates existing tasks and accepts an empty change set", async () => {
-  const product = tasks(), added = await product.add({ title: "Existing" });
+  const product = await tasks(), added = await product.add({ title: "Existing" });
   assert.equal(added.kind, "accepted");
   const before = await product.task({ id: "task/existing" }).read();
   const result = await product.compose({ markdown: "@task/existing pri=0\nNew body\n" });
@@ -43,7 +43,7 @@ test("compose updates existing tasks and accepts an empty change set", async () 
 });
 
 test("compose planning refusals write nothing", async () => {
-  const product = tasks();
+  const product = await tasks();
   const result = await product.compose({ markdown: "+ Broken needs=@task/missing\n" });
   assert.equal(result.kind, "refused");
   const all = await product.list({ scope: "world", selection: "all" });
@@ -57,7 +57,7 @@ test("compose planning refusals write nothing", async () => {
 });
 
 test("compose admits cycles and doctor owns their diagnosis", async () => {
-  const product = tasks();
+  const product = await tasks();
   assert.equal((await product.add({ title: "First" })).kind, "accepted");
   assert.equal((await product.add({ title: "Second" })).kind, "accepted");
   const result = await product.compose({ markdown: "@task/first needs=@task/second\n@task/second needs=@task/first\n" });
@@ -66,7 +66,7 @@ test("compose admits cycles and doctor owns their diagnosis", async () => {
 });
 
 test("compose busy returns canonical remaining DSL that can be replayed directly", async () => {
-  const product = tasks();
+  const product = await tasks();
   const held = await acquireSqliteTransactionLock({ path: join(product.root, ".keiyaku", "locks", "task-allocation.sqlite"), mode: "immediate", timeoutMs: 100 });
   let result;
   try { result = await product.compose({ markdown: "+ Remaining\n\\+ literal\n\\@task/not-a-node\n\\\\leading slash\n" }); }

@@ -34,7 +34,7 @@ type InvocationEdge = Readonly<{
 export type SettingsInvocationResult = Readonly<{ kind: "settings"; value: Settings }>;
 export type GuidanceInvocationResult = Readonly<{ kind: "guidance"; contract: ContractId; guidance: string }>;
 
-function settingsAt(root: WorldRoot | undefined, environment: NodeJS.ProcessEnv): Settings {
+function settingsAt(root: WorldRoot | undefined, environment: NodeJS.ProcessEnv): Promise<Settings> {
   const home = environment.KEIYAKU_HOME?.trim();
   return settings({ ...(root === undefined ? {} : { root }), ...(home === undefined || home.length === 0 ? {} : { home }) });
 }
@@ -288,8 +288,8 @@ async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, input: AkumaEdgeI
   catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
 }
 
-function akumaWorldFor(parsed: ParsedAkumaCommand, located: WorldRoot | null, establish: () => WorldRoot): WorldRoot {
-  const world = parsed.command === "call" ? establish() : located;
+async function akumaWorldFor(parsed: ParsedAkumaCommand, located: WorldRoot | null, establish: () => Promise<WorldRoot>): Promise<WorldRoot> {
+  const world = parsed.command === "call" ? await establish() : located;
   if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
   return world;
 }
@@ -308,7 +308,7 @@ async function invokeCatalog(
     if (parsed.query.kind === "archetypes") {
       return {
         kind: "catalog" as const,
-        catalog: await Keiyaku.ls({ query: parsed.query, settings: settingsAt(undefined, edge.environment) }),
+        catalog: await Keiyaku.ls({ query: parsed.query, settings: await settingsAt(undefined, edge.environment) }),
       };
     }
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
@@ -328,7 +328,7 @@ async function invokeStatus(
   repo: Repo | undefined,
   edge: InvocationEdge,
 ) {
-  const configuration = settingsAt(world ?? undefined, edge.environment);
+  const configuration = await settingsAt(world ?? undefined, edge.environment);
   if (parsed.akuma === true) {
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
     return invokeAkumaStatus(world, parsed.contract, configuration, undefined, repo);
@@ -364,7 +364,7 @@ async function invokeParsed(
   invocation: NonInstallExecution,
   runtime: InvokeRuntime,
 ): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
-  const coordinates = resolveCliCoordinates({
+  const coordinates = await resolveCliCoordinates({
     ...(runtime.cwd === undefined ? {} : { processCwd: runtime.cwd }),
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
@@ -377,7 +377,7 @@ async function invokeParsed(
   };
   const parsed = invocation.command;
   if (parsed.command === "settings") {
-    return { kind: "settings", value: settingsAt(world ?? undefined, edge.environment) };
+    return { kind: "settings", value: await settingsAt(world ?? undefined, edge.environment) };
   }
   if (parsed.command === "task") {
     try {
@@ -390,8 +390,8 @@ async function invokeParsed(
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
   }
   if (isParsedAkumaCommand(parsed)) {
-    const akumaWorld = akumaWorldFor(parsed, world, coordinates.establishWorld);
-    const configuration = settingsAt(akumaWorld, edge.environment);
+    const akumaWorld = await akumaWorldFor(parsed, world, coordinates.establishWorld);
+    const configuration = await settingsAt(akumaWorld, edge.environment);
     return await invokeAkumaFromEdge(parsed, {
       path: akumaWorld,
       executionCwd: cwd,
@@ -404,7 +404,7 @@ async function invokeParsed(
   if (parsed.command === "status") return await invokeStatus(parsed, world, repo, edge);
   if (repo === undefined) throw new Error(`${parsed.command} requires a resolved Repo`);
   const scope = cwd;
-  const configuration = settingsAt(world ?? undefined, edge.environment);
+  const configuration = await settingsAt(world ?? undefined, edge.environment);
   const hooks = selectedHooks(configuration);
 
   if (parsed.command === "show") {

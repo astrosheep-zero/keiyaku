@@ -404,7 +404,7 @@ export class KeiyakuHandle {
     const options = reconcileInput(input);
     return withGitDecodeChannel(this.scope, async (channel) => {
       const retained = await reconcileOperation({ scope: this.scope, channel, contractId: this.id, ...options, retainTerminalWorktree: true });
-      const projection = projectContractWorktree(this.scope, retained.state);
+      const projection = await projectContractWorktree(this.scope, retained.state);
       const settlement = await settle({ repository: this.scope, channel, state: retained.state, effects: retained.report.effects });
       const deferRemoval = retained.state !== null && retained.state.terminal !== null
         && retained.state.coordinates.workspace === "worktree";
