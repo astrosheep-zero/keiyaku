@@ -72,9 +72,14 @@ test("foldJournal preserves a large interleaved attestation history and final st
       brief: `Brief ${sequence}`,
     }, index++);
     const delivery = entry("deliver", {
-      expectedPredecessor: snapshotId(`predecessor-${sequence}`),
-      candidate: snapshotId(`candidate-${sequence}`),
-      deliveryPatchId: changeId(`patch-${sequence}`),
+      tenderSnapshot: snapshotId(`tender-${sequence}`),
+      integration: {
+        predecessor: snapshotId(`predecessor-${sequence}`),
+        snapshot: snapshotId(`candidate-${sequence}`),
+        changeId: changeId(`patch-${sequence}`),
+      },
+      method: "squash",
+      policy: { requireBranchesToBeUpToDate: false },
     }, index++);
     const afterDelivery = entry("attestation", {
       gate: gate("reviewed"),

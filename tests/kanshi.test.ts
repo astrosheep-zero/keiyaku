@@ -207,7 +207,8 @@ function attentionReport(): KanshiReport {
             workspace: "worktree",
             worktreePath: "/repo/.keiyaku/worktrees/terminal-contract",
             target: "refs/heads/main",
-            candidate: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            delivery: { tenderSnapshot: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", integration: { predecessor: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", snapshot: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", changeId: "patch-b" }, method: "squash", policy: { requireBranchesToBeUpToDate: false } },
+            targetObservation: { head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", drift: false },
             gates: {
               satisfied: true,
               reports: [
@@ -222,7 +223,8 @@ function attentionReport(): KanshiReport {
             workspace: "worktree",
             worktreePath: "/repo/.keiyaku/worktrees/active-contract",
             target: "refs/heads/main",
-            candidate: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            delivery: { tenderSnapshot: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", integration: { predecessor: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", snapshot: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", changeId: "patch-a" }, method: "squash", policy: { requireBranchesToBeUpToDate: false } },
+            targetObservation: { head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", drift: false },
             gates: {
               satisfied: false,
               reports: [
@@ -277,10 +279,10 @@ test("bare Kanshi text triages every section without changing its report", () =>
   assert.doesNotMatch(text, /marks |root |─/u);
   assert.match(text, /keiyaku 2/u);
   assert.match(text, /^⧗ kei\/active-contract pending-delivery$/mu);
-  assert.match(text, /^  worktree · candidate aaaaaaaa · -> refs\/heads\/main$/mu);
+  assert.match(text, /^  worktree · integration aaaaaaaa · -> refs\/heads\/main$/mu);
   assert.match(text, /^  ✓ reviewed · ! verified · \? security · \? manual$/mu);
   assert.ok(text.indexOf("kei/active-contract") < text.indexOf("kei/terminal-contract"));
-  assert.doesNotMatch(text, /candidate a{9}/u);
+  assert.doesNotMatch(text, /integration a{9}/u);
   assert.doesNotMatch(text, /stale|missing/u);
   assert.doesNotMatch(text, /world summary should stay hidden/u);
   assert.doesNotMatch(text, /terminal review summary/u);
@@ -416,6 +418,7 @@ test("Kanshi narrow wrapping exceeds columns only for indivisible scan and coord
     || /^[●○⧗✓!?×] /u.test(line)
     || line.includes(longRef)
     || line.includes(longGate)
+    || line.includes("integration")
     || /keiyaku kei\//u.test(line)));
   assert.equal(text.includes(longId), true);
   assert.equal(text.includes(longRef), true);

@@ -12,14 +12,12 @@ import {
   type TreeEntry,
 } from "./tree.js";
 export type { TreeChange } from "./tree.js";
-
 export const GIT_REF = "refs/heads/keiyaku-state";
 export const DELIVERY_REF_NAMESPACE = "refs/heads/keiyaku-delivery";
 export const CANDIDATE_PIN_REF_NAMESPACE = "refs/heads/keiyaku-candidate";
 export const GIT_FORMAT_PATH = "meta/format.json";
-const CURRENT_FORMAT_VERSION = 3;
+const CURRENT_FORMAT_VERSION = 4;
 export const GIT_FORMAT_BYTES = `{"version":${CURRENT_FORMAT_VERSION}}\n`;
-
 export function isKeiyakuOwnedRef(ref: string): boolean {
   return ref === GIT_REF
     || ref === DELIVERY_REF_NAMESPACE
@@ -29,25 +27,21 @@ export function isKeiyakuOwnedRef(ref: string): boolean {
 }
 
 export type GitOid = string;
-
 export type RefPublication =
   | Readonly<{ readonly kind: "published" }>
   | Readonly<{ readonly kind: "non-published"; readonly error: unknown }>
   | Readonly<{ readonly kind: "unknown" }>;
-
 export type GitRepository = Readonly<{
   /** The invocation's effective working directory, including a caller -C worktree. */
   readonly effectiveCwd: string;
   /** The canonical primary worktree root for this repository. */
   readonly primaryWorktree: string;
 }>;
-
 export type GitSnapshot = Readonly<{
   readonly commit: GitOid | null;
   readonly tree: GitOid | null;
   readonly paths: ReadonlyMap<string, TreeEntry>;
 }>;
-
 export class NoGitWorldError extends Error {
   readonly path: string;
 
@@ -57,26 +51,22 @@ export class NoGitWorldError extends Error {
     this.path = path;
   }
 }
-
 export class GitPlumbingError extends Error {
-  readonly stderr: Buffer;
-  readonly status: number | null;
-  readonly pid: number | null;
+  readonly stdout: Buffer; readonly stderr: Buffer;
+  readonly status: number | null; readonly pid: number | null;
 
   constructor(input: Readonly<{
-    stderr: string | Uint8Array;
-    status: number | null;
-    message: string;
-    pid?: number | null;
+    stdout?: string | Uint8Array; stderr: string | Uint8Array;
+    status: number | null; message: string; pid?: number | null;
   }>) {
     super(input.message);
     this.name = "GitPlumbingError";
+    this.stdout = Buffer.from(input.stdout ?? "");
     this.stderr = Buffer.from(input.stderr);
     this.status = input.status;
     this.pid = input.pid ?? null;
   }
 }
-
 export type RegisteredWorktree = Readonly<{ path: string; branch: string | null }>;
 
 function worktreesFromPorcelain(output: Buffer): readonly RegisteredWorktree[] {
@@ -151,13 +141,16 @@ export function worktreeGitDirectory(repository: GitRepository, worktree: string
 function commandError(command: readonly string[], error: unknown): GitPlumbingError {
   const candidate = error as {
     message?: string;
+    stdout?: Buffer | string;
     stderr?: Buffer | string;
     status?: number | null;
     pid?: number;
   };
   const stderr = candidate.stderr === undefined ? Buffer.alloc(0) : Buffer.from(candidate.stderr);
+  const stdout = candidate.stdout === undefined ? Buffer.alloc(0) : Buffer.from(candidate.stdout);
   const detail = stderr.length === 0 ? candidate.message ?? "git command failed" : stderr.toString("utf8");
   return new GitPlumbingError({
+    stdout,
     stderr,
     status: candidate.status ?? null,
     message: `${command.join(" ")}: ${detail}`,
@@ -196,17 +189,14 @@ export function runGitWithEnvironment(
     throw commandError(args, error);
   }
 }
-
 function assertOid(oid: string, label: string): void {
   gitObjectId(oid, label);
 }
-
 function assertRef(ref: string): void {
   if (!ref.startsWith("refs/") || /[\s\0]/.test(ref) || ref.endsWith("/") || ref.includes("..")) {
     throw new Error(`invalid Git ref: ${ref}`);
   }
 }
-
 export function readRef(repository: GitRepository, ref: string): GitOid | null {
   assertRef(ref);
   try {

@@ -25,9 +25,10 @@ function state(candidate: string, document = "document-1"): ContractState {
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
     at: "2026-08-06T00:00:00Z",
     data: {
-      expectedPredecessor: snapshotId("base"),
-      candidate: snapshotId(candidate),
-      deliveryPatchId: patch,
+      tenderSnapshot: snapshotId(candidate),
+      integration: { predecessor: snapshotId("base"), snapshot: snapshotId(candidate), changeId: patch },
+      method: "squash",
+      policy: { requireBranchesToBeUpToDate: false },
     },
   };
   return {

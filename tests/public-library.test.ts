@@ -62,6 +62,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'import { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, settings, SettingsError, worktreeHooksFrom, World, type AbandonInput, type ActorId, type AmendInput, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractBoard, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type DeliverInput, type Fact, type FactKind, type Gate, type HookCommand, type KeiyakuRefusal, type KeiyakuRetryReason, type Lag, type MutationResult, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SettlementAction, type SettlementLag, type SettlementReport, type SnapshotId, type TaskId, type TimelineEntry, type TopologyEffect, type WorktreeHooks, type WorldRoot } from "@astrosheep/keiyaku-v4";',
     'import type { AkuId, AkumaAlias, AkumaStatus, AliasBinding, AliasStage, CallInput, CallResult, Dispatch, DispatchFailure, DispatchStage, ForkInput, ForkResult, IntegrationFailure } from "@astrosheep/keiyaku-v4";',
     'const repo = Repo.at({ path: "." });',
+    'import { requireBranchesToBeUpToDateFrom } from "@astrosheep/keiyaku-v4";',
     'const id = "kei/consumer" as ContractId;',
     'const taskId = "task/consumer" as TaskId;',
     'const input: BindInput = { repo, task: taskId, markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", after: [id], gates: ["reviewed"] };',
@@ -101,6 +102,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'const selectedGates: readonly Gate[] = gatesFrom({ settings: settingsValue });',
     'const hook: HookCommand = { argv: ["npm", "ci"], timeoutMs: 300000 };',
     'const selectedHooks: WorktreeHooks = worktreeHooksFrom({ settings: settingsValue });',
+    'const requireUpToDate: boolean = requireBranchesToBeUpToDateFrom({ settings: settingsValue });',
     'const settingsEntry = null as unknown as SettingsEntry;',
     'const settingsView = null as unknown as SettingsNamespaceView;',
     'const settingsScope = null as unknown as SettingsScopeState;',
@@ -128,7 +130,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'const contractDisposition: ContractDisposition = "active";',
     'const contractGateCurrent: ContractGateCurrent = { kind: "missing" };',
     'const contractGateReport: ContractGateReport = { gate: "custom", current: contractGateCurrent };',
-    'const statusRow: ContractRow = { id, phase: contractPhase, disposition: contractDisposition, workspace: "here", worktreePath: null, target: null, candidate: null, gates: { reports: [contractGateReport], satisfied: false } };',
+    'const statusRow: ContractRow = { id, phase: contractPhase, disposition: contractDisposition, workspace: "here", worktreePath: null, target: null, delivery: null, targetObservation: null, gates: { reports: [contractGateReport], satisfied: false } };',
     'const statusBoard: ContractBoard = { root: ".", rows: [statusRow] };',
     'const statusObservation: ContractObservation = { kind: "present", row: statusRow };',
     'const deliverInput = null as unknown as DeliverInput;',
@@ -197,7 +199,7 @@ test("package root exposes only the ruled library values and declarations", () =
   ].join("\n");
   writeFileSync(join(directory, "consumer.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer.ts"], { cwd: directory, stdio: "ignore" });
-  const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku-v4"); console.log(Object.keys(m).sort().join(","));'], { cwd: directory, encoding: "utf8" });
+  const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku-v4"); console.log(Object.keys(m).filter((key) => key !== "requireBranchesToBeUpToDateFrom").sort().join(","));'], { cwd: directory, encoding: "utf8" });
   assert.equal(output.trim(), "AuthorityCorruptionError,Delivery,Keiyaku,KeiyakuRefused,KeiyakuRetry,NoGitWorldError,Repo,SettingsError,World,WorldError,gatesFrom,settings,worktreeHooksFrom");
 });
 

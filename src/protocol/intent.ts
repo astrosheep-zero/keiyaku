@@ -105,13 +105,13 @@ export async function verifyDelivery(
     || input.verification === undefined
   ) return null;
   const subject = dependencyKeySet([
-    { kind: "snapshot", value: state.delivery.data.candidate },
+    { kind: "snapshot", value: state.delivery.data.integration.snapshot },
     { kind: "segment", value: input.verification.segment },
   ]);
 
   let prepared: ReturnType<typeof materializeVerificationCandidate>;
   try {
-    prepared = materializeVerificationCandidate(input.repository, state.delivery.data.candidate);
+    prepared = materializeVerificationCandidate(input.repository, state.delivery.data.integration.snapshot);
   } catch (error) {
     return {
       step: {

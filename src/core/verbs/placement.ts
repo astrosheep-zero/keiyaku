@@ -43,8 +43,8 @@ export function decidePlacement({ input, attempt, observation }: DecideInput<Pla
       ...(current.coordinates.target === undefined ? {} : {
         target: {
           target: current.coordinates.target,
-          expectedOid: delivery.data.expectedPredecessor,
-          newOid: delivery.data.candidate,
+          expectedOid: delivery.data.integration.predecessor,
+          newOid: delivery.data.integration.snapshot,
         },
       }),
     },

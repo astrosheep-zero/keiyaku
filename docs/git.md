@@ -68,50 +68,68 @@ authority.
 
 ## Delivery Preparation And Placement
 
-Preparation consumes only the state coordinates projected from that attempt and
-a title stamped with the `DocumentKey` from which it was derived. It does not
-observe, fold, or judge contract lifecycle state, decode a document, request a
-callback, or import a protocol body. For a target contract, its mechanical
-target-head read supplies the delivery predecessor. For a targetless contract,
-the supplied `start` coordinate is the predecessor used to derive patch
-identity and there is no target ref operation.
+Preparation consumes only the state coordinates projected from that attempt, a
+pure `requireBranchesToBeUpToDate` value, and a title stamped with the
+`DocumentKey` from which it was derived. It does not observe, fold, or judge
+contract lifecycle state, decode a document, request a callback, import
+Settings, or import a protocol body. For a target contract, Git observes the
+current target head and constructs one squash integration against it. For a
+targetless contract, the supplied `start` coordinate is the integration
+predecessor, the tender is also the integration snapshot, and there is no
+target ref operation.
 
 Preparation uses the one core mechanical-result primitive. Delivery returns
 `Preparation<DeliverData, DeliveryPreparationFailure>` and review returns
 `Preparation<ChangeId, ReviewPreparationFailure>`; the prepared payload field
 is always `data`. Git defines neither bespoke delivery/review preparation
-unions nor a wrapper supertype. Delivery's data contains the
-candidate, patch, and predecessor identities; review's data is the captured
-patch identity. A mechanical preparation failure is data for the attempt's
-completed legal decision, not a lifecycle refusal. The candidate is the selected workspace content: the
+unions nor a wrapper supertype. Delivery's data contains the tender snapshot,
+complete integration identity, squash method, and frozen policy; review's data
+is the captured integration ChangeId. A mechanical preparation failure is data
+for the attempt's completed legal decision, not a lifecycle refusal. The
+tender is the selected workspace content: the
 deterministic managed worktree in worktree mode or the pinned caller worktree
 in here mode. Clean content uses its existing `HEAD`. Dirty content, including
 untracked files, is captured through a private index and materialized as a
-deterministic candidate commit/tree without changing the caller's index or
+deterministic tender commit/tree without changing the caller's index or
 worktree. Its commit message defaults to `<contract-id>: <title>` followed by
 `Keiyaku-Contract: <contract-id>`. A caller-supplied `message` replaces the
-message bytes only; candidate tree, parent, identity rules, and lifecycle
+message bytes only; tender tree, parent, identity rules, and lifecycle
 meaning do not change.
 
 Git uses commit identity for `SnapshotId` and one stable patch-ID
-method for `ChangeId`. Review captures that patch identity from current
-worktree content against the contract `start`; deliver records it against its
-observed delivery predecessor. Without target drift, those two computations
-produce the same patch identity. A pure rebase changes the delivery predecessor
-and candidate coordinates but preserves that identity; a conflict resolution
-that changes the patch does not. When a target is declared, the candidate must
-descend from the observed predecessor. Equality between predecessor and
-candidate is a valid assertion. Target drift ends that attempt; only a later,
-explicitly started attempt may prepare from the new target head. A targetless
-claimed admission appends the same fact without a ref operation.
+method for `ChangeId`: `patch-id --stable` over the diff from the integration
+predecessor to the integration tree. Review runs the same integration-aware
+projection without creating a durable snapshot, running Verification, or
+changing a worktree. A pure target rebase that leaves the integration patch
+unchanged therefore preserves review testimony; a conflict resolution that
+changes integration bytes does not.
+
+`requireBranchesToBeUpToDate` is a delivery-attempt policy. When true, a
+targeted tender that does not descend from the observed target head returns
+`integration-failed` with reason `not-based-on-target`; it admits no delivery
+fact. When false, Git performs a three-way squash integration with contract
+`start` as base, observed target head as ours, and tender tree as theirs. It
+uses `merge-tree --write-tree -z --name-only`, then creates one deterministic
+commit whose parent is the observed target head and whose message is the
+tender message. It never checks out or edits an agent worktree. Structured
+conflict paths produce `integration-failed` with reason `conflict`.
+
+Squash integration requires Git 2.38 or a compatible structured
+`merge-tree --write-tree` capability. Git probes that capability without
+parsing version prose. Absence returns `integration-unsupported` with
+`requiredGit: "2.38"`. Targetless delivery and the strict up-to-date path do
+not require this capability.
 
 Targeted claimed placement is one serialized Git operation per canonical
 target ref. Its fence begins before checkout preconditions are observed and
 ends only after the journal and target transaction has been published and the
 target checkout has followed it. Admission atomically asserts
-`target == expectedPredecessor`, moves it to the candidate, and appends
+`target == integration.predecessor`, moves it to `integration.snapshot`, and appends
 `claimed`; filesystem materialization remains a second physical write inside
-that same fence.
+that same fence. If the target moved after delivery admission or Verification,
+placement returns `target-moved` with the expected and freshly observed target
+coordinates. It appends no claimed fact, does not move the target, and never
+re-integrates or reuses Verification inside that attempt.
 
 When the target checkout is not the tender source, placement follows Git merge
 semantics. Before publication, each registered checkout of the target must
@@ -407,17 +425,21 @@ topology rather than an in-memory receipt.
 
 ## Identities And Bytes
 
-Keiyaku records delivery identity in durable facts: predecessor, candidate, and
-patch identity. Git stores and resolves the Git bytes behind those
-identities. A journal entry is not a Git reachability edge. Git retains
-no additional Keiyaku diff blob, permanent ref, or state index solely to
-preserve a tender.
+Keiyaku records the tender snapshot and complete integration identity in
+durable facts. Git stores and resolves the bytes behind those identities. A
+journal entry is not a Git reachability edge. While active, the managed
+delivery ref names the tender snapshot and the candidate pin names the
+integration snapshot. The target makes a claimed integration reachable. Git
+retains no additional Keiyaku diff blob, permanent ref, or state index.
 
 Terminal cleanup releases the delivery ref, candidate pin, and managed
-worktree only after the applicable cleanup rule succeeds. A retained worktree
+worktree only after the applicable cleanup rule succeeds. A managed worktree
+is removable only when clean and its `HEAD` is either the tender snapshot or
+the contract start with the matching tree. A retained worktree
 retains its reachability topology. Once the topology is released, Git pruning
-may make a recorded predecessor or candidate unavailable. That availability is
-Git state, while delivery identities remain durable contract facts. The
+may make a recorded tender, predecessor, or integration snapshot unavailable.
+That availability is Git state, while delivery identities remain durable
+contract facts. The
 public `Delivery.diff()` contract and its git-unavailable result are
 defined in [public-api.md](public-api.md).
 

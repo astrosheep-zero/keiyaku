@@ -66,12 +66,12 @@ test("typed refusal text preserves the refusal object", () => {
     kind: "refused",
     verb: "deliver",
     contract,
-    refusal: { kind: "candidate-not-based-on-target", contractId: contract },
+    refusal: { kind: "integration-failed", reason: "not-based-on-target", targetHead: "target-head", contractId: contract },
   };
 
   assert.equal(
     renderText(result),
-    'refused deliver kei/render-refusal {"kind":"candidate-not-based-on-target","contractId":"kei/render-refusal"}',
+    'refused deliver kei/render-refusal {"kind":"integration-failed","reason":"not-based-on-target","targetHead":"target-head","contractId":"kei/render-refusal"}',
   );
 });
 

@@ -25,7 +25,7 @@ export type Lag = ReconcileReport["lag"][number];
 
 export type DiffUnavailable = Readonly<{
   reason: "git-unavailable";
-  snapshotId: SnapshotId;
+  integrationSnapshot: SnapshotId;
   changeId: ChangeId;
 }>;
 

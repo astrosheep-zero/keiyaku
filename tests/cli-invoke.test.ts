@@ -489,8 +489,8 @@ test("audit renders an unavailable public delivery diff as accepted", async () =
     if (result.kind !== "accepted") return;
     assert.deepEqual(result.diff, {
       reason: "git-unavailable",
-      snapshotId: delivery.snapshotId,
-      changeId: delivery.changeId,
+      integrationSnapshot: delivery.integration.snapshot,
+      changeId: delivery.integration.changeId,
     });
   } finally {
     Delivery.prototype.diff = diff;
@@ -522,8 +522,8 @@ test("managed delivery reads without realigning its deterministic worktree", asy
   const deliver = await fromManaged(["deliver", "--actor", "external-test"]);
   assert.equal(deliver.kind, "accepted");
   const state = observeContract(repositoryAt(repository.path), id).state;
-  assert.equal(state?.delivery?.data.candidate, candidate);
-  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), candidate);
+  assert.equal(state?.delivery?.data.tenderSnapshot, candidate);
+  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), state?.delivery?.data.integration.snapshot);
   assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)), candidate);
   const audit = await fromManaged(["audit"]);
   assert.equal(audit.kind, "accepted");
@@ -620,6 +620,7 @@ test("a terminal worktree removal failure remains accepted cleanup lag", async (
     environment: {},
   });
   assert.equal(delivered.kind, "accepted");
+  const state = observeContract(repositoryAt(repository.path), id).state;
 
   const abandoned = await withGitShim(
     [
@@ -639,8 +640,8 @@ test("a terminal worktree removal failure remains accepted cleanup lag", async (
   if (abandoned.kind !== "accepted") return;
   assert.deepEqual(abandoned.lag, [{ kind: "worktree-retained", path }]);
   assert.equal(existsSync(path), true);
-  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)), candidate);
-  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), candidate);
+  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)), state?.delivery?.data.tenderSnapshot);
+  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), state?.delivery?.data.integration.snapshot);
 });
 
 test("reconcile world command adapts the public repository report", async () => {
@@ -684,9 +685,10 @@ test("--here delivers in place without owning a managed worktree", async () => {
   const deliver = await command(["deliver", id, "--actor", "external-test"]);
   assert.equal(deliver.kind, "accepted");
   const state = observeContract(repositoryAt(repository.path), id).state;
-  assert.equal(state?.delivery?.data.expectedPredecessor, candidate);
-  assert.equal(state?.delivery?.data.candidate, candidate);
-  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), candidate);
+  assert.equal(state?.delivery?.data.integration.predecessor, candidate);
+  assert.equal(state?.delivery?.data.tenderSnapshot, candidate);
+  assert.notEqual(state?.delivery?.data.integration.snapshot, candidate);
+  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), state?.delivery?.data.integration.snapshot);
   assert.equal(readRef(repositoryAt(repository.path), "refs/heads/main"), main);
   assert.equal(readRef(repositoryAt(repository.path), "refs/heads/feature"), candidate);
   assert.equal(repository.run(["symbolic-ref", "--short", "HEAD"]).trim(), "feature");

@@ -89,10 +89,27 @@ function renderContracts(report: KanshiReport, context: TextRenderContext, selec
   const rows = hotFirst(section.value.rows, (row) => row.phase === "waiting" || row.phase === "pending-delivery");
   const lines = [`keiyaku ${rows.length}`];
   for (const row of rows) {
+    const deliveryFacts = row.delivery === null
+      ? []
+      : selection === "world"
+        ? [`integration ${safeText(row.delivery.integration.snapshot).slice(0, 8)}`]
+        : [
+            `tender ${row.delivery.tenderSnapshot}`,
+            `predecessor ${row.delivery.integration.predecessor}`,
+            `integration ${row.delivery.integration.snapshot}`,
+            `change ${row.delivery.integration.changeId}`,
+          ];
+    const targetFacts = selection !== "contract" || row.targetObservation === null
+      ? []
+      : [
+          `target head ${row.targetObservation.head ?? "missing"}`,
+          `target ${row.targetObservation.drift ? "drifted" : "current"}`,
+        ];
     const facts = [
       row.workspace,
-      ...(row.candidate === null ? [] : [`candidate ${safeText(row.candidate).slice(0, 8)}`]),
+      ...deliveryFacts,
       ...(row.target === null ? [] : [`-> ${row.target}`]),
+      ...targetFacts,
     ];
     lines.push(`${contractMark(row.phase)} ${safeText(row.id)} ${row.phase}`);
     lines.push(...wrapChain(facts, context.columns));

@@ -203,17 +203,17 @@ async function reconcileWithTopology(
       if (state.terminal) effects.push(removeRef(repository, pin));
       else if (state.bound) effects.push(state.delivery === null
         ? removeRef(repository, pin)
-        : updateRef(repository, pin, state.delivery.data.candidate));
+        : updateRef(repository, pin, state.delivery.data.integration.snapshot));
       return complete(effects, lag);
     }
     if (state.terminal) {
       const expected = state.delivery === null
         ? [state.coordinates.start]
-        : [state.delivery.data.candidate, state.coordinates.start];
+        : [state.delivery.data.tenderSnapshot, state.coordinates.start];
       const primary = fromPrimaryWorktree(repository);
       const retain = (retainedLag: ReconcileLag): ReconcileResult => {
-        effects.push(updateRef(primary, ref, state.delivery?.data.candidate ?? state.coordinates.start));
-        effects.push(state.delivery === null ? removeRef(primary, pin) : updateRef(primary, pin, state.delivery.data.candidate));
+        effects.push(updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
+        effects.push(state.delivery === null ? removeRef(primary, pin) : updateRef(primary, pin, state.delivery.data.integration.snapshot));
         effects.push({ kind: "worktree", path, action: "unchanged" });
         lag.push(retainedLag);
         return complete(effects, lag);
@@ -232,12 +232,12 @@ async function reconcileWithTopology(
       return complete(effects, lag);
     }
     if (!state.bound) return complete(effects, lag);
-    const desired = state.delivery?.data.candidate ?? state.coordinates.start;
+    const desired = state.delivery?.data.tenderSnapshot ?? state.coordinates.start;
     effects.push(updateRef(repository, ref, desired));
     effects.push(worktree(repository, topology, path, desired));
     const hookLag = await runCreateHooks(path, worktreeGitDirectory(repository, path), hooks, retryHooks);
     if (hookLag !== null) lag.push(hookLag);
-    effects.push(state.delivery ? updateRef(repository, pin, state.delivery.data.candidate) : removeRef(repository, pin));
+    effects.push(state.delivery ? updateRef(repository, pin, state.delivery.data.integration.snapshot) : removeRef(repository, pin));
     return complete(effects, lag);
   } catch (error) {
     return failed("effect", error, effects, lag);

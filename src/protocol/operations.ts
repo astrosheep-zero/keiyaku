@@ -20,7 +20,7 @@ import type { WorktreeLeak } from "../git/verification.js";
 import { dependencyKeySet } from "../core/subject.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState, documentIsCurrent } from "../core/facts/observation.js";
-import type { ActorId, AmendData, ArcData, AttestationData, ChangeId, ContractId, ContractState, ContractTerms, DocumentKey, SnapshotId } from "../core/facts/types.js";
+import type { ActorId, AmendData, ArcData, AttestationData, ContractId, ContractState, ContractTerms, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
 import { gate } from "../core/facts/types.js";
 import { decideAbandon, type AbandonRefusal } from "../core/verbs/abandon.js";
 import { decideAmend, type AmendInput, type AmendRefusal } from "../core/verbs/amend.js";
@@ -90,6 +90,7 @@ export type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: Inte
 export type VerificationStop = StepStop<AttestationRefusal> | VerificationRuntimeStop;
 export type PlacementStop =
   | StepStop<PlacementRefusal | TargetPlacementRefusal>
+  | Readonly<{ failure: "target-moved"; contractId: ContractId; target: string; expected: SnapshotId; observed: SnapshotId | null }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>;
 
 function timestamp(): string { return new Date().toISOString(); }
@@ -113,6 +114,10 @@ function placementStop(result: PlacementProtocolResult): PlacementStop | undefin
   if (result.kind === "accepted") return undefined;
   if (result.kind === "placement-failed") {
     return { failure: "target-placement-failed", diagnostic: result.diagnostic };
+  }
+  if (result.kind === "target-moved") {
+    const { contractId, target, expected, observed } = result;
+    return { failure: "target-moved", contractId, target, expected, observed };
   }
   return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
 }
@@ -144,16 +149,12 @@ export function stateOperation(input: OperationInput): ContractState {
 
 export function readStateOperation(input: OperationInput): ContractState | null { return observeContract(input.scope, input.contractId).state; }
 
-type DeliveryIdentity = Readonly<{ snapshotId: SnapshotId; changeId: ChangeId; expectedPredecessor: SnapshotId }>;
+type DeliveryIdentity = DeliverData;
 
 export function deliveryOperation(input: OperationInput): DeliveryIdentity | null {
   const state = observeContract(input.scope, input.contractId).state;
   if (state === null || state.delivery === null) return null;
-  return {
-    snapshotId: state.delivery.data.candidate,
-    changeId: state.delivery.data.deliveryPatchId,
-    expectedPredecessor: state.delivery.data.expectedPredecessor,
-  };
+  return state.delivery.data;
 }
 
 function observePrerequisiteClosure(
@@ -177,9 +178,9 @@ function observePrerequisiteClosure(
   return observation;
 }
 
-type DeliveryDiffOperationInput = Readonly<{ scope: RepositoryScope; expectedPredecessor: SnapshotId; snapshotId: SnapshotId }>;
+type DeliveryDiffOperationInput = Readonly<{ scope: RepositoryScope; integrationPredecessor: SnapshotId; integrationSnapshot: SnapshotId }>;
 
-export async function deliveryDiffOperation(input: DeliveryDiffOperationInput): Promise<string | null> { return readDeliveryDiff(input.scope, input.expectedPredecessor, input.snapshotId); }
+export async function deliveryDiffOperation(input: DeliveryDiffOperationInput): Promise<string | null> { return readDeliveryDiff(input.scope, input.integrationPredecessor, input.integrationSnapshot); }
 
 type AmendOperationInput = OperationInput & Readonly<{
   amendment?: Readonly<{
@@ -226,7 +227,11 @@ type AttemptDecision<Value, Refusal = IntentRefusal> =
   | Readonly<{ kind: "collision" }>
   | Extract<DecidedOfferResult, { kind: "publication-failed" }>;
 
-type DeliverOperationInput = OperationInput & Readonly<{ derivation?: DocumentDerivation; message?: string }>;
+type DeliverOperationInput = OperationInput & Readonly<{
+  derivation?: DocumentDerivation;
+  message?: string;
+  requireBranchesToBeUpToDate: boolean;
+}>;
 
 function deliverAttempt(input: DeliverOperationInput, attempt: Parameters<typeof admitDecidedOffer>[2]): AttemptDecision<DeliveryIdentity> {
   const decisionObservation = observeContractsForAdmission(input.scope, [input.contractId]);
@@ -247,6 +252,7 @@ function deliverAttempt(input: DeliverOperationInput, attempt: Parameters<typeof
     }, {
       title: input.derivation.title,
       ...(input.message === undefined ? {} : { message: input.message }),
+      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
     });
     preparation = prepared.kind === "refused"
       ? { kind: "refused", document: input.derivation.document, refusal: prepared.refusal }
@@ -271,11 +277,7 @@ function deliverAttempt(input: DeliverOperationInput, attempt: Parameters<typeof
     input.contractId,
   );
   if (admitted.kind === "accepted") {
-    return { ...admitted, value: {
-      snapshotId: preparation.data.candidate,
-      changeId: preparation.data.deliveryPatchId,
-      expectedPredecessor: preparation.data.expectedPredecessor,
-    } };
+    return { ...admitted, value: preparation.data };
   }
   return admitted;
 }
@@ -496,7 +498,7 @@ export async function auditOperation(
         ? { refusal: verification.step.refusal }
         : { retry: verification.step };
   const report = !("failure" in verification.step) && verification.step.kind === "accepted"
-    ? auditReport(verification.step.journal, REVIEWED)
+    ? auditReport(verification.step.journal, REVIEWED, initial.state, git)
     : initial.report;
   const value = {
     ...report,

@@ -50,16 +50,19 @@ ref transaction is accepted it cannot be reinterpreted as a refusal: a follow
 failure is returned as the recoverable physical lag defined by
 [git.md](git.md), and process death can leave that same recovery shape.
 
-`deliver` tenders the selected current worktree content. Its fact records the
-observed predecessor, candidate, and patch identity. A later tender replaces
-the current delivery on the read model. The tender's Git preparation and
-target update rules live in
-[git.md](git.md).
+`deliver` tenders the selected current worktree content. Before admitting the
+fact, Git materializes the complete integration candidate that this attempt may
+verify and place. The fact records the tender snapshot, integration
+predecessor, integration snapshot, integration ChangeId, squash method, and the
+attempt's frozen up-to-date policy. A later tender replaces the current
+delivery on the read model. The tender and integration preparation rules live
+in [git.md](git.md).
 
 `review` is a contract operation and may record testimony before any `deliver`.
-It captures the current worktree patch identity and the document key projected
+It uses Git's compute-only integration projection to capture the ChangeId that
+the current target and worktree bytes produce, plus the document key projected
 by its decision observation; this is not a decoded-document derivation. Its
-subject has no candidate identity. The reviewed producer boundary owns the
+subject has no snapshot identity. The reviewed producer boundary owns the
 `reviewed` token whether or not it is listed in `terms.gates`. A satisfied
 review requests placement; an unsatisfied review records judgment only.
 Optional `summary` is opaque testimony and does not participate in a gate.
@@ -129,7 +132,8 @@ same gate and subject overrides the satisfied result. Gate-specific producer
 methodology is outside core;
 [verification.md](verification.md) owns the execution-side verification case.
 The current key set always contains the current document and ordered segment
-keys; candidate snapshot and patch keys join it only while a delivery exists.
+keys; integration snapshot and ChangeId keys join it only while a delivery
+exists. Tender identity is custody and observation data, not gate currency.
 
 Gate currency has one implementation in `core/facts/gate.ts`. Claimed
 admission and the public Contract status projection both call that

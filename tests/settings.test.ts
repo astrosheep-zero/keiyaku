@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { gatesFrom, SettingsError } from "../src/library/keiyaku.js";
+import { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "../src/library/keiyaku.js";
 import { loadArchetype } from "../src/akuma/archetype.js";
 import { invoke, type SettingsInvocationResult } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
@@ -87,6 +87,20 @@ test("gatesFrom admits custom words, empty sets, and no implicit default", () =>
     assert.throws(() => gatesFrom({ settings: loaded, name: "missing" }), /unknown gate set/u);
     assert.throws(() => gatesFrom({ settings: loaded, name: "duplicate" }), /duplicate gates/u);
     assert.throws(() => gatesFrom({ settings: loaded, name: "invalid" }), /invalid gate word/u);
+  } finally { value.close(); }
+});
+
+test("git policy defaults false and accepts only the ruled boolean", () => {
+  const value = fixture();
+  try {
+    let loaded = settings({ root: value.project, home: value.home });
+    assert.equal(requireBranchesToBeUpToDateFrom({ settings: loaded }), false);
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ git: { requireBranchesToBeUpToDate: true } }));
+    loaded = settings({ root: value.project, home: value.home });
+    assert.equal(requireBranchesToBeUpToDateFrom({ settings: loaded }), true);
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ git: { requireBranchesToBeUpToDate: "yes" } }));
+    loaded = settings({ root: value.project, home: value.home });
+    assert.throws(() => requireBranchesToBeUpToDateFrom({ settings: loaded }), SettingsError);
   } finally { value.close(); }
 });
 

@@ -270,8 +270,10 @@ test("installed binary dogfoods managed delivery, replacement review, and termin
   const firstCandidate = commit(managed, "candidate.txt", "first candidate\n", "first candidate");
   const firstDelivery = invoke(repository, ["deliver", id]);
   assert.deepEqual(acceptedFactKinds(firstDelivery, id), ["deliver"]);
+  const firstData = journalEntries(repository, id).findLast((entry) => entry.kind === "deliver")?.data;
+  assert.equal(firstData?.tenderSnapshot, firstCandidate);
   const candidatePin = effectRef(firstDelivery, "refs/heads/keiyaku-candidate/");
-  assert.equal(gitRef(repository, candidatePin), firstCandidate);
+  assert.equal(gitRef(repository, candidatePin), firstData?.integration.snapshot);
   assert.equal(gitRef(repository, deliveryRef), firstCandidate);
   assert.equal(gitRef(repository, target), start);
 
@@ -290,13 +292,15 @@ test("installed binary dogfoods managed delivery, replacement review, and termin
   const replacementCandidate = commit(managed, "candidate.txt", "replacement candidate\n", "replacement candidate");
   const replacementDelivery = invoke(repository, ["deliver", id]);
   assert.deepEqual(acceptedFactKinds(replacementDelivery, id), ["deliver"]);
-  assert.equal(gitRef(repository, candidatePin), replacementCandidate);
+  const replacementData = journalEntries(repository, id).findLast((entry) => entry.kind === "deliver")?.data;
+  assert.equal(replacementData?.tenderSnapshot, replacementCandidate);
+  assert.equal(gitRef(repository, candidatePin), replacementData?.integration.snapshot);
   assert.equal(gitRef(repository, deliveryRef), replacementCandidate);
   assert.equal(gitRef(repository, target), start);
 
   const satisfiedReview = invoke(repository, ["review", id, "--satisfied"]);
   assert.deepEqual(acceptedFactKinds(satisfiedReview, id), ["attestation", "claimed"]);
-  assert.equal(gitRef(repository, target), replacementCandidate, "claimed CAS places the reviewed replacement");
+  assert.equal(gitRef(repository, target), replacementData?.integration.snapshot, "claimed CAS places the reviewed integration");
   assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "deliver", "attestation", "deliver", "attestation", "claimed"]);
   assert.equal(gitRef(repository, candidatePin), null);
   assert.equal(gitRef(repository, deliveryRef), null);
@@ -339,8 +343,8 @@ test("installed binary dogfoods here verification and gate-controlled placement"
   const originalTarget = gitRef(repository, target);
   assert.ok(originalTarget);
   const originalWorktrees = worktreePaths(repository);
-  mkdirSync(join(repository, ".keiyaku"));
-  writeFileSync(join(repository, ".keiyaku", "settings.json"), JSON.stringify({
+  mkdirSync(join(here, ".keiyaku"));
+  writeFileSync(join(here, ".keiyaku", "settings.json"), JSON.stringify({
     gates: { default: ["reviewed", "verified"] },
   }));
 
@@ -361,7 +365,7 @@ test("installed binary dogfoods here verification and gate-controlled placement"
 
   const delivered = succeeds(invokeResult(here, ["deliver", id]));
   assert.deepEqual(acceptedFactKinds(delivered, id), ["deliver", "attestation"]);
-  const candidate = journalEntries(repository, id).findLast((entry) => entry.kind === "deliver")?.data.candidate;
+  const candidate = journalEntries(repository, id).findLast((entry) => entry.kind === "deliver")?.data.integration.snapshot;
   assert.equal(typeof candidate, "string");
   assert.equal(gitRef(repository, target), originalTarget, "failed Verification must not place the target");
 

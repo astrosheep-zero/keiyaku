@@ -73,6 +73,11 @@ function stringValue(value: unknown, path: string, nonblank = true): string {
   return value;
 }
 
+function booleanValue(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean") fail(path, "expected a boolean");
+  return value;
+}
+
 function brandedValue<T>(value: unknown, path: string, brand: (value: string) => T): T {
   const text = stringValue(value, path);
   try {
@@ -194,11 +199,27 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
     }
     case "deliver": {
       const object = requireRecord(value, path);
-      requireKeys(object, ["expectedPredecessor", "candidate", "deliveryPatchId"], path);
+      requireKeys(object, ["tenderSnapshot", "integration", "method", "policy"], path);
+      const integration = requireRecord(object.integration, `${path}.integration`);
+      requireKeys(integration, ["predecessor", "snapshot", "changeId"], `${path}.integration`);
+      const method = stringValue(object.method, `${path}.method`);
+      if (method !== "squash") fail(`${path}.method`, "unknown merge method");
+      const policy = requireRecord(object.policy, `${path}.policy`);
+      requireKeys(policy, ["requireBranchesToBeUpToDate"], `${path}.policy`);
       return {
-        expectedPredecessor: brandedValue(object.expectedPredecessor, `${path}.expectedPredecessor`, snapshotId),
-        candidate: brandedValue(object.candidate, `${path}.candidate`, snapshotId),
-        deliveryPatchId: brandedValue(object.deliveryPatchId, `${path}.deliveryPatchId`, changeId),
+        tenderSnapshot: brandedValue(object.tenderSnapshot, `${path}.tenderSnapshot`, snapshotId),
+        integration: {
+          predecessor: brandedValue(integration.predecessor, `${path}.integration.predecessor`, snapshotId),
+          snapshot: brandedValue(integration.snapshot, `${path}.integration.snapshot`, snapshotId),
+          changeId: brandedValue(integration.changeId, `${path}.integration.changeId`, changeId),
+        },
+        method,
+        policy: {
+          requireBranchesToBeUpToDate: booleanValue(
+            policy.requireBranchesToBeUpToDate,
+            `${path}.policy.requireBranchesToBeUpToDate`,
+          ),
+        },
       } satisfies DeliverData;
     }
     case "attestation":

@@ -135,14 +135,17 @@ runs hook commands or reads marker files. `reconcile --retry-hooks` maps to
 `retryHooks: true`. It retries only a failed marker phase with its frozen
 commands and does not recapture edited settings for an existing worktree.
 
-Repository `.keiyaku/settings.json` may supply named gate snapshots for the
-`--gates <name>` edge flag:
+Repository `.keiyaku/settings.json` may supply named gate snapshots and the Git
+delivery policy for the edge:
 
 ```json
 {
   "gates": {
     "default": ["reviewed"],
     "strict": ["reviewed", "verified"]
+  },
+  "git": {
+    "requireBranchesToBeUpToDate": false
   }
 }
 ```
@@ -156,7 +159,9 @@ public value when its flag is omitted. A malformed Settings scope, malformed
 selected entry, or explicitly selected unknown name is a typed usage refusal.
 
 `deliver` accepts an optional materialized-commit `--message`, `--actor`, and
-`--json`. `review` requires exactly one of
+`--json`. Its up-to-date policy comes from the settings consumer at
+`git.requireBranchesToBeUpToDate`; there is no per-deliver policy flag.
+`review` requires exactly one of
 `--satisfied` or `--unsatisfied`, with optional `--summary`, `--actor`, and
 `--json`. `abandon` accepts optional `--note`, `--actor`, and `--json`; it has
 no reason flag or hidden reason classification. `arc` and `audit` accept
@@ -425,7 +430,7 @@ Delivery from the public handle and renders diff text when available. A `null`
 public diff renders:
 
 ```text
-{ reason: "git-unavailable", snapshotId, changeId }
+{ reason: "git-unavailable", integrationSnapshot, changeId }
 ```
 
 This is an observation with exit `0`, contains no raw Git error, and is not
@@ -499,9 +504,10 @@ The status board renders one public `KanshiReport`. Default and selected status
 have the same report shape. An explicit Contract selector projects the already
 assembled report to that Contract and its associated source rows; it does not
 switch to another observation result. The Contract section is supplied by
-`Keiyaku.list({ repo })` and exposes lifecycle, candidate, and every declared
-gate's current report. Kanshi and the renderer copy those discriminants and do
-not evaluate gate currency, infer claimability, or derive terminality.
+`Keiyaku.list({ repo })` and exposes lifecycle, integration delivery identity,
+fresh target observation, and every declared gate's current report. Kanshi and
+the renderer copy those discriminants and do not evaluate gate currency, infer
+claimability, or derive terminality.
 Its Akuma section is supplied by `Akuma.list()` as specified by
 [kanshi.md](kanshi.md); the board copies life, identity, pending count,
 confinement, and searched coordinates
@@ -516,7 +522,8 @@ no ruler, separate root line, or mark legend. The fixed `keiyaku`, `task`, and
 Bare status renders every Contract row. Waiting and pending-delivery rows come
 before other Contracts, with source order stable inside each class. A row starts
 with its mark, complete ContractId, and adjacent phase word. Incremental facts
-continue beneath it: workspace, an eight-character textual candidate, and a
+continue beneath it: workspace, an eight-character textual integration
+snapshot, and a
 target expressed as `-> <ref>`. Every rendered Contract copies all of its
 declared gates in declaration order as one compact icon-and-name chain. The
 gate marks are `✓` for a current satisfied attestation, `!` for a current

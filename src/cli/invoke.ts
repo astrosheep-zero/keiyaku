@@ -1,6 +1,6 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { gatesFrom, Keiyaku, NoGitWorldError, Repo, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
+import { gatesFrom, Keiyaku, NoGitWorldError, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
 import { kanshi, selectKanshi } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromMutationCall } from "./accepted.js";
@@ -71,6 +71,14 @@ function selectedHooks(value: Settings): WorktreeHooks {
   }
 }
 
+function selectedGitPolicy(value: Settings): boolean {
+  try { return requireBranchesToBeUpToDateFrom({ settings: value }); }
+  catch (error) {
+    if (error instanceof SettingsError) throw new CliUsageError(error.message);
+    throw error;
+  }
+}
+
 function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
   let resolved: ActorId | undefined;
   try {
@@ -129,11 +137,11 @@ async function invokeBind(
   );
 }
 
-function unavailableDiff(delivery: { snapshotId: SnapshotId; changeId: ChangeId }): DiffUnavailable {
+function unavailableDiff(delivery: { integration: { snapshot: SnapshotId; changeId: ChangeId } }): DiffUnavailable {
   return {
     reason: "git-unavailable",
-    snapshotId: delivery.snapshotId,
-    changeId: delivery.changeId,
+    integrationSnapshot: delivery.integration.snapshot,
+    changeId: delivery.integration.changeId,
   };
 }
 
@@ -147,10 +155,12 @@ type ExistingSeat = Readonly<{
 async function invokeDeliver(
   parsed: Extract<ExistingCommand, { command: "deliver" }>,
   seat: ExistingSeat,
+  requireBranchesToBeUpToDate: boolean,
 ): Promise<InvocationResult> {
   return resultFromMutationCall("deliver", () => seat.contract.deliver({
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
     ...(parsed.message === undefined ? {} : { message: parsed.message }),
+    requireBranchesToBeUpToDate,
     hooks: seat.hooks,
   }), {
     coordinate: seat.id,
@@ -235,7 +245,7 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
       );
     }
     case "deliver":
-      return invokeDeliver(parsed, seat);
+      return invokeDeliver(parsed, seat, selectedGitPolicy(configuration));
     case "review":
       return invokeReview(parsed, seat, edge.readStdin);
     case "arc": {

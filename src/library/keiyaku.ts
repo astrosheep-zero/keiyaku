@@ -26,6 +26,7 @@ export {
 export { NoGitWorldError, Repo } from "./repo.js";
 export {
   gatesFrom,
+  requireBranchesToBeUpToDateFrom,
   SettingsError,
   worktreeHooksFrom,
 } from "./configuration.js";
@@ -77,6 +78,7 @@ export type {
   Gate,
   GatesFromInput,
   HookCommand,
+  RequireBranchesToBeUpToDateFromInput,
   WorktreeHooks,
   WorktreeHooksFromInput,
 } from "./configuration.js";

@@ -54,7 +54,8 @@ single structured detail value.
 Settings construction and generic resource behavior are owned by
 [settings.md](settings.md). This package root exports `settings`, `Settings`,
 its observation value types, and the Contract-owned pure consumers
-`gatesFrom({ settings, name? })` and `worktreeHooksFrom({ settings })`. They
+`gatesFrom({ settings, name? })`, `worktreeHooksFrom({ settings })`, and
+`requireBranchesToBeUpToDateFrom({ settings })`. They
 return concrete immutable values; no Contract operation reads a settings file
 or retains a Settings observation. Their selected-entry and resource-view
 failures throw the exported Contract-owned `SettingsError`; generic Settings
@@ -189,6 +190,17 @@ type ContractGateCurrent =
 
 type ContractGateReport = Readonly<{ gate: string; current: ContractGateCurrent }>
 
+type DeliveryIdentity = Readonly<{
+  tenderSnapshot: SnapshotId
+  integration: Readonly<{
+    predecessor: SnapshotId
+    snapshot: SnapshotId
+    changeId: ChangeId
+  }>
+  method: "squash"
+  policy: Readonly<{ requireBranchesToBeUpToDate: boolean }>
+}>
+
 type ContractRow = Readonly<{
   id: ContractId
   phase: "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned"
@@ -196,7 +208,11 @@ type ContractRow = Readonly<{
   workspace: "worktree" | "here"
   worktreePath: string | null
   target: string | null
-  candidate: SnapshotId | null
+  delivery: DeliveryIdentity | null
+  targetObservation: Readonly<{
+    head: SnapshotId | null
+    drift: boolean
+  }> | null
   gates: Readonly<{
     reports: readonly ContractGateReport[]
     satisfied: boolean
@@ -408,6 +424,7 @@ keiyaku.amend(input: {
 keiyaku.deliver(input?: {
   actor?: ActorId
   message?: string
+  requireBranchesToBeUpToDate?: boolean
   hooks?: WorktreeHooks
 }): Promise<MutationResult<Delivery>>
 keiyaku.review(input: {
@@ -449,16 +466,16 @@ frozen commands. No mutation input carries `retryHooks`, so an ordinary later
 mutation cannot silently retry a failed external command.
 
 `review` is a contract operation. It does not require a Delivery handle or an
-existing delivery fact. It captures the current worktree patch identity against
-the contract start and the document key projected by its lifecycle observation.
-It receives no decoded-document derivation. It records the owned `reviewed`
+existing delivery fact. It captures the current worktree's integration-aware
+ChangeId and the document key projected by its lifecycle observation. It
+receives no decoded-document derivation. It records the owned `reviewed`
 testimony even when that token is absent from `terms.gates`.
 
 `delivery()` freshly observes the journal and returns the most recent tender.
 It returns `null` only when the contract has never tendered. A returned
-Delivery is pinned to public `snapshotId`, `changeId`, and
-`expectedPredecessor`; `deliver()` and `delivery()` are its two birth paths. A
-Delivery has no review operation. `message` overrides only a mechanically
+Delivery exposes the tender snapshot and the complete integration identity;
+`deliver()` and `delivery()` are its two birth paths. A Delivery has no review
+operation. `message` overrides only a mechanically
 materialized commit message; omitting it uses the Git template in
 [git.md](git.md).
 
@@ -561,6 +578,18 @@ type PlacementRefusal = Readonly<{
   contractId: ContractId
 }>
 
+type IntegrationRefusal = Readonly<{
+  kind: "integration-failed"
+  contractId: ContractId
+  reason: "not-based-on-target" | "conflict"
+  targetHead: SnapshotId
+  conflictPaths?: readonly string[]
+}> | Readonly<{
+  kind: "integration-unsupported"
+  contractId: ContractId
+  requiredGit: "2.38"
+}>
+
 type CheckoutNotFollowableRefusal = Readonly<{
   kind: "checkout-not-followable"
   contractId: ContractId
@@ -599,12 +628,24 @@ type VerificationStop =
 
 type PlacementStop =
   | StepStop<PlacementRefusal | CheckoutNotFollowableRefusal | DeliveryWorkspaceRefusal>
+  | Readonly<{
+      failure: "target-moved"
+      contractId: ContractId
+      target: string
+      expected: SnapshotId
+      observed: SnapshotId | null
+    }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>
 
 type Delivery = Readonly<{
-  snapshotId: SnapshotId
-  changeId: ChangeId
-  expectedPredecessor: SnapshotId
+  tenderSnapshot: SnapshotId
+  integration: Readonly<{
+    predecessor: SnapshotId
+    snapshot: SnapshotId
+    changeId: ChangeId
+  }>
+  method: "squash"
+  policy: Readonly<{ requireBranchesToBeUpToDate: boolean }>
   verification?: VerificationStop
   placement?: PlacementStop
   leak?: WorktreeLeak
@@ -706,6 +747,8 @@ type AuditReport = Readonly<{
   reworks: number
   reviews: number
   timeline: readonly TimelineEntry[]
+  delivery?: DeliveryIdentity
+  targetObservation?: Readonly<{ head: SnapshotId | null; drift: boolean }>
   attempt?: VerificationStop
   leak?: WorktreeLeak
 }>
@@ -728,7 +771,8 @@ the integer millisecond difference from the immediately preceding value. The
 first entry yields `null`; a negative difference is preserved. Canonical
 journal decoding rejects an unparseable timestamp before this projection.
 Attestation timeline entries copy their gate, verdict, and optional bounded
-summary from that fact. Reports contain no journal entries, body snapshots,
+summary from that fact. Reports include the current delivery identity and
+fresh target observation when available, but no journal entries, body snapshots,
 detached raw logs, artifacts, or evidence bytes.
 
 `audit()` returns `MutationResult<AuditReport>` when its leading observation and
@@ -748,12 +792,12 @@ facts, cleanup authority, or reconcile input.
 
 ## Delivery Diff
 
-`Delivery.diff()` asks Git to resolve the pinned predecessor and
-candidate identities each time. It returns their diff text when both bytes are
+`Delivery.diff()` asks Git to resolve the pinned integration predecessor and
+integration snapshot identities each time. It returns their diff text when both bytes are
 available, including `""` for an empty patch. It returns `null` when Git
 cannot resolve either recorded byte sequence, including a pruning race during
-the lookup. It never exposes a raw Git lookup error. `snapshotId` and
-`changeId` remain available on the Delivery in either result.
+the lookup. It never exposes a raw Git lookup error. The complete integration
+identity and `tenderSnapshot` remain available on the Delivery in either result.
 
 Diff text is presentation data. It is never persisted, folded, admitted,
 cached, supplied to a gate, or retained through a Keiyaku-owned ref. Terminal
@@ -761,7 +805,7 @@ cleanup may release delivery refs, candidate pins, and managed worktrees only
 under the Git-owned cleanup rule; byte availability remains Git
 custody. The CLI renders a `null` result for
 `--show-diff-body` as
-`{ reason: "git-unavailable", snapshotId, changeId }`, without a raw Git
+`{ reason: "git-unavailable", integrationSnapshot, changeId }`, without a raw Git
 diagnostic and with observation exit status `0`.
 
 ## Document Boundary

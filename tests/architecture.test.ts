@@ -238,7 +238,7 @@ test("architecture policy permits the aggregate status read path", () => {
       'import { deliveryWorktreePath } from "../../git/workspace.js";',
       'import { gateReports } from "../../core/facts/gate.js";',
       'import type { ContractId, ContractState, SnapshotId } from "../../core/facts/types.js";',
-      "export type ContractRow = { id: ContractId; candidate: SnapshotId | null };",
+      "export type ContractRow = { id: ContractId; delivery: unknown; targetObservation: unknown };",
       "export type ContractBoard = { rows: readonly ContractRow[] };",
       "export function readContractBoard(state: ContractState): ContractBoard { void deliveryWorktreePath; gateReports(); void state; return { rows: [] }; }",
     ].join("\n"),

@@ -26,7 +26,8 @@ There is no attestation reuse or stale-skip rule. A matching satisfied or
 unsatisfied attestation is durable history, and a later testimony for the same
 gate and subject supersedes it under the generic lifecycle rule; neither one
 permits an invocation to omit a declaration from the admitted document
-revision. The `verified` producer's subject is exactly the candidate snapshot
+revision. The `verified` producer's subject is exactly the delivery's
+integration snapshot
 key and the decoded Verification segment key. Core only mints and compares
 those opaque keys; it does not know how the producer chose them.
 
@@ -35,7 +36,7 @@ Admission receives it through the core `Preparation` primitive, never
 re-derives the set, and never silently retargets the result. The sole
 `decideAttestation` call judges contract existence and terminal state against
 its own attempt observation. It does not reject an older document or subject:
-the completed run remains a truthful fact about the candidate and Verification
+the completed run remains a truthful fact about the integration and Verification
 segment it names. Subject currentness remains placement's sole law as defined
 in [lifecycle.md](lifecycle.md). The
 journal attestation is the only durable execution result and the only input to
@@ -57,10 +58,10 @@ gate/declaration legality formula. Core receives the composed preparation and
 remains the sole judge of lifecycle and document-currentness priority.
 
 The producer resolves the admitted declarations and runs them against the
-selected candidate tree. It accepts the derivation as data; it imports no
+selected integration tree. It accepts the derivation as data; it imports no
 decoded document, callback, or protocol body. Deliver and audit use the same
 execution path and a fresh disposable detached worktree checked out at that
-candidate tree; such scratch is process-local, is never reused, and is not
+integration tree; such scratch is process-local, is never reused, and is not
 derived from journal facts. A terminal process exit admits a satisfied or
 unsatisfied attestation. For each terminal declaration the runtime retains the
 last 16 KiB of stdout and stderr; the producer renders at most 32 KiB across the
@@ -68,11 +69,11 @@ ordered run into the attestation `summary`, including executor and exit status.
 Silent successful runs omit the summary. `candidate-unavailable`, `timeout`,
 `spawn-error`, and `unknown-exit` admit no attestation. Candidate materialization
 is Git custody needed only to run the selected declarations; its failure
-is not a new fact about the contract or candidate. `candidate-unavailable` and
+is not a new fact about the contract or integration. `candidate-unavailable` and
 `spawn-error` carry their verbatim diagnostic through the transient public
 attempt so a failed Git executable is not reported without its cause.
 Placement is still attempted afterward. The
-candidate remains pending only when its declared gates are unsatisfied.
+integration remains pending only when its declared gates are unsatisfied.
 
 Producer nonterminal outcomes and attestation-admission refusals or retries are
 one public Verification-stop vocabulary: the obligation ran and admitted no

@@ -134,10 +134,10 @@ test("dirty --here delivery materializes and lands the verified candidate cleanl
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
   const state = observeContract(setup.repository, bound.contract).state;
   assert.equal(state?.attestations.at(-1)?.data.verdict, "satisfied");
-  assert.equal(state?.delivery?.data.candidate, setup.raw.run(["rev-parse", "HEAD"]).trim());
-  assert.equal(setup.raw.run(["show", `${state?.delivery?.data.candidate}:candidate.txt`]), "passing\n");
+  assert.equal(state?.delivery?.data.integration.snapshot, setup.raw.run(["rev-parse", "HEAD"]).trim());
+  assert.equal(setup.raw.run(["show", `${state?.delivery?.data.integration.snapshot}:candidate.txt`]), "passing\n");
   assert.equal(
-    setup.raw.run(["show", "-s", "--format=%B", state?.delivery?.data.candidate ?? "HEAD"]),
+    setup.raw.run(["show", "-s", "--format=%B", state?.delivery?.data.integration.snapshot ?? "HEAD"]),
     `Verified dirty candidate\n\nKeiyaku-Contract: ${bound.contract}\n\n`,
   );
   assert.equal(setup.raw.run(["diff", "--cached", "--binary"]), indexBefore);

@@ -68,8 +68,8 @@ import { settle, type SettlementReport } from "../settlement/settle.js";
 import { claimTaskHolder, readTaskHolders, releaseTaskHolder, type TaskHolder } from "../settlement/holder.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
-export { gatesFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
-export type { Gate, GatesFromInput, HookCommand, WorktreeHooks, WorktreeHooksFromInput } from "./configuration.js";
+export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
+export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks, WorktreeHooksFromInput } from "./configuration.js";
 
 export type {
   AuditReport,
@@ -169,7 +169,7 @@ export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type KeiyakuOfInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type ReviewInput = ActorOptions & Readonly<{ verdict: AttestationVerdict; summary?: string }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
-export type DeliverInput = ActorOptions & Readonly<{ message?: string }>;
+export type DeliverInput = ActorOptions & Readonly<{ message?: string; requireBranchesToBeUpToDate?: boolean }>;
 export type AuditInput = ActorOptions;
 
 type AcceptedIntent<Value> = Readonly<{
@@ -222,14 +222,21 @@ class DeliveryHandle {
   declare readonly leak?: DeliverValue["leak"];
 
   constructor(
-    readonly snapshotId: SnapshotId,
-    readonly changeId: ChangeId,
-    readonly expectedPredecessor: SnapshotId,
+    identity: Pick<DeliverValue, "tenderSnapshot" | "integration" | "method" | "policy">,
     private readonly readDiff: () => Promise<string | null>,
     outcomes: Partial<Pick<DeliverValue, "verification" | "placement" | "leak">> = {},
   ) {
+    this.tenderSnapshot = identity.tenderSnapshot;
+    this.integration = identity.integration;
+    this.method = identity.method;
+    this.policy = identity.policy;
     Object.assign(this, outcomes);
   }
+
+  declare readonly tenderSnapshot: SnapshotId;
+  declare readonly integration: DeliverValue["integration"];
+  declare readonly method: DeliverValue["method"];
+  declare readonly policy: DeliverValue["policy"];
 
   diff(): Promise<string | null> {
     return this.readDiff();
@@ -313,6 +320,9 @@ export class KeiyakuHandle {
     const values = input === undefined ? undefined : requireInput(input, "deliver input");
     const hooks = worktreeHooksOption(values?.hooks);
     const message = optionalNonblank(values?.message, "deliver message");
+    if (values?.requireBranchesToBeUpToDate !== undefined && typeof values.requireBranchesToBeUpToDate !== "boolean") {
+      throw new TypeError("requireBranchesToBeUpToDate must be a boolean");
+    }
     const actor = actorOption(values?.actor);
     const state = readStateOperation({ scope: this.scope, contractId: this.id });
     const derivation = state === null
@@ -325,6 +335,7 @@ export class KeiyakuHandle {
         ...(derivation === undefined ? {} : { derivation }),
         ...actor,
         ...(message === undefined ? {} : { message }),
+        requireBranchesToBeUpToDate: values?.requireBranchesToBeUpToDate ?? false,
       }),
     );
     return mutationResult(this.scope, this.id, accepted, (delivery) => this.deliveryHandle(delivery), hooks);
@@ -408,13 +419,11 @@ export class KeiyakuHandle {
 
   private deliveryHandle(delivery: DeliverValue): Delivery {
     return new DeliveryHandle(
-      delivery.snapshotId,
-      delivery.changeId,
-      delivery.expectedPredecessor,
+      delivery,
       () => deliveryDiffOperation({
         scope: this.scope,
-        expectedPredecessor: delivery.expectedPredecessor,
-        snapshotId: delivery.snapshotId,
+        integrationPredecessor: delivery.integration.predecessor,
+        integrationSnapshot: delivery.integration.snapshot,
       }),
       delivery,
     );

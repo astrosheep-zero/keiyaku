@@ -122,9 +122,16 @@ export type AmendData = ContractTerms;
 export type BoundData = Readonly<Record<string, never>>;
 
 export type DeliverData = Readonly<{
-  expectedPredecessor: SnapshotId;
-  candidate: SnapshotId;
-  deliveryPatchId: ChangeId;
+  tenderSnapshot: SnapshotId;
+  integration: Readonly<{
+    predecessor: SnapshotId;
+    snapshot: SnapshotId;
+    changeId: ChangeId;
+  }>;
+  method: "squash";
+  policy: Readonly<{
+    requireBranchesToBeUpToDate: boolean;
+  }>;
 }>;
 
 export type AttestationData = Readonly<{

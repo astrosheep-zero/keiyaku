@@ -96,8 +96,8 @@ function currentKeys(state: ContractState): ReadonlySet<string> {
     encodeKey({ kind: "document", value: state.terms.document.key }),
     ...state.terms.segments.map((value) => encodeKey({ kind: "segment", value })),
     ...(state.delivery === null ? [] : [
-      encodeKey({ kind: "snapshot", value: state.delivery.data.candidate }),
-      encodeKey({ kind: "change", value: state.delivery.data.deliveryPatchId }),
+      encodeKey({ kind: "snapshot", value: state.delivery.data.integration.snapshot }),
+      encodeKey({ kind: "change", value: state.delivery.data.integration.changeId }),
     ]),
   ]);
 }

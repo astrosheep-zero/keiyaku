@@ -14,6 +14,7 @@ import {
   isKeiyakuOwnedRef,
   extendGitPaths,
   readBlobs,
+  readRef,
   readGit,
   readGitPaths,
   runGit,
@@ -21,6 +22,26 @@ import {
   type GitOid,
   type GitRepository,
 } from "./repository.js";
+
+/** Observe a target ref as a branded snapshot without changing Git state. */
+export function observeTargetHead(repository: GitRepository, target: string): SnapshotId | null {
+  const value = readRef(repository, target);
+  return value === null ? null : mintSnapshotId(value);
+}
+
+export type TargetObservation = Readonly<{ head: SnapshotId | null; drift: boolean }>;
+
+export function observeDeliveryTarget(repository: GitRepository, state: ContractState): TargetObservation | null {
+  const target = state.coordinates.target;
+  if (target === undefined) return null;
+  const head = observeTargetHead(repository, target);
+  const delivery = state.delivery?.data;
+  if (delivery === undefined) return { head, drift: false };
+  const expected = state.terminal?.kind === "claimed"
+    ? delivery.integration.snapshot
+    : delivery.integration.predecessor;
+  return { head, drift: head !== expected };
+}
 
 type GitJournalRecord = Readonly<{
   entries: readonly JournalEntry[];

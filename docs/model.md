@@ -38,12 +38,13 @@ Git/protocol observation used for audit and unknown-admission recovery; they
 do not enter the pact decision projection. Git snapshot identity and
 physical provenance likewise remain Git concerns.
 
-`SnapshotId` names a work snapshot and `ChangeId` names patch content. Git
-mints both and is the sole physical Git object-ID validator; pact validates only
-their opaque nonblank values. Every tender has both identities. A producer or
-operation may include either identity in its dependency-key set when its own law
-requires it. Git may make them equal and thereby choose stricter
-freshness.
+`SnapshotId` names a work snapshot and `ChangeId` names integration patch
+content. Git mints both and is the sole physical Git object-ID validator; pact
+validates only their opaque nonblank values. A tender has one snapshot identity.
+Its delivery has one integration snapshot and one ChangeId computed from that
+integration's predecessor-to-tree diff. Tender content has no second ChangeId.
+A producer or operation may include either integration identity in its
+dependency-key set when its own law requires it.
 
 ## Identity Coordinates
 
@@ -182,9 +183,16 @@ arc / bound / claimed / abandoned
 type BoundData = {}
 
 type DeliverData = Readonly<{
-  expectedPredecessor: SnapshotId
-  candidate: SnapshotId
-  deliveryPatchId: ChangeId
+  tenderSnapshot: SnapshotId
+  integration: Readonly<{
+    predecessor: SnapshotId
+    snapshot: SnapshotId
+    changeId: ChangeId
+  }>
+  method: "squash"
+  policy: Readonly<{
+    requireBranchesToBeUpToDate: boolean
+  }>
 }>
 
 type AttestationData = Readonly<{

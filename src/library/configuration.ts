@@ -9,6 +9,7 @@ export type WorktreeHooks = Readonly<{
   destroy: readonly HookCommand[];
 }>;
 export type WorktreeHooksFromInput = Readonly<{ settings: Settings }>;
+export type RequireBranchesToBeUpToDateFromInput = Readonly<{ settings: Settings }>;
 
 export class SettingsError extends Error {
   readonly kind = "settings";
@@ -81,6 +82,23 @@ export function worktreeHooksFrom(input: WorktreeHooksFromInput): WorktreeHooks 
     return selected === undefined ? Object.freeze([]) : commands(selected.value, `worktree.${phase}`, SettingsError);
   };
   return Object.freeze({ create: value("create"), destroy: value("destroy") });
+}
+
+export function requireBranchesToBeUpToDateFrom(input: RequireBranchesToBeUpToDateFromInput): boolean {
+  if (!record(input)) throw new TypeError("requireBranchesToBeUpToDateFrom input must be an object");
+  const view = input.settings.namespace("git");
+  if (view.kind === "failed") namespaceFailure(view);
+  for (const entry of view.entries) {
+    if (entry.name !== "requireBranchesToBeUpToDate") {
+      throw new SettingsError(`git has unknown entry: ${entry.name}`);
+    }
+  }
+  const selected = view.entries.find((entry) => entry.name === "requireBranchesToBeUpToDate");
+  if (selected === undefined) return false;
+  if (typeof selected.value !== "boolean") {
+    throw new SettingsError("git.requireBranchesToBeUpToDate must be a boolean");
+  }
+  return selected.value;
 }
 
 export function normalizedWorktreeHooks(value: unknown): WorktreeHooks {

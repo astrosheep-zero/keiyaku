@@ -1,7 +1,7 @@
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ContractId, ContractState } from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { observeContract, observeGitForAdmission } from "../git/observe.js";
 import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
@@ -10,6 +10,7 @@ import {
   acquireTargetPlacementFence,
   followTargetPlacement,
   prepareTargetPlacement,
+  observeTargetHead,
   type TargetPlacementRefusal,
 } from "../git/target-placement.js";
 import { admitDecidedOffer, mintAttempts, mintEntryUlids, type AcceptedAdmission } from "./attempt.js";
@@ -25,9 +26,18 @@ export type PlacementExecutionFailure = Readonly<{
   diagnostic: string;
 }>;
 
+export type TargetMovedStop = Readonly<{
+  kind: "target-moved";
+  contractId: ContractId;
+  target: string;
+  expected: SnapshotId;
+  observed: SnapshotId | null;
+}>;
+
 export type PlacementProtocolResult =
   | (AcceptedAdmission & Readonly<{ physical?: ReconcileResult }>)
   | Exclude<ProtocolResult<PlacementRefusal | TargetPlacementRefusal>, AcceptedAdmission>
+  | TargetMovedStop
   | PlacementExecutionFailure;
 
 type PlacementProtocolInput = Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
@@ -52,6 +62,16 @@ function runFencedPlacement(
     const state = contractState(prepared.observation.decision, input.contractId);
     if (state === null) throw new Error("placement offer has no contract state");
     if (prepared.offer.target === undefined) throw new Error("targeted placement offer is missing its target movement");
+    const observed = observeTargetHead(repository, prepared.offer.target.target);
+    if (observed !== prepared.offer.target.expectedOid) {
+      return {
+        kind: "target-moved",
+        contractId: input.contractId,
+        target: prepared.offer.target.target,
+        expected: prepared.offer.target.expectedOid,
+        observed,
+      };
+    }
     const physical = prepareTargetPlacement(repository, state, prepared.offer.target);
     if (physical.kind === "refused") return physical;
     const result = admitDecidedOffer(

@@ -1,6 +1,6 @@
-import { observeContract } from "../../git/observe.js";
+import { observeContract, observeDeliveryTarget } from "../../git/observe.js";
 import type { GitRepository } from "../../git/repository.js";
-import type { ContractId, ContractState, FactKind, Gate, JournalEntry } from "../../core/facts/types.js";
+import type { ContractId, ContractState, DeliverData, FactKind, Gate, JournalEntry, SnapshotId } from "../../core/facts/types.js";
 
 export type { FactKind } from "../../core/facts/types.js";
 
@@ -19,6 +19,8 @@ export type AuditReport = Readonly<{
   reworks: number;
   reviews: number;
   timeline: readonly TimelineEntry[];
+  delivery?: DeliverData;
+  targetObservation?: Readonly<{ head: SnapshotId | null; drift: boolean }>;
 }>;
 
 type AuditRead = Readonly<{
@@ -34,7 +36,7 @@ function elapsedSince(prior: string | undefined, current: string): number | null
   return currentMs - priorMs;
 }
 
-export function auditReport(entries: readonly JournalEntry[], reviewed: Gate): AuditReport {
+export function auditReport(entries: readonly JournalEntry[], reviewed: Gate, state?: ContractState, repository?: GitRepository): AuditReport {
   let reworks = 0;
   let reviews = 0;
   const timeline = entries.map((entry, index) => {
@@ -53,7 +55,17 @@ export function auditReport(entries: readonly JournalEntry[], reviewed: Gate): A
       } : {}),
     };
   });
-  return { reworks, reviews, timeline };
+  const delivery = state?.delivery?.data;
+  const targetObservation = state === undefined || repository === undefined
+    ? undefined
+    : observeDeliveryTarget(repository, state) ?? undefined;
+  return {
+    reworks,
+    reviews,
+    timeline,
+    ...(delivery === undefined ? {} : { delivery }),
+    ...(targetObservation === undefined ? {} : { targetObservation }),
+  };
 }
 
 export function readAudit(repository: GitRepository, contract: ContractId, reviewed: Gate): AuditRead {
@@ -61,6 +73,6 @@ export function readAudit(repository: GitRepository, contract: ContractId, revie
   return {
     state: observation.state,
     entries: observation.entries,
-    report: auditReport(observation.entries, reviewed),
+    report: auditReport(observation.entries, reviewed, observation.state ?? undefined, repository),
   };
 }

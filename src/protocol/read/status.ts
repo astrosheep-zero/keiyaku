@@ -1,8 +1,8 @@
-import { observeGit, observeContract } from "../../git/observe.js";
+import { observeDeliveryTarget, observeGit, observeContract } from "../../git/observe.js";
 import { deliveryWorktreePath } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/repository.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
-import type { ContractId, ContractState, SnapshotId } from "../../core/facts/types.js";
+import type { ContractId, ContractState, DeliverData, SnapshotId } from "../../core/facts/types.js";
 
 export type ContractPhase = "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned";
 export type ContractDisposition = "active" | "terminal";
@@ -18,7 +18,8 @@ export type ContractRow = Readonly<{
   workspace: "worktree" | "here";
   worktreePath: string | null;
   target: string | null;
-  candidate: SnapshotId | null;
+  delivery: DeliverData | null;
+  targetObservation: Readonly<{ head: SnapshotId | null; drift: boolean }> | null;
   gates: Readonly<{
     reports: readonly ContractGateReport[];
     satisfied: boolean;
@@ -52,7 +53,8 @@ function rowFor(repository: GitRepository, state: ContractState): ContractRow {
     workspace,
     worktreePath: workspace === "worktree" ? deliveryWorktreePath(repository, state.id) : null,
     target: state.coordinates.target ?? null,
-    candidate: state.delivery?.data.candidate ?? null,
+    delivery: state.delivery?.data ?? null,
+    targetObservation: observeDeliveryTarget(repository, state),
     gates: {
       reports: gates.reports.map((report) => ({ gate: report.gate, current: report.current })),
       satisfied: gates.satisfied,

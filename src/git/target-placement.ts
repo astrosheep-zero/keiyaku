@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { acquireSqliteTransactionLock, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import type { RefOperation } from "../core/facts/offer.js";
-import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, type GitObjectId } from "./identity.js";
+import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { currentBranch } from "./observe.js";
 import {
   commonGitDirectory,
@@ -64,6 +64,11 @@ export type PreparedTargetPlacement = Readonly<{
 export type TargetPlacementPreparation =
   | Readonly<{ kind: "prepared"; placement: PreparedTargetPlacement }>
   | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>;
+
+export function observeTargetHead(repository: GitRepository, target: string): SnapshotId | null {
+  const value = readRef(repository, target);
+  return value === null ? null : mintSnapshotId(value);
+}
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -211,7 +216,7 @@ export function prepareTargetPlacement(
   state: ContractState,
   target: RefOperation,
 ): TargetPlacementPreparation {
-  if (state.coordinates.target !== target.target || state.delivery?.data.candidate !== target.newOid) {
+  if (state.coordinates.target !== target.target || state.delivery?.data.integration.snapshot !== target.newOid) {
     throw new Error("placement state does not match its offered target movement");
   }
   const worktrees = registeredWorktrees(repository)
@@ -333,10 +338,10 @@ export function recoverTargetPlacement(
   const target = state.coordinates.target;
   const delivery = state.delivery;
   if (state.terminal?.kind !== "claimed" || target === undefined || delivery === null) return { effects: [], lag: [] };
-  if (readRef(repository, target) !== delivery.data.candidate) return { effects: [], lag: [] };
+  if (readRef(repository, target) !== delivery.data.integration.snapshot) return { effects: [], lag: [] };
 
-  const candidateTree = commitTree(repository, delivery.data.candidate);
-  const predecessorTree = commitTree(repository, delivery.data.expectedPredecessor);
+  const candidateTree = commitTree(repository, delivery.data.integration.snapshot);
+  const predecessorTree = commitTree(repository, delivery.data.integration.predecessor);
   const worktrees = registeredWorktrees(repository)
     .filter((worktree) => worktree.branch === target)
     .sort((left, right) => left.path.localeCompare(right.path));
@@ -347,8 +352,8 @@ export function recoverTargetPlacement(
       const recovery = recoverCheckout({
         repository,
         path: worktree.path,
-        predecessor: delivery.data.expectedPredecessor,
-        candidate: delivery.data.candidate,
+        predecessor: delivery.data.integration.predecessor,
+        candidate: delivery.data.integration.snapshot,
         predecessorTree,
         candidateTree,
       });

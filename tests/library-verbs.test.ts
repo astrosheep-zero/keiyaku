@@ -155,8 +155,8 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   commitCandidate(repository);
   const delivered = await contract.deliver();
   const recovered = await contract.delivery();
-  assert.equal(recovered?.snapshotId, delivered.value.snapshotId);
-  assert.equal(recovered?.changeId, delivered.value.changeId);
+  assert.equal(recovered?.integration.snapshot, delivered.value.integration.snapshot);
+  assert.equal(recovered?.integration.changeId, delivered.value.integration.changeId);
 
   const reviewed = await contract.review({ verdict: "unsatisfied",
     summary: "The candidate still needs one correction.",
@@ -172,7 +172,7 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   assert.equal((await contract.state()).terminal?.kind, "abandoned");
   assert.deepEqual((await contract.state()).terminal?.data, { note: "Return the task to planning." });
   const terminalDelivery = await contract.delivery();
-  assert.equal(terminalDelivery?.snapshotId, delivered.value.snapshotId);
+  assert.equal(terminalDelivery?.integration.snapshot, delivered.value.integration.snapshot);
   await assert.rejects(
     contract.review({ verdict: "satisfied" }),
     refused({ kind: "terminal", contractId: (await contract.state()).id }),
@@ -281,7 +281,7 @@ test("public deliver keeps its Verification admission in accepted facts", async 
   const delivered = await contract.deliver();
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
   assert.equal(delivered.head, (await contract.state()).head);
-  assert.equal(delivered.value.expectedPredecessor, (await contract.state()).delivery?.data.expectedPredecessor);
+  assert.equal(delivered.value.integration.predecessor, (await contract.state()).delivery?.data.integration.predecessor);
   assert.equal("verification" in delivered.value, false);
   assert.equal("placement" in delivered.value, false);
   assert.equal((await contract.state()).attestations.at(-1)?.data.verdict, "satisfied");
@@ -612,7 +612,7 @@ test("eligibility placement observes and binds every waiting dependent", async (
   }
 });
 
-test("review exhausts placement after its target premise moves", async () => {
+test("review stops placement when its verified target premise moves", async () => {
   const repository = repositoryWithMain();
   repository.run(["branch", "release"]);
   const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
@@ -648,10 +648,13 @@ test("review exhausts placement after its target premise moves", async () => {
   const reviewed = await withGitShim(shim, {
     KEIYAKU_PUBLICATION_FAILED: failed,
   }, () => result.keiyaku.review({ verdict: "satisfied" }));
-  assert.ok(reviewed.value.placement?.retry);
-  assert.equal("kind" in reviewed.value.placement!, false);
-  const placementRetry = reviewed.value.placement!.retry!;
-  assert.equal(placementRetry.kind, "exhausted");
+  assert.deepEqual(reviewed.value.placement, {
+    failure: "target-moved",
+    contractId: result.keiyaku.id,
+    target: "refs/heads/release",
+    expected: delivered.value.integration.predecessor,
+    observed: repository.run(["rev-parse", "HEAD"]).trim(),
+  });
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
   const state = await result.keiyaku.state();
   assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");

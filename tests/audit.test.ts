@@ -280,7 +280,7 @@ test("audit admits Verification testimony for its captured old subject", async (
   await amended;
   assert.deepEqual(audited.facts.map((fact) => fact.kind), ["attestation"]);
   assert.equal((await contract.state()).attestations.at(-1)?.data.subject, dependencyKeySet([
-    { kind: "snapshot", value: state.delivery.data.candidate },
+    { kind: "snapshot", value: state.delivery.data.integration.snapshot },
     { kind: "segment", value: definition.segment },
   ]));
 });
@@ -333,7 +333,7 @@ test("Verification runs a valid declaration even after prior testimony", async (
   assert.equal(result?.step.kind, "accepted");
   assert.equal((await contract.state()).attestations.length, before + 1);
   assert.equal((await contract.state()).attestations.at(-1)?.data.subject, dependencyKeySet([
-    { kind: "snapshot", value: state.delivery!.data.candidate },
+    { kind: "snapshot", value: state.delivery!.data.integration.snapshot },
     { kind: "segment", value: definition.segment },
   ]));
 });

@@ -95,7 +95,8 @@ test("Contract reads return plain pinned data from one git snapshot", () => {
     workspace: "here",
     worktreePath: null,
     target: null,
-    candidate: null,
+    delivery: null,
+    targetObservation: null,
     gates: { reports: [], satisfied: true },
   });
   assert.deepEqual(report.rows.find((contract) => contract.id === second), {
@@ -105,7 +106,8 @@ test("Contract reads return plain pinned data from one git snapshot", () => {
     workspace: "worktree",
     worktreePath: deliveryWorktreePath(git, second),
     target: null,
-    candidate: null,
+    delivery: null,
+    targetObservation: null,
     gates: { reports: [], satisfied: true },
   });
   const invocations = readFileSync(log, "utf8").trim().split("\n");

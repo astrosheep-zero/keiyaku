@@ -1,4 +1,4 @@
-export { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, SettingsError, worktreeHooksFrom } from "./library/keiyaku.js";
+export { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./library/keiyaku.js";
 export { settings } from "./settings.js";
 export { World, WorldError } from "./world.js";
 export type { WorldRoot } from "./world.js";
@@ -67,6 +67,7 @@ export type {
   Gate,
   GatesFromInput,
   HookCommand,
+  RequireBranchesToBeUpToDateFromInput,
   KeiyakuOfInput,
   KeiyakuRefusal,
   KeiyakuRetryReason,

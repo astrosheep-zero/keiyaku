@@ -69,6 +69,119 @@ function candidatePinRefFor(contract: ContractId): string {
   return `refs/heads/keiyaku-candidate/kei-${contract.slice("kei/".length)}`;
 }
 
+async function targetedContract() {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
+  writeFileSync(join(repository.path, "shared.txt"), "base\n");
+  repository.run(["add", "shared.txt"]);
+  repository.run(["commit", "--quiet", "-m", "initial"]);
+  const bound = await Keiyaku.bind({
+    repo: Repo.at({ path: repository.path }),
+    markdown: contractBody(),
+    workspace: "worktree",
+    target: "refs/heads/main",
+  });
+  const state = await bound.keiyaku.state();
+  return { repository, state, worktree: deliveryWorktreePath(repositoryAt(repository.path), state.id) };
+}
+
+test("permissive targeted delivery integrates tender bytes over the observed target head", async () => {
+  const { repository, state, worktree } = await targetedContract();
+  writeFileSync(join(repository.path, "target.txt"), "target advance\n");
+  repository.run(["add", "target.txt"]);
+  repository.run(["commit", "--quiet", "-m", "advance target"]);
+  const targetHead = repository.run(["rev-parse", "HEAD"]).trim();
+  writeFileSync(join(worktree, "tender.txt"), "tender\n");
+  repository.run(["-C", worktree, "add", "tender.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender"]);
+  const tenderHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+  const git = repositoryAt(repository.path);
+  const review = prepareReview(git, preparationCoordinates(state));
+  const delivery = prepareDelivery(git, preparationCoordinates(state), {
+    title: "Integrated delivery",
+    requireBranchesToBeUpToDate: false,
+  });
+  assert.equal(review.kind, "prepared");
+  assert.equal(delivery.kind, "prepared");
+  if (review.kind !== "prepared" || delivery.kind !== "prepared") return;
+  assert.equal(delivery.data.tenderSnapshot, tenderHead);
+  assert.equal(delivery.data.integration.predecessor, targetHead);
+  assert.equal(delivery.data.integration.changeId, review.data);
+  assert.equal(repository.run(["rev-parse", `${delivery.data.integration.snapshot}^`]).trim(), targetHead);
+  assert.equal(repository.run(["show", `${delivery.data.integration.snapshot}:target.txt`]), "target advance\n");
+  assert.equal(repository.run(["show", `${delivery.data.integration.snapshot}:tender.txt`]), "tender\n");
+});
+
+test("strict targeted delivery refuses a tender not based on the target head", async () => {
+  const { repository, state } = await targetedContract();
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "advance target"]);
+  const targetHead = repository.run(["rev-parse", "HEAD"]).trim();
+  assert.deepEqual(prepareDelivery(repositoryAt(repository.path), preparationCoordinates(state), {
+    title: "Strict delivery",
+    requireBranchesToBeUpToDate: true,
+  }), {
+    kind: "refused",
+    refusal: {
+      kind: "integration-failed",
+      contractId: state.id,
+      reason: "not-based-on-target",
+      targetHead,
+    },
+  });
+});
+
+test("targeted integration conflict returns structured paths", async () => {
+  const { repository, state, worktree } = await targetedContract();
+  writeFileSync(join(repository.path, "shared.txt"), "target\n");
+  repository.run(["add", "shared.txt"]);
+  repository.run(["commit", "--quiet", "-m", "target change"]);
+  const targetHead = repository.run(["rev-parse", "HEAD"]).trim();
+  writeFileSync(join(worktree, "shared.txt"), "tender\n");
+  repository.run(["-C", worktree, "add", "shared.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
+  assert.deepEqual(prepareDelivery(repositoryAt(repository.path), preparationCoordinates(state), {
+    title: "Conflicted delivery",
+    requireBranchesToBeUpToDate: false,
+  }), {
+    kind: "refused",
+    refusal: {
+      kind: "integration-failed",
+      contractId: state.id,
+      reason: "conflict",
+      targetHead,
+      conflictPaths: ["shared.txt"],
+    },
+  });
+});
+
+test("permissive integration reports unsupported Git while strict policy needs no merge-tree", async () => {
+  const { repository, state } = await targetedContract();
+  const shim = [
+    'if [ "$1" = "merge-tree" ]; then',
+    '  printf "unsupported merge-tree\n" >&2',
+    '  exit 129',
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+  const permissive = withGitShim(shim, {}, () => prepareDelivery(
+    repositoryAt(repository.path),
+    preparationCoordinates(state),
+    { title: "Permissive", requireBranchesToBeUpToDate: false },
+  ));
+  assert.deepEqual(permissive, {
+    kind: "refused",
+    refusal: { kind: "integration-unsupported", contractId: state.id, requiredGit: "2.38" },
+  });
+  const strict = withGitShim(shim, {}, () => prepareDelivery(
+    repositoryAt(repository.path),
+    preparationCoordinates(state),
+    { title: "Strict", requireBranchesToBeUpToDate: true },
+  ));
+  assert.equal(strict.kind, "prepared");
+});
+
 test("Git materialization normalizes the complete prefixed identity", () => {
   const repository = makeGitRepository();
   assert.equal(
@@ -92,10 +205,10 @@ test("dirty delivery materializes a candidate without changing the caller index"
   const prepared = prepareDelivery(git, preparationCoordinates(state), { title: "Patch identity" });
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind !== "prepared") throw new Error("delivery preparation was refused");
-  assert.equal(prepared.data.deliveryPatchId, review.data);
+  assert.equal(prepared.data.integration.changeId, review.data);
   assert.equal(repository.run(["diff", "--cached", "--binary"]), indexBefore);
-  assert.match(repository.run(["show", "-s", "--format=%B", prepared.data.candidate]), /kei\/.*: Patch identity/);
-  assert.match(repository.run(["show", "-s", "--format=%B", prepared.data.candidate]), /Keiyaku-Contract: /);
+  assert.match(repository.run(["show", "-s", "--format=%B", prepared.data.integration.snapshot]), /kei\/.*: Patch identity/);
+  assert.match(repository.run(["show", "-s", "--format=%B", prepared.data.integration.snapshot]), /Keiyaku-Contract: /);
 });
 
 test("delivery preparation refuses an unregistered directory at the managed worktree path", async () => {
@@ -173,8 +286,8 @@ test("distinct no-op candidates share the empty patch ChangeId", async () => {
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "second no-op"]);
   const second = preparedDelivery(repository, id);
 
-  assert.notEqual(first.candidate, second.candidate);
-  assert.equal(first.deliveryPatchId, second.deliveryPatchId);
+  assert.notEqual(first.integration.snapshot, second.integration.snapshot);
+  assert.equal(first.integration.changeId, second.integration.changeId);
 });
 
 test("clean delivery resolves its workspace head and tree in one Git call", async () => {
@@ -205,13 +318,13 @@ test("delivery diff preserves an empty patch and treats a clean missing object a
   const delivery = preparedDelivery(repository, id);
   const git = repositoryAt(repository.path);
 
-  assert.equal(readDeliveryDiff(git, delivery.expectedPredecessor, delivery.candidate), "");
+  assert.equal(readDeliveryDiff(git, delivery.integration.predecessor, delivery.integration.snapshot), "");
   assert.equal(await deliveryDiffOperation({
     scope: scopeOperation({ coordinate: repository.path }),
-    expectedPredecessor: delivery.expectedPredecessor,
-    snapshotId: delivery.candidate,
+    integrationPredecessor: delivery.integration.predecessor,
+    integrationSnapshot: delivery.integration.snapshot,
   }), "");
-  assert.equal(readDeliveryDiff(git, delivery.expectedPredecessor, mintSnapshotId("0".repeat(40))), null);
+  assert.equal(readDeliveryDiff(git, delivery.integration.predecessor, mintSnapshotId("0".repeat(40))), null);
 });
 
 test("delivery diff checks both snapshots in one batch process", async () => {
@@ -228,7 +341,7 @@ test("delivery diff checks both snapshots in one batch process", async () => {
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_GIT_CALLS: calls },
-    () => readDeliveryDiff(git, delivery.expectedPredecessor, delivery.candidate),
+    () => readDeliveryDiff(git, delivery.integration.predecessor, delivery.integration.snapshot),
   );
 
   assert.equal(result, "");
@@ -241,7 +354,7 @@ test("delivery diff rejects a recorded non-commit object", async () => {
   const blob = mintSnapshotId(repository.run(["hash-object", "-w", "--stdin"], "not a commit\n").trim());
 
   assert.throws(
-    () => readDeliveryDiff(repositoryAt(repository.path), delivery.expectedPredecessor, blob),
+    () => readDeliveryDiff(repositoryAt(repository.path), delivery.integration.predecessor, blob),
     (error: unknown) => error instanceof AuthorityCorruptionError
       && error.message === "recorded delivery snapshot is not a Git commit",
   );
@@ -275,7 +388,7 @@ test("delivery diff rechecks one batch for a pruning race", async () => {
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_GIT_CALLS: calls, KEIYAKU_PRUNED_MARKER: pruned },
-    () => readDeliveryDiff(git, delivery.expectedPredecessor, delivery.candidate),
+    () => readDeliveryDiff(git, delivery.integration.predecessor, delivery.integration.snapshot),
   );
 
   assert.equal(result, null);
@@ -297,7 +410,7 @@ test("delivery diff leaves probe diagnostics as Git errors", async () => {
     {},
     () => {
       assert.throws(
-        () => readDeliveryDiff(repositoryAt(repository.path), delivery.expectedPredecessor, delivery.candidate),
+    () => readDeliveryDiff(repositoryAt(repository.path), delivery.integration.predecessor, delivery.integration.snapshot),
         (error: unknown) => error instanceof Error && error.message.startsWith("cat-file"),
       );
     },
@@ -405,10 +518,10 @@ test("nonempty candidates retain Git stable patch identity", async () => {
   repository.run(["commit", "--quiet", "-m", "candidate"]);
 
   const delivery = preparedDelivery(repository, id);
-  assert.equal(delivery.candidate, repository.run(["rev-parse", "HEAD"]).trim());
-  const diff = repository.run(["diff", "--binary", delivery.expectedPredecessor, delivery.candidate]);
+  assert.equal(delivery.integration.snapshot, repository.run(["rev-parse", "HEAD"]).trim());
+  const diff = repository.run(["diff", "--binary", delivery.integration.predecessor, delivery.integration.snapshot]);
   const stablePatchId = repository.run(["patch-id", "--stable"], diff).trim().split(" ")[0];
-  assert.equal(delivery.deliveryPatchId, stablePatchId);
+  assert.equal(delivery.integration.changeId, stablePatchId);
 });
 
 test("verification materializes the protocol-selected candidate snapshot", () => {

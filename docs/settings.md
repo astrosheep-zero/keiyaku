@@ -98,6 +98,15 @@ and environment loading are not part of Settings. The returned arrays and
 commands are deeply frozen. Their managed-worktree execution and durable
 freezing rules are owned by [git.md](git.md).
 
+The Git integration consumer publicly provides
+`requireBranchesToBeUpToDateFrom({ settings })`. It reads the one optional
+boolean entry `git.requireBranchesToBeUpToDate` and defaults to `false` when
+the entry is absent. The `git` namespace rejects unknown entries and a
+non-boolean selected value with `SettingsError`. The CLI resolves this consumer
+for each deliver invocation and passes only the resulting boolean; Git custody
+never imports Settings. Project/user shadowing and provenance remain the
+generic namespace behavior above.
+
 Akuma owns the `providers` interpreter, its record grammar, defaults, and Soul
 freeze in [akuma.md](akuma.md). Settings contributes only the resolved opaque
 entry and its provenance.
