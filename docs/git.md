@@ -54,25 +54,62 @@ name one target cause one target-ref read. The complete read therefore uses
 row count, and blob count. An empty private state needs no batch process unless
 a consumer explicitly requests an object.
 
-Only `withGitReadObservation(repository, consume)` creates this capability.
-The callback may neither construct nor close it, and returning or throwing
-closes its batch before the call completes. The capability is invalid after
-the callback. A format or freeze failure fails the shared Git observation. If
-the batch process dies, remaining dependent reads receive that same transport
-failure; Git does not start a replacement or freeze a second snapshot.
+Only Git creates a decode channel or a read observation. A package-root public
+call may own one channel and pass that read-only capability through protocol,
+reconciliation, and settlement. The consumer may neither construct nor close
+it, and returning or throwing from the public call closes its batch. The
+capability is invalid afterward. If the batch process dies, remaining
+dependent reads receive that same transport failure; Git does not start a
+replacement channel. The channel carries only content-addressed object decode;
+it does not carry a repository handle. An epoch receives the repository from
+its caller's existing scope capability. Callback failure remains primary over
+a simultaneous close failure; when the callback succeeds, a close failure is
+returned to the caller.
 
-`Keiyaku.list`, a complete Settlement holder observation, a complete Dispatch
-read, and Kanshi each create an observation at their own Promise boundary.
-Targeted admission, publication, read-back, and other write-side operations
-keep their targeted synchronous primitives. There is no all-tree blob
-prefetch, owner prepare/finish protocol, owner-created Git process,
-cross-call cache, or product-named Git reader.
+Each legal observation boundary freezes refs independently. A public Contract
+mutation uses one channel but opens a fresh ref epoch for every decision
+attempt and, when reached, for publication recovery, a holder or target fence,
+reconciliation, and settlement. Immutable objects already named by OID may be
+decoded once and reused through the channel; ref resolutions are memoized only
+inside their epoch and never authorize a later boundary. Admission consumes
+the decision epoch's frozen journal bytes and tree-directory entries, so it
+does not rediscover or decode that immutable base tree. The process topology
+of one mutation is therefore `O(lawful epochs) + O(1)` decode processes, not
+`O(contracts)` or `O(read sites)`.
+
+A targeted epoch walks only the bounded tree ancestors of its exact paths and
+the explicitly selected owner subtrees. It never expands the complete private
+tree. A full-world read remains the only complete-tree traversal. When a
+post-decision companion adds a path, Git extends the admission directories for
+that path from the same frozen tree before object construction; it does not
+reread the state ref or discard untouched siblings.
+
+`Keiyaku.list`, each public single-Contract read, a complete Dispatch read, and
+Kanshi own their call boundary. There is no all-tree blob prefetch, owner
+prepare/finish protocol, owner-created Git process, cross-call cache,
+cross-epoch ref cache, synchronous Contract-reader fallback, or product-named
+Git reader.
 
 Git mints `ContractCoordinates.start` at bind. With a target it is
 the resolved target head; without a target it is the caller worktree's current
 `HEAD`. It is the initial managed-worktree commit and the original comparison
 point for a `here` workspace. A targeted here contract is legal only while the
 caller's symbolic `HEAD` is that target.
+
+Bind derives those coordinates anew inside every semantic attempt. The same
+atomic admission transaction asserts only the ref fact sealed into
+`coordinates.start`: an explicit target's OID, or dereferenced `HEAD` OID for a
+targetless bind. Every assertion is a non-mutating `verify`; apart from the
+state-ref CAS append, admission never updates, creates, deletes, or symbolically
+updates a ref. An OID movement, identity collision, or Git CAS retry therefore
+discards the attempt and re-observes coordinates; a fresh read alone is not the
+currentness judge.
+
+The symbolic branch and attachedness read for targeted `here` eligibility are
+not Contract facts. They can refuse that decision observation, but admission
+does not assert or persist them. Moving to another branch at the same OID
+between observation and admission is therefore legal and invisible; Git must
+not change the caller's checkout to restore the earlier observation.
 
 An explicit target must exist at bind observation. Absence is returned to the
 library as `target-missing` before any journal or ref publication. Git

@@ -7,19 +7,19 @@ import {
 } from "../git/delivery.js";
 import {
   currentBranch,
-  extendContractsForAdmission,
+  extendContractsForAdmissionAt,
+  observeContractAt,
   observeContractWorld,
-  observeContract,
-  observeContractsForAdmission,
-  type GitDecisionObservation,
+  observeContractsForAdmissionAt,
 } from "../git/observe.js";
 import { reconcile, reconcileBatch, reconcileObservationFailure, type ReconcileResult } from "../git/reconcile.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import { NoGitWorldError, repositoryAt, type GitRepository } from "../git/repository.js";
-import { withGitReadObservation } from "../git/read-observation.js";
+import { withGitReadObservation, type GitDecodeChannel, type GitTreeSelection } from "../git/read-observation.js";
 import { readDeliveryDiff } from "../git/verification.js";
 import type { WorktreeLeak } from "../git/verification.js";
 import { dependencyKeySet } from "../core/subject.js";
+import type { AttemptContext } from "../core/decide.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState, documentIsCurrent } from "../core/facts/observation.js";
 import type { ActorId, AmendData, ArcData, AttestationData, ContractId, ContractState, ContractTerms, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
@@ -39,11 +39,11 @@ import {
 } from "./intent.js";
 import { admitPlacement, type PlacementProtocolResult } from "./placement.js";
 import type { TargetPlacementRefusal } from "../git/target-placement.js";
-import { auditReport, readAudit, type AuditReport as AuditReadReport } from "./read/audit.js";
+import { auditReport, readAuditAt, type AuditReport as AuditReadReport } from "./read/audit.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import {
   readContractBoard,
-  readContractObservation,
+  readContractObservationAt,
   type ContractBoard,
   type ContractDisposition,
   type ContractGateCurrent,
@@ -82,6 +82,7 @@ export type IntentRetry = ProtocolTerminal;
 export type IntentOutcome<Value, Refusal = IntentRefusal> = ProtocolIntentOutcome<Value, Refusal>;
 
 type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId; actor?: ActorId }>;
+type MutationOperationInput = OperationInput & Readonly<{ channel: GitDecodeChannel }>;
 
 export type AuditReport = AuditReadReport & Readonly<{ attempt?: VerificationStop; leak?: WorktreeLeak }>;
 
@@ -133,95 +134,98 @@ export function currentBranchOperation(input: Readonly<{ scope: RepositoryScope 
   return currentBranch(input.scope);
 }
 
-export async function contractsOperation(input: Readonly<{ scope: RepositoryScope }>): Promise<ContractBoard> {
-  return withGitReadObservation(input.scope, readContractBoard);
+export async function contractsOperation(input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }>): Promise<ContractBoard> {
+  return withGitReadObservation(input.scope, input.channel, readContractBoard);
 }
 
-export function contractObservationOperation(input: OperationInput): ContractObservation {
-  return readContractObservation(input.scope, input.contractId);
+export function contractObservationOperation(input: MutationOperationInput): Promise<ContractObservation> {
+  return readContractObservationAt(input.scope, input.channel, input.contractId);
 }
 
 export type { ContractBoard, ContractDisposition, ContractGateCurrent, ContractGateReport, ContractObservation, ContractPhase, ContractRow };
 
-export async function documentsOperation(input: Readonly<{ scope: RepositoryScope }>): Promise<readonly ContractDocumentProjection[]> {
-  return withGitReadObservation(input.scope, readDocuments);
+export async function documentsOperationAt(
+  scope: RepositoryScope,
+  channel: GitDecodeChannel,
+): Promise<readonly ContractDocumentProjection[]> {
+  return withGitReadObservation(scope, channel, readDocuments);
 }
 
-export function stateOperation(input: OperationInput): ContractState {
-  const state = observeContract(input.scope, input.contractId).state;
+export async function stateOperation(input: MutationOperationInput): Promise<ContractState> {
+  const state = (await observeContractAt(input.scope, input.channel, input.contractId)).state;
   if (state === null) throw new Error(`contract does not exist: ${input.contractId}`);
   return state;
 }
 
-export function readStateOperation(input: OperationInput): ContractState | null { return observeContract(input.scope, input.contractId).state; }
-
 type DeliveryIdentity = DeliverData;
 
-export function deliveryOperation(input: OperationInput): DeliveryIdentity | null {
-  const state = observeContract(input.scope, input.contractId).state;
-  if (state === null || state.delivery === null) return null;
-  return state.delivery.data;
-}
-
-function observePrerequisiteClosure(
-  repository: GitRepository,
-  contracts: readonly ContractId[],
-): GitDecisionObservation {
-  let observation = observeContractsForAdmission(repository, contracts);
-  let frontier = contracts.slice(1);
-  while (frontier.length > 0) {
-    const next = new Set<ContractId>();
-    for (const id of frontier) {
-      const state = contractState(observation.decision, id);
-      if (state === null) continue;
-      for (const dependency of state.terms.after) {
-        if (!observation.decision.has(dependency)) next.add(dependency);
-      }
-    }
-    frontier = [...next];
-    observation = extendContractsForAdmission(repository, observation, frontier);
-  }
-  return observation;
+export async function deliveryOperation(input: MutationOperationInput): Promise<DeliveryIdentity | null> {
+  const state = (await observeContractAt(input.scope, input.channel, input.contractId)).state;
+  return state?.delivery?.data ?? null;
 }
 
 type DeliveryDiffOperationInput = Readonly<{ scope: RepositoryScope; integrationPredecessor: SnapshotId; integrationSnapshot: SnapshotId }>;
 
 export async function deliveryDiffOperation(input: DeliveryDiffOperationInput): Promise<string | null> { return readDeliveryDiff(input.scope, input.integrationPredecessor, input.integrationSnapshot); }
 
-type AmendOperationInput = OperationInput & Readonly<{
-  amendment?: Readonly<{
-    source: ContractTerms;
+type AmendOperationInput = MutationOperationInput & Readonly<{
+  source?: ContractTerms;
+  deriveAmendment?: (source: ContractTerms) => Readonly<{
     terms: AmendData;
     verification: VerificationDeclarationPreparation;
   }>;
 }>;
 
-export function amendOperation(input: AmendOperationInput): IntentOutcome<void, AmendRefusal | VerificationDeclarationRefusal> {
-  const amendment = input.amendment;
-  const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] = amendment === undefined
-    ? undefined
-    : amendment.verification.kind === "prepared"
-      ? { kind: "prepared", data: amendment.terms }
-      : { kind: "refused", refusal: amendment.verification.refusal };
-  const decisionInput: AmendInput<VerificationDeclarationRefusal> = {
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-    ...(amendment === undefined ? {} : { source: amendment.source }),
-    ...(preparation === undefined ? {} : { preparation }),
-  };
-  return complete(
-    admitIntent(
-      input.scope,
-      decisionInput,
-      decideAmend,
-      {
-        observedContracts: [input.contractId, ...(amendment?.terms.after ?? [])],
-        observe: observePrerequisiteClosure,
+type Amendment = Readonly<{ source: ContractTerms }> & ReturnType<NonNullable<AmendOperationInput["deriveAmendment"]>>;
+
+export async function amendOperation(
+  input: AmendOperationInput,
+): Promise<IntentOutcome<Amendment, AmendRefusal | VerificationDeclarationRefusal>> {
+  const attempts = mintAttempts({ entryCount: 2 });
+  let source = input.source;
+  for (let index = 0; index < attempts.length; index += 1) {
+    let observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+    const state = contractState(observation.decision, input.contractId);
+    if (source === undefined && state !== null) source = state.terms;
+    const amendment = source === undefined || input.deriveAmendment === undefined
+      ? undefined
+      : { source, ...input.deriveAmendment(source) };
+    if (amendment !== undefined) {
+      observation = await extendContractsForAdmissionAt(input.channel, observation, amendment.terms.after);
+    }
+    const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] = amendment === undefined
+      ? undefined
+      : amendment.verification.kind === "prepared"
+        ? { kind: "prepared", data: amendment.terms }
+        : { kind: "refused", refusal: amendment.verification.refusal };
+    const decision = decideAmend({
+      input: {
+        contractId: input.contractId,
+        ...(input.actor === undefined ? {} : { actor: input.actor }),
+        at: timestamp(),
+        ...(amendment === undefined ? {} : { source: amendment.source }),
+        ...(preparation === undefined ? {} : { preparation }),
       },
-    ),
-    undefined,
-  );
+      attempt: attempts[index]!,
+      observation: observation.decision,
+    });
+    if (decision.kind === "refused") return decision;
+    const admission = await admitDecidedOffer({
+      channel: input.channel,
+      repository: input.scope,
+      decisionObservation: observation,
+      attempt: attempts[index]!,
+      offer: decision.offer,
+      primaryContract: input.contractId,
+    });
+    if (admission.kind === "accepted") {
+      if (amendment === undefined) throw new Error("accepted amendment is missing its document derivation");
+      return admitted(admission, amendment);
+    }
+    if (admission.kind === "publication-failed") return { kind: "retry", reason: admission };
+    if (admission.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: admission };
+  }
+  return { kind: "retry", reason: { kind: "exhausted" } };
 }
 
 export type DeliverValue = DeliveryIdentity & Readonly<{ verification?: VerificationStop; placement?: PlacementStop; leak?: WorktreeLeak }>;
@@ -233,38 +237,43 @@ type AttemptDecision<Value, Refusal = IntentRefusal> =
   | Readonly<{ kind: "collision" }>
   | Extract<DecidedOfferResult, { kind: "publication-failed" }>;
 
-type DeliverOperationInput = OperationInput & Readonly<{
-  derivation?: DocumentDerivation;
+type DeliverOperationInput = MutationOperationInput & Readonly<{
+  deriveDocument?: (state: ContractState) => DocumentDerivation;
   message?: string;
   requireBranchesToBeUpToDate: boolean;
   includeDirty: boolean;
 }>;
 
-function deliverAttempt(input: DeliverOperationInput, attempt: Parameters<typeof admitDecidedOffer>[2]): AttemptDecision<DeliveryIdentity> {
-  const decisionObservation = observeContractsForAdmission(input.scope, [input.contractId]);
+type PreparedDelivery = Readonly<{ delivery: DeliveryIdentity; derivation: DocumentDerivation }>;
+
+async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptContext): Promise<AttemptDecision<PreparedDelivery>> {
+  const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
+  const derivation = state === null || input.deriveDocument === undefined
+    ? undefined
+    : input.deriveDocument(state);
   let preparation: DeliverInput<DeliveryFailure>["preparation"];
-  if (state === null || input.derivation === undefined) {
+  if (state === null || derivation === undefined) {
     preparation = { kind: "unavailable" };
-  } else if (input.derivation.verification.kind === "refused") {
+  } else if (derivation.verification.kind === "refused") {
     preparation = {
       kind: "refused",
-      document: input.derivation.document,
-      refusal: input.derivation.verification.refusal,
+      document: derivation.document,
+      refusal: derivation.verification.refusal,
     };
   } else {
     const prepared = prepareDelivery(input.scope, {
       contractId: state.id,
       coordinates: state.coordinates,
     }, {
-      title: input.derivation.title,
+      title: derivation.title,
       ...(input.message === undefined ? {} : { message: input.message }),
       requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
       includeDirty: input.includeDirty,
     });
     preparation = prepared.kind === "refused"
-      ? { kind: "refused", document: input.derivation.document, refusal: prepared.refusal }
-      : { kind: "prepared", document: input.derivation.document, data: prepared.data };
+      ? { kind: "refused", document: derivation.document, refusal: prepared.refusal }
+      : { kind: "prepared", document: derivation.document, data: prepared.data };
   }
   const decisionInput: DeliverInput<DeliveryFailure> = {
     contractId: input.contractId,
@@ -277,27 +286,26 @@ function deliverAttempt(input: DeliverOperationInput, attempt: Parameters<typeof
   if (preparation.kind !== "prepared") {
     throw new Error("offered delivery is missing its mechanical preparation");
   }
-  const admitted = admitDecidedOffer(
-    input.scope,
+  const admitted = await admitDecidedOffer({
+    channel: input.channel,
+    repository: input.scope,
     decisionObservation,
     attempt,
-    decision.offer,
-    input.contractId,
-  );
+    offer: decision.offer,
+    primaryContract: input.contractId,
+  });
   if (admitted.kind === "accepted") {
-    return { ...admitted, value: preparation.data };
+    if (derivation === undefined) throw new Error("accepted delivery is missing its document derivation");
+    return { ...admitted, value: { delivery: preparation.data, derivation } };
   }
   return admitted;
 }
 
 async function completeDelivery(
   input: DeliverOperationInput,
-  first: Extract<AttemptDecision<DeliveryIdentity>, { kind: "accepted" }>,
+  first: Extract<AttemptDecision<PreparedDelivery>, { kind: "accepted" }>,
 ): Promise<IntentOutcome<DeliverValue>> {
-  if (input.derivation === undefined) {
-    throw new Error("accepted delivery is missing its document derivation");
-  }
-  const derivation = input.derivation;
+  const derivation = first.value.derivation;
   if (derivation.verification.kind !== "prepared") {
     throw new Error("accepted delivery is missing its Verification preparation");
   }
@@ -305,6 +313,7 @@ async function completeDelivery(
   let verificationValue: VerificationStop | undefined;
   let leak: WorktreeLeak | undefined;
   const verification = await verifyDelivery({
+    channel: input.channel,
     repository: input.scope,
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
@@ -324,7 +333,7 @@ async function completeDelivery(
       if (verification.step.kind === "accepted") admission = mergeAdmissions(admission, verification.step);
     }
   }
-  const placement = await admitPlacement(input.scope, {
+  const placement = await admitPlacement(input.channel, input.scope, first.state.coordinates.target, {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
@@ -332,7 +341,7 @@ async function completeDelivery(
   const placementValue = placementStop(placement);
   if (placement.kind === "accepted") admission = mergeAdmissions(admission, placement);
   return admitted(admission, {
-    ...first.value,
+    ...first.value.delivery,
     ...(verificationValue === undefined ? {} : { verification: verificationValue }),
     ...(placementValue === undefined ? {} : { placement: placementValue }),
     ...(leak === undefined ? {} : { leak }),
@@ -343,9 +352,9 @@ export async function deliverOperation(
   input: DeliverOperationInput,
 ): Promise<IntentOutcome<DeliverValue>> {
   const attempts = mintAttempts({ entryCount: 2 });
-  let first: Extract<AttemptDecision<DeliveryIdentity>, { kind: "accepted" }> | null = null;
+  let first: Extract<AttemptDecision<PreparedDelivery>, { kind: "accepted" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
-    const result = deliverAttempt(input, attempts[index]!);
+    const result = await deliverAttempt(input, attempts[index]!);
     if (result.kind === "accepted") {
       first = result;
       break;
@@ -359,25 +368,32 @@ export async function deliverOperation(
   return completeDelivery(input, first);
 }
 
-export function abandonOperation(
-  input: OperationInput & Readonly<{ note?: string; decorateOffer?: CompanionDecorator }>,
-): IntentOutcome<void, AbandonRefusal> {
+export async function abandonOperation(
+  input: MutationOperationInput & Readonly<{
+    note?: string;
+    decorateOffer?: CompanionDecorator;
+    observationSelection?: GitTreeSelection;
+  }>,
+): Promise<IntentOutcome<void, AbandonRefusal>> {
   return complete(
-    admitIntent(input.scope, {
+    await admitIntent(input.channel, input.scope, {
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
       ...(input.note === undefined ? {} : { note: input.note }),
-    }, decideAbandon, input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
+    }, decideAbandon, {
+      ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
+      ...(input.observationSelection === undefined ? {} : { observationSelection: input.observationSelection }),
+    }),
     undefined,
   );
 }
 
-export function arcOperation(
-  input: OperationInput & Readonly<{ chapter: Omit<ArcData, "seq"> }>,
-): IntentOutcome<void, ArcRefusal> {
+export async function arcOperation(
+  input: MutationOperationInput & Readonly<{ chapter: Omit<ArcData, "seq"> }>,
+): Promise<IntentOutcome<void, ArcRefusal>> {
   return complete(
-    admitIntent(input.scope, {
+    await admitIntent(input.channel, input.scope, {
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
@@ -387,15 +403,22 @@ export function arcOperation(
   );
 }
 
-type ReviewOperationInput = OperationInput & Readonly<{ verdict: AttestationData["verdict"]; summary?: string }>;
+type ReviewOperationInput = MutationOperationInput & Readonly<{ verdict: AttestationData["verdict"]; summary?: string }>;
 
 export type ReviewValue = Readonly<{ placement?: PlacementStop; workspace?: WorkspaceDirtyDelta }>;
 
 function reviewAttempt(
   input: ReviewOperationInput,
-  attempt: Parameters<typeof admitDecidedOffer>[2],
-): AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal> {
-  const decisionObservation = observeContractsForAdmission(input.scope, [input.contractId]);
+  attempt: AttemptContext,
+): Promise<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>> {
+  return reviewAttemptObserved(input, attempt);
+}
+
+async function reviewAttemptObserved(
+  input: ReviewOperationInput,
+  attempt: AttemptContext,
+): Promise<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>> {
+  const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
   let preparation: AttestationInput<ReviewRefusal>["preparation"];
   let workspace: WorkspaceDirtyDelta | undefined;
@@ -425,13 +448,14 @@ function reviewAttempt(
   };
   const decision = decideAttestation({ input: decisionInput, attempt, observation: decisionObservation.decision });
   if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
-  const admitted = admitDecidedOffer(
-    input.scope,
+  const admitted = await admitDecidedOffer({
+    channel: input.channel,
+    repository: input.scope,
     decisionObservation,
     attempt,
-    decision.offer,
-    input.contractId,
-  );
+    offer: decision.offer,
+    primaryContract: input.contractId,
+  });
   if (admitted.kind === "accepted") return {
     ...admitted,
     value: workspace === undefined ? {} : { workspace },
@@ -446,7 +470,7 @@ export async function reviewOperation(
   const attempts = mintAttempts({ entryCount: 2 });
   let review: Extract<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
-    const result = reviewAttempt(input, attempts[index]!);
+    const result = await reviewAttempt(input, attempts[index]!);
     if (result.kind === "accepted" || result.kind === "refused") {
       review = result;
       break;
@@ -458,7 +482,7 @@ export async function reviewOperation(
   if (review.kind !== "accepted") return review;
   if (input.verdict !== "satisfied") return admitted(review, review.value);
 
-  const placement = await admitPlacement(git, {
+  const placement = await admitPlacement(input.channel, git, review.state.coordinates.target, {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
@@ -469,12 +493,12 @@ export async function reviewOperation(
 }
 
 export async function auditOperation(
-  input: OperationInput & Readonly<{ derivation?: DocumentDerivation }>,
+  input: MutationOperationInput & Readonly<{ deriveDocument?: (state: ContractState) => DocumentDerivation }>,
 ): Promise<IntentOutcome<AuditReport>> {
   const git = input.scope;
-  const initial = readAudit(git, input.contractId, REVIEWED);
+  const initial = await readAuditAt(git, input.channel, input.contractId, REVIEWED);
   if (initial.state === null) return { kind: "refused", refusal: { kind: "contract-missing", contractId: input.contractId } };
-  const derivation = input.derivation;
+  const derivation = input.deriveDocument?.(initial.state);
   if (derivation === undefined) {
     return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
   }
@@ -491,6 +515,7 @@ export async function auditOperation(
   }
 
   const verification = await verifyDelivery({
+    channel: input.channel,
     repository: git,
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
@@ -511,7 +536,7 @@ export async function auditOperation(
         ? { refusal: verification.step.refusal }
         : { retry: verification.step };
   const report = !("failure" in verification.step) && verification.step.kind === "accepted"
-    ? auditReport(verification.step.journal, REVIEWED, initial.state, git)
+    ? auditReport(verification.step.journal, REVIEWED, initial.state, initial.report.targetObservation)
     : initial.report;
   const value = {
     ...report,
@@ -527,10 +552,11 @@ export type ReconcileReport = ReconcileResult;
 export type ReconcileObservation = Readonly<{ state: ContractState | null; report: ReconcileReport }>;
 type ReconcileOptions = Readonly<{ hooks: WorktreeHooks; retryHooks: boolean }>;
 
-export async function reconcileOperation(input: OperationInput & ReconcileOptions): Promise<ReconcileObservation> {
+export async function reconcileOperation(input: MutationOperationInput & ReconcileOptions): Promise<ReconcileObservation> {
   try {
     const observation = await reconcile({
       repository: input.scope,
+      channel: input.channel,
       contractId: input.contractId,
       hooks: input.hooks,
       retryHooks: input.retryHooks,
@@ -547,12 +573,13 @@ type RepoReconcileItem = Readonly<{ contractId: ContractId; state: ContractState
 export type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>;
 
 export async function reconcileAllOperation(
-  input: Readonly<{ scope: RepositoryScope }> & ReconcileOptions,
+  input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }> & ReconcileOptions,
 ): Promise<RepoReconcileReport> {
   const git = input.scope;
-  const observation = await withGitReadObservation(git, (read) => observeContractWorld(read));
+  const observation = await withGitReadObservation(input.scope, input.channel, (read) => observeContractWorld(read));
   const contracts = (await reconcileBatch(
     git,
+    input.channel,
     observation.contracts.keys(),
     input.hooks,
     input.retryHooks,

@@ -11,6 +11,7 @@ import { contractLocator } from "../src/git/identity.js";
 import { hookMarkerPath, runCreateHooks, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
+import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { abandonOperation, scopeOperation } from "../src/protocol/operations.js";
 import { makeGitRepository } from "./support/git.js";
@@ -134,10 +135,12 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
   const held = await acquireSqliteTransactionLock({ path: lockPath(git, id), mode: "immediate", timeoutMs: 100 });
   const pending = bound.keiyaku.reconcile();
 
-  const terminal = abandonOperation({
-    scope: scopeOperation({ coordinate: repository.path }),
+  const scope = scopeOperation({ coordinate: repository.path });
+  const terminal = await withGitDecodeChannel(scope, (channel) => abandonOperation({
+    scope,
+    channel,
     contractId: id,
-  });
+  }));
   assert.equal(terminal.kind, "accepted");
   repository.run(["worktree", "remove", worktree]);
   held.close();

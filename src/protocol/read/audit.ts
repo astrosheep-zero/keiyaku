@@ -1,4 +1,5 @@
-import { observeContract, observeDeliveryTarget } from "../../git/observe.js";
+import { observeContractWorld, observeDeliveryTargetAt } from "../../git/observe.js";
+import { withGitReadObservation, type GitDecodeChannel } from "../../git/read-observation.js";
 import type { GitRepository } from "../../git/repository.js";
 import type { ContractId, ContractState, DeliverData, FactKind, Gate, JournalEntry, SnapshotId } from "../../core/facts/types.js";
 
@@ -36,7 +37,12 @@ function elapsedSince(prior: string | undefined, current: string): number | null
   return currentMs - priorMs;
 }
 
-export function auditReport(entries: readonly JournalEntry[], reviewed: Gate, state?: ContractState, repository?: GitRepository): AuditReport {
+export function auditReport(
+  entries: readonly JournalEntry[],
+  reviewed: Gate,
+  state?: ContractState,
+  targetObservation?: AuditReport["targetObservation"],
+): AuditReport {
   let reworks = 0;
   let reviews = 0;
   const timeline = entries.map((entry, index) => {
@@ -56,9 +62,6 @@ export function auditReport(entries: readonly JournalEntry[], reviewed: Gate, st
     };
   });
   const delivery = state?.delivery?.data;
-  const targetObservation = state === undefined || repository === undefined
-    ? undefined
-    : observeDeliveryTarget(repository, state) ?? undefined;
   return {
     reworks,
     reviews,
@@ -68,11 +71,23 @@ export function auditReport(entries: readonly JournalEntry[], reviewed: Gate, st
   };
 }
 
-export function readAudit(repository: GitRepository, contract: ContractId, reviewed: Gate): AuditRead {
-  const observation = observeContract(repository, contract);
-  return {
-    state: observation.state,
-    entries: observation.entries,
-    report: auditReport(observation.entries, reviewed, observation.state ?? undefined, repository),
-  };
+export async function readAuditAt(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+  contract: ContractId,
+  reviewed: Gate,
+): Promise<AuditRead> {
+  return withGitReadObservation(repository, channel, async (observation) => {
+    const world = await observeContractWorld(observation, [contract]);
+    const record = world.contracts.get(contract);
+    if (record === undefined) throw new Error(`missing requested contract observation: ${contract}`);
+    const targetObservation = record.state === null
+      ? undefined
+      : await observeDeliveryTargetAt(observation, record.state) ?? undefined;
+    return {
+      state: record.state,
+      entries: record.entries,
+      report: auditReport(record.entries, reviewed, record.state ?? undefined, targetObservation),
+    };
+  });
 }

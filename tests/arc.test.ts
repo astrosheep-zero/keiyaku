@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeArcDocument } from "../src/body/arc.js";
 import { renderContractBody } from "../src/body/render.js";
-import { observeContract } from "../src/git/observe.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
@@ -18,7 +17,7 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { makeGitRepository } from "./support/git.js";
+import { makeGitRepository, observeContract } from "./support/git.js";
 
 const id = contractId("kei/arc-test");
 const initial = snapshotId("a".repeat(40));
@@ -174,13 +173,13 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   const admitted = await command(["arc", contract, "-"], arcDocument("CLI Chapter"));
   assert.equal(admitted.kind, "accepted");
   assert.deepEqual(admitted.facts.map((fact) => fact.kind), ["arc"]);
-  const state = observeContract(repositoryAt(repository.path), contract).state;
+  const state = (await observeContract(repositoryAt(repository.path), contract)).state;
   assert.equal(state?.currentArc?.data.seq, 1);
   assert.equal(state?.currentArc?.data.title, "CLI Chapter");
 
   const second = await command(["arc", contract, "-"], arcDocument("CLI Chapter Two"));
   assert.equal(second.kind, "accepted");
-  const secondState = observeContract(repositoryAt(repository.path), contract).state;
+  const secondState = (await observeContract(repositoryAt(repository.path), contract)).state;
   assert.equal(secondState?.currentArc?.data.seq, 2);
   assert.equal(secondState?.currentArc?.data.title, "CLI Chapter Two");
 

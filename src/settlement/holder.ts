@@ -2,20 +2,24 @@ import { createHash } from "node:crypto";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { TreeUpdate } from "../core/facts/offer.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
+import type { GitDecisionObservation } from "../git/observe.js";
+import type { GitRepository } from "../git/repository.js";
 import {
-  expandGitSnapshot,
-  readBlob,
-  readGit,
-  type GitRepository,
-  type GitSnapshot,
-} from "../git/repository.js";
-import { withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
+  withGitTargetedReadObservation,
+  type GitDecodeChannel,
+  type GitReadObservation,
+  type GitTreeSelection,
+} from "../git/read-observation.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 import { acquireTaskSettlementFence } from "./fence.js";
 
 const HOLDER_ROOT = "settlement/task-holders";
 const HOLDER_PREFIX = `${HOLDER_ROOT}/`;
 const HOLDER_SUFFIX = ".json";
+
+export function taskHolderObservationSelection(): GitTreeSelection {
+  return { subtrees: [HOLDER_ROOT] };
+}
 
 export type TaskHolder = Readonly<{
   version: 1;
@@ -72,27 +76,6 @@ function decodeHolder(path: string, bytes: Uint8Array): TaskHolder {
   if (holderPath(taskId) !== path) corruption(`TaskHolder path does not match taskId: ${path}`);
   if (!Buffer.from(canonicalBytes(holder)).equals(Buffer.from(bytes))) corruption(`TaskHolder bytes are not canonical: ${path}`);
   return holder;
-}
-
-function holderEntries(
-  repository: GitRepository,
-  snapshot: GitSnapshot,
-  scope: "complete" | "targeted",
-): readonly TaskHolder[] {
-  const expanded = scope === "complete" ? snapshot : expandGitSnapshot(repository, snapshot);
-  const holders: TaskHolder[] = [];
-  const seen = new Set<TaskId>();
-  for (const [path, entry] of expanded.paths) {
-    if (path === HOLDER_ROOT) corruption(`TaskHolder authority root is not a tree: ${path}`);
-    if (!path.startsWith(HOLDER_PREFIX)) continue;
-    if (!path.endsWith(HOLDER_SUFFIX)) corruption(`unexpected TaskHolder authority path: ${path}`);
-    if (entry.type !== "blob") corruption(`TaskHolder path is not a blob: ${path}`);
-    const holder = decodeHolder(path, readBlob(repository, entry.oid));
-    if (seen.has(holder.taskId)) corruption(`duplicate TaskHolder identity: ${holder.taskId}`);
-    seen.add(holder.taskId);
-    holders.push(holder);
-  }
-  return holders.sort((left, right) => Buffer.compare(Buffer.from(left.taskId), Buffer.from(right.taskId)));
 }
 
 export type TaskHolderProjection = ReadonlyMap<ContractId, TaskHolder>;
@@ -169,41 +152,81 @@ export function claimTaskHolderWithFence<T extends AdmissionOutcome>(
   return admitWithTaskHolderFence(repository, taskId, action);
 }
 
-export function releaseTaskHolder(
-  repository: GitRepository,
-  snapshot: GitSnapshot,
+export async function releaseTaskHolder(
+  channel: GitDecodeChannel,
+  observation: GitDecisionObservation,
   owner: ContractId,
-): TreeUpdate | null {
-  const current = projectTaskHolders(holderEntries(repository, snapshot, "targeted")).get(owner) ?? null;
+): Promise<TreeUpdate | null> {
+  const current = (await readTaskHolderProjectionFromDecision(channel, observation)).get(owner) ?? null;
   return current === null || current.disposition !== "held"
     ? null
     : update({ ...current, disposition: "released" });
 }
 
-function heldTaskForContract(repository: GitRepository, owner: ContractId): TaskId | null {
-  const holder = projectTaskHolders(holderEntries(repository, readGit(repository), "complete")).get(owner) ?? null;
+export async function readTaskHolderProjectionFromDecision(
+  channel: GitDecodeChannel,
+  observation: GitDecisionObservation,
+): Promise<TaskHolderProjection> {
+  const read = {
+    snapshot: observation.admission.snapshot,
+    readBlobs: async (oids: readonly string[]) => {
+      const objects = await channel.readObjects(oids);
+      const blobs = new Map();
+      for (const [oid, object] of objects) {
+        if (object.kind === "missing") blobs.set(oid, object);
+        else {
+          if (object.type !== "blob") corruption(`TaskHolder Git object is not a blob: ${oid}`);
+          blobs.set(oid, { kind: "present", bytes: object.bytes });
+        }
+      }
+      return blobs;
+    },
+  } satisfies Pick<GitReadObservation, "snapshot" | "readBlobs">;
+  return projectTaskHolders(await readTaskHoldersAt(read));
+}
+
+export function observeTaskHolderProjection(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+): Promise<TaskHolderProjection> {
+  return withGitTargetedReadObservation(
+    repository,
+    channel,
+    taskHolderObservationSelection(),
+    readTaskHolderProjectionAt,
+  );
+}
+
+async function heldTaskForContract(repository: GitRepository, channel: GitDecodeChannel, owner: ContractId): Promise<TaskId | null> {
+  const holder = (await observeTaskHolderProjection(repository, channel)).get(owner) ?? null;
   return holder?.disposition === "held" ? holder.taskId : null;
 }
 
 export async function releaseTaskHolderWithFence<T extends AdmissionOutcome>(
   repository: GitRepository,
+  channel: GitDecodeChannel,
   owner: ContractId,
   action: () => T | Promise<T>,
 ): Promise<TaskHolderAdmission<T>> {
-  const taskId = heldTaskForContract(repository, owner);
+  const taskId = await heldTaskForContract(repository, channel, owner);
   return taskId === null
     ? { kind: "completed", result: await action() }
     : admitWithTaskHolderFence(repository, taskId, action);
 }
 
-export async function readTaskHoldersAt(observation: GitReadObservation): Promise<readonly TaskHolder[]> {
+export async function readTaskHoldersAt(
+  observation: Pick<GitReadObservation, "snapshot" | "readBlobs">,
+): Promise<readonly TaskHolder[]> {
   const entries = [...observation.snapshot.paths]
     .filter(([path, entry]) => path.startsWith(HOLDER_PREFIX) && entry.type === "blob");
   const blobs = await observation.readBlobs(entries.map(([, entry]) => entry.oid));
   const holders: TaskHolder[] = [];
   const seen = new Set<TaskId>();
   for (const [path, entry] of observation.snapshot.paths) {
-    if (path === HOLDER_ROOT) corruption(`TaskHolder authority root is not a tree: ${path}`);
+    if (path === HOLDER_ROOT) {
+      if (entry.type !== "tree") corruption(`TaskHolder authority root is not a tree: ${path}`);
+      continue;
+    }
     if (!path.startsWith(HOLDER_PREFIX)) continue;
     if (!path.endsWith(HOLDER_SUFFIX)) corruption(`unexpected TaskHolder authority path: ${path}`);
     if (entry.type !== "blob") corruption(`TaskHolder path is not a blob: ${path}`);
@@ -219,12 +242,4 @@ export async function readTaskHoldersAt(observation: GitReadObservation): Promis
 
 export async function readTaskHolderProjectionAt(observation: GitReadObservation): Promise<TaskHolderProjection> {
   return projectTaskHolders(await readTaskHoldersAt(observation));
-}
-
-export async function readTaskHolders(repository: GitRepository): Promise<readonly TaskHolder[]> {
-  return withGitReadObservation(repository, readTaskHoldersAt);
-}
-
-export async function readTaskHolderProjection(repository: GitRepository): Promise<TaskHolderProjection> {
-  return withGitReadObservation(repository, readTaskHolderProjectionAt);
 }

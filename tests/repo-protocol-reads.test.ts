@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { readGit, repositoryAt } from "../src/git/repository.js";
+import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import {
   bindOperation,
@@ -50,14 +51,16 @@ function terms(title: string) {
   return { document: document.document, segments: document.segments, gates: [], after: [] };
 }
 
-function bind(repository: TestGitRepository, title: string, workspace: "worktree" | "here"): ContractId {
-  const result = bindOperation({
-    scope: scopeOperation({ coordinate: repository.path }),
+async function bind(repository: TestGitRepository, title: string, workspace: "worktree" | "here"): Promise<ContractId> {
+  const scope = scopeOperation({ coordinate: repository.path });
+  const result = await withGitDecodeChannel(scope, (channel) => bindOperation({
+    scope,
+    channel,
     title,
     terms: terms(title),
     verification: { kind: "prepared", data: null },
     workspace,
-  });
+  }));
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("bind did not succeed");
   return result.value.contractId;
@@ -70,15 +73,16 @@ test("git repository resolution rejects omitted and empty coordinates", () => {
 
 test("Contract board keeps an absent Keiyaku state snapshot explicit", async () => {
   const repository = repositoryWithMain();
-  const report = await contractsOperation({ scope: scopeOperation({ coordinate: repository.path }) });
+  const scope = scopeOperation({ coordinate: repository.path });
+  const report = await withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
   assert.equal(report.state, null);
   assert.deepEqual(report.rows, []);
 });
 
 test("Contract reads return plain pinned data from one git snapshot", async () => {
   const repository = repositoryWithMain();
-  const first = bind(repository, "First status row", "here");
-  const second = bind(repository, "Second status row", "worktree");
+  const first = await bind(repository, "First status row", "here");
+  const second = await bind(repository, "Second status row", "worktree");
   const scope = scopeOperation({ coordinate: repository.path });
   const log = resolve(repository.path, "status-blob-reads.log");
   writeFileSync(log, "");
@@ -86,7 +90,7 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
   const report = await withGitShim(
     "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_STATUS_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_STATUS_READ_LOG: log },
-    () => contractsOperation({ scope }),
+    () => withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel })),
   );
   const git = repositoryAt(repository.path);
 
@@ -122,7 +126,11 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
   assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
   assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 0);
 
-  assert.deepEqual(contractObservationOperation({ scope, contractId: first }), {
+  assert.deepEqual(await withGitDecodeChannel(scope, (channel) => contractObservationOperation({
+    scope,
+    channel,
+    contractId: first,
+  })), {
     kind: "present",
     row: report.rows.find((contract) => contract.id === first),
   });
@@ -130,16 +138,18 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
 
 test("batch reconcile isolates a failed contract and retains successful reports", async () => {
   const repository = repositoryWithMain();
-  const blocked = bind(repository, "Blocked reconcile", "worktree");
-  const healthy = bind(repository, "Healthy reconcile", "worktree");
+  const blocked = await bind(repository, "Blocked reconcile", "worktree");
+  const healthy = await bind(repository, "Healthy reconcile", "worktree");
   const git = repositoryAt(repository.path);
   mkdirSync(deliveryWorktreePath(git, blocked), { recursive: true });
 
-  const report = await reconcileAllOperation({
-    scope: scopeOperation({ coordinate: repository.path }),
+  const scope = scopeOperation({ coordinate: repository.path });
+  const report = await withGitDecodeChannel(scope, (channel) => reconcileAllOperation({
+    scope,
+    channel,
     hooks: { create: [], destroy: [] },
     retryHooks: false,
-  });
+  }));
   assert.equal(report.contracts.length, 2);
 
   const failed = report.contracts.find((contract) => contract.contractId === blocked);

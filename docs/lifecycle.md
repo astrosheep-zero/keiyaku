@@ -193,6 +193,16 @@ The same decision judges that stamp against the observation's current document
 key. A mismatch is the lifecycle `document-moved` refusal for a verb that uses
 a document derivation.
 
+The operation derives decoded document input inside that attempt's decision
+epoch. A publication movement that requires another legal attempt discards the
+prior derivation, freezes a fresh decision observation, and derives the input
+again. Amend keeps the invocation's initially selected source terms while doing
+so; it never retargets the operation document to terms observed by a later
+attempt, and the fresh decision returns `terms-moved` when those source terms
+are no longer current. The package-root facade performs no document pre-read,
+and retry never carries an offer or Git observation from an earlier epoch into
+a new decision.
+
 Core owns one `activeContract` guard for the shared existence-and-terminal
 law. Amend, deliver, placement, attestation, abandon, and arc begin their legal
 decision with that guard and then apply only their verb-specific rules. The
@@ -252,11 +262,18 @@ mechanical result shape; operations whose fact claims the current document use
 the core `StampedPreparation` union. Attestations use ordinary `Preparation`
 because their captured subject already names exactly what was judged. A document or other lifecycle refusal from the
 completed decision takes priority over a mechanical preparation failure.
+Bind coordinate preparation is one such stage: every semantic attempt derives
+its complete `BindInput` from current Git facts, and admission atomically
+asserts exactly the ref OID sealed into its coordinates. A targeted `here`
+branch mismatch is an eligibility refusal of that fresh observation, not an
+admission currentness fact. Collision and CAS retries never reuse an earlier
+bind preparation.
 
 The one decision submits at most one offer. Git admission owns raw Git
-object construction and one atomic `update-ref --stdin --no-deref` operation;
-it does not parse Git prose. Admission's expected-head assertions remain the
-only currentness adjudicator for that offer.
+object construction and one atomic `update-ref --stdin` operation; it does not
+parse Git prose. Admission's non-mutating expected-OID assertions remain the
+only currentness adjudicator for the facts sealed into that offer. Eligibility
+observations do not enlarge that assertion scope.
 
 Placement alone may wrap that decided offer in the Git target fence. The fence
 does not make another legal decision: it checks only whether a registered
@@ -271,6 +288,10 @@ and may only add companion updates; it cannot replace journal entries, target
 assertions, or the decision. A retry re-runs the decorator from the fresh
 observation, so a stale companion can never be replayed against a newer Git
 root.
+If a companion introduces a path outside the decision's initially selected
+paths, Protocol asks Git to extend only that path's ancestor directories from
+the same frozen tree. The decorator still neither reads Git nor becomes a tree
+authority.
 
 After a known rejected transaction, protocol compares the Git and optional
 target ref with the coordinates asserted by that attempt. Any movement discards

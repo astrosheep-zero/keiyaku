@@ -1,7 +1,7 @@
-import { observeContractWorld, observeDeliveryTarget, observeDeliveryTargetAt, observeContract } from "../../git/observe.js";
+import { observeContractWorld, observeDeliveryTargetAt } from "../../git/observe.js";
 import { deliveryWorktreePath } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/repository.js";
-import type { GitReadObservation } from "../../git/read-observation.js";
+import { withGitReadObservation, type GitDecodeChannel, type GitReadObservation } from "../../git/read-observation.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import type { ContractId, ContractState, DeliverData, SnapshotId } from "../../core/facts/types.js";
 
@@ -81,10 +81,17 @@ export async function readContractBoard(observation: GitReadObservation): Promis
   return { root: observation.repository.primaryWorktree, state: observed.snapshot, rows: await Promise.all(rows) };
 }
 
-/** Observe one Contract without enumerating the Contract world. */
-export function readContractObservation(repository: GitRepository, id: ContractId): ContractObservation {
-  const state = observeContract(repository, id).state;
-  return state === null
-    ? { kind: "missing", id }
-    : { kind: "present", row: rowFor(repository, state, observeDeliveryTarget(repository, state)) };
+/** Observe one Contract and its target from one fresh ref epoch. */
+export async function readContractObservationAt(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+  id: ContractId,
+): Promise<ContractObservation> {
+  return withGitReadObservation(repository, channel, async (observation) => {
+    const world = await observeContractWorld(observation, [id]);
+    const state = world.contracts.get(id)?.state ?? null;
+    return state === null
+      ? { kind: "missing", id }
+      : { kind: "present", row: rowFor(observation.repository, state, await observeDeliveryTargetAt(observation, state)) };
+  });
 }

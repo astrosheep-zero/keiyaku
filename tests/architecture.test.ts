@@ -205,9 +205,9 @@ test("architecture policy permits protocol to join pact with Git", () => {
   const diagnostics = check({
     "core/decide.ts": "export type AttemptContext = {};",
     "git/repository.ts": "export type GitRepository = {};",
-    "git/observe.ts": 'import type { GitRepository } from "./repository.js"; export function observeContractsForAdmission(repository: GitRepository): void { void repository; }',
+    "git/observe.ts": 'import type { GitRepository } from "./repository.js"; export function observeContractsForAdmissionAt(repository: GitRepository): void { void repository; }',
     "protocol/attempt.ts": "export function admitDecidedOffer(): void {}",
-    "protocol/run.ts": 'import { observeContractsForAdmission } from "../git/observe.js"; import type { GitRepository } from "../git/repository.js"; import type { AttemptContext } from "../core/decide.js"; import { admitDecidedOffer } from "./attempt.js"; export function run(repository: GitRepository, attempt: AttemptContext): void { observeContractsForAdmission(repository); void attempt; admitDecidedOffer(); }',
+    "protocol/run.ts": 'import { observeContractsForAdmissionAt } from "../git/observe.js"; import type { GitRepository } from "../git/repository.js"; import type { AttemptContext } from "../core/decide.js"; import { admitDecidedOffer } from "./attempt.js"; export function run(repository: GitRepository, attempt: AttemptContext): void { observeContractsForAdmissionAt(repository); void attempt; admitDecidedOffer(); }',
   });
   assert.deepEqual(diagnostics, []);
 });
@@ -403,6 +403,21 @@ test("architecture policy keeps shared Git observation product-blind and Kanshi 
     "kanshi/read.ts": "export function read(observation: any): unknown { return observation.snapshot; }",
   });
   assert.ok(rules(kanshiGitMechanics).includes("architecture/forbidden-source-pattern"));
+
+  const nominalChannel = check({
+    "git/read-observation.ts": "class BatchReader { #child = null; }",
+  });
+  assert.ok(rules(nominalChannel).includes("architecture/forbidden-source-pattern"));
+
+  const compatibilityChannel = check({
+    "git/read-observation.ts": "export const read = () => withGitDecodeChannel(repo, (channel) => observeEpoch(repo, channel));",
+  });
+  assert.ok(rules(compatibilityChannel).includes("architecture/forbidden-source-pattern"));
+
+  const mutatingAssertion = check({
+    "git/repository.ts": "export const assertion = 'symref-update HEAD refs/heads/main';",
+  });
+  assert.ok(rules(mutatingAssertion).includes("architecture/forbidden-source-pattern"));
 });
 
 test("architecture policy matches recursive wildcards between exact path segments", () => {

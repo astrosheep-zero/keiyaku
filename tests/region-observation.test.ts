@@ -84,20 +84,21 @@ test("post-admission observation failure preserves the admitted Contract without
   const repository = repositoryWithHead();
   await bind(repository, "Existing", ["src/**"]);
   const marker = `${repository.path}/region-observation-admitted`;
+  const batchPid = `${repository.path}/region-observation-batch.pid`;
   const result = await withGitShim(
       [
+        "if [ \"$1 $2\" = \"cat-file --batch\" ]; then",
+        "  printf '%s\\n' \"$$\" > \"$KEIYAKU_REGION_BATCH_PID\"",
+        "fi",
         "if [ \"$1\" = \"update-ref\" ] && [ ! -e \"$KEIYAKU_REGION_MARKER\" ]; then",
         "  \"$KEIYAKU_REAL_GIT\" \"$@\" || exit $?",
+        "  kill -TERM \"$(cat \"$KEIYAKU_REGION_BATCH_PID\")\"",
         "  touch \"$KEIYAKU_REGION_MARKER\"",
         "  exit 0",
         "fi",
-        "if [ \"$1\" = \"cat-file\" ] && [ -e \"$KEIYAKU_REGION_MARKER\" ]; then",
-        "  printf 'post-admission document read failed\\n' >&2",
-        "  exit 1",
-        "fi",
         "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
       ].join("\n"),
-      { KEIYAKU_REGION_MARKER: marker },
+      { KEIYAKU_REGION_MARKER: marker, KEIYAKU_REGION_BATCH_PID: batchPid },
       () => Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
         markdown: document("Observed failure", ["docs/**"]),
         workspace: "here",
@@ -108,7 +109,7 @@ test("post-admission observation failure preserves the admitted Contract without
   assert.equal(result.lags[0]?.kind, "reconcile-failed");
   if (result.lags[0]?.kind === "reconcile-failed") {
     assert.equal(result.lags[0].stage, "observation");
-    assert.match(result.lags[0].diagnostic, /post-admission document read failed/);
+    assert.match(result.lags[0].diagnostic, /git cat-file --batch/u);
   }
   const state = await result.keiyaku.state();
   assert.equal(state.id, result.facts[0]?.contract);

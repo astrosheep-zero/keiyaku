@@ -22,7 +22,7 @@ export {
   Delivery,
   KeiyakuRefused,
   KeiyakuRetry,
-} from "./contract-values.js";
+} from "./contract.js";
 export { NoGitWorldError, Repo } from "./repo.js";
 export {
   gatesFrom,
@@ -53,23 +53,21 @@ export type {
   ContractRow,
   DeliverInput,
   Fact,
+  FactKind,
   KeiyakuOfInput,
-  ReconcileReport,
-  Review,
-  ReviewInput,
-  TimelineEntry,
-  TaskId,
-} from "./contract.js";
-export type { FactKind } from "./contract.js";
-export type {
   KeiyakuRefusal,
   KeiyakuRetryReason,
   Lag,
   MutationResult,
   PlacementStop,
+  ReconcileReport,
+  Review,
+  ReviewInput,
+  TimelineEntry,
+  TaskId,
   TopologyEffect,
   VerificationStop,
-} from "./contract-values.js";
+} from "./contract.js";
 export type {
   ContractId,
   ContractState,

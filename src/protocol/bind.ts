@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { currentBranch, normalizeTargetBranch, observeBindCoordinates } from "../git/observe.js";
-import type { GitRepository } from "../git/repository.js";
+import { normalizeTargetBranch, observeBindCoordinates } from "../git/observe.js";
+import { gitObjectIdForSnapshot } from "../git/identity.js";
+import type { GitRefAssertion, GitRepository } from "../git/repository.js";
+import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { BindData, ActorId, ContractId } from "../core/facts/types.js";
 import { contractIdFromSegment } from "../core/facts/types.js";
 import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
@@ -22,6 +24,7 @@ export type TargetInputRefusal =
 
 type BindOperationInput = Readonly<{
   scope: GitRepository;
+  channel: GitDecodeChannel;
   title: string;
   terms: BindData["terms"];
   verification: VerificationDeclarationPreparation;
@@ -52,54 +55,76 @@ function contractIdFromStem(stem: string, suffix?: string): ContractId {
   }));
 }
 
-export function bindOperation(
+type BindRefusalUnion = BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal;
+type BindSeed = Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
+
+function bindPreparation(
   input: BindOperationInput,
-): IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal> {
+  target: string | undefined,
+  seed: BindSeed,
+): Readonly<{ kind: "prepared"; input: BindInput<VerificationDeclarationRefusal>; assertions?: readonly GitRefAssertion[] }>
+  | Readonly<{ kind: "refused"; refusal: BindRefusalUnion }> {
+  if (input.verification.kind === "refused") {
+    return { kind: "prepared", input: { ...seed, preparation: input.verification } };
+  }
+  const observed = observeBindCoordinates(input.scope, target);
+  if (observed === null) return { kind: "refused", refusal: { kind: "target-missing" } };
+  if (input.workspace === "here" && target !== undefined && observed.branch !== target) {
+    return { kind: "refused", refusal: { kind: "here-target-mismatch", target, branch: observed.branch } };
+  }
+  const oid = gitObjectIdForSnapshot(observed.start);
+  const assertions: GitRefAssertion[] = [{ ref: target ?? "HEAD", oid }];
+  return {
+    kind: "prepared",
+    input: {
+      ...seed,
+      preparation: {
+        kind: "prepared",
+        data: {
+          coordinates: {
+            start: observed.start,
+            ...(observed.target === undefined ? {} : { target: observed.target }),
+            workspace: input.workspace,
+          },
+          terms: input.terms,
+        },
+      },
+    },
+    assertions,
+  };
+}
+
+export async function bindOperation(
+  input: BindOperationInput,
+): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal>> {
   let target: string | undefined;
   if (input.target !== undefined) {
     const normalized = normalizeTargetBranch(input.scope, input.target);
     if (normalized === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
     target = normalized;
   }
-  const observed = observeBindCoordinates(input.scope, target);
-  if (observed === null) return { kind: "refused", refusal: { kind: "target-missing" } };
-  if (input.workspace === "here" && target !== undefined) {
-    const branch = currentBranch(input.scope);
-    if (branch !== target) {
-      return { kind: "refused", refusal: { kind: "here-target-mismatch", target, branch } };
-    }
-  }
-  const data: BindData = {
-    coordinates: {
-      start: observed.start,
-      ...(observed.target === undefined ? {} : { target: observed.target }),
-      workspace: input.workspace,
-    },
-    terms: input.terms,
-  };
   const stem = normalizeIdentityStem({ source: input.title }) || "contract";
   const at = new Date().toISOString();
-  const attempt = (id: ContractId): IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | VerificationDeclarationRefusal> => complete(
-    admitIntent(
+  const attempt = async (id: ContractId): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusalUnion>> => complete(
+    await admitIntent<BindInput<VerificationDeclarationRefusal>, BindRefusalUnion, BindSeed>(
+      input.channel,
       input.scope,
       {
         contractId: id,
         ...(input.actor === undefined ? {} : { actor: input.actor }),
         at,
-        preparation: input.verification.kind === "prepared"
-          ? { kind: "prepared", data }
-          : { kind: "refused", refusal: input.verification.refusal },
-      } satisfies BindInput<VerificationDeclarationRefusal>,
+      } satisfies BindSeed,
       decideBind,
       {
         observedContracts: [id, ...input.terms.after],
+        prepareInput: (_observation, original) => bindPreparation(input, target, original),
         ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
       },
     ),
     { contractId: id },
   );
-  const first = attempt(contractIdFromStem(stem));
+  const first = await attempt(contractIdFromStem(stem));
   return first.kind === "refused" && first.refusal.kind === "contract-exists"
-    ? attempt(contractIdFromStem(stem, mintCollisionSuffix()))
+    ? await attempt(contractIdFromStem(stem, mintCollisionSuffix()))
     : first;
 }

@@ -16,7 +16,7 @@ import {
   type GitSnapshot,
   type TreeChange,
 } from "../git/repository.js";
-import { withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
+import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 
 const DISPATCH_ROOT = "dispatch";
 const DISPATCH_PREFIX = `${DISPATCH_ROOT}/`;
@@ -134,7 +134,7 @@ export async function readDispatchesAt(observation: GitReadObservation): Promise
 }
 
 export async function readDispatches(repository: GitRepository): Promise<readonly Dispatch[]> {
-  return withGitReadObservation(repository, readDispatchesAt);
+  return withGitDecodeChannel(repository, (channel) => withGitReadObservation(repository, channel, readDispatchesAt));
 }
 
 function observedPublication(

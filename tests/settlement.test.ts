@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError, Keiyaku, Repo } from "../src/index.js";
 import { contractJournalPath } from "../src/git/identity.js";
+import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import {
   GIT_REF,
   readGit,
@@ -18,7 +19,7 @@ import {
 import {
   claimTaskHolderWithFence,
   finishTaskHolderAdmission,
-  readTaskHolders,
+  readTaskHoldersAt,
 } from "../src/settlement/holder.js";
 import { settle, settleAll } from "../src/settlement/settle.js";
 import { settlementFencePath } from "../src/settlement/fence.js";
@@ -86,7 +87,7 @@ test("accepted claim synchronously settles its current held Task", async () => {
   const state = await bound.keiyaku.state();
   const git = repositoryAt(world.path);
   assert.equal(readGit(git).paths.has(contractJournalPath(state.id)), true);
-  assert.deepEqual(await readTaskHolders(git), [{
+  assert.deepEqual(await withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, readTaskHoldersAt)), [{
     version: 1,
     taskId,
     contractId: state.id,
@@ -112,6 +113,24 @@ test("accepted abandonment reopens its current released Task", async () => {
   assert.equal(await taskState(world.path, taskId), "open");
   assert.deepEqual(abandoned.settlement.actions, [{ kind: "task", taskId, action: "reopened" }]);
   assert.deepEqual(abandoned.settlement.lags, []);
+});
+
+test("abandon decodes TaskHolders through the shared batch without legacy readers", async () => {
+  const world = repository(), repo = Repo.at({ path: world.path });
+  const taskId = await task(world.path, "Batch-only release");
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Batch-only release"), workspace: "here" });
+  const log = join(world.path, "abandon-holder-reads.log");
+
+  await withGitShim(
+    'printf "%s\\n" "$*" >> "$KEIYAKU_READ_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
+    { KEIYAKU_READ_LOG: log },
+    () => bound.keiyaku.abandon(),
+  );
+
+  const commands = readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(commands.filter((command) => command === "cat-file --batch").length, 1);
+  assert.equal(commands.filter((command) => command.startsWith("cat-file blob ")).length, 0);
+  assert.equal(commands.filter((command) => command.startsWith("ls-tree ")).length, 0);
 });
 
 test("contract and world reconcile replay settlement from current authority", async () => {
@@ -154,19 +173,55 @@ test("batch settlement reads one locator and one fenced snapshot per Contract", 
   const reports = await withGitShim(
     'printf "%s\\n" "$*" >> "$KEIYAKU_READ_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
     { KEIYAKU_READ_LOG: log },
-    () => settleAll({
-      repository: repositoryAt(world.path),
-      contracts: [
-        { state: states[0]!, effects: [] },
-        { state: states[1]!, effects: [] },
-      ],
-    }),
+    () => {
+      const git = repositoryAt(world.path);
+      return withGitDecodeChannel(git, (channel) => settleAll({
+        repository: git,
+        channel,
+        contracts: [
+          { state: states[0]!, effects: [] },
+          { state: states[1]!, effects: [] },
+        ],
+      }));
+    },
   );
 
   assert.equal(reports.length, 2);
-  const stateReads = readFileSync(log, "utf8").trim().split("\n")
-    .filter((command) => command === "rev-parse --verify --quiet refs/heads/keiyaku-state");
-  assert.equal(stateReads.length, 3);
+  const commands = readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(commands.filter((command) => command === "rev-parse --verify --quiet refs/heads/keiyaku-state").length, 3);
+  assert.equal(commands.filter((command) => command === "cat-file --batch").length, 1);
+});
+
+test("settlement ignores an unrelated missing private-state subtree", async () => {
+  const world = repository(), repo = Repo.at({ path: world.path });
+  const taskId = await task(world.path, "Targeted settlement");
+  const bound = await Keiyaku.bind({
+    repo,
+    task: taskId,
+    markdown: document("Targeted settlement"),
+    workspace: "here",
+    gates: [],
+  });
+  writeFileSync(`${world.path}/targeted.txt`, "targeted\n");
+  await bound.keiyaku.deliver({ includeDirty: true });
+  replaceTaskState(world.path, taskId, "done", "open");
+
+  const git = repositoryAt(world.path);
+  const state = await bound.keiyaku.state();
+  const snapshot = readGit(git);
+  const missingTree = world.run(["mktree"], "").trim();
+  const tree = updateGitTree(git, snapshot.tree, new Map([
+    ["unrelated/broken", { oid: missingTree, mode: "040000", type: "tree" }],
+  ]));
+  const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
+  unlinkSync(join(git.commonDirectory, "objects", missingTree.slice(0, 2), missingTree.slice(2)));
+
+  const report = await withGitDecodeChannel(git, (channel) => settle({ repository: git, channel, state, effects: [] }));
+
+  assert.deepEqual(report.actions, [{ kind: "task", taskId, action: "done" }]);
+  assert.deepEqual(report.lags, []);
+  assert.equal(await taskState(world.path, taskId), "done");
 });
 
 test("accepted holder admission survives a fence release failure", () => {
@@ -283,7 +338,7 @@ test("fenced settlement validates the complete current holder projection", async
     KEIYAKU_MOVE_MARKER: marker,
     KEIYAKU_CORRUPT_STATE: corrupt,
     KEIYAKU_ORIGINAL_STATE: snapshot.commit!,
-  }, () => settle({ repository: git, state, effects: [] }));
+  }, () => withGitDecodeChannel(git, (channel) => settle({ repository: git, channel, state, effects: [] })));
 
   assert.deepEqual(report.actions, []);
   assert.equal(report.lags[0]?.surface, "task-holder");
@@ -303,7 +358,7 @@ test("TaskHolder reads reject unexpected paths in their authority namespace", as
   assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
 
   await assert.rejects(
-    readTaskHolders(git),
+    withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, readTaskHoldersAt)),
     (error: unknown) => error instanceof AuthorityCorruptionError
       && error.message === "TaskHolder authority root is not a tree: settlement/task-holders",
   );

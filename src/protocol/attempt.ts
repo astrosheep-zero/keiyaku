@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { encodeEntry } from "../core/facts/codec.js";
 import { admit, type PublicationFailed } from "../git/admission.js";
-import { observeContracts, type GitDecisionObservation } from "../git/observe.js";
-import { GIT_REF, readRef, type GitRepository } from "../git/repository.js";
+import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import type { GitDecodeChannel } from "../git/read-observation.js";
+import { GIT_REF, readRef, type GitRefAssertion, type GitRepository } from "../git/repository.js";
 import type { AttemptContext } from "../core/decide.js";
 import { foldJournal } from "../core/facts/fold.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -110,7 +111,7 @@ function journalFor(
 }
 
 function recoveredAcceptance(
-  observation: ReturnType<typeof observeContracts>,
+  observation: Readonly<{ contracts: GitDecisionObservation["journals"] }>,
   offer: Offer,
   primaryContract: ContractId,
 ): AcceptedAdmission {
@@ -130,23 +131,29 @@ function publicationPremiseMoved(
   repository: GitRepository,
   observation: GitDecisionObservation,
   offer: Offer,
+  assertions: readonly GitRefAssertion[],
 ): boolean {
   if (readRef(repository, GIT_REF) !== observation.admission.snapshot.commit) return true;
+  for (const assertion of assertions) if (readRef(repository, assertion.ref) !== assertion.oid) return true;
   return offer.target !== undefined
     && readRef(repository, offer.target.target) !== offer.target.expectedOid;
 }
 
 /** Admit one decided offer without making another legal decision. */
-export function admitDecidedOffer(
-  repository: GitRepository,
-  decisionObservation: GitDecisionObservation,
-  attempt: AttemptContext,
-  offer: Offer,
-  primaryContract: ContractId,
-): DecidedOfferResult {
+export async function admitDecidedOffer(input: Readonly<{
+  channel: GitDecodeChannel;
+  repository: GitRepository;
+  decisionObservation: GitDecisionObservation;
+  attempt: AttemptContext;
+  offer: Offer;
+  primaryContract: ContractId;
+  assertions?: readonly GitRefAssertion[];
+}>): Promise<DecidedOfferResult> {
+  const { channel, repository, decisionObservation, attempt, offer, primaryContract } = input;
+  const assertions = input.assertions ?? [];
   validateOffer(offer, attempt);
   const primary = primaryAppend(offer, primaryContract);
-  const admission = admit(repository, offer, decisionObservation.admission);
+  const admission = admit(repository, offer, decisionObservation.admission, assertions);
   if (admission.kind === "accepted") {
     return {
       kind: "accepted",
@@ -156,13 +163,13 @@ export function admitDecidedOffer(
     };
   }
   if (admission.kind === "publication-failed") {
-    return publicationPremiseMoved(repository, decisionObservation, offer)
+    return publicationPremiseMoved(repository, decisionObservation, offer, assertions)
       ? { kind: "redecide" }
       : admission;
   }
-  const recovered = observeContracts(repository, offer.facts.map((append) => append.contractId));
-  const classification = classifyUnknownAttempt(recovered, offer);
-  if (classification.kind === "accepted") return recoveredAcceptance(recovered, offer, primaryContract);
+  const recovered = await observeContractsForAdmissionAt(repository, channel, offer.facts.map((append) => append.contractId));
+  const classification = classifyUnknownAttempt({ contracts: recovered.journals }, offer);
+  if (classification.kind === "accepted") return recoveredAcceptance({ contracts: recovered.journals }, offer, primaryContract);
   return classification.kind === "collision" ? { kind: "collision" } : { kind: "redecide" };
 }
 

@@ -1,7 +1,8 @@
 import { decodeContractDocument } from "../body/decode.js";
 import { regionsOverlap } from "../body/region.js";
 import type { ContractId } from "../core/facts/types.js";
-import { documentsOperation, type RepositoryScope } from "../protocol/operations.js";
+import type { GitDecodeChannel } from "../git/read-observation.js";
+import { documentsOperationAt, type RepositoryScope } from "../protocol/operations.js";
 
 export type RegionOverlap = Readonly<{
   contract: ContractId;
@@ -17,10 +18,15 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function observeRegion(scope: RepositoryScope, self: ContractId, mine: readonly string[]): Promise<RegionObservation> {
+export async function observeRegion(
+  scope: RepositoryScope,
+  channel: GitDecodeChannel,
+  self: ContractId,
+  mine: readonly string[],
+): Promise<RegionObservation> {
   try {
     const overlaps: RegionOverlap[] = [];
-    for (const peer of await documentsOperation({ scope })) {
+    for (const peer of await documentsOperationAt(scope, channel)) {
       if (peer.contract === self) continue;
       try {
         const pairs = regionsOverlap(mine, decodeContractDocument(peer.documentBytes).region);

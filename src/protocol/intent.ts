@@ -1,5 +1,7 @@
 import type { GitDecisionObservation } from "../git/observe.js";
+import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
 import type { GitRepository } from "../git/repository.js";
+import type { GitRefAssertion } from "../git/repository.js";
 import { materializeVerificationCandidate } from "../git/verification.js";
 import type { WorktreeLeak } from "../git/verification.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
@@ -18,33 +20,52 @@ import { mintAttempts } from "./attempt.js";
 
 const VERIFICATION_TIMEOUT_MS = 5 * 60 * 1_000;
 
-type IntentAdmissionOptions = Readonly<{
+type IntentAdmissionOptions<Input, Refusal, Seed> = Readonly<{
   observedContracts?: readonly ContractId[];
-  observe?: (repository: GitRepository, contracts: readonly ContractId[]) => GitDecisionObservation;
+  observe?: (repository: GitRepository, channel: GitDecodeChannel, contracts: readonly ContractId[]) => Promise<GitDecisionObservation>;
   decorateOffer?: CompanionDecorator;
+  observationSelection?: GitTreeSelection;
+  prepareInput?: (
+    observation: GitDecisionObservation,
+    input: Seed,
+  ) => Readonly<{ kind: "prepared"; input: Input; assertions?: readonly GitRefAssertion[] }>
+    | Readonly<{ kind: "refused"; refusal: Refusal }>
+    | Promise<
+        Readonly<{ kind: "prepared"; input: Input; assertions?: readonly GitRefAssertion[] }>
+        | Readonly<{ kind: "refused"; refusal: Refusal }>
+      >;
 }>;
 
 /** Observe, decide, and atomically admit one intent with bounded Git retries. */
-export function admitIntent<Input extends Readonly<{ contractId: ContractId }>, Refusal>(
+export function admitIntent<
+  Input extends Readonly<{ contractId: ContractId }>,
+  Refusal,
+  Seed extends Readonly<{ contractId: ContractId }> = Input,
+>(
+  channel: GitDecodeChannel,
   repository: GitRepository,
-  input: Input,
+  input: Seed,
   decide: (input: DecideInput<Input>) => OfferDecision<Refusal>,
-  options: IntentAdmissionOptions = {},
-): ProtocolResult<Refusal> {
+  options: IntentAdmissionOptions<Input, Refusal, Seed> = {},
+): Promise<ProtocolResult<Refusal>> {
   const contracts = options.observedContracts ?? [input.contractId];
   return runProtocol({
     input,
+    channel,
     repository,
     contracts,
     attempts: mintAttempts({ entryCount: 2 }),
     decide,
     ...(options.observe === undefined ? {} : { observe: options.observe }),
     ...(options.decorateOffer === undefined ? {} : { decorateOffer: options.decorateOffer }),
+    ...(options.observationSelection === undefined ? {} : { observationSelection: options.observationSelection }),
+    ...(options.prepareInput === undefined ? {} : { prepareInput: options.prepareInput }),
   });
 }
 
 
 type VerifyDeliveryInput = Readonly<{
+  channel: GitDecodeChannel;
   repository: GitRepository;
   contractId: ContractId;
   actor?: ActorId;
@@ -130,7 +151,8 @@ export async function verifyDelivery(
       env: input.environment,
     });
     if (outcome.kind === "terminal") {
-      step = admitIntent(
+      step = await admitIntent<AttestationInput<never>, AttestationRefusal>(
+        input.channel,
         input.repository,
         verificationInput(outcome, input, subject),
         decideAttestation,

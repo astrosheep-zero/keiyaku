@@ -89,13 +89,14 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   assert.deepEqual((await contract.state()).terminal?.data, { note: "Return the task to planning." });
   const terminalDelivery = await contract.delivery();
   assert.equal(terminalDelivery?.integration.snapshot, delivered.value.integration.snapshot);
+  const contractId = (await contract.state()).id;
   await assert.rejects(
-    contract.review({ verdict: "satisfied" }),
-    refused({ kind: "terminal", contractId: (await contract.state()).id }),
+    () => contract.review({ verdict: "satisfied" }),
+    refused({ kind: "terminal", contractId }),
   );
 
   await assert.rejects(
-    contract.arc({ markdown: [
+    () => contract.arc({ markdown: [
       "# Late",
       "",
       "## Objective",
@@ -105,7 +106,7 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
       "Must refuse.",
       "",
     ].join("\n") }),
-    refused({ kind: "terminal", contractId: (await contract.state()).id }),
+    refused({ kind: "terminal", contractId }),
   );
 });
 
@@ -127,9 +128,10 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
   assert.ok(path);
   assert.equal(existsSync(path), false);
 
+  const terminalContractId = (await dependent.keiyaku.state()).id;
   await assert.rejects(
-    dependent.keiyaku.deliver(),
-    refused({ kind: "terminal", contractId: (await dependent.keiyaku.state()).id }),
+    () => dependent.keiyaku.deliver(),
+    refused({ kind: "terminal", contractId: terminalContractId }),
   );
 });
 

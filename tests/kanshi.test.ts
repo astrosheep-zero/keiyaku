@@ -128,12 +128,12 @@ test("one-target Kanshi observation has a seven-process Git topology", async () 
   }).kind, "dispatched");
   const invocations = await observedGitInvocations(repository);
 
-  assert.equal(invocations.length, 7);
+  assert.equal(invocations.length, 6);
   assert.equal(invocations.filter((command) => command === "worktree list --porcelain -z").length, 1);
   assert.equal(invocations.filter((command) => command === "rev-parse --path-format=absolute --git-common-dir").length, 1);
   assert.equal(invocations.filter((command) => command === "symbolic-ref --quiet HEAD").length, 1);
   assert.equal(invocations.filter((command) => command === `rev-parse --verify --quiet ${GIT_REF}`).length, 1);
-  assert.equal(invocations.filter((command) => command.startsWith("ls-tree -r -z --full-tree ")).length, 1);
+  assert.equal(invocations.some((command) => command.startsWith("ls-tree ")), false);
   assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
   assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
   assert.equal(invocations.some((command) => command.startsWith("cat-file blob ")), false);
@@ -151,7 +151,7 @@ test("Kanshi Git topology adds one ref read per distinct Contract target", async
 
   const invocations = await observedGitInvocations(repository);
 
-  assert.equal(invocations.length, 8);
+  assert.equal(invocations.length, 7);
   assert.equal(invocations.filter((command) => command === "rev-parse --path-format=absolute --git-common-dir").length, 1);
   assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
   assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/other").length, 1);

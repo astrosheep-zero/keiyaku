@@ -2,7 +2,6 @@ import { documentDiff } from "../markdown/diff.js";
 import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
-import type { DecodedContractDocument } from "../body/types.js";
 import {
   actorOption,
   contractTerms,
@@ -11,7 +10,6 @@ import {
   normalizedList,
   optionalBoolean,
   optionalNonblank,
-  rejectUnknownFields,
   requireInput,
   requireMarkdown,
 } from "./input.js";
@@ -20,9 +18,9 @@ import { type Gate, type WorktreeHooks, worktreeHooksOption } from "./configurat
 import {
   contractId,
   type ChangeId,
-  type ContractHead,
   type ContractId,
   type ContractState,
+  type JournalEntry,
   type SnapshotId,
 } from "../core/facts/types.js";
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -37,7 +35,6 @@ import {
   deliveryDiffOperation,
   deliverOperation,
   deliveryOperation,
-  readStateOperation,
   reconcileOperation,
   reviewOperation,
   stateOperation,
@@ -52,46 +49,33 @@ import {
   type DeliverValue,
   type FactKind,
   type IntentOutcome,
+  type IntentRefusal,
+  type IntentRetry,
+  type PlacementStop,
   type ReconcileReport as ProtocolReconcileReport,
   type RepositoryScope,
+  type ReviewValue,
   type TimelineEntry,
+  type VerificationStop,
 } from "../protocol/operations.js";
-import { deferredTaskHolderSettlement, settle, type SettlementReport } from "../settlement/settle.js";
+import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
+import { settle, type SettlementReport } from "../settlement/settle.js";
 import {
   claimTaskHolder,
   claimTaskHolderWithFence,
   releaseTaskHolder,
   releaseTaskHolderWithFence,
-  type TaskHolderAdmission,
+  taskHolderObservationSelection,
 } from "../settlement/holder.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
+import { Delivery, deliveryHandle } from "./delivery.js";
 import {
-  deliveryHandle,
-  KeiyakuRefused,
-  KeiyakuRetry,
-  type ActorId,
-  type AttestationVerdict,
-  type Delivery,
-  type Fact,
-  type KeiyakuRefusal,
+  completeHolderMutation,
+  completeMutation,
+  type AcceptedIntent,
   type MutationResult,
-  type Review,
-} from "./contract-values.js";
-export { Delivery, KeiyakuRefused, KeiyakuRetry } from "./contract-values.js";
-export type {
-  ActorId,
-  AttestationVerdict,
-  Fact,
-  KeiyakuRefusal,
-  KeiyakuRetryReason,
-  Lag,
-  MutationResult,
-  PlacementStop,
-  Review,
-  TopologyEffect,
-  VerificationStop,
-} from "./contract-values.js";
+} from "./mutation.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
 export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks, WorktreeHooksFromInput } from "./configuration.js";
 
@@ -114,10 +98,45 @@ export type {
 export type { TaskId };
 export type { RegionOverlap };
 
+export type Fact = JournalEntry;
+export type ActorId = string;
+export type AttestationVerdict = "satisfied" | "unsatisfied";
+export type Review = ReviewValue;
+export type KeiyakuRefusal = IntentRefusal;
+export type KeiyakuRetryReason = IntentRetry;
+export type { PlacementStop, VerificationStop };
+
+export type TopologyEffect = ProtocolReconcileReport["effects"][number];
+export type Lag = ProtocolReconcileReport["lag"][number];
+export type { MutationResult };
+export { Delivery };
+
 export type BindResult = Readonly<Omit<MutationResult<Keiyaku>, "value"> & { keiyaku: Keiyaku } & RegionObservation>;
 export type AmendResult = Readonly<MutationResult<void> & RegionObservation & { documentDiff: string }>;
 export type ReconcileReport = Readonly<ProtocolReconcileReport & { settlement: SettlementReport }>;
 export type { SettlementAction, SettlementLag, SettlementReport } from "../settlement/settle.js";
+
+export class KeiyakuRefused extends Error {
+  constructor(readonly refusal: KeiyakuRefusal) {
+    super(`Keiyaku refused: ${refusal.kind}`);
+    this.name = "KeiyakuRefused";
+  }
+
+  get code(): KeiyakuRefusal["kind"] {
+    return this.refusal.kind;
+  }
+}
+
+export class KeiyakuRetry extends Error {
+  constructor(readonly reason: KeiyakuRetryReason) {
+    super(reason.kind === "publication-failed" ? reason.diagnostic : `Keiyaku retry required: ${reason.kind}`);
+    this.name = "KeiyakuRetry";
+  }
+
+  get code(): KeiyakuRetryReason["kind"] {
+    return this.reason.kind;
+  }
+}
 
 export type BindInput = Readonly<{
   repo: Repo;
@@ -159,14 +178,6 @@ export type DeliverInput = ActorOptions & Readonly<{
 }>;
 export type AuditInput = ActorOptions;
 
-type AcceptedIntent<Value> = Readonly<{
-  kind: "accepted";
-  facts: readonly Fact[];
-  head: ContractHead;
-  value: Value;
-  physical?: ProtocolReconcileReport;
-}>;
-
 function requireAccepted<Value, Refusal extends KeiyakuRefusal>(result: IntentOutcome<Value, Refusal>): AcceptedIntent<Value> {
   if (result.kind === "refused") throw new KeiyakuRefused(result.refusal);
   if (result.kind === "retry") throw new KeiyakuRetry(result.reason);
@@ -184,50 +195,14 @@ function taskOption(value: unknown): TaskId | undefined {
   return value as TaskId;
 }
 
-function contractIdOption(value: unknown): ContractId {
-  if (typeof value !== "string") throw new TypeError("contract ID must be a string");
-  try {
-    return contractId(value);
-  } catch (error) {
-    throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
-  }
-}
-
-async function mutationResult<Value, PublicValue>(
+function completion<Value, PublicValue>(
   scope: RepositoryScope,
+  channel: GitDecodeChannel,
   id: ContractId,
-  accepted: AcceptedIntent<Value>,
   value: (result: Value) => PublicValue,
   hooks: WorktreeHooks,
-): Promise<MutationResult<PublicValue>> {
-  const reconciled = await reconcileOperation({ scope, contractId: id, hooks, retryHooks: false });
-  const settlement = await settle({ repository: scope, state: reconciled.state, effects: reconciled.report.effects });
-  return {
-    facts: accepted.facts,
-    head: accepted.head,
-    value: value(accepted.value),
-    effects: [...(accepted.physical?.effects ?? []), ...reconciled.report.effects],
-    lags: [...(accepted.physical?.lag ?? []), ...reconciled.report.lag],
-    settlement,
-  };
-}
-async function holderMutationResult<Value, PublicValue, Refusal extends KeiyakuRefusal>(
-  scope: RepositoryScope,
-  id: ContractId,
-  admission: TaskHolderAdmission<IntentOutcome<Value, Refusal>>,
-  value: (result: Value) => PublicValue,
-  hooks: WorktreeHooks,
-): Promise<MutationResult<PublicValue>> {
-  const accepted = requireAccepted(admission.result);
-  if (admission.kind === "completed") return mutationResult(scope, id, accepted, value, hooks);
-  return {
-    facts: accepted.facts,
-    head: accepted.head,
-    value: value(accepted.value),
-    effects: [...(accepted.physical?.effects ?? [])],
-    lags: [...(accepted.physical?.lag ?? [])],
-    settlement: deferredTaskHolderSettlement({ contractId: id, taskId: admission.taskId, diagnostic: admission.diagnostic }),
-  };
+): Readonly<Omit<Parameters<typeof completeMutation<Value, PublicValue>>[0], "accepted">> {
+  return { scope, channel, contractId: id, value, hooks };
 }
 
 export class KeiyakuHandle {
@@ -239,11 +214,19 @@ export class KeiyakuHandle {
   }
 
   async state(): Promise<ContractState> {
-    return stateOperation({ scope: this.scope, contractId: this.id });
+    return withGitDecodeChannel(this.scope, (channel) => stateOperation({
+      scope: this.scope,
+      channel,
+      contractId: this.id,
+    }));
   }
 
   async delivery(): Promise<Delivery | null> {
-    const delivery = deliveryOperation({ scope: this.scope, contractId: this.id });
+    const delivery = await withGitDecodeChannel(this.scope, (channel) => deliveryOperation({
+      scope: this.scope,
+      channel,
+      contractId: this.id,
+    }));
     return delivery === null
       ? null
       : this.deliveryHandle(delivery);
@@ -258,60 +241,75 @@ export class KeiyakuHandle {
     const prerequisites = values.after === undefined
       ? undefined
       : normalizedList(values.after, "after", contractId);
-    const current = readStateOperation({ scope: this.scope, contractId: this.id });
-    let document: DecodedContractDocument | undefined;
-    let terms: ReturnType<typeof contractTerms> | undefined;
-    let verification: ReturnType<typeof documentDerivation>["verification"] | undefined;
-    if (current !== null) {
-      const before = current.terms.document.bytes;
-      const currentDocument = decodeContractDocument(before);
-      document = decodeContractDocument(applyAmendDocument(markdown, currentDocument));
-      terms = contractTerms(
-        document,
-        gates ?? current.terms.gates,
-        prerequisites ?? current.terms.after,
-      );
-      verification = documentDerivation(document, terms.gates, this.id).verification;
-    }
-    const accepted = requireAccepted(amendOperation({
-      scope: this.scope,
-      contractId: this.id,
-      ...actor,
-      ...(current === null || terms === undefined || verification === undefined
-        ? {}
-        : { amendment: { source: current.terms, terms, verification } }),
-    }));
-    if (document === undefined || current === null) {
-      throw new Error("accepted amendment is missing its document derivation");
-    }
-    const before = current.terms.document.bytes;
-    const after = document.document.bytes;
-    return {
-      ...await mutationResult(this.scope, this.id, accepted, () => undefined, hooks),
-      documentDiff: documentDiff("before", "after", before, after),
-      ...await observeRegion(this.scope, this.id, document.region),
-    };
+    return withGitDecodeChannel(this.scope, async (channel) => {
+      const accepted = requireAccepted(await amendOperation({
+        scope: this.scope,
+        channel,
+        contractId: this.id,
+        ...actor,
+        deriveAmendment: (source) => {
+          const document = decodeContractDocument(applyAmendDocument(
+            markdown,
+            decodeContractDocument(source.document.bytes),
+          ));
+          const terms = contractTerms(
+            document,
+            gates ?? source.gates,
+            prerequisites ?? source.after,
+          );
+          return {
+            terms,
+            verification: documentDerivation(document, terms.gates, this.id).verification,
+          };
+        },
+      }));
+      const document = decodeContractDocument(accepted.value.terms.document.bytes);
+      return {
+        ...await completeMutation({
+          ...completion(this.scope, channel, this.id, () => undefined, hooks),
+          accepted,
+        }),
+        documentDiff: documentDiff(
+          "before",
+          "after",
+          accepted.value.source.document.bytes,
+          accepted.value.terms.document.bytes,
+        ),
+        ...await observeRegion(this.scope, channel, this.id, document.region),
+      };
+    });
   }
 
   async deliver(input?: DeliverInput): Promise<MutationResult<Delivery>> {
     const values = input === undefined ? undefined : requireInput(input, "deliver input");
     const hooks = worktreeHooksOption(values?.hooks);
     const message = optionalNonblank(values?.message, "deliver message");
-    const requireBranchesToBeUpToDate = optionalBoolean(values?.requireBranchesToBeUpToDate, "requireBranchesToBeUpToDate");
-    const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty");
+    const requireBranchesToBeUpToDate = optionalBoolean(
+      values?.requireBranchesToBeUpToDate,
+      "requireBranchesToBeUpToDate",
+    ) ?? false;
+    const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty") ?? false;
     const actor = actorOption(values?.actor);
-    const accepted = requireAccepted(
-      await deliverOperation({
+    return withGitDecodeChannel(this.scope, async (channel) => {
+      const accepted = requireAccepted(await deliverOperation({
         scope: this.scope,
+        channel,
         contractId: this.id,
+        deriveDocument: (state) => documentDerivation(
+          decodeContractDocument(state.terms.document.bytes),
+          state.terms.gates,
+          state.id,
+        ),
         ...actor,
-        ...this.currentDerivationOption(),
         ...(message === undefined ? {} : { message }),
-        requireBranchesToBeUpToDate: requireBranchesToBeUpToDate ?? false,
-        includeDirty: includeDirty ?? false,
-      }),
-    );
-    return mutationResult(this.scope, this.id, accepted, (delivery) => this.deliveryHandle(delivery), hooks);
+        requireBranchesToBeUpToDate,
+        includeDirty,
+      }));
+      return completeMutation({
+        ...completion(this.scope, channel, this.id, (delivery: DeliverValue) => this.deliveryHandle(delivery), hooks),
+        accepted,
+      });
+    });
   }
 
   async review(input: ReviewInput): Promise<MutationResult<Review>> {
@@ -322,68 +320,98 @@ export class KeiyakuHandle {
       throw new TypeError("verdict must be satisfied or unsatisfied");
     }
     const summary = optionalNonblank(values.summary, "review summary");
-    const accepted = requireAccepted(await reviewOperation({
-      scope: this.scope,
-      contractId: this.id,
-      verdict,
-      ...(summary === undefined ? {} : { summary }),
-      ...actorOption(values.actor),
-    }));
-    return mutationResult(this.scope, this.id, accepted, (value) => value, hooks);
+    return withGitDecodeChannel(this.scope, async (channel) => {
+      const accepted = requireAccepted(await reviewOperation({
+        scope: this.scope,
+        channel,
+        contractId: this.id,
+        verdict,
+        ...(summary === undefined ? {} : { summary }),
+        ...actorOption(values.actor),
+      }));
+      return completeMutation({
+        ...completion(this.scope, channel, this.id, (value: ReviewValue) => value, hooks),
+        accepted,
+      });
+    });
   }
 
   async abandon(input?: AbandonInput): Promise<MutationResult<void>> {
     const values = input === undefined ? undefined : requireInput(input, "abandon input");
     const hooks = worktreeHooksOption(values?.hooks);
     const note = optionalNonblank(values?.note, "abandon note");
-    const admission = await releaseTaskHolderWithFence(this.scope, this.id, () => abandonOperation({
-      scope: this.scope,
-      contractId: this.id,
-      ...actorOption(values?.actor),
-      ...(note === undefined ? {} : { note }),
-      decorateOffer: ({ repository, observation, contractId: owner }) => {
-        const companion = releaseTaskHolder(repository, observation.admission.snapshot, owner);
-        return companion === null ? [] : [companion];
-      },
-    }));
-    return holderMutationResult(this.scope, this.id, admission, () => undefined, hooks);
+    return withGitDecodeChannel(this.scope, async (channel) => {
+      const admission = await releaseTaskHolderWithFence(this.scope, channel, this.id, () => abandonOperation({
+        scope: this.scope,
+        channel,
+        contractId: this.id,
+        ...actorOption(values?.actor),
+        ...(note === undefined ? {} : { note }),
+        observationSelection: taskHolderObservationSelection(),
+        decorateOffer: async ({ observation, contractId: owner }) => {
+          const companion = await releaseTaskHolder(channel, observation, owner);
+          return companion === null ? [] : [companion];
+        },
+      }));
+      return completeHolderMutation({
+        completion: completion(this.scope, channel, this.id, () => undefined, hooks),
+        admission,
+        requireAccepted,
+      });
+    });
   }
 
   async arc(input: ArcInput): Promise<MutationResult<void>> {
     const values = requireInput(input, "arc input");
     const hooks = worktreeHooksOption(values.hooks);
     const chapter = decodeArcDocument(requireMarkdown(values.markdown));
-    const accepted = requireAccepted(arcOperation({
-      scope: this.scope,
-      contractId: this.id,
-      ...actorOption(values.actor),
-      chapter,
-    }));
-    return mutationResult(this.scope, this.id, accepted, () => undefined, hooks);
+    return withGitDecodeChannel(this.scope, async (channel) => {
+      const accepted = requireAccepted(await arcOperation({
+        scope: this.scope,
+        channel,
+        contractId: this.id,
+        ...actorOption(values.actor),
+        chapter,
+      }));
+      return completeMutation({
+        ...completion(this.scope, channel, this.id, () => undefined, hooks),
+        accepted,
+      });
+    });
   }
 
   async audit(input?: AuditInput): Promise<MutationResult<AuditReport>> {
     const values = input === undefined ? undefined : requireInput(input, "audit input");
     const hooks = worktreeHooksOption(values?.hooks);
     const actor = actorOption(values?.actor);
-    const accepted = requireAccepted(
-      await auditOperation({
+    return withGitDecodeChannel(this.scope, async (channel) => {
+      const accepted = requireAccepted(await auditOperation({
         scope: this.scope,
+        channel,
         contractId: this.id,
-        ...this.currentDerivationOption(),
+        deriveDocument: (state) => documentDerivation(
+          decodeContractDocument(state.terms.document.bytes),
+          state.terms.gates,
+          state.id,
+        ),
         ...actor,
-      }),
-    );
-    return mutationResult(this.scope, this.id, accepted, (report) => report, hooks);
+      }));
+      return completeMutation({
+        ...completion(this.scope, channel, this.id, (report: AuditReport) => report, hooks),
+        accepted,
+      });
+    });
   }
 
   async reconcile(input?: ReconcileInput): Promise<ReconcileReport> {
     const options = reconcileInput(input);
-    const reconciled = await reconcileOperation({ scope: this.scope, contractId: this.id, ...options });
-    return {
-      ...reconciled.report,
-      settlement: await settle({ repository: this.scope, state: reconciled.state, effects: reconciled.report.effects }),
-    };
+    return withGitDecodeChannel(this.scope, async (channel) => {
+      const reconciled = await reconcileOperation({ scope: this.scope, channel, contractId: this.id, ...options });
+      return {
+        ...reconciled.report,
+        settlement: await settle({ repository: this.scope, channel, state: reconciled.state, effects: reconciled.report.effects }),
+      };
+    });
   }
 
   private deliveryHandle(delivery: DeliverValue): Delivery {
@@ -394,15 +422,7 @@ export class KeiyakuHandle {
         integrationPredecessor: delivery.integration.predecessor,
         integrationSnapshot: delivery.integration.snapshot,
       }),
-      delivery,
     );
-  }
-
-  private currentDerivationOption(): Readonly<{ derivation?: ReturnType<typeof documentDerivation> }> {
-    const state = readStateOperation({ scope: this.scope, contractId: this.id });
-    return state === null
-      ? {}
-      : { derivation: documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id) };
   }
 
 }
@@ -422,20 +442,29 @@ export type Keiyaku = KeiyakuHandle;
 export function keiyakuOf(input: KeiyakuOfInput): Keiyaku {
   const values = requireInput(input, "Keiyaku.of input");
   const scope = scopeForRepo(values.repo);
-  return new KeiyakuHandle(contractIdOption(values.id), scope);
+  if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
+  return new KeiyakuHandle(contractId(values.id), scope);
 }
 
 export async function listKeiyaku(input: ContractListInput): Promise<ContractBoard> {
   const values = requireInput(input, "Keiyaku.list input");
-  rejectUnknownFields(values, ["repo"], "Keiyaku.list input");
-  return await contractsOperation({ scope: scopeForRepo(values.repo) });
+  for (const key of Object.keys(values)) if (key !== "repo") throw new TypeError(`Keiyaku.list input has unknown field: ${key}`);
+  const scope = scopeForRepo(values.repo);
+  return withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
 }
 
 export async function observeKeiyaku(input: ContractObservationInput): Promise<ContractObservation> {
   const values = requireInput(input, "Keiyaku.observe input");
-  rejectUnknownFields(values, ["repo", "id"], "Keiyaku.observe input");
+  for (const key of Object.keys(values)) if (key !== "repo" && key !== "id") throw new TypeError(`Keiyaku.observe input has unknown field: ${key}`);
   const scope = scopeForRepo(values.repo);
-  return contractObservationOperation({ scope, contractId: contractIdOption(values.id) });
+  if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
+  let id: ContractId;
+  try {
+    id = contractId(values.id);
+  } catch (error) {
+    throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
+  }
+  return withGitDecodeChannel(scope, (channel) => contractObservationOperation({ scope, channel, contractId: id }));
 }
 
 export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
@@ -455,32 +484,39 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     normalizedGates(values.gates),
     normalizedList(values.after, "after", contractId),
   );
-  const bind = () => bindOperation({
-    scope,
-    title: document.title,
-    terms,
-    verification: documentDerivation(document, terms.gates).verification,
-    workspace,
-    ...(target === undefined ? {} : { target }),
-    ...(task === undefined ? {} : {
-      decorateOffer: ({ contractId: owner }) => [claimTaskHolder(task, owner)],
-    }),
-    ...actor,
+  return withGitDecodeChannel(scope, async (channel) => {
+    const bind = () => bindOperation({
+      scope,
+      channel,
+      title: document.title,
+      terms,
+      verification: documentDerivation(document, terms.gates).verification,
+      workspace,
+      ...(target === undefined ? {} : { target }),
+      ...(task === undefined ? {} : {
+        decorateOffer: ({ contractId: owner }) => [claimTaskHolder(task, owner)],
+      }),
+      ...actor,
+    });
+    const admission = task === undefined ? null : await claimTaskHolderWithFence(scope, task, bind);
+    const accepted = requireAccepted(admission === null ? await bind() : admission.result);
+    const id = accepted.value.contractId;
+    const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku => new KeiyakuHandle(contract, scope);
+    const result = admission === null
+      ? await completeMutation({ ...completion(scope, channel, id, toHandle, hooks), accepted })
+      : await completeHolderMutation({
+          completion: completion(scope, channel, id, toHandle, hooks),
+          admission,
+          requireAccepted,
+        });
+    return {
+      facts: result.facts,
+      head: result.head,
+      keiyaku: result.value,
+      effects: result.effects,
+      lags: result.lags,
+      settlement: result.settlement,
+      ...await observeRegion(scope, channel, id, document.region),
+    };
   });
-  const admission = task === undefined ? null : await claimTaskHolderWithFence(scope, task, bind);
-  const accepted = requireAccepted(admission === null ? bind() : admission.result);
-  const id = accepted.value.contractId;
-  const toHandle = ({ contractId: contract }: { contractId: ContractId }): Keiyaku => new KeiyakuHandle(contract, scope);
-  const result = admission === null
-    ? await mutationResult(scope, id, accepted, toHandle, hooks)
-    : await holderMutationResult(scope, id, admission, toHandle, hooks);
-  return {
-    facts: result.facts,
-    head: result.head,
-    keiyaku: result.value,
-    effects: result.effects,
-    lags: result.lags,
-    settlement: result.settlement,
-    ...await observeRegion(scope, id, document.region),
-  };
 }

@@ -1,9 +1,10 @@
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
+import type { ActorId, ContractId, SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
-import { observeContract, observeGitForAdmission } from "../git/observe.js";
+import { observeGitForAdmissionAt } from "../git/observe.js";
+import type { GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
 import { GitPlumbingError, type GitRepository } from "../git/repository.js";
 import {
@@ -51,13 +52,13 @@ function expectedPlacementFailure(error: unknown): PlacementExecutionFailure {
   throw error;
 }
 
-function runFencedPlacement(
+async function runFencedPlacement(
   repository: GitRepository,
   input: PlacementProtocolInput,
   protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal>,
-): PlacementProtocolResult {
+): Promise<PlacementProtocolResult> {
   for (let index = 0; index < protocol.attempts.length; index += 1) {
-    const prepared = prepareProtocolAttempt(protocol, protocol.attempts[index]!);
+    const prepared = await prepareProtocolAttempt(protocol, protocol.attempts[index]!);
     if (prepared.kind === "refused") return prepared;
     const state = contractState(prepared.observation.decision, input.contractId);
     if (state === null) throw new Error("placement offer has no contract state");
@@ -74,13 +75,14 @@ function runFencedPlacement(
     }
     const physical = prepareTargetPlacement(repository, state, prepared.offer.target);
     if (physical.kind === "refused") return physical;
-    const result = admitDecidedOffer(
+    const result = await admitDecidedOffer({
+      channel: protocol.channel,
       repository,
-      prepared.observation,
-      prepared.attempt,
-      prepared.offer,
-      input.contractId,
-    );
+      decisionObservation: prepared.observation,
+      attempt: prepared.attempt,
+      offer: prepared.offer,
+      primaryContract: input.contractId,
+    });
     if (result.kind === "accepted") {
       return { ...result, physical: followTargetPlacement(repository, physical.placement) };
     }
@@ -92,16 +94,19 @@ function runFencedPlacement(
 
 /** Run the sole placement adjudicator inside the target's physical fence. */
 export async function admitPlacement(
+  channel: GitDecodeChannel,
   repository: GitRepository,
+  target: string | undefined,
   input: PlacementProtocolInput,
 ): Promise<PlacementProtocolResult> {
   const attempts = mintAttempts({ entryCount: 2 });
   const protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal> = {
     input,
+    channel,
     repository,
     contracts: [input.contractId],
     attempts,
-    observe: observeGitForAdmission,
+    observe: observeGitForAdmissionAt,
     extendAttempt: (attempt, observedContractCount) => ({
       ...attempt,
       entryUlids: [
@@ -111,17 +116,9 @@ export async function admitPlacement(
     }),
     decide: decidePlacement,
   };
-  const run = (): ProtocolResult<PlacementRefusal | TargetPlacementRefusal> => runProtocol(protocol);
+  const run = (): Promise<ProtocolResult<PlacementRefusal | TargetPlacementRefusal>> => runProtocol(protocol);
 
-  let state: ContractState | null;
-  try {
-    state = observeContract(repository, input.contractId).state;
-  } catch (error) {
-    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
-    return expectedPlacementFailure(error);
-  }
-  const target = state?.coordinates.target;
-  if (target === undefined) return run();
+  if (target === undefined) return await run();
 
   let held: Awaited<ReturnType<typeof acquireTargetPlacementFence>>;
   try {
@@ -132,7 +129,7 @@ export async function admitPlacement(
   let result: PlacementProtocolResult | undefined;
   let exceptional: unknown;
   try {
-    result = runFencedPlacement(repository, input, protocol);
+    result = await runFencedPlacement(repository, input, protocol);
   } catch (error) {
     if (error instanceof AuthorityCorruptionError || error instanceof TypeError) exceptional = error;
     else {

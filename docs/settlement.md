@@ -68,14 +68,15 @@ calls Task's existing locked predecessor-CAS transition. The only lock order is
 before Settlement starts, and world settlement finishes one Task fence before
 acquiring another.
 
-A complete holder read consumes one call-scoped `GitReadObservation` from the
-Git owner. Settlement selects TaskHolder paths and object IDs from its
-immutable snapshot, requests those blobs once, and exclusively performs path,
-codec, canonical-byte, duplicate, sorting, and projection judgment. A missing
-holder object or malformed holder fact fails the holder observation; Git does
-not decode it. The complete Settlement entry point creates one observation at
-its Promise boundary, while offer decoration and release keep their targeted
-write-side reads.
+A complete holder read consumes one `GitReadObservation` from the Git owner.
+Settlement selects TaskHolder paths and object IDs from its immutable snapshot,
+requests those blobs once, and exclusively performs path, codec,
+canonical-byte, duplicate, sorting, and projection judgment. A missing holder
+object or malformed holder fact fails the holder observation; Git does not
+decode it. Settlement receives the public mutation's shared decode channel but
+opens its own fresh settlement epoch. The initial locator observation and each
+fenced settlement observation are likewise separate ref freezes on that same
+channel; an earlier projection never authorizes the fenced Task write.
 
 ## Rules
 

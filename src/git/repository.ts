@@ -31,6 +31,10 @@ export type RefPublication =
   | Readonly<{ readonly kind: "published" }>
   | Readonly<{ readonly kind: "non-published"; readonly error: unknown }>
   | Readonly<{ readonly kind: "unknown" }>;
+export type GitRefAssertion = Readonly<{
+  readonly ref: string;
+  readonly oid: GitOid;
+}>;
 export type GitRepository = Readonly<{
   /** The invocation's effective working directory, including a caller -C worktree. */
   readonly effectiveCwd: string;
@@ -204,8 +208,11 @@ function assertRef(ref: string): void {
     throw new Error(`invalid Git ref: ${ref}`);
   }
 }
+function assertAssertionRef(ref: string): void {
+  if (ref !== "HEAD") assertRef(ref);
+}
 export function readRef(repository: GitRepository, ref: string): GitOid | null {
-  assertRef(ref);
+  assertAssertionRef(ref);
   try {
     const oid = runGit(repository, ["rev-parse", "--verify", "--quiet", ref]).toString("utf8").trim();
     if (oid.length === 0) return null;
@@ -365,16 +372,6 @@ function readObjects(repository: GitRepository, oids: readonly GitOid[]): Readon
   return objects;
 }
 
-/** Read immutable Git objects through one structured, length-delimited batch. */
-export function readBlobs(repository: GitRepository, oids: readonly GitOid[]): ReadonlyMap<GitOid, Buffer> {
-  const blobs = new Map<GitOid, Buffer>();
-  for (const [oid, object] of readObjects(repository, oids)) {
-    if (object.type !== "blob") malformedBatchOutput(`expected blob for ${oid}, found ${object.type}`);
-    blobs.set(oid, object.bytes);
-  }
-  return blobs;
-}
-
 function validateGitFormat(repository: GitRepository, paths: ReadonlyMap<string, TreeEntry>): void {
   const format = paths.get(GIT_FORMAT_PATH);
   if (format === undefined) throw new AuthorityCorruptionError(`Git is missing ${GIT_FORMAT_PATH}`);
@@ -456,6 +453,25 @@ export function updateGitTree(
   return prepared.root;
 }
 
+/** Write a tree update from directory entries frozen with the admitted base tree. */
+export function updateGitTreeFromFrozenDirectories(
+  repository: GitRepository,
+  baseTree: GitOid | null,
+  directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>,
+  changes: ReadonlyMap<string, TreeChange>,
+): GitOid {
+  const update = treeUpdate(changes);
+  const representativeOid = baseTree ?? changes.values().next().value?.oid;
+  if (representativeOid === undefined) throw new Error("cannot write an empty Git tree without an object format");
+  const prepared = prepareTreeUpdate({
+    update,
+    bases: directories,
+    oidBytes: representativeOid.length / 2,
+  });
+  writePreparedTrees(repository, prepared.trees);
+  return prepared.root;
+}
+
 function writeCommitObject(input: Readonly<{
   repository: GitRepository;
   tree: GitOid;
@@ -507,12 +523,31 @@ export function writeCommit(input: Readonly<{
   });
 }
 
+function refAssertionLine(assertion: GitRefAssertion): string {
+  assertAssertionRef(assertion.ref);
+  assertOid(assertion.oid, `expected oid for ${assertion.ref}`);
+  return `${assertion.ref === "HEAD" ? "" : "option no-deref\n"}verify ${assertion.ref} ${assertion.oid}`;
+}
+
+function refUpdateLine(
+  update: { readonly ref: string; readonly newOid: GitOid; readonly expectedOid: GitOid | null },
+  index: number,
+): string {
+  assertRef(update.ref);
+  if (index > 0 && update.ref === GIT_REF) throw new Error(`duplicate ref update: ${update.ref}`);
+  if (index > 0 && update.expectedOid === null) throw new Error("target ref updates require non-null OIDs");
+  assertOid(update.newOid, `new oid for ${update.ref}`);
+  if (update.expectedOid !== null) assertOid(update.expectedOid, `expected oid for ${update.ref}`);
+  return `option no-deref\nupdate ${update.ref} ${update.newOid} ${update.expectedOid ?? "0".repeat(update.newOid.length)}`;
+}
+
 export function updateRefsAtomically(
   repository: GitRepository,
   updates: readonly (
     | { readonly ref: typeof GIT_REF; readonly newOid: GitOid; readonly expectedOid: GitOid | null }
     | { readonly ref: string; readonly newOid: GitOid; readonly expectedOid: GitOid }
   )[],
+  assertions: readonly GitRefAssertion[] = [],
 ): RefPublication {
   if (updates.length === 0) throw new Error("an atomic ref transaction needs a Git update");
   if (updates.length > 2) throw new Error("an atomic ref transaction accepts at most one target ref update");
@@ -520,23 +555,16 @@ export function updateRefsAtomically(
   if (git === undefined || git.ref !== GIT_REF) {
     throw new Error(`the first atomic update must be the Git ref: ${GIT_REF}`);
   }
-  const lines = ["start"];
-  for (const [index, update] of updates.entries()) {
-    assertRef(update.ref);
-    if (index > 0 && update.ref === GIT_REF) {
-      throw new Error(`duplicate ref update: ${update.ref}`);
-    }
-    if (index > 0 && (update.newOid === null || update.expectedOid === null)) {
-      throw new Error("target ref updates require non-null OIDs");
-    }
-    assertOid(update.newOid, `new oid for ${update.ref}`);
-    if (update.expectedOid !== null) assertOid(update.expectedOid, `expected oid for ${update.ref}`);
-    const expectedOid = update.expectedOid ?? "0".repeat(update.newOid.length);
-    lines.push(`update ${update.ref} ${update.newOid} ${expectedOid}`);
-  }
-  lines.push("prepare", "commit", "");
+  const lines = [
+    "start",
+    ...assertions.map(refAssertionLine),
+    ...updates.map(refUpdateLine),
+    "prepare",
+    "commit",
+    "",
+  ];
   try {
-    runGit(repository, ["update-ref", "--stdin", "--no-deref"], lines.join("\n"));
+    runGit(repository, ["update-ref", "--stdin"], lines.join("\n"));
     return { kind: "published" };
   } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;

@@ -6,14 +6,13 @@ import test from "node:test";
 import { prepareDelivery, prepareReview } from "../src/git/delivery.js";
 import { mintSnapshotId } from "../src/git/identity.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
-import { observeContract } from "../src/git/observe.js";
 import { materializeVerificationCandidate, readDeliveryDiff } from "../src/git/verification.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { contractId } from "../src/core/facts/types.js";
 import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
-import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
+import { makeGitRepository, observeContract, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function contractBody(): string {
   return [
@@ -39,7 +38,7 @@ function contractBody(): string {
   ].join("\n");
 }
 
-function preparationCoordinates(state: NonNullable<ReturnType<typeof observeContract>["state"]>) {
+function preparationCoordinates(state: NonNullable<Awaited<ReturnType<typeof observeContract>>["state"]>) {
   return { contractId: state.id, coordinates: state.coordinates };
 }
 
@@ -52,8 +51,8 @@ async function boundContract(): Promise<Readonly<{ repository: TestGitRepository
   return { repository, id: (await bound.keiyaku.state()).id };
 }
 
-function preparedDelivery(repository: TestGitRepository, id: ContractId) {
-  const state = observeContract(repositoryAt(repository.path), id).state;
+async function preparedDelivery(repository: TestGitRepository, id: ContractId) {
+  const state = (await observeContract(repositoryAt(repository.path), id)).state;
   if (state === null) throw new Error("contract was not observed");
   const prepared = prepareDelivery(repositoryAt(repository.path), preparationCoordinates(state), { title: "Delivery patch identity" });
   assert.equal(prepared.kind, "prepared");
@@ -249,7 +248,7 @@ test("dirty delivery materializes a candidate without changing the caller index"
   const { repository, id } = await boundContract();
   writeFileSync(join(repository.path, "candidate.txt"), "dirty candidate\n");
   const git = repositoryAt(repository.path);
-  const state = observeContract(git, id).state;
+  const state = (await observeContract(git, id)).state;
   if (state === null) throw new Error("contract was not observed");
   const review = prepareReview(git, preparationCoordinates(state));
   assert.equal(review.kind, "prepared");
@@ -284,7 +283,7 @@ test("dirty delivery refuses classified paths unless the complete workspace is a
   writeFileSync(join(repository.path, "untracked.txt"), "untracked\n");
   writeFileSync(join(repository.path, "ignored.txt"), "ignored\n");
   const git = repositoryAt(repository.path);
-  const state = observeContract(git, id).state;
+  const state = (await observeContract(git, id)).state;
   if (state === null) throw new Error("contract was not observed");
   const headBefore = repository.run(["rev-parse", "HEAD"]);
   const indexBefore = repository.run(["diff", "--cached", "--binary"]);
@@ -325,7 +324,7 @@ test("review observes dirty bytes but refuses dirty submodule internals", async 
   repository.run(["commit", "--quiet", "-am", "submodule"]);
   writeFileSync(join(repository.path, "module", "child.txt"), "dirty child\n");
   const git = repositoryAt(repository.path);
-  const state = observeContract(git, id).state;
+  const state = (await observeContract(git, id)).state;
   if (state === null) throw new Error("contract was not observed");
   const expected = {
     kind: "refused" as const,
@@ -415,9 +414,9 @@ test("distinct no-op candidates share the empty patch ChangeId", async () => {
   const { repository, id } = await boundContract();
 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "first no-op"]);
-  const first = preparedDelivery(repository, id);
+  const first = await preparedDelivery(repository, id);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "second no-op"]);
-  const second = preparedDelivery(repository, id);
+  const second = await preparedDelivery(repository, id);
 
   assert.notEqual(first.integration.snapshot, second.integration.snapshot);
   assert.equal(first.integration.changeId, second.integration.changeId);
@@ -425,8 +424,10 @@ test("distinct no-op candidates share the empty patch ChangeId", async () => {
 
 test("clean delivery resolves its workspace head and tree in one Git call", async () => {
   const { repository, id } = await boundContract();
+  const state = (await observeContract(repositoryAt(repository.path), id)).state;
+  if (state === null) throw new Error("contract was not observed");
   const calls = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-git-calls-")), "calls");
-  const prepared = withGitShim(
+  const prepared = await withGitShim(
     [
       "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-parse\" ]; then",
       "  printf '%s|%s|%s\\n' \"$3\" \"$4\" \"$5\" >> \"$KEIYAKU_GIT_CALLS\"",
@@ -434,11 +435,7 @@ test("clean delivery resolves its workspace head and tree in one Git call", asyn
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_GIT_CALLS: calls },
-    () => {
-      const state = observeContract(repositoryAt(repository.path), id).state;
-      if (state === null) throw new Error("contract was not observed");
-      return prepareDelivery(repositoryAt(repository.path), preparationCoordinates(state), { title: "Delivery patch identity" });
-    },
+    () => prepareDelivery(repositoryAt(repository.path), preparationCoordinates(state), { title: "Delivery patch identity" }),
   );
 
   assert.equal(prepared.kind, "prepared");
@@ -448,7 +445,7 @@ test("clean delivery resolves its workspace head and tree in one Git call", asyn
 test("delivery diff preserves an empty patch and treats a clean missing object as Git absence", async () => {
   const { repository, id } = await boundContract();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "no-op candidate"]);
-  const delivery = preparedDelivery(repository, id);
+  const delivery = await preparedDelivery(repository, id);
   const git = repositoryAt(repository.path);
 
   assert.equal(readDeliveryDiff(git, delivery.integration.predecessor, delivery.integration.snapshot), "");
@@ -463,7 +460,7 @@ test("delivery diff preserves an empty patch and treats a clean missing object a
 test("delivery diff checks both snapshots in one batch process", async () => {
   const { repository, id } = await boundContract();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "no-op candidate"]);
-  const delivery = preparedDelivery(repository, id);
+  const delivery = await preparedDelivery(repository, id);
   const git = repositoryAt(repository.path);
   const calls = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-git-calls-")), "calls");
 
@@ -483,7 +480,7 @@ test("delivery diff checks both snapshots in one batch process", async () => {
 
 test("delivery diff rejects a recorded non-commit object", async () => {
   const { repository, id } = await boundContract();
-  const delivery = preparedDelivery(repository, id);
+  const delivery = await preparedDelivery(repository, id);
   const blob = mintSnapshotId(repository.run(["hash-object", "-w", "--stdin"], "not a commit\n").trim());
 
   assert.throws(
@@ -496,7 +493,7 @@ test("delivery diff rejects a recorded non-commit object", async () => {
 test("delivery diff rechecks one batch for a pruning race", async () => {
   const { repository, id } = await boundContract();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "no-op candidate"]);
-  const delivery = preparedDelivery(repository, id);
+  const delivery = await preparedDelivery(repository, id);
   const git = repositoryAt(repository.path);
   const calls = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-git-calls-")), "calls");
   const pruned = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-git-pruned-")), "marker");
@@ -530,7 +527,7 @@ test("delivery diff rechecks one batch for a pruning race", async () => {
 
 test("delivery diff leaves probe diagnostics as Git errors", async () => {
   const { repository, id } = await boundContract();
-  const delivery = preparedDelivery(repository, id);
+  const delivery = await preparedDelivery(repository, id);
 
   withGitShim(
     [
@@ -723,7 +720,7 @@ test("nonempty candidates retain Git stable patch identity", async () => {
   repository.run(["add", "candidate.txt"]);
   repository.run(["commit", "--quiet", "-m", "candidate"]);
 
-  const delivery = preparedDelivery(repository, id);
+  const delivery = await preparedDelivery(repository, id);
   assert.equal(delivery.integration.snapshot, repository.run(["rev-parse", "HEAD"]).trim());
   const diff = repository.run(["diff", "--binary", delivery.integration.predecessor, delivery.integration.snapshot]);
   const stablePatchId = repository.run(["patch-id", "--stable"], diff).trim().split(" ")[0];

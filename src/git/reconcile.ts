@@ -17,7 +17,8 @@ import {
 } from "./repository.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import { contractLocator, contractPhysicalName, gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
-import { observeContract } from "./observe.js";
+import { observeContractAt } from "./observe.js";
+import type { GitDecodeChannel } from "./read-observation.js";
 import {
   acquireTargetPlacementFence,
   recoverTargetPlacement,
@@ -54,10 +55,12 @@ export type Effect =
     }>;
 type ReconcileInput = Readonly<{
   repository: GitRepository;
+  channel: GitDecodeChannel;
   contractId: ContractId;
   hooks: WorktreeHooks;
   retryHooks: boolean;
 }>;
+type ReconcileEffectsInput = Omit<ReconcileInput, "channel">;
 type WorktreeRetained = Readonly<{
   kind: "worktree-retained";
   path: string;
@@ -335,7 +338,7 @@ function releaseTerminalCustody(
 }
 
 async function reconcileTerminalManagedWorktree(
-  { repository, hooks, retryHooks }: ReconcileInput,
+  { repository, hooks, retryHooks }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
   acc: ReconcileAccumulation,
@@ -355,7 +358,7 @@ async function reconcileTerminalManagedWorktree(
 }
 
 async function reconcileActiveManagedWorktree(
-  { repository, hooks, retryHooks }: ReconcileInput,
+  { repository, hooks, retryHooks }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
   { effects, lag }: ReconcileAccumulation,
@@ -373,7 +376,7 @@ async function reconcileActiveManagedWorktree(
 }
 
 async function reconcileWithTopology(
-  { repository, hooks, retryHooks }: ReconcileInput,
+  { repository, hooks, retryHooks }: ReconcileEffectsInput,
   state: ContractState | null,
   topology: WorktreeTopology,
 ): Promise<ReconcileResult> {
@@ -427,7 +430,7 @@ export async function reconcile(input: ReconcileInput): Promise<GitReconcileObse
   let observation: GitReconcileObservation | undefined;
   let exceptional: unknown;
   try {
-    const state = observeContract(input.repository, input.contractId).state;
+    const state = (await observeContractAt(input.repository, input.channel, input.contractId)).state;
     const topology = needsWorktreeTopology(state)
       ? acquireWorktreeTopology(input.repository)
       : { paths: new Set<string>() };
@@ -456,11 +459,12 @@ export function reconcileEffectFailure(error: unknown, prior?: ReconcileResult):
 
 async function reconcileBatchItem(
   repository: GitRepository,
+  channel: GitDecodeChannel,
   contract: ContractId,
   hooks: WorktreeHooks,
   retryHooks: boolean,
 ): Promise<ReconcileBatchItem> {
-  const observation = await reconcile({ repository, contractId: contract, hooks, retryHooks });
+  const observation = await reconcile({ repository, channel, contractId: contract, hooks, retryHooks });
   return {
     contract,
     state: observation.state,
@@ -471,11 +475,12 @@ async function reconcileBatchItem(
 /** Reconcile each discovered Contract through its own serialized, fresh observation. */
 export async function reconcileBatch(
   repository: GitRepository,
+  channel: GitDecodeChannel,
   contracts: Iterable<ContractId>,
   hooks: WorktreeHooks,
   retryHooks: boolean,
 ): Promise<readonly ReconcileBatchItem[]> {
   const items: ReconcileBatchItem[] = [];
-  for (const contract of contracts) items.push(await reconcileBatchItem(repository, contract, hooks, retryHooks));
+  for (const contract of contracts) items.push(await reconcileBatchItem(repository, channel, contract, hooks, retryHooks));
   return items;
 }

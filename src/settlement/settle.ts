@@ -1,14 +1,15 @@
 import { contractSegment, type ContractId, type ContractState } from "../core/facts/types.js";
-import { observeContractWorld } from "../git/observe.js";
-import { withGitReadObservation } from "../git/read-observation.js";
+import { observeContractsForAdmissionAt } from "../git/observe.js";
+import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { Effect } from "../git/reconcile.js";
 import type { GitRepository } from "../git/repository.js";
 import { repairNamespaceContext } from "../task/context.js";
 import { settleTask } from "../task/operations.js";
 import type { TaskId } from "../task/identity.js";
 import {
-  readTaskHolderProjection,
-  readTaskHolderProjectionAt,
+  observeTaskHolderProjection,
+  readTaskHolderProjectionFromDecision,
+  taskHolderObservationSelection,
   type TaskHolderProjection,
 } from "./holder.js";
 import { withTaskSettlementFence } from "./fence.js";
@@ -42,12 +43,14 @@ export function deferredTaskHolderSettlement(input: Readonly<{
 
 export type SettlementInput = Readonly<{
   repository: GitRepository;
+  channel: GitDecodeChannel;
   state: ContractState | null;
   effects: readonly Effect[];
 }>;
 
 export type SettlementBatchInput = Readonly<{
   repository: GitRepository;
+  channel: GitDecodeChannel;
   contracts: readonly Readonly<Pick<SettlementInput, "state" | "effects">>[];
 }>;
 
@@ -68,6 +71,7 @@ function taskFailure(result: Exclude<Awaited<ReturnType<typeof settleTask>>, { k
 type SettleTasksInput = Readonly<{
   observation: SettlementObservation;
   repository: GitRepository;
+  channel: GitDecodeChannel;
   world: WorldRoot;
   candidate: ContractState;
   actions: SettlementAction[];
@@ -91,13 +95,16 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
     await withTaskSettlementFence({ repository, taskId }, async () => {
       let current: Readonly<{ state: ContractState | null; holders: TaskHolderProjection }>;
       try {
-        current = await withGitReadObservation(repository, async (read) => {
-          const [contracts, holders] = await Promise.all([
-            observeContractWorld(read, [candidate.id]),
-            readTaskHolderProjectionAt(read),
-          ]);
-          return { state: contracts.contracts.get(candidate.id)?.state ?? null, holders };
-        });
+        const observation = await observeContractsForAdmissionAt(
+          repository,
+          input.channel,
+          [candidate.id],
+          taskHolderObservationSelection(),
+        );
+        current = {
+          state: observation.journals.get(candidate.id)?.state ?? null,
+          holders: await readTaskHolderProjectionFromDecision(input.channel, observation),
+        };
       } catch (error) {
         lags.push({
           kind: "settlement-failed",
@@ -159,9 +166,12 @@ function settleNamespace(state: ContractState, effects: readonly Effect[], actio
   }
 }
 
-async function observeSettlement(repository: GitRepository): Promise<SettlementObservation> {
+async function observeSettlement(repository: GitRepository, channel: GitDecodeChannel): Promise<SettlementObservation> {
   try {
-    return { kind: "present", holders: await readTaskHolderProjection(repository) };
+    return {
+      kind: "present",
+      holders: await observeTaskHolderProjection(repository, channel),
+    };
   } catch (error) {
     return { kind: "failed", diagnostic: diagnostic(error) };
   }
@@ -174,6 +184,7 @@ async function settleObserved(input: SettlementInput, observation: SettlementObs
     await settleTasks({
       observation,
       repository: input.repository,
+      channel: input.channel,
       world: World.at(input.repository.primaryWorktree),
       candidate: input.state,
       actions,
@@ -187,14 +198,14 @@ async function settleObserved(input: SettlementInput, observation: SettlementObs
 }
 
 export async function settle(input: SettlementInput): Promise<SettlementReport> {
-  return settleObserved(input, await observeSettlement(input.repository));
+  return settleObserved(input, await observeSettlement(input.repository, input.channel));
 }
 
 export async function settleAll(input: SettlementBatchInput): Promise<readonly SettlementReport[]> {
-  const observation = await observeSettlement(input.repository);
+  const observation = await observeSettlement(input.repository, input.channel);
   const reports: SettlementReport[] = [];
   for (const contract of input.contracts) {
-    reports.push(await settleObserved({ repository: input.repository, ...contract }, observation));
+    reports.push(await settleObserved({ repository: input.repository, channel: input.channel, ...contract }, observation));
   }
   return reports;
 }

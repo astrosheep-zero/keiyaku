@@ -106,7 +106,7 @@ function record(name: string, change: TreeChange): string {
 function prepareNode(
   node: MutableTreeNode,
   path: string,
-  bases: ReadonlyMap<string, Map<string, TreeEntry>>,
+  bases: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>,
   oidBytes: number,
   prepared: PreparedTree[],
 ): string {
@@ -134,7 +134,7 @@ function prepareNode(
 
 export function prepareTreeUpdate(input: Readonly<{
   update: TreeUpdate;
-  bases: ReadonlyMap<string, Map<string, TreeEntry>>;
+  bases: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
   oidBytes: number;
 }>): Readonly<{ root: string; trees: readonly PreparedTree[] }> {
   const trees: PreparedTree[] = [];

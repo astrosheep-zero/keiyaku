@@ -8,10 +8,11 @@ import { decidePlacement } from "../src/core/verbs/placement.js";
 import { gate, type ContractId } from "../src/core/facts/types.js";
 import { admitDecidedOffer, mintAttempts } from "../src/protocol/attempt.js";
 import { admitIntent } from "../src/protocol/intent.js";
-import { observeContract, observeGitForAdmission } from "../src/git/observe.js";
+import { observeContractsForAdmissionAt } from "../src/git/observe.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { makeGitRepository, type TestGitRepository } from "./support/git.js";
+import { withGitDecodeChannel } from "../src/git/read-observation.js";
+import { makeGitRepository, observeContract, type TestGitRepository } from "./support/git.js";
 
 function repositoryWithMain(): TestGitRepository {
   const repository = makeGitRepository();
@@ -171,7 +172,7 @@ test("conflicting target bytes refuse placement before claimed or target movemen
   });
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]), predecessor);
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "local conflict\n");
-  assert.equal(observeContract(repositoryAt(repository.path), contract.id).state?.terminal, null);
+  assert.equal((await observeContract(repositoryAt(repository.path), contract.id)).state?.terminal, null);
   assert.deepEqual(delivered.lags, []);
 });
 
@@ -284,7 +285,7 @@ test("here delivery refuses before tender after its workspace leaves the target 
       && error.code === "workspace-not-on-target"
       && error.refusal.branch === "refs/heads/other",
   );
-  assert.equal(observeContract(repositoryAt(repository.path), bound.keiyaku.id).state?.delivery, null);
+  assert.equal((await observeContract(repositoryAt(repository.path), bound.keiyaku.id)).state?.delivery, null);
 });
 
 test("targeted here bind refuses a foreign branch before Contract birth", async () => {
@@ -309,30 +310,39 @@ async function admitClaimWithoutFollow(repository: TestGitRepository, contract: 
   await contract.deliver({ includeDirty: true });
   await contract.review({ verdict: "unsatisfied" });
   const git = repositoryAt(repository.path);
-  const state = observeContract(git, contract.id).state;
+  const state = (await observeContract(git, contract.id)).state;
   const subject = state?.attestations.at(-1)?.data.subject;
   assert.ok(subject);
-  const attested = admitIntent(git, {
-    contractId: contract.id,
-    at: new Date().toISOString(),
-    preparation: {
-      kind: "prepared" as const,
-      data: { gate: gate("reviewed"), subject, verdict: "satisfied" as const },
-    },
-  }, decideAttestation);
-  assert.equal(attested.kind, "accepted");
+  await withGitDecodeChannel(git, async (channel) => {
+    const attested = await admitIntent(channel, git, {
+      contractId: contract.id,
+      at: new Date().toISOString(),
+      preparation: {
+        kind: "prepared" as const,
+        data: { gate: gate("reviewed"), subject, verdict: "satisfied" as const },
+      },
+    }, decideAttestation);
+    assert.equal(attested.kind, "accepted");
 
-  const observation = observeGitForAdmission(git, [contract.id]);
-  const attempt = mintAttempts({ entryCount: 2 })[0]!;
-  const decision = decidePlacement({
-    input: { contractId: contract.id, at: new Date().toISOString() },
-    attempt,
-    observation: observation.decision,
+    const observation = await observeContractsForAdmissionAt(git, channel, [contract.id]);
+    const attempt = mintAttempts({ entryCount: 2 })[0]!;
+    const decision = decidePlacement({
+      input: { contractId: contract.id, at: new Date().toISOString() },
+      attempt,
+      observation: observation.decision,
+    });
+    assert.equal(decision.kind, "offer");
+    if (decision.kind !== "offer") assert.fail("expected placement offer");
+    const admitted = await admitDecidedOffer({
+      channel,
+      repository: git,
+      decisionObservation: observation,
+      attempt,
+      offer: decision.offer,
+      primaryContract: contract.id,
+    });
+    assert.equal(admitted.kind, "accepted");
   });
-  assert.equal(decision.kind, "offer");
-  if (decision.kind !== "offer") assert.fail("expected placement offer");
-  const admitted = admitDecidedOffer(git, observation, attempt, decision.offer, contract.id);
-  assert.equal(admitted.kind, "accepted");
 }
 
 test("reconcile completes an ordinary follow interrupted after atomic publication", async () => {
@@ -353,7 +363,7 @@ test("reconcile recognizes a completed ordinary follow despite unrelated staged 
   const repository = repositoryWithMain();
   const candidate = await managedCandidate(repository, ["reviewed"]);
   await admitClaimWithoutFollow(repository, candidate.contract);
-  const delivery = observeContract(repositoryAt(repository.path), candidate.contract.id).state?.delivery?.data;
+  const delivery = (await observeContract(repositoryAt(repository.path), candidate.contract.id)).state?.delivery?.data;
   assert.ok(delivery);
   repository.run(["read-tree", "-m", "-u", delivery.integration.predecessor, delivery.integration.snapshot]);
   writeFileSync(resolve(repository.path, "local.txt"), "staged local\n");
@@ -378,7 +388,7 @@ test("reconcile aligns a candidate worktree to its index without disturbing unre
   repository.run(["add", "local.txt"]);
   const stagedPatch = repository.run(["diff", "--cached", "--", "local.txt"]);
   await admitClaimWithoutFollow(repository, candidate.contract);
-  const delivery = observeContract(repositoryAt(repository.path), candidate.contract.id).state?.delivery?.data;
+  const delivery = (await observeContract(repositoryAt(repository.path), candidate.contract.id)).state?.delivery?.data;
   assert.ok(delivery);
   writeFileSync(resolve(repository.path, "delivered.txt"), "candidate\n");
   assert.equal(repository.run(["diff", "--cached", "--name-only", delivery.integration.predecessor]), "local.txt\n");

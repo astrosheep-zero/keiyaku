@@ -7,7 +7,7 @@ import { readAliases } from "../alias/index.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
 import { readContractBoard } from "../protocol/read/status.js";
-import { withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
+import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import type {
   AkumaKanshiWorld,
   ContractEndpointObservation,
@@ -199,7 +199,8 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
     };
   }
   try {
-    return await withGitReadObservation(scopeForRepo(repo), async (observation) => {
+    const repository = scopeForRepo(repo);
+    return await withGitDecodeChannel(repository, (channel) => withGitReadObservation(repository, channel, async (observation) => {
       const [contractSection, holders, dispatches] = await Promise.all([
         readContracts(observation),
         readHolders(observation),
@@ -220,7 +221,7 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
             ? dispatches
             : joinAkuma(world, observeContract, dispatches.value),
       };
-    });
+    }));
   } catch (error) {
     const failure = { kind: "failed" as const, failure: { message: diagnostic(error) } };
     return {

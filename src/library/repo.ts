@@ -10,6 +10,7 @@ import { settleAll, type SettlementReport } from "../settlement/settle.js";
 import { optionalNonblank, requireInput } from "./input.js";
 import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
 import type { ContractId } from "../core/facts/types.js";
+import { withGitDecodeChannel } from "../git/read-observation.js";
 
 export { NoGitWorldError };
 
@@ -59,23 +60,26 @@ export class Repo {
 
   async reconcile(input?: ReconcileInput): Promise<RepoReconcileReport> {
     const scope = scopeForRepo(this);
-    const reconciled = await reconcileAllOperation({ scope, ...reconcileInput(input) });
-    const settlements = await settleAll({
-      repository: scope,
-      contracts: reconciled.contracts.map((contract) => ({
-        state: contract.state,
-        effects: contract.report.effects,
-      })),
+    return withGitDecodeChannel(scope, async (channel) => {
+      const reconciled = await reconcileAllOperation({ scope, channel, ...reconcileInput(input) });
+      const settlements = await settleAll({
+        repository: scope,
+        channel,
+        contracts: reconciled.contracts.map((contract) => ({
+          state: contract.state,
+          effects: contract.report.effects,
+        })),
+      });
+      return {
+        contracts: reconciled.contracts.map((contract, index) => ({
+          contractId: contract.contractId,
+          report: {
+            ...contract.report,
+            settlement: settlements[index]!,
+          },
+        })),
+      };
     });
-    return {
-      contracts: reconciled.contracts.map((contract, index) => ({
-        contractId: contract.contractId,
-        report: {
-          ...contract.report,
-          settlement: settlements[index]!,
-        },
-      })),
-    };
   }
 }
 

@@ -2,6 +2,10 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ContractId } from "../../src/core/facts/types.js";
+import { observeContractAt } from "../../src/git/observe.js";
+import { withGitDecodeChannel } from "../../src/git/read-observation.js";
+import type { GitRepository } from "../../src/git/repository.js";
 
 export interface TestGitRepository {
   readonly path: string;
@@ -64,4 +68,8 @@ export function cloneGitRepository(source: TestGitRepository): TestGitRepository
 
 export function gitRepositoryPath(): string {
   return mkdtempSync(join(tmpdir(), "keiyaku-v4-"));
+}
+
+export function observeContract(repository: GitRepository, id: ContractId) {
+  return withGitDecodeChannel(repository, (channel) => observeContractAt(repository, channel, id));
 }

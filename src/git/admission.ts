@@ -7,11 +7,11 @@ import {
   GIT_FORMAT_BYTES,
   GIT_FORMAT_PATH,
   GIT_REF,
-  type GitSnapshot,
   type GitRepository,
+  type GitRefAssertion,
   type RefPublication,
   type TreeChange,
-  updateGitTree,
+  updateGitTreeFromFrozenDirectories,
   updateRefsAtomically,
   writeBlob,
   writeCommit,
@@ -129,11 +129,18 @@ function buildOffer(
 
 function publishOffer(
   repository: GitRepository,
-  snapshot: GitSnapshot,
+  admission: GitAdmissionSnapshot,
   target: RefOperation | null,
   changes: ReadonlyMap<string, TreeChange>,
+  assertions: readonly GitRefAssertion[],
 ): RefPublication {
-  const gitTree = updateGitTree(repository, snapshot.tree, changes);
+  const { snapshot } = admission;
+  const gitTree = updateGitTreeFromFrozenDirectories(
+    repository,
+    snapshot.tree,
+    admission.treeDirectories,
+    changes,
+  );
   const gitCommit = mintSnapshotId(writeCommit({
     repository,
     tree: gitTree,
@@ -148,13 +155,14 @@ function publishOffer(
           newOid: gitObjectIdForSnapshot(target.newOid),
           expectedOid: gitObjectIdForSnapshot(target.expectedOid),
         }]),
-  ]);
+  ], assertions);
 }
 
 export function admit(
   repository: GitRepository,
   offer: Offer,
   admission: GitAdmissionSnapshot,
+  assertions: readonly GitRefAssertion[] = [],
 ): Admission {
   if (!Array.isArray(offer.facts) || offer.facts.length === 0) {
     throw new Error("facts must be a nonempty array");
@@ -165,7 +173,7 @@ export function admit(
   const target = offer.target ?? null;
 
   const attempt = buildOffer(repository, admission, appends, companions);
-  const publication = publishOffer(repository, admission.snapshot, target, attempt.changes);
+  const publication = publishOffer(repository, admission, target, attempt.changes, assertions);
   if (publication.kind === "published") {
     return {
       kind: "accepted",

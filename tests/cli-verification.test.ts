@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { observeContract } from "../src/git/observe.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
-import { makeGitRepository, withGitShim } from "./support/git.js";
+import { makeGitRepository, observeContract, withGitShim } from "./support/git.js";
 
 function repositoryWithCandidate() {
   const raw = makeGitRepository();
@@ -73,7 +72,7 @@ test("deliver adapts a passing Verification through the package-root operation",
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
-  assert.equal(observeContract(repository, id).state?.terminal?.kind, "claimed");
+  assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
   assert.notEqual(raw.run(["rev-parse", "refs/heads/main"]).trim(), candidate);
 });
 
@@ -82,7 +81,7 @@ test("Verification produces an attestation without becoming a placement gate", a
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
-  const state = observeContract(repository, id).state;
+  const state = (await observeContract(repository, id)).state;
   assert.deepEqual(state?.terms?.gates, []);
   assert.equal(state?.attestations.at(-1)?.data.gate, "verified");
   assert.equal(state?.attestations.at(-1)?.data.verdict, "unsatisfied");
@@ -94,8 +93,8 @@ test("deliver adapts a failing Verification without a private producer injection
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation"]);
-  assert.equal(observeContract(repository, id).state?.terminal, null);
-  assert.equal(observeContract(repository, id).state?.attestations.at(-1)?.data.verdict, "unsatisfied");
+  assert.equal((await observeContract(repository, id)).state?.terminal, null);
+  assert.equal((await observeContract(repository, id)).state?.attestations.at(-1)?.data.verdict, "unsatisfied");
 });
 
 test("dirty --here delivery materializes and lands the verified candidate cleanly", async () => {
@@ -132,7 +131,7 @@ test("dirty --here delivery materializes and lands the verified candidate cleanl
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
-  const state = observeContract(setup.repository, bound.contract).state;
+  const state = (await observeContract(setup.repository, bound.contract)).state;
   assert.equal(state?.attestations.at(-1)?.data.verdict, "satisfied");
   assert.equal(state?.delivery?.data.integration.snapshot, setup.raw.run(["rev-parse", "HEAD"]).trim());
   assert.equal(setup.raw.run(["show", `${state?.delivery?.data.integration.snapshot}:candidate.txt`]), "passing\n");
@@ -160,7 +159,7 @@ test("audit stays accepted when it admits a verified attestation", async () => {
   assert.deepEqual(audit.facts.map((fact) => fact.kind), ["attestation"]);
   assert.equal(audit.report.attempt, undefined);
   assert.equal("diff" in audit, true);
-  assert.equal(observeContract(pending.repository, pending.id).state?.attestations.at(-1)?.actor, "audit-user");
+  assert.equal((await observeContract(pending.repository, pending.id)).state?.attestations.at(-1)?.actor, "audit-user");
 });
 
 test("audit renders a pure read as accepted with its public report and optional diff", async () => {
