@@ -80,7 +80,7 @@ The command vocabulary is:
 | `install` | Installs the bundled Keiyaku skills through one or more native harness installers. |
 | `task ...` | Calls the separate `./task` public surface described below. |
 | `call`, `fork` | Call the package-root Akuma facet so Dispatch and Alias integration is not reimplemented at the edge. |
-| `wait`, `tell`, `history`, `kill` | Call the corresponding package-root Akuma facade capability as root verbs; `tell --interrupt` selects the composed interrupt capability. |
+| `wait`, `tell`, `history`, `kill` | Route `history kei/...` to the Contract handle; otherwise call the corresponding package-root Akuma facade capability as root verbs. `tell --interrupt` selects the composed interrupt capability. |
 
 `bind` accepts no contract positional. Existing Contract commands accept a full
 `kei/<contract-segment>` or active `@<contract-segment>` reference. The short
@@ -115,7 +115,7 @@ install <codex|claude|opencode|pi> [--json]
 call <akuma-name> [--contract <kei/...>] [--alias @name] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
 wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]
 tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)
-history <aku/...|@alias> [--before <index> | --since <index>] [--limit <count>] [--last] [--json]
+history <aku/...|@alias|kei/...> [--before <index> | --since <index>] [--limit <count>] [--last] [--json]
 fork <aku/...|@alias> --at <historyId> [--json]
 kill <akuma-selector>... [--json]
 ```
@@ -306,10 +306,13 @@ canonical root used by the operation. Dispatch failure, Alias failure, or a
 readonly-none refusal keeps its existing factual lines and does not add that
 command. Detach does not fabricate a current life. It is mutually exclusive
 with `--wait`.
-`tell`, `history`, `fork`, and exact `status` accept a complete
-`aku/<akuma>/<hex8>` or world-local `@alias`. `wait` and `kill` additionally
-accept Akuma globs and complete `kei/...` worker selectors. Their positional
-set is expanded once, deduplicated, and byte-sorted before the operation.
+`tell`, `fork`, and exact `status` accept a complete
+`aku/<akuma>/<hex8>` or world-local `@alias`. `history` accepts that same
+Akuma selector or one complete `kei/...`. It does not accept `@contract`, a
+bare Contract segment, globs, or multiple selectors. `wait` and `kill`
+additionally accept Akuma globs and complete `kei/...` worker selectors. Their
+positional set is expanded once, deduplicated, and byte-sorted before the
+operation.
 A `kei/...` selector reads Dispatch only from `--repo` (or the invocation Repo
 when `--repo` is omitted) and then operates in the `-C` World. One Contract
 member absent from that World refuses the whole set as typed usage
@@ -348,8 +351,11 @@ optional `--timeout` value and `call --wait` value match exactly
 are refused except for zero itself, and the units convert to milliseconds
 before the public call. A converted value beyond the safe integer range is
 refused. Each duration passes that value as `timeoutMs`, while predicate
-functions remain library-only input. `history`
-with no mode renders the newest page of at most 50 semantic rows. `--limit`
+functions remain library-only input. A complete `kei/...` history selector
+requires Repo, refuses `--before`, `--since`, `--limit`, and `--last`, and
+calls `Keiyaku.of({ repo, id }).history()` with no Akuma World. `history`
+with an Akuma selector and no mode renders the newest page of at most 50
+semantic rows. `--limit`
 selects a positive page size no greater than 5000 and otherwise keeps that
 default. `--before`
 reads the page preceding an already visible activity index; `--since` reads

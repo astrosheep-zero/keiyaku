@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
+import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
-import { changeId, entryUlid, snapshotId } from "../src/core/facts/types.js";
+import { changeId, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/git/identity.js";
-import { readBlob, readGit, repositoryAt, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
+import { GIT_REF, readBlob, readGit, readRef, repositoryAt, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
 import { appointedWorktreePath, makeGitRepository, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
@@ -25,6 +27,26 @@ function appoint(repositoryPath: string, contract: string, description?: string)
 
 function appointmentPath(repositoryPath: string): string {
   return resolve(realpathSync(repositoryPath), ".keiyaku", "KEIYAKU.md");
+}
+
+async function plantDispatch(
+  repository: ReturnType<typeof repositoryWithMain>,
+  akuId: string,
+  owner: string,
+  dispatchedAt: string,
+  bytes?: Buffer,
+): Promise<void> {
+  const git = await repositoryAt(repository.path);
+  const path = `dispatch/${createHash("sha256").update(akuId).digest("hex")}.json`;
+  const payload = bytes ?? Buffer.from(`${JSON.stringify({
+    akuId,
+    contractId: owner,
+    dispatchedAt,
+  })}\n`);
+  const before = await readGit(git);
+  const tree = await updateGitTree(git, before.tree, new Map([[path, { oid: await writeBlob(git, payload) }]]));
+  const commit = await writeCommit({ repository: git, tree, parent: before.commit, message: `dispatch ${akuId}`, at: dispatchedAt });
+  repository.run(["update-ref", GIT_REF, commit, before.commit ?? ""]);
 }
 
 function changeIdFromSubject(subject: string | undefined): string | undefined {
@@ -660,4 +682,108 @@ test("review testimony is recorded when reviewed is not a placement gate", async
   assert.equal(reviewed.value.placement, undefined);
   assert.deepEqual(reviewed.value.workspace?.untracked, ["candidate.txt"]);
   assert.equal((await result.keiyaku.state()).attestations.at(-1)?.data.gate, "reviewed");
+});
+
+test("contract history composes one frozen journal and Dispatch observation", async () => {
+  const repository = repositoryWithMain();
+  const first = await bind(repository);
+  const firstId = (await first.state()).id;
+  const other = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: document().replace("# Library verbs", "# Other contract"),
+    workspace: "worktree",
+  });
+  const otherId = (await other.keiyaku.state()).id;
+  const observedBind = (await first.history()).events.find((event) => event.source === "journal" && event.fact.kind === "bind");
+  if (observedBind === undefined || observedBind.source !== "journal") throw new Error("missing bind fact");
+  const bindTime = observedBind.fact.at;
+  await plantDispatch(repository, "aku/worker/bbbbbbbb", firstId, bindTime);
+  await plantDispatch(repository, "aku/worker/aaaaaaaa", firstId, bindTime);
+  await plantDispatch(repository, "aku/reviewer/cccccccc", firstId, "2099-01-01T00:00:00.000Z");
+  await plantDispatch(repository, "aku/worker/dddddddd", otherId, bindTime);
+  await first.abandon({ note: "done" });
+  const abandoned = (await first.history()).events.find((event) => event.source === "journal" && event.fact.kind === "abandoned");
+  if (abandoned === undefined || abandoned.source !== "journal") throw new Error("missing abandoned fact");
+  await plantDispatch(repository, "aku/worker/eeeeeeee", firstId, abandoned.fact.at);
+
+  const log = resolve(repository.path, "history-observation.log");
+  writeFileSync(log, "");
+  const history = await withGitShim(
+    "printf '%s\\n' \"$*\" >> \"$KEIYAKU_HISTORY_OBSERVATION_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    { KEIYAKU_HISTORY_OBSERVATION_LOG: log },
+    async () => Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id: firstId }).history(),
+  );
+  const snapshot = await readRef(await repositoryAt(repository.path), GIT_REF);
+  assert.equal(history.id, firstId);
+  assert.equal(history.state, snapshot);
+  assert.equal(history.events.filter((event) => event.source === "journal").length, 2);
+  assert.deepEqual(
+    history.events.filter((event) => event.source === "dispatch").map((event) => event.source === "dispatch" ? event.dispatch.akuId : ""),
+    ["aku/worker/aaaaaaaa", "aku/worker/bbbbbbbb", "aku/worker/eeeeeeee", "aku/reviewer/cccccccc"],
+  );
+  assert.equal(history.events.some((event) => event.source === "dispatch" && event.dispatch.akuId === "aku/worker/dddddddd"), false);
+  const times = history.events.map((event) => event.source === "journal" ? event.fact.at : event.dispatch.dispatchedAt);
+  assert.deepEqual(times, [...times].sort());
+  const equalBind = history.events.filter((event) => (event.source === "journal" ? event.fact.at : event.dispatch.dispatchedAt) === bindTime);
+  assert.equal(equalBind[0]?.source, "journal");
+  assert.deepEqual(
+    equalBind.filter((event) => event.source === "dispatch").map((event) => event.source === "dispatch" ? event.dispatch.akuId : ""),
+    ["aku/worker/aaaaaaaa", "aku/worker/bbbbbbbb"],
+  );
+  const equalAbandon = history.events.filter((event) => (event.source === "journal" ? event.fact.at : event.dispatch.dispatchedAt) === abandoned.fact.at);
+  assert.equal(equalAbandon[0]?.source, "journal");
+  assert.equal(readFileSync(log, "utf8").split("\n").filter((line) => line.includes(`rev-parse --verify --quiet ${GIT_REF}`)).length, 1);
+});
+
+test("contract history reports only journal events when Dispatch is absent", async () => {
+  const repository = repositoryWithMain();
+  const contract = await bind(repository);
+  const history = await contract.history();
+  assert.equal(history.events.every((event) => event.source === "journal"), true);
+  assert.equal(history.events.length >= 1, true);
+  assert.equal(history.events[0]?.source === "journal" && history.events[0].fact.kind === "bind", true);
+});
+
+test("contract history uses the existing contract-missing refusal", async () => {
+  const repository = repositoryWithMain();
+  const missing = contractId("kei/missing-history");
+  await assert.rejects(
+    async () => Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id: missing }).history(),
+    refused({ kind: "contract-missing", contractId: missing }),
+  );
+});
+
+test("contract history fails the whole read when journal or Dispatch is corrupt", async () => {
+  const repository = repositoryWithMain();
+  const contract = await bind(repository);
+  const id = (await contract.state()).id;
+  const git = await repositoryAt(repository.path);
+  const before = await readGit(git);
+  const journal = before.paths.get(contractJournalPath(id));
+  if (journal?.type !== "blob") throw new Error("missing journal");
+  const tree = await updateGitTree(git, before.tree, new Map([[
+    contractJournalPath(id),
+    { oid: await writeBlob(git, Buffer.from("not-a-journal\n")) },
+  ]]));
+  const commit = await writeCommit({ repository: git, tree, parent: before.commit, message: "corrupt journal" });
+  repository.run(["update-ref", GIT_REF, commit, before.commit]);
+  await assert.rejects(
+    async () => Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id }).history(),
+    (error: unknown) => error instanceof AuthorityCorruptionError,
+  );
+
+  const clean = repositoryWithMain();
+  const intact = await bind(clean);
+  const intactId = (await intact.state()).id;
+  await plantDispatch(
+    clean,
+    "aku/worker/ffffffff",
+    intactId,
+    "2026-08-17T00:00:00.000Z",
+    Buffer.from("{not-canonical\n"),
+  );
+  await assert.rejects(
+    () => intact.history(),
+    (error: unknown) => error instanceof AuthorityCorruptionError,
+  );
 });

@@ -1,6 +1,6 @@
 import type { InvocationResult } from "../result.js";
 import { renderObservation } from "./board.js";
-import { renderAccepted, renderRetry } from "./contract.js";
+import { renderAccepted, renderContractHistory, renderRetry } from "./contract.js";
 import { renderKanshiText } from "./kanshi.js";
 import { renderRefusal } from "./refusal.js";
 import type { TextRenderContext } from "./terminal.js";
@@ -11,6 +11,7 @@ export function renderText(result: InvocationResult, context?: TextRenderContext
   if (result.kind === "guidance") return result.guidance;
   if (result.kind === "status") return renderKanshiText(result.report, context, result.selection);
   if (result.kind === "catalog") return renderCatalogText(result.catalog);
+  if (result.kind === "contract-history") return renderContractHistory(result.history);
   if (result.kind === "region") return renderRegionText(result.region);
   if (result.kind === "accepted") return renderAccepted(result, context);
   if (result.kind === "refused") return renderRefusal(result, context);

@@ -1,4 +1,19 @@
-import { AkumaWorldScopeError, gatesFrom, Keiyaku, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type WorktreeHooks } from "../index.js";
+import {
+  AkumaWorldScopeError,
+  gatesFrom,
+  Keiyaku,
+  KeiyakuRefused,
+  Repo,
+  requireBranchesToBeUpToDateFrom,
+  settings,
+  SettingsError,
+  worktreeHooksFrom,
+  type ActorId,
+  type ContractId,
+  type Keiyaku as KeiyakuContract,
+  type Settings,
+  type WorktreeHooks,
+} from "../index.js";
 import { kanshi, selectKanshi, selectRegion, type KanshiRegionSelection } from "../kanshi/index.js";
 import { observeKanshi } from "../kanshi/read.js";
 import { resolveActor } from "./actor.js";
@@ -14,7 +29,7 @@ import {
 } from "./accepted.js";
 import { amendFromCommand } from "./commands/amend.js";
 import { invokeAkuma, invokeAkumaStatus, type AkumaInvocationResult } from "./commands/akuma-invoke.js";
-import { isParsedAkumaCommand, type ParsedAkumaCommand } from "./commands/akuma.js";
+import { isParsedAkumaCommand, type InvokedAkumaCommand } from "./commands/akuma.js";
 import { bindFromCommand } from "./commands/bind.js";
 import { installHarnesses, type InstallInvocationResult } from "./commands/install.js";
 import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js";
@@ -37,7 +52,12 @@ type InvokeRuntime = Readonly<{
   onOperationStart?: () => void;
 }>;
 
-type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "show" | "ls" | "reconcile" | "settings" | "region" | "task" | "install" }>;
+type ExistingCommand = Exclude<
+  ParsedCommand,
+  | InvokedAkumaCommand
+  | { command: "history" }
+  | { command: "bind" | "status" | "show" | "ls" | "reconcile" | "settings" | "region" | "task" | "install" }
+>;
 type NonInstallExecution = Readonly<{ cwd?: string; repo?: string; command: Exclude<ParsedCommand, { command: "install" }> }>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
@@ -298,7 +318,7 @@ type AkumaEdgeInput = Readonly<{
   edge: InvocationEdge;
 }>;
 
-async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, input: AkumaEdgeInput) {
+async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdgeInput) {
   try {
     const { path, executionCwd, repo, home, configuration, edge } = input;
     if (parsed.command === "call" && parsed.contract !== undefined && repo === undefined) {
@@ -322,7 +342,7 @@ async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, input: AkumaEdgeI
 }
 
 async function akumaWorldFor(
-  parsed: ParsedAkumaCommand,
+  parsed: InvokedAkumaCommand,
   located: WorldRoot | null,
   candidate: WorldRoot | null,
   establish: () => Promise<WorldRoot>,
@@ -424,6 +444,20 @@ async function invokeRegion(
   return { kind: "region", region: { kind: "present", value: selectRegion({ declarations: report.region.value.declarations, selection }) } };
 }
 
+async function invokeContractHistory(repo: Repo | undefined, contract: string): Promise<InvocationResult> {
+  if (repo === undefined) throw new Error("history kei/... requires a resolved Repo");
+  const selected = contractFromInput(repo, contract);
+  try {
+    return { kind: "contract-history" as const, history: await selected.contract.history() };
+  } catch (error) {
+    if (error instanceof TypeError) throw new CliUsageError(error.message);
+    if (error instanceof KeiyakuRefused) {
+      return { kind: "refused" as const, verb: "history", contract: selected.id, refusal: error.refusal };
+    }
+    throw error;
+  }
+}
+
 // eslint-disable-next-line complexity -- command dispatch keeps the CLI's existing boundary in one place.
 async function invokeParsed(
   invocation: NonInstallExecution,
@@ -457,6 +491,7 @@ async function invokeParsed(
     }
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
   }
+  if (parsed.command === "history" && "contract" in parsed) return await invokeContractHistory(repo, parsed.contract);
   if (isParsedAkumaCommand(parsed)) {
     const akumaWorld = await akumaWorldFor(parsed, world, candidateWorld, coordinates.establishWorld);
     const configuration = parsed.command === "call" ? await settingsAt(akumaWorld, home) : undefined;

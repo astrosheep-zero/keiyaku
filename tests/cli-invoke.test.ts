@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { GIT_REF, readRef, repositoryAt } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
-import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
+import { HeartAbsentError } from "../src/akuma/heart/index.js";
+import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, type ContractId } from "../src/index.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
@@ -954,6 +956,56 @@ test("blank acquired stdin is usage before World, Repo, or package invocation", 
         && !/invocation cwd is not an existing directory/u.test(error.message),
     );
   }
+});
+
+test("history kei/... reads Contract history through Repo without an Akuma World", async () => {
+  const repository = repositoryWithMain();
+  const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("History Route"));
+  const id = acceptedContract(bound);
+  const expected = await Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id }).history();
+  const foreign = makeGitRepository();
+  foreign.run(["config", "user.name", "Test User"]);
+  foreign.run(["config", "user.email", "test@example.com"]);
+  foreign.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
+  foreign.run(["commit", "--allow-empty", "--quiet", "-m", "foreign"]);
+  const result = await invoke(parseArgv(["--repo", repository.path, "history", id]), {
+    cwd: foreign.path,
+    environment: {},
+  });
+  assert.deepEqual(result, { kind: "contract-history", history: expected });
+  assert.equal(existsSync(resolve(foreign.path, ".keiyaku")), false);
+  const json = await invoke(parseArgv(["--repo", repository.path, "history", id, "--json"]), {
+    cwd: foreign.path,
+    environment: {},
+  });
+  assert.equal(json.kind, "contract-history");
+  if (json.kind === "contract-history") assert.deepEqual(json.history, expected);
+
+  const missing = await invoke(parseArgv(["history", "kei/missing-history"]), {
+    cwd: repository.path,
+    environment: {},
+  });
+  assert.deepEqual(missing, {
+    kind: "refused",
+    verb: "history",
+    contract: "kei/missing-history",
+    refusal: { kind: "contract-missing", contractId: "kei/missing-history" },
+  });
+
+  await assert.rejects(
+    () => invoke(parseArgv(["history", "aku/claude/1234abcd"]), { cwd: foreign.path, environment: {} }),
+    (error: unknown) => error instanceof HeartAbsentError,
+  );
+  const empty = mkdtempSync(join(tmpdir(), "keiyaku-history-norepo-"));
+  await assert.rejects(
+    () => invoke(parseArgv(["history", "aku/claude/1234abcd"]), { cwd: empty, environment: {} }),
+    (error: unknown) => error instanceof CliUsageError
+      && /no Keiyaku world contains the invocation cwd/u.test(error.message),
+  );
+  await assert.rejects(
+    () => invoke(parseArgv(["history", id]), { cwd: empty, environment: {} }),
+    (error: unknown) => error instanceof NoGitWorldError,
+  );
 });
 
 test("valid acquired stdin bytes pass through unchanged", async () => {

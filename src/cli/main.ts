@@ -10,7 +10,7 @@ import {
 import { renderText } from "./render/text.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "./render/task.js";
 import { akumaExitCode, akumaRawAnswer, renderAkumaJson, renderAkumaText } from "./render/akuma.js";
-import { isParsedAkumaCommand, renderAkumaHelp } from "./commands/akuma.js";
+import { isParsedAkumaCommand, renderAkumaHelp, type InvokedAkumaCommand } from "./commands/akuma.js";
 import { installExitCode, renderInstallHelp, renderInstallText, type InstallInvocationResult } from "./commands/install.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import { renderTaskHelp, type ParsedTaskCommand } from "./commands/task.js";
@@ -36,8 +36,11 @@ function writeTask(command: ParsedTaskCommand, result: TaskInvocationResult): nu
   return taskExitCode(result);
 }
 
-function writeAkuma(command: Parameters<typeof renderAkumaText>[0], result: AkumaInvocationResult): number {
-  const output = command.output === "json" ? renderAkumaJson(command, result) : renderAkumaText(command, result, {
+function writeAkuma(
+  command: InvokedAkumaCommand | Extract<ParsedCommand, { command: "status" }>,
+  result: AkumaInvocationResult,
+): number {
+  const output = command.output === "json" ? renderAkumaJson(result) : renderAkumaText(command, result, {
     columns: process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : 80,
     color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
   });
@@ -93,8 +96,17 @@ function writeResult(command: ParsedCommand, result: unknown): number {
     process.stdout.write(`${command.output === "json" ? JSON.stringify(settingsJsonValue(value)) : renderSettingsText(value)}\n`);
     return 0;
   }
-  if (isParsedAkumaCommand(command)
-    || (typeof result === "object" && result !== null && "kind" in result && result.kind === "akuma")) {
+  if (typeof result === "object" && result !== null && "kind" in result && result.kind === "contract-history") {
+    const history = (result as Extract<InvocationResult, { kind: "contract-history" }>).history;
+    const output = command.output === "json" ? JSON.stringify(history) : renderText(result as InvocationResult);
+    process.stdout.write(`${output}\n`);
+    return 0;
+  }
+  const akumaResult = typeof result === "object" && result !== null && "kind" in result && result.kind === "akuma";
+  if (isParsedAkumaCommand(command)) {
+    return writeAkuma(command, result as AkumaInvocationResult);
+  }
+  if (akumaResult && command.command === "status") {
     return writeAkuma(command, result as AkumaInvocationResult);
   }
   const contractResult = result as InvocationResult;

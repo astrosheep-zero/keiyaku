@@ -7,6 +7,28 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const docs = join(root, "docs");
 
+test("owner documents keep Contract history a same-snapshot two-authority projection", () => {
+  const model = readFileSync(join(docs, "model.md"), "utf8");
+  const dispatch = readFileSync(join(docs, "dispatch.md"), "utf8");
+  const api = readFileSync(join(docs, "public-api.md"), "utf8");
+  const cli = readFileSync(join(docs, "cli.md"), "utf8");
+  const output = readFileSync(join(docs, "cli-output.md"), "utf8");
+  assert.match(model, /one `GitReadObservation` of\nkeiyaku-state/u);
+  assert.match(model, /journal before Dispatch on equal\ntimestamps/u);
+  assert.match(model, /presentation only and asserts no causality/u);
+  assert.match(model, /no global cursor, reverse index, or expansion of\nAkuma Heart history/u);
+  assert.match(dispatch, /same observation that\nsupplies the selected journal/u);
+  assert.match(dispatch, /does not invent a reverse index/u);
+  assert.match(api, /keiyaku\.history\(\): Promise<ContractHistory>/u);
+  assert.match(api, /needs no WorldRoot or Akuma\nSettings/u);
+  assert.match(api, /Static `Keiyaku\.history` remains the unchanged Akuma operation/u);
+  assert.match(cli, /history <aku\/\.\.\.\|@alias\|kei\/\.\.\.>/u);
+  assert.match(cli, /refuses `--before`, `--since`, `--limit`, and `--last`/u);
+  assert.match(cli, /with no Akuma World/u);
+  assert.match(output, /history <kei\/\.\.\.> · <J> journal · <D> dispatch/u);
+  assert.match(output, /JSON is the exact `ContractHistory` value/u);
+});
+
 test("Akuma owner law records the settled snapshot timeline", () => {
   const output = readFileSync(join(docs, "cli-output.md"), "utf8");
   const cli = readFileSync(join(docs, "cli.md"), "utf8");

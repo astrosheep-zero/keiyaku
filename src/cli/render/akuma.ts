@@ -161,7 +161,11 @@ function snapshotText(view: AkumaStatusView, context: TextRenderContext, options
   return [...snapshotHeading(view.status.id, options.alias, view.contractId), ...facts, ...activity, ...footer].join("\n");
 }
 
-function historyText(command: Extract<ParsedCommand, { command: "history" }>, result: Extract<AkumaInvocationResult, { action: "history" }>, context: TextRenderContext): string {
+function historyText(
+  command: Extract<ParsedCommand, { command: "history"; last: boolean }>,
+  result: Extract<AkumaInvocationResult, { action: "history" }>,
+  context: TextRenderContext,
+): string {
   if (command.last) return result.mode === "last" ? result.answer : "no answer retained";
   if (result.mode !== "page") throw new Error("history result lacks page");
   const contractId = result.historyResult.contractId;
@@ -243,7 +247,8 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
     case "status": return snapshotText(result.status, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) });
     case "wait": return result.result.statuses.map((status) => snapshotText(status, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) })).join("\n\n");
     case "tell": return result.mode === "ordinary" ? tellText(result, context) : snapshotText(result.result.observation, context, { ...(result.alias === undefined ? {} : { alias: result.alias }), showLife: false });
-    case "history": return historyText(command as Extract<ParsedCommand, { command: "history" }>, result, context);
+    case "history":
+      return historyText(command as Extract<ParsedCommand, { command: "history"; last: boolean }>, result, context);
     case "fork": {
       if (result.receipt.kind !== "forked") return result.receipt.kind === "unknown-history" ? `${result.receipt.at} has no matching retained answered turn` : result.receipt.kind === "provider-cannot-fork" ? `${result.receipt.provider} cannot fork` : result.receipt.diagnostic;
       const contractId = result.receipt.dispatch.kind === "dispatched" ? result.receipt.dispatch.dispatch.contractId : undefined;
@@ -284,12 +289,16 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
   }
 }
 
-export function akumaJsonValue(command: ParsedCommand, result: AkumaInvocationResult): unknown {
-  if (result.action === "call" || result.action === "fork" || result.action === "status" || result.action === "wait" || result.action === "tell" || result.action === "kill") return result.action === "status" ? result.status : result.action === "wait" ? result.result : result.action === "tell" ? result.result : result.action === "kill" ? result.result : result.action === "call" ? result.result : result.receipt;
-  if (command.command !== "history") throw new Error("history result requires the history command");
+export function akumaJsonValue(result: AkumaInvocationResult): unknown {
+  if (result.action === "call") return result.result;
+  if (result.action === "fork") return result.receipt;
+  if (result.action === "status") return result.status;
+  if (result.action === "wait") return result.result;
+  if (result.action === "tell") return result.result;
+  if (result.action === "kill") return result.result;
   return result.historyResult;
 }
 
-export function renderAkumaJson(command: ParsedCommand, result: AkumaInvocationResult): string {
-  return JSON.stringify(akumaJsonValue(command, result));
+export function renderAkumaJson(result: AkumaInvocationResult): string {
+  return JSON.stringify(akumaJsonValue(result));
 }

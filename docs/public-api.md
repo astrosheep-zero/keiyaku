@@ -270,6 +270,7 @@ re-evaluate them.
 ```ts
 keiyaku.state(): Promise<ContractState>
 keiyaku.guidance(): Promise<string>
+keiyaku.history(): Promise<ContractHistory>
 keiyaku.delivery(): Promise<Delivery | null>
 keiyaku.amend(input: {
   markdown: string
@@ -333,6 +334,28 @@ nonterminal stop and admits no attestation.
 
 `state()` and `guidance()` observe and fold afresh for each call. `guidance()`
 returns the canonical derived bytes owned by [workspace.md](workspace.md).
+`history()` is a handle read of the selected journal and matching Dispatch
+facts from one keiyaku-state observation. It needs no WorldRoot or Akuma
+Settings. Static `Keiyaku.history` remains the unchanged Akuma operation.
+Absence is the existing `contract-missing` refusal; corruption in either
+authority fails the whole read. `ContractHistory.state` is that observation's
+non-null snapshot. Events are one journal event per exact `Fact` and one
+dispatch event per exact Contract membership, ordered by recorded time with
+the deterministic non-causal ties in [model.md](model.md). The public value
+has no parallel source collections, cursor, or persisted merge.
+
+```ts
+type ContractHistoryEvent =
+  | Readonly<{ source: "journal"; fact: Fact }>
+  | Readonly<{ source: "dispatch"; dispatch: Dispatch }>
+
+type ContractHistory = Readonly<{
+  id: ContractId
+  state: SnapshotId
+  events: readonly ContractHistoryEvent[]
+}>
+```
+
 Worktree paths are projected
 by `status()` for selectors and board views; a contract handle has no duplicate
 path getter.

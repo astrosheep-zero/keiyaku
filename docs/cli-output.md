@@ -20,6 +20,19 @@ status header or explanatory wrapper. JSON is exactly
 workspace renderer owned by [workspace.md](workspace.md); the CLI does not
 assemble a second projection. Audit remains unchanged and omits guidance.
 
+`history kei/...` is that same-snapshot two-authority projection. Text begins
+with `history <kei/...> · <J> journal · <D> dispatch`, then one recorded-time
+timeline. Counts come from event source. Zero Dispatch facts render `0
+dispatch` and no placeholder row. A journal event is
+`<fact.at> <fact.kind> · <fact.entry>[ · <fact.actor>]` plus the
+decision-relevant subordinate facts for that kind; a Dispatch event is
+`<dispatchedAt> dispatch · <complete AkuId>`. Opaque coordinates and payloads
+are never truncated. Equal timestamps stay visibly equal and claim no
+causality. JSON is the exact `ContractHistory` value and exits `0`.
+`contract-missing` exits `1`; authority corruption keeps the exception exit.
+Akuma history text, `--last`, cursors, JSON, and exits remain unchanged. There
+is no Contract cursor, pagination, last-event shortcut, or section split.
+
 The installed executable is `keiyaku`. The package declares no alternate or
 versioned command name.
 

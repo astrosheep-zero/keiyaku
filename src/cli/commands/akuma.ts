@@ -23,8 +23,11 @@ export type ParsedAkumaCommand = Output & (
   | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
   | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
   | (Readonly<{ command: "history"; last: boolean; before?: number; since?: number; limit?: number }> & Addressed)
+  | Readonly<{ command: "history"; contract: string }>
   | (Readonly<{ command: "fork"; at: string }> & Addressed)
 );
+
+export type InvokedAkumaCommand = Exclude<ParsedAkumaCommand, { command: "history"; contract: string }>;
 
 export type AkumaAction = ParsedAkumaCommand["command"];
 type FlagValue = string | true;
@@ -80,8 +83,8 @@ const AKUMA_COMMAND_SPECS = {
     arity: 1,
     stdin: false,
     flags: { before: "value", since: "value", limit: "value", last: "boolean", json: "boolean" },
-    usage: "history <aku/...> [--before <index> | --since <index>] [--limit <count>] [--last] [--json]",
-    purpose: "Read the persistent execution history or the last answer.",
+    usage: "history <aku/...|@alias|kei/...> [--before <index> | --since <index>] [--limit <count>] [--last] [--json]",
+    purpose: "Read Akuma execution history or one complete Contract journal and Dispatch timeline.",
   },
   fork: {
     arity: 1,
@@ -103,8 +106,8 @@ export function isAkumaAction(value: string | undefined): value is AkumaAction {
   return value !== undefined && Object.hasOwn(AKUMA_COMMAND_SPECS, value);
 }
 
-export function isParsedAkumaCommand(command: Readonly<{ command: string }>): command is ParsedAkumaCommand {
-  return isAkumaAction(command.command);
+export function isParsedAkumaCommand(command: Readonly<{ command: string }>): command is InvokedAkumaCommand {
+  return isAkumaAction(command.command) && !("contract" in command && command.command === "history");
 }
 
 export function renderAkumaRootRows(): readonly string[] {
@@ -230,11 +233,17 @@ function parseWait(
 }
 
 function parseHistory(
-  akuma: string,
+  selector: string,
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
   fail: (message: string) => never,
-): ParsedAkumaCommand {
+): Extract<ParsedAkumaCommand, { command: "history" }> {
+  if (selector.startsWith("kei/")) {
+    if (flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined || flags.last === true) {
+      fail("history kei/... does not accept --before, --since, --limit, or --last");
+    }
+    return { command: "history", contract: selector, output };
+  }
   if (flags.before !== undefined && flags.since !== undefined) fail("history --before and --since are mutually exclusive");
   if (flags.last === true && (flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined)) {
     fail("history --last cannot be combined with --before, --since, or --limit");
@@ -243,7 +252,7 @@ function parseHistory(
   if (limit !== undefined && limit > 5_000) fail("--limit must be no greater than 5000");
   return {
     command: "history",
-    akuma,
+    akuma: validateDirect(selector, fail),
     last: flags.last === true,
     ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
     ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),
@@ -261,8 +270,12 @@ function parseAddressed(
 ): ParsedAkumaCommand {
   if (action === "kill") return { command: action, akuma: rawSelectors.map((value) => validateSet(value, fail)), output };
   if (action === "wait") return parseWait(rawSelectors, flags, output, fail);
+  if (action === "history") {
+    const selector = rawSelectors[0]!;
+    if (selector.includes("*")) fail("history accepts one complete aku/..., @alias, or kei/... selector");
+    return parseHistory(selector, flags, output, fail);
+  }
   const akuma = validateDirect(rawSelectors[0]!, fail);
-  if (action === "history") return parseHistory(akuma, flags, output, fail);
   const at = stringFlag(flags.at, "fork requires --at <historyId>", fail);
   return { command: action, akuma, at, output };
 }

@@ -14,12 +14,17 @@ import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/requests.js";
-import type { AkumaStatusView } from "../src/index.js";
+import type { AkumaStatusView, ContractHistory, Fact } from "../src/index.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import { renderContractHistory } from "../src/cli/render/contract.js";
 import { akumaExitCode, akumaJsonValue, akumaRawAnswer, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
+import { renderText } from "../src/cli/render/text.js";
+import { actorId, changeId, contractId, documentKey, entryUlid, gate, snapshotId } from "../src/core/facts/types.js";
+import { dependencyKeySet } from "../src/core/subject.js";
+import type { AkuId } from "../src/akuma/identity.js";
 import { toolRepr } from "../src/cli/render/akuma-tool.js";
 import { normalizeToolCommand } from "../src/cli/render/akuma-tool-command.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
@@ -138,6 +143,23 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
       output: "json",
     },
   });
+  assert.deepEqual(parseArgv(["history", "kei/example", "--json"]), {
+    command: { command: "history", contract: "kei/example", output: "json" },
+  });
+  assert.deepEqual(parseArgv(["history", "@example"]), {
+    command: { command: "history", akuma: "@example", last: false, output: "text" },
+  });
+  assert.throws(() => parseArgv(["history", "example"]), /identity must use aku\//u);
+  assert.throws(() => parseArgv(["history", "aku/*/*"]), /one complete/u);
+  assert.throws(() => parseArgv(["history", "kei/one", "kei/two"]), /invalid positional/u);
+  for (const option of ["--before", "--since", "--limit", "--last"]) {
+    assert.throws(
+      () => parseArgv(option === "--last"
+        ? ["history", "kei/example", option]
+        : ["history", "kei/example", option, "1"]),
+      /does not accept/u,
+    );
+  }
   for (const limit of ["0", "-1", "1.5", "5001"]) {
     assert.throws(() => parseArgv(["history", "aku/claude/1234abcd", "--limit", limit]), /--limit/u);
   }
@@ -195,6 +217,161 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   }
 });
 
+test("Contract history text is one counted timeline", () => {
+  const id = contractId("kei/example");
+  const at = "2026-08-17T00:00:00.000Z";
+  const later = "2026-08-17T00:00:01.000Z";
+  const note = "final note\n\n";
+  const facts = {
+    bind: {
+      v: 1 as const,
+      kind: "bind" as const,
+      contract: id,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA0"),
+      at,
+      actor: actorId("binder"),
+      data: {
+        coordinates: { start: snapshotId("start-snapshot"), target: "refs/heads/main", workspace: "here" as const },
+        terms: {
+          document: { bytes: "# Example\n", key: documentKey("document-key") },
+          segments: [],
+          gates: [gate("reviewed")],
+          after: [contractId("kei/after")],
+        },
+      },
+    },
+    amend: {
+      v: 1 as const,
+      kind: "amend" as const,
+      contract: id,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA1"),
+      at: later,
+      data: {
+        document: { bytes: "# Amended\n", key: documentKey("amended-key") },
+        segments: [],
+        gates: [gate("reviewed")],
+        after: [],
+      },
+    },
+    bound: {
+      v: 1 as const,
+      kind: "bound" as const,
+      contract: id,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA2"),
+      at: later,
+      data: {},
+    },
+    deliver: {
+      v: 1 as const,
+      kind: "deliver" as const,
+      contract: id,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3"),
+      at: later,
+      data: {
+        tenderSnapshot: snapshotId("tender"),
+        integration: {
+          predecessor: snapshotId("predecessor"),
+          snapshot: snapshotId("integrated"),
+          changeId: changeId("change"),
+        },
+        method: "squash" as const,
+        policy: { requireBranchesToBeUpToDate: true },
+      },
+    },
+    attestation: {
+      v: 1 as const,
+      kind: "attestation" as const,
+      contract: id,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA4"),
+      at: later,
+      data: {
+        gate: gate("reviewed"),
+        verdict: "satisfied" as const,
+        subject: dependencyKeySet([{ kind: "document", value: documentKey("document-key") }]),
+        summary: "opaque summary\n",
+      },
+    },
+    claimed: {
+      v: 1 as const,
+      kind: "claimed" as const,
+      contract: id,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA5"),
+      at: later,
+      data: { delivery: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
+    },
+    arc: {
+      v: 1 as const,
+      kind: "arc" as const,
+      contract: id,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA6"),
+      at: later,
+      data: { seq: 1, title: "First", objective: "objective\n", brief: "brief\n" },
+    },
+    abandoned: {
+      v: 1 as const,
+      kind: "abandoned" as const,
+      contract: id,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA7"),
+      at: later,
+      data: { note },
+    },
+  } satisfies Record<string, Fact>;
+  const history: ContractHistory = {
+    id,
+    state: snapshotId("state-snapshot"),
+    events: [
+      { source: "journal", fact: facts.bind },
+      { source: "dispatch", dispatch: { akuId: "aku/worker/aaaaaaaa" as AkuId, contractId: id, dispatchedAt: at } },
+      { source: "journal", fact: facts.amend },
+      { source: "journal", fact: facts.bound },
+      { source: "journal", fact: facts.deliver },
+      { source: "journal", fact: facts.attestation },
+      { source: "journal", fact: facts.claimed },
+      { source: "journal", fact: facts.arc },
+      { source: "journal", fact: facts.abandoned },
+    ],
+  };
+  const text = renderContractHistory(history);
+  assert.equal(renderText({ kind: "contract-history", history }), text);
+  assert.equal(text.startsWith("history kei/example · 8 journal · 1 dispatch\n\n"), true);
+  assert.doesNotMatch(text, /^Journal$|^Dispatch$/mu);
+  assert.match(text, /^2026-08-17T00:00:00\.000Z bind · 01ARZ3NDEKTSV4RRFFQ69G5FA0 · binder$/mu);
+  assert.match(text, /^2026-08-17T00:00:00\.000Z dispatch · aku\/worker\/aaaaaaaa$/mu);
+  assert.ok(text.indexOf("bind · 01ARZ3NDEKTSV4RRFFQ69G5FA0 · binder") < text.indexOf("dispatch · aku/worker/aaaaaaaa"));
+  for (const kind of ["bind", "amend", "bound", "deliver", "attestation", "claimed", "arc", "abandoned"] as const) {
+    assert.match(text, new RegExp(` ${kind} · `, "u"));
+  }
+  assert.match(text, /^  start start-snapshot$/mu);
+  assert.match(text, /^  target refs\/heads\/main$/mu);
+  assert.match(text, /^  workspace here$/mu);
+  assert.match(text, /^  document document-key$/mu);
+  assert.match(text, /^  gates reviewed$/mu);
+  assert.match(text, /^  after kei\/after$/mu);
+  assert.match(text, /^  tender tender$/mu);
+  assert.match(text, /^  predecessor predecessor$/mu);
+  assert.match(text, /^  snapshot integrated$/mu);
+  assert.match(text, /^  change change$/mu);
+  assert.match(text, /^  method squash$/mu);
+  assert.match(text, /^  require-branches-to-be-up-to-date true$/mu);
+  assert.match(text, /^  gate reviewed$/mu);
+  assert.match(text, /^  verdict satisfied$/mu);
+  assert.match(text, /^  subject \[\["document","document-key"\]\]$/mu);
+  assert.match(text, /^  delivery 01ARZ3NDEKTSV4RRFFQ69G5FA3$/mu);
+  assert.match(text, /^  sequence 1$/mu);
+  assert.match(text, /^  title First$/mu);
+  assert.ok(text.includes("summary\n\nopaque summary\n\n"));
+  assert.ok(text.includes("objective\n\nobjective\n\n"));
+  assert.ok(text.includes("brief\n\nbrief\n\n"));
+  assert.ok(text.endsWith(`note\n\n${note}\n`));
+  const journalOnly = {
+    ...history,
+    events: history.events.filter((event) => event.source === "journal"),
+  };
+  const zeroDispatch = renderContractHistory(journalOnly);
+  assert.match(zeroDispatch, /^history kei\/example · 8 journal · 0 dispatch\n/u);
+  assert.doesNotMatch(zeroDispatch, /^dispatch /mu);
+});
+
 test("blank Akuma stdin is usage before World or package invocation", async () => {
   await assert.rejects(
     () => invoke(parseArgv(["call", "claude", "-"]), {
@@ -237,7 +414,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   assert.match(snapshotLines[4]!, /^ {5} · think  “same minute”$/u);
   assert.equal(snapshotLines.at(-1), "  ● running");
   assert.equal(snapshotLines.filter((line) => line === "─────").length, 1);
-  assert.equal((akumaJsonValue(command, result) as { status: typeof status }).status.timeline.omitted, 12);
+  assert.equal((akumaJsonValue(result) as { status: typeof status }).status.timeline.omitted, 12);
   assert.equal(renderAkumaText(command, {
     kind: "akuma",
     action: "wait",
@@ -289,7 +466,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   const recordedText = renderAkumaText(command, recorded);
   assert.equal(recordedText.split("\n")[0], "─────");
   assert.equal(recordedText.split("\n")[1], "aku/worker/1234abcd (@review)");
-  assert.deepEqual(akumaJsonValue(command, recorded), recorded.result);
+  assert.deepEqual(akumaJsonValue(recorded), recorded.result);
   const recordedLines = recordedText.split("\n");
   assert.equal(renderAkumaText(command, {
     ...recorded,
@@ -320,7 +497,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
     },
   };
   assert.equal(renderAkumaText(command, observedTell).match(/current input/gu)?.length, 1);
-  assert.deepEqual(akumaJsonValue(command, observedTell), observedTell.result);
+  assert.deepEqual(akumaJsonValue(observedTell), observedTell.result);
 });
 
 test("Akuma snapshot rows use fixed semantic line budgets", () => {
@@ -432,7 +609,7 @@ test("ordinary tell leads with mutation authority before an asleep observation",
   const text = renderAkumaText(command, result);
   assert.equal(text.split("\n")[0], "─────");
   assert.equal(text.split("\n")[1], "aku/worker/1234abcd");
-  assert.deepEqual(akumaJsonValue(command, result), result.result);
+  assert.deepEqual(akumaJsonValue(result), result.result);
 });
 
 test("Akuma voice is bounded and active tools carry the live mark", () => {
@@ -1021,7 +1198,7 @@ test("akuma call renders optional integration stages and maps partial success", 
     renderAkumaText(command, managed),
     `─────\n${akuma}\ncwd /repo/.git/keiyaku/wt/atlantis\n$ keiyaku -C /world wait ${akuma} --timeout 5m`,
   );
-  assert.deepEqual(akumaJsonValue(command, plain), plain.result);
+  assert.deepEqual(akumaJsonValue(plain), plain.result);
   assert.equal(akumaExitCode(plain), 0);
 
   const integrated = {
@@ -1185,7 +1362,7 @@ test("akuma fork renders the public receipt and maps every exit class", () => {
   });
   assert.equal(renderAkumaText(command, forked), "aku/claude/87654321");
   assert.equal(akumaExitCode(forked), 0);
-  assert.deepEqual(akumaJsonValue(command, forked), forked.receipt);
+  assert.deepEqual(akumaJsonValue(forked), forked.receipt);
   const dispatched = result({
     kind: "forked",
     parent,
@@ -1477,7 +1654,7 @@ test("history --last renders typed no-answer and preserves answered empty bytes"
     },
   };
   assert.equal(renderAkumaText(command, noAnswer), "no answer retained");
-  assert.deepEqual(akumaJsonValue(command, noAnswer), {
+  assert.deepEqual(akumaJsonValue(noAnswer), {
     kind: "no-answer",
     id: "aku/worker/00000001",
     contractId: "kei/provider-core-review" as const,
@@ -1496,7 +1673,7 @@ test("history --last renders typed no-answer and preserves answered empty bytes"
     },
   };
   assert.equal(renderAkumaText(command, emptyAnswer), "");
-  assert.deepEqual(akumaJsonValue(command, emptyAnswer), {
+  assert.deepEqual(akumaJsonValue(emptyAnswer), {
     kind: "last",
     id: "aku/worker/00000001",
     answer: "",
@@ -1644,14 +1821,13 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
   assert.match(pluralText, /aku\/reviewer\/deadbeef/u);
   assert.match(pluralText, /second answer/u);
   assert.notEqual(pluralText, "first answersecond answer");
-  assert.deepEqual(akumaJsonValue(parseArgv(["wait", id, "--json"]).command, complete), complete.result);
-  assert.deepEqual(akumaJsonValue(parseArgv(["wait", id, other, "--all", "--json"]).command, plural), plural.result);
+  assert.deepEqual(akumaJsonValue(complete), complete.result);
+  assert.deepEqual(akumaJsonValue(plural), plural.result);
 });
 
 test("history JSON preserves an associated Contract for every result mode", () => {
   const akuma = "aku/worker/00000001" as const;
   const contractId = "kei/provider-core-review" as const;
-  const pageCommand = parseArgv(["history", akuma, "--json"]).command;
   const page = {
     kind: "akuma" as const,
     action: "history" as const,
@@ -1676,21 +1852,20 @@ test("history JSON preserves an associated Contract for every result mode", () =
       contractId,
     },
   };
-  assert.deepEqual(akumaJsonValue(pageCommand, page), {
+  assert.deepEqual(akumaJsonValue(page), {
     kind: "history",
     id: akuma,
     history: page.history,
     contractId,
   });
 
-  const lastCommand = parseArgv(["history", akuma, "--last", "--json"]).command;
   const last = {
     ...page,
     mode: "last" as const,
     answer: "answer",
     historyResult: { kind: "last" as const, id: akuma, answer: "answer", contractId },
   };
-  assert.deepEqual(akumaJsonValue(lastCommand, last), {
+  assert.deepEqual(akumaJsonValue(last), {
     kind: "last",
     id: akuma,
     answer: "answer",
@@ -1701,7 +1876,7 @@ test("history JSON preserves an associated Contract for every result mode", () =
     mode: "no-answer" as const,
     historyResult: { kind: "no-answer" as const, id: akuma, contractId },
   };
-  assert.deepEqual(akumaJsonValue(lastCommand, noAnswer), {
+  assert.deepEqual(akumaJsonValue(noAnswer), {
     kind: "no-answer",
     id: akuma,
     contractId,

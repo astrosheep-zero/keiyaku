@@ -1,5 +1,6 @@
 import type {
   AuditReport,
+  ContractHistory,
   ContractId,
   Fact,
   MutationResult,
@@ -188,4 +189,15 @@ export type RegionResult = Readonly<{ kind: "region"; region: Section<RegionRead
 
 export type CatalogResult = Readonly<{ kind: "catalog"; catalog: Catalog }>;
 
-export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | ObservationResult | GuidanceResult | StatusResult | RegionResult | CatalogResult;
+export type ContractHistoryResult = Readonly<{ kind: "contract-history"; history: ContractHistory }>;
+
+export type InvocationResult =
+  | AcceptedResult
+  | RefusedResult
+  | RetryResult
+  | ObservationResult
+  | GuidanceResult
+  | StatusResult
+  | RegionResult
+  | CatalogResult
+  | ContractHistoryResult;

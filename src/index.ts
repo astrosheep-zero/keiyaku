@@ -55,6 +55,8 @@ export type {
   ContractDisposition,
   ContractGateCurrent,
   ContractGateReport,
+  ContractHistory,
+  ContractHistoryEvent,
   ContractListInput,
   ContractObservation,
   ContractObservationInput,

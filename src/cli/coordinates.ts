@@ -56,8 +56,11 @@ function repoPolicy(command: ParsedCommand): RepoPolicy {
       return { use: command.query.kind === "contracts" ? "required" : "none", acceptsExplicit: false };
     case "status":
     case "tell":
-    case "history":
       return { use: "optional", acceptsExplicit: false };
+    case "history":
+      return "contract" in command
+        ? { use: "required", acceptsExplicit: true }
+        : { use: "optional", acceptsExplicit: false };
     case "fork":
       return { use: "optional", acceptsExplicit: true };
     case "wait":

@@ -49,6 +49,12 @@ one. Targeted reads, publication, and publication read-back keep their
 targeted synchronous Git primitives, and no Dispatch read cache survives the
 call.
 
+Contract history reuses that complete reader on the same observation that
+supplies the selected journal. Membership is exact `contractId` equality.
+Failed publication leaves no fact and therefore no event. The Library
+projection does not invent a reverse index, Contract back-pointer, second
+timestamp, or Akuma-history expansion.
+
 ## Publication
 
 Dispatch publications in one repository share one publication seat at:

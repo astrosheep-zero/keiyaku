@@ -59,7 +59,10 @@ import {
   type VerificationStop,
   type DeliveryPreparationRefusal,
 } from "../protocol/operations.js";
-import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
+import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
+import { mintSnapshotId } from "../git/identity.js";
+import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
+import { withGitDecodeChannel, withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import { type SettlementReport } from "../settlement/settle.js";
 import {
   claimTaskHolderWithFence,
@@ -109,6 +112,14 @@ export type { TaskId };
 export type { RegionOverlap };
 
 export type Fact = JournalEntry;
+export type ContractHistoryEvent =
+  | Readonly<{ source: "journal"; fact: Fact }>
+  | Readonly<{ source: "dispatch"; dispatch: Dispatch }>;
+export type ContractHistory = Readonly<{
+  id: ContractId;
+  state: SnapshotId;
+  events: readonly ContractHistoryEvent[];
+}>;
 export type ActorId = string;
 export type AttestationVerdict = "satisfied" | "unsatisfied";
 export type Review = ReviewValue;
@@ -204,6 +215,40 @@ export class KeiyakuHandle {
       channel,
       contractId: this.id,
     }));
+  }
+
+  async history(): Promise<ContractHistory> {
+    return withGitDecodeChannel(this.scope, (channel) => withGitReadObservation(
+      this.scope,
+      channel,
+      async (observation) => {
+        const [journals, dispatches] = await Promise.all([
+          observeContractsForAdmissionInObservationAt(observation, [this.id]),
+          readDispatchesAt(observation),
+        ]);
+        const record = journals.journals.get(this.id);
+        if (record === undefined) throw new Error(`missing requested contract observation: ${this.id}`);
+        if (record.state === null) throw new KeiyakuRefused({ kind: "contract-missing", contractId: this.id });
+        const commit = observation.snapshot.commit;
+        if (commit === null) throw new Error("contract history requires a keiyaku-state snapshot");
+        const recordedAt = (event: ContractHistoryEvent): string => (
+          event.source === "journal" ? event.fact.at : event.dispatch.dispatchedAt
+        );
+        const events = [
+          ...record.entries.map((fact) => ({ source: "journal" as const, fact })),
+          ...dispatches
+            .filter((dispatch) => dispatch.contractId === this.id)
+            .map((dispatch) => ({ source: "dispatch" as const, dispatch })),
+        ].sort((left, right) => {
+          const leftAt = recordedAt(left);
+          const rightAt = recordedAt(right);
+          if (leftAt !== rightAt) return leftAt < rightAt ? -1 : 1;
+          if (left.source !== right.source) return left.source === "journal" ? -1 : 1;
+          return 0;
+        });
+        return { id: this.id, state: mintSnapshotId(commit), events };
+      },
+    ));
   }
 
   async guidance(): Promise<string> {

@@ -13,7 +13,7 @@ import {
 } from "../../index.js";
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
-import type { AkumaPromptSource, ParsedAkumaCommand } from "./akuma.js";
+import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
 
 export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; result: CallResult; world: WorldRoot }>
@@ -45,7 +45,10 @@ async function promptBody(command: Readonly<{ prompt: AkumaPromptSource }>, inpu
   return command.prompt.kind === "stdin" ? await input.readStdin() : command.prompt.value;
 }
 
-async function invokeWait(command: Extract<ParsedAkumaCommand, { command: "wait" }>, input: InvokeInput): Promise<AkumaInvocationResult> {
+async function invokeWait(
+  command: Extract<InvokedAkumaCommand, { command: "wait" }>,
+  input: InvokeInput,
+): Promise<AkumaInvocationResult> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
   return {
     kind: "akuma",
@@ -61,7 +64,10 @@ async function invokeWait(command: Extract<ParsedAkumaCommand, { command: "wait"
   };
 }
 
-async function invokeTell(command: ParsedAkumaCommand & Readonly<{ command: "tell"; akuma: string }>, input: InvokeInput): Promise<AkumaInvocationResult> {
+async function invokeTell(
+  command: Extract<InvokedAkumaCommand, { command: "tell" }>,
+  input: InvokeInput,
+): Promise<AkumaInvocationResult> {
   const body = await promptBody(command, input);
   if (command.interrupt) {
     const result = await Keiyaku.interrupt({
@@ -83,7 +89,10 @@ async function invokeTell(command: ParsedAkumaCommand & Readonly<{ command: "tel
   return { kind: "akuma", action: "tell", mode: "ordinary", result, body, ...(alias === undefined ? {} : { alias }) };
 }
 
-async function invokeHistory(command: Extract<ParsedAkumaCommand, { command: "history" }>, input: InvokeInput): Promise<AkumaInvocationResult> {
+async function invokeHistory(
+  command: Extract<InvokedAkumaCommand, { command: "history" }>,
+  input: InvokeInput,
+): Promise<AkumaInvocationResult> {
   const result = await Keiyaku.history({
     path: input.path,
     akuma: command.akuma,
@@ -107,7 +116,10 @@ async function invokeHistory(command: Extract<ParsedAkumaCommand, { command: "hi
   };
 }
 
-async function invokeFork(command: Extract<ParsedAkumaCommand, { command: "fork" }>, input: InvokeInput): Promise<AkumaInvocationResult> {
+async function invokeFork(
+  command: Extract<InvokedAkumaCommand, { command: "fork" }>,
+  input: InvokeInput,
+): Promise<AkumaInvocationResult> {
   return {
     kind: "akuma",
     action: "fork",
@@ -120,7 +132,10 @@ async function invokeFork(command: Extract<ParsedAkumaCommand, { command: "fork"
   };
 }
 
-async function invokeKill(command: Extract<ParsedAkumaCommand, { command: "kill" }>, input: InvokeInput): Promise<AkumaInvocationResult> {
+async function invokeKill(
+  command: Extract<InvokedAkumaCommand, { command: "kill" }>,
+  input: InvokeInput,
+): Promise<AkumaInvocationResult> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
   return {
     kind: "akuma",
@@ -135,7 +150,7 @@ async function invokeKill(command: Extract<ParsedAkumaCommand, { command: "kill"
 }
 
 export async function invokeAkuma(
-  command: ParsedAkumaCommand,
+  command: InvokedAkumaCommand,
   input: InvokeInput,
 ): Promise<AkumaInvocationResult> {
   switch (command.command) {

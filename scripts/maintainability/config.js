@@ -25,4 +25,12 @@ export const FILE_LINE_EXEMPTIONS = Object.freeze([
     file: "src/akuma/body.ts",
     reason: "The Body is the single live supervisor for provider setup, turn consumption, durable control, and owned descendant cleanup.",
   },
+  {
+    file: "src/library/contract.ts",
+    reason: "The package-root Contract handle remains one operations owner.",
+  },
+  {
+    file: "src/cli/invoke.ts",
+    reason: "CLI invocation and adaptation stay one command boundary.",
+  },
 ]);
