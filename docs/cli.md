@@ -283,9 +283,12 @@ reverse-selects an Alias. Life and elapsed time cannot appear in the header
 because they may change after a stream fixes its head. The id already contains
 the Archetype, so the Archetype is never repeated. A one-member wait still
 writes a finished answer as exact bytes with no header. A plural wait prefixes
-every member with that identity header, then the wait body (status spine, exact
-answer bytes, or `failure <diagnostic>`), members blank-line separated, with no
-`came back`, `N of M`, or elapsed clocks. JSON remains `AkumaWaitResult`. The closed marks are `●` running, `○` nonterminal
+each answered member with `✓ came back` and the identity header, then the exact
+answer bytes; a failed member keeps the bare identity header above `failure
+<diagnostic>`; a running member keeps the status spine. Members are blank-line
+separated, and one final `N/M` footer counts settled members over the total.
+No `came back first`, `N of M done`, or elapsed clocks. JSON remains
+`AkumaWaitResult`. The closed marks are `●` running, `○` nonterminal
 idle, `×` killed, `!` stillborn or warning, `│` spine, `⋮` omitted history,
 `⧗` pending tell, `told` effective tell, `✂` interrupted, and `✓`
 answered. Text never prints the storage words

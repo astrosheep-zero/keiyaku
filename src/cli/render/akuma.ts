@@ -252,7 +252,8 @@ function waitMemberText(status: AkumaStatus, context: TextRenderContext, alias?:
   const body = waitText(status, context, alias);
   if (status.life === "running") return body;
   if (status.answer === undefined && status.failure === undefined) return body;
-  return [ruler(identity(status.id, alias), context.columns), body].join("\n");
+  const cameBack = status.answer !== undefined ? "✓ came back " : "";
+  return [`${cameBack}${ruler(identity(status.id, alias), context.columns)}`, body].join("\n");
 }
 
 function waitResultText(
@@ -260,8 +261,10 @@ function waitResultText(
   context: TextRenderContext,
   alias?: string,
 ): string {
-  const render = statuses.length > 1 ? waitMemberText : waitText;
-  return statuses.map((status) => render(status, context, alias)).join("\n\n");
+  if (statuses.length <= 1) return statuses.map((status) => waitText(status, context, alias)).join("\n\n");
+  const body = statuses.map((status) => waitMemberText(status, context, alias)).join("\n\n");
+  const settled = statuses.filter((status) => status.life !== "running").length;
+  return `${body}\n\n${settled}/${statuses.length}`;
 }
 
 function wakeFailure(result: TellResult): string | null {

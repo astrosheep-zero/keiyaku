@@ -151,8 +151,8 @@ test("Akuma status aligns and counts omitted activity", () => {
     action: "wait",
     result: { completion: "all", statuses: [answered, other] },
   });
-  assert.match(plural, /^aku\/worker\/1234abcd ─+\nfirst answer\n\naku\/reviewer\/deadbeef ─+\nsecond answer$/u);
-  assert.doesNotMatch(plural, /came back|N of M/u);
+  assert.match(plural, /^✓ came back aku\/worker\/1234abcd ─+\nfirst answer\n\n✓ came back aku\/reviewer\/deadbeef ─+\nsecond answer\n\n2\/2$/u);
+  assert.doesNotMatch(plural, /came back first|N of M done/u);
   const recorded = {
     kind: "akuma",
     action: "tell" as const,
