@@ -584,7 +584,7 @@ type PlacementRefusal = Readonly<{
 type IntegrationRefusal = Readonly<{
   kind: "integration-failed"
   contractId: ContractId
-  reason: "not-based-on-target" | "conflict"
+  reason: "not-based-on-target" | "unrelated-histories" | "conflict"
   targetHead: SnapshotId
   conflictPaths?: readonly string[]
 }> | Readonly<{

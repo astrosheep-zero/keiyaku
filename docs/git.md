@@ -107,12 +107,16 @@ changes integration bytes does not.
 `requireBranchesToBeUpToDate` is a delivery-attempt policy. When true, a
 targeted tender that does not descend from the observed target head returns
 `integration-failed` with reason `not-based-on-target`; it admits no delivery
-fact. When false, Git performs a three-way squash integration with contract
-`start` as base, observed target head as ours, and tender tree as theirs. It
-uses `merge-tree --write-tree -z --name-only`, then creates one deterministic
-commit whose parent is the observed target head and whose message is the
-tender message. It never checks out or edits an agent worktree. Structured
-conflict paths produce `integration-failed` with reason `conflict`.
+fact. When false, Git computes the common ancestor of the tender `HEAD` and
+observed target head, then performs a three-way squash integration with that
+ancestor as base, observed target head as ours, and tender tree as theirs. A
+rebase therefore changes the integration base through ordinary Git history;
+immutable Contract `start` remains birth topology and is not a mutable delivery
+base. Git uses `merge-tree --write-tree -z --name-only`, then creates one
+deterministic commit whose parent is the observed target head and whose message
+is the tender message. It never checks out or edits an agent worktree. No common
+ancestor produces `integration-failed` with reason `unrelated-histories`;
+structured conflict paths produce reason `conflict`.
 
 Squash integration requires Git 2.38 or a compatible structured
 `merge-tree --write-tree` capability. Git probes that capability without

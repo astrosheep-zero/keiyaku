@@ -156,6 +156,61 @@ test("targeted integration conflict returns structured paths", async () => {
   });
 });
 
+test("rebasing a managed tender onto the current target resolves its integration base", async () => {
+  const { repository, state, worktree } = await targetedContract();
+  writeFileSync(join(repository.path, "shared.txt"), "target\n");
+  repository.run(["add", "shared.txt"]);
+  repository.run(["commit", "--quiet", "-m", "target change"]);
+  const targetHead = repository.run(["rev-parse", "HEAD"]).trim();
+
+  writeFileSync(join(worktree, "shared.txt"), "tender\n");
+  repository.run(["-C", worktree, "add", "shared.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
+  const before = prepareDelivery(repositoryAt(repository.path), preparationCoordinates(state), {
+    title: "Conflicted delivery",
+    requireBranchesToBeUpToDate: false,
+  });
+  assert.equal(before.kind, "refused");
+
+  assert.throws(() => repository.run([
+    "-C", worktree, "rebase", "--onto", targetHead, state.coordinates.start,
+  ]));
+  writeFileSync(join(worktree, "shared.txt"), "tender\n");
+  repository.run(["-C", worktree, "add", "shared.txt"]);
+  repository.run(["-C", worktree, "-c", "core.editor=true", "rebase", "--continue"]);
+  const after = prepareDelivery(repositoryAt(repository.path), preparationCoordinates(state), {
+    title: "Rebased delivery",
+    requireBranchesToBeUpToDate: false,
+  });
+  assert.equal(after.kind, "prepared");
+  if (after.kind !== "prepared") return;
+  assert.equal(after.data.integration.predecessor, targetHead);
+  assert.equal(repository.run(["show", `${after.data.integration.snapshot}:shared.txt`]), "tender\n");
+});
+
+test("targeted integration refuses unrelated histories without invoking merge-tree", async () => {
+  const { repository, state, worktree } = await targetedContract();
+  repository.run(["-C", worktree, "checkout", "--orphan", "unrelated"]);
+  repository.run(["-C", worktree, "rm", "--quiet", "-rf", "."]);
+  writeFileSync(join(worktree, "unrelated.txt"), "unrelated\n");
+  repository.run(["-C", worktree, "add", "unrelated.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "unrelated"]);
+  const targetHead = repository.run(["rev-parse", "refs/heads/main"]).trim();
+  const prepared = prepareDelivery(repositoryAt(repository.path), preparationCoordinates(state), {
+    title: "Unrelated delivery",
+    requireBranchesToBeUpToDate: false,
+  });
+  assert.deepEqual(prepared, {
+    kind: "refused",
+    refusal: {
+      kind: "integration-failed",
+      contractId: state.id,
+      reason: "unrelated-histories",
+      targetHead,
+    },
+  });
+});
+
 test("permissive integration reports unsupported Git while strict policy needs no merge-tree", async () => {
   const { repository, state } = await targetedContract();
   const shim = [

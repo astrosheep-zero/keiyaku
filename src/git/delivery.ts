@@ -28,7 +28,7 @@ export type IntegrationPreparationRefusal =
   | Readonly<{
       kind: "integration-failed";
       contractId: ContractId;
-      reason: "not-based-on-target" | "conflict";
+      reason: "not-based-on-target" | "unrelated-histories" | "conflict";
       targetHead: SnapshotId;
       conflictPaths?: readonly string[];
     }>
@@ -132,6 +132,23 @@ function isAncestor(repository: GitRepository, ancestor: SnapshotId, descendant:
   });
 }
 
+function commonAncestor(repository: GitRepository, left: SnapshotId, right: SnapshotId): SnapshotId | null {
+  const result = runAllowingNonzero(repository, [
+    "merge-base",
+    gitObjectIdForSnapshot(left),
+    gitObjectIdForSnapshot(right),
+  ]);
+  if (result.status === 1) return null;
+  if (result.status !== 0) {
+    throw new GitPlumbingError({
+      stderr: result.stderr,
+      status: result.status,
+      message: "git merge-base failed",
+    });
+  }
+  return mintSnapshotId(result.stdout.toString("utf8").trim());
+}
+
 function supportsMergeTree(repository: GitRepository): boolean {
   return runAllowingNonzero(repository, ["merge-tree", "--write-tree", "--stdin"], "").status === 0;
 }
@@ -225,10 +242,22 @@ function integrationTree(
     }
     tree = tender.tree;
   } else {
+    const base = commonAncestor(repository, tender.head, targetHead);
+    if (base === null) {
+      return {
+        kind: "refused",
+        refusal: {
+          kind: "integration-failed",
+          contractId: input.contractId,
+          reason: "unrelated-histories",
+          targetHead,
+        },
+      };
+    }
     const merged = mergedTree(
       repository,
       input.contractId,
-      input.coordinates.start,
+      base,
       targetHead,
       tender.tree,
     );
