@@ -111,9 +111,10 @@ writes its verbatim diagnostic to stderr and exits `3`.
 
 Akuma text has one shared snapshot presentation across status, wait, call, tell,
 interrupt, and kill; history remains the unbounded browsing surface. Snapshot
-budgets are fixed by semantic kind: `say` at most three lines, `tell` one, and
-every other activity row two. Text clipping and receipt presentation never alter
-the public value serialized by `--json`.
+`said` and `thought` rows occupy at most two terminal lines, including a visible
+truncation marker when clipped. Other semantic-kind budgets remain unchanged.
+Text clipping and receipt presentation never alter the public value serialized
+by `--json`.
 
 Akuma life words are rendered verbatim from the public union. `hung` means the
 latest Body durably recorded provider custody that did not retire; a public
@@ -124,46 +125,30 @@ and return failure status without inventing an external termination attempt.
 
 Snapshot omission is reported by the typed snapshot count; history retains its
 own cursor, gap, and loss metadata. Text is clipped by terminal display width
-without splitting grapheme clusters; quoted
-voice keeps balanced delimiters. A `run` command remains one row and preserves
-recognizable head and tail when clipped; its outcome is shown only when space
-allows. History uses the same presentation vocabulary without snapshot budgets.
-Each displayed activity minute starts one `── HH:MM ──` divider, and every
-event whose rendered clock is that same minute follows without indentation.
-Adjacent minute groups are separated by one blank line. The divider uses line
-glyphs rather than equals signs and adds no event column. Wrapped continuation
-text aligns beneath the first content byte. There is no derived silence or date
-line.
+without splitting grapheme clusters. A `run` command remains one row and
+preserves recognizable head and tail when clipped; its outcome is shown only
+when space allows. Activity rows use a fluid prefix: `<mark> [HH:MM] <label>:`
+when the displayed minute changes, otherwise `<mark> <label>:`. The first row
+adds `[+N omitted]` after its time token only when `omitted` is nonzero. Wrapped
+continuation text uses a two-space hanging indent. There are no standalone
+minute dividers, padded columns, horizontal rules, or decorative grouping lines.
 
 ```text
-── 18:08 ──
-✓ say: previous conclusion
-
-── 18:09 ──
-· say: checking again; the projection still carries
-       activity from the previous Turn
+● running aku/worker/1234abcd (@worker)
+✓ [18:08] say: previous conclusion
+· [18:09] say: checking again; the projection still carries
+  activity from the current Turn
 · think: projection may own the bug
 ⧖ run: $ npm test
 ```
 
-Status, wait, observed call, and kill snapshots end with the current Akuma life
-as an independent footer outside the displayed-minute groups. Nonempty activity
-and the footer have one blank line between them; with no activity, the footer
-directly follows the identity and association facts. The footer reads the public
-status life directly and uses the existing fleet vocabulary: `● running`, `○
-asleep`, `× killed`, `? stranded`, `? hung`, and `? untidy`. A row mark remains local
-to that event, so a failed command followed by `● running` means the command
-failed while the Akuma continues running. Ordinary and interrupt tell output
-omits the footer because it is an input mutation receipt. History also has no
-life footer because it carries no current status observation. The header, JSON,
-timeline rows, and history model remain unchanged.
-
-```text
-── 18:09 ──
-! run: $ npm test
-
-● running
-```
+Status, wait, observed call, and kill snapshots begin with the current Akuma life
+glyph/word followed by the exact physical identity and optional alias on one
+compact line. Contract and mutation facts follow as separate factual lines.
+Ordinary and interrupt tell output retain identity but omit current life;
+history likewise carries no life observation. The life vocabulary remains `●
+running`, `○ asleep`, `× killed`, `? stranded`, `? hung`, and `? untidy`. The
+JSON values, timeline row semantics, and history model remain unchanged.
 
 Post-admission physical or settlement failures remain inside the accepted
 object as typed lags. Text and JSON expose them without changing the Contract

@@ -8,7 +8,8 @@ Status and history read the retained Heart timeline once, project one typed
 Turn ledger in persisted sequence order, then apply their snapshot or cursor
 policy. They do not join outcomes by timestamp or read a second Turn
 projection. A snapshot is current actionable observation: an open Turn exposes
-only that Turn's bounded tail, active tools, and actionable pending tells; with
+only that Turn's tail-three plus independent pre-tail voice-three union, active
+tools, and actionable pending tells; with
 no open Turn it exposes only the latest outcome and actionable pending tells.
 It never samples activity across closed Turns. `history` exposes pages of the
 complete retained ledger in global order.
@@ -72,7 +73,7 @@ does not imply delivery, provider observation, or turn entry. Delivery and
 provider receipts fold into ordinary Akuma observation as one `pending` or
 `told` tell row at the admission's original timeline position. Tell admission
 is Body-scoped and does not imply entry into a Turn. Pending tell rows therefore
-remain visible outside the open-Turn tail because they can still change the
+remain visible outside the open-Turn selection because they can still change the
 caller's action; settled tell rows are visible through the current Turn or
 history like other settled activity. Text and
 JSON expose the same two-state row and no provider fence, five-stage

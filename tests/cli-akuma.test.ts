@@ -109,6 +109,12 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   const text = renderAkumaText(command, result);
   assert.match(text, /running tests/u);
   assert.match(text, /same minute/u);
+  const snapshotLines = text.split("\n");
+  assert.equal(snapshotLines[0], "● running aku/worker/1234abcd");
+  assert.equal(text.match(/● running/gu)?.length, 1);
+  assert.match(snapshotLines[1]!, /^· \[\d{2}:\d{2}\] \[\+12 omitted\] note: /u);
+  assert.match(snapshotLines[2]!, /^· think: /u);
+  assert.equal(snapshotLines.some((line) => line.startsWith("──") || line === ""), false);
   assert.equal((akumaJsonValue(command, result) as { status: typeof status }).status.timeline.omitted, 12);
   assert.equal(renderAkumaText(command, {
     kind: "akuma",
@@ -121,7 +127,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
     alias: "@review",
     result: { completion: "all", statuses: [{ status }] },
   });
-  assert.equal(aliasedWait.split("\n")[0], "aku/worker/1234abcd (@review)");
+  assert.equal(aliasedWait.split("\n")[0], "● running aku/worker/1234abcd (@review)");
   const answered = {
     ...status,
     life: "asleep" as const,
@@ -212,14 +218,12 @@ test("Akuma snapshot rows use fixed semantic line budgets", () => {
       timeline,
     };
     const rendered = renderAkumaText(command, { kind: "akuma", action: "status", status: { status } }, { columns: 34, color: false }).split("\n");
-    const footer = rendered.findIndex((line) => line === "● running");
-    assert.ok(footer > 2);
-    return rendered.slice(2, footer - 1);
+    return rendered.slice(1);
   };
   const rows: readonly Readonly<{ kind: import("../src/akuma/index.js").ActivityRow["kind"]; lines: number; row: import("../src/akuma/index.js").ActivityRow }>[] = [
     {
       kind: "said",
-      lines: 3,
+      lines: 2,
       row: { kind: "said", sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", text: longText },
     },
     {
@@ -343,11 +347,13 @@ test("Akuma voice is bounded and active tools carry the live mark", () => {
     } },
   }, { columns: 30, color: false });
   const narrowLines = narrow.split("\n");
-  const voiceStart = narrowLines.findIndex((line) => line.startsWith("· say: "));
+  const voiceStart = narrowLines.findIndex((line) => /^· \[\d{2}:\d{2}\] say: /u.test(line));
   assert.ok(voiceStart >= 0);
-  const voice = narrowLines.slice(voiceStart, narrowLines.indexOf("", voiceStart)).join("\n");
+  const voice = narrowLines.slice(voiceStart, voiceStart + 2).join("\n");
   assert.match(voice, /alpha/u);
   assert.match(voice, /…$/u);
+  assert.equal(voice.split("\n").length, 2);
+  assert.match(voice.split("\n")[1]!, /^  /u);
 });
 
 test("Akuma snapshot life uses the fleet vocabulary independently of activity", () => {
@@ -481,8 +487,8 @@ test("Akuma history distinguishes open active tools from closed unsettled tools"
     historyResult: { kind: "history" as const, id: akuma, history },
   };
   const text = renderAkumaText(command, result);
-  assert.match(text, /⧖ search: active/u);
-  assert.match(text, /\? search: unsettled/u);
+  assert.match(text, /⧖ \[\d{2}:\d{2}\] search: active/u);
+  assert.match(text, /\? \[\d{2}:\d{2}\] search: unsettled/u);
 });
 
 test("Akuma header shows a complete associated Contract without truncating identity", () => {
@@ -500,7 +506,7 @@ test("Akuma header shows a complete associated Contract without truncating ident
     }, contractId: "kei/provider-core-review" },
   }, { columns: 28, color: false });
   const lines = text.split("\n");
-  assert.equal(lines[0], "aku/worker/1234abcd");
+  assert.equal(lines[0], "● running aku/worker/1234abcd");
   assert.equal(lines[1], "contract kei/provider-core-review");
 });
 
@@ -522,7 +528,7 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
     assert.ok(line !== undefined);
     return line;
   };
-  assert.match(runLine(text), /^⧖ run: \$ npm test/u);
+  assert.match(runLine(text), /^⧖ \[\d{2}:\d{2}\] run: \$ npm test/u);
   assert.match(runLine(text), /….*final\.json$/u);
 
   const completedText = renderAkumaText(command, {
@@ -540,7 +546,7 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
   const completed = runLine(completedText);
   assert.match(completed, /\$ npm test/u);
   assert.match(completed, /….*inal\.json — 41s · exit 1$/u);
-  assert.match(completed, /^! run:/u);
+  assert.match(completed, /^! \[\d{2}:\d{2}\] run:/u);
   assert.match(completedText, /● running/u);
 
   const unicode = runLine(renderAkumaText(command, {

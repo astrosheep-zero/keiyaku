@@ -12,7 +12,7 @@ function identity(id: string, alias?: string): string {
   return `${id}${alias === undefined ? "" : ` (${alias})`}`;
 }
 
-function lifeFooter(life: AkumaStatusView["status"]["life"]): string {
+function lifeLabel(life: AkumaStatusView["status"]["life"]): string {
   if (life === "running") return "● running";
   if (life === "asleep") return "○ asleep";
   if (life === "killed") return "× killed";
@@ -48,7 +48,7 @@ function mark(row: ActivityRow | SnapshotRow): "·" | "✓" | "!" | "⧖" | "⧗
 
 function rowText(row: ActivityRow | SnapshotRow): Readonly<{ text: string; lines: number; middle?: true; suffix?: string }> {
   if (row.kind === "said" || row.kind === "thought" || row.kind === "note" || row.kind === "call" || row.kind === "tell") {
-    return { text: row.text, lines: row.kind === "said" ? 3 : row.kind === "tell" || row.kind === "call" ? 1 : 2 };
+    return { text: row.text, lines: row.kind === "said" || row.kind === "thought" ? 2 : row.kind === "tell" || row.kind === "call" ? 1 : 2 };
   }
   if (row.kind === "outcome") return row.outcome.kind === "answered"
     ? { text: row.outcome.answer, lines: 3 }
@@ -58,45 +58,45 @@ function rowText(row: ActivityRow | SnapshotRow): Readonly<{ text: string; lines
   return { text: repr.text, lines: 2, ...(repr.overflow === "middle-ellipsis" ? { middle: true as const } : {}), ...(repr.suffix === undefined ? {} : { suffix: repr.suffix }) };
 }
 
-function renderRow(row: ActivityRow | SnapshotRow, context: TextRenderContext, history: boolean): readonly string[] {
+function renderRow(row: ActivityRow | SnapshotRow, context: TextRenderContext, history: boolean, first: string): readonly string[] {
   const value = rowText(row);
-  const first = `${mark(row)} ${label(row)}: `;
   if (value.middle === true) {
     const suffix = value.suffix ?? "";
     return [`${first}${truncateMiddleDisplayText(value.text, Math.max(1, context.columns - first.length - suffix.length))}${suffix}`];
   }
   return renderBoundedTextBlock(value.text, {
     first,
-    continuation: " ".repeat(first.length),
+    continuation: "  ",
     columns: context.columns,
     lines: history ? Number.MAX_SAFE_INTEGER : value.lines,
     ...("truncated" in row && row.truncated === true ? { truncated: true } : {}),
   });
 }
 
-function groupedRows(rows: readonly (ActivityRow | SnapshotRow)[], context: TextRenderContext, history = false): readonly string[] {
+function groupedRows(rows: readonly (ActivityRow | SnapshotRow)[], context: TextRenderContext, history = false, omitted = 0): readonly string[] {
   const visible = rows.filter((row) => row.kind !== "turn");
   const lines: string[] = [];
   let previousClock: string | undefined;
-  for (const row of visible) {
+  for (const [index, row] of visible.entries()) {
     const at = clock(row.at);
-    if (previousClock !== undefined && at !== previousClock) lines.push("");
-    if (at !== previousClock) lines.push(`── ${at} ──`);
-    lines.push(...renderRow(row, context, history));
+    const changed = previousClock === undefined || at !== previousClock;
+    const omission = index === 0 && omitted > 0 ? ` [+${omitted} omitted]` : "";
+    const prefix = `${mark(row)}${changed ? ` [${at}]` : ""}${omission} ${label(row)}: `;
+    lines.push(...renderRow(row, context, history, prefix));
     previousClock = at;
   }
   return lines;
 }
 
-function snapshotText(view: AkumaStatusView, context: TextRenderContext, options: Readonly<{ alias?: string; facts?: readonly string[]; lifeFooter?: boolean }> = {}): string {
+function snapshotText(view: AkumaStatusView, context: TextRenderContext, options: Readonly<{ alias?: string; facts?: readonly string[]; showLife?: boolean }> = {}): string {
   const snapshot = view.status.timeline;
   const rows: readonly (ActivityRow | SnapshotRow)[] = snapshot.kind === "idle" && snapshot.outcome !== undefined
     ? [...snapshot.entries.map((entry) => entry.row), snapshot.outcome].sort((left, right) => left.sequence - right.sequence)
     : snapshot.entries.map((entry) => entry.row);
   const facts = [...(view.contractId === undefined ? [] : [`contract ${view.contractId}`]), ...(options.facts ?? [])];
-  const activity = groupedRows(rows, context);
-  const footer = options.lifeFooter === false ? [] : [...(activity.length === 0 ? [] : [""]), lifeFooter(view.status.life)];
-  return [identity(view.status.id, options.alias), ...facts, ...activity, ...footer].join("\n");
+  const activity = groupedRows(rows, context, false, snapshot.omitted);
+  const header = options.showLife === false ? identity(view.status.id, options.alias) : `${lifeLabel(view.status.life)} ${identity(view.status.id, options.alias)}`;
+  return [header, ...facts, ...activity].join("\n");
 }
 
 function historyText(command: Extract<ParsedCommand, { command: "history" }>, result: Extract<AkumaInvocationResult, { action: "history" }>, context: TextRenderContext): string {
@@ -108,7 +108,7 @@ function historyText(command: Extract<ParsedCommand, { command: "history" }>, re
 
 function tellText(result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>, context: TextRenderContext): string {
   const facts = typeof result.result.tell.wake === "string" ? [] : [`! error ${safeText(result.result.tell.wake.diagnostic)}`];
-  return snapshotText(result.result.observation, context, { ...(result.alias === undefined ? {} : { alias: result.alias }), facts, lifeFooter: false });
+  return snapshotText(result.result.observation, context, { ...(result.alias === undefined ? {} : { alias: result.alias }), facts, showLife: false });
 }
 
 function dispatchLines(stage: DispatchStage): readonly string[] {
@@ -133,7 +133,7 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
     case "call": return callText(result, context);
     case "status": return snapshotText(result.status, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) });
     case "wait": return result.result.statuses.map((status) => snapshotText(status, context, { ...(result.alias === undefined ? {} : { alias: result.alias }) })).join("\n\n");
-    case "tell": return result.mode === "ordinary" ? tellText(result, context) : snapshotText(result.result.observation, context, { ...(result.alias === undefined ? {} : { alias: result.alias }), lifeFooter: false });
+    case "tell": return result.mode === "ordinary" ? tellText(result, context) : snapshotText(result.result.observation, context, { ...(result.alias === undefined ? {} : { alias: result.alias }), showLife: false });
     case "history": return historyText(command as Extract<ParsedCommand, { command: "history" }>, result, context);
     case "fork": {
       if (result.receipt.kind !== "forked") return result.receipt.kind === "unknown-history" ? `${result.receipt.at} has no matching retained answered turn` : result.receipt.kind === "provider-cannot-fork" ? `${result.receipt.provider} cannot fork` : result.receipt.diagnostic;

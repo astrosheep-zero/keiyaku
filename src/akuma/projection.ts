@@ -7,6 +7,7 @@ import type {
 } from "./heart/index.js";
 
 const DEFAULT_TAIL = 3;
+const DEFAULT_VOICE = 3;
 
 export type TurnOutcome = TurnEndFact["outcome"];
 
@@ -332,13 +333,20 @@ function entries<Row extends SnapshotRow>(rows: readonly Row[]): readonly Activi
 }
 
 /** Select one current Turn, one latest outcome, or no focus; pending tells stay actionable. */
-export function selectSnapshot(ledger: TurnLedger, budget: Readonly<{ tail: number }> = { tail: DEFAULT_TAIL }): ActivitySnapshot {
+export function selectSnapshot(ledger: TurnLedger, budget: Readonly<{ tail: number; voice?: number }> = { tail: DEFAULT_TAIL, voice: DEFAULT_VOICE }): ActivitySnapshot {
   if (ledger.turns.length === 0 && !ledger.rows.some((row) => row.kind === "tell")) return { kind: "unborn", entries: [], omitted: 0 };
   const pending = ledger.rows.filter((row): row is Extract<ActivityRow, { kind: "tell" }> => row.kind === "tell" && row.state === "pending");
   if (ledger.openTurn !== undefined) {
     const window = ledger.openTurn.rows;
+    const tailCount = Math.max(0, budget.tail);
+    const tail = tailCount === 0 ? [] : window.slice(-tailCount);
+    const tailSet = new Set(tail);
+    const voiceCount = Math.max(0, budget.voice ?? DEFAULT_VOICE);
+    const voiceCandidates = window
+      .filter((row) => !tailSet.has(row) && (row.kind === "said" || row.kind === "thought"));
+    const voice = voiceCount === 0 ? [] : voiceCandidates.slice(-voiceCount);
     const active = window.filter((row) => row.kind === "tool" && row.state === "active");
-    const selected = new Set<ActivityRow>([...window.slice(-Math.max(0, budget.tail)), ...active, ...pending]);
+    const selected = new Set<ActivityRow>([...tail, ...voice, ...active, ...pending]);
     const visible = ledger.rows
       .filter((row) => selected.has(row))
       .filter((row): row is OpenSnapshotRow => row.kind !== "turn" && row.kind !== "outcome" && !(row.kind === "tool" && row.state === "unsettled"));

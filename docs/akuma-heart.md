@@ -27,8 +27,12 @@ remaining active rows to `unsettled` in the closed arm, without adding a
 completion fact or `ToolResult`.
 Its snapshot frontier is one open Turn, otherwise the latest closed outcome,
 or unborn. Pending tells are the body-scoped actionable exception to that Turn
-frontier. Snapshot omission is a read-time tail count; history alone applies
-cursors and owns retained-boundary, gap, and loss interpretation. The projector
+frontier. For an open Turn, the selector retains the newest three rows as its
+tail and independently retains the newest three `said` or `thought` rows
+strictly before that tail. Every active tool and pending tell is pinned outside
+both budgets; the union is deduplicated, restored to timeline order, and its
+omitted count covers only hidden open-Turn rows. History alone applies cursors
+and owns retained-boundary, gap, and loss interpretation. The projector
 may fold a final assistant row whose complete bytes exactly equal its answered
 Turn outcome, but it never changes or creates Heart facts.
 
@@ -162,16 +166,12 @@ both timestamps, derives completed duration, projects each tell as exactly one
 produces semantic rows before any budget is applied. A completed event whose
 start was pruned is a settled row without duration; a retained start without
 completion is in flight. The snapshot selector pins every in-flight tool and
-every pending tell outside its budget, selects the newest three settled
-semantic rows, and additionally retains the newest five `say` or `thought`
-rows even when they precede that tail. It deduplicates the union and returns
-semantic order as typed `row | gap` entries. Each hidden interval stays at its
-actual position and counts folded semantic rows, not stored events or sequence
-differences. A one-row interval is expanded as its original row; only two or
-more hidden rows become `gap`. `status()` and `wait()` use this one selector.
-Action feedback uses the same fold and selector with only the tail-three settled
-budget while retaining the same in-flight and pending pins. Full history pages
-do not apply snapshot pinning or category budgets.
+every pending tell outside the independent tail-three and voice-three budgets.
+Voice inside the tail does not consume the voice budget; `note`, `call`, `tell`,
+tool, and outcome rows are not voice candidates. It deduplicates the union,
+restores timeline order, and reports only hidden open-Turn rows as omitted.
+`status()` and `wait()` use this one selector. Full history pages do not apply
+snapshot pinning or category budgets.
 
 The shared timeline is the sole retained Turn projection. Its `turn-start` and
 `turn-end` rows provide answer, failure, and boundary order. The fork-point

@@ -284,46 +284,24 @@ files.
 ## Akuma Text Surface
 
 Akuma text is one pure projection over public values. Provider adapters retain
-facts, the Akuma timeline projection folds and selects rows, and the CLI only
-lays those rows onto one ruler and spine. No CLI branch repairs, reselects, or
-reinterprets activity. JSON exposes the same public value with complete ISO
-`at` values and no text-only time suppression.
+facts, the Akuma timeline projection folds and selects rows, and the CLI chooses
+which public result a command presents without repairing, reselecting, or
+reinterpreting activity. JSON exposes that same value with complete ISO `at`
+values and no text-only time suppression.
 
-The header is fixed for the complete rendering: it carries
-the complete AkuId, the optional frozen Alias in v3's `(@alias)` form, and the
-complete `kei/...` Contract ID when the Akuma has a Dispatch association. It
-never reverse-selects an Alias. Life and elapsed time do not appear in the
-identity header. The id already contains the Archetype, so the Archetype is
-never repeated. A one-member wait still
-writes a finished answer as exact bytes with no header. A plural wait prefixes
-each answered member with `✓ came back` and the identity header, then the exact
-answer bytes; a failed member keeps the bare identity header above `failure
-<diagnostic>`; a running member keeps the status spine. Members are blank-line
-separated, and one final `N/M` footer counts settled members over the total.
-No `came back first`, `N of M done`, or elapsed clocks. JSON remains
-`AkumaWaitResult`. Status, wait, observed call, and kill text ends with the
-public Akuma life as a separate footer outside the activity minute groups: `●
-running`, `○ asleep`, `× killed`, `? stranded`, `? hung`, or `? untidy`. This footer
-and each event row state independent facts; `! run` followed by `● running`
-means that command failed while the Akuma continues running. With activity
-present, one blank line separates the footer; with no activity, it directly
-follows the header facts. Ordinary and interrupt tell output omits the life
-footer because it is scoped to its input mutation and wake or interrupt result.
-History has no current life and therefore no footer. Text never prints the
-storage words `retained`, `latest`, `body`, `heart`, or `turn`.
+Status, wait, observed call, and kill compose the shared snapshot with a compact
+first line of public life plus complete AkuId and optional frozen Alias. Contract
+and mutation facts remain separate lines below it. Ordinary and interrupt tell
+compose the refreshed snapshot with identity but no current-life claim; history
+does the same for its page, while `history --last` writes exact answer bytes.
+The id already contains the Archetype and the CLI never reverse-selects an
+Alias. Text never prints the storage words `retained`, `latest`, `body`,
+`heart`, or `turn`.
 
-```text
-aku/worker/1234abcd (@review)
-contract kei/provider-core
-── 09:31 ──
-! run: $ npm test — 41s · exit 1
-
-● running
-```
-
-Shared Akuma presentation and snapshot budgets are owned by
-[cli-output.md](cli-output.md); this command chapter owns only what each verb
-means and which public result it presents.
+Shared activity-row layout, snapshot budgets, clipping, inline minute tokens,
+and omission placement are owned by [cli-output.md](cli-output.md). This command
+chapter delegates that presentation: it adds no divider, padded column, blank
+minute grouping, or life footer.
 
 Tell remains one input action. Text presents the refreshed shared snapshot;
 only a wake or interrupt failure adds an error line. The current tell appears
@@ -356,29 +334,11 @@ suffix. One file change prints its operation and path. Multiple changes print
 only when every change has a diffstat. Missing optional provider facts shorten
 the row and never produce placeholders.
 
-History is the only text surface with an index column. The index is a visible
-activity cursor and exists only to be copied into the next command. The three
-navigation laws are: every cursor was already visible, direction words match
-caller intent, and every recoverable omission line contains a complete command.
-
-```text
-── aku/worker/1234abcd ── history ─────────────────────────
-   ⋮ 32 earlier · keiyaku history aku/worker/1234abcd --before 37
-  37 09:31 │ say      narrowing the failing suite
-  38       │ run      $ npm test — 41s · exit 1
-
-── aku/worker/1234abcd ── history ── since 43 ─────────────
-  44 09:41 │ say      checking the leash timeout
-```
-
-A page that reaches a pruned lower boundary prints exactly `⋮ earlier history
-no longer kept`. A `--since` page with no rows prints exactly `⋮ no activity
-since <index>`. Exact status prints `⋮ +<count>` at the spine column when its
-snapshot omits semantic rows; each typed gap stays at its actual spine
-position and does not invent a history cursor. Answer boundaries name the
-complete AkuId in `keiyaku history <AkuId> --last`; native provider history ids
-never become CLI selectors. No text asks the caller to calculate a cursor.
-`history --last` bypasses this frame and writes only exact answer bytes.
+History pages retain the same public row order and unbounded row text, rendered
+through the shared inline-time presentation without a current-life observation.
+Answer boundaries name the complete AkuId in `keiyaku history <AkuId> --last`;
+native provider history ids never become CLI selectors. `history --last`
+bypasses the page and writes only exact answer bytes.
 
 ## Product Boundary
 
