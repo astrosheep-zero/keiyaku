@@ -13,18 +13,26 @@ import type {
   TaskPage,
   TaskQueryResult,
   TaskQueryRow,
+  TaskRef,
+  TaskRefusal,
   TaskRow,
+  TaskTreeNode,
   TaskUpdateResult,
   TaskView,
 } from "../../task/index.js";
 import type { TaskInvocationResult, TaskWorldObservation } from "../commands/task-invoke.js";
 import type { ParsedTaskCommand } from "../commands/task.js";
+import { outcomeLines, receiptPayload } from "./receipt.js";
+import { displayColumns, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskNamespaceResult;
-type TaskDocumentChanges = Extract<TaskCompositionResult, { kind: "accepted" }>["documentChanges"];
-type TaskFailure =
-  | Extract<TaskMutationResult, { kind: "refused" | "retry" }>
-  | Extract<TaskCompositionResult, { kind: "refused" }>;
+type TaskFailure = Extract<TaskMutationResult, { kind: "refused" | "retry" }> | Extract<TaskCompositionResult, { kind: "refused" }>;
+type TaskWord = TaskRow["disposition"] | TaskView["state"] | TaskRef["state"];
+type TaskEntity = Readonly<{ id: string; priority: number | null; word: TaskWord; title: string | null }>;
+type RefusalProjection = Readonly<{ line: string; diagnostic?: string }>;
+type ComposeStop = Extract<TaskCompositionResult, { kind: "incomplete" }>["stopped"];
+
+const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 
 function isWorldObservation(result: TaskInvocationResult): result is TaskWorldObservation {
   return typeof result === "object" && result !== null
@@ -32,104 +40,233 @@ function isWorldObservation(result: TaskInvocationResult): result is TaskWorldOb
     && (result.kind === "present" || result.kind === "absent" || result.kind === "failed");
 }
 
-function row(value: TaskRow | TaskView): string {
-  const disposition = "disposition" in value ? value.disposition : value.state;
-  return `${value.id} - P${value.priority} - ${disposition} - ${value.title}`;
+function markFor(word: string): string {
+  if (word === "in_progress") return "●";
+  if (word === "ready" || word === "open") return "○";
+  if (word === "blocked" || word === "missing") return "!";
+  if (word === "on_hold") return "·";
+  if (word === "done") return "✓";
+  if (word === "drop") return "×";
+  return "?";
 }
-function changes(values: TaskDocumentChanges): string {
-  return values.map((change) => change.documentDiff).filter((diff) => diff.length > 0).join("\n");
+
+function priorityText(priority: number | null): string {
+  return priority === null ? "P?" : `P${priority}`;
 }
-function failure(result: TaskFailure): string {
-  return result.kind === "retry" ? `retry ${JSON.stringify(result.reason)}` : `refused ${JSON.stringify(result.refusal)}`;
+
+function scanUnit(id: string, priority: number | null, word: string): string {
+  return `${markFor(word)} ${id} · ${priorityText(priority)} ${word}`;
 }
-function renderListRow(item: TaskRow | BlockedTaskRow | TaskQueryRow): readonly string[] {
-  const lines = [row(item)];
+
+function entityLines(entity: TaskEntity, columns: number, indent = ""): readonly string[] {
+  const scan = `${indent}${scanUnit(entity.id, entity.priority, entity.word)}`;
+  if (entity.title === null || entity.title.length === 0) return [scan];
+  const title = safeText(entity.title);
+  const inline = `${scan} — ${title}`;
+  if (displayColumns(inline) <= columns) return [inline];
+  return [`${scan} —`, ...renderTextBlock(title, `${indent}  `, columns)];
+}
+
+function listEntity(item: TaskRow): TaskEntity {
+  return { id: item.id, priority: item.priority, word: item.disposition, title: item.title };
+}
+
+function stateEntity(task: TaskView | TaskRef & { priority?: number | null }): TaskEntity {
+  return { id: task.id, priority: "priority" in task && task.priority !== undefined ? task.priority : null, word: task.state, title: task.title };
+}
+
+function projectRefusal(refusal: TaskRefusal): RefusalProjection {
+  if (refusal.kind === "task-missing") return { line: `task-missing ${refusal.taskId}` };
+  if (refusal.kind === "invalid-lifecycle-transition") {
+    return { line: `invalid-lifecycle-transition ${refusal.taskId} ${refusal.state} ${refusal.verb}` };
+  }
+  if (refusal.kind === "invalid-namespace-context") return { line: `invalid-namespace-context ${refusal.path}` };
+  if (refusal.kind === "relation-owned-by-other") {
+    return { line: `relation-owned-by-other ${refusal.taskId} ${refusal.related} ${refusal.declaringTask}` };
+  }
+  return { line: refusal.kind, diagnostic: refusal.diagnostic };
+}
+
+function appendDiagnostic(lines: string[], diagnostic: string | undefined): void {
+  if (diagnostic !== undefined) receiptPayload(lines, "diagnostic", diagnostic);
+}
+
+function renderFailure(verb: string, result: TaskFailure, columns: number): string {
+  if (result.kind === "retry") {
+    return [...outcomeLines("?", verb, "retry", undefined, columns), result.reason].join("\n");
+  }
+  const lines = [...outcomeLines("!", verb, "refused", undefined, columns)];
+  const facts = projectRefusal(result.refusal);
+  lines.push(facts.line);
+  appendDiagnostic(lines, facts.diagnostic);
+  return lines.join("\n");
+}
+
+function edge(label: string, ref: TaskRef, mark?: string): string {
+  const prefix = mark === undefined ? `  ${label}` : `  ${mark} ${label}`;
+  return `${prefix} ${ref.id} · ${ref.state}`;
+}
+
+function pageHeading(view: string, page: TaskPage<TaskRow | TaskQueryRow>): string {
+  if (page.truncated) return `${view} ${page.returned} of ${page.total} · limit ${page.returned}`;
+  return `${view} ${page.returned}`;
+}
+
+function renderListRow(item: TaskRow | BlockedTaskRow | TaskQueryRow, columns: number): readonly string[] {
+  const lines = [...entityLines(listEntity(item), columns)];
   if ("blockers" in item) {
-    for (const blocker of item.blockers) lines.push(`  needs ${blocker.id} (${blocker.state})`);
+    for (const blocker of item.blockers) lines.push(`  needs ${blocker.id} · ${blocker.state}`);
   }
   return lines;
 }
-function pageHeading(command: ParsedTaskCommand, page: TaskPage<TaskRow | TaskQueryRow>): string {
-  const count = page.truncated ? `${page.returned} of ${page.total}` : `${page.returned}`;
-  return `${count} ${command.action}${page.truncated ? ` · limit ${page.returned}` : ""}`;
+
+function renderRows(command: ParsedTaskCommand, result: TaskList | BlockedTaskList | TaskQueryResult, columns: number): string {
+  if (result.kind !== "accepted") return renderFailure(command.action, result, columns);
+  const view = command.action === "ls" ? "tasks" : command.action;
+  return [pageHeading(view, result.value), ...result.value.rows.flatMap((item) => renderListRow(item, columns))].join("\n");
 }
-function renderRows(command: ParsedTaskCommand, result: TaskList | BlockedTaskList | TaskQueryResult): string {
-  if (result.kind !== "accepted") return failure(result);
-  return [pageHeading(command, result.value), ...result.value.rows.flatMap(renderListRow)].join("\n");
-}
-function renderShow(result: TaskDetail | TaskMutationResult): string {
-  if ("kind" in result) return result.kind === "accepted" ? row(result.value) : failure(result);
-  const task = result.task, lines = [
-    row(task), `namespace: ${task.namespace.join("/") || "root"}`,
-    ...(task.createdBy === undefined ? [] : [`createdBy: ${task.createdBy}`]),
-    `createdAt: ${task.createdAt}`, `updatedAt: ${task.updatedAt}`, `note: ${task.note}`,
+
+function renderShow(result: TaskDetail | TaskMutationResult, columns: number): string {
+  if ("kind" in result) return result.kind === "accepted" ? entityLines(stateEntity(result.value), columns).join("\n") : renderFailure("show", result, columns);
+  const task = result.task;
+  const lines = [
+    ...entityLines(stateEntity(task), columns),
+    ...renderTextBlock(`created ${task.createdAt} · updated ${task.updatedAt}`, "", columns),
+    ...(task.createdBy === undefined ? [] : [`created-by ${task.createdBy}`]),
   ];
-  for (const [label, values] of [
-    ["needs", task.needs], ["blockers", result.blockers.map((item) => item.id)], ["blocks", result.blocks.map((item) => item.id)],
-    ["children", result.children.map((item) => item.id)], ["supersedes", task.supersedes],
-    ["superseded by", result.supersededBy.map((item) => item.id)], ["related", result.related.map((item) => item.id)],
-  ] as const) if (values.length > 0) lines.push(`${label}: ${values.join(", ")}`);
-  if (task.parent !== null) lines.push(`parent: ${task.parent}`);
-  if (task.body.length > 0) lines.push("", task.body);
+  for (const need of result.needs.filter((item) => !item.released)) lines.push(edge("needs", need, "!"));
+  for (const need of result.needs.filter((item) => item.released)) lines.push(edge("needs", need, "✓"));
+  for (const item of result.blocks) lines.push(edge("blocks", item));
+  if (result.parent !== null) lines.push(edge("parent", result.parent));
+  for (const item of result.children) lines.push(edge("child", item));
+  for (const item of result.supersedes) lines.push(edge("supersedes", item));
+  for (const item of result.supersededBy) lines.push(edge("superseded-by", item));
+  for (const item of result.related) lines.push(edge("related", item));
+  if (task.note.length > 0) receiptPayload(lines, "note", task.note);
+  if (task.body.length > 0) receiptPayload(lines, "body", task.body);
   return lines.join("\n");
 }
-function treeLines(node: Extract<TaskDecompositionTree, { kind: "accepted" }>["value"], depth = 0): readonly string[] {
-  const marker = node.cycle ? "cycle" : node.task.state;
-  const line = `${"  ".repeat(depth)}${node.task.id} - ${node.task.priority === null ? "P?" : `P${node.task.priority}`} - ${marker}${node.task.title === null ? "" : ` - ${node.task.title}`}`;
-  return [line, ...node.children.flatMap((child) => treeLines(child, depth + 1))];
+
+function treeLines(node: TaskTreeNode, columns: number, depth = 0): readonly string[] {
+  const indent = "  ".repeat(depth);
+  if (node.cycle === true) return [`${indent}! ${node.task.id} · cycle`];
+  return [
+    ...entityLines(stateEntity(node.task), columns, indent),
+    ...node.children.flatMap((child) => treeLines(child, columns, depth + 1)),
+  ];
 }
+
 function doctorIssue(issue: TaskDoctorIssue): string {
-  if (issue.kind === "missing-target") return `${issue.taskId}: ${issue.relation} target missing: ${issue.target}`;
-  if (issue.kind === "self-relation") return `${issue.taskId}: self ${issue.relation}`;
-  return `${issue.relation} cycle: ${issue.tasks.join(" -> ")}`;
+  if (issue.kind === "missing-target") return `! missing-target ${issue.taskId} ${issue.relation} ${issue.target}`;
+  if (issue.kind === "self-relation") return `! self-relation ${issue.taskId} ${issue.relation}`;
+  return `! cycle ${issue.relation} ${issue.tasks.join(" ")}`;
 }
 
-export function renderTaskText(command: ParsedTaskCommand, result: TaskInvocationResult): string {
-  if (isWorldObservation(result)) return renderTaskWorldObservation(command, result);
-  return renderTaskValue(command, result);
+function renderDoctor(report: TaskDoctorReport): string {
+  if (report.issues.length === 0) return "healthy";
+  const noun = report.issues.length === 1 ? "issue" : "issues";
+  return [`${report.issues.length} ${noun}`, ...report.issues.map(doctorIssue)].join("\n");
 }
 
-function renderTaskWorldObservation(command: ParsedTaskCommand, result: TaskWorldObservation): string {
-  if (result.kind === "absent") return "task world absent";
-  if (result.kind === "failed") return `task world failed\n  ${result.failure.message}`;
-  return renderTaskValue(command, result.value);
+function renderAcceptedMutation(verb: string, task: TaskView, columns: number, documentDiff?: string): string {
+  const lines = [
+    ...outcomeLines("✓", verb, "accepted", task.id, columns),
+    ...entityLines(stateEntity(task), columns),
+  ];
+  if (documentDiff !== undefined) receiptPayload(lines, "diff", documentDiff);
+  return lines.join("\n");
 }
 
-function renderMutation(command: ParsedTaskCommand, result: TaskMutationResult | TaskUpdateResult): string {
-  if (result.kind !== "accepted") return failure(result);
+function renderMutation(command: ParsedTaskCommand, result: TaskMutationResult | TaskUpdateResult, columns: number): string {
+  if (result.kind !== "accepted") return renderFailure(command.action, result, columns);
   if (command.action !== "update") {
-    return row((result as Extract<TaskMutationResult, { kind: "accepted" }>).value);
+    return renderAcceptedMutation(command.action, (result as Extract<TaskMutationResult, { kind: "accepted" }>).value, columns);
   }
   const value = (result as Extract<TaskUpdateResult, { kind: "accepted" }>).value;
-  return [row(value.task), value.documentDiff].filter((line) => line.length > 0).join("\n");
+  return renderAcceptedMutation(command.action, value.task, columns, value.documentDiff);
 }
 
-function renderTaskValue(command: ParsedTaskCommand, result: Exclude<TaskInvocationResult, TaskWorldObservation>): string {
-  if (command.action === "show") return renderShow(result as TaskDetail | TaskMutationResult);
-  if (command.action === "ls" || command.action === "ready" || command.action === "blocked" || command.action === "query") return renderRows(command, result as TaskList | BlockedTaskList | TaskQueryResult);
+function renderBatchItem(verb: string, item: TaskBatchResult["items"][number]): string {
+  if (item.outcome.kind === "accepted") return `✓ ${verb} ${item.id}`;
+  if (item.outcome.kind === "retry") return `? ${verb} ${item.id} · ${item.outcome.reason}`;
+  const facts = projectRefusal(item.outcome.refusal);
+  const lines = [`! ${verb} ${item.id} · ${facts.line}`];
+  appendDiagnostic(lines, facts.diagnostic);
+  return lines.join("\n");
+}
+
+function renderBatch(verb: string, batch: TaskBatchResult): string {
+  return batch.items.map((item) => renderBatchItem(verb, item)).join("\n");
+}
+
+function composeDiffs(lines: string[], changes: Extract<TaskCompositionResult, { kind: "accepted" }>["documentChanges"]): void {
+  for (const change of changes) receiptPayload(lines, `diff ${change.taskId}`, change.documentDiff);
+}
+
+function stoppedLines(stopped: ComposeStop): string[] {
+  if (stopped.kind === "retry") return [`? stopped ${stopped.reason}`];
+  const facts = projectRefusal(stopped);
+  const lines = [`! stopped ${facts.line}`];
+  appendDiagnostic(lines, facts.diagnostic);
+  return lines;
+}
+
+function renderCompose(result: TaskCompositionResult, columns: number): string {
+  if (result.kind === "incomplete") return "";
+  if (result.kind !== "accepted") return renderFailure("compose", result, columns);
+  const lines = [`✓ compose accepted · ${result.documentChanges.length} changed`];
+  composeDiffs(lines, result.documentChanges);
+  return lines.join("\n");
+}
+
+export function renderTaskText(
+  command: ParsedTaskCommand,
+  result: TaskInvocationResult,
+  context: TextRenderContext = DEFAULT_CONTEXT,
+): string {
+  if (isWorldObservation(result)) {
+    if (result.kind === "absent") return "task world absent";
+    if (result.kind === "failed") {
+      const lines: string[] = ["task world failed"];
+      receiptPayload(lines, "diagnostic", result.failure.message);
+      return lines.join("\n");
+    }
+    result = result.value;
+  }
+  return renderTaskValue(command, result, context.columns);
+}
+
+function renderTaskValue(
+  command: ParsedTaskCommand,
+  result: Exclude<TaskInvocationResult, TaskWorldObservation>,
+  columns: number,
+): string {
+  if (command.action === "show") return renderShow(result as TaskDetail | TaskMutationResult, columns);
+  if (command.action === "ls" || command.action === "ready" || command.action === "blocked" || command.action === "query") {
+    return renderRows(command, result as TaskList | BlockedTaskList | TaskQueryResult, columns);
+  }
   if (command.action === "tree") {
-    const tree = result as TaskDecompositionTree; return tree.kind === "accepted" ? treeLines(tree.value).join("\n") : failure(tree);
+    const tree = result as TaskDecompositionTree;
+    return tree.kind === "accepted" ? treeLines(tree.value, columns).join("\n") : renderFailure(command.action, tree, columns);
   }
-  if (command.action === "doctor") {
-    const report = result as TaskDoctorReport; return report.issues.length === 0 ? "healthy" : report.issues.map(doctorIssue).join("\n");
-  }
+  if (command.action === "doctor") return renderDoctor(result as TaskDoctorReport);
   if (command.action === "namespace") {
-    const namespace = result as TaskNamespaceResult; return namespace.kind === "accepted" ? namespace.value.join("/") || "root" : failure(namespace);
+    const namespace = result as TaskNamespaceResult;
+    if (namespace.kind !== "accepted") return renderFailure(command.action, namespace, columns);
+    return `namespace ${namespace.value.length === 0 ? "root" : namespace.value.join("/")}`;
   }
-  if (command.action === "compose") {
-    const composition = result as TaskCompositionResult;
-    return composition.kind === "accepted" ? changes(composition.documentChanges) : composition.kind === "incomplete" ? "" : failure(composition);
-  }
+  if (command.action === "compose") return renderCompose(result as TaskCompositionResult, columns);
   if (command.action === "hold" || command.action === "done" || command.action === "drop") {
-    const batch = result as TaskBatchResult;
-    return batch.items.map((item) => item.outcome.kind === "accepted" ? `accepted ${item.id}` : `${item.id}: ${failure(item.outcome)}`).join("\n");
+    return renderBatch(command.action, result as TaskBatchResult);
   }
-  return renderMutation(command, result as TaskMutationResult | TaskUpdateResult);
+  return renderMutation(command, result as TaskMutationResult | TaskUpdateResult, columns);
 }
 
 export function renderTaskIncompleteDiagnostic(result: TaskCompositionResult): string {
   if (result.kind !== "incomplete") return "";
-  return [`incomplete ${JSON.stringify(result.stopped)}`, changes(result.documentChanges)].filter((line) => line.length > 0).join("\n");
+  const lines = [`! compose incomplete · ${result.documentChanges.length} admitted`, ...stoppedLines(result.stopped)];
+  composeDiffs(lines, result.documentChanges);
+  return lines.join("\n");
 }
 
 export function taskExitCode(result: TaskInvocationResult): number {

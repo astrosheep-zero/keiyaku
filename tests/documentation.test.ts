@@ -70,6 +70,10 @@ test("Task tree law is parent decomposition without DAG residue", () => {
   assert.doesNotMatch(task, /task\.tree\(input\?: \{ full\?: boolean \}\)/u);
   assert.match(cli, /task tree <TaskId> \[--json\]/u);
   assert.doesNotMatch(cli, /task tree <TaskId> \[--full\]/u);
+  assert.match(cli, /<mark> <complete TaskId> · P<n> <word>/u);
+  assert.doesNotMatch(cli, /TaskId - P<n> -/u);
+  assert.doesNotMatch(cli, /JSON\.stringify|refused \$\{JSON/u);
+  assert.doesNotMatch(cli, /TaskDependencyTree|full vocabulary|\[--full\]/u);
 });
 
 test("Task creation actor is optional createdBy with CLI resolveActor precedence", () => {
@@ -82,6 +86,8 @@ test("Task creation actor is optional createdBy with CLI resolveActor precedence
   assert.match(cli, /task add <TITLE>.*\[--actor <actor>\]/su);
   assert.match(cli, /task compose \[--actor <actor>\] \[--json\] -/u);
   assert.match(cli, /KEIYAKU_ACTOR_ID/u);
+  assert.match(cli, /persisted `createdBy`\nas `created-by <actor>` when present/u);
+  assert.match(cli, /list and query text do not\nrender it/u);
   assert.match(cli, /Update, lifecycle, and settlement commands\ndo not accept `--actor`/u);
   assert.doesNotMatch(cli, /KEIYAKU_PROJECTION_ID/u);
   assert.doesNotMatch(task, /KEIYAKU_PROJECTION_ID/u);

@@ -23,12 +23,16 @@ import { BindDraftError } from "./draft.js";
 import { renderBindDraftReceipt } from "./render/refusal.js";
 
 function writeTask(command: ParsedTaskCommand, result: TaskInvocationResult): number {
+  const context = {
+    columns: process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : 80,
+    color: false,
+  };
   if (command.output === "json") process.stdout.write(`${JSON.stringify(result)}\n`);
   else if (command.action === "compose" && typeof result === "object" && result !== null && "kind" in result && result.kind === "incomplete") {
     const diagnostic = renderTaskIncompleteDiagnostic(result);
     if (diagnostic.length > 0) process.stderr.write(`${diagnostic}\n`);
     process.stdout.write(result.draft);
-  } else process.stdout.write(`${renderTaskText(command, result)}\n`);
+  } else process.stdout.write(`${renderTaskText(command, result, context)}\n`);
   return taskExitCode(result);
 }
 
