@@ -13,7 +13,7 @@ export type {
   ActivitySnapshot,
   ForkReceipt,
   InterruptReceipt,
-  TellReceipt,
+  TellResult,
   UnbornAkumaListRow,
 } from "./akuma.js";
 export type { AgentEvent, ToolCall, ToolEvent, ToolResult } from "./provider.js";

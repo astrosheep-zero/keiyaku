@@ -69,6 +69,7 @@ export type AkumaStatus = AkumaListRow & Readonly<{
   failure?: string;
   outcomeAt?: string;
   activity: ActivitySnapshot;
+  strandedReason?: "resume-unsupported";
 }>;
 export type { ActivityHistory, ActivityRow, ActivitySnapshot } from "./activity.js";
 
@@ -87,9 +88,8 @@ export type AkumaListInput = Readonly<{
   archetype?: string;
 }>;
 
-export type TellReceipt = Readonly<{
-  id: string;
-  state: "recorded";
+export type TellResult = Readonly<{
+  admission: Readonly<{ tellId: string; fact: "recorded" }>;
   wake: "spawned" | Readonly<{ kind: "failed"; diagnostic: string }>;
 }>;
 
@@ -107,7 +107,7 @@ export type InterruptReceipt =
   | Readonly<{
       kind: "interrupted";
       putDown: "was-idle" | "self-aborted" | "collar";
-      tell: TellReceipt | Readonly<{ kind: "refused-dead" }>;
+      tell: TellResult | Readonly<{ kind: "refused-dead" }>;
     }>;
 
 export type ForkReceipt =
@@ -137,22 +137,21 @@ async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<Held
   }
 }
 
-function recordTellBody(paths: AkumaPaths, body: string): Readonly<{ kind: "recorded"; id: string }> | Readonly<{ kind: "dead" }> {
+function recordTellBody(paths: AkumaPaths, body: string): Readonly<{ kind: "recorded"; tellId: string }> | Readonly<{ kind: "dead" }> {
   const id = randomUUID();
   const admitted = recordTell(paths, { id, body, recordedAt: new Date().toISOString() });
-  return admitted === "dead" ? { kind: "dead" } : { kind: "recorded", id };
+  return admitted.kind === "dead" ? admitted : { kind: "recorded", tellId: admitted.tell.id };
 }
 
-async function wakeTell(paths: AkumaPaths, akuma: AkuId, id: string): Promise<TellReceipt> {
+async function wakeTell(paths: AkumaPaths, akuma: AkuId, tellId: string): Promise<TellResult> {
   const soul = readSoul(paths);
   if (soul === null) throw new Error(`Akuma ${akuma} has no soul`);
   try {
     await spawnAkumaBody({ paths });
-    return { id, state: "recorded", wake: "spawned" };
+    return { admission: { tellId, fact: "recorded" }, wake: "spawned" };
   } catch (error) {
     return {
-      id,
-      state: "recorded",
+      admission: { tellId, fact: "recorded" },
       wake: { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) },
     };
   }
@@ -185,6 +184,9 @@ function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const current = bornListRow(paths, expected, snapshot);
   const latest = readCurrentTurn(paths);
+  const resumeUnsupported = current.life === "stranded"
+    && snapshot.latestSession?.provider === snapshot.soul.provider.name
+    && providerNamed(snapshot.soul.provider).resume === undefined;
   return {
     ...current,
     ...(latest === null ? {} : { outcomeAt: latest.completedAt }),
@@ -192,10 +194,10 @@ function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
       ? { answer: latest.outcome.answer, answerHistoryId: latest.outcome.historyId }
       : {}),
     ...(latest?.outcome.kind === "failed" ? { failure: latest.outcome.diagnostic } : {}),
+    ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
     activity: (() => {
-      const slice = activitySlice(paths, { limit: 5_000 });
+      const slice = activitySlice(paths, { limit: Number.MAX_SAFE_INTEGER });
       return selectActivitySnapshot(slice.rows, {
-        pending: snapshot.pending,
         lowestRetained: slice.lowestRetained,
         highest: slice.highest,
       });
@@ -258,10 +260,10 @@ export class AkumaHandle {
     }
   }
 
-  async tell(body: string): Promise<TellReceipt> {
+  async tell(body: string): Promise<TellResult> {
     const recorded = recordTellBody(this.paths, body);
     if (recorded.kind === "dead") throw new Error(`Akuma ${this.id} is dead`);
-    return await wakeTell(this.paths, this.id, recorded.id);
+    return await wakeTell(this.paths, this.id, recorded.tellId);
   }
 
   async interrupt(body: string): Promise<InterruptReceipt> {
@@ -298,7 +300,7 @@ export class AkumaHandle {
     if (recorded.kind === "dead") {
       return { kind: "interrupted", putDown, tell: { kind: "refused-dead" } };
     }
-    return { kind: "interrupted", putDown, tell: await wakeTell(this.paths, this.id, recorded.id) };
+    return { kind: "interrupted", putDown, tell: await wakeTell(this.paths, this.id, recorded.tellId) };
   }
 
   async fork(input: Readonly<{ at: string }>): Promise<ForkReceipt> {

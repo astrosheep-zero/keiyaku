@@ -16,8 +16,6 @@ import type {
   ResumeCoordinate,
   SessionFact,
   Soul,
-  TellFact,
-  TellState,
   TurnFact,
 } from "./facts.js";
 
@@ -65,13 +63,6 @@ export type TurnRow = Readonly<{
   completed_at: string;
 }>;
 
-export type TellRow = Readonly<{
-  id: string;
-  body: string;
-  state: TellState;
-  recorded_at: string;
-}>;
-
 export type RequestRow = Readonly<{
   sequence: number;
   id: string;
@@ -98,11 +89,6 @@ export type ActivityFact = Readonly<{
   bodySequence: number;
   event: unknown;
   at: string;
-}>;
-export type ActivityFactSlice = Readonly<{
-  rows: readonly ActivityFact[];
-  lowestRetained: number | null;
-  highest: number | null;
 }>;
 export type DeathRow = Readonly<{ value_json: string; at: string }>;
 
@@ -198,10 +184,6 @@ export function decodeTurnRow(row: TurnRow): TurnFact {
   };
 }
 
-export function decodeTellRow(row: TellRow): TellFact {
-  return { id: row.id, body: row.body, state: row.state, recordedAt: row.recorded_at };
-}
-
 export function decodeRequestRow(row: RequestRow): RequestFact {
   const input = {
     id: row.id,
@@ -289,60 +271,14 @@ export function insertActivityFact(
   database: DatabaseSync,
   input: Readonly<{ bodySequence: number; event: unknown; at: string }>,
 ): number {
-  const result = database.prepare("INSERT INTO activity(body_sequence, event_json, at) VALUES (?, ?, ?)")
-    .run(input.bodySequence, encodeActivityEvent(input.event), input.at);
-  return Number(result.lastInsertRowid);
-}
-
-export function pruneActivityFacts(database: DatabaseSync, limit: number): void {
-  database.prepare(`DELETE FROM activity
-    WHERE sequence NOT IN (SELECT sequence FROM activity ORDER BY sequence DESC LIMIT ?)`)
-    .run(limit);
-}
-
-export function activityFactSlice(
-  database: DatabaseSync,
-  input: Readonly<{ before?: number; since?: number; limit: number }>,
-): ActivityFactSlice {
-  const bounds = database.prepare("SELECT MIN(sequence) AS lowest, MAX(sequence) AS highest FROM activity")
-    .get() as { lowest: number | null; highest: number | null };
-  let rows: readonly ActivityRow[];
-  if (input.before !== undefined) {
-    rows = database.prepare(`SELECT sequence, body_sequence, event_json, at FROM (
-      SELECT sequence, body_sequence, event_json, at FROM activity
-      WHERE sequence < ? ORDER BY sequence DESC LIMIT ?
-    ) ORDER BY sequence`).all(input.before, input.limit) as unknown as readonly ActivityRow[];
-  } else if (input.since !== undefined) {
-    rows = database.prepare(`SELECT sequence, body_sequence, event_json, at FROM activity
-      WHERE sequence > ? ORDER BY sequence LIMIT ?`).all(input.since, input.limit) as unknown as readonly ActivityRow[];
-  } else {
-    rows = database.prepare(`SELECT sequence, body_sequence, event_json, at FROM (
-      SELECT sequence, body_sequence, event_json, at FROM activity ORDER BY sequence DESC LIMIT ?
-    ) ORDER BY sequence`).all(input.limit) as unknown as readonly ActivityRow[];
-  }
-  return {
-    rows: rows.map(decodeActivityRow),
-    lowestRetained: bounds.lowest,
-    highest: bounds.highest,
-  };
+  const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('activity')").run().lastInsertRowid);
+  database.prepare("INSERT INTO activity(sequence, body_sequence, event_json, at) VALUES (?, ?, ?, ?)")
+    .run(sequence, input.bodySequence, encodeActivityEvent(input.event), input.at);
+  return sequence;
 }
 
 export function deathExists(database: DatabaseSync): boolean {
   return database.prepare("SELECT kind FROM control WHERE kind = 'death'").get() !== undefined;
-}
-
-export function insertTellFact(database: DatabaseSync, tell: Omit<TellFact, "state">): void {
-  database.prepare(`INSERT INTO tells(id, body, state, recorded_at)
-    VALUES (?, ?, 'recorded', ?)`).run(tell.id, tell.body, tell.recordedAt);
-}
-
-export function tellState(database: DatabaseSync, id: string): TellState | null {
-  const row = database.prepare("SELECT state FROM tells WHERE id = ?").get(id) as { state: TellState } | undefined;
-  return row?.state ?? null;
-}
-
-export function updateTellState(database: DatabaseSync, id: string, state: TellState): void {
-  database.prepare("UPDATE tells SET state = ? WHERE id = ?").run(state, id);
 }
 
 const REQUEST_COLUMNS = `sequence, id, archetype, body, cwd, world, recipe_json, admitted_at,
@@ -420,10 +356,6 @@ export function insertDeathFact(database: DatabaseSync, death: DeathFact): void 
     .run(encodeDeathRow(death), death.at);
 }
 
-export function voidTellsByDeath(database: DatabaseSync): void {
-  database.prepare("UPDATE tells SET state = 'voided-by-death' WHERE state NOT IN ('consumed', 'voided-by-death')").run();
-}
-
 export function voidRequestsByDeath(database: DatabaseSync, evidence: string): void {
   database.prepare(`UPDATE requests SET state = 'voided',
     evidence = CASE WHEN child IS NULL THEN ? ELSE ? || '; child=' || child END,
@@ -487,13 +419,6 @@ export function sessionFactForCoordinate(database: DatabaseSync, coordinate: Res
     FROM sessions WHERE coordinate_json = ? ORDER BY sequence DESC LIMIT 1`)
     .get(encodeResumeCoordinate(coordinate)) as SessionRow | undefined;
   return row === undefined ? null : decodeSessionRow(row);
-}
-
-export function pendingTellFacts(database: DatabaseSync): readonly TellFact[] {
-  const rows = database.prepare(`SELECT id, body, state, recorded_at FROM tells
-    WHERE state NOT IN ('consumed', 'voided-by-death') ORDER BY recorded_at, id`)
-    .all() as unknown as readonly TellRow[];
-  return rows.map(decodeTellRow);
 }
 
 export function deathFact(database: DatabaseSync): DeathFact | null {

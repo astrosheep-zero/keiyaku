@@ -199,7 +199,9 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
       ]);
     },
   }));
-  const drive = await provider.start({ prompt: "observe", cwd: "/work", options: {} });
+  const drive = await provider.start({
+    body: "observe", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
   const events = [];
   for await (const event of drive.events) events.push(event);
 
@@ -246,7 +248,9 @@ test("Claude adapter admits the native session before returning its answer", asy
       ]);
     },
   }));
-  const drive = await provider.start({ prompt: "build it", cwd: "/work", options: {} });
+  const drive = await provider.start({
+    body: "build it", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
   const events = [];
   for await (const event of drive.events) events.push(event);
 
@@ -275,11 +279,12 @@ test("Claude adapter restores only the native session coordinate it was given", 
       } as unknown as SDKMessage]);
     },
   }));
-  const drive = await provider.start({
-    prompt: "continue",
+  const drive = await provider.resume!({
+    body: "continue",
+    launchTells: [],
     cwd: "/work",
     options: {},
-    session: { sessionId: "session-1" },
+    session: { kind: "resume", coordinate: { sessionId: "session-1" } },
   });
   for await (const _event of drive.events) { /* drain */ }
   assert.equal(resume, "session-1");
@@ -298,7 +303,9 @@ test("Claude never substitutes a result UUID for the assistant fork point", asyn
       } as unknown as SDKMessage]);
     },
   }));
-  const drive = await provider.start({ prompt: "build", cwd: "/work", options: {} });
+  const drive = await provider.start({
+    body: "build", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
   for await (const _event of drive.events) { /* drain */ }
   assert.deepEqual(await drive.completion, {
     kind: "failed",
@@ -334,7 +341,9 @@ test("Claude never substitutes a sidechain assistant UUID for the outer fork poi
       ]);
     },
   }));
-  const drive = await provider.start({ prompt: "delegate", cwd: "/work", options: {} });
+  const drive = await provider.start({
+    body: "delegate", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
   for await (const _event of drive.events) { /* drain */ }
   assert.deepEqual(await drive.completion, {
     kind: "answered",
@@ -374,7 +383,9 @@ test("Claude adapter consumes the admitted Archetype options", async () => {
   });
   assert.equal(admitted.kind, "admitted");
   if (admitted.kind !== "admitted") return;
-  const drive = await provider.start({ prompt: "inspect", cwd: "/work", options: admitted.options });
+  const drive = await provider.start({
+    body: "inspect", launchTells: [], cwd: "/work", options: admitted.options, session: { kind: "fresh" },
+  });
   for await (const _event of drive.events) { /* drain */ }
   await drive.completion;
   assert.deepEqual(seen, {
@@ -409,7 +420,9 @@ test("Claude execution overlays literal env and selects its executable", async (
       ]);
     },
   }), { executable: "/custom/claude", env: { SETTINGS_LITERAL: "yes" } });
-  const drive = await provider.start({ prompt: "inspect", cwd: "/work", options: {} });
+  const drive = await provider.start({
+    body: "inspect", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
   for await (const _event of drive.events) { /* drain */ }
   await drive.completion;
   const options = seen as { pathToClaudeCodeExecutable: string; env: NodeJS.ProcessEnv };
@@ -442,9 +455,11 @@ test("Claude start consumes its admitted snapshot without a second admission", a
     },
   }));
   const drive = await provider.start({
-    prompt: "continue",
+    body: "continue",
+    launchTells: [],
     cwd: "/work",
     options: { network: "disabled" },
+    session: { kind: "fresh" },
   });
   for await (const _event of drive.events) { /* drain */ }
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "assistant-history-snapshot" });
@@ -632,10 +647,12 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     const requestDirectory = join(root, "body-requests");
     mkdirSync(requestDirectory);
     const drive = await provider.start({
-      prompt: "build",
+      body: "build",
+      launchTells: [],
       cwd: root,
       options,
       requests: { dir: requestDirectory },
+      session: { kind: "fresh" },
     });
     const events = [];
     for await (const event of drive.events) events.push(event);
@@ -675,7 +692,9 @@ test("Codex maps observations without leaking output or unknown payloads", async
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-observations-"));
   try {
     const provider = createCodexAppServerProvider(fakeCodex(root, "observations").executable);
-    const drive = await provider.start({ prompt: "observe", cwd: root, options: {} });
+    const drive = await provider.start({
+      body: "observe", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
     const events = [];
     for await (const event of drive.events) events.push(event);
 
@@ -708,7 +727,9 @@ test("Codex failed turns retain native notification and turn diagnostics", async
     const root = mkdtempSync(join(tmpdir(), `keiyaku-codex-${mode}-`));
     try {
       const provider = createCodexAppServerProvider(fakeCodex(root, mode).executable);
-      const drive = await provider.start({ prompt: "fail", cwd: root, options: {} });
+      const drive = await provider.start({
+        body: "fail", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+      });
       for await (const _event of drive.events) { /* drain */ }
       assert.deepEqual(await drive.completion, { kind: "failed", diagnostic });
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -720,11 +741,12 @@ test("Codex app-server resumes and forks only the supplied native coordinates", 
   try {
     const fake = fakeCodex(root);
     const provider = createCodexAppServerProvider(fake.executable);
-    const drive = await provider.start({
-      prompt: "continue",
+    const drive = await provider.resume!({
+      body: "continue",
+      launchTells: [],
       cwd: root,
       options: {},
-      session: { sessionId: "thread-source" },
+      session: { kind: "resume", coordinate: { sessionId: "thread-source" } },
     });
     for await (const _event of drive.events) { /* drain */ }
     assert.equal((await drive.completion).kind, "answered");
@@ -750,7 +772,9 @@ test("Codex app-server abort requests native interruption and waits for terminal
   try {
     const fake = fakeCodex(root, "interrupt");
     const provider = createCodexAppServerProvider(fake.executable);
-    const drive = await provider.start({ prompt: "wait", cwd: root, options: {} });
+    const drive = await provider.start({
+      body: "wait", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
     await drive.abort();
     for await (const _event of drive.events) { /* drain */ }
     assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "codex app-server turn ended interrupted" });

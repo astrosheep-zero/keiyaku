@@ -1,4 +1,4 @@
-import type { ActivityHistory, ActivityRow, AkumaStatus, TellReceipt } from "../../akuma/index.js";
+import type { ActivityHistory, ActivityRow, AkumaStatus, TellResult } from "../../akuma/index.js";
 import { toolRepr } from "./akuma-tool.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
@@ -50,16 +50,17 @@ function activityItem(row: ActivityRow): SpineItem {
   if (row.kind === "said") return { at: row.at, label: "say", text: row.text };
   if (row.kind === "thought") return { at: row.at, label: "thought", text: row.text };
   if (row.kind === "note") return { at: row.at, label: "note", text: row.text };
+  if (row.kind === "tell") return {
+    at: row.at,
+    label: row.state === "pending" ? "⧗ tell" : row.state === "told" ? "told" : "† tell",
+    text: JSON.stringify(row.text),
+  };
   const repr = toolRepr(row);
   return {
     at: row.at,
     label: repr.label,
     text: repr.text,
   };
-}
-
-function pendingItems(status: AkumaStatus): readonly SpineItem[] {
-  return status.activity.pendingTells.map((tell) => ({ label: "⧗ tell", text: JSON.stringify(tell.body) }));
 }
 
 function outcomeItems(status: AkumaStatus): readonly SpineItem[] {
@@ -83,7 +84,9 @@ function outcomeItems(status: AkumaStatus): readonly SpineItem[] {
 function statusItems(status: AkumaStatus): readonly SpineItem[] {
   return [
     ...status.activity.rows.map(activityItem),
-    ...pendingItems(status),
+    ...(status.strandedReason === "resume-unsupported"
+      ? [{ label: "!", text: "resume unsupported" }]
+      : []),
     ...outcomeItems(status),
   ];
 }
@@ -148,13 +151,32 @@ function waitText(status: AkumaStatus): string {
   return statusText(status);
 }
 
-function wakeFailure(receipt: TellReceipt): string | null {
-  return typeof receipt.wake === "string" ? null : `wake failed: ${safeText(receipt.wake.diagnostic)}`;
+function wakeFailure(result: TellResult): string | null {
+  return typeof result.wake === "string" ? null : `wake failed: ${safeText(result.wake.diagnostic)}`;
 }
 
-function tellText(status: AkumaStatus, receipt: TellReceipt): string {
-  const failure = wakeFailure(receipt);
-  return failure === null ? statusText(status) : `${statusText(status)}\n${failure}`;
+function tellText(result: Extract<AkumaInvocationResult, { action: "tell" }>): string {
+  const { observation } = result.result;
+  const tellId = result.result.tell.admission.tellId;
+  const observed = observation.activity.rows.find((row) => row.kind === "tell" && row.tellId === tellId);
+  const status = {
+    ...observation,
+    activity: {
+      ...observation.activity,
+      rows: observation.activity.rows.filter((row) => row.kind !== "tell" || row.tellId !== tellId),
+    },
+  };
+  const current = observed === undefined
+    ? { label: "⧗ tell", text: JSON.stringify(result.body) }
+    : activityItem(observed);
+  const lines = [
+    ruler([`${mark(status.life)} ${status.id}`]),
+    ...omission(status),
+    ...renderSpine([...statusItems(status), current]),
+  ];
+  const failure = wakeFailure(result.result.tell);
+  if (failure !== null) lines.push(failure);
+  return lines.join("\n");
 }
 
 function dispatchLines(stage: DispatchStage): readonly string[] {
@@ -195,7 +217,7 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
     case "call": return callText(result);
     case "status": return statusText(result.status);
     case "wait": return result.result.statuses.map(waitText).join("\n\n");
-    case "tell": return tellText(result.status, result.receipt);
+    case "tell": return tellText(result);
     case "interrupt": {
       const receipt = result.receipt;
       if (receipt.kind === "dead") return `${result.akuma} interrupt dead`;
@@ -224,7 +246,7 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
       || result.result.observation.kind === "failed")) return 2;
   if (result.action === "kill" && result.result.results.some((member) =>
     member.evidence === "unavailable" || member.evidence === "alive-after-sigkill")) return 1;
-  if (result.action === "tell" && typeof result.receipt.wake !== "string") return 2;
+  if (result.action === "tell" && typeof result.result.tell.wake !== "string") return 2;
   if (result.action === "interrupt") {
     if (result.receipt.kind !== "interrupted" || "kind" in result.receipt.tell) return 1;
     if (typeof result.receipt.tell.wake !== "string") return 2;
@@ -241,7 +263,7 @@ export function akumaJsonValue(command: ParsedCommand, result: AkumaInvocationRe
   if (result.action === "fork") return result.receipt;
   if (result.action === "status") return result.status;
   if (result.action === "wait") return result.result;
-  if (result.action === "tell") return { receipt: result.receipt, status: result.status };
+  if (result.action === "tell") return result.result;
   if (result.action === "history") return command.command === "history" && command.last ? result.answer ?? "" : result.history;
   return result;
 }

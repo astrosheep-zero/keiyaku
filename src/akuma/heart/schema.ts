@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 6;
+const HEART_SCHEMA_VERSION = 7;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(
@@ -71,17 +71,54 @@ export const HEART_SCHEMA = `
       OR (outcome = 'failed' AND history_id IS NULL AND session_json IS NULL AND answer IS NULL AND diagnostic IS NOT NULL)
     )
   ) STRICT;
-  CREATE TABLE IF NOT EXISTS activity (
+  CREATE TABLE IF NOT EXISTS timeline (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK (kind IN ('activity', 'tell'))
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS activity (
+    sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
     body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
     event_json TEXT NOT NULL CHECK (json_valid(event_json)),
     at TEXT NOT NULL
   ) STRICT;
   CREATE TABLE IF NOT EXISTS tells (
     id TEXT PRIMARY KEY,
+    sequence INTEGER NOT NULL UNIQUE REFERENCES timeline(sequence) ON DELETE CASCADE,
     body TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('recorded', 'delivered', 'seen', 'consumed', 'voided-by-death')),
     recorded_at TEXT NOT NULL
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS tell_deliveries (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    tell_id TEXT NOT NULL REFERENCES tells(id) ON DELETE CASCADE,
+    route TEXT NOT NULL CHECK (route IN ('launch', 'live')),
+    body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
+    fence TEXT NOT NULL,
+    receipt TEXT CHECK (receipt IN ('unavailable', 'required')),
+    delivered_at TEXT NOT NULL,
+    CHECK ((route = 'launch' AND receipt IS NULL) OR (route = 'live' AND receipt IS NOT NULL)),
+    UNIQUE (tell_id, body_sequence, fence)
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS tell_receipts (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    evidence TEXT NOT NULL CHECK (evidence IN ('exact', 'fence')),
+    tell_id TEXT REFERENCES tells(id) ON DELETE CASCADE,
+    body_sequence INTEGER REFERENCES bodies(sequence),
+    fence TEXT,
+    kind TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    CHECK (
+      (evidence = 'exact' AND tell_id IS NOT NULL AND body_sequence IS NULL AND fence IS NULL)
+      OR (evidence = 'fence' AND tell_id IS NULL AND body_sequence IS NOT NULL AND fence IS NOT NULL)
+    )
+  ) STRICT;
+  CREATE UNIQUE INDEX IF NOT EXISTS tell_receipts_exact
+    ON tell_receipts(tell_id, kind) WHERE evidence = 'exact';
+  CREATE UNIQUE INDEX IF NOT EXISTS tell_receipts_fence
+    ON tell_receipts(body_sequence, fence, kind) WHERE evidence = 'fence';
+  CREATE TABLE IF NOT EXISTS tell_voids (
+    tell_id TEXT PRIMARY KEY REFERENCES tells(id) ON DELETE CASCADE,
+    evidence TEXT NOT NULL,
+    voided_at TEXT NOT NULL
   ) STRICT;
   CREATE TABLE IF NOT EXISTS requests (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,

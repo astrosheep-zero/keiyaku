@@ -12,24 +12,40 @@ import { requestBodyCall } from "../src/akuma/requests.js";
 function adapter(input: Readonly<{
   events: readonly AgentEvent[];
   result: TurnResult;
-  starts: Array<Readonly<{ prompt: string; options: ProviderOptions; session?: string }>>;
+  starts: Array<Readonly<{
+    body: string;
+    launchTells: readonly Readonly<{ id: string; text: string }>[];
+    options: ProviderOptions;
+    session: "fresh" | string;
+  }>>;
 }>): ProviderAdapter {
+  const drive = async (
+    call: Parameters<ProviderAdapter["start"]>[0]
+      | Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
+  ) => {
+    assert.equal(call.requests, undefined);
+    input.starts.push({
+      body: call.body,
+      launchTells: call.launchTells,
+      options: call.options,
+      session: call.session.kind === "fresh" ? "fresh" : call.session.coordinate.sessionId,
+    });
+    return {
+      admission: { fence: `fixture-${input.starts.length}` },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          for (const event of input.events) yield event;
+        },
+      },
+      completion: Promise.resolve(input.result),
+      async abort() {},
+    };
+  };
   return {
     confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
-    async start(call) {
-      assert.equal(call.requests, undefined);
-      input.starts.push({ prompt: call.prompt, options: call.options, ...(call.session === undefined ? {} : { session: call.session.sessionId }) });
-      return {
-        events: {
-          async *[Symbol.asyncIterator]() {
-            for (const event of input.events) yield event;
-          },
-        },
-        completion: Promise.resolve(input.result),
-        async abort() {},
-      };
-    },
+    start: drive,
+    resume: drive,
   };
 }
 
@@ -51,7 +67,12 @@ test("body births, admits native session, records the turn, and exits only when 
       },
       initialBody: "build it",
     };
-    const starts: Array<Readonly<{ prompt: string; options: ProviderOptions; session?: string }>> = [];
+    const starts: Array<Readonly<{
+      body: string;
+      launchTells: readonly Readonly<{ id: string; text: string }>[];
+      options: ProviderOptions;
+      session: "fresh" | string;
+    }>> = [];
     await driveAkumaBody(launch, adapter({
       starts,
       events: [
@@ -80,8 +101,10 @@ test("body births, admits native session, records the turn, and exits only when 
     });
     assert.equal(first.latestBody?.end, "exited");
     assert.deepEqual(starts, [{
-      prompt: "build it",
+      body: "build it",
+      launchTells: [],
       options: { model: "claude-sonnet-4-5", effort: "high", systemPrompt: "Build carefully." },
+      session: "fresh",
     }]);
 
     recordTell(allocated.paths, {
@@ -102,11 +125,14 @@ test("body births, admits native session, records the turn, and exits only when 
     const second = readHeart(allocated.paths);
     assert.deepEqual(starts, [
       {
-        prompt: "build it",
+        body: "build it",
+        launchTells: [],
         options: { model: "claude-sonnet-4-5", effort: "high", systemPrompt: "Build carefully." },
+        session: "fresh",
       },
       {
-        prompt: "adjust it",
+        body: "",
+        launchTells: [{ id: "tell-1", text: "adjust it" }],
         options: { model: "claude-sonnet-4-5", effort: "high", systemPrompt: "Build carefully." },
         session: "native-1",
       },
@@ -119,6 +145,134 @@ test("body births, admits native session, records the turn, and exits only when 
     });
     assert.deepEqual(second.pending, []);
     assert.equal(second.latestBody?.end, "exited");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("live receipt persistence waits for its Body-scoped delivery mapping", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-live-tell-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c4d" });
+    initializeHeart(allocated.paths);
+    let releaseEvents!: () => void;
+    const eventsReleased = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    let releaseReceipt!: () => void;
+    const receiptReleased = new Promise<void>((resolve) => { releaseReceipt = resolve; });
+    let tellObserved!: () => void;
+    const observed = new Promise<void>((resolve) => { tellObserved = resolve; });
+    const live: ProviderAdapter = {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        return {
+          admission: { fence: "initial-turn" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "live-session" } };
+              await eventsReleased;
+            },
+          },
+          receipts: {
+            async *[Symbol.asyncIterator]() {
+              await receiptReleased;
+              yield { evidence: "fence" as const, fence: "live-fence", kind: "accepted" };
+            },
+          },
+          completion: Promise.resolve({ kind: "answered", answer: "done", historyId: "live-history" }),
+          async tell() {
+            releaseReceipt();
+            tellObserved();
+            return { fence: "live-fence" };
+          },
+          async abort() {},
+        };
+      },
+    };
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, live, {
+      collar: { pid: 999_978, processGroup: 999_978, spawnedAt: "live-tell" },
+      now: () => "2026-08-08T00:00:00.000Z",
+      async putDownOwnTree() {},
+    });
+    while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    recordTell(allocated.paths, {
+      id: "tell-live", body: "steer", recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await observed;
+    releaseEvents();
+    await body;
+    assert.deepEqual(readHeart(allocated.paths).pending, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("receipt persistence failure aborts the Session and terminates the Body", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-receipt-failure-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c4e" });
+    initializeHeart(allocated.paths);
+    let aborted = false;
+    let releaseEvents!: () => void;
+    const eventsReleased = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        return {
+          admission: { fence: "launch" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "receipt-failure-session" } };
+              await eventsReleased;
+            },
+          },
+          receipts: {
+            async *[Symbol.asyncIterator]() {
+              yield { evidence: "fence" as const, fence: "unknown", kind: "accepted" };
+            },
+          },
+          completion: new Promise<TurnResult>(() => {}),
+          async abort() { aborted = true; releaseEvents(); },
+        };
+      },
+    }, {
+      collar: { pid: 999_977, processGroup: 999_977, spawnedAt: "receipt-failure" },
+      now: () => "2026-08-08T00:00:00.000Z",
+      async putDownOwnTree() {},
+    });
+
+    await body;
+    assert.equal(aborted, true);
+    assert.equal(readHeart(allocated.paths).latestBody?.end, "broke-off");
+    assert.deepEqual(readTurns(allocated.paths).at(-1)?.outcome, {
+      kind: "failed",
+      diagnostic: "tell receipt has no delivery mapping",
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -173,6 +327,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
           },
         });
         return {
+          admission: { fence: "body-request-parent-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
               yield { type: "session" as const, coordinate: { sessionId: "parent-session" } };
@@ -229,7 +384,12 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a1b0d1" });
     initializeHeart(allocated.paths);
-    const starts: Array<Readonly<{ prompt: string; options: ProviderOptions; session?: string }>> = [];
+    const starts: Array<Readonly<{
+      body: string;
+      launchTells: readonly Readonly<{ id: string; text: string }>[];
+      options: ProviderOptions;
+      session: "fresh" | string;
+    }>> = [];
     await driveAkumaBody({
       paths: allocated.paths,
       seed: {
@@ -271,7 +431,12 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
       now: () => "2026-08-08T00:00:02.000Z",
       async putDownOwnTree() {},
     });
-    assert.deepEqual(starts, [{ prompt: "continue", options: { model: "fork-recipe" }, session: "native-child" }]);
+    assert.deepEqual(starts, [{
+      body: "",
+      launchTells: [{ id: "tell-fork", text: "continue" }],
+      options: { model: "fork-recipe" },
+      session: "native-child",
+    }]);
     assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
       kind: "answered",
       answer: "continued",
@@ -426,6 +591,7 @@ test("pause aborts the current drive and records the body as put down", async ()
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
+          admission: { fence: "pause-fixture-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
               while (!aborted) {
@@ -482,6 +648,7 @@ test("a body aborts and buries its process tree when the heart disappears during
     admitOptions(options) { return { kind: "admitted", options }; },
     async start() {
       return {
+        admission: { fence: "heart-gone-fixture-turn" },
         events: {
           async *[Symbol.asyncIterator]() {
             rmSync(allocated.paths.directory, { recursive: true, force: true });

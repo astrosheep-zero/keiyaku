@@ -4,7 +4,7 @@ import {
   type AkumaStatus,
   type InterruptReceipt,
   type KillEvidence,
-  type TellReceipt,
+  type TellResult,
 } from "../akuma/index.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
@@ -26,7 +26,7 @@ export type AkumaKillResult = Readonly<{
 }>;
 
 export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string }>;
-export type AkumaTellResult = Readonly<{ receipt: TellReceipt; status: AkumaStatus }>;
+export type AkumaTellResult = Readonly<{ akuma: AkumaStatus["id"]; tell: TellResult; observation: AkumaStatus }>;
 export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string }>;
 export type AkumaInterruptResult = Readonly<{ id: AkumaStatus["id"]; receipt: InterruptReceipt }>;
 export type AkumaHistoryInput = AkumaAddressInput & Readonly<{
@@ -120,8 +120,8 @@ export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult>
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const addressed = addressAkuma(directAddress(values));
   const handle = source(addressed.path, addressed.settings).of({ id: addressed.id });
-  const receipt = await handle.tell(values.body);
-  return { receipt, status: handle.status() };
+  const tell = await handle.tell(values.body);
+  return { akuma: addressed.id, tell, observation: handle.status() };
 }
 
 export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {

@@ -68,7 +68,7 @@ Heart records only tell facts with a named witness:
 - **receipt** — provider-authored evidence attached without reinterpretation.
   Its kind preserves the provider's terminal evidence; its correlation is an
   exact TellId or shared fence.
-- **voided-by-death** — witnessed by the death transaction for a tell that had
+- **voided** — witnessed by the death transaction for a tell that had
   no terminal `told` evidence.
 
 ```ts
@@ -126,6 +126,9 @@ nothing. For launch input, Body commits admission and delivery before consuming
 receipts. For live tell, the adapter exposes the receipt only after its
 acknowledgement resolves, and Body serializes acknowledgement persistence before
 receipt consumption continues.
+If receipt persistence fails, Body aborts that Session, closes its request pump,
+records the turn failure, and terminates the Body; it never continues execution
+after losing the durable receipt writer.
 
 Delivery is at-least-once and correlated by TellId, not exactly-once. If a
 provider accepts input and the process dies before Heart records its evidence,
@@ -186,7 +189,7 @@ type InterruptReceipt =
   | {
       kind: "interrupted";
       putDown: "was-idle" | "self-aborted" | "collar";
-      tell: TellReceipt | { kind: "refused-dead" };
+      tell: TellResult | { kind: "refused-dead" };
     };
 ```
 

@@ -14,8 +14,9 @@ import type {
   SealFact,
   SessionFact,
   Soul,
+  TellDeliveryInput,
   TellFact,
-  TellState,
+  TellReceiptInput,
   TurnFact,
 } from "./facts.js";
 import {
@@ -25,7 +26,6 @@ import {
   assertLeashSchemaVersion,
 } from "./schema.js";
 import {
-  activityFactSlice,
   answeredTurnFact,
   deathExists,
   deathFact,
@@ -45,31 +45,37 @@ import {
   insertSessionFact,
   insertSoulFact,
   insertStopControl,
-  insertTellFact,
   latestBodyFact,
   latestSessionFact,
   latestTurnFact,
   lastAnsweredTurnFact,
   nonterminalRequestFacts,
   pauseExists,
-  pendingTellFacts,
-  pruneActivityFacts,
   requestFact,
   sealExists,
   sealFact,
   sessionFactForCoordinate,
   soulFact,
   stopExists,
-  tellState,
   updateRequestRefused,
   updateRequestReserved,
   updateRequestServed,
   updateRequestVoided,
-  updateTellState,
   voidRequestsByDeath,
-  voidTellsByDeath,
 } from "./rows.js";
-import type { ActivityFact, ActivityFactSlice } from "./rows.js";
+import type { ActivityFact } from "./rows.js";
+import {
+  activityFactSlice,
+  insertTellDeliveryFact,
+  insertTellFact,
+  insertTellReceiptFact,
+  pendingTellFacts,
+  pruneActivityFacts,
+  tellFact,
+  tellIdsForFence,
+  voidTellsByDeath,
+  type ActivityFactSlice,
+} from "./tells.js";
 
 export { life } from "./facts.js";
 export type {
@@ -95,7 +101,8 @@ export type {
   SessionFact,
   Soul,
   TellFact,
-  TellState,
+  TellDeliveryInput,
+  TellReceiptInput,
   TurnFact,
   TurnOutcome,
 } from "./facts.js";
@@ -245,36 +252,58 @@ export function appendActivity(
 export type ActivitySliceInput = Readonly<{ before?: number; since?: number; limit?: number }>;
 export type ActivitySlice = ActivityFactSlice;
 export type { ActivityFact };
+export type { TimelineFact } from "./tells.js";
 
 export function activitySlice(paths: AkumaPaths, input: ActivitySliceInput = {}): ActivitySlice {
   const limit = input.limit ?? ACTIVITY_LIMIT;
   return withHeart(paths, (heart) => activityFactSlice(heart, { ...input, limit }));
 }
 
-export function recordTell(paths: AkumaPaths, tell: Omit<TellFact, "state">): "recorded" | "dead" {
+export function recordTell(
+  paths: AkumaPaths,
+  tell: Omit<TellFact, "sequence" | "state">,
+): Readonly<{ kind: "recorded"; tell: TellFact }> | Readonly<{ kind: "dead" }> {
   return withHeart(paths, (heart) =>
     transaction(heart, () => {
-      if (deathExists(heart)) return "dead";
-      insertTellFact(heart, tell);
-      return "recorded";
+      if (deathExists(heart)) return { kind: "dead" };
+      const sequence = insertTellFact(heart, tell);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+      return { kind: "recorded", tell: { sequence, ...tell, state: "pending" } };
     }));
 }
 
-const TELL_ORDER: Readonly<Record<TellState, number>> = {
-  recorded: 0,
-  delivered: 1,
-  seen: 2,
-  consumed: 3,
-  "voided-by-death": 3,
-};
-
-export function advanceTell(paths: AkumaPaths, id: string, state: Exclude<TellState, "recorded" | "voided-by-death">): void {
+export function recordTellDeliveries(
+  paths: AkumaPaths,
+  inputs: readonly TellDeliveryInput[],
+): void {
   withHeart(paths, (heart) =>
     transaction(heart, () => {
-      const current = tellState(heart, id);
-      if (current === null) throw new Error(`unknown tell ${id}`);
-      if (TELL_ORDER[state] < TELL_ORDER[current] || current === "voided-by-death") return;
-      updateTellState(heart, id, state);
+      for (const input of inputs) {
+        const current = tellFact(heart, input.tellId);
+        if (current === null) throw new Error(`unknown tell ${input.tellId}`);
+        if (current.state === "voided") throw new Error(`tell ${input.tellId} is voided`);
+      }
+      for (const input of inputs) insertTellDeliveryFact(heart, input);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
+    }));
+}
+
+export function recordTellReceipt(
+  paths: AkumaPaths,
+  input: TellReceiptInput,
+): void {
+  withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      const tellIds = input.evidence === "exact"
+        ? [input.tellId]
+        : tellIdsForFence(heart, input.bodySequence, input.fence);
+      if (tellIds.length === 0) throw new Error("tell receipt has no delivery mapping");
+      for (const tellId of tellIds) {
+        const current = tellFact(heart, tellId);
+        if (current?.state === "voided") throw new Error(`tell ${tellId} is voided`);
+      }
+      insertTellReceiptFact(heart, input);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
     }));
 }
 
@@ -393,8 +422,9 @@ export function recordDeath(paths: AkumaPaths, death: DeathFact): "recorded" | "
     transaction(heart, () => {
       if (deathExists(heart)) return "already-dead";
       insertDeathFact(heart, death);
-      voidTellsByDeath(heart);
+      voidTellsByDeath(heart, `death:${death.evidence}`, death.at);
       voidRequestsByDeath(heart, `death:${death.evidence}`);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT);
       return "recorded";
     }));
 }

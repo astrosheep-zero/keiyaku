@@ -37,8 +37,9 @@ dies; their existence does not depend on a current control-flow reader.
 - **activity** — the persistent execution-history sequence
   `(sequence, body_sequence, event_json, at)`. `sequence` is monotonic and
   never reused. Every row belongs to the body that observed it. The body keeps
-  the newest 5,000 rows on write; recent status is a read-time selection, not
-  a smaller persisted log. Typed, bounded activity is the first and only
+  the newest 5,000 rows with a bounded write buffer; crossing that buffer
+  compacts in one batch rather than enforcing an exact count after every write.
+  Recent status is a read-time selection, not a smaller persisted log. Typed, bounded activity is the first and only
   execution-history log. Raw native payloads are never activity facts.
 - **tells** — the admitted body and recorded timeline sequence, repeatable
   deliveries with route plus Heart-owned `bodySequence`, provider fence, and
@@ -64,9 +65,10 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed `heart/` custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `6`; leash schema version remains `4`. Heart version 6
-renames the persisted Archetype columns and removes Contract columns from soul
-and Body Requests. This is a hard cut: an
+Heart schema version is `7`; leash schema version remains `4`. Heart version 7
+adds the shared activity-and-tell timeline and replaces mutable tell state with
+immutable delivery, receipt, and death-void witnesses. It retains the version 6
+Archetype and Contract-column hard cut. This is a hard cut: an
 older heart fails the existing schema gate; no migration or compatibility
 decoder exists. Absence is stored as SQL `NULL` and omitted from public values.
 
@@ -94,9 +96,11 @@ otherwise the tell is `pending`. Receipt admission and death voiding use the
 same Heart transaction serialization. Death voids only tells without terminal
 evidence and a voided tell rejects every later delivery or receipt, so the fold
 never changes one terminal state into another.
-Retention removes settled tell facts below the same 5,000-row timeline boundary
-as settled provider activity. Pending tell facts are pinned until they become
-told or voided because Body recovery still reads them.
+Retention removes settled tell facts below the same buffered 5,000-row timeline
+boundary as settled provider activity. Pending tell facts are pinned until they
+become told or voided because Body recovery and status still read them. A
+settled fact may remain in the bounded buffer until a later write crosses the
+compaction threshold; no command promises an exact physical row count.
 
 `activitySlice({ before?, since?, limit? })` is the sole activity-history
 primitive. It joins provider activity and tell facts by their one shared

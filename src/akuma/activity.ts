@@ -1,5 +1,5 @@
 import { decodeAgentEvent, type ToolCall, type ToolResult } from "./provider.js";
-import type { ActivityFact, ActivitySlice, TellFact, TurnFact } from "./heart/index.js";
+import type { ActivityFact, ActivitySlice, TellFact, TimelineFact, TurnFact } from "./heart/index.js";
 
 const SETTLED_LIMIT = 8;
 const INTENT_LIMIT = 2;
@@ -18,13 +18,18 @@ export type ActivityRow =
       call: ToolCall;
       state: "running" | ToolResult;
     }>
-  | Readonly<{ kind: "note"; sequence: number; bodySequence: number; at: string; text: string }>;
-
-export type PendingTell = Readonly<{ id: string; body: string; recordedAt: string }>;
+  | Readonly<{ kind: "note"; sequence: number; bodySequence: number; at: string; text: string }>
+  | Readonly<{
+      kind: "tell";
+      sequence: number;
+      at: string;
+      tellId: string;
+      text: string;
+      state: TellFact["state"];
+    }>;
 
 export type ActivitySnapshot = Readonly<{
   rows: readonly ActivityRow[];
-  pendingTells: readonly PendingTell[];
   omitted: number;
   lowestRetained: number | null;
   highest: number | null;
@@ -65,10 +70,24 @@ function narrationRow(fact: ActivityFact, event: ReturnType<typeof decodeAgentEv
 }
 
 /** Fold the complete retained typed event window before any display budget. */
-export function foldActivity(facts: readonly ActivityFact[]): readonly ActivityRow[] {
+export function foldActivity(facts: readonly TimelineFact[]): readonly ActivityRow[] {
   const rows: Folded[] = [];
   const running = new Map<string, number>();
   for (const fact of facts) {
+    if (!("event" in fact)) {
+      rows.push({
+        settled: fact.state !== "pending",
+        row: {
+          kind: "tell",
+          sequence: fact.sequence,
+          at: fact.recordedAt,
+          tellId: fact.id,
+          text: fact.body,
+          state: fact.state,
+        },
+      });
+      continue;
+    }
     const event = decodeAgentEvent(fact.event);
     const narration = narrationRow(fact, event);
     if (narration !== null) {
@@ -132,35 +151,32 @@ export function foldActivity(facts: readonly ActivityFact[]): readonly ActivityR
   return rows.map((entry) => entry.row);
 }
 
-function pendingTellFacts(tells: readonly TellFact[]): readonly PendingTell[] {
-  return tells
-    .filter((tell) => tell.state !== "consumed" && tell.state !== "voided-by-death")
-    .map((tell) => ({ id: tell.id, body: tell.body, recordedAt: tell.recordedAt }));
-}
-
 /** Apply the one bounded recent selection after folding semantic rows. */
 export function selectActivitySnapshot(
-  facts: readonly ActivityFact[],
-  input: Readonly<{ pending?: readonly TellFact[]; lowestRetained?: number | null; highest?: number | null }> = {},
+  facts: readonly TimelineFact[],
+  input: Readonly<{ lowestRetained?: number | null; highest?: number | null }> = {},
 ): ActivitySnapshot {
   const folded = foldActivity(facts);
-  const settled = folded.filter((row) => row.kind !== "tool" || row.state !== "running");
+  const settled = folded.filter((row) =>
+    (row.kind !== "tool" || row.state !== "running") && (row.kind !== "tell" || row.state !== "pending"));
   const selected = new Set<ActivityRow>(settled.slice(-SETTLED_LIMIT));
   const intent = settled.filter((row) => row.kind === "said" || row.kind === "thought").slice(-INTENT_LIMIT);
   for (const row of intent) selected.add(row);
   for (const row of folded) {
-    if (row.kind === "tool" && row.state === "running") selected.add(row);
+    if ((row.kind === "tool" && row.state === "running") || (row.kind === "tell" && row.state === "pending")) {
+      selected.add(row);
+    }
   }
   return {
     rows: folded.filter((row) => selected.has(row)),
-    pendingTells: pendingTellFacts(input.pending ?? []),
-    omitted: settled.length - [...selected].filter((row) => row.kind !== "tool" || row.state !== "running").length,
+    omitted: settled.length - [...selected].filter((row) =>
+      (row.kind !== "tool" || row.state !== "running") && (row.kind !== "tell" || row.state !== "pending")).length,
     lowestRetained: input.lowestRetained ?? (facts[0]?.sequence ?? null),
     highest: input.highest ?? (facts.at(-1)?.sequence ?? null),
   };
 }
 
-function visibleRows(facts: readonly ActivityFact[], since: boolean, limit: number): readonly ActivityRow[] {
+function visibleRows(facts: readonly TimelineFact[], since: boolean, limit: number): readonly ActivityRow[] {
   const folded = foldActivity(facts);
   return since ? folded.slice(0, limit) : folded.slice(-limit);
 }
@@ -173,7 +189,7 @@ export function projectActivityHistory(
 ): ActivityHistory {
   const all = foldActivity(slice.rows);
   const rows = visibleRows(slice.rows, input.since === true, input.limit);
-  const bodySequences = new Set(rows.map((row) => row.bodySequence));
+  const bodySequences = new Set(rows.flatMap((row) => "bodySequence" in row ? [row.bodySequence] : []));
   return {
     rows,
     turns: turns.filter((turn) => bodySequences.has(turn.bodySequence)),

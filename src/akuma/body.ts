@@ -1,7 +1,6 @@
 import { fileURLToPath } from "node:url";
 import {
   HeldAkumaLeash,
-  advanceTell,
   appendActivity,
   breakBody,
   clearAbandonedControl,
@@ -11,15 +10,18 @@ import {
   readHeart,
   recordBody,
   recordSession,
+  recordTellDeliveries,
+  recordTellReceipt,
   recordTurn,
   stopRequested,
   type ResumeCoordinate,
+  type TellFact,
   type SessionFact,
   type Soul,
   type BodyFact,
 } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
-import { encodeAgentEvent, type Drive, type ProviderAdapter, type TurnResult } from "./provider.js";
+import { encodeAgentEvent, type ProviderAdapter, type Session, type TurnResult } from "./provider.js";
 import { providerNamed } from "./providers/index.js";
 import {
   BodyRequestPump,
@@ -53,6 +55,17 @@ type BodyRuntime = Readonly<{
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function serializeEffects() {
+  let tail = Promise.resolve();
+  return async <T>(effect: () => Promise<T> | T): Promise<T> => {
+    const before = tail;
+    let release!: () => void;
+    tail = new Promise<void>((resolve) => { release = resolve; });
+    await before;
+    try { return await effect(); } finally { release(); }
+  };
 }
 
 function missing(error: unknown): boolean {
@@ -106,22 +119,25 @@ type DriveTurnInput = Readonly<{
   soul: Soul;
   adapter: ProviderAdapter;
   bodySequence: number;
-  prompt: string;
-  tellId?: string;
+  body: string;
+  launchTells: readonly TellFact[];
   runtimeSpawn(launch: RequestChildLaunch): Promise<ProcessCollar>;
   now(): string;
 }>;
 
 type ActiveTurn = Readonly<{
-  drive: Drive;
+  drive: Session;
   requests: BodyRequestPump | null;
   cwd: string;
   options: Soul["options"];
-  session?: ResumeCoordinate;
+  resume?: ResumeCoordinate;
 }>;
 
-async function startTurnDrive(input: DriveTurnInput): Promise<ActiveTurn> {
+type StartTurnResult = ActiveTurn | Readonly<{ kind: "resume-unsupported" }>;
+
+async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
   const { cwd, options, session } = turnRecipe(input.paths, input.soul);
+  if (session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
   const requests = input.soul.confinement.kind === "declared"
     ? new BodyRequestPump({
         paths: input.paths,
@@ -132,18 +148,69 @@ async function startTurnDrive(input: DriveTurnInput): Promise<ActiveTurn> {
       })
     : null;
   try {
-    const drive = await input.adapter.start({
-      prompt: input.prompt,
+    const driveInput = {
+      body: input.body,
+      launchTells: input.launchTells.map((tell) => ({ id: tell.id, text: tell.body })),
       cwd,
       options,
-      ...(session === undefined ? {} : { session }),
       ...(requests === null ? {} : { requests: { dir: requests.directory } }),
-    });
-    if (requests !== null) void drive.completion.then(() => requests.stopAdmission());
-    return { drive, requests, cwd, options, ...(session === undefined ? {} : { session }) };
+    };
+    const selected = session === undefined
+      ? await input.adapter.start({ ...driveInput, session: { kind: "fresh" } })
+      : await input.adapter.resume!({ ...driveInput, session: { kind: "resume", coordinate: session } });
+    if (input.launchTells.length > 0) {
+      recordTellDeliveries(input.paths, input.launchTells.map((tell) => ({
+        tellId: tell.id,
+        route: "launch" as const,
+        bodySequence: input.bodySequence,
+        fence: selected.admission.fence,
+        deliveredAt: input.now(),
+      })));
+    }
+    if (requests !== null) void selected.completion.then(() => requests.stopAdmission());
+    return { drive: selected, requests, cwd, options, ...(session === undefined ? {} : { resume: session }) };
   } catch (error) {
     if (requests !== null) await requests.close();
     throw error;
+  }
+}
+
+function pumpReceipts(
+  input: DriveTurnInput,
+  drive: Session,
+  writeWitness: ReturnType<typeof serializeEffects>,
+): Promise<void> {
+  return (async () => {
+    if (drive.receipts === undefined) return;
+    for await (const receipt of drive.receipts) {
+      await writeWitness(() => recordTellReceipt(input.paths, receipt.evidence === "exact"
+        ? { ...receipt, receivedAt: input.now() }
+        : { ...receipt, bodySequence: input.bodySequence, receivedAt: input.now() }));
+    }
+  })();
+}
+
+async function submitPendingLiveTells(
+  input: DriveTurnInput,
+  drive: Session,
+  attempted: Set<string>,
+  writeWitness: ReturnType<typeof serializeEffects>,
+): Promise<void> {
+  if (drive.tell === undefined) return;
+  for (const tell of readHeart(input.paths).pending) {
+    if (attempted.has(tell.id)) continue;
+    attempted.add(tell.id);
+    await writeWitness(async () => {
+      const acknowledgement = await drive.tell!({ id: tell.id, text: tell.body });
+      recordTellDeliveries(input.paths, [{
+        tellId: tell.id,
+        route: "live",
+        bodySequence: input.bodySequence,
+        fence: acknowledgement.fence,
+        receipt: drive.receipts === undefined ? "unavailable" : "required",
+        deliveredAt: input.now(),
+      }]);
+    });
   }
 }
 
@@ -151,63 +218,86 @@ async function consumeTurnDrive(
   input: DriveTurnInput,
   active: ActiveTurn,
 ): Promise<DrivenTurn | Readonly<{ kind: "stopped" }>> {
-  const { drive, requests, cwd, options, session } = active;
-  let turnSession = session;
-  let entered = false;
+  const { drive, requests, cwd, options, resume } = active;
+  let turnSession = resume;
+  const attempted = new Set(input.launchTells.map((tell) => tell.id));
+  const writeWitness = serializeEffects();
+  const receiptPump = pumpReceipts(input, drive, writeWitness);
+  const receiptFailure = receiptPump.then(
+    () => new Promise<never>(() => {}),
+    (error: unknown) => Promise.reject(error),
+  );
   const iterator = drive.events[Symbol.asyncIterator]();
   let pending = iterator.next();
-  for (;;) {
-    if (stopRequested(input.paths) || pauseRequested(input.paths)) {
-      const draining = requests?.close();
-      try { await drive.abort(); } finally { await draining; }
-      return { kind: "stopped" };
-    }
-    const next = await Promise.race([
-      pending,
-      wait(LEASH_RETRY_MS).then(() => null),
-      ...(requests === null ? [] : [requests.failure]),
-    ]);
-    if (next === null) continue;
-    if (next.done) break;
-    const event = next.value;
-    const at = input.now();
-    if (event.type === "session") {
-      turnSession = event.coordinate;
-      recordSession(input.paths, {
-        provider: input.soul.provider.name,
-        coordinate: event.coordinate,
-        cwd,
-        options,
-        admittedAt: at,
+  try {
+    for (;;) {
+      if (stopRequested(input.paths) || pauseRequested(input.paths)) {
+        const draining = requests?.close();
+        try { await drive.abort(); } finally {
+          await draining;
+          await receiptPump;
+        }
+        return { kind: "stopped" };
+      }
+      await submitPendingLiveTells(input, drive, attempted, writeWitness);
+      const next = await Promise.race([
+        pending,
+        wait(LEASH_RETRY_MS).then(() => null),
+        receiptFailure,
+        ...(requests === null ? [] : [requests.failure]),
+      ]);
+      if (next === null) continue;
+      if (next.done) break;
+      const event = next.value;
+      const at = input.now();
+      if (event.type === "session") {
+        turnSession = event.coordinate;
+        recordSession(input.paths, {
+          provider: input.soul.provider.name,
+          coordinate: event.coordinate,
+          cwd,
+          options,
+          admittedAt: at,
+        });
+      }
+      appendActivity(input.paths, {
+        bodySequence: input.bodySequence,
+        event: encodeAgentEvent(event),
+        at,
       });
+      pending = iterator.next();
     }
-    appendActivity(input.paths, {
-      bodySequence: input.bodySequence,
-      event: encodeAgentEvent(event),
-      at,
-    });
-    if (!entered && input.tellId !== undefined) {
-      entered = true;
-      advanceTell(input.paths, input.tellId, "seen");
-      advanceTell(input.paths, input.tellId, "consumed");
-    }
-    pending = iterator.next();
+    const result = await drive.completion;
+    await receiptPump;
+    if (requests !== null) await requests.close();
+    return result.kind === "answered"
+      ? { ...result, ...(turnSession === undefined ? {} : { session: turnSession }) }
+      : result;
+  } catch (error) {
+    const draining = requests?.close();
+    try { await drive.abort(); } catch { /* the pump failure owns the turn result */ }
+    try { await receiptPump; } catch { /* preserve the first pump failure */ }
+    try { await draining; } catch { /* preserve the first pump failure */ }
+    return { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) };
   }
-  const result = await drive.completion;
-  if (requests !== null) await requests.close();
-  if (!entered && result.kind === "answered" && input.tellId !== undefined) {
-    advanceTell(input.paths, input.tellId, "seen");
-    advanceTell(input.paths, input.tellId, "consumed");
-  }
-  return result.kind === "answered"
-    ? { ...result, ...(turnSession === undefined ? {} : { session: turnSession }) }
-    : result;
 }
 
 async function driveTurn(
   input: DriveTurnInput,
-): Promise<DrivenTurn | Readonly<{ kind: "stopped" }> | Readonly<{ kind: "heart-gone" }>> {
-  const active = await startTurnDrive(input);
+): Promise<DrivenTurn
+  | Readonly<{ kind: "stopped" }>
+  | Readonly<{ kind: "heart-gone" }>
+  | Readonly<{ kind: "resume-unsupported" }>> {
+  let active: ActiveTurn;
+  try {
+    const started = await startTurnDrive(input);
+    if ("kind" in started) return started;
+    active = started;
+  } catch (error) {
+    return heartExists(input.paths)
+      ? { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) }
+      : { kind: "heart-gone" };
+  }
   try {
     return await consumeTurnDrive(input, active);
   } catch (error) {
@@ -311,22 +401,20 @@ export async function driveAkumaBody(
         breakBody(launch.paths, { sequence: body.sequence, end: "put-down", at: runtime.now() });
         return;
       }
-      const tell = initial === undefined ? snapshot.pending[0] : undefined;
-      const prompt = initial ?? tell?.body;
-      if (prompt === undefined) {
+      const launchTells = snapshot.pending;
+      if (initial === undefined && launchTells.length === 0) {
         const finished = finishBodyIfIdle(launch.paths, { sequence: body.sequence, at: runtime.now() });
         if (finished.kind === "finished") return;
         continue;
       }
-      if (tell !== undefined) advanceTell(launch.paths, tell.id, "delivered");
       const result = await driveTurn({
         paths: launch.paths,
         soul,
         adapter: selected,
         bodySequence: body.sequence,
         runtimeSpawn: childSpawner(runtime),
-        prompt,
-        ...(tell === undefined ? {} : { tellId: tell.id }),
+        body: initial ?? "",
+        launchTells,
         now: runtime.now,
       });
       if (result.kind === "heart-gone") {
@@ -335,6 +423,10 @@ export async function driveAkumaBody(
       }
       if (result.kind === "stopped") {
         breakBody(launch.paths, { sequence: body.sequence, end: "put-down", at: runtime.now() });
+        return;
+      }
+      if (result.kind === "resume-unsupported") {
+        breakBody(launch.paths, { sequence: body.sequence, end: "broke-off", at: runtime.now() });
         return;
       }
       if (persistTurn(launch.paths, body.sequence, result, runtime.now()) === "failed") {

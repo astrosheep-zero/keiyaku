@@ -28,6 +28,7 @@ const provider: ProviderAdapter = {
   admitOptions(options) { return { kind: "admitted", options }; },
   async start() {
     return {
+      admission: { fence: "fleet-fixture-turn" },
       events: { async *[Symbol.asyncIterator]() { yield { type: "session" as const, coordinate: { sessionId: "fixture" } }; } },
       completion: Promise.resolve({ kind: "answered", answer: "done", historyId: "history" }),
       async abort() {},
@@ -91,6 +92,24 @@ test("facade requires an explicit completion mode for a plural wait", async () =
       Keiyaku.wait({ path: root, akuma: [one.id, two.id], timeoutMs: 0 }),
       /completion must be any or all/u,
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("facade tell preserves mutation authority beside a separate observation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-"));
+  try {
+    const source = await answered(root, "worker", "00000001");
+    const result = await Keiyaku.tell({ path: root, akuma: source.id, body: "continue" });
+    assert.equal(result.akuma, source.id);
+    assert.equal(result.tell.admission.fact, "recorded");
+    assert.equal(typeof result.tell.admission.tellId, "string");
+    assert.equal(result.observation.id, source.id);
+    assert.ok(result.observation.activity.rows.some((row) =>
+      row.kind === "tell" && row.tellId === result.tell.admission.tellId));
+    assert.equal("receipt" in result, false);
+    assert.equal("status" in result, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

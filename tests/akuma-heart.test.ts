@@ -8,6 +8,8 @@ import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import {
   HeldAkumaLeash,
   admitRequest,
+  activitySlice,
+  appendActivity,
   finishBodyIfIdle,
   initializeHeart,
   life,
@@ -22,6 +24,8 @@ import {
   recordDeath,
   recordSession,
   recordTell,
+  recordTellDeliveries,
+  recordTellReceipt,
   recordTurn,
   requestPause,
   requestStop,
@@ -95,20 +99,183 @@ test("session admission survives before turn completion", () => {
   } finally { value.close(); }
 });
 
-test("tell admission and death are one serialized fence", () => {
+test("tell admission shares activity order and delivery witnesses fold without mutable stages", () => {
   const value = fixture();
   try {
     const body = HeldAkumaLeash.try(value.allocated.paths)!;
     body.birth(value.allocated.paths, value.soul);
-    body.release();
-    assert.equal(recordTell(value.allocated.paths, {
+    const bodyFact = recordBody(value.allocated.paths, {
+      collar: { pid: 1, processGroup: 1, spawnedAt: "tell-witness" },
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    const firstActivity = appendActivity(value.allocated.paths, {
+      bodySequence: bodyFact.sequence,
+      event: { type: "note", text: "before" },
+      at: "2026-08-08T00:00:00.000Z",
+    });
+    const admitted = recordTell(value.allocated.paths, {
       id: "tell-1", body: "first", recordedAt: "2026-08-08T00:00:01.000Z",
-    }), "recorded");
-    assert.equal(recordDeath(value.allocated.paths, { evidence: "killed", at: "2026-08-08T00:00:02.000Z" }), "recorded");
-    assert.equal(recordTell(value.allocated.paths, {
-      id: "tell-2", body: "late", recordedAt: "2026-08-08T00:00:03.000Z",
-    }), "dead");
+    });
+    assert.equal(admitted.kind, "recorded");
+    if (admitted.kind !== "recorded") return;
+    const afterActivity = appendActivity(value.allocated.paths, {
+      bodySequence: bodyFact.sequence,
+      event: { type: "note", text: "after" },
+      at: "2026-08-08T00:00:02.000Z",
+    });
+    assert.deepEqual([firstActivity, admitted.tell.sequence, afterActivity], [1, 2, 3]);
+    assert.deepEqual(activitySlice(value.allocated.paths).rows.map((fact) => "id" in fact ? "tell" : "activity"), [
+      "activity", "tell", "activity",
+    ]);
+
+    const delivery = {
+      tellId: admitted.tell.id,
+      route: "launch" as const,
+      bodySequence: bodyFact.sequence,
+      fence: "launch-fence",
+      deliveredAt: "2026-08-08T00:00:03.000Z",
+    };
+    recordTellDeliveries(value.allocated.paths, [delivery]);
+    recordTellDeliveries(value.allocated.paths, [delivery]);
+    const told = activitySlice(value.allocated.paths).rows[1];
+    assert.equal(told !== undefined && "id" in told ? told.state : null, "told");
+    assert.equal(readHeart(value.allocated.paths).pending.length, 0);
+    body.release();
+  } finally { value.close(); }
+});
+
+test("live receipts are terminal only under their exact Heart correlation", () => {
+  const value = fixture();
+  try {
+    const body = HeldAkumaLeash.try(value.allocated.paths)!;
+    body.birth(value.allocated.paths, value.soul);
+    const firstBody = recordBody(value.allocated.paths, {
+      collar: { pid: 1, processGroup: 1, spawnedAt: "receipt-1" },
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    const required = recordTell(value.allocated.paths, {
+      id: "tell-required", body: "wait for receipt", recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    const unavailable = recordTell(value.allocated.paths, {
+      id: "tell-unavailable", body: "ack is terminal", recordedAt: "2026-08-08T00:00:02.000Z",
+    });
+    assert.equal(required.kind, "recorded");
+    assert.equal(unavailable.kind, "recorded");
+    recordTellDeliveries(value.allocated.paths, [{
+      tellId: "tell-required", route: "live", receipt: "required",
+      bodySequence: firstBody.sequence, fence: "shared-fence", deliveredAt: "2026-08-08T00:00:03.000Z",
+    }, {
+      tellId: "tell-unavailable", route: "live", receipt: "unavailable",
+      bodySequence: firstBody.sequence, fence: "ack-fence", deliveredAt: "2026-08-08T00:00:03.000Z",
+    }]);
+    assert.deepEqual(readHeart(value.allocated.paths).pending.map((tell) => tell.id), ["tell-required"]);
+    assert.throws(() => recordTellReceipt(value.allocated.paths, {
+      evidence: "fence", bodySequence: firstBody.sequence + 1, fence: "shared-fence",
+      kind: "accepted", receivedAt: "2026-08-08T00:00:04.000Z",
+    }), /no delivery mapping/u);
+    assert.deepEqual(readHeart(value.allocated.paths).pending.map((tell) => tell.id), ["tell-required"]);
+    recordTellReceipt(value.allocated.paths, {
+      evidence: "fence", bodySequence: firstBody.sequence, fence: "shared-fence",
+      kind: "accepted", receivedAt: "2026-08-08T00:00:05.000Z",
+    });
     assert.deepEqual(readHeart(value.allocated.paths).pending, []);
+
+    const exact = recordTell(value.allocated.paths, {
+      id: "tell-exact", body: "exact", recordedAt: "2026-08-08T00:00:06.000Z",
+    });
+    assert.equal(exact.kind, "recorded");
+    recordTellReceipt(value.allocated.paths, {
+      evidence: "exact", tellId: "tell-exact", kind: "consumed", receivedAt: "2026-08-08T00:00:07.000Z",
+    });
+    assert.deepEqual(readHeart(value.allocated.paths).pending, []);
+    body.release();
+  } finally { value.close(); }
+});
+
+test("death voids only pending tells and terminal witness order never reverses", () => {
+  const value = fixture();
+  try {
+    const body = HeldAkumaLeash.try(value.allocated.paths)!;
+    body.birth(value.allocated.paths, value.soul);
+    const pending = recordTell(value.allocated.paths, {
+      id: "tell-pending", body: "pending", recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    const told = recordTell(value.allocated.paths, {
+      id: "tell-told", body: "told", recordedAt: "2026-08-08T00:00:02.000Z",
+    });
+    assert.equal(pending.kind, "recorded");
+    assert.equal(told.kind, "recorded");
+    recordTellReceipt(value.allocated.paths, {
+      evidence: "exact", tellId: "tell-told", kind: "consumed", receivedAt: "2026-08-08T00:00:03.000Z",
+    });
+    assert.equal(recordDeath(value.allocated.paths, { evidence: "killed", at: "2026-08-08T00:00:04.000Z" }), "recorded");
+    const rows = activitySlice(value.allocated.paths).rows.filter((fact) => "id" in fact);
+    assert.deepEqual(rows.map((fact) => "id" in fact ? fact.state : null), ["voided", "told"]);
+    assert.throws(() => recordTellDeliveries(value.allocated.paths, [{
+      tellId: "tell-pending", route: "launch", bodySequence: 1,
+      fence: "late", deliveredAt: "2026-08-08T00:00:05.000Z",
+    }]), /is voided/u);
+    assert.throws(() => recordTellReceipt(value.allocated.paths, {
+      evidence: "exact", tellId: "tell-pending", kind: "late", receivedAt: "2026-08-08T00:00:05.000Z",
+    }), /is voided/u);
+    assert.deepEqual(recordTell(value.allocated.paths, {
+      id: "tell-late", body: "late", recordedAt: "2026-08-08T00:00:06.000Z",
+    }), { kind: "dead" });
+    body.release();
+  } finally { value.close(); }
+});
+
+test("retention uses a bounded settled buffer while pending tells remain pinned", () => {
+  const value = fixture();
+  try {
+    const leash = HeldAkumaLeash.try(value.allocated.paths)!;
+    leash.birth(value.allocated.paths, value.soul);
+    const body = recordBody(value.allocated.paths, {
+      collar: { pid: 1, processGroup: 1, spawnedAt: "retention" },
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    const admitted = recordTell(value.allocated.paths, {
+      id: "tell-pinned", body: "keep me", recordedAt: "2026-08-08T00:00:00.000Z",
+    });
+    assert.equal(admitted.kind, "recorded");
+    const heart = new DatabaseSync(value.allocated.paths.heart);
+    try {
+      heart.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
+      heart.prepare(`WITH RECURSIVE rows(value) AS (
+        VALUES(1) UNION ALL SELECT value + 1 FROM rows WHERE value < 5501
+      ) INSERT INTO timeline(kind) SELECT 'activity' FROM rows`).run();
+      heart.prepare(`INSERT INTO activity(sequence, body_sequence, event_json, at)
+        SELECT sequence, ?, '{"type":"note","text":"buffered"}', '2026-08-08T00:00:01.000Z'
+        FROM timeline WHERE kind = 'activity'`).run(body.sequence);
+      heart.exec("COMMIT");
+    } catch (error) {
+      heart.exec("ROLLBACK");
+      throw error;
+    } finally { heart.close(); }
+
+    appendActivity(value.allocated.paths, {
+      bodySequence: body.sequence,
+      event: { type: "note", text: "trigger compaction" },
+      at: "2026-08-08T00:00:02.000Z",
+    });
+    let retained = activitySlice(value.allocated.paths, { limit: Number.MAX_SAFE_INTEGER });
+    assert.equal(retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"), true);
+    assert.equal(retained.rows.filter((fact) => !("id" in fact)).length, 5_000);
+
+    recordTellReceipt(value.allocated.paths, {
+      evidence: "exact", tellId: "tell-pinned", kind: "consumed", receivedAt: "2026-08-08T00:00:03.000Z",
+    });
+    for (let index = 0; index < 501; index += 1) {
+      appendActivity(value.allocated.paths, {
+        bodySequence: body.sequence,
+        event: { type: "note", text: `after-${index}` },
+        at: "2026-08-08T00:00:04.000Z",
+      });
+    }
+    retained = activitySlice(value.allocated.paths, { limit: Number.MAX_SAFE_INTEGER });
+    assert.equal(retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"), false);
+    assert.ok(retained.rows.length >= 5_000 && retained.rows.length <= 5_500);
+    leash.release();
   } finally { value.close(); }
 });
 
@@ -178,7 +345,7 @@ test("Body Request facts have one idempotent monotonic authority", () => {
   } finally { value.close(); }
 });
 
-test("heart schema version 6 and leash schema version 4 hard-refuse old authority", () => {
+test("heart schema version 7 and leash schema version 4 hard-refuse old authority", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -188,7 +355,7 @@ test("heart schema version 6 and leash schema version 4 hard-refuse old authorit
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 6/u);
+    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 7/u);
     assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

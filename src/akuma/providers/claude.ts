@@ -1,11 +1,12 @@
-import type { Options, Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { randomUUID } from "node:crypto";
+import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   AgentEventChannel,
   boundedEventText,
   boundedThoughtText,
   noteEvent,
   unknownEvent,
-  type Drive,
+  type Session,
   type ProviderAdapter,
   type ProviderOptions,
   type ToolCall,
@@ -17,6 +18,9 @@ type ClaudeSystemSubtype = Extract<SDKMessage, { type: "system" }>["subtype"];
 type MessageDisposition = "assistant" | "auth" | "note" | "system" | "tool-results" | "drop" | "terminal";
 type SystemDisposition = "note" | "control-progress" | "drop";
 type ClaudeObservationState = { tools: Map<string, Readonly<{ name: string; call: ToolCall }>> };
+type ClaudeExecution = Readonly<{ executable?: string; env?: Readonly<Record<string, string>> }>;
+type ClaudeDriveInput = Parameters<ProviderAdapter["start"]>[0]
+  | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 
 export const CLAUDE_MESSAGE_DISPOSITIONS = {
   assistant: "assistant",
@@ -64,7 +68,7 @@ export const CLAUDE_SYSTEM_DISPOSITIONS = {
 } as const satisfies Record<ClaudeSystemSubtype, SystemDisposition>;
 
 export type ClaudeSdk = Readonly<{
-  query(input: Readonly<{ prompt: string; options?: Options }>): Query;
+  query(input: Readonly<{ prompt: string | AsyncIterable<SDKUserMessage>; options?: Options }>): Query;
   forkSession?(
     sessionId: string,
     options: Readonly<{ dir: string; upToMessageId: string }>,
@@ -249,7 +253,7 @@ function permissionMode(access: ProviderOptions["access"]): "plan" | "acceptEdit
 
 async function forkClaude(
   load: () => Promise<ClaudeSdk>,
-  execution: Readonly<{ env?: Readonly<Record<string, string>> }>,
+  execution: ClaudeExecution,
   input: Parameters<NonNullable<ProviderAdapter["fork"]>>[0],
 ): Promise<Readonly<{ session: { sessionId: string } }>> {
   if (execution.env !== undefined) {
@@ -263,77 +267,130 @@ async function forkClaude(
   return { session: { sessionId: forked.sessionId } };
 }
 
+function claudeQueryOptions(
+  input: ClaudeDriveInput,
+  execution: ClaudeExecution,
+  abortController: AbortController,
+): Options {
+  const providerOptions = input.options;
+  const access = permissionMode(providerOptions.access);
+  return {
+    cwd: input.cwd,
+    abortController,
+    ...(execution.executable === undefined ? {} : { pathToClaudeCodeExecutable: execution.executable }),
+    ...(execution.env === undefined ? {} : { env: { ...process.env, ...execution.env } }),
+    permissionMode: access,
+    ...(access === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
+    settingSources: ["user", "project", "local"],
+    ...(providerOptions.model === undefined ? {} : { model: providerOptions.model }),
+    ...(providerOptions.effort === undefined ? {} : {
+      effort: providerOptions.effort as NonNullable<Options["effort"]>,
+    }),
+    ...(providerOptions.systemPrompt === undefined || providerOptions.systemPrompt.length === 0 ? {} : {
+      systemPrompt: { type: "preset", preset: "claude_code", append: providerOptions.systemPrompt },
+    }),
+    ...(input.session.kind === "fresh" ? {} : { resume: input.session.coordinate.sessionId }),
+  };
+}
+
+function claudePrompt(input: ClaudeDriveInput, fence: ReturnType<typeof randomUUID>): AsyncIterable<SDKUserMessage> {
+  const text = [input.body, ...input.launchTells.map((tell) => tell.text)]
+    .filter((part) => part.length > 0).join("\n\n");
+  return {
+    async *[Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
+      yield {
+        type: "user",
+        message: { role: "user", content: text },
+        parent_tool_use_id: null,
+        uuid: fence,
+      };
+    },
+  };
+}
+
+function observeClaudeQuery(
+  query: Query,
+  events: AgentEventChannel,
+): Readonly<{ admission: Promise<void>; completion: Promise<TurnResult> }> {
+  const observation: ClaudeObservationState = { tools: new Map() };
+  let admit!: () => void;
+  let rejectAdmission!: (error: Error) => void;
+  const admission = new Promise<void>((resolve, reject) => { admit = resolve; rejectAdmission = reject; });
+  let settle!: (result: TurnResult) => void;
+  const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
+  void (async () => {
+    let admitted = false;
+    let terminal: TurnResult | null = null;
+    let historyId: string | undefined;
+    try {
+      for await (const message of query) {
+        if (!admitted && "session_id" in message && typeof message.session_id === "string") {
+          admitted = true;
+          events.emit({ type: "session", coordinate: { sessionId: message.session_id } });
+          admit();
+        }
+        emitClaudeMessage(message, events, observation);
+        if (message.type === "assistant" && message.parent_tool_use_id === null
+          && typeof message.uuid === "string" && message.uuid.length > 0) historyId = message.uuid;
+        if (message.type === "result") terminal = message.subtype === "success"
+          ? historyId === undefined
+            ? { kind: "failed", diagnostic: "Claude query succeeded without an assistant history id" }
+            : { kind: "answered", answer: message.result, historyId }
+          : { kind: "failed", diagnostic: message.errors.join("; ") || message.subtype };
+      }
+      const result = terminal ?? { kind: "failed" as const, diagnostic: "Claude query ended without a result" };
+      if (!admitted) rejectAdmission(new Error(
+        result.kind === "failed" ? result.diagnostic : "Claude query ended before session admission",
+      ));
+      settle(result);
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      if (!admitted) rejectAdmission(failure);
+      settle({ kind: "failed", diagnostic: failure.message });
+    } finally {
+      events.end();
+    }
+  })();
+  return { admission, completion };
+}
+
+async function driveClaude(
+  load: () => Promise<ClaudeSdk>,
+  execution: ClaudeExecution,
+  input: ClaudeDriveInput,
+): Promise<Session> {
+  const sdk = await load();
+  const events = new AgentEventChannel();
+  const abortController = new AbortController();
+  const fence = randomUUID();
+  const query = sdk.query({
+    prompt: claudePrompt(input, fence),
+    options: claudeQueryOptions(input, execution, abortController),
+  });
+  const observed = observeClaudeQuery(query, events);
+  await observed.admission;
+  return {
+    admission: { fence },
+    events,
+    completion: observed.completion,
+    async abort(): Promise<void> {
+      abortController.abort();
+      query.close();
+      await observed.completion;
+    },
+  };
+}
+
 export function createClaudeProvider(
   load: () => Promise<ClaudeSdk>,
-  execution: Readonly<{ executable?: string; env?: Readonly<Record<string, string>> }> = {},
+  execution: ClaudeExecution = {},
 ): ProviderAdapter {
   return {
     confinement: () => ({ kind: "unconfined" }),
     admitOptions: admitClaudeOptions,
     fork: (input) => forkClaude(load, execution, input),
-    async start(input): Promise<Drive> {
-      const sdk = await load();
-      const events = new AgentEventChannel();
-      const abortController = new AbortController();
-      const providerOptions = input.options;
-      const access = permissionMode(providerOptions.access);
-      const options: Options = {
-        cwd: input.cwd,
-        abortController,
-        ...(execution.executable === undefined ? {} : { pathToClaudeCodeExecutable: execution.executable }),
-        ...(execution.env === undefined ? {} : { env: { ...process.env, ...execution.env } }),
-        permissionMode: access,
-        ...(access === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
-        settingSources: ["user", "project", "local"],
-        ...(providerOptions.model === undefined ? {} : { model: providerOptions.model }),
-        ...(providerOptions.effort === undefined ? {} : { effort: providerOptions.effort as NonNullable<Options["effort"]> }),
-        ...(providerOptions.systemPrompt === undefined || providerOptions.systemPrompt.length === 0 ? {} : {
-          systemPrompt: { type: "preset", preset: "claude_code", append: providerOptions.systemPrompt },
-        }),
-        ...(input.session === undefined ? {} : { resume: input.session.sessionId }),
-      };
-      const query = sdk.query({ prompt: input.prompt, options });
-      const observation: ClaudeObservationState = { tools: new Map() };
-      let admitted = false;
-      let settle!: (result: TurnResult) => void;
-      const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
-      void (async () => {
-        let terminal: TurnResult | null = null;
-        let historyId: string | undefined;
-        try {
-          for await (const message of query) {
-            if (!admitted && "session_id" in message && typeof message.session_id === "string") {
-              admitted = true;
-              events.emit({ type: "session", coordinate: { sessionId: message.session_id } });
-            }
-            emitClaudeMessage(message, events, observation);
-            if (message.type === "assistant" && message.parent_tool_use_id === null
-              && typeof message.uuid === "string" && message.uuid.length > 0) {
-              historyId = message.uuid;
-            }
-            if (message.type === "result") terminal = message.subtype === "success"
-              ? historyId === undefined
-                ? { kind: "failed", diagnostic: "Claude query succeeded without an assistant history id" }
-                : { kind: "answered", answer: message.result, historyId }
-              : { kind: "failed", diagnostic: message.errors.join("; ") || message.subtype };
-          }
-          settle(terminal ?? { kind: "failed", diagnostic: "Claude query ended without a result" });
-        } catch (error) {
-          settle({ kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) });
-        } finally {
-          events.end();
-        }
-      })();
-      return {
-        events,
-        completion,
-        async abort(): Promise<void> {
-          abortController.abort();
-          query.close();
-          await completion;
-        },
-      };
-    },
+    start: (input) => driveClaude(load, execution, input),
+    resume: (input) => driveClaude(load, execution, input),
   };
 }
 

@@ -102,7 +102,6 @@ test("Akuma status aligns and counts omitted activity", () => {
         at: "2026-08-10T16:42:00.000Z",
         text: "running tests",
       }],
-      pendingTells: [],
       omitted: 12,
       lowestRetained: 1,
       highest: 13,
@@ -122,17 +121,50 @@ test("Akuma status aligns and counts omitted activity", () => {
     result: { completion: "all", statuses: [status] },
   }), renderAkumaText(command, result));
   assert.equal(renderAkumaText(command, {
-    ...result,
+    kind: "akuma",
     action: "tell",
-    akuma: status.id,
-    receipt: { id: "tell-1", state: "recorded", wake: "spawned" },
-  }), renderAkumaText(command, result));
+    body: "current input",
+    result: {
+      akuma: status.id,
+      tell: { admission: { tellId: "tell-1", fact: "recorded" }, wake: "spawned" },
+      observation: status,
+    },
+  }), `${renderAkumaText(command, result)}\n      │ ⧗ tell   \"current input\"`);
   assert.equal(renderAkumaText(command, {
-    ...result,
+    kind: "akuma",
     action: "tell",
-    akuma: status.id,
-    receipt: { id: "tell-1", state: "recorded", wake: { kind: "failed", diagnostic: "spawn\nfailed" } },
-  }), `${renderAkumaText(command, result)}\nwake failed: spawn failed`);
+    body: "current input",
+    result: {
+      akuma: status.id,
+      tell: { admission: { tellId: "tell-1", fact: "recorded" }, wake: { kind: "failed", diagnostic: "spawn\nfailed" } },
+      observation: status,
+    },
+  }), `${renderAkumaText(command, result)}\n      │ ⧗ tell   \"current input\"\nwake failed: spawn failed`);
+  const observedTell = {
+    kind: "akuma" as const,
+    action: "tell" as const,
+    body: "current input",
+    result: {
+      akuma: status.id,
+      tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
+      observation: {
+        ...status,
+        activity: {
+          ...status.activity,
+          rows: [...status.activity.rows, {
+            kind: "tell" as const,
+            sequence: 14,
+            at: "2026-08-10T16:43:00.000Z",
+            tellId: "tell-1",
+            text: "current input",
+            state: "told" as const,
+          }],
+        },
+      },
+    },
+  };
+  assert.equal(renderAkumaText(command, observedTell).match(/current input/gu)?.length, 1);
+  assert.deepEqual(akumaJsonValue(command, observedTell), observedTell.result);
 });
 
 test("Akuma follow remains outside the unsettled CLI vocabulary", () => {
@@ -200,7 +232,7 @@ test("akuma call renders optional integration stages and maps partial success", 
           confinement: { kind: "unconfined" as const },
           pending: [],
           answer: "finished",
-          activity: { rows: [], pendingTells: [], omitted: 0, lowestRetained: null, highest: null },
+          activity: { rows: [], omitted: 0, lowestRetained: null, highest: null },
         },
       },
     },
@@ -289,6 +321,7 @@ test("akuma interrupt invokes the public receipt and maps every exit class", asy
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
+          admission: { fence: "cli-terminal-fixture" },
           events: { async *[Symbol.asyncIterator]() {} },
           completion: Promise.resolve({ kind: "failed", diagnostic: "done" }),
           async abort() {},
@@ -319,14 +352,14 @@ test("akuma interrupt invokes the public receipt and maps every exit class", asy
       receipt: {
         kind: "interrupted" as const,
         putDown: "self-aborted" as const,
-        tell: { id: "tell-1", state: "recorded" as const, wake: "spawned" as const },
+        tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
       },
     };
     assert.equal(renderAkumaText(parsed.command, interrupted), `${allocated.id} interrupted self-aborted`);
     assert.equal(akumaExitCode(interrupted), 0);
     const wakeFailed = {
       ...interrupted,
-      receipt: { ...interrupted.receipt, tell: { id: "tell-1", state: "recorded", wake: { kind: "failed", diagnostic: "spawn" } } },
+      receipt: { ...interrupted.receipt, tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: { kind: "failed", diagnostic: "spawn" } } },
     };
     assert.equal(renderAkumaText(parsed.command, wakeFailed), `${allocated.id} interrupted self-aborted · wake failed: spawn`);
     assert.equal(akumaExitCode(wakeFailed), 2);
@@ -355,6 +388,7 @@ test("Akuma status, wait, and history share public observations without embeddin
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
+          admission: { fence: "cli-fixture-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
               yield { type: "session" as const, coordinate: { sessionId: "cli-session" } };
@@ -398,7 +432,6 @@ test("Akuma status, wait, and history share public observations without embeddin
         at: "2026-08-08T00:00:00.000Z",
         text: "cli activity",
       }],
-      pendingTells: [],
       omitted: 0,
       lowestRetained: 1,
       highest: 2,

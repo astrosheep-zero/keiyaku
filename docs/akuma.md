@@ -100,7 +100,7 @@ Retained history outlives death — a dead akuma can still be forked, and its
 answers remain readable.
 
 Death closes every outstanding caller obligation in the same heart
-transaction: pending tells become `voided-by-death`, and `admitted` or
+transaction: pending tells become `voided`, and `admitted` or
 `reserved` Body Requests become `voided` with death evidence. A reserved
 request copies its child coordinate into that evidence before clearing the
 state field. Death-void is receipt-scoped: it proves no caller can ever receive

@@ -2,7 +2,7 @@ import { LineRpcProcess } from "../../../runtime/proc/line-rpc.js";
 import {
   AgentEventChannel,
   AKUMA_REQUESTS_ENV,
-  type Drive,
+  type Session,
   type ProviderAdapter,
   type ProviderOptions,
   type TurnResult,
@@ -17,7 +17,7 @@ import {
 
 export { CODEX_ITEM_DISPOSITIONS, CODEX_NOTIFICATION_DISPOSITIONS } from "./events.js";
 
-type StartInput = Parameters<ProviderAdapter["start"]>[0];
+type StartInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 type ForkInput = Parameters<NonNullable<ProviderAdapter["fork"]>>[0];
 type Finish = (result: TurnResult) => void;
 
@@ -74,16 +74,19 @@ async function admitTurn(
     ...(input.options.systemPrompt === undefined || input.options.systemPrompt.length === 0
       ? {} : { developerInstructions: input.options.systemPrompt }),
   };
-  state.threadId = input.session === undefined
-    ? threadId(await server.request("thread/start", threadParams))
-    : threadId(await server.request("thread/resume", {
-      threadId: input.session.sessionId,
+  if (input.session.kind === "fresh") {
+    state.threadId = threadId(await server.request("thread/start", threadParams));
+  } else {
+    state.threadId = threadId(await server.request("thread/resume", {
+      threadId: input.session.coordinate.sessionId,
       ...threadParams,
-    }), input.session.sessionId);
+    }), input.session.coordinate.sessionId);
+  }
   events.emit({ type: "session", coordinate: { sessionId: state.threadId } });
   state.turnId = turnId(await server.request("turn/start", {
     threadId: state.threadId,
-    input: [{ type: "text", text: input.prompt }],
+    input: [{ type: "text", text: [input.body, ...input.launchTells.map((tell) => tell.text)]
+      .filter((part) => part.length > 0).join("\n\n") }],
     ...(input.options.model === undefined ? {} : { model: input.options.model }),
     ...(input.options.effort === undefined ? {} : { effort: input.options.effort }),
     approvalPolicy: "never",
@@ -125,7 +128,7 @@ async function abortTurn(
   await server.close(true);
 }
 
-async function startCodex(execution: ProviderExecution, input: StartInput): Promise<Drive> {
+async function startCodex(execution: ProviderExecution, input: StartInput): Promise<Session> {
   const events = new AgentEventChannel();
   const server = new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
@@ -162,7 +165,9 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
   });
   try { await admitTurn(server, input, state, events, execution.config); }
   catch (error) { finish({ kind: "failed", diagnostic: diagnostic(error) }); }
+  if (state.turnId === undefined) throw new Error("codex app-server did not admit a turn");
   return {
+    admission: { fence: state.turnId },
     events,
     completion,
     abort: () => abortTurn(server, state, completion, finish),
@@ -183,6 +188,7 @@ export function createCodexAppServerProvider(input: string | ProviderExecution =
     },
     fork: (input) => forkCodex(execution, input),
     start: (input) => startCodex(execution, input),
+    resume: (input) => startCodex(execution, input),
   };
 }
 

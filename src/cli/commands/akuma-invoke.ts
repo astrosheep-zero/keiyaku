@@ -4,11 +4,11 @@ import {
   type ActivityHistory,
   type AkumaStatus,
   type InterruptReceipt,
-  type TellReceipt,
 } from "../../akuma/index.js";
 import {
   Keiyaku,
   type AkumaKillResult,
+  type AkumaTellResult,
   type AkumaWaitResult,
   type CallResult,
   type ForkResult,
@@ -23,7 +23,7 @@ export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; result: CallResult }>
   | Readonly<{ kind: "akuma"; action: "status"; status: AkumaStatus }>
   | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult }>
-  | Readonly<{ kind: "akuma"; action: "tell"; akuma: AkuId; receipt: TellReceipt; status: AkumaStatus }>
+  | Readonly<{ kind: "akuma"; action: "tell"; result: AkumaTellResult; body: string }>
   | Readonly<{ kind: "akuma"; action: "interrupt"; akuma: AkuId; receipt: InterruptReceipt }>
   | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; history?: ActivityHistory; answer?: string }>
   | Readonly<{ kind: "akuma"; action: "fork"; receipt: ForkResult }>
@@ -54,8 +54,9 @@ async function invokeWait(command: Extract<ParsedAkumaCommand, { command: "wait"
 }
 
 async function invokeTell(command: ParsedAkumaCommand & Readonly<{ command: "tell"; akuma: string }>, input: InvokeInput): Promise<AkumaInvocationResult> {
-  const result = await Keiyaku.tell({ path: input.path, akuma: command.akuma, settings: input.settings, body: input.readStdin() });
-  return { kind: "akuma", action: "tell", akuma: result.status.id, receipt: result.receipt, status: result.status };
+  const body = input.readStdin();
+  const result = await Keiyaku.tell({ path: input.path, akuma: command.akuma, settings: input.settings, body });
+  return { kind: "akuma", action: "tell", result, body };
 }
 
 async function invokeInterrupt(command: ParsedAkumaCommand & Readonly<{ command: "interrupt"; akuma: string }>, input: InvokeInput): Promise<AkumaInvocationResult> {

@@ -16,6 +16,7 @@ import {
   readHeart,
   readTurns,
   recordBody,
+  recordTell,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
@@ -34,6 +35,7 @@ const provider: ProviderAdapter = {
   admitOptions(options) { return { kind: "admitted", options }; },
   async start() {
     return {
+      admission: { fence: "public-fixture-turn" },
       events: {
         async *[Symbol.asyncIterator]() {
           yield { type: "session" as const, coordinate: { sessionId: "public-session" } };
@@ -87,7 +89,6 @@ test("activity fold pairs tools and bounds settled rows without dropping in-flig
       { kind: "tool", sequence: 4, bodySequence: 1, at: "2026-08-10T00:00:04.000Z", name: "Read", call: { kind: "read", path: "README.md" }, state: { status: "error", message: "missing" } },
       { kind: "tool", sequence: 5, bodySequence: 1, at: "2026-08-10T00:00:05.000Z", name: "Search", call: { kind: "search", query: "TODO" }, state: "running" },
     ],
-    pendingTells: [],
     omitted: 0,
     lowestRetained: 1,
     highest: 5,
@@ -234,6 +235,38 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
   }
 });
 
+test("status names a durable session that the adapter cannot resume", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-resume-unsupported-"));
+  const mutable = claudeProvider as MutableProvider;
+  const originalResume = mutable.resume;
+  try {
+    const source = await answeredSource(root, "f0a10003");
+    mutable.resume = undefined;
+    const handle = akumaAt(root).of({ id: source.id });
+    const admitted = recordTell(source.paths, {
+      id: "resume-unsupported-tell",
+      body: "continue",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    assert.equal(admitted.kind, "recorded");
+    await driveAkumaBody({ paths: source.paths }, claudeProvider, {
+      collar: { pid: 999_976, processGroup: 999_976, spawnedAt: "resume-unsupported" },
+      now: () => "2026-08-08T00:00:02.000Z",
+      async putDownOwnTree() {},
+    });
+    const status = handle.status();
+    assert.equal(status.life, "stranded");
+    assert.equal(status.strandedReason, "resume-unsupported");
+    assert.equal(status.failure, undefined);
+    assert.equal(status.pending.includes("resume-unsupported-tell"), true);
+    assert.equal(readTurns(source.paths).length, 1);
+    assert.equal(readTurns(source.paths)[0]?.outcome.kind, "answered");
+  } finally {
+    mutable.resume = originalResume;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("public Akuma handles separate compact list rows from full status and wait", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-public-"));
   try {
@@ -294,7 +327,6 @@ test("public Akuma handles separate compact list rows from full status and wait"
         at: "2026-08-08T00:00:00.000Z",
         text: "working",
       }],
-      pendingTells: [],
       omitted: 0,
       lowestRetained: 1,
       highest: 2,
@@ -349,7 +381,7 @@ test("interrupt records a tell only after taking an idle leash", async () => {
     assert.equal(receipt.putDown, "was-idle");
     assert.equal(typeof receipt.tell.wake, "object");
     assert.equal(pauseRequested(allocated.paths), false);
-    assert.deepEqual(readHeart(allocated.paths).pending.map((tell) => tell.id), [receipt.tell.id]);
+    assert.deepEqual(readHeart(allocated.paths).pending.map((tell) => tell.id), [receipt.tell.admission.tellId]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -672,12 +704,14 @@ test("activity is persistent narration and old raw events fail the public hard c
     const handle = akumaAt(root).of({ id: source.id });
     const before = handle.status();
     const heart = new DatabaseSync(source.paths.heart);
-    try { heart.prepare("DELETE FROM activity").run(); } finally { heart.close(); }
+    try {
+      heart.exec("PRAGMA foreign_keys=ON");
+      heart.prepare("DELETE FROM timeline WHERE kind = 'activity'").run();
+    } finally { heart.close(); }
     assert.deepEqual(handle.status(), {
       ...before,
       activity: {
         rows: [],
-        pendingTells: [],
         omitted: 0,
         lowestRetained: null,
         highest: null,
@@ -710,6 +744,7 @@ test("kill gives the body a stop grace before putting down its process tree", as
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
+          admission: { fence: "kill-fixture-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
               while (!aborted) {

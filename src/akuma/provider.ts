@@ -288,10 +288,26 @@ export type TurnResult =
   | Readonly<{ kind: "answered"; answer: string; historyId: string }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 
-export type Drive = Readonly<{
+export type ProviderFence = string;
+export type TellReceipt =
+  | Readonly<{ evidence: "exact"; tellId: string; kind: string }>
+  | Readonly<{ evidence: "fence"; fence: ProviderFence; kind: string }>;
+
+export type Session = Readonly<{
+  admission: Readonly<{ fence: ProviderFence }>;
   events: AsyncIterable<AgentEvent>;
+  receipts?: AsyncIterable<TellReceipt>;
   completion: Promise<TurnResult>;
   abort(): Promise<void>;
+  tell?(tell: Readonly<{ id: string; text: string }>): Promise<Readonly<{ fence: ProviderFence }>>;
+}>;
+
+export type DriveInput = Readonly<{
+  body: string;
+  launchTells: readonly Readonly<{ id: string; text: string }>[];
+  cwd: string;
+  options: ProviderOptions;
+  requests?: Readonly<{ dir: string }>;
 }>;
 
 export type ProviderOptionAdmission =
@@ -306,11 +322,8 @@ export type ProviderAdapter = Readonly<{
     at: string;
     cwd: string;
   }>): Promise<Readonly<{ session: ResumeCoordinate }>>;
-  start(input: Readonly<{
-    prompt: string;
-    cwd: string;
-    options: ProviderOptions;
-    session?: ResumeCoordinate;
-    requests?: Readonly<{ dir: string }>;
-  }>): Promise<Drive>;
+  start(input: DriveInput & Readonly<{ session: Readonly<{ kind: "fresh" }> }>): Promise<Session>;
+  resume?(input: DriveInput & Readonly<{
+    session: Readonly<{ kind: "resume"; coordinate: ResumeCoordinate }>;
+  }>): Promise<Session>;
 }>;

@@ -85,14 +85,31 @@ export type TurnFact = Readonly<{
   completedAt: string;
 }>;
 
-export type TellState = "recorded" | "delivered" | "seen" | "consumed" | "voided-by-death";
-
 export type TellFact = Readonly<{
+  sequence: number;
   id: string;
   body: string;
-  state: TellState;
   recordedAt: string;
+  state: "pending" | "told" | "voided";
 }>;
+
+export type TellDeliveryInput = Readonly<{
+  tellId: string;
+  bodySequence: number;
+  fence: string;
+  deliveredAt: string;
+}> & (
+  | Readonly<{ route: "launch" }>
+  | Readonly<{ route: "live"; receipt: "unavailable" | "required" }>
+);
+
+export type TellReceiptInput = Readonly<{
+  kind: string;
+  receivedAt: string;
+}> & (
+  | Readonly<{ evidence: "exact"; tellId: string }>
+  | Readonly<{ evidence: "fence"; bodySequence: number; fence: string }>
+);
 
 export type RequestInput = Readonly<{
   id: string;
