@@ -204,8 +204,9 @@ union disposition is compile-time exhaustive with a runtime unknown fallback.
 The Codex app-server method set is open, so its explicit known dispositions end
 in an unknown fallback. Tests pin both tables and both unknown paths.
 
-Claude's terminal answer is exactly `result.result`. Codex joins all completed
-`agentMessage` texts in order with one blank line. A failed Codex turn preserves
+Claude's terminal answer is exactly `result.result`. Codex emits every completed
+`agentMessage` as assistant activity, while its terminal answer is exactly the
+last completed `agentMessage` text. A failed Codex turn preserves
 the native explanation from an `error` notification or `turn.error`, using a
 generic status diagnostic only when no native detail exists.
 

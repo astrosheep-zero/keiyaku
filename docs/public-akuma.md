@@ -180,7 +180,9 @@ the two-state tell projection. Facade code never derives delivery or receipt
 facts from that observation. Direct verbs accept only AkuId or Alias.
 Their result carries the resolved AkuId, so an adapter never resolves a movable
 Alias twice. `history({ last: true })` is the distinct last-answer arm: it reads
-only the last answered turn and never reads status or activity history.
+only the last answered turn by durable sequence and never reads status or
+activity history. Its typed result is either `{ kind: "last", answer }`
+(including an empty answer) or `{ kind: "no-answer" }`.
 
 `Keiyaku.interrupt` remains a Library composition over one addressed Akuma:
 pause the current Body, obtain its leash, atomically clear pause plus record the

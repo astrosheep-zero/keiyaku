@@ -51,7 +51,7 @@ test("provider activity codec round trips every closed event and tool-call arm",
 
 function fakeCodex(
   root: string,
-  mode: "complete" | "interrupt" | "observations" | "failed-notification" | "failed-turn"
+  mode: "complete" | "empty-final" | "interrupt" | "observations" | "failed-notification" | "failed-turn"
     | "steer" | "steer-complete-first" | "steer-error-after-complete" | "steer-mismatch" | "steer-missing" = "complete",
 ): Readonly<{
   executable: string;
@@ -81,6 +81,11 @@ function fakeCodex(
     "    reply(message,{turn:{id:'turn-1'}});",
     "    if(mode==='complete'){",
     "      send({method:'item/completed',params:{item:{id:'item-1',type:'agentMessage',text:'codex answer'}}});",
+    "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
+    "    }",
+    "    if(mode==='empty-final'){",
+    "      send({method:'item/completed',params:{item:{id:'answer-1',type:'agentMessage',text:'first answer'}}});",
+    "      send({method:'item/completed',params:{item:{id:'answer-2',type:'agentMessage',text:''}}});",
     "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
     "    }",
     "    if(mode==='observations'){",
@@ -730,12 +735,30 @@ test("Codex maps observations without leaking output or unknown payloads", async
     ]);
     assert.deepEqual(await drive.completion, {
       kind: "answered",
-      answer: "first answer\n\nsecond answer",
+      answer: "second answer",
       historyId: "turn-1",
     });
     assert.equal(JSON.stringify(events).includes("secret output"), false);
     assert.equal(JSON.stringify(events).includes("must not escape"), false);
     assert.equal(JSON.stringify(events).includes("999"), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex preserves an empty final agent message as the answered turn", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-empty-answer-"));
+  try {
+    const provider = createCodexAppServerProvider(fakeCodex(root, "empty-final").executable);
+    const drive = await provider.start({
+      body: "answer", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    const events = [];
+    for await (const event of drive.events) events.push(event);
+    assert.deepEqual(events, [
+      { type: "session", coordinate: { sessionId: "thread-fresh" } },
+      { type: "assistant", text: "first answer" },
+      { type: "assistant", text: "" },
+    ]);
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

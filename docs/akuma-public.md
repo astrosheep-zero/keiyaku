@@ -137,7 +137,9 @@ the read model, not Heart or the CLI, owns that join. Cursor coordinates are
 persisted activity sequences. `before` and `since` are exclusive and mutually
 exclusive. Status and wait never carry a full history page. The final answer
 is not activity text: the explicit last-answer read selects the last answered
-`TurnFact`, and CLI `history --last` writes its exact answer bytes.
+`TurnFact` by durable sequence. The handle returns `{ kind: "answer", answer }`
+or `{ kind: "no-answer" }`; an empty answered string stays in the answer arm.
+CLI `history --last` writes exact answer bytes.
 
 An akuma that answered and whose latest Body was later killed reports both:
 `life: "killed"` with the retained answer still attached. What to do about a

@@ -258,7 +258,11 @@ reads the page preceding an already visible activity index; `--since` reads
 activity following an already visible index. Both are exclusive, accept only
 positive safe integers, and are mutually exclusive with each other and
 `--last`. `--last` writes the complete answer from the last answered turn,
-skipping later failed turns; it does not read activity or append framing.
+skipping later failed turns; it does not read activity or append framing. With
+no answered turn, text writes `no answer retained` and JSON exposes the typed
+`{ "kind": "no-answer", "id": "..." }` arm. An answered empty string remains
+an answer and writes zero bytes in text mode. Both last-answer arms exit zero
+because each is a successful read result.
 `fork` requires one nonblank `--at` history id and has no stdin body.
 The adapter supplies the invocation Repo to package-root fork when `-C` is
 inside a Git world and supplies no Repo outside Git. The facade alone reads and

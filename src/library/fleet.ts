@@ -38,7 +38,8 @@ export type AkumaHistoryInput = AkumaAddressInput & Readonly<{
 }>;
 export type AkumaHistoryResult =
   | Readonly<{ kind: "history"; id: AkumaStatus["id"]; history: ActivityHistory }>
-  | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer?: string }>;
+  | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer: string }>
+  | Readonly<{ kind: "no-answer"; id: AkumaStatus["id"] }>;
 
 function source(path: WorldRoot, settings?: Settings): Akuma {
   return Akuma.of(path, settings);
@@ -206,7 +207,9 @@ export function historyAkuma(input: AkumaHistoryInput): AkumaHistoryResult {
   const handle = source(addressed.path, addressed.settings).of({ id: addressed.id });
   if (values.last === true) {
     const answer = handle.lastAnswer();
-    return { kind: "last", id: addressed.id, ...(answer === undefined ? {} : { answer }) };
+    return answer.kind === "answer"
+      ? { kind: "last", id: addressed.id, answer: answer.answer }
+      : { kind: "no-answer", id: addressed.id };
   }
   const history = handle.history({
     ...(values.before === undefined ? {} : { before: values.before as number }),

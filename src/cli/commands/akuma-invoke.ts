@@ -24,7 +24,9 @@ export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "interrupt"; result: Awaited<ReturnType<typeof Keiyaku.interrupt>>; body: string; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; history?: ActivityHistory; answer?: string; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "page"; history: ActivityHistory; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "last"; answer: string; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "no-answer"; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "fork"; receipt: ForkResult }>
   | Readonly<{ kind: "akuma"; action: "kill"; result: AkumaKillResult; alias?: string }>;
 
@@ -84,8 +86,11 @@ function invokeHistory(command: Extract<ParsedAkumaCommand, { command: "history"
     action: "history",
     akuma: result.id,
     ...(inputAlias(command.akuma) === undefined ? {} : { alias: command.akuma }),
-    ...(result.kind === "history" ? { history: result.history } : {}),
-    ...(result.kind === "last" && result.answer !== undefined ? { answer: result.answer } : {}),
+    ...(result.kind === "history"
+      ? { mode: "page" as const, history: result.history }
+      : result.kind === "last"
+        ? { mode: "last" as const, answer: result.answer }
+        : { mode: "no-answer" as const }),
   };
 }
 

@@ -391,11 +391,17 @@ export class AkumaHandle {
     }
   }
 
-  lastAnswer(): string {
+  lastAnswer(): LastAnswer {
     const turn = readLastAnsweredTurn(this.paths);
-    return turn?.outcome.kind === "answered" ? turn.outcome.answer : "";
+    return turn?.outcome.kind === "answered"
+      ? { kind: "answer", answer: turn.outcome.answer }
+      : { kind: "no-answer" };
   }
 }
+
+export type LastAnswer =
+  | Readonly<{ kind: "answer"; answer: string }>
+  | Readonly<{ kind: "no-answer" }>;
 
 export class Akuma {
   private constructor(private readonly path: WorldRoot, private readonly configuredSettings?: Settings) {}

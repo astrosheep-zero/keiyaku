@@ -205,9 +205,13 @@ function historyText(
   result: Extract<AkumaInvocationResult, { action: "history" }>,
   context: TextRenderContext,
 ): string {
-  if (command.last) return result.answer ?? "";
+  if (command.last) {
+    if (result.mode === "no-answer") return "no answer retained";
+    if (result.mode !== "last") throw new Error("history last result lacks its typed outcome");
+    return result.answer;
+  }
+  if (result.mode !== "page") throw new Error("history result lacks its activity page");
   const history = result.history;
-  if (history === undefined) throw new Error("history result lacks its activity page");
   const scope = command.before === undefined && command.since === undefined
     ? "history"
     : `history ── ${command.before === undefined ? `since ${command.since}` : `before ${command.before}`}`;
@@ -337,7 +341,15 @@ export function akumaJsonValue(command: ParsedCommand, result: AkumaInvocationRe
   if (result.action === "status") return result.status;
   if (result.action === "wait") return result.result;
   if (result.action === "tell") return result.result;
-  if (result.action === "history") return command.command === "history" && command.last ? result.answer ?? "" : result.history;
+  if (result.action === "history") {
+    if (command.command === "history" && command.last) {
+      if (result.mode === "no-answer") return { kind: "no-answer", id: result.akuma };
+      if (result.mode !== "last") throw new Error("history last result lacks its typed outcome");
+      return { kind: "last", id: result.akuma, answer: result.answer };
+    }
+    if (result.mode !== "page") throw new Error("history result lacks its activity page");
+    return result.history;
+  }
   return result;
 }
 

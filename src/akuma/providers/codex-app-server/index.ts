@@ -167,7 +167,7 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
       ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
     } }),
   });
-  const state: CodexTurnState = { answers: [], settled: false, tools: new Map() };
+  const state: CodexTurnState = { settled: false, tools: new Map() };
   const inFlightSteers = new Set<Promise<void>>();
   let settle!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });

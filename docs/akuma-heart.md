@@ -145,7 +145,9 @@ corruption, not `unknown-history`.
 `readHeart()` does not read or reinterpret turns. `readCurrentTurn()` reads only
 the newest retained turn for `status()`. Public history joins activity pages to
 the relevant body and turn facts without copying answer bytes into activity.
-`history --last` reads the final answered `TurnFact` directly. Recovery,
+`history --last` reads at most one answered `TurnFact`, selected by descending
+durable turn sequence. No answered row projects typed absence; an answered row
+retains its exact `answer` bytes, including an empty string. Recovery,
 resume, fork, outcome, failure, and life never read activity. Thus activity
 owns execution chronology, `TurnFact` owns complete outcome bytes and native
 fork points, and session rows remain the sole resume authority.

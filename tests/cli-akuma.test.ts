@@ -614,3 +614,28 @@ test("Akuma status, wait, and history share public observations without embeddin
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("history --last renders typed no-answer and preserves answered empty bytes", () => {
+  const command = parseArgv(["history", "aku/worker/00000001", "--last"]).command;
+  const noAnswer = {
+    kind: "akuma" as const,
+    action: "history" as const,
+    akuma: "aku/worker/00000001" as const,
+    mode: "no-answer" as const,
+  };
+  assert.equal(renderAkumaText(command, noAnswer), "no answer retained");
+  assert.deepEqual(akumaJsonValue(command, noAnswer), {
+    kind: "no-answer",
+    id: "aku/worker/00000001",
+  });
+  assert.equal(akumaExitCode(noAnswer), 0);
+
+  const emptyAnswer = { ...noAnswer, mode: "last" as const, answer: "" };
+  assert.equal(renderAkumaText(command, emptyAnswer), "");
+  assert.deepEqual(akumaJsonValue(command, emptyAnswer), {
+    kind: "last",
+    id: "aku/worker/00000001",
+    answer: "",
+  });
+  assert.equal(akumaExitCode(emptyAnswer), 0);
+});

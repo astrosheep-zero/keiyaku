@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { appendActivity, initializeHeart, recordTell } from "../src/akuma/heart/index.js";
+import { appendActivity, initializeHeart, recordBody, recordSession, recordTell, recordTurn } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -332,6 +332,62 @@ test("history last bypasses activity and glob grammar follows normalized archety
 
     const glob = parseAkumaGlob("aku/审查-👁️*/1234*");
     assert.equal(matchesAkumaGlob(glob, "aku/审查-👁️/1234abcd"), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("history last selects exactly one latest answered TurnFact by durable sequence", () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-last-sequence-"));
+  try {
+    const source = allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "00000001" });
+    initializeHeart(source.paths);
+    const body = recordBody(source.paths, {
+      collar: { pid: 999_969, processGroup: 999_969, spawnedAt: "fixture" },
+      leashTakenAt: "2026-08-11T00:00:00.000Z",
+    });
+    for (const sessionId of ["session-1", "session-2", "session-3"]) {
+      recordSession(source.paths, {
+        provider: "claude",
+        coordinate: { sessionId },
+        cwd: root,
+        options: {},
+        admittedAt: "2026-08-11T00:00:00.000Z",
+      });
+    }
+    const last = () => Keiyaku.history({ path: root, akuma: source.id, last: true });
+
+    assert.deepEqual(last(), { kind: "no-answer", id: source.id });
+    recordTurn(source.paths, {
+      bodySequence: body.sequence,
+      outcome: { kind: "failed", diagnostic: "first failure" },
+      completedAt: "2026-08-11T00:00:01.000Z",
+    });
+    assert.deepEqual(last(), { kind: "no-answer", id: source.id });
+    recordTurn(source.paths, {
+      bodySequence: body.sequence,
+      outcome: { kind: "answered", answer: "first", historyId: "history-1", session: { sessionId: "session-1" } },
+      completedAt: "2026-08-11T00:00:02.000Z",
+    });
+    assert.deepEqual(last(), { kind: "last", id: source.id, answer: "first" });
+    recordTurn(source.paths, {
+      bodySequence: body.sequence,
+      outcome: { kind: "answered", answer: "second", historyId: "history-2", session: { sessionId: "session-2" } },
+      completedAt: "2026-08-11T00:00:03.000Z",
+    });
+    assert.deepEqual(last(), { kind: "last", id: source.id, answer: "second" });
+    recordTurn(source.paths, {
+      bodySequence: body.sequence,
+      outcome: { kind: "failed", diagnostic: "later failure" },
+      completedAt: "2026-08-11T00:00:04.000Z",
+    });
+    assert.deepEqual(last(), { kind: "last", id: source.id, answer: "second" });
+    recordTurn(source.paths, {
+      bodySequence: body.sequence,
+      outcome: { kind: "answered", answer: "", historyId: "history-3", session: { sessionId: "session-3" } },
+      completedAt: "2026-08-11T00:00:05.000Z",
+    });
+    assert.deepEqual(last(), { kind: "last", id: source.id, answer: "" });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -11,7 +11,7 @@ import {
 export type CodexTurnState = {
   threadId?: string;
   turnId?: string;
-  answers: string[];
+  lastAnswer?: string;
   error?: string;
   settled: boolean;
   tools: Map<string, Readonly<{ name: string; call: ToolCall }>>;
@@ -238,9 +238,9 @@ function emitItem(item: Readonly<Record<string, unknown>>, completed: boolean, e
   const disposition = CODEX_ITEM_DISPOSITIONS[kind as keyof typeof CODEX_ITEM_DISPOSITIONS];
   if (disposition === "assistant") {
     if (!completed) return;
-    const message = codexText(item.text);
+    const message = typeof item.text === "string" ? item.text : undefined;
     if (message !== undefined) {
-      state.answers.push(message);
+      state.lastAnswer = message;
       events.emit({ type: "assistant", text: message });
     }
     return;
@@ -319,7 +319,7 @@ function terminalResult(params: Readonly<Record<string, unknown>>, state: CodexT
     return { kind: "failed", diagnostic: "codex app-server completed a different turn" };
   }
   return status === "completed"
-    ? { kind: "answered", answer: state.answers.join("\n\n"), historyId: completedId }
+    ? { kind: "answered", answer: state.lastAnswer ?? "", historyId: completedId }
     : { kind: "failed", diagnostic: turnError(turn?.error) ?? state.error ?? `codex app-server turn ended ${status}` };
 }
 export function codexNotificationResult(
