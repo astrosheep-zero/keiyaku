@@ -12,6 +12,7 @@ import type {
   VerificationStop,
 } from "../index.js";
 import type { KanshiReport } from "../kanshi/index.js";
+import type { RegionRead, Section } from "../kanshi/index.js";
 import type { Catalog } from "../index.js";
 
 export type BindDraftReceipt = Readonly<
@@ -89,6 +90,8 @@ export type StatusResult = Readonly<{
   selection: "world" | "contract";
 }>;
 
+export type RegionResult = Readonly<{ kind: "region"; region: Section<RegionRead> }>;
+
 export type CatalogResult = Readonly<{ kind: "catalog"; catalog: Catalog }>;
 
-export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | ObservationResult | GuidanceResult | StatusResult | CatalogResult;
+export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | ObservationResult | GuidanceResult | StatusResult | RegionResult | CatalogResult;

@@ -1,5 +1,5 @@
 import { gatesFrom, Keiyaku, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
-import { kanshi, selectKanshi } from "../kanshi/index.js";
+import { kanshi, selectKanshi, selectRegion, type KanshiRegionSelection } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromMutationCall } from "./accepted.js";
 import { amendFromCommand } from "./commands/amend.js";
@@ -9,7 +9,7 @@ import { bindFromCommand } from "./commands/bind.js";
 import { installHarnesses, type InstallInvocationResult } from "./commands/install.js";
 import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js";
 import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
-import type { DiffUnavailable, InvocationResult } from "./result.js";
+import type { DiffUnavailable, InvocationResult, RegionResult } from "./result.js";
 import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
 import { resolveNamedAddress } from "../library/address.js";
 import type { WorldRoot } from "../world.js";
@@ -24,7 +24,7 @@ type InvokeRuntime = Readonly<{
   readStdin?: () => Promise<string>;
 }>;
 
-type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "show" | "ls" | "reconcile" | "settings" | "task" | "install" }>;
+type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "show" | "ls" | "reconcile" | "settings" | "region" | "task" | "install" }>;
 type NonInstallExecution = Readonly<{ cwd?: string; repo?: string; command: Exclude<ParsedCommand, { command: "install" }> }>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
@@ -384,6 +384,35 @@ async function invokeStatus(
   return { kind: "status" as const, report: selectKanshi({ report, contract }), selection: "contract" as const };
 }
 
+async function invokeRegion(
+  parsed: Extract<ParsedCommand, { command: "region" }>,
+  world: WorldRoot | null,
+  repo: Repo,
+): Promise<RegionResult> {
+  const read = async (region: KanshiRegionSelection) => {
+    try { return await kanshi({ world, repo, region }); }
+    catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
+  };
+  if (parsed.contract === undefined) {
+    const selection: KanshiRegionSelection = parsed.path !== undefined
+      ? { kind: "path", path: parsed.path }
+      : parsed.overlap ? { kind: "overlap" } : { kind: "declarations" };
+    const report = await read(selection);
+    return { kind: "region", region: report.region ?? { kind: "absent" } };
+  }
+  const report = await read({ kind: "declarations" });
+  const contract = resolveKanshiContract(report, parsed.contract) as ContractId;
+  if (report.contracts.kind !== "present" || report.contracts.value.rows.every((row) => row.id !== contract || row.disposition !== "active")) {
+    throw new CliUsageError(`unknown contract selector: ${parsed.contract}`);
+  }
+  if (report.region?.kind !== "present" || report.region.value.kind !== "declarations") {
+    return { kind: "region", region: report.region ?? { kind: "absent" } };
+  }
+  const selection: KanshiRegionSelection = parsed.overlap ? { kind: "overlap", contract } : { kind: "contract", contract };
+  return { kind: "region", region: { kind: "present", value: selectRegion({ declarations: report.region.value.declarations, selection }) } };
+}
+
+// eslint-disable-next-line complexity -- command dispatch keeps the CLI's existing boundary in one place.
 async function invokeParsed(
   invocation: NonInstallExecution,
   runtime: InvokeRuntime,
@@ -427,6 +456,7 @@ async function invokeParsed(
   if (parsed.command === "ls") return await invokeCatalog(parsed, world, repo, edge);
   if (parsed.command === "status") return await invokeStatus(parsed, world, repo, edge);
   if (repo === undefined) throw new Error(`${parsed.command} requires a resolved Repo`);
+  if (parsed.command === "region") return invokeRegion(parsed, world, repo);
   const scope = cwd;
   const configuration = await settingsAt(world ?? undefined, edge.environment);
   const hooks = selectedHooks(configuration);
@@ -435,7 +465,6 @@ async function invokeParsed(
     const selected = await selectContract(repo, parsed.contract, scope);
     return { kind: "guidance", contract: selected.id, guidance: await selected.contract.guidance() };
   }
-
   switch (parsed.command) {
     case "reconcile": {
       if (parsed.contract === undefined) {

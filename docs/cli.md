@@ -398,6 +398,15 @@ Task mutation; the CLI merely renders package-root results. Bind, amend,
 deliver, review, and abandon share the mutation receipt grammar owned by
 [cli-output.md](cli-output.md).
 
+`region [<contract>] [--overlap] [--json]` reads active declared Regions;
+`region --path <repo-relative-path> [--json]` reverse-queries one canonical
+path. A positional selector without `--overlap` is the Contract's own
+declaration. Bare `region` declares the world view, while `--overlap` is the
+only relation trigger. `--path` cannot combine with a selector or overlap.
+The CLI adapts Kanshi's typed Region section and never decodes documents or
+recomputes patterns. Missing or terminal selectors use the existing typed
+selector refusal; invalid paths are usage refusals before the read.
+
 The surface has no interactive mode, input envelope, independent JSON schema,
-configurable attempt count, command alias, or `scope`/`region` command. The
+configurable attempt count, command alias, or `scope` alias. The
 report `root` remains the invocation world coordinate.

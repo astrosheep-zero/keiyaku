@@ -111,6 +111,7 @@ export type ParsedAudit = Output & Readonly<{
 }>;
 type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
 export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
+export type ParsedRegion = Output & Readonly<{ command: "region"; contract?: string; overlap: boolean; path?: string }>;
 
 export type ParsedCommand =
   | ParsedBind
@@ -125,6 +126,7 @@ export type ParsedCommand =
   | ParsedAudit
   | ParsedReconcile
   | ParsedSettings
+  | ParsedRegion
   | ParsedInstallCommand
   | ParsedAkumaCommand
   | ParsedTaskCommand;
@@ -337,6 +339,20 @@ function parseShow(parts: ParsedParts): Extract<ParsedCommand, { command: "show"
   return { command: "show", ...(contract === undefined ? {} : { contract }), output: parts.output };
 }
 
+function parseRegion(parts: ParsedParts): ParsedRegion {
+  const contract = parts.positionals[0];
+  const path = optionalFlag(parts.flags, "path");
+  const overlap = parts.flags.overlap === true;
+  if (path !== undefined && (contract !== undefined || overlap)) refuse("region", "--path cannot combine with a contract or --overlap");
+  return {
+    command: "region",
+    ...(contract === undefined ? {} : { contract }),
+    ...(path === undefined ? {} : { path }),
+    overlap,
+    output: parts.output,
+  };
+}
+
 function parseLs(parts: ParsedParts): ParsedLs {
   const path = parts.positionals[0]!;
   if (path === "task/") return { command: "ls", query: { kind: "tasks" }, output: parts.output };
@@ -433,6 +449,7 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
       };
     }
     case "settings": return { command: "settings", output: parts.output };
+    case "region": return parseRegion(parts);
   }
 }
 

@@ -67,6 +67,7 @@ function writeCatalog(command: ParsedCommand, result: Extract<InvocationResult, 
   return 0;
 }
 
+// eslint-disable-next-line complexity -- output dispatch is the single CLI presentation boundary.
 function writeResult(command: ParsedCommand, result: unknown): number {
   if (command.command === "install") {
     const value = result as InstallInvocationResult;
@@ -86,6 +87,11 @@ function writeResult(command: ParsedCommand, result: unknown): number {
   const contractResult = result as InvocationResult;
   if (contractResult.kind === "guidance") return writeGuidance(command, contractResult);
   if (contractResult.kind === "catalog") return writeCatalog(command, contractResult);
+  if (contractResult.kind === "region") {
+    const output = command.output === "json" ? JSON.stringify(contractResult.region) : renderText(contractResult);
+    process.stdout.write(`${output}\n`);
+    return 0;
+  }
   const output = command.output === "json"
     ? JSON.stringify(contractResult.kind === "status" ? contractResult.report : contractResult)
     : renderText(contractResult, {

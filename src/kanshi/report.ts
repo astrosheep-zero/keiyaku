@@ -3,6 +3,7 @@ import type { TaskId, TaskRef, TaskRow } from "../task/index.js";
 import type { AkumaList, AkumaListRow, UnbornAkumaListRow } from "../akuma/index.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
+import type { ContractId } from "../library/contract.js";
 
 export type Section<Value> =
   | Readonly<{ kind: "present"; value: Value }>
@@ -43,6 +44,25 @@ export type AkumaKanshiWorld = Omit<AkumaList, "rows"> & Readonly<{
   rows: readonly AkumaKanshiRow[];
 }>;
 
+export type KanshiRegionSelection =
+  | Readonly<{ kind: "declarations" }>
+  | Readonly<{ kind: "contract"; contract: ContractId }>
+  | Readonly<{ kind: "overlap"; contract?: ContractId }>
+  | Readonly<{ kind: "path"; path: string }>;
+
+export type RegionDeclaration = Readonly<{ contract: ContractId; patterns: readonly string[] }>;
+export type RegionIntersection = Readonly<{
+  left: ContractId;
+  right: ContractId;
+  patterns: readonly Readonly<{ left: string; right: string }>[];
+}>;
+export type RegionPathMatch = Readonly<{ contract: ContractId; pattern: string }>;
+export type RegionRead =
+  | Readonly<{ kind: "declarations"; declarations: readonly RegionDeclaration[] }>
+  | Readonly<{ kind: "contract"; declaration: RegionDeclaration }>
+  | Readonly<{ kind: "overlap"; subject?: ContractId; intersections: readonly RegionIntersection[] }>
+  | Readonly<{ kind: "path"; path: string; matches: readonly RegionPathMatch[] }>;
+
 export type KanshiReport = Readonly<{
   root: WorldRoot | null;
   observedAt: string;
@@ -50,4 +70,5 @@ export type KanshiReport = Readonly<{
   contracts: Section<ContractKanshiBoard>;
   tasks: Section<TaskKanshiWorld>;
   akuma: Section<AkumaKanshiWorld>;
+  region?: Section<RegionRead>;
 }>;

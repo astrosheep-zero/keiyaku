@@ -21,6 +21,7 @@ export const CONTRACT_COMMAND_SPECS = {
   audit: { positional: "optional", stdin: "none", flags: { "show-diff-body": "boolean", actor: "value", json: "boolean" }, usage: "audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]", purpose: "Audit one Contract without mutation." },
   reconcile: { positional: "optional", stdin: "none", flags: { "retry-hooks": "boolean", json: "boolean" }, usage: "reconcile [<contract>|@<contract>] [--retry-hooks] [--json]", purpose: "Reconcile one Contract or the invocation world." },
   settings: { positional: "none", stdin: "none", flags: { json: "boolean" }, usage: "settings [--json]", purpose: "Read user and project Settings resources." },
+  region: { positional: "optional", stdin: "none", flags: { overlap: "boolean", path: "value", json: "boolean" }, usage: "region [<contract>] [--overlap] [--json]\n       region --path <repo-relative-path> [--json]", purpose: "Read active declared Contract Regions." },
 } as const satisfies Readonly<Record<string, ContractCommandSpec>>;
 
 export type ContractCommand = keyof typeof CONTRACT_COMMAND_SPECS;

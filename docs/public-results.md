@@ -240,6 +240,11 @@ the edge. It never imports Git directly, loops over per-contract `state()`
 reads, reuses an admission receipt as a world snapshot, or caches or persists a
 second Region value.
 
+Kanshi's optional read-time Region section is separate from this mutation-time
+snapshot. It exposes `RegionDeclaration`, `RegionIntersection`,
+`RegionPathMatch`, and the `RegionRead` union selected by `KanshiInput.region`;
+it carries declarations only and never actual touched paths or Git conflicts.
+
 `amend` exposes `terms-moved` when any source `ContractTerms` value used to
 derive its complete replacement no longer matches the attempt observation.
 `deliver` and audit's read-only methodology selection expose

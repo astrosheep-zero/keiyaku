@@ -173,6 +173,11 @@ targetless semantics; the CLI consumes this mechanical fact for its default.
 
 `Repo` is the pinned Git-world capability. It owns reconciliation and the
 coordinate needed by Contract operations, not Contract reads or construction.
+
+The `@astrosheep/keiyaku/kanshi` surface additionally exports the optional
+read-time `KanshiInput.region` selection and typed `RegionRead` values. This is
+a current active-document read using the document Region owner; it is not
+persisted and is independent of delivery or audit paths.
 `Keiyaku` is the sole branded Contract front door. There is no `repo.bind`,
 `repo.status`, or `repo.contract` convenience path.
 

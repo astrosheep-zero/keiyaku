@@ -49,6 +49,7 @@ function repoPolicy(command: ParsedCommand): RepoPolicy {
     case "audit":
     case "reconcile":
     case "show":
+    case "region":
       return { use: "required", acceptsExplicit: true };
     case "ls":
       return { use: command.query.kind === "contracts" ? "required" : "none", acceptsExplicit: false };

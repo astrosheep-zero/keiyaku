@@ -124,3 +124,42 @@ exactly matches the selector, and Akuma rows whose Dispatch endpoint names that
 Contract. Section presence, absence, and
 failure remain unchanged. The text renderer consumes only this public report
 and renders each present endpoint as `keiyaku <id> (<observed>)`.
+
+## Read-Time Region
+
+`KanshiInput.region` is optional. Omitted input leaves `KanshiReport` without a
+`region` property; present input adds an isolated `Section<RegionRead>`:
+
+```ts
+type KanshiRegionSelection =
+  | { kind: "declarations" }
+  | { kind: "contract"; contract: ContractId }
+  | { kind: "overlap"; contract?: ContractId }
+  | { kind: "path"; path: string }
+
+type RegionDeclaration = {
+  contract: ContractId;
+  patterns: readonly string[];
+}
+type RegionIntersection = {
+  left: ContractId;
+  right: ContractId;
+  patterns: readonly { left: string; right: string }[];
+}
+type RegionPathMatch = { contract: ContractId; pattern: string }
+type RegionRead =
+  | { kind: "declarations"; declarations: readonly RegionDeclaration[] }
+  | { kind: "contract"; declaration: RegionDeclaration }
+  | { kind: "overlap"; subject?: ContractId; intersections: readonly RegionIntersection[] }
+  | { kind: "path"; path: string; matches: readonly RegionPathMatch[] }
+```
+
+Declarations preserve each active Contract's pattern order. Bare declarations
+contain no relation data; overlap is the only relation view and reports both
+decisive patterns. Path reads match active declarations against one canonical
+repository-relative path. Empty arrays are typed empty results. A malformed or
+unreadable document fails only this section, while a missing world is absent.
+The public input validates this exact discriminated union, rejects unknown
+fields, and validates ContractId/path values before any repository observation.
+This planning read uses the document Region owner and never reports actual
+touched paths, Git conflicts, ownership, gates, or serialization advice.

@@ -8,6 +8,10 @@ import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
 import { readContractBoard } from "../protocol/read/status.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
+import { readDocuments } from "../protocol/read/documents.js";
+import { readRegionDeclarations, validateRegionPath } from "../library/region.js";
+import { contractId } from "../core/facts/types.js";
+import { selectRegion } from "./select.js";
 import type {
   AkumaKanshiWorld,
   ContractEndpointObservation,
@@ -16,10 +20,13 @@ import type {
   Section,
   TaskKanshiRow,
   TaskKanshiWorld,
+  KanshiRegionSelection,
+  RegionDeclaration,
+  RegionRead,
 } from "./report.js";
 import type { WorldRoot } from "../world.js";
 
-export type KanshiInput = Readonly<{ world: WorldRoot | null; repo?: Repo }>;
+export type KanshiInput = Readonly<{ world: WorldRoot | null; repo?: Repo; region?: KanshiRegionSelection }>;
 
 function diagnostic(error: unknown): string {
   let source: string;
@@ -31,14 +38,61 @@ function diagnostic(error: unknown): string {
   return line.length <= 240 ? line : `${line.slice(0, 239)}…`;
 }
 
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`kanshi ${label} must be an object`);
+  return value as Record<string, unknown>;
+}
+
+function exactKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new TypeError(`kanshi ${label} has unknown field: ${key}`);
+}
+
+function regionSelection(value: unknown): KanshiRegionSelection {
+  const selection = record(value, "region selection");
+  if (typeof selection.kind !== "string") throw new TypeError("kanshi region selection kind must be a string");
+  if (selection.kind === "declarations") {
+    exactKeys(selection, ["kind"], "region selection");
+    return { kind: "declarations" };
+  }
+  if (selection.kind === "contract") {
+    exactKeys(selection, ["kind", "contract"], "region selection");
+    if (typeof selection.contract !== "string") throw new TypeError("kanshi region contract must be a ContractId");
+    try { return { kind: "contract", contract: contractId(selection.contract) }; }
+    catch { throw new TypeError("kanshi region contract must be a canonical ContractId"); }
+  }
+  if (selection.kind === "overlap") {
+    exactKeys(selection, ["kind", "contract"], "region selection");
+    if (selection.contract === undefined) return { kind: "overlap" };
+    if (typeof selection.contract !== "string") throw new TypeError("kanshi region contract must be a ContractId");
+    try { return { kind: "overlap", contract: contractId(selection.contract) }; }
+    catch { throw new TypeError("kanshi region contract must be a canonical ContractId"); }
+  }
+  if (selection.kind === "path") {
+    exactKeys(selection, ["kind", "path"], "region selection");
+    try { validateRegionPath(selection.path); }
+    catch (error) { throw new TypeError(error instanceof Error ? error.message : String(error)); }
+    return { kind: "path", path: selection.path };
+  }
+  throw new TypeError(`kanshi region selection kind is invalid: ${selection.kind}`);
+}
+
 function coordinate(input: KanshiInput): KanshiInput {
   if (typeof input !== "object" || input === null || Array.isArray(input)) throw new TypeError("kanshi input must be an object");
-  for (const key of Object.keys(input)) if (key !== "world" && key !== "repo") throw new TypeError(`kanshi input has unknown field: ${key}`);
+  for (const key of Object.keys(input)) if (key !== "world" && key !== "repo" && key !== "region") throw new TypeError(`kanshi input has unknown field: ${key}`);
   if (input.world !== null && (typeof input.world !== "string" || input.world.trim().length === 0)) {
     throw new TypeError("kanshi world must be a WorldRoot or null");
   }
   if (input.repo !== undefined && !(input.repo instanceof Repo)) throw new TypeError("kanshi repo must be a Repo");
-  return input;
+  return input.region === undefined ? input : { ...input, region: regionSelection(input.region) };
+}
+
+async function readRegion(observation: GitReadObservation, selection: KanshiRegionSelection): Promise<Section<RegionRead>> {
+  try {
+    const declarations: readonly RegionDeclaration[] = [...readRegionDeclarations(await readDocuments(observation))].sort((left, right) => left.contract.localeCompare(right.contract));
+    return { kind: "present", value: selectRegion({ declarations, selection }) };
+  } catch (error) {
+    return { kind: "failed", failure: { message: diagnostic(error) } };
+  }
 }
 
 async function readBranch(repo?: Repo): Promise<string | null> {
@@ -196,15 +250,17 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
       contracts,
       tasks: world === null ? { kind: "absent" } : await readTasks(world, holders, observeContract),
       akuma: world === null ? { kind: "absent" } : await joinAkuma(world, observeContract, []),
+      ...(input.region === undefined ? {} : { region: { kind: "absent" as const } }),
     };
   }
   try {
     const repository = scopeForRepo(repo);
     return await withGitDecodeChannel(repository, (channel) => withGitReadObservation(repository, channel, async (observation) => {
-      const [contractSection, holders, dispatches] = await Promise.all([
+      const [contractSection, holders, dispatches, region] = await Promise.all([
         readContracts(observation),
         readHolders(observation),
         readDispatches(observation),
+        input.region === undefined ? Promise.resolve(undefined) : readRegion(observation, input.region),
       ]);
       const contracts = decorateContracts(contractSection, holders);
       const observeContract = contractEndpointObserver(contracts);
@@ -220,6 +276,7 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
           : dispatches.kind === "failed"
             ? dispatches
             : await joinAkuma(world, observeContract, dispatches.value),
+        ...(region === undefined ? {} : { region }),
       };
     }));
   } catch (error) {
@@ -231,6 +288,7 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
       contracts: failure,
       tasks: world === null ? { kind: "absent" } : failure,
       akuma: world === null ? { kind: "absent" } : failure,
+      ...(input.region === undefined ? {} : { region: failure }),
     };
   }
 }

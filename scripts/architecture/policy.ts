@@ -582,7 +582,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "library/region.ts",
       allow: [
-        any("body/decode.ts"), any("body/region.ts"), types("core/facts/types.ts"),
+        any("body/decode.ts"), any("body/region.ts"), types("core/facts/types.ts"), types("protocol/operations.ts", ["ContractDocumentProjection"]),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
         any("protocol/operations.ts", ["RepositoryScope", "documentsOperationAt"]),
       ],
@@ -627,15 +627,18 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("alias/index.ts", ["readAliases"]),
         any("dispatch/index.ts", ["Dispatch", "readDispatchesAt"]),
         any("git/read-observation.ts", ["GitReadObservation", "withGitDecodeChannel", "withGitReadObservation"]),
-        any("kanshi/**"),
+        any("kanshi/**"), any("library/region.ts", ["readRegionDeclarations", "regionIntersections", "regionPathMatches", "validateRegionPath"]),
+        any("core/facts/types.ts", ["contractId"]),
         types("library/contract.ts"),
         any("library/repo.ts", ["Repo", "scopeForRepo"]),
         any("protocol/read/status.ts", ["readContractBoard"]),
+        any("protocol/read/documents.ts", ["readDocuments"]),
         any("settlement/holder.ts", ["TaskHolderProjection", "readTaskHolderProjectionAt"]),
         any("task/operations.ts", ["observeTaskStatusRows"]),
       ],
     },
     { source: "kanshi/report.ts", allow: [types("world.ts"), types("akuma/index.ts"), types("identity/selector.ts"), types("library/contract.ts"), types("task/index.ts")] },
+    { source: "kanshi/select.ts", allow: [types("kanshi/report.ts"), any("library/region.ts", ["regionIntersections", "regionPathMatches"])] },
     { source: "kanshi/**", allow: [any("index.ts"), any("kanshi/**"), any("task/index.ts")] },
     { source: "markdown/diff.ts", allow: [] },
     {

@@ -54,6 +54,62 @@ function compileRegionPattern(pattern: string): CompiledRegionPattern {
   return { source, segments: canonical.map((segment) => compileSegment(segment, pattern)) };
 }
 
+export function assertCanonicalRegionPath(path: string): void {
+  if (path.length === 0 || /[\r\n\0]/u.test(path) || path.startsWith("/") || path.endsWith("/")) {
+    refusal(`Region path '${path}' must be a canonical repository-relative path`);
+  }
+  if (path.split("/").some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    refusal(`Region path '${path}' must be a canonical repository-relative path`);
+  }
+}
+
+function segmentMatchesPath(pattern: readonly string[], path: readonly string[]): boolean {
+  const queue: Array<readonly [number, number]> = [[0, 0]];
+  const visited = new Set<string>();
+  let cursor = 0;
+  while (cursor < queue.length) {
+    const [patternIndex, pathIndex] = queue[cursor++]!;
+    const key = `${patternIndex}:${pathIndex}`;
+    if (visited.has(key)) continue;
+    visited.add(key);
+    if (patternIndex === pattern.length && pathIndex === path.length) return true;
+    const character = pattern[patternIndex];
+    if (character === "*") {
+      queue.push([patternIndex + 1, pathIndex]);
+      if (pathIndex < path.length) queue.push([patternIndex, pathIndex + 1]);
+      continue;
+    }
+    if (character === "?") {
+      if (pathIndex < path.length) queue.push([patternIndex + 1, pathIndex + 1]);
+      continue;
+    }
+    if (character !== undefined && character === path[pathIndex]) queue.push([patternIndex + 1, pathIndex + 1]);
+  }
+  return false;
+}
+
+function patternMatchesPath(pattern: readonly RegionSegment[], path: readonly string[]): boolean {
+  const queue: Array<readonly [number, number]> = [[0, 0]];
+  const visited = new Set<string>();
+  let cursor = 0;
+  while (cursor < queue.length) {
+    const [patternIndex, pathIndex] = queue[cursor++]!;
+    const key = `${patternIndex}:${pathIndex}`;
+    if (visited.has(key)) continue;
+    visited.add(key);
+    if (patternIndex === pattern.length && pathIndex === path.length) return true;
+    const segment = pattern[patternIndex];
+    if (segment?.kind === "deep") {
+      queue.push([patternIndex + 1, pathIndex]);
+      if (pathIndex < path.length) queue.push([patternIndex, pathIndex + 1]);
+      continue;
+    }
+    if (segment === undefined || path[pathIndex] === undefined) continue;
+    if (segmentMatchesPath(segment.characters, Array.from(path[pathIndex]!))) queue.push([patternIndex + 1, pathIndex + 1]);
+  }
+  return false;
+}
+
 function segmentTransition(characters: readonly string[], index: number): SegmentTransition | null {
   const character = characters[index];
   if (character === undefined) return null;
@@ -151,4 +207,13 @@ export function regionsOverlap(mine: readonly string[], theirs: readonly string[
     }
   }
   return overlaps;
+}
+
+export function regionPatternsMatchPath(patterns: readonly string[], path: string): readonly string[] {
+  assertCanonicalRegionPath(path);
+  const pathSegments = path.split("/");
+  return patterns
+    .map((pattern) => compileRegionPattern(pattern))
+    .filter((pattern) => patternMatchesPath(pattern.segments, pathSegments))
+    .map((pattern) => pattern.source);
 }

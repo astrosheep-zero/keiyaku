@@ -277,3 +277,10 @@ unsatisfied attestation fact, not a stop. A failed scratch destroy command
 renders without claiming that the worktree remains. The leak line reports a
 disposable Verification worktree that could not be removed after admission; it
 does not change the accepted exit status and is not a repair command.
+Region reads render one row per declaration, decisive overlap pair, or path
+match. Empty arrays render no rows; a failed Region section renders one
+`region failed <diagnostic>` row. JSON carries the same Kanshi `Section` value,
+with no actual touched paths, Git conflicts, ownership, or action advice. A
+Region read is an observation, so both present and failed sections exit `0`;
+the failure remains visible in the typed/text value rather than being mapped to
+the mutation retry status.
