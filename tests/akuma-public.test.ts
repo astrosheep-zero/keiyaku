@@ -74,15 +74,20 @@ const provider: ProviderAdapter = {
   confinement: () => ({ kind: "unconfined" }),
   admitOptions(options) { return { kind: "admitted", options }; },
   async start() {
+    let finishEvents!: () => void;
+    const eventsFinished = new Promise<void>((resolve) => { finishEvents = resolve; });
     return {
       admission: { fence: "public-fixture-turn" },
       events: {
         async *[Symbol.asyncIterator]() {
           yield { type: "session" as const, coordinate: { sessionId: "public-session" } };
           yield { type: "assistant" as const, text: "working" };
+          finishEvents();
         },
       },
-      completion: Promise.resolve({ kind: "answered", answer: "public answer", historyId: "public-history" }),
+      completion: eventsFinished.then(() => ({
+        kind: "answered" as const, answer: "public answer", historyId: "public-history",
+      })),
       async abort() {},
     };
   },

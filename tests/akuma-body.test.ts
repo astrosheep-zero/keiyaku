@@ -31,6 +31,8 @@ function adapter(input: Readonly<{
     call: Parameters<ProviderAdapter["start"]>[0]
       | Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
   ) => {
+    let finishEvents!: () => void;
+    const eventsFinished = new Promise<void>((resolve) => { finishEvents = resolve; });
     assert.equal(call.requests, undefined);
     input.starts.push({
       body: call.body,
@@ -43,9 +45,10 @@ function adapter(input: Readonly<{
       events: {
         async *[Symbol.asyncIterator]() {
           for (const event of input.events) yield event;
+          finishEvents();
         },
       },
-      completion: Promise.resolve(input.result),
+      completion: eventsFinished.then(() => input.result),
       async abort() {},
     };
   };
@@ -183,7 +186,9 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
               yield { evidence: "fence" as const, fence: "live-fence", kind: "accepted" };
             },
           },
-          completion: Promise.resolve({ kind: "answered", answer: "done", historyId: "live-history" }),
+          completion: eventsReleased.then(() => ({
+            kind: "answered" as const, answer: "done", historyId: "live-history",
+          })),
           async tell() {
             releaseReceipt();
             tellObserved();
@@ -242,7 +247,9 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
               await eventsReleased;
             },
           },
-          completion: Promise.resolve({ kind: "answered", answer: "done", historyId: "live-history" }),
+          completion: eventsReleased.then(() => ({
+            kind: "answered" as const, answer: "done", historyId: "live-history",
+          })),
           async tell() { tellObserved(); return { kind: "accepted" as const, fence: "turn-1:tell-live" }; },
           async abort() {},
         };
@@ -278,6 +285,172 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
   }
 });
 
+test("a Session without live tell falls back after events close before completion", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-tell-handoff-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c42" });
+    initializeHeart(allocated.paths);
+    let aborts = 0;
+    const incumbent: ProviderAdapter = {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        return {
+          admission: { fence: "incumbent" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              return;
+            },
+          },
+          completion: new Promise<TurnResult>(() => undefined),
+          async abort() {
+            aborts += 1;
+            assert.equal(probeLeash(allocated.paths), "held");
+            assert.deepEqual(readHeart(allocated.paths).pending.map((tell) => tell.id), ["tell-handoff"]);
+          },
+        };
+      },
+    };
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "acp",
+        provider: { name: "acp", kind: "acp" },
+        options: {},
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, incumbent, { now: () => "2026-08-08T00:00:00.000Z" });
+    while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    recordTell(allocated.paths, {
+      id: "tell-handoff", body: "continue promptly", recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await Promise.race([
+      body,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Body did not hand off pending Tell")), 500)),
+    ]);
+
+    assert.equal(aborts, 1);
+    assert.equal(probeLeash(allocated.paths), "free");
+    assert.equal(readHeart(allocated.paths).latestBody?.end, "put-down");
+    assert.deepEqual(outcomes(allocated.paths), []);
+    assert.deepEqual(readHeart(allocated.paths).pending.map((tell) => tell.id), ["tell-handoff"]);
+
+    const launches: Array<readonly Readonly<{ id: string; text: string }>[]> = [];
+    const successorStart = async (input: Parameters<ProviderAdapter["start"]>[0]) => {
+      launches.push(input.launchTells);
+      return {
+        admission: { fence: "successor" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "successor-session" } };
+          },
+        },
+        completion: Promise.resolve({ kind: "answered" as const, answer: "continued" }),
+        async abort() {},
+      };
+    };
+    await driveAkumaBody({ paths: allocated.paths }, {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      start: successorStart,
+      resume: successorStart,
+    }, { now: () => "2026-08-08T00:00:02.000Z" });
+
+    assert.deepEqual(launches, [[{ id: "tell-handoff", text: "continue promptly" }]]);
+    assert.deepEqual(readHeart(allocated.paths).pending, []);
+    assert.equal(outcomes(allocated.paths).length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("completion wins before a Tell arrives on a Session without live tell", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-tell-completion-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c43" });
+    initializeHeart(allocated.paths);
+    let started!: () => void;
+    const turnStarted = new Promise<void>((resolve) => { started = resolve; });
+    let sessionSeen!: () => void;
+    const sessionObserved = new Promise<void>((resolve) => { sessionSeen = resolve; });
+    let releaseEvents!: () => void;
+    const eventsReleased = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    let settle!: (result: TurnResult) => void;
+    let aborts = 0;
+    const incumbent: ProviderAdapter = {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        started();
+        return {
+          admission: { fence: "incumbent" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "incumbent-session" } };
+              sessionSeen();
+              await eventsReleased;
+            },
+          },
+          completion: new Promise<TurnResult>((resolve) => { settle = resolve; }),
+          async abort() { aborts += 1; },
+        };
+      },
+    };
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "acp",
+        provider: { name: "acp", kind: "acp" },
+        options: {},
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, incumbent, { now: () => "2026-08-08T00:00:00.000Z" });
+    await turnStarted;
+    await sessionObserved;
+    settle({ kind: "answered", answer: "complete", historyId: "history-1" });
+    await body;
+    releaseEvents();
+
+    assert.equal(aborts, 0);
+    assert.deepEqual(outcomes(allocated.paths)[0], {
+      kind: "answered",
+      answer: "complete",
+      historyId: "history-1",
+      session: { sessionId: "incumbent-session" },
+    });
+    recordTell(allocated.paths, {
+      id: "tell-after-completion", body: "continue", recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    const launches: Array<readonly Readonly<{ id: string; text: string }>[]> = [];
+    const successorStart = async (input: Parameters<ProviderAdapter["start"]>[0]) => {
+      launches.push(input.launchTells);
+      return {
+        admission: { fence: "successor" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "successor-session" } };
+          },
+        },
+        completion: Promise.resolve({ kind: "answered" as const, answer: "continued" }),
+        async abort() {},
+      };
+    };
+    await driveAkumaBody({ paths: allocated.paths }, {
+      confinement: () => ({ kind: "unconfined" }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      start: successorStart,
+      resume: successorStart,
+    }, { now: () => "2026-08-08T00:00:02.000Z" });
+    assert.deepEqual(launches, [[{ id: "tell-after-completion", text: "continue" }]]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("a Tell after Session terminality stays pending without replacing the answered turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-terminal-tell-"));
   try {
@@ -303,11 +476,11 @@ test("a Tell after Session terminality stays pending without replacing the answe
               if (currentTurn === 1) await eventsClosed;
             },
           },
-          completion: Promise.resolve({
+          completion: (currentTurn === 1 ? eventsClosed : Promise.resolve()).then(() => ({
             kind: "answered" as const,
             answer: currentTurn === 1 ? "done" : "continued",
             historyId: `terminal-history-${currentTurn}`,
-          }),
+          })),
           async tell() { return { kind: "turn-ended" as const }; },
           async abort() {},
         };

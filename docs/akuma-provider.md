@@ -71,8 +71,8 @@ close or reinterpret that vocabulary.
 Fresh start, typed events, completion, abort, confinement and option admission,
 and `launchTells` are unconditional Provider Core. Resume, fork, and live tell
 are capabilities expressed only by the corresponding optional operation. An
-adapter without live tell still receives pending tells at the next turn
-boundary through `launchTells`; an adapter without resume starts fresh only
+adapter without live tell still receives pending tells through `launchTells`
+after Body custody is retired; an adapter without resume starts fresh only
 when no durable resume promise exists. There is no capability registry,
 declaration table, probe, independent `SteerControl`, or `ExecutionObserver`.
 

@@ -231,6 +231,10 @@ type StartTurnResult = ActiveTurn
   | Readonly<{ kind: "resume-unsupported" }>
   | (Extract<DrivenTurn, { kind: "failed" }> & Readonly<{ turnSequence: number }>);
 
+type TurnDriveResult = DrivenTurn
+  | Readonly<{ kind: "stopped" }>
+  | Readonly<{ kind: "handoff" }>;
+
 async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
   const { cwd, options, session } = turnRecipe(input.paths, input.soul);
   if (session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
@@ -340,14 +344,14 @@ async function submitPendingLiveTells(
   writers: TurnWriters,
   pending: readonly TellFact[],
   attempted: Set<string>,
+  tellLive: NonNullable<Session["tell"]>,
 ): Promise<"live" | "turn-ended"> {
   const { input, turnSequence, drive, writeWitness, mayWrite } = writers;
-  if (drive.tell === undefined) return "live";
   for (const tell of pending) {
     if (attempted.has(tell.id)) continue;
     attempted.add(tell.id);
     const outcome = await writeWitness(async () => {
-      const submission = await drive.tell!({ id: tell.id, text: tell.body });
+      const submission = await tellLive({ id: tell.id, text: tell.body });
       if (!mayWrite()) return "turn-ended" as const;
       if (submission.kind === "turn-ended") return "turn-ended" as const;
       recordTellDeliveries(input.paths, [{
@@ -373,6 +377,15 @@ async function stopActiveDrive(
   await active.requests?.close();
 }
 
+function hasUnattemptedTell(
+  liveTells: boolean,
+  tellPump: Promise<"live" | "turn-ended"> | null,
+  pending: readonly TellFact[],
+  attempted: ReadonlySet<string>,
+): boolean {
+  return liveTells && tellPump === null && pending.some((tell) => !attempted.has(tell.id));
+}
+
 function persistProviderEvent(
   input: DriveTurnInput,
   active: ActiveTurn,
@@ -393,10 +406,19 @@ function persistProviderEvent(
   return event.type === "session" ? event.coordinate : undefined;
 }
 
+async function settleCompletion(
+  result: TurnResult,
+  session: ResumeCoordinate | undefined,
+  requests: BodyRequestPump | null,
+): Promise<DrivenTurn> {
+  await requests?.close();
+  return result.kind === "answered" ? { ...result, ...(session === undefined ? {} : { session }) } : result;
+}
+
 async function consumeTurnDrive(
   input: DriveTurnInput,
   active: ActiveTurn,
-): Promise<DrivenTurn | Readonly<{ kind: "stopped" }>> {
+): Promise<TurnDriveResult> {
   const { turnSequence, drive, requests, resume } = active;
   let heart = input.supervisor.current();
   let turnSession = resume;
@@ -415,6 +437,8 @@ async function consumeTurnDrive(
   let liveTells = true;
   let tellPump: Promise<"live" | "turn-ended"> | null = null;
   let tellObservation: Promise<Readonly<{ kind: "tell"; result: "live" | "turn-ended" }>> | null = null;
+  let eventsOpen = true;
+  const completionObservation = drive.completion.then((result) => ({ kind: "completion" as const, result }));
   try {
     for (;;) {
       if (input.supervisor.signal.aborted) {
@@ -422,14 +446,18 @@ async function consumeTurnDrive(
         await stopActiveDrive(input, active);
         return { kind: "stopped" };
       }
-      const hasUnattemptedTell = liveTells && tellPump === null
-        && heart.pending.some((tell) => !attempted.has(tell.id));
-      if (hasUnattemptedTell) {
-        tellPump = submitPendingLiveTells(writers, heart.pending, attempted);
+      if (hasUnattemptedTell(liveTells, tellPump, heart.pending, attempted)) {
+        if (drive.tell === undefined) {
+          writesOpen = false;
+          await stopActiveDrive(input, active);
+          return { kind: "handoff" };
+        }
+        tellPump = submitPendingLiveTells(writers, heart.pending, attempted, drive.tell);
         tellObservation = tellPump.then((result) => ({ kind: "tell" as const, result }));
       }
       const next = await Promise.race([
-        pending.then((event) => ({ kind: "event" as const, event })),
+        ...(eventsOpen ? [pending.then((event) => ({ kind: "event" as const, event }))] : []),
+        completionObservation,
         input.supervisor.next(heart).then((observation) => ({ kind: "heart" as const, observation })),
         ...(tellObservation === null ? [] : [tellObservation]),
         receiptFailure,
@@ -445,17 +473,17 @@ async function consumeTurnDrive(
         liveTells = next.result === "live";
         continue;
       }
-      if (next.event.done) break;
-      const event = next.event.value;
-      turnSession = persistProviderEvent(input, active, event) ?? turnSession;
+      if (next.kind === "completion") {
+        writesOpen = false;
+        return await settleCompletion(next.result, turnSession, requests);
+      }
+      if (next.event.done) {
+        eventsOpen = false;
+        continue;
+      }
+      turnSession = persistProviderEvent(input, active, next.event.value) ?? turnSession;
       pending = iterator.next();
     }
-    const result = await drive.completion;
-    writesOpen = false;
-    await requests?.close();
-    return result.kind === "answered"
-      ? { ...result, ...(turnSession === undefined ? {} : { session: turnSession }) }
-      : result;
   } catch (error) {
     writesOpen = false;
     if (input.supervisor.signal.aborted) {
@@ -472,6 +500,7 @@ async function driveTurn(
   input: DriveTurnInput,
 ): Promise<(DrivenTurn & Readonly<{ turnSequence: number }>)
   | Readonly<{ kind: "stopped" }>
+  | Readonly<{ kind: "handoff" }>
   | Readonly<{ kind: "resume-unsupported" }>> {
   let active: ActiveTurn;
   try {
@@ -487,7 +516,9 @@ async function driveTurn(
   }
   try {
     const result = await consumeTurnDrive(input, active);
-    return result.kind === "stopped" ? result : { ...result, turnSequence: active.turnSequence };
+    return result.kind === "stopped" || result.kind === "handoff"
+      ? result
+      : { ...result, turnSequence: active.turnSequence };
   } catch (error) {
     if (heartExists(input.paths)) {
       await active.requests?.close();
@@ -618,6 +649,10 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
     });
     if (result.kind === "stopped") {
       putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
+      return;
+    }
+    if (result.kind === "handoff") {
+      breakBody(launch.paths, { sequence: bodySequence, end: "put-down", at: runtime.now() });
       return;
     }
     if (result.kind === "resume-unsupported"
