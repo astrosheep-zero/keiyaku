@@ -86,17 +86,20 @@ segment after `task/` and may have any number of namespace segments before it;
 no namespace denotes the task root. Identity bytes are exact: no Unicode
 normalization or visual-confusable deduplication applies.
 
-Bind derives the first ContractId as `kei/<fitted-normalized-title>`. Its
-title-derived stem has a 48 UTF-8 byte budget; the `kei/` prefix is outside that
-budget. Admission is the sole uniqueness adjudicator. When the unsuffixed
-identity exists, bind may make at most three more admission attempts. Each one
-appends `-` and a newly minted eight-byte lowercase hexadecimal suffix to the
-same fitted title stem; neither separator nor suffix consumes its 48-byte
-budget. Suffixing is not part of normalization. Other Git movement retries
-reuse the selected identity; they never silently remint it. A third suffixed
-collision remains the typed `contract-exists` refusal. An empty normalized stem
-uses `contract` before the same collision rule. Readers, folds, and gates
-compare the whole `ContractId` and never renormalize an admitted identity.
+Library bind derives the first ContractId as `kei/<fitted-normalized-title>`.
+Its title-derived stem has a 48 UTF-8 byte budget; the `kei/` prefix is outside
+that budget. Admission is the sole uniqueness adjudicator. Protocol bind accepts
+one already selected complete ContractId and performs one preparation and
+admission attempt; it does not normalize a title, mint a suffix, or retry a
+different identity. When the unsuffixed identity exists, Library may make at
+most three more Protocol admissions. Each one appends `-` and a newly minted
+eight-byte lowercase hexadecimal suffix to the same fitted title stem; neither
+separator nor suffix consumes its 48-byte budget. Suffixing is not part of
+normalization. Other Git movement retries reuse the selected identity; they
+never silently remint it. After the third suffixed collision, Library returns
+that exact typed `contract-exists` refusal. An empty normalized stem uses
+`contract` before the same collision rule. Readers, folds, and gates compare
+the whole `ContractId` and never renormalize an admitted identity.
 Complete-ID validation does not retroactively enforce the generation budget, so
 existing longer identities remain valid.
 

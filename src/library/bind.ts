@@ -13,6 +13,28 @@ import type { TaskId } from "../task/identity.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
 import type { KeiyakuRefusal } from "./refusal.js";
 
+const suffixDraw = {
+  next(): string {
+    return randomBytes(8).toString("hex");
+  },
+};
+
+export async function withBindSuffixDraws<T>(suffixes: readonly string[], run: () => Promise<T>): Promise<T> {
+  const previous = suffixDraw.next;
+  let index = 0;
+  suffixDraw.next = () => {
+    const next = suffixes[index];
+    if (next === undefined) throw new Error("bind suffix fixture is exhausted");
+    index += 1;
+    return next;
+  };
+  try {
+    return await run();
+  } finally {
+    suffixDraw.next = previous;
+  }
+}
+
 type BindAttemptInput = Readonly<{
   scope: RepositoryScope;
   channel: GitDecodeChannel;
@@ -27,7 +49,7 @@ type BindAttemptInput = Readonly<{
 
 function candidateId(title: string, collision: number): ContractId {
   const stem = fitIdentityStem({ stem: normalizeIdentityStem({ source: title }) || "contract", maxBytes: 48 });
-  const suffix = collision === 0 ? "" : `-${randomBytes(8).toString("hex")}`;
+  const suffix = collision === 0 ? "" : `-${suffixDraw.next()}`;
   return contractIdFromSegment(`${stem}${suffix}`);
 }
 
@@ -35,7 +57,6 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
   return bindOperation({
     scope: input.scope,
     channel: input.channel,
-    title: input.title,
     terms: input.terms,
     verification: input.verification,
     workspace: input.workspace,
@@ -49,6 +70,7 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
 }
 
 async function attemptCandidates(input: BindAttemptInput): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, KeiyakuRefusal>> {
+  let result!: IntentOutcome<Readonly<{ contractId: ContractId }>, KeiyakuRefusal>;
   for (let collision = 0; collision <= 3; collision += 1) {
     const id = candidateId(input.title, collision);
     let reserved = false;
@@ -63,12 +85,12 @@ async function attemptCandidates(input: BindAttemptInput): Promise<IntentOutcome
       }
       reserved = true;
     }
-    const result = await attempt(input, id);
+    result = await attempt(input, id);
     if (result.kind === "accepted") return result;
     if (reserved) await releaseContractWorktree(input.scope, id);
     if (result.kind !== "refused" || result.refusal.kind !== "contract-exists") return result;
   }
-  throw new Error("contract identity collision attempts exhausted");
+  return result;
 }
 
 export async function admitBindWithAppointment(input: BindAttemptInput) {

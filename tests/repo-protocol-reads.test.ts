@@ -24,7 +24,15 @@ import {
   reconcileAllOperation,
   scopeOperation,
 } from "../src/protocol/operations.js";
-import { changeId, entryUlid, snapshotId, type ContractId, type JournalEntry } from "../src/core/facts/types.js";
+import {
+  changeId,
+  contractIdFromSegment,
+  entryUlid,
+  snapshotId,
+  type ContractId,
+  type JournalEntry,
+} from "../src/core/facts/types.js";
+import { fitIdentityStem, normalizeIdentityStem } from "../src/identity/normalize.js";
 
 
 function firstJournalAt(repository: TestGitRepository, id: ContractId): string {
@@ -68,12 +76,19 @@ function terms(title: string) {
   return { document: document.document, segments: document.segments, gates: [], after: [] };
 }
 
+function protocolContractId(title: string): ContractId {
+  return contractIdFromSegment(fitIdentityStem({
+    stem: normalizeIdentityStem({ source: title }) || "contract",
+    maxBytes: 48,
+  }));
+}
+
 async function bind(repository: TestGitRepository, title: string, workspace: "worktree" | "here"): Promise<ContractId> {
   const scope = await scopeOperation({ coordinate: repository.path });
   const result = await withGitDecodeChannel(scope, (channel) => bindOperation({
     scope,
     channel,
-    title,
+    contractId: protocolContractId(title),
     terms: terms(title),
     verification: { kind: "prepared", data: null },
     workspace,
@@ -270,7 +285,7 @@ test("single Contract observation never combines state and target from different
   const contract = await withGitDecodeChannel(scope, (channel) => bindOperation({
     scope,
     channel,
-    title: "Frozen observation",
+    contractId: protocolContractId("Frozen observation"),
     terms: terms("Frozen observation"),
     verification: { kind: "prepared", data: null },
     workspace: "here",

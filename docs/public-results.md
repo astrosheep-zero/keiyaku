@@ -348,6 +348,11 @@ contract identity: it asserts that no new identity was established, and
 retrying bind mints a new identity. Adapters keep their addressed input instead
 of mining another coordinate from an error.
 
+Library owns bind identity allocation. Four `contract-exists` admissions return
+the last typed Protocol refusal; the package root throws `KeiyakuRefused` with
+that same refusal. Identity exhaustion is not `KeiyakuRetry` and does not use
+the `exhausted` retry reason.
+
 ```ts
 type AuditWorkspace = Readonly<{ kind: "worktree" | "here"; path: string }>
 type DiffScope = Readonly<{

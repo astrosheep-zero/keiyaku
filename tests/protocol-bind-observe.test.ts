@@ -26,7 +26,19 @@ import {
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { bindOperation as rawBindOperation, amendOperation as rawAmendOperation } from "../src/protocol/operations.js";
-import { contractId, documentKey, entryUlid, gate, type AmendData, type ContractId, type ContractTerms, type JournalEntry, type SnapshotId } from "../src/core/facts/types.js";
+import {
+  contractId,
+  contractIdFromSegment,
+  documentKey,
+  entryUlid,
+  gate,
+  type AmendData,
+  type ContractId,
+  type ContractTerms,
+  type JournalEntry,
+  type SnapshotId,
+} from "../src/core/facts/types.js";
+import { fitIdentityStem, normalizeIdentityStem } from "../src/identity/normalize.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { admitIntent } from "../src/protocol/intent.js";
@@ -37,13 +49,27 @@ import { makeGitRepository, observeContract, withGitShim } from "./support/git.j
 
 const NO_VERIFICATION = { kind: "prepared", data: null } as const;
 
+function protocolContractId(title: string): ContractId {
+  return contractIdFromSegment(fitIdentityStem({
+    stem: normalizeIdentityStem({ source: title }) || "contract",
+    maxBytes: 48,
+  }));
+}
+
+let untitledBind = 0;
+
 function bindOperation(
-  input: Omit<Parameters<typeof rawBindOperation>[0], "channel" | "verification" | "title"> & Readonly<{ title?: string }>,
+  input: Omit<Parameters<typeof rawBindOperation>[0], "channel" | "verification" | "contractId"> & Readonly<{
+    title?: string;
+    contractId?: ContractId;
+  }>,
 ) {
+  const { title, contractId: id, ...rest } = input;
   return withGitDecodeChannel(input.scope, (channel) => rawBindOperation({
-    ...input,
+    ...rest,
     channel,
-    title: input.title ?? "Protocol bind",
+    contractId: id
+      ?? (title === undefined ? contractIdFromSegment(`protocol-bind-${untitledBind++}`) : protocolContractId(title)),
     verification: NO_VERIFICATION,
   }));
 }
@@ -468,30 +494,18 @@ test("single-contract amend object I/O stays fixed as the git grows", async () =
   );
 });
 
-test("bind reobserves and atomically asserts target coordinates after an identity collision", async () => {
+test("bind reobserves and atomically asserts target coordinates after Git movement", async () => {
   const repository = repositoryWithHead();
   repository.run(["branch", "release"]);
   const git = await repositoryAt(repository.path);
-  const first = await bindOperation({
-    scope: git,
-    title: "Moving target",
-    terms: terms([]),
-    target: "refs/heads/release",
-    workspace: "worktree",
-  });
-  assert.equal(first.kind, "accepted");
-
   const predecessor = repository.run(["rev-parse", "refs/heads/release"]).trim();
   const tree = repository.run(["rev-parse", `${predecessor}^{tree}`]).trim();
   const moved = repository.run(["commit-tree", tree, "-p", predecessor, "-m", "move target"]).trim();
   const marker = join(repository.path, "bind-target-observation.marker");
-  const second = await withGitShim([
-    'if [ "$1" = "for-each-ref" ]; then',
-    '  if [ -e "$KEIYAKU_BIND_MARKER" ]; then',
-    '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$KEIYAKU_MOVED_TARGET" "$KEIYAKU_OLD_TARGET" || exit $?',
-    "  else",
-    '    : > "$KEIYAKU_BIND_MARKER"',
-    "  fi",
+  const bound = await withGitShim([
+    'if [ "$1 $2" = "update-ref --stdin" ] && [ ! -e "$KEIYAKU_BIND_MARKER" ]; then',
+    '  : > "$KEIYAKU_BIND_MARKER"',
+    '  "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$KEIYAKU_MOVED_TARGET" "$KEIYAKU_OLD_TARGET" || exit $?',
     "fi",
     'exec "$KEIYAKU_REAL_GIT" "$@"',
   ].join("\n"), {
@@ -506,48 +520,37 @@ test("bind reobserves and atomically asserts target coordinates after an identit
     workspace: "worktree",
   }));
 
-  assert.equal(second.kind, "accepted");
-  if (second.kind !== "accepted") throw new Error("collision bind was not accepted");
-  const state = (await observeContract(git, second.value.contractId)).state;
+  assert.equal(bound.kind, "accepted");
+  if (bound.kind !== "accepted") throw new Error("moved target bind was not accepted");
+  const state = (await observeContract(git, bound.value.contractId)).state;
   assert.equal(state?.coordinates.start, moved);
+  assert.equal(bound.value.contractId, protocolContractId("Moving target"));
 });
 
-test("bind fits Contract identity stems to 48 UTF-8 bytes", async () => {
+test("protocol bind admits one explicit identity and refuses a second use of it", async () => {
   const repository = repositoryWithHead();
   const git = await repositoryAt(repository.path);
-  const ascii = await bindOperation({
+  const id = contractId(`kei/${"a".repeat(48)}`);
+  const first = await bindOperation({
     scope: git,
-    title: "a".repeat(100),
+    contractId: id,
     terms: terms([]),
     workspace: "here",
   });
-  assert.equal(ascii.kind, "accepted");
-  if (ascii.kind !== "accepted") throw new Error("long ASCII bind was not accepted");
-  assert.equal(ascii.value.contractId, `kei/${"a".repeat(48)}`);
-  assert.equal(Buffer.byteLength(ascii.value.contractId), 52);
-
-  const unicode = await bindOperation({
-    scope: git,
-    title: "👩‍💻".repeat(20),
-    terms: terms([]),
-    workspace: "worktree",
-  });
-  assert.equal(unicode.kind, "accepted");
-  if (unicode.kind !== "accepted") throw new Error("long Unicode bind was not accepted");
-  assert.equal(unicode.value.contractId, `kei/${"👩‍💻".repeat(4)}`);
-  assert.equal(Buffer.byteLength(unicode.value.contractId.slice("kei/".length)) <= 48, true);
+  assert.equal(first.kind, "accepted");
+  if (first.kind !== "accepted") throw new Error("explicit bind was not accepted");
+  assert.equal(first.value.contractId, id);
 
   const collision = await bindOperation({
     scope: git,
-    title: "a".repeat(100),
+    contractId: id,
     terms: terms([]),
     workspace: "worktree",
   });
-  assert.equal(collision.kind, "accepted");
-  if (collision.kind !== "accepted") throw new Error("long identity collision bind was not accepted");
-  const collisionStem = collision.value.contractId.slice("kei/".length);
-  assert.equal(Buffer.byteLength(collisionStem), 65);
-  assert.match(collisionStem, /^a{48}-[0-9a-f]{16}$/u);
+  assert.deepEqual(collision, {
+    kind: "refused",
+    refusal: { kind: "contract-exists", contractId: id },
+  });
 });
 
 test("protocol bind does not own here-worktree appointment", async () => {

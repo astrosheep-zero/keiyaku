@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { createTwoFilesPatch } from "diff";
-import { Delivery, Keiyaku, KeiyakuRefused, Repo, type ContractId } from "../src/index.js";
+import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
+import { contractId, documentKey } from "../src/core/facts/types.js";
+import { withGitDecodeChannel } from "../src/git/read-observation.js";
+import { repositoryAt } from "../src/git/repository.js";
+import { withBindSuffixDraws } from "../src/library/bind.js";
+import { bindOperation } from "../src/protocol/operations.js";
 import { makeGitRepository } from "./support/git.js";
 
 const root = resolve(import.meta.dirname, "..");
@@ -423,6 +428,68 @@ test("arc decodes its Markdown input and worktree paths are computed", async () 
   const status = await Keiyaku.list({ repo });
   const managedState = await managed.keiyaku.state();
   assert.equal(typeof status.rows.find((contract) => contract.id === managedState.id)?.worktreePath, "string");
+});
+
+async function occupyContract(repositoryPath: string, id: ContractId) {
+  const git = await repositoryAt(repositoryPath);
+  const occupied = await withGitDecodeChannel(git, (channel) => bindOperation({
+    scope: git,
+    channel,
+    contractId: id,
+    terms: {
+      document: { bytes: "# Occupied\n", key: documentKey("occupied") },
+      segments: [],
+      gates: [],
+      after: [],
+    },
+    verification: { kind: "prepared", data: null },
+    workspace: "worktree",
+  }));
+  assert.equal(occupied.kind, "accepted");
+}
+
+test("library bind tries the title stem then three suffixed identities and keeps the last typed refusal", async () => {
+  const repository = repositoryWithInitialCommit();
+  const stem = "kei/collision-title";
+  const suffixes = ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc"] as const;
+  const candidates = [stem, ...suffixes.map((suffix) => `${stem}-${suffix}`)] as const;
+  for (const id of candidates) await occupyContract(repository.path, contractId(id));
+
+  const error = await withBindSuffixDraws(suffixes, async () => {
+    try {
+      await Keiyaku.bind({
+        repo: await Repo.at({ path: repository.path }),
+        markdown: markdown("Collision title"),
+        workspace: "worktree",
+      });
+      return undefined;
+    } catch (caught) {
+      return caught;
+    }
+  });
+
+  assert.ok(error instanceof KeiyakuRefused);
+  assert.equal(error instanceof KeiyakuRetry, false);
+  assert.deepEqual(error.refusal, { kind: "contract-exists", contractId: candidates[3] });
+  assert.match(candidates[1]!, /^kei\/collision-title-[0-9a-f]{16}$/);
+  assert.equal(new Set(candidates).size, 4);
+});
+
+test("a non-collision here refusal stops after the first candidate and releases its reservation", async () => {
+  const repository = repositoryWithInitialCommit();
+  const appointment = resolve(repository.path, ".keiyaku", "KEIYAKU.md");
+  await assert.rejects(
+    Keiyaku.bind({
+      repo: await Repo.at({ path: repository.path }),
+      markdown: markdown("Stop after refusal"),
+      workspace: "here",
+      after: ["kei/missing-prerequisite" as ContractId],
+    }),
+    (error: unknown) => error instanceof KeiyakuRefused
+      && error.refusal.kind === "unknown-prerequisite"
+      && error.refusal.contractId === "kei/stop-after-refusal",
+  );
+  assert.equal(existsSync(appointment), false);
 });
 
 test("Delivery.diff remains a nullable Promise-backed Git read", async () => {
