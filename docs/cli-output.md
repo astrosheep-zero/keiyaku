@@ -123,31 +123,36 @@ free but the latest Body has no explicit end. Both use the conservative `?`
 mark. Mutation renderers preserve `hung`, `untidy`, and `unavailable` evidence
 and return failure status without inventing an external termination attempt.
 
-Snapshot omission is reported by the typed snapshot count; history retains its
-own cursor, gap, and loss metadata. Text is clipped by terminal display width
-without splitting grapheme clusters. A `run` command remains one row and
-preserves recognizable head and tail when clipped; its outcome is shown only
-when space allows. Activity rows use a fluid prefix: `<mark> [HH:MM] <label>:`
-when the displayed minute changes, otherwise `<mark> <label>:`. The first row
-adds `[+N omitted]` after its time token only when `omitted` is nonzero. Wrapped
-continuation text uses a two-space hanging indent. There are no standalone
-minute dividers, padded columns, horizontal rules, or decorative grouping lines.
+Snapshot omission is positional: every typed snapshot gap renders as `  ⋮ N
+omitted` at its actual break between visible rows, and the gap counts sum to the
+typed `omitted` total. History retains its own cursor and loss metadata and does
+not reinterpret snapshot gaps. Text is clipped by terminal display width without
+splitting grapheme clusters. A `run` command remains one row and preserves
+recognizable head and tail when clipped; its outcome is shown only when space
+allows. Activity rows use a fluid prefix: `<mark> [HH:MM] <label>:` when the
+displayed minute changes, otherwise `<mark> <label>:`. Wrapped continuation text
+uses a two-space hanging indent. There is no aggregate omission token on the
+first row, standalone minute divider, padded column, horizontal rule, or
+decorative grouping line.
 
 ```text
-● running aku/worker/1234abcd (@worker)
-✓ [18:08] say: previous conclusion
+aku/worker/1234abcd (@worker) [kei/provider-core]
+· [18:08] say: previous conclusion
+  ⋮ 18 omitted
 · [18:09] say: checking again; the projection still carries
   activity from the current Turn
+  ⋮ 39 omitted
 · think: projection may own the bug
 ⧖ run: $ npm test
+  ● running
 ```
 
-Status, wait, observed call, and kill snapshots begin with the current Akuma life
-glyph/word followed by the exact physical identity and optional alias on one
-compact line. Contract and mutation facts follow as separate factual lines.
-Ordinary and interrupt tell output retain identity but omit current life;
-history likewise carries no life observation. The life vocabulary remains `●
-running`, `○ asleep`, `× killed`, `? stranded`, `? hung`, and `? untidy`. The
+The first line is the exact physical identity and optional alias, followed by a
+single bracketed `[kei/...]` cue when associated. It never contains current
+life. Status, wait, observed call, and kill place life on one two-space-indented
+trailing line immediately after nonempty activity. Ordinary and
+interrupt tell output and history omit life. The life vocabulary remains `●
+running`, `○ asleep`, `× killed`, `? stranded`, `? hung`, and `? untidy`.
 JSON values, timeline row semantics, and history model remain unchanged.
 
 Post-admission physical or settlement failures remain inside the accepted

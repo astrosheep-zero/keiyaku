@@ -1,5 +1,4 @@
-import type { ActivityRow } from "../../akuma/index.js";
-import type { SnapshotRow } from "../../akuma/index.js";
+import type { ActivityRow, ActivitySnapshotEntry, SnapshotRow } from "../../akuma/index.js";
 import type { AkumaStatusView, DispatchStage } from "../../index.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
@@ -10,6 +9,10 @@ const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 
 function identity(id: string, alias?: string): string {
   return `${id}${alias === undefined ? "" : ` (${alias})`}`;
+}
+
+function associatedIdentity(id: string, alias?: string, contractId?: string): string {
+  return `${identity(id, alias)}${contractId === undefined ? "" : ` [${contractId}]`}`;
 }
 
 function lifeLabel(life: AkumaStatusView["status"]["life"]): string {
@@ -73,37 +76,48 @@ function renderRow(row: ActivityRow | SnapshotRow, context: TextRenderContext, h
   });
 }
 
-function groupedRows(rows: readonly (ActivityRow | SnapshotRow)[], context: TextRenderContext, history = false, omitted = 0): readonly string[] {
-  const visible = rows.filter((row) => row.kind !== "turn");
+type RenderEntry = ActivitySnapshotEntry | Readonly<{ kind: "row"; row: ActivityRow }>;
+
+function groupedEntries(entries: readonly RenderEntry[], context: TextRenderContext, history = false): readonly string[] {
   const lines: string[] = [];
   let previousClock: string | undefined;
-  for (const [index, row] of visible.entries()) {
+  for (const entry of entries) {
+    if (entry.kind === "gap") {
+      lines.push(`  ⋮ ${entry.count} omitted`);
+      previousClock = undefined;
+      continue;
+    }
+    const row = entry.row;
     const at = clock(row.at);
     const changed = previousClock === undefined || at !== previousClock;
-    const omission = index === 0 && omitted > 0 ? ` [+${omitted} omitted]` : "";
-    const prefix = `${mark(row)}${changed ? ` [${at}]` : ""}${omission} ${label(row)}: `;
+    const prefix = `${mark(row)}${changed ? ` [${at}]` : ""} ${label(row)}: `;
     lines.push(...renderRow(row, context, history, prefix));
     previousClock = at;
   }
   return lines;
 }
 
+function groupedRows(rows: readonly ActivityRow[], context: TextRenderContext, history = false): readonly string[] {
+  return groupedEntries(rows.filter((row) => row.kind !== "turn").map((row) => ({ kind: "row", row })), context, history);
+}
+
 function snapshotText(view: AkumaStatusView, context: TextRenderContext, options: Readonly<{ alias?: string; facts?: readonly string[]; showLife?: boolean }> = {}): string {
   const snapshot = view.status.timeline;
-  const rows: readonly (ActivityRow | SnapshotRow)[] = snapshot.kind === "idle" && snapshot.outcome !== undefined
-    ? [...snapshot.entries.map((entry) => entry.row), snapshot.outcome].sort((left, right) => left.sequence - right.sequence)
-    : snapshot.entries.map((entry) => entry.row);
-  const facts = [...(view.contractId === undefined ? [] : [`contract ${view.contractId}`]), ...(options.facts ?? [])];
-  const activity = groupedRows(rows, context, false, snapshot.omitted);
-  const header = options.showLife === false ? identity(view.status.id, options.alias) : `${lifeLabel(view.status.life)} ${identity(view.status.id, options.alias)}`;
-  return [header, ...facts, ...activity].join("\n");
+  const activity = snapshot.kind === "idle" && snapshot.outcome !== undefined
+    ? groupedRows([
+      ...snapshot.entries.filter((entry) => entry.kind === "row").map((entry) => entry.row),
+      snapshot.outcome,
+    ].sort((left, right) => left.sequence - right.sequence), context)
+    : groupedEntries(snapshot.entries, context);
+  const footer = options.showLife === false ? [] : [`  ${lifeLabel(view.status.life)}`];
+  return [associatedIdentity(view.status.id, options.alias, view.contractId), ...(options.facts ?? []), ...activity, ...footer].join("\n");
 }
 
 function historyText(command: Extract<ParsedCommand, { command: "history" }>, result: Extract<AkumaInvocationResult, { action: "history" }>, context: TextRenderContext): string {
   if (command.last) return result.mode === "last" ? result.answer : "no answer retained";
   if (result.mode !== "page") throw new Error("history result lacks page");
   const contractId = result.historyResult.contractId;
-  return [identity(result.akuma, result.alias), ...(contractId === undefined ? [] : [`contract ${contractId}`]), ...groupedRows(result.history.rows, context, true)].join("\n");
+  return [associatedIdentity(result.akuma, result.alias, contractId), ...groupedRows(result.history.rows, context, true)].join("\n");
 }
 
 function tellText(result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>, context: TextRenderContext): string {
@@ -121,11 +135,11 @@ function dispatchLines(stage: DispatchStage): readonly string[] {
 function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, context: TextRenderContext): string {
   const alias = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : undefined;
   const contractId = result.result.dispatch.kind === "dispatched" ? result.result.dispatch.dispatch.contractId : undefined;
-  const facts = [...(contractId === undefined ? [] : [`contract ${contractId}`]), ...dispatchLines(result.result.dispatch)];
+  const facts = [...dispatchLines(result.result.dispatch)];
   if (result.result.alias.kind === "failed") facts.push(`alias failed ${result.result.alias.failure.kind} ${safeText(result.result.alias.failure.diagnostic)}`);
-  if (result.result.observation.kind === "detached") return [identity(result.result.akuma, alias), ...facts].join("\n");
-  if (result.result.observation.kind === "failed") return [identity(result.result.akuma, alias), ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
-  return snapshotText({ status: result.result.observation.status }, context, { ...(alias === undefined ? {} : { alias }), facts });
+  if (result.result.observation.kind === "detached") return [associatedIdentity(result.result.akuma, alias, contractId), ...facts].join("\n");
+  if (result.result.observation.kind === "failed") return [associatedIdentity(result.result.akuma, alias, contractId), ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
+  return snapshotText({ status: result.result.observation.status, ...(contractId === undefined ? {} : { contractId }) }, context, { ...(alias === undefined ? {} : { alias }), facts });
 }
 
 export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
@@ -138,7 +152,7 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
     case "fork": {
       if (result.receipt.kind !== "forked") return result.receipt.kind === "unknown-history" ? `${result.receipt.at} has no matching retained answered turn` : result.receipt.kind === "provider-cannot-fork" ? `${result.receipt.provider} cannot fork` : result.receipt.diagnostic;
       const contractId = result.receipt.dispatch.kind === "dispatched" ? result.receipt.dispatch.dispatch.contractId : undefined;
-      return [result.receipt.child, ...(contractId === undefined ? [] : [`contract ${contractId}`])].join("\n");
+      return associatedIdentity(result.receipt.child, undefined, contractId);
     }
     case "kill": return result.result.results.map((member) => snapshotText(member.observation, context, { facts: [`kill ${member.evidence}`], ...(result.alias === undefined ? {} : { alias: result.alias }) })).join("\n\n");
   }

@@ -100,6 +100,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
       turn: { kind: "turn" as const, sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
       entries: [
         { kind: "row" as const, row: { kind: "note" as const, sequence: 13, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", text: "running tests" } },
+        { kind: "gap" as const, count: 12 },
         { kind: "row" as const, row: { kind: "thought" as const, sequence: 14, turnSequence: 1, at: "2026-08-10T16:42:30.000Z", text: "same minute" } },
       ],
       omitted: 12,
@@ -110,11 +111,13 @@ test("Akuma snapshots preserve activity and typed omission", () => {
   assert.match(text, /running tests/u);
   assert.match(text, /same minute/u);
   const snapshotLines = text.split("\n");
-  assert.equal(snapshotLines[0], "● running aku/worker/1234abcd");
+  assert.equal(snapshotLines[0], "aku/worker/1234abcd");
   assert.equal(text.match(/● running/gu)?.length, 1);
-  assert.match(snapshotLines[1]!, /^· \[\d{2}:\d{2}\] \[\+12 omitted\] note: /u);
-  assert.match(snapshotLines[2]!, /^· think: /u);
-  assert.equal(snapshotLines.some((line) => line.startsWith("──") || line === ""), false);
+  assert.match(snapshotLines[1]!, /^· \[\d{2}:\d{2}\] note: /u);
+  assert.equal(snapshotLines[2], "  ⋮ 12 omitted");
+  assert.match(snapshotLines[3]!, /^· \[\d{2}:\d{2}\] think: /u);
+  assert.equal(snapshotLines.at(-1), "  ● running");
+  assert.equal(snapshotLines.some((line) => line.startsWith("──")), false);
   assert.equal((akumaJsonValue(command, result) as { status: typeof status }).status.timeline.omitted, 12);
   assert.equal(renderAkumaText(command, {
     kind: "akuma",
@@ -127,7 +130,7 @@ test("Akuma snapshots preserve activity and typed omission", () => {
     alias: "@review",
     result: { completion: "all", statuses: [{ status }] },
   });
-  assert.equal(aliasedWait.split("\n")[0], "● running aku/worker/1234abcd (@review)");
+  assert.equal(aliasedWait.split("\n")[0], "aku/worker/1234abcd (@review)");
   const answered = {
     ...status,
     life: "asleep" as const,
@@ -218,7 +221,8 @@ test("Akuma snapshot rows use fixed semantic line budgets", () => {
       timeline,
     };
     const rendered = renderAkumaText(command, { kind: "akuma", action: "status", status: { status } }, { columns: 34, color: false }).split("\n");
-    return rendered.slice(1);
+    const footer = rendered.findIndex((line) => /^  (?:●|○|×|\?)/u.test(line));
+    return rendered.slice(1, footer === -1 ? undefined : footer);
   };
   const rows: readonly Readonly<{ kind: import("../src/akuma/index.js").ActivityRow["kind"]; lines: number; row: import("../src/akuma/index.js").ActivityRow }>[] = [
     {
@@ -506,8 +510,8 @@ test("Akuma header shows a complete associated Contract without truncating ident
     }, contractId: "kei/provider-core-review" },
   }, { columns: 28, color: false });
   const lines = text.split("\n");
-  assert.equal(lines[0], "● running aku/worker/1234abcd");
-  assert.equal(lines[1], "contract kei/provider-core-review");
+  assert.equal(lines[0], "aku/worker/1234abcd [kei/provider-core-review]");
+  assert.equal(lines.at(-1), "  ● running");
 });
 
 test("Akuma run commands stay on one row and preserve their head and tail", () => {
@@ -632,7 +636,7 @@ test("akuma call renders optional integration stages and maps partial success", 
       },
     },
   };
-  assert.equal(renderAkumaText(command, integrated), `${akuma} (@worker)\ncontract kei/work`);
+  assert.equal(renderAkumaText(command, integrated), `${akuma} (@worker) [kei/work]`);
   assert.equal(akumaExitCode(integrated), 0);
 
   const partial = {
@@ -719,7 +723,7 @@ test("akuma fork renders the public receipt and maps every exit class", () => {
       },
     },
   });
-  assert.equal(renderAkumaText(command, dispatched), "aku/claude/87654321\ncontract kei/work");
+  assert.equal(renderAkumaText(command, dispatched), "aku/claude/87654321 [kei/work]");
 
   const incapable = result({ kind: "provider-cannot-fork", provider: "claude", parent });
   assert.equal(renderAkumaText(command, incapable), "claude cannot fork");
@@ -757,8 +761,8 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
     },
   };
   const interruptedText = renderAkumaText(parsed.command, interrupted);
-  assert.equal(interruptedText.split("\n")[0], "aku/claude/1d1e0004");
-  assert.match(interruptedText, /contract kei\/provider-core-review/u);
+  assert.equal(interruptedText.split("\n")[0], "aku/claude/1d1e0004 [kei/provider-core-review]");
+  assert.doesNotMatch(interruptedText, /(?:^|\n)contract /u);
   assert.equal(akumaExitCode(interrupted), 0);
 
   const wakeFailed = {

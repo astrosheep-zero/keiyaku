@@ -101,7 +101,9 @@ type SnapshotFactRow = TurnNarrationRow | TellRow;
 export type OpenSnapshotRow = SnapshotFactRow | ActiveToolRow | CompletedToolRow;
 export type IdleSnapshotRow = SnapshotFactRow | CompletedToolRow;
 export type SnapshotRow = OpenSnapshotRow | IdleSnapshotRow;
-export type ActivitySnapshotEntry<Row extends SnapshotRow = SnapshotRow> = Readonly<{ kind: "row"; row: Row }>;
+export type ActivitySnapshotEntry<Row extends SnapshotRow = SnapshotRow> =
+  | Readonly<{ kind: "row"; row: Row }>
+  | Readonly<{ kind: "gap"; count: number }>;
 
 export type Snapshot =
   | Readonly<{ kind: "unborn"; entries: readonly []; omitted: 0 }>
@@ -332,6 +334,34 @@ function entries<Row extends SnapshotRow>(rows: readonly Row[]): readonly Activi
   return rows.map((row) => ({ kind: "row", row }));
 }
 
+function openEntries(
+  ledger: TurnLedger,
+  window: readonly OpenTurnRow[],
+  selected: ReadonlySet<ActivityRow>,
+): readonly ActivitySnapshotEntry<OpenSnapshotRow>[] {
+  const windowRows = new Set<ActivityRow>(window);
+  const result: ActivitySnapshotEntry<OpenSnapshotRow>[] = [];
+  let hidden = 0;
+  const flushGap = (): void => {
+    if (hidden === 0) return;
+    result.push({ kind: "gap", count: hidden });
+    hidden = 0;
+  };
+  for (const row of ledger.rows) {
+    if (windowRows.has(row) && !selected.has(row)) {
+      hidden += 1;
+      continue;
+    }
+    if (!selected.has(row)) continue;
+    flushGap();
+    if (row.kind !== "turn" && row.kind !== "outcome" && !(row.kind === "tool" && row.state === "unsettled")) {
+      result.push({ kind: "row", row });
+    }
+  }
+  flushGap();
+  return result;
+}
+
 /** Select one current Turn, one latest outcome, or no focus; pending tells stay actionable. */
 export function selectSnapshot(ledger: TurnLedger, budget: Readonly<{ tail: number; voice?: number }> = { tail: DEFAULT_TAIL, voice: DEFAULT_VOICE }): ActivitySnapshot {
   if (ledger.turns.length === 0 && !ledger.rows.some((row) => row.kind === "tell")) return { kind: "unborn", entries: [], omitted: 0 };
@@ -347,10 +377,8 @@ export function selectSnapshot(ledger: TurnLedger, budget: Readonly<{ tail: numb
     const voice = voiceCount === 0 ? [] : voiceCandidates.slice(-voiceCount);
     const active = window.filter((row) => row.kind === "tool" && row.state === "active");
     const selected = new Set<ActivityRow>([...tail, ...voice, ...active, ...pending]);
-    const visible = ledger.rows
-      .filter((row) => selected.has(row))
-      .filter((row): row is OpenSnapshotRow => row.kind !== "turn" && row.kind !== "outcome" && !(row.kind === "tool" && row.state === "unsettled"));
-    return { kind: "open", turn: ledger.openTurn.turn, entries: entries(visible), omitted: window.filter((row) => !selected.has(row)).length };
+    const omitted = window.filter((row) => !selected.has(row)).length;
+    return { kind: "open", turn: ledger.openTurn.turn, entries: openEntries(ledger, window, selected), omitted };
   }
   return {
     kind: "idle",

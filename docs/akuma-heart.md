@@ -31,8 +31,10 @@ frontier. For an open Turn, the selector retains the newest three rows as its
 tail and independently retains the newest three `said` or `thought` rows
 strictly before that tail. Every active tool and pending tell is pinned outside
 both budgets; the union is deduplicated, restored to timeline order, and its
-omitted count covers only hidden open-Turn rows. History alone applies cursors
-and owns retained-boundary, gap, and loss interpretation. The projector
+omitted count covers only hidden open-Turn rows. Each contiguous hidden run
+becomes a typed read-time gap entry at its actual position; the gap counts sum
+to `omitted`. These entries are not Heart facts or history cursors. History
+alone owns retained-boundary and loss interpretation. The projector
 may fold a final assistant row whose complete bytes exactly equal its answered
 Turn outcome, but it never changes or creates Heart facts.
 
@@ -169,7 +171,9 @@ completion is in flight. The snapshot selector pins every in-flight tool and
 every pending tell outside the independent tail-three and voice-three budgets.
 Voice inside the tail does not consume the voice budget; `note`, `call`, `tell`,
 tool, and outcome rows are not voice candidates. It deduplicates the union,
-restores timeline order, and reports only hidden open-Turn rows as omitted.
+restores timeline order, and replaces each contiguous hidden run with a typed
+gap entry carrying that run's semantic-row count. The gap counts sum to the
+snapshot's total omitted count and never represent persisted loss.
 `status()` and `wait()` use this one selector. Full history pages do not apply
 snapshot pinning or category budgets.
 

@@ -11,8 +11,10 @@ projection. A snapshot is current actionable observation: an open Turn exposes
 only that Turn's tail-three plus independent pre-tail voice-three union, active
 tools, and actionable pending tells; with
 no open Turn it exposes only the latest outcome and actionable pending tells.
-It never samples activity across closed Turns. `history` exposes pages of the
-complete retained ledger in global order.
+It never samples activity across closed Turns. Contiguous hidden open-Turn runs
+remain visible at their actual positions as typed read-time gap entries whose
+counts sum to the snapshot's `omitted` total. `history` exposes pages of the
+complete retained ledger in global order and does not consume snapshot gaps.
 `history --last` is the exact full-answer read for the latest retained answered
 Turn.
 

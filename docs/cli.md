@@ -289,19 +289,20 @@ which public result a command presents without repairing, reselecting, or
 reinterpreting activity. JSON exposes that same value with complete ISO `at`
 values and no text-only time suppression.
 
-Status, wait, observed call, and kill compose the shared snapshot with a compact
-first line of public life plus complete AkuId and optional frozen Alias. Contract
-and mutation facts remain separate lines below it. Ordinary and interrupt tell
-compose the refreshed snapshot with identity but no current-life claim; history
-does the same for its page, while `history --last` writes exact answer bytes.
-The id already contains the Archetype and the CLI never reverse-selects an
-Alias. Text never prints the storage words `retained`, `latest`, `body`,
-`heart`, or `turn`.
+Every rendered snapshot begins with the complete AkuId and optional frozen
+Alias. When a Contract is associated, its complete `kei/...` identity is one
+bracketed cue on that same line; it is not a second metadata heading. Status,
+wait, observed call, and kill end with the public life on a subdued trailing
+line. Ordinary and interrupt tell compose the refreshed snapshot without a
+current-life claim; history does the same for its page, while `history --last`
+writes exact answer bytes. The id already contains the Archetype and the CLI
+never reverse-selects an Alias. Text never prints the storage words `retained`,
+`latest`, `body`, `heart`, or `turn`.
 
 Shared activity-row layout, snapshot budgets, clipping, inline minute tokens,
 and omission placement are owned by [cli-output.md](cli-output.md). This command
 chapter delegates that presentation: it adds no divider, padded column, blank
-minute grouping, or life footer.
+minute grouping, or competing metadata heading.
 
 Tell remains one input action. Text presents the refreshed shared snapshot;
 only a wake or interrupt failure adds an error line. The current tell appears

@@ -127,10 +127,11 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
   const ledger = projectTurns(facts);
   const snapshot = selectSnapshot(ledger, { tail: 1 });
   assert.equal(snapshot.kind, "open");
-  assert.deepEqual(snapshot.entries.map((entry) => entry.row.sequence), [7, 8]);
+  if (snapshot.kind !== "open") return;
+  assert.deepEqual(snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:2", 7, 8]);
   assert.equal(snapshot.omitted, 2);
-  assert.equal(snapshot.entries.some((entry) => entry.row.kind === "tool" && entry.row.state === "active"), true);
-  assert.equal(snapshot.entries.some((entry) => entry.row.sequence === 2), false);
+  assert.equal(snapshot.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"), true);
+  assert.equal(snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 2), false);
   assert.equal(ledger.rows.some((row) => row.kind === "tool" && row.sequence === 2 && row.state === "unsettled"), true);
   assert.equal(ledger.rows.some((row) => row.kind === "tool" && row.sequence === 8 && row.state === "active"), true);
   assert.equal(ledger.turns[0]?.kind, "closed");
@@ -145,7 +146,7 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
   assert.equal(idle.kind, "idle");
   if (idle.kind !== "idle") return;
   assert.equal(idle.outcome?.outcome.kind, "answered");
-  assert.deepEqual(idle.entries.map((entry) => entry.row.sequence), [7]);
+  assert.deepEqual(idle.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), [7]);
   assert.equal(closed.rows.some((row) => row.kind === "said" && row.sequence === 9), false);
   assert.equal(closed.rows.some((row) => row.kind === "tool" && row.sequence === 8 && row.state === "unsettled"), true);
   assert.equal(closed.turns[1]?.kind, "closed");
@@ -170,30 +171,31 @@ test("open snapshot independently retains pre-tail voice and actionable pins", (
   const ledger = projectTurns([
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
     { kind: "activity" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "assistant", text: "voice one" } },
-    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "thought", text: "voice two" } },
-    { kind: "activity" as const, sequence: 4, turnSequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "assistant", text: "voice three" } },
-    { kind: "activity" as const, sequence: 5, turnSequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "note", text: "hidden note" } },
-    { kind: "call" as const, sequence: 6, turnSequence: 1, at: "2026-08-10T00:00:06.000Z", body: "hidden call" },
-    { kind: "activity" as const, sequence: 7, turnSequence: 1, at: "2026-08-10T00:00:07.000Z", event: { type: "tool", phase: "started", id: "pinned", name: "Search", call: { kind: "search", query: "pin" } } },
-    { kind: "tell" as const, sequence: 8, id: "tell-pinned", body: "pinned input", recordedAt: "2026-08-10T00:00:08.000Z", state: "pending" as const, deliveries: [] },
-    { kind: "activity" as const, sequence: 9, turnSequence: 1, at: "2026-08-10T00:00:09.000Z", event: { type: "note", text: "tail note" } },
-    { kind: "activity" as const, sequence: 10, turnSequence: 1, at: "2026-08-10T00:00:10.000Z", event: { type: "assistant", text: "tail voice" } },
-    { kind: "activity" as const, sequence: 11, turnSequence: 1, at: "2026-08-10T00:00:11.000Z", event: { type: "thought", text: "tail thought" } },
+    { kind: "activity" as const, sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "note", text: "hidden between voices" } },
+    { kind: "activity" as const, sequence: 4, turnSequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "thought", text: "voice two" } },
+    { kind: "call" as const, sequence: 5, turnSequence: 1, at: "2026-08-10T00:00:05.000Z", body: "hidden between voices" },
+    { kind: "activity" as const, sequence: 6, turnSequence: 1, at: "2026-08-10T00:00:06.000Z", event: { type: "assistant", text: "voice three" } },
+    { kind: "activity" as const, sequence: 7, turnSequence: 1, at: "2026-08-10T00:00:07.000Z", event: { type: "note", text: "hidden before pin" } },
+    { kind: "activity" as const, sequence: 8, turnSequence: 1, at: "2026-08-10T00:00:08.000Z", event: { type: "tool", phase: "started", id: "pinned", name: "Search", call: { kind: "search", query: "pin" } } },
+    { kind: "tell" as const, sequence: 9, id: "tell-pinned", body: "pinned input", recordedAt: "2026-08-10T00:00:09.000Z", state: "pending" as const, deliveries: [] },
+    { kind: "activity" as const, sequence: 10, turnSequence: 1, at: "2026-08-10T00:00:10.000Z", event: { type: "note", text: "tail note" } },
+    { kind: "activity" as const, sequence: 11, turnSequence: 1, at: "2026-08-10T00:00:11.000Z", event: { type: "assistant", text: "tail voice" } },
+    { kind: "activity" as const, sequence: 12, turnSequence: 1, at: "2026-08-10T00:00:12.000Z", event: { type: "thought", text: "tail thought" } },
   ]);
 
   const snapshot = selectSnapshot(ledger, { tail: 3, voice: 3 });
   assert.equal(snapshot.kind, "open");
   if (snapshot.kind !== "open") return;
-  const sequences = snapshot.entries.map((entry) => entry.row.sequence);
-  assert.deepEqual(sequences, [2, 3, 4, 7, 8, 9, 10, 11]);
-  assert.equal(new Set(sequences).size, sequences.length);
-  assert.equal(snapshot.omitted, 2);
+  const positions = snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence);
+  assert.deepEqual(positions, [2, "gap:1", 4, "gap:1", 6, "gap:1", 8, 9, 10, 11, 12]);
+  assert.equal(snapshot.entries.filter((entry) => entry.kind === "row").length, 8);
+  assert.equal(snapshot.omitted, 3);
 
   const pinnedOnly = selectSnapshot(ledger, { tail: 0, voice: 0 });
   assert.equal(pinnedOnly.kind, "open");
   if (pinnedOnly.kind !== "open") return;
-  assert.deepEqual(pinnedOnly.entries.map((entry) => entry.row.sequence), [7, 8]);
-  assert.equal(pinnedOnly.omitted, 8);
+  assert.deepEqual(pinnedOnly.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:6", 8, 9, "gap:3"]);
+  assert.equal(pinnedOnly.omitted, 9);
 });
 
 test("outcome folding preserves a truncated final voice equal to the answer", () => {
