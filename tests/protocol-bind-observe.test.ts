@@ -664,12 +664,12 @@ test("Git journal depth is independent of contract identity length", () => {
   const short = contractJournalPath(contractId("kei/alpha"));
   const long = contractJournalPath(contractId(`kei/${"可读".repeat(1_000)}`));
 
-  assert.match(short, /^contracts\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/);
-  assert.match(long, /^contracts\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/);
+  assert.match(short, /^contracts\/active\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/);
+  assert.match(long, /^contracts\/active\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/);
   assert.notEqual(long, short);
 });
 
-test("admission reuses frozen journal bytes for a multi-contract placement offer", async () => {
+test("placement claims only the selected contract", async () => {
   const repository = repositoryWithHead();
   const git = repositoryAt(repository.path);
   const source = await bindOperation({ scope: git, terms: terms([]), workspace: "here" });
@@ -697,25 +697,17 @@ test("admission reuses frozen journal bytes for a multi-contract placement offer
   }, decideDeliver));
   assert.equal(delivered.kind, "accepted");
 
-  const log = join(repository.path, "placement-git.log");
-  const claimed = await withGitShim(
-    "printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
-    { KEIYAKU_READ_LOG: log },
-    () => withGitDecodeChannel(git, (channel) => admitPlacement(
-      channel,
-      git,
-      sourceState.coordinates.target,
-      { contractId: source.value.contractId, at: "2026-08-07T00:00:01Z" },
-    )),
-  );
+  const claimed = await withGitDecodeChannel(git, (channel) => admitPlacement(
+    channel,
+    git,
+    sourceState.coordinates.target,
+    { contractId: source.value.contractId, at: "2026-08-07T00:00:01Z" },
+  ));
 
   assert.equal(claimed.kind, "accepted");
   if (claimed.kind !== "accepted") throw new Error("placement was not accepted");
-  assert.deepEqual(claimed.facts.map((entry) => entry.kind), ["bound", "claimed"]);
-  const invocations = readFileSync(log, "utf8").trim().split("\n");
-  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
-  assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 0);
-  assert.equal(invocations.filter((command) => command.startsWith("ls-tree ")).length, 0);
+  assert.deepEqual(claimed.facts.map((entry) => entry.kind), ["claimed"]);
+  assert.equal((await observeContract(git, dependent.value.contractId)).state?.bound, null);
 });
 
 test("public reconcile and admission observation retain canonical journal validation", async () => {
@@ -786,7 +778,7 @@ test("bind and amend eligibility read only self and their after contracts", asyn
   assert.deepEqual(amended.facts.map((entry) => entry.kind), ["amend"]);
 });
 
-test("amend replacement does not observe a removed prerequisite closure", async () => {
+test("amend reads the current prerequisite before replacing it", async () => {
   const repository = repositoryWithHead();
   const git = repositoryAt(repository.path);
   const dependency = await bindOperation({ scope: git, terms: terms([]), workspace: "here" });
@@ -801,8 +793,6 @@ test("amend replacement does not observe a removed prerequisite closure", async 
   if (waiting.kind !== "accepted") throw new Error("waiting bind was not accepted");
   const before = (await observeContract(git, waiting.value.contractId)).state;
   if (before === null) throw new Error("waiting contract was not observed");
-  publishMalformedJournal(git, contractJournalPath(dependency.value.contractId));
-
   const amended = await amendOperation({
     scope: git,
     contractId: waiting.value.contractId,
@@ -812,7 +802,7 @@ test("amend replacement does not observe a removed prerequisite closure", async 
 
   assert.equal(amended.kind, "accepted");
   if (amended.kind !== "accepted") throw new Error("replacement amend was not accepted");
-  assert.deepEqual(amended.facts.map((entry) => entry.kind), ["amend", "bound"]);
+  assert.deepEqual(amended.facts.map((entry) => entry.kind), ["amend"]);
 });
 
 test("amend refuses a stale complete-terms replacement when document bytes did not move", async () => {
@@ -877,7 +867,7 @@ test("bind rejects unresolved after and bound amend prioritizes consumed prerequ
   });
 });
 
-test("amend emits bound atomically when its resulting after set is claimed", async () => {
+test("bind and amend leave eligible prerequisites unmaterialized", async () => {
   const repository = repositoryWithHead();
   const activeDependency = await bindOperation({
     scope: repositoryAt(repository.path),
@@ -929,7 +919,7 @@ test("amend emits bound atomically when its resulting after set is claimed", asy
   });
   assert.equal(immediatelyBound.kind, "accepted");
   if (immediatelyBound.kind !== "accepted") throw new Error("claimed prerequisite bind was not accepted");
-  assert.deepEqual(immediatelyBound.facts.map((entry) => entry.kind), ["bind", "bound"]);
+  assert.deepEqual(immediatelyBound.facts.map((entry) => entry.kind), ["bind"]);
 
   const waitingState = (await observeContract(git, waiting.value.contractId)).state;
   if (waitingState === null) throw new Error("waiting contract state was not observed");
@@ -942,10 +932,10 @@ test("amend emits bound atomically when its resulting after set is claimed", asy
   });
   assert.equal(amended.kind, "accepted");
   if (amended.kind !== "accepted") throw new Error("eligible amend was not accepted");
-  assert.deepEqual(amended.facts.map((entry) => entry.kind), ["amend", "bound"]);
+  assert.deepEqual(amended.facts.map((entry) => entry.kind), ["amend"]);
 });
 
-test("placement redecides after a world advance and binds a new dependent", async () => {
+test("placement redecides after a world advance without binding a dependent", async () => {
   const repository = repositoryWithHead();
   const source = await bindOperation({
     scope: repositoryAt(repository.path),
@@ -1011,9 +1001,9 @@ test("placement redecides after a world advance and binds a new dependent", asyn
   );
   assert.equal(claimed.kind, "accepted");
   if (claimed.kind !== "accepted") throw new Error("placement was not accepted after redecision");
-  assert.deepEqual(claimed.facts.map((fact) => fact.kind), ["bound", "claimed"]);
+  assert.deepEqual(claimed.facts.map((fact) => fact.kind), ["claimed"]);
   assert.equal((await observeContract(git, source.value.contractId)).state?.terminal?.kind, "claimed");
-  assert.equal((await observeContract(git, dependent)).state?.bound?.kind, "bound");
+  assert.equal((await observeContract(git, dependent)).state?.bound, null);
 });
 
 test("delivery preparation ignores an unrelated malformed journal", async () => {

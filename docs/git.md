@@ -21,18 +21,29 @@ per Contract.
 
 Targeted observation and admission are
 `O(touched journal size + bounded ancestor depth)`, never `O(world)`. A
-full-world observation is `O(N)`. The private Git map has no cache,
-current-state snapshot, second or per-contract Git ref, or in-repository
-fact index. The deterministic managed refs and pins are topology and
-reachability only; they are not a Git-state index or a second fact store.
+full-world observation is `O(N)`. The private Git map has no independently
+updated cache, current-state snapshot, second or per-contract Git ref, or fact
+index. The prohibition is against a second update timeline and second
+authority, not against organizing the one atomically updated state-tree value.
+The deterministic managed refs and pins are topology and reachability only;
+they are not a Git-state index or a second fact store.
 Git also owns observation of the invocation worktree's current branch. It
 returns the canonical `refs/heads/...` symbolic `HEAD`, or absence when that
 worktree is detached; no higher layer runs or interprets Git for this fact.
 Variable-length public identities do not determine Git depth. A journal
-locator uses a fixed-width strong digest of the complete ContractId as a
-bounded-fanout Git tree path, while the journal bytes retain and canonically
-verify the complete identity. The digest is a private locator, never contract
-identity or a second uniqueness authority.
+locator uses an `active` or `terminal` class followed by a fixed-width strong
+digest of the complete ContractId as a bounded-fanout Git tree path, while the
+journal bytes retain and canonically verify the complete identity. The digest
+and class are private locators, never contract identity or a second uniqueness
+authority. Each Contract exists at exactly one locator, and its path class must
+equal the class derived by folding that journal. Appending a terminal fact
+moves the complete journal from `active` to `terminal` in the same state-tree
+update and state-ref CAS. A targeted lookup probes both classes; an active-world
+reader enumerates only `contracts/active/**`.
+
+The active/terminal layout is a hard format boundary. Existing state is moved
+to the fold-derived locator before code that reads the new format is installed.
+Runtime code has no predecessor-path reader, migration branch, or fallback.
 
 ## Call-Scoped Read Observation
 

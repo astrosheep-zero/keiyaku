@@ -3,7 +3,6 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
-import { observeGitForAdmissionAt } from "../git/observe.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
 import { GitPlumbingError, type GitRepository } from "../git/repository.js";
@@ -14,7 +13,7 @@ import {
   observeTargetHead,
   type TargetPlacementRefusal,
 } from "../git/target-placement.js";
-import { admitDecidedOffer, mintAttempts, mintEntryUlids, type AcceptedAdmission } from "./attempt.js";
+import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
 import {
   prepareProtocolAttempt,
   runProtocol,
@@ -99,21 +98,13 @@ export async function admitPlacement(
   target: string | undefined,
   input: PlacementProtocolInput,
 ): Promise<PlacementProtocolResult> {
-  const attempts = mintAttempts({ entryCount: 2 });
+  const attempts = mintAttempts({ entryCount: 1 });
   const protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal> = {
     input,
     channel,
     repository,
     contracts: [input.contractId],
     attempts,
-    observe: observeGitForAdmissionAt,
-    extendAttempt: (attempt, observedContractCount) => ({
-      ...attempt,
-      entryUlids: [
-        ...attempt.entryUlids,
-        ...mintEntryUlids(Math.max(0, observedContractCount - attempt.entryUlids.length)),
-      ],
-    }),
     decide: decidePlacement,
   };
   const run = (): Promise<ProtocolResult<PlacementRefusal | TargetPlacementRefusal>> => runProtocol(protocol);

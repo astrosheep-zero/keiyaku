@@ -243,7 +243,11 @@ type ContractState = Readonly<{
 `ContractState` is a fold snapshot, not stored authority. It holds the
 contract head, coordinates, effective opaque terms, binding placement, current
 tender, attestation history, current arc, and terminal placement. Pending
-delivery is a read-model projection over this state.
+delivery is a read-model projection over this state. Eligibility is not a
+field on `ContractState`: before `bound` materializes it is derived by a reader
+from this state and the terminal states of the ContractIds in `terms.after`.
+The durable `bound` entry records consumption; it is not the only way an
+eligible Contract can be observed.
 
 Contract absence has exactly one representation: its requested decision-map
 entry is `null`. A `ContractState` value proves that a bind-rooted journal was

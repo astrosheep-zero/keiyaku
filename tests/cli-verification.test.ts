@@ -71,7 +71,7 @@ test("deliver adapts a passing Verification through the package-root operation",
   const { raw, repository, id, candidate, result } = await bindAndDeliver("exit 0");
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
   assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
   assert.notEqual(raw.run(["rev-parse", "refs/heads/main"]).trim(), candidate);
 });
@@ -80,7 +80,7 @@ test("Verification produces an attestation without becoming a placement gate", a
   const { repository, id, result } = await bindAndDeliver("exit 1", []);
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
   const state = (await observeContract(repository, id)).state;
   assert.deepEqual(state?.terms?.gates, []);
   assert.equal(state?.attestations.at(-1)?.data.gate, "verified");
@@ -92,7 +92,7 @@ test("deliver adapts a failing Verification without a private producer injection
   const { repository, id, result } = await bindAndDeliver("exit 1");
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation"]);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation"]);
   assert.equal((await observeContract(repository, id)).state?.terminal, null);
   assert.equal((await observeContract(repository, id)).state?.attestations.at(-1)?.data.verdict, "unsatisfied");
 });
@@ -130,7 +130,7 @@ test("dirty --here delivery materializes and lands the verified candidate cleanl
 
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
   const state = (await observeContract(setup.repository, bound.contract)).state;
   assert.equal(state?.attestations.at(-1)?.data.verdict, "satisfied");
   assert.equal(state?.delivery?.data.integration.snapshot, setup.raw.run(["rev-parse", "HEAD"]).trim());

@@ -446,7 +446,7 @@ export function updateGitTree(
 ): GitOid {
   const update = treeUpdate(changes);
   const bases = baseTreeEntries(repository, baseTree, [...changes.keys()], update.nodePaths);
-  const representativeOid = baseTree ?? changes.values().next().value?.oid;
+  const representativeOid = baseTree ?? [...changes.values()].find((change) => change !== null)?.oid;
   if (representativeOid === undefined) throw new Error("cannot write an empty Git tree without an object format");
   const prepared = prepareTreeUpdate({ update, bases, oidBytes: representativeOid.length / 2 });
   writePreparedTrees(repository, prepared.trees);
@@ -461,7 +461,7 @@ export function updateGitTreeFromFrozenDirectories(
   changes: ReadonlyMap<string, TreeChange>,
 ): GitOid {
   const update = treeUpdate(changes);
-  const representativeOid = baseTree ?? changes.values().next().value?.oid;
+  const representativeOid = baseTree ?? [...changes.values()].find((change) => change !== null)?.oid;
   if (representativeOid === undefined) throw new Error("cannot write an empty Git tree without an object format");
   const prepared = prepareTreeUpdate({
     update,

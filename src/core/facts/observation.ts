@@ -2,6 +2,7 @@ import type { ContractId, ContractState, DocumentKey } from "./types.js";
 
 /** The complete state projection consumed by one pure pact decision. */
 export type ContractsObservation = ReadonlyMap<ContractId, ContractState | null>;
+export type PrerequisiteStatus = "unknown" | "pending" | "claimed";
 
 /** Read one requested identity; a missing key violates the observation contract. */
 export function contractState(
@@ -16,6 +17,20 @@ export function contractState(
     throw new Error(`contract state identity disagrees with decision map: ${contract}`);
   }
   return state;
+}
+
+/** Project prerequisite existence and terminal satisfaction from one observation. */
+export function prerequisiteStatus(
+  prerequisites: readonly ContractId[],
+  observation: ContractsObservation,
+): PrerequisiteStatus {
+  let pending = false;
+  for (const dependency of prerequisites) {
+    const state = contractState(observation, dependency);
+    if (state === null) return "unknown";
+    if (state.terminal?.kind !== "claimed") pending = true;
+  }
+  return pending ? "pending" : "claimed";
 }
 
 export type ActiveContractRefusal = Readonly<{

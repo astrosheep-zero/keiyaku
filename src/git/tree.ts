@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { gitObjectId } from "./identity.js";
 
 export type TreeEntry = Readonly<{ mode: string; type: string; oid: string }>;
-export type TreeChange = Readonly<{ oid: string; mode?: string; type?: string }>;
+export type TreeChange = Readonly<{ oid: string; mode?: string; type?: string }> | null;
 
 type MutableTreeNode = Readonly<{ files: Map<string, TreeChange>; directories: Map<string, MutableTreeNode> }>;
 
@@ -96,7 +96,7 @@ function objectId(entries: ReadonlyMap<string, TreeEntry>, oidBytes: number): st
   return createHash(algorithm).update(`tree ${bytes.length}\0`).update(bytes).digest("hex");
 }
 
-function record(name: string, change: TreeChange): string {
+function record(name: string, change: Exclude<TreeChange, null>): string {
   gitObjectId(change.oid, `tree entry ${name}`);
   const mode = change.mode ?? "100644";
   const type = change.type ?? (mode === "160000" ? "commit" : "blob");
@@ -112,6 +112,10 @@ function prepareNode(
 ): string {
   const entries = new Map(bases.get(path) ?? []);
   for (const [name, change] of node.files) {
+    if (change === null) {
+      entries.delete(name);
+      continue;
+    }
     entries.set(name, {
       oid: change.oid,
       mode: change.mode ?? "100644",

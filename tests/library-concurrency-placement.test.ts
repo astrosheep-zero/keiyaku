@@ -191,7 +191,7 @@ test("accepted head excludes an append made after admission", async () => {
   assert.equal((await contract.state()).currentArc?.data.title, "Concurrent");
 });
 
-test("eligibility placement observes and binds every waiting dependent", async () => {
+test("claim does not mutate eligible dependents", async () => {
   const repository = repositoryWithMain();
   const sourceResult = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: document(),
@@ -212,10 +212,12 @@ test("eligibility placement observes and binds every waiting dependent", async (
     dependents.push(bound.keiyaku);
   }
 
-  const reviewed = await source.review({ verdict: "satisfied" });
+  await source.review({ verdict: "satisfied" });
   assert.equal((await source.state()).terminal?.kind, "claimed");
   for (const dependent of dependents) {
-    assert.equal((await dependent.state()).bound?.kind, "bound");
+    const state = await dependent.state();
+    assert.equal(state.bound, null);
+    assert.equal(state.terminal, null);
   }
 });
 
@@ -267,4 +269,3 @@ test("review stops placement when its verified target premise moves", async () =
   assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");
   assert.equal(state.terminal, null);
 });
-

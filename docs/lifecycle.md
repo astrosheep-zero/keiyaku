@@ -10,7 +10,7 @@ library edge by [document.md](document.md).
 The folded lifecycle is:
 
 ```text
-no journal -> waiting for bound -> bound -> pending delivery -> claimed
+no journal -> waiting for bound -> eligible -> pending delivery -> claimed
                                       \-> abandoned
 ```
 
@@ -21,8 +21,10 @@ A bind records immutable coordinates and the initial opaque contract terms. It
 may admit `bound` in the same offer when every declared prerequisite is already
 claimed; otherwise the contract is waiting. A contract's `after` list is an
 ordered prerequisite snapshot. It cannot contain the contract itself. An amend
-replaces the complete opaque terms and may change `after` only before a `bound`
-fact has consumed prerequisites; otherwise it receives the typed
+replaces the complete opaque terms and may change `after` only while those
+prerequisites remain unsatisfied. Once every prerequisite is claimed,
+eligibility is monotonic and `after` is frozen whether or not a `bound` fact has
+yet materialized; an attempted change receives the typed
 `prerequisites-already-consumed` refusal. Coordinates never change.
 
 The prerequisite graph is acyclic by construction. An amend whose resulting
@@ -157,11 +159,12 @@ no generic attest operation or gate registry.
 
 ## Eligibility
 
-Eligibility is recomputed for exactly the contracts a fact can affect. A
-`bind` or `amend` offer judges only its own contract, observing the contracts
-named by its resulting `after` set. A `claimed` offer judges every contract in
-the same snapshot because it may make any contract that names the claimed one
-eligible. An attestation does not change eligibility.
+Eligibility is a Contract-local projection of that Contract's current `after`
+and the terminal state of the ContractIds it names. Bind and amend observe only
+their addressed Contract and the finite prerequisite closure needed by their
+own decision. Claim concerns only the claimed Contract; it neither discovers
+dependents nor broadcasts `bound` facts. Attestation does not change
+eligibility.
 
 Every `after` coordinate must resolve to an existing contract in the decision
 snapshot. An unresolved coordinate is a typed `unknown-prerequisite` refusal;
@@ -171,13 +174,16 @@ coordinate.
 
 Bind observes its new identity and direct `after` contracts. Amend observes its
 identity plus the transitive prerequisite closure of its resulting `after`.
-Claimed placement remains the only full-world eligibility observation.
+No lifecycle decision performs a full-world Contract observation.
 
-A `bound` entry is admitted atomically with the fact that made the contract
-eligible, under that fact's decision snapshot. The triggering fact is the
-contract's own `bind` or `amend`, or a prerequisite's `claimed` fact. `bound`
-is never offered or repaired independently. The ordered offer places every
-newly eligible `bound` entry before facts that depend on it.
+Eligibility becoming true does not itself publish a fact. Claimed terminality
+cannot revert, so the truth remains available for a later targeted decision.
+`bound` is the durable record that the prerequisite snapshot was consumed. It
+is materialized only by the first operation whose fact requires boundness, in
+the same Offer and immediately before that dependent fact. Bind and amend never
+eagerly append it, even when their resulting terms are already eligible.
+`bound` is never offered or repaired independently, and no dependent fact may
+precede it.
 
 The kernel neither sorts, queues, nor automatically reorders contracts.
 Eligibility observes the declared prerequisite identities and their terminal

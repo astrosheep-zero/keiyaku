@@ -166,7 +166,7 @@ test("post-admission reconcile failure remains accepted with a physical lag", as
 
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("post-admission result was not accepted");
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind", "bound"]);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind"]);
   assert.notEqual(result.head, null);
   assert.deepEqual(result.effects.map((effect) => [effect.kind, effect.action]), [["ref", "created"]]);
   assert.equal(result.lag?.[0]?.kind, "reconcile-failed");
@@ -192,7 +192,7 @@ test("journal-writing commands preserve optional actor testimony", async () => {
 
   const unsigned = await command(["bind", "-"], {});
   const unsignedEntries = (await observeContract(repositoryAt(repository.path), acceptedContract(unsigned))).entries;
-  assert.equal(unsignedEntries.length, 2);
+  assert.equal(unsignedEntries.length, 1);
   assert.equal(unsignedEntries.every((entry) => !("actor" in entry)), true);
 
   const environmentActor = "projection/codex";

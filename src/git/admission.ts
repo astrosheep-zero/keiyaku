@@ -1,4 +1,5 @@
 import {
+  decodeJournal,
   encodeEntry,
 } from "../core/facts/codec.js";
 import type { ContractJournalAppend, Offer, RefOperation, TreeUpdate } from "../core/facts/offer.js";
@@ -22,6 +23,7 @@ import {
 } from "../core/facts/types.js";
 import {
   contractJournalPath,
+  contractJournalPaths,
   gitObjectIdForSnapshot,
   mintContractHead,
   mintSnapshotId,
@@ -42,7 +44,7 @@ type Unknown = Readonly<{ kind: "unknown" }>;
 
 export type Admission = Accepted | PublicationFailed | Unknown;
 
-const CONTRACT_JOURNAL_PATH = /^contracts\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/u;
+const CONTRACT_JOURNAL_PATH = /^contracts\/(?:active|terminal)\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/u;
 
 function assertAppendStructure(
   appends: readonly ContractJournalAppend[],
@@ -65,7 +67,7 @@ function assertCompanionStructure(
   companions: readonly TreeUpdate[],
   appends: readonly ContractJournalAppend[],
 ): readonly TreeUpdate[] {
-  const reserved = new Set([GIT_FORMAT_PATH, ...appends.map((append) => contractJournalPath(append.contractId))]);
+  const reserved = new Set([GIT_FORMAT_PATH, ...appends.flatMap((append) => contractJournalPaths(append.contractId))]);
   const seen = new Set<string>();
   for (const companion of companions) {
     if (!companion || typeof companion !== "object") throw new Error("invalid companion update");
@@ -83,15 +85,17 @@ function assertCompanionStructure(
 function readCanonicalJournal(
   admission: GitAdmissionSnapshot,
   id: ContractId,
-): Buffer {
+): Readonly<{ bytes: Buffer; path: string | null }> {
   const snapshot = admission.snapshot;
-  const path = contractJournalPath(id);
-  const entry = snapshot.paths.get(path);
-  if (entry === undefined) return Buffer.alloc(0);
+  const matches = contractJournalPaths(id).filter((path) => snapshot.paths.has(path));
+  if (matches.length > 1) throw new Error(`duplicate contract journal identity: ${id}`);
+  const path = matches[0];
+  if (path === undefined) return { bytes: Buffer.alloc(0), path: null };
+  const entry = snapshot.paths.get(path)!;
   if (entry.type !== "blob") throw new Error(`journal path is not a blob: ${path}`);
   const journal = admission.frozenJournalBytes.get(entry.oid);
   if (journal === undefined) throw new Error(`missing frozen journal bytes: ${path}`);
-  return journal;
+  return { bytes: journal, path };
 }
 
 function buildOffer(
@@ -117,10 +121,15 @@ function buildOffer(
   }
 
   for (const append of appends) {
-    let journal = readCanonicalJournal(admission, append.contractId);
+    const current = readCanonicalJournal(admission, append.contractId);
+    let journal = current.bytes;
     for (const entry of append.entries) journal = Buffer.concat([journal, Buffer.from(encodeEntry(entry))]);
     const blob = writeBlob(repository, journal);
-    changes.set(contractJournalPath(append.contractId), { oid: blob, mode: "100644", type: "blob" });
+    const entries = decodeJournal(journal.toString("utf8"));
+    const terminal = entries.some((entry) => entry.kind === "claimed" || entry.kind === "abandoned");
+    const destination = contractJournalPath(append.contractId, terminal ? "terminal" : "active");
+    if (current.path !== null && current.path !== destination) changes.set(current.path, null);
+    changes.set(destination, { oid: blob, mode: "100644", type: "blob" });
     heads[append.contractId] = mintContractHead(blob);
   }
 

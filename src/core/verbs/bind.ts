@@ -1,6 +1,5 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
-import { prerequisiteStatus } from "../facts/eligibility.js";
-import { contractState } from "../facts/observation.js";
+import { contractState, prerequisiteStatus } from "../facts/observation.js";
 import type { ActorId, BindData, ContractId, JournalEntry } from "../facts/types.js";
 
 export type BindInput<Failure = never> = Readonly<{
@@ -35,18 +34,5 @@ export function decideBind<Failure>({ input, attempt, observation }: DecideInput
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     data,
   };
-  const entries: JournalEntry[] = [bind];
-  if (prerequisites === "claimed") {
-    const bound: JournalEntry = {
-      v: 1,
-      kind: "bound",
-      contract: id,
-      entry: attempt.entryUlids[1]!,
-      at: input.at,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      data: {},
-    };
-    entries.push(bound);
-  }
-  return { kind: "offer", offer: { facts: [{ contractId: id, expectedHead: null, entries }] } };
+  return { kind: "offer", offer: { facts: [{ contractId: id, expectedHead: null, entries: [bind] }] } };
 }

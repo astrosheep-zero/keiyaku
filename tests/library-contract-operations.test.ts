@@ -3,6 +3,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
+import { repositoryAt } from "../src/git/repository.js";
+import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
@@ -121,11 +123,9 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
     after: [prerequisiteId],
   });
   assert.equal((await dependent.keiyaku.state()).bound, null);
-  await dependent.keiyaku.abandon();
-  const status = await Keiyaku.list({ repo: Repo.at({ path: repository.path }) });
   const dependentId = (await dependent.keiyaku.state()).id;
-  const path = status.rows.find((contract) => contract.id === dependentId)?.worktreePath;
-  assert.ok(path);
+  const path = deliveryWorktreePath(repositoryAt(repository.path), dependentId);
+  await dependent.keiyaku.abandon();
   assert.equal(existsSync(path), false);
 
   const terminalContractId = (await dependent.keiyaku.state()).id;
@@ -155,7 +155,7 @@ test("review records before delivery and the same patch can be placed", async ()
   assert.equal(testimony.includes("dirty"), false);
 
   const delivered = await result.keiyaku.deliver({ includeDirty: true });
-  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "claimed"]);
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "claimed"]);
   assert.equal((await result.keiyaku.state()).attestations.at(-1)?.data.subject, subject);
   assert.equal((await result.keiyaku.state()).terminal?.kind, "claimed");
 });
@@ -169,7 +169,7 @@ test("a changed worktree patch leaves the reviewed placement pending", async () 
   writeFileSync(`${repository.path}/candidate.txt`, "second\n");
 
   const delivered = await result.keiyaku.deliver({ includeDirty: true });
-  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver"]);
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver"]);
   assert.equal(delivered.value.placement?.refusal.kind, "gates-unsatisfied");
   assert.equal((await result.keiyaku.state()).terminal, null);
 });
@@ -185,7 +185,7 @@ test("a changed document leaves an otherwise unchanged reviewed patch pending", 
   });
 
   const delivered = await result.keiyaku.deliver({ includeDirty: true });
-  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver"]);
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver"]);
   assert.equal(delivered.value.placement?.refusal.kind, "gates-unsatisfied");
   assert.equal((await result.keiyaku.state()).terminal, null);
 });

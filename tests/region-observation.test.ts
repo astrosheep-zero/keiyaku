@@ -104,7 +104,7 @@ test("post-admission observation failure preserves the admitted Contract without
         workspace: "here",
       }),
   );
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind", "bound"]);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind"]);
   assert.notEqual(result.head, null);
   assert.equal(result.lags[0]?.kind, "reconcile-failed");
   if (result.lags[0]?.kind === "reconcile-failed") {

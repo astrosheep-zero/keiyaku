@@ -148,7 +148,7 @@ async function settleTasks(input: SettleTasksInput): Promise<void> {
 }
 
 function settleNamespace(state: ContractState, effects: readonly Effect[], actions: SettlementAction[], lags: SettlementLag[]): void {
-  if (state.terminal !== null || state.coordinates.workspace !== "worktree" || state.bound === null) return;
+  if (state.terminal !== null || state.coordinates.workspace !== "worktree") return;
   const worktrees = effects.filter((effect): effect is Extract<Effect, { kind: "worktree" }> =>
     effect.kind === "worktree" && effect.action !== "removed");
   for (const effect of worktrees) {

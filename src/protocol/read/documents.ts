@@ -1,4 +1,4 @@
-import { observeContractWorld } from "../../git/observe.js";
+import { observeActiveContractWorld } from "../../git/observe.js";
 import type { GitReadObservation } from "../../git/read-observation.js";
 import type { ContractId } from "../../core/facts/types.js";
 
@@ -11,11 +11,11 @@ export type ContractDocumentProjection = Readonly<{
 export async function readDocuments(
   observation: GitReadObservation,
 ): Promise<readonly ContractDocumentProjection[]> {
-  const observed = await observeContractWorld(observation);
+  const observed = await observeActiveContractWorld(observation);
   const documents: ContractDocumentProjection[] = [];
   for (const [contract, observation] of observed.contracts) {
     const state = observation.state;
-    if (state === null || state.terminal !== null) continue;
+    if (state === null) continue;
     documents.push({
       contract,
       documentBytes: state.terms.document.bytes,

@@ -12,7 +12,7 @@ test("public deliver keeps its Verification admission in accepted facts", async 
   commitCandidate(repository);
 
   const delivered = await contract.deliver();
-  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
   assert.equal(delivered.head, (await contract.state()).head);
   assert.equal(delivered.value.integration.predecessor, (await contract.state()).delivery?.data.integration.predecessor);
   assert.equal("verification" in delivered.value, false);
@@ -97,7 +97,7 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
   });
   commitCandidate(openRepository);
   const openDelivery = await open.keiyaku.deliver();
-  assert.deepEqual(openDelivery.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  assert.deepEqual(openDelivery.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
   assert.equal(openDelivery.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "unsatisfied");
   assert.equal(openDelivery.value.verification, undefined);
   assert.equal(openDelivery.value.placement, undefined);
@@ -111,7 +111,7 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
   });
   commitCandidate(gatedRepository);
   const gatedDelivery = await gated.keiyaku.deliver();
-  assert.deepEqual(gatedDelivery.facts.map((fact) => fact.kind), ["deliver", "attestation"]);
+  assert.deepEqual(gatedDelivery.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation"]);
   assert.equal(gatedDelivery.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "unsatisfied");
   assert.equal(gatedDelivery.value.verification, undefined);
   assert.deepEqual(gatedDelivery.value.placement, {
@@ -164,7 +164,7 @@ test("Verification provisions only the candidate Settings environment and destro
 
   const delivered = await contract.deliver();
 
-  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
   assert.equal(delivered.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "satisfied");
   assert.equal(existsSync(destroyed), true);
 });
@@ -179,7 +179,7 @@ test("candidate create failure stops Verification with no attestation and still 
 
   const delivered = await contract.deliver();
 
-  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver"]);
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver"]);
   assert.equal(delivered.value.verification?.failure, "environment-failure");
   assert.equal(existsSync(join(repository.path, "verification-ran")), false);
   assert.equal(existsSync(destroyed), true);
@@ -258,7 +258,7 @@ test("public deliver preserves admission when Verification cleanup leaks a workt
     {},
     () => contract.deliver(),
   );
-  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
   assert.equal(delivered.value.leak?.path.startsWith("/"), true);
   assert.match(delivered.value.leak?.diagnostic ?? "", /worktree remove --force .*forced verification cleanup failure/);
   repository.run(["worktree", "remove", "--force", delivered.value.leak!.path]);

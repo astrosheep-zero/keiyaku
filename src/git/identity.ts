@@ -32,9 +32,22 @@ export function contractPhysicalName(contract: ContractId): string {
   return contractId(contract).replace("/", "-");
 }
 
-export function contractJournalPath(contract: ContractId): string {
+function contractJournalSuffix(contract: ContractId): string {
   const digest = contractLocator(contract);
-  return `contracts/${digest.slice(0, 2)}/${digest.slice(2, 4)}/${digest.slice(4)}.jsonl`;
+  return `${digest.slice(0, 2)}/${digest.slice(2, 4)}/${digest.slice(4)}.jsonl`;
+}
+
+export type ContractJournalClass = "active" | "terminal";
+
+export function contractJournalPath(contract: ContractId, journalClass: ContractJournalClass = "active"): string {
+  return `contracts/${journalClass}/${contractJournalSuffix(contract)}`;
+}
+
+export function contractJournalPaths(contract: ContractId): readonly string[] {
+  return [
+    contractJournalPath(contract, "active"),
+    contractJournalPath(contract, "terminal"),
+  ];
 }
 
 export function gitObjectId(value: string, label = "Git object ID"): GitObjectId {

@@ -283,7 +283,7 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   assert.deepEqual(state.terms.gates, []);
 
   const sameTitle = await Keiyaku.bind({ repo, markdown: markdown("Markdown input"), workspace: "here" });
-  assert.match((await sameTitle.keiyaku.state()).id, /^kei\/markdown-input-[0-9a-hjkmnp-tv-z]{8}$/);
+  assert.match((await sameTitle.keiyaku.state()).id, /^kei\/markdown-input-[0-9a-f]{16}$/);
 
   assert.equal(repo.root, resolve(repo.root));
   assert.equal((await Keiyaku.list({ repo })).rows.some((contract) => contract.id === state.id), true);

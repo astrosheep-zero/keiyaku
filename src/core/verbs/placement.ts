@@ -1,5 +1,4 @@
 import { gatesSatisfied } from "../facts/gate.js";
-import { placeEligibleBounds } from "../facts/eligibility.js";
 import { activeContract } from "../facts/observation.js";
 import type { ActorId, ContractId, JournalEntry } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
@@ -36,7 +35,7 @@ export function decidePlacement({ input, attempt, observation }: DecideInput<Pla
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     data: { delivery: delivery.entry },
   };
-  const offer = {
+  return {
     kind: "offer",
     offer: {
       facts: [{ contractId: id, expectedHead: current.head, entries: [claimed] }],
@@ -49,8 +48,4 @@ export function decidePlacement({ input, attempt, observation }: DecideInput<Pla
       }),
     },
   } as const;
-  return {
-    ...offer,
-    offer: placeEligibleBounds(offer.offer, observation, attempt),
-  };
 }

@@ -187,7 +187,7 @@ type Amendment = Readonly<{ source: ContractTerms }> & ReturnType<NonNullable<Am
 export async function amendOperation(
   input: AmendOperationInput,
 ): Promise<IntentOutcome<Amendment, AmendRefusal | VerificationDeclarationRefusal>> {
-  const attempts = mintAttempts({ entryCount: 2 });
+  const attempts = mintAttempts({ entryCount: 1 });
   let source = input.source;
   for (let index = 0; index < attempts.length; index += 1) {
     let observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
@@ -197,7 +197,11 @@ export async function amendOperation(
       ? undefined
       : { source, ...input.deriveAmendment(source) };
     if (amendment !== undefined) {
-      observation = await extendContractsForAdmissionAt(input.channel, observation, amendment.terms.after);
+      observation = await extendContractsForAdmissionAt(
+        input.channel,
+        observation,
+        [...new Set([...(state?.terms.after ?? []), ...amendment.terms.after])],
+      );
     }
     const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] = amendment === undefined
       ? undefined
@@ -254,8 +258,11 @@ type DeliverOperationInput = MutationOperationInput & Readonly<{
 type PreparedDelivery = Readonly<{ delivery: DeliveryIdentity; derivation: DocumentDerivation }>;
 
 async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptContext): Promise<AttemptDecision<PreparedDelivery>> {
-  const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  let decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
+  if (state !== null) {
+    decisionObservation = await extendContractsForAdmissionAt(input.channel, decisionObservation, state.terms.after);
+  }
   const derivation = state === null || input.deriveDocument === undefined
     ? undefined
     : input.deriveDocument(state);
@@ -477,7 +484,7 @@ export async function reviewOperation(
   input: ReviewOperationInput,
 ): Promise<IntentOutcome<ReviewValue, ReviewRefusal>> {
   const git = input.scope;
-  const attempts = mintAttempts({ entryCount: 2 });
+  const attempts = mintAttempts({ entryCount: 1 });
   let review: Extract<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
     const result = await reviewAttempt(input, attempts[index]!);

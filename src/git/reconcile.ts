@@ -425,7 +425,6 @@ async function reconcileWithTopology(
     lag.push(...targetCheckouts.lag);
     if (state.coordinates.workspace === "here") return reconcileHereWorkspaceRefs(repository, state, { effects, lag });
     if (state.terminal) return await reconcileTerminalManagedWorktree(input, state, topology, { effects, lag });
-    if (!state.bound) return complete(effects, lag);
     return await reconcileActiveManagedWorktree(input, state, topology, { effects, lag });
   } catch (error) {
     return failed("effect", error, effects, lag);

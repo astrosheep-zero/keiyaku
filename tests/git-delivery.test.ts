@@ -393,7 +393,7 @@ test("managed bind preserves its admitted Contract when worktree reconciliation 
     {},
     () => Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" }),
   );
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind", "bound"]);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind"]);
   assert.notEqual(result.head, null);
   assert.deepEqual(result.effects.map((effect) => [effect.kind, effect.action]), [["ref", "created"]]);
   assert.equal(result.lags[0]?.kind, "reconcile-failed");
