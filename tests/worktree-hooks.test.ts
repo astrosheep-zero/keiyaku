@@ -9,7 +9,7 @@ import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
 import { hookMarkerPath, runCreateHooks, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
-import { deliveryWorktreePath } from "../src/git/workspace.js";
+import { appointedWorktreePath } from "./support/git.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
@@ -95,7 +95,7 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
     hooks: EMPTY_HOOKS,
   });
   const id = bound.keiyaku.id;
-  const worktree = deliveryWorktreePath(git, id);
+  const worktree = await appointedWorktreePath(git, id);
   const administration = await worktreeGitDirectory(git, worktree);
   unlinkSync(hookMarkerPath(administration));
   const hooks: WorktreeHooks = {
@@ -132,7 +132,7 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
     hooks: EMPTY_HOOKS,
   });
   const id = bound.keiyaku.id;
-  const worktree = deliveryWorktreePath(git, id);
+  const worktree = await appointedWorktreePath(git, id);
   const held = await acquireSqliteTransactionLock({ path: lockPath(git, id), mode: "immediate", timeoutMs: 100 });
   const pending = bound.keiyaku.reconcile();
 

@@ -4,8 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { deliveryWorktreePath } from "../src/git/workspace.js";
-import { withGitShim } from "./support/git.js";
+import { appointedWorktreePath, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
 test("pre-delivery audit preview matches a later unchanged deliver", async () => {
@@ -103,7 +102,7 @@ test("ready targeted audit previews checkout collisions without placing", async 
     gates: ["verified"],
   });
   const state = await bound.keiyaku.state();
-  const worktree = deliveryWorktreePath(await repositoryAt(repository.path), state.id);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), state.id);
   const collision = "literal[1].tmp";
   writeFileSync(join(repository.path, ".gitignore"), "literal*.tmp\n");
   repository.run(["add", ".gitignore"]);
@@ -146,7 +145,7 @@ test("later target checkout mutation is reobserved at placement", async () => {
     gates: ["verified"],
   });
   const state = await bound.keiyaku.state();
-  const worktree = deliveryWorktreePath(await repositoryAt(repository.path), state.id);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), state.id);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);

@@ -1,5 +1,5 @@
 import { access, mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { acquireSqliteTransactionLock, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
@@ -36,12 +36,8 @@ import {
   type WorktreeHookLag,
   type WorktreeHooks,
 } from "./hooks.js";
-import { deliveryWorktreePath } from "./workspace.js";
+import { worktreePath } from "./workspace.js";
 import { collectableScratchWorktrees } from "./scratch.js";
-
-async function pathExists(path: string): Promise<boolean> {
-  return await access(path).then(() => true, () => false);
-}
 import {
   terminalSealExpectations as decodeTerminalSealExpectations,
   terminalSealSnapshots,
@@ -50,12 +46,10 @@ import {
   type UnsealedBytes,
 } from "./terminal-seal.js";
 
+const pathExists = (path: string) => access(path).then(() => true, () => false);
+
 export type Effect =
-  | Readonly<{
-      kind: "worktree";
-      path: string;
-      action: "created" | "removed" | "unchanged";
-    }>
+  | Readonly<{ kind: "worktree"; path: string; action: "created" | "removed" | "unchanged" }>
   | TargetCheckoutEffect
   | Readonly<{
       kind: "ref";
@@ -71,25 +65,31 @@ type ReconcileInput = Readonly<{
   hooks: WorktreeHooks;
   retryHooks: boolean;
   retainTerminalWorktree?: boolean;
+  place?: string;
 }>;
 type ReconcileEffectsInput = ReconcileInput;
-type WorktreeRetained = Readonly<{
-  kind: "worktree-retained";
-  path: string;
-}>;
+type WorktreeRetained = Readonly<{ kind: "worktree-retained"; path: string }>;
 export type ReconcileFailure = Readonly<{
   kind: "reconcile-failed";
   stage: "observation" | "effect";
   diagnostic: string;
 }>;
-export type ReconcileLag = WorktreeRetained | UnsealedBytes | TargetCheckoutLag | WorktreeHookLag | ReconcileFailure;
-export type ReconcileResult = Readonly<{
-  effects: readonly Effect[];
-  lag: readonly ReconcileLag[];
+export type ReconcileLag =
+  | WorktreeRetained
+  | UnsealedBytes
+  | TargetCheckoutLag
+  | WorktreeHookLag
+  | ReconcileFailure;
+export type ReconcileResult = Readonly<{ effects: readonly Effect[]; lag: readonly ReconcileLag[] }>;
+type ReconcileBatchItem = Readonly<{
+  contract: ContractId;
+  state: ContractState | null;
+  result: ReconcileResult;
 }>;
-type ReconcileBatchItem = Readonly<{ contract: ContractId; state: ContractState | null; result: ReconcileResult }>;
-export type GitReconcileObservation = Readonly<{ state: ContractState | null; result: ReconcileResult }>;
-
+export type GitReconcileObservation = Readonly<{
+  state: ContractState | null;
+  result: ReconcileResult;
+}>;
 type WorktreeTopology = Readonly<{ paths: Set<string> }>;
 type ReconcileAccumulation = Readonly<{ effects: Effect[]; lag: ReconcileLag[] }>;
 type TerminalWorktreeCleanup = Readonly<{
@@ -110,12 +110,42 @@ type TerminalCustody = Readonly<{
   acc: ReconcileAccumulation;
 }>;
 
-function deliveryRefFor(contract: ContractId): string { return `${DELIVERY_REF_NAMESPACE}/${contractPhysicalName(contract)}`; }
-function candidatePinRefFor(contract: ContractId): string { return `${CANDIDATE_PIN_REF_NAMESPACE}/${contractPhysicalName(contract)}`; }
+function deliveryRefFor(contract: ContractId): string {
+  return `${DELIVERY_REF_NAMESPACE}/${contractPhysicalName(contract)}`;
+}
+function candidatePinRefFor(contract: ContractId): string {
+  return `${CANDIDATE_PIN_REF_NAMESPACE}/${contractPhysicalName(contract)}`;
+}
+function retiredWorktreePath(repository: GitRepository, contract: ContractId): string {
+  return resolve(repository.commonDirectory, "keiyaku", "wt", contractPhysicalName(contract));
+}
+
+export async function retiredManagedWorktreePresent(
+  repository: GitRepository,
+  contract: ContractId,
+): Promise<boolean> {
+  const retired = retiredWorktreePath(repository, contract);
+  const topology = await acquireWorktreeTopology(repository);
+  return topology.paths.has(retired) && await pathExists(retired);
+}
+
+function missingPlaceLag(repository: GitRepository): ReconcileFailure {
+  return {
+    kind: "reconcile-failed",
+    stage: "effect",
+    diagnostic: `managed Contract is unappointed: ${join(repository.commonDirectory, "keiyaku", "places.json")}`,
+  };
+}
 async function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Promise<Effect> {
   const before = await readRef(repository, ref);
   if (before === desired) return { kind: "ref", name: ref, action: "unchanged", before, after: desired };
-  await runGit(repository, ["update-ref", "--no-deref", ref, gitObjectIdForSnapshot(desired), before ?? "0".repeat(desired.length)]);
+  await runGit(repository, [
+    "update-ref",
+    "--no-deref",
+    ref,
+    gitObjectIdForSnapshot(desired),
+    before ?? "0".repeat(desired.length),
+  ]);
   return { kind: "ref", name: ref, action: before === null ? "created" : "updated", before, after: desired };
 }
 async function removeRef(repository: GitRepository, ref: string): Promise<Effect> {
@@ -151,6 +181,7 @@ async function acquireWorktreeTopology(repository: GitRepository): Promise<Workt
 function fromPrimaryWorktree(repository: GitRepository): GitRepository {
   return { ...repository, effectiveCwd: repository.primaryWorktree };
 }
+
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -158,7 +189,6 @@ function diagnostic(error: unknown): string {
 function complete(effects: readonly Effect[] = [], lag: readonly ReconcileLag[] = []): ReconcileResult {
   return { effects, lag };
 }
-
 function failed(
   stage: ReconcileFailure["stage"],
   error: unknown,
@@ -174,12 +204,36 @@ function reconcileLockPath(repository: GitRepository, contract: ContractId): str
   return join(commonGitDirectory(repository), "keiyaku", "locks", "reconcile", locator.slice(0, 2), `${locator.slice(2)}.sqlite`);
 }
 
-async function worktree(repository: GitRepository, topology: WorktreeTopology, path: string, desired: SnapshotId): Promise<Effect> {
+async function adoptRetiredWorktree(
+  repository: GitRepository,
+  topology: WorktreeTopology,
+  contract: ContractId,
+  path: string,
+): Promise<boolean> {
+  const retired = retiredWorktreePath(repository, contract);
+  if (retired === path || !topology.paths.has(retired) || !await pathExists(retired)) return false;
+  await mkdir(dirname(path), { recursive: true });
+  await runGit(repository, ["worktree", "move", retired, path]);
+  topology.paths.delete(retired);
+  topology.paths.add(path);
+  return true;
+}
+
+async function worktree(
+  repository: GitRepository,
+  topology: WorktreeTopology,
+  path: string,
+  desired: SnapshotId,
+  contract: ContractId,
+): Promise<Effect> {
   const registered = topology.paths.has(path);
   if (registered && await pathExists(path)) return { kind: "worktree", path, action: "unchanged" };
   if (registered) {
     await runGit(repository, ["worktree", "remove", path]);
     topology.paths.delete(path);
+  }
+  if (await adoptRetiredWorktree(repository, topology, contract, path)) {
+    return { kind: "worktree", path, action: "created" };
   }
   if (await pathExists(path)) throw new Error(`delivery worktree path is occupied: ${path}`);
   await mkdir(dirname(path), { recursive: true });
@@ -194,7 +248,12 @@ async function removeWorktree(
   force = false,
 ): Promise<Readonly<{ effect: Effect; retained: boolean }>> {
   const registered = topology.paths.has(path);
-  if (!registered) return { effect: { kind: "worktree", path, action: "unchanged" }, retained: false };
+  if (!registered) {
+    return {
+      effect: { kind: "worktree", path, action: "unchanged" },
+      retained: await pathExists(path),
+    };
+  }
   if (!await pathExists(path)) {
     await runGit(repository, ["worktree", "remove", path]);
     topology.paths.delete(path);
@@ -382,7 +441,7 @@ async function releaseTerminalCustody(
 }
 
 async function reconcileTerminalManagedWorktree(
-  { repository, channel, hooks, retryHooks, retainTerminalWorktree }: ReconcileEffectsInput,
+  { repository, channel, hooks, retryHooks, retainTerminalWorktree, place }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
   acc: ReconcileAccumulation,
@@ -390,28 +449,40 @@ async function reconcileTerminalManagedWorktree(
   const primary = fromPrimaryWorktree(repository);
   const ref = deliveryRefFor(state.id);
   const pin = candidatePinRefFor(state.id);
-  const path = deliveryWorktreePath(repository, state.id);
+  const path = place === undefined ? undefined : worktreePath(repository, place);
+  if (path === undefined) return complete(acc.effects, acc.lag);
   const expected = await terminalSealExpectations(channel, state);
   acc.effects.push(await updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
-  if (state.delivery !== null) acc.effects.push(await updateRef(primary, pin, state.delivery.data.integration.snapshot));
+  if (state.delivery !== null) {
+    acc.effects.push(await updateRef(primary, pin, state.delivery.data.integration.snapshot));
+  }
   if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag);
-
-  const retained = await removeSealedTerminalWorktree({ repository: primary, topology, path, expected, hooks, retryHooks, acc });
+  await adoptRetiredWorktree(primary, topology, state.id, path);
+  const retained = await removeSealedTerminalWorktree({
+    repository: primary,
+    topology,
+    path,
+    expected,
+    hooks,
+    retryHooks,
+    acc,
+  });
   if (retained !== null) return retained;
   await releaseTerminalCustody({ repository: primary, state, expected, ref, pin, acc });
   return complete(acc.effects, acc.lag);
 }
 
 async function reconcileActiveManagedWorktree(
-  { repository, hooks, retryHooks }: ReconcileEffectsInput,
+  { repository, hooks, retryHooks, place }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
   { effects, lag }: ReconcileAccumulation,
 ): Promise<ReconcileResult> {
-  const path = deliveryWorktreePath(repository, state.id);
+  if (place === undefined) return complete(effects, [...lag, missingPlaceLag(repository)]);
+  const path = worktreePath(repository, place);
   const desired = state.delivery?.data.tenderSnapshot ?? state.coordinates.start;
   effects.push(await updateRef(repository, deliveryRefFor(state.id), desired));
-  effects.push(await worktree(repository, topology, path, desired));
+  effects.push(await worktree(repository, topology, path, desired, state.id));
   const hookLag = await runCreateHooks(path, await worktreeGitDirectory(repository, path), hooks, retryHooks);
   if (hookLag !== null) lag.push(hookLag);
   effects.push(await (state.delivery
@@ -501,21 +572,8 @@ type ReconcileBatchOptions = Readonly<{
   hooks: WorktreeHooks;
   retryHooks: boolean;
   retainTerminalWorktree: boolean;
+  places?: ReadonlyMap<ContractId, string>;
 }>;
-
-async function reconcileBatchItem(
-  repository: GitRepository,
-  channel: GitDecodeChannel,
-  contract: ContractId,
-  options: ReconcileBatchOptions,
-): Promise<ReconcileBatchItem> {
-  const observation = await reconcile({ repository, channel, contractId: contract, ...options });
-  return {
-    contract,
-    state: observation.state,
-    result: observation.result,
-  };
-}
 
 /** Reconcile each discovered Contract through its own serialized, fresh observation. */
 export async function reconcileBatch(
@@ -525,6 +583,18 @@ export async function reconcileBatch(
   options: ReconcileBatchOptions,
 ): Promise<readonly ReconcileBatchItem[]> {
   const items: ReconcileBatchItem[] = [];
-  for (const contract of contracts) items.push(await reconcileBatchItem(repository, channel, contract, options));
+  for (const contract of contracts) {
+    const place = options.places?.get(contract);
+    const observation = await reconcile({
+      repository,
+      channel,
+      contractId: contract,
+      hooks: options.hooks,
+      retryHooks: options.retryHooks,
+      retainTerminalWorktree: options.retainTerminalWorktree,
+      ...(place === undefined ? {} : { place }),
+    });
+    items.push({ contract, state: observation.state, result: observation.result });
+  }
   return items;
 }

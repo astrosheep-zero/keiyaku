@@ -3,7 +3,6 @@ import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
 import {
-  projectContractWorktree,
   renderContractGuidance,
   type ContractFileEffect,
   type ContractFileLag,
@@ -40,7 +39,6 @@ import {
   deliveryDiffOperation,
   deliverOperation,
   deliveryOperation,
-  reconcileOperation,
   reviewOperation,
   stateOperation,
   type AuditPreview,
@@ -64,7 +62,7 @@ import {
   type DeliveryPreparationRefusal,
 } from "../protocol/operations.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
-import { settle, type SettlementReport } from "../settlement/settle.js";
+import { type SettlementReport } from "../settlement/settle.js";
 import {
   claimTaskHolderWithFence,
   releaseTaskHolder,
@@ -80,6 +78,7 @@ import {
   completeMutation,
   type MutationResult,
 } from "./mutation.js";
+import { completeReconcile } from "./reconcile.js";
 import { admitBindWithAppointment } from "./bind.js";
 import { KeiyakuRefused, requireAccepted } from "./refusal.js";
 export {
@@ -390,21 +389,9 @@ export class KeiyakuHandle {
 
   async reconcile(input?: ReconcileInput): Promise<ReconcileReport> {
     const options = reconcileInput(input);
-    return withGitDecodeChannel(this.scope, async (channel) => {
-      const retained = await reconcileOperation({ scope: this.scope, channel, contractId: this.id, ...options, retainTerminalWorktree: true });
-      const projection = await projectContractWorktree(this.scope, retained.state);
-      const settlement = await settle({ repository: this.scope, channel, state: retained.state, effects: retained.report.effects });
-      const deferRemoval = retained.state !== null && retained.state.terminal !== null
-        && retained.state.coordinates.workspace === "worktree";
-      const cleanup = deferRemoval
-        ? await reconcileOperation({ scope: this.scope, channel, contractId: this.id, ...options })
-        : null;
-      return {
-        effects: [...retained.report.effects, ...projection.effects, ...(cleanup?.report.effects ?? [])],
-        lag: [...retained.report.lag, ...projection.lag, ...(cleanup?.report.lag ?? [])],
-        settlement,
-      };
-    });
+    return withGitDecodeChannel(this.scope, (channel) => completeReconcile({
+      scope: this.scope, channel, contractId: this.id, ...options,
+    }));
   }
 
   private deliveryHandle(delivery: DeliverValue): Delivery {

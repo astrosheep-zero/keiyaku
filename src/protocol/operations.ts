@@ -75,7 +75,9 @@ import {
   type ContractRow,
 } from "./read/status.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission, type DecidedOfferResult } from "./attempt.js";
+import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 export { bindOperation } from "./bind.js";
+export { reconcileObservationFailure } from "../git/reconcile.js";
 import type { BindRefusal, TargetInputRefusal } from "./bind.js";
 import {
   accepted,
@@ -362,7 +364,13 @@ export async function prepareDelivery(
       return { kind: "refused", refusal: { kind: "workspace-not-on-target", contractId, target: coordinates.target, branch } };
     }
   }
-  const tender = await captureTender(repository, stage);
+  const appointed = coordinates.workspace === "worktree"
+    ? appointmentFor(await readPlaceRegister(repository), contractId)
+    : undefined;
+  const tender = await captureTender(repository, {
+    ...stage,
+    ...(appointed === undefined ? {} : { place: appointed.place }),
+  });
   if (tender.kind === "refused") return tender;
   if ((tender.data.dirty && input.includeDirty !== true) || tender.data.changes.submodules.length > 0) {
     return { kind: "refused", refusal: await dirtyTenderRefusal(repository, contractId, tender.data) };
@@ -398,7 +406,13 @@ export async function prepareReview(
   stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"] }>,
 ): Promise<{ kind: "prepared"; data: Readonly<{ changeId: DeliverData["integration"]["changeId"]; workspace?: WorkspaceDirtyDelta }> }
   | { kind: "refused"; refusal: ReviewPreparationRefusal }> {
-  const tender = await captureTender(repository, stage);
+  const appointed = stage.coordinates.workspace === "worktree"
+    ? appointmentFor(await readPlaceRegister(repository), stage.contractId)
+    : undefined;
+  const tender = await captureTender(repository, {
+    ...stage,
+    ...(appointed === undefined ? {} : { place: appointed.place }),
+  });
   if (tender.kind === "refused") return tender;
   if (tender.data.changes.submodules.length > 0) {
     return { kind: "refused", refusal: await dirtyTenderRefusal(repository, stage.contractId, tender.data) };
@@ -766,7 +780,13 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
 
 export type ReconcileReport = ReconcileResult;
 export type ReconcileObservation = Readonly<{ state: ContractState | null; report: ReconcileReport }>;
-type ReconcileOptions = Readonly<{ hooks: WorktreeHooks; retryHooks: boolean; retainTerminalWorktree?: boolean }>;
+type ReconcileOptions = Readonly<{
+  hooks: WorktreeHooks;
+  retryHooks: boolean;
+  retainTerminalWorktree?: boolean;
+  place?: string;
+  places?: ReadonlyMap<ContractId, string>;
+}>;
 
 export async function reconcileOperation(input: MutationOperationInput & ReconcileOptions): Promise<ReconcileObservation> {
   try {
@@ -777,6 +797,7 @@ export async function reconcileOperation(input: MutationOperationInput & Reconci
       hooks: input.hooks,
       retryHooks: input.retryHooks,
       ...(input.retainTerminalWorktree === undefined ? {} : { retainTerminalWorktree: input.retainTerminalWorktree }),
+      ...(input.place === undefined ? {} : { place: input.place }),
     });
     return { state: observation.state, report: observation.result };
   } catch (error) {
@@ -788,6 +809,13 @@ export async function reconcileOperation(input: MutationOperationInput & Reconci
 type RepoReconcileItem = Readonly<{ contractId: ContractId; state: ContractState | null; report: ReconcileReport }>;
 
 export type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>;
+
+export async function worldContractStates(
+  input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }>,
+): Promise<readonly ContractState[]> {
+  const observation = await withGitReadObservation(input.scope, input.channel, async (read) => await observeContractWorld(read));
+  return [...observation.contracts.values()].flatMap((value) => value.state === null ? [] : [value.state]);
+}
 
 export async function reconcileAllOperation(
   input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }> & ReconcileOptions,
@@ -802,6 +830,7 @@ export async function reconcileAllOperation(
       hooks: input.hooks,
       retryHooks: input.retryHooks,
       retainTerminalWorktree: input.retainTerminalWorktree ?? false,
+      ...(input.places === undefined ? {} : { places: input.places }),
     },
   )).map((item): RepoReconcileItem => ({
     contractId: item.contract,

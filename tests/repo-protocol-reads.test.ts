@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { deliveryWorktreePath } from "../src/git/workspace.js";
+import { appointManagedWorktrees } from "../src/workspace-place.js";
+import { appointedWorktreePath, makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 import {
   readBlob,
   readGit,
@@ -24,7 +25,7 @@ import {
   scopeOperation,
 } from "../src/protocol/operations.js";
 import { changeId, entryUlid, snapshotId, type ContractId, type JournalEntry } from "../src/core/facts/types.js";
-import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
+
 
 function firstJournalAt(repository: TestGitRepository, id: ContractId): string {
   const path = contractJournalPath(id, "active");
@@ -145,11 +146,8 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
     phaseAt: firstJournalAt(repository, second),
     disposition: "active",
     workspace: "worktree",
-    worktreePath: deliveryWorktreePath(git, second),
-    workspaceObservation: {
-      kind: "unavailable",
-      location: { kind: "worktree", path: deliveryWorktreePath(git, second) },
-    },
+    worktreePath: null,
+    workspaceObservation: { kind: "unappointed" },
     target: null,
     targetLag: { kind: "none" },
     delivery: null,
@@ -355,7 +353,9 @@ test("batch reconcile isolates a failed contract and retains successful reports"
   const blocked = await bind(repository, "Blocked reconcile", "worktree");
   const healthy = await bind(repository, "Healthy reconcile", "worktree");
   const git = await repositoryAt(repository.path);
-  mkdirSync(deliveryWorktreePath(git, blocked), { recursive: true });
+  const appointed = await appointManagedWorktrees(git, [blocked, healthy]);
+  const places = new Map(appointed.appointments.map((appointment) => [appointment.contract, appointment.place]));
+  mkdirSync(await appointedWorktreePath(git, blocked), { recursive: true });
 
   const scope = await scopeOperation({ coordinate: repository.path });
   const report = await withGitDecodeChannel(scope, (channel) => reconcileAllOperation({
@@ -363,6 +363,7 @@ test("batch reconcile isolates a failed contract and retains successful reports"
     channel,
     hooks: { create: [], destroy: [] },
     retryHooks: false,
+    places,
   }));
   assert.equal(report.contracts.length, 2);
 
@@ -375,5 +376,5 @@ test("batch reconcile isolates a failed contract and retains successful reports"
 
   const reconciled = report.contracts.find((contract) => contract.contractId === healthy);
   assert.deepEqual(reconciled?.report.lag, []);
-  assert.equal(existsSync(deliveryWorktreePath(git, healthy)), true);
+  assert.equal(existsSync(await appointedWorktreePath(git, healthy)), true);
 });

@@ -7,14 +7,15 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { deliveryWorktreePath } from "../src/git/workspace.js";
+import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
+import { appointedWorktreePath, makeGitRepository, observeContract, withGitShim } from "./support/git.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
 import { BindDraftError, preserveBindDraft } from "../src/cli/draft.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
-import { makeGitRepository, observeContract, withGitShim } from "./support/git.js";
+
 
 function repositoryWithMain() {
   const repository = makeGitRepository();
@@ -672,7 +673,7 @@ test("managed delivery reads without realigning its deterministic worktree", asy
     contractDocument("Managed Worktree"),
   );
   const id = acceptedContract(bound);
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), id);
   const managedRepository = await repositoryAt(path);
   assert.equal(managedRepository.effectiveCwd, path);
   assert.equal(managedRepository.primaryWorktree, (await repositoryAt(repository.path)).primaryWorktree);
@@ -680,7 +681,7 @@ test("managed delivery reads without realigning its deterministic worktree", asy
     parseArgv(["-C", path, ...argv]),
     { environment: {}, readStdin: () => source },
   );
-  assert.equal(deliveryWorktreePath(managedRepository, id), path);
+  assert.equal(await appointedWorktreePath(managedRepository, id), path);
   assert.notEqual(path, resolve(path, ".keiyaku-v4", "worktrees", "managed-worktree"));
   assert.match(path, /[\\/]keiyaku[\\/]wt[\\/]/u);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "managed candidate"]);
@@ -699,12 +700,14 @@ test("managed delivery reads without realigning its deterministic worktree", asy
 
   repository.run(["-C", path, "reset", "--hard", target]);
   const reconcileRepository = await repositoryAt(repository.path);
+  const appointment = await readManagedWorktreeAppointment(reconcileRepository, id);
   const reconciled = await withGitDecodeChannel(reconcileRepository, (channel) => reconcile({
     repository: reconcileRepository,
     channel,
     contractId: id,
     hooks: { create: [], destroy: [] },
     retryHooks: false,
+    ...(appointment.kind === "appointed" ? { place: appointment.place } : {}),
   }));
   assert.equal(reconciled.result.effects.some((effect) => effect.kind === "worktree" && effect.action === "unchanged"), true);
   assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), target);
@@ -725,7 +728,7 @@ test("an accepted arc preserves un-tendered managed worktree content", async () 
     contractDocument("Un-tendered Work"),
   );
   const id = acceptedContract(bound);
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), id);
   writeFileSync(resolve(path, "agent-owned.txt"), "keep this work\n");
   repository.run(["-C", path, "add", "agent-owned.txt"]);
   repository.run(["-C", path, "commit", "--quiet", "-m", "un-tendered work"]);
@@ -751,7 +754,7 @@ test("managed abandonment cleans terminal resources from its own worktree cwd", 
   );
   const id = acceptedContract(bound);
 
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), id);
   const fromManaged = (argv: readonly string[], source = "") => invoke(
     parseArgv(["-C", path, ...argv]),
     { environment: {}, readStdin: () => source },
@@ -785,7 +788,7 @@ test("a terminal worktree removal failure remains accepted cleanup lag", async (
     contractDocument("Retained Cleanup"),
   );
   const id = acceptedContract(bound);
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), id);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "retained candidate"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
   const delivered = await invoke(parseArgv(["-C", path, "deliver", id, "--actor", "external-test"]), {
@@ -866,7 +869,7 @@ test("--here delivers in place without owning a managed worktree", async () => {
   assert.equal(repository.run(["symbolic-ref", "--short", "HEAD"]).trim(), "feature");
   assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), candidate);
   assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)), null);
-  assert.equal(existsSync(deliveryWorktreePath(await repositoryAt(repository.path), id)), false);
+  assert.deepEqual(await readManagedWorktreeAppointment(await repositoryAt(repository.path), id), { kind: "unappointed" });
   const reconcileRepository = await repositoryAt(repository.path);
   const reconciled = await withGitDecodeChannel(reconcileRepository, (channel) => reconcile({
     repository: reconcileRepository,
@@ -894,7 +897,7 @@ test("--here delivers in place without owning a managed worktree", async () => {
   assert.equal(repository.run(["symbolic-ref", "--short", "HEAD"]).trim(), "feature");
   assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), candidate);
   assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)), null);
-  assert.equal(existsSync(deliveryWorktreePath(await repositoryAt(repository.path), id)), false);
+  assert.deepEqual(await readManagedWorktreeAppointment(await repositoryAt(repository.path), id), { kind: "unappointed" });
 });
 
 test("selector refusal does not use sole-active fallback and accepts only active @short", async () => {

@@ -1,8 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ContractId, SnapshotId } from "../core/facts/types.js";
-import { contractPhysicalName, gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
+import type { SnapshotId } from "../core/facts/types.js";
+import { gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { runGit, runGitWithEnvironment, type GitRepository } from "./repository.js";
 
 const WORKTREE_DIRECTORY = ["keiyaku", "wt"] as const;
@@ -21,8 +21,8 @@ export type WorkspaceTree = Readonly<{
   changes: WorkspaceChanges;
 }>;
 
-export function deliveryWorktreePath(repository: GitRepository, contract: ContractId): string {
-  return resolve(repository.commonDirectory, ...WORKTREE_DIRECTORY, contractPhysicalName(contract));
+export function worktreePath(repository: GitRepository, place: string): string {
+  return resolve(repository.commonDirectory, ...WORKTREE_DIRECTORY, place);
 }
 
 export async function withPrivateGitIndex<Value>(action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value | PromiseLike<Value>): Promise<Value> {
@@ -105,7 +105,8 @@ export type ContractWorkspaceLocation =
 
 export type ContractWorkspaceObservation =
   | Readonly<{ kind: "clean" | "dirty"; location: ContractWorkspaceLocation; counts: WorkspaceChangeCounts }>
-  | Readonly<{ kind: "unavailable"; location: ContractWorkspaceLocation }>;
+  | Readonly<{ kind: "unavailable"; location: ContractWorkspaceLocation }>
+  | Readonly<{ kind: "unappointed" }>;
 
 export type ContractTargetLag =
   | Readonly<{ kind: "counted"; behind: number }>

@@ -79,7 +79,9 @@ unsealed `HEAD`. Destroy hooks run only after the initial proof, and Keiyaku
 repeats the complete proof after the hooks return. An eligible worktree is then
 removed with `git worktree remove --force`; force is legal here only because the
 complete byte and `HEAD` proof has already succeeded twice. Removal precedes ref
-cleanup. Each Keiyaku-owned ref deletion atomically verifies its surviving
+cleanup. That result must prove the appointed path is physically absent
+before Place release; leftover bytes at an unregistered appointed path
+are retention, not a completed cleanup. Each Keiyaku-owned ref deletion atomically verifies its surviving
 custodian ref. Integration custody requires the exact integration commit;
 tender custody requires the exact tender tree and may therefore pass to the
 claimed integration when their trees match. Nonredundant custody remains.

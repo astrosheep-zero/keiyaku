@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readManagedWorktreeAppointment } from "../../src/workspace-place.js";
 import type { ContractId } from "../../src/core/facts/types.js";
 import { observeContractAt } from "../../src/git/observe.js";
 import { withGitDecodeChannel } from "../../src/git/read-observation.js";
@@ -75,4 +76,12 @@ export function gitRepositoryPath(): string {
 
 export function observeContract(repository: GitRepository, id: ContractId) {
   return withGitDecodeChannel(repository, (channel) => observeContractAt(repository, channel, id));
+}
+
+export async function appointedWorktreePath(repository: GitRepository, contract: ContractId): Promise<string> {
+  const appointment = await readManagedWorktreeAppointment(repository, contract);
+  if (appointment.kind !== "appointed") {
+    throw new Error(`expected appointed Place for ${contract}, got ${appointment.kind}`);
+  }
+  return appointment.path;
 }

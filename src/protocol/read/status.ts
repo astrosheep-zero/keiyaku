@@ -6,10 +6,15 @@ import {
 } from "../../git/observe.js";
 import { decodeContractDocument } from "../../body/decode.js";
 import {
-  deliveryWorktreePath,
   observeTargetLag,
   observeWorkspace,
+  worktreePath,
 } from "../../git/workspace.js";
+import {
+  appointmentFor,
+  readPlaceRegister,
+  type PlaceRegister,
+} from "../../workspace-place.js";
 import type { ContractTargetLag, ContractWorkspaceObservation } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/repository.js";
 import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
@@ -78,22 +83,59 @@ export function phaseAtFor(
   return state.terminal?.at ?? state.delivery?.at ?? state.bound?.at ?? bindAt;
 }
 
+async function managedWorkspaceFacts(
+  repository: GitRepository,
+  state: ContractState,
+  register: PlaceRegister,
+  targetObservation: ContractRow["targetObservation"],
+): Promise<Readonly<{
+  appointed: ReturnType<typeof appointmentFor>;
+  workspaceObservation: ContractWorkspaceObservation;
+  targetLag: ContractTargetLag;
+}>> {
+  const appointed = appointmentFor(register, state.id);
+  if (appointed === undefined) {
+    return {
+      appointed,
+      workspaceObservation: { kind: "unappointed" },
+      targetLag: state.coordinates.target === undefined ? { kind: "none" } : { kind: "unknown" },
+    };
+  }
+  const path = worktreePath(repository, appointed.place);
+  const [workspaceObservation, targetLag] = await Promise.all([
+    observeWorkspace(repository, { kind: "worktree", path }, path),
+    observeTargetLag(repository, path, targetObservation?.head),
+  ]);
+  return { appointed, workspaceObservation, targetLag };
+}
+
+async function hereWorkspaceFacts(
+  repository: GitRepository,
+  targetObservation: ContractRow["targetObservation"],
+): Promise<Readonly<{
+  appointed: undefined;
+  workspaceObservation: ContractWorkspaceObservation;
+  targetLag: ContractTargetLag;
+}>> {
+  const [workspaceObservation, targetLag] = await Promise.all([
+    observeWorkspace(repository, { kind: "here" }, repository.effectiveCwd),
+    observeTargetLag(repository, repository.effectiveCwd, targetObservation?.head),
+  ]);
+  return { appointed: undefined, workspaceObservation, targetLag };
+}
+
 async function rowFor(
   repository: GitRepository,
   state: ContractState,
   bindAt: string,
   targetObservation: ContractRow["targetObservation"],
+  register: PlaceRegister,
 ): Promise<ContractRow> {
   const workspace = state.coordinates.workspace;
   const gates = gateReports(state);
-  const location = workspace === "worktree"
-    ? { kind: "worktree" as const, path: deliveryWorktreePath(repository, state.id) }
-    : { kind: "here" as const };
-  const workspacePath = location.kind === "worktree" ? location.path : repository.effectiveCwd;
-  const [workspaceObservation, targetLag] = await Promise.all([
-    observeWorkspace(repository, location, workspacePath),
-    observeTargetLag(repository, workspacePath, targetObservation?.head),
-  ]);
+  const { appointed, workspaceObservation, targetLag } = workspace === "worktree"
+    ? await managedWorkspaceFacts(repository, state, register, targetObservation)
+    : await hereWorkspaceFacts(repository, targetObservation);
   return {
     id: state.id,
     title: titleFor(state),
@@ -101,7 +143,7 @@ async function rowFor(
     phaseAt: phaseAtFor(state, bindAt),
     disposition: state.terminal === null ? "active" : "terminal",
     workspace,
-    worktreePath: location.kind === "worktree" ? location.path : null,
+    worktreePath: appointed === undefined ? null : worktreePath(repository, appointed.place),
     workspaceObservation,
     target: state.coordinates.target ?? null,
     targetLag,
@@ -117,13 +159,14 @@ async function rowFor(
 /** Build the Contract board from one immutable git observation. */
 export async function readContractBoard(observation: GitReadObservation): Promise<ContractBoard> {
   const observed = await observeActiveContractWorld(observation);
+  const register = await readPlaceRegister(observation.repository);
   const rows: Promise<ContractRow>[] = [];
   for (const value of observed.contracts.values()) {
     if (value.state === null) continue;
     const state = value.state;
     const bindAt = value.entries[0]!.at;
     rows.push(observeDeliveryTargetAt(observation, state).then((target) =>
-      rowFor(observation.repository, state, bindAt, target)));
+      rowFor(observation.repository, state, bindAt, target, register)));
   }
   return { root: observation.repository.primaryWorktree, state: observed.snapshot, rows: await Promise.all(rows) };
 }
@@ -148,6 +191,7 @@ export async function readContractObservationAt(
             state,
             record.entries[0]!.at,
             await observeDeliveryTargetAt(observation, state),
+            await readPlaceRegister(observation.repository),
           ),
         };
   });

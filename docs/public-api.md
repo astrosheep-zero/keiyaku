@@ -226,6 +226,7 @@ type ContractWorkspaceLocation =
 type ContractWorkspaceObservation =
   | Readonly<{ kind: "clean" | "dirty"; location: ContractWorkspaceLocation; counts: Readonly<{ staged: number; unstaged: number; untracked: number; submodules: number }> }>
   | Readonly<{ kind: "unavailable"; location: ContractWorkspaceLocation }>
+  | Readonly<{ kind: "unappointed" }>
 
 type ContractRow = Readonly<{
   id: ContractId
@@ -257,7 +258,8 @@ type ContractObservation =
 absent. Title is the current document H1. `targetLag` counts workspace `HEAD`
 against the same-epoch `targetObservation.head` and never rereads a live
 target ref. `workspaceObservation` is a Git read-time fact, not a journal
-field. Phase,
+field. An unappointed managed Contract uses the `unappointed` arm,
+keeps `worktreePath` null, and is not probed as a worktree. Phase,
 disposition, candidate currency, every gate report, and `gates.satisfied` use
 the claimed-admission judgment. Downstream boards copy them and never
 re-evaluate them.

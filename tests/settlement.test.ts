@@ -25,11 +25,11 @@ import { EMPTY_WORKTREE_HOOKS } from "../src/library/configuration.js";
 import { requireAccepted } from "../src/library/refusal.js";
 import { reviewOperation } from "../src/protocol/operations.js";
 import { settle } from "../src/settlement/settle.js";
-import { deliveryWorktreePath } from "../src/git/workspace.js";
+
 import { readNamespaceContext } from "../src/task/context.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
-import { makeGitRepository, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, makeGitRepository, withGitShim } from "./support/git.js";
 
 function repository() {
   const value = makeGitRepository();
@@ -367,7 +367,7 @@ test("a terminal held Contract completes placement and Task settlement after its
     gates: ["reviewed"],
   });
   const state = await bound.keiyaku.state();
-  const path = deliveryWorktreePath(await repositoryAt(world.path), state.id);
+  const path = await appointedWorktreePath(await repositoryAt(world.path), state.id);
   const fromWorktree = Keiyaku.of({ repo: await Repo.at({ path }), id: state.id });
   writeFileSync(`${path}/terminal.txt`, "candidate\n");
   await fromWorktree.deliver({ includeDirty: true });
@@ -441,7 +441,7 @@ test("a claimed managed-worktree Contract settles its held Task after removal", 
   const taskId = await task(world.path, "Managed claim");
   const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Managed claim"), workspace: "worktree", gates: [] });
   const state = await bound.keiyaku.state();
-  const path = deliveryWorktreePath(await repositoryAt(world.path), state.id);
+  const path = await appointedWorktreePath(await repositoryAt(world.path), state.id);
   const fromWorktree = Keiyaku.of({ repo: await Repo.at({ path }), id: state.id });
   writeFileSync(`${path}/candidate.txt`, "candidate\n");
   const claimed = await fromWorktree.deliver({ includeDirty: true });

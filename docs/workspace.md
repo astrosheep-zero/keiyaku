@@ -70,11 +70,129 @@ known, a later workspace projection restores canonical bytes. Terminal
 cleanup and foreign-appointment refusal use the parsed Contract identity and
 never treat the description as lifecycle authority.
 
+## Managed Place Appointment
+
+Place is the managed form of this same local appointment. It is not a Git
+identity, journal field, or a second product. A here Contract never enters
+the Place register.
+
+The sole managed appointment authority is one canonical file and one
+coordination lock under the pinned common Git directory:
+
+```text
+<git-common-dir>/keiyaku/places.json
+<git-common-dir>/keiyaku/locks/places.sqlite
+```
+
+The current file shape is exactly:
+
+```json
+{"version":1,"appointments":{"atlantis":"kei/example"}}
+```
+
+It is one canonical JSON line with one trailing LF. The top-level fields are
+exactly `version` then `appointments`; `version` is exactly `1`; appointment
+keys are sorted by byte order and values are complete valid ContractIds. Each
+ContractId occurs at most once. A missing file means no appointments. An
+empty register, once written, remains the complete
+`{"version":1,"appointments":{}}\n` document. Noncanonical bytes, unknown
+fields or version, an invalid Place or ContractId, or duplicate Contract
+appointment are corruption. Mutation surfaces propagate the verbatim
+corruption diagnostic as exit 3; observation returns a typed failed arm
+without suppressing other independently readable status sections.
+
+The first-generation Place vocabulary is the exact ordered 173-entry v3
+catalog owned as one source constant in the workspace Place owner
+(`src/workspace-place.ts`). A later
+generation appends its canonical decimal integer, at least 2 and without a
+leading zero, to each base. Allocation order is generation-major: the
+complete catalog in listed order, then the same catalog with suffix `2`,
+then suffix `3`, without bound. Generation arithmetic is exact beyond
+`Number.MAX_SAFE_INTEGER`. Allocation chooses the first unappointed Place.
+The v3 random-base allocator and shared-ledger Place field are not part of
+this owner. The register stores only current appointments; it has no cursor,
+free list, tombstone, reverse index, migration bit, or physical occupancy
+fact. Decode builds one immutable in-memory snapshot with derived by-Place
+and by-Contract indexes. Those indexes are not persisted authority.
+
+Every register mutation holds one SQLite `BEGIN IMMEDIATE` transaction at
+the exact lock path across decode, map mutation, and durable same-directory
+replacement. Readers do not lock and observe one complete old or new file
+through atomic rename. One invocation decodes the register at most once for
+its read or bulk path and passes that snapshot through reconcile, bulk
+observation, and public reading; there is no per-Contract file read or
+cross-invocation cache. A writer decodes its fresh mutation premise only
+inside the lock. A caller-held register snapshot is read-only projection
+and is never a writer premise or a later Git-effect authorization.
+
+Managed bind admission remains journal-only. Materialization then runs in
+this order: fold the admitted Contract; under the register lock, decode once
+and reuse the Contract's appointment or durably appoint first-free; if that
+appointment failed operationally, return typed lag and perform no Git
+effect. World reconcile applies that lag only to observed managed
+Contracts; every here Contract continues the ordinary single-Contract
+lifecycle. Realize Git at `<git-common-dir>/keiyaku/wt/<place>`; project
+workspace guidance at that realized worktree. Once an appointment is durable
+it survives every later failure, and retry uses the same Place. Existing
+appointments are never reselected from Git or filesystem topology.
+Allocation does not pre-check a physical directory.
+
+Only an active managed Contract may receive a missing appointment. A
+terminal Contract consumes an existing appointment for retained cleanup
+and is never freshly appointed after a successful release. Appointment
+absence for an ordinary terminal Contract is the proof that terminal
+physical cleanup already completed, because release is ordered after
+hooks and removal. Repeated per-Contract and whole-repo reconcile must
+remain unappointed and clean.
+
+The sole pre-Place exception is a terminal still registered at the
+retired ContractId-derived coordinate: that world is appointed, adopted
+onto the Place, removed, and released. Dirty or otherwise retained bytes
+keep the appointment.
+
+Managed terminal cleanup keeps the appointment through hooks and physical
+Git worktree removal. Git's cleanup result must prove the appointed path
+is physically absent before one locked durable register mutation removes
+that Contract's entry. An unregistered-but-existing appointed path is
+typed retention and keeps the appointment. A truly absent path may permit
+release even when this attempt reports no removal. Any hook, removal, or
+operational register-write failure leaves the appointment, so a free
+Place never hides managed bytes. The next reconcile retries that same
+absence proof and release. Release corruption propagates. There is no
+second persisted release marker.
+
+This owner exposes exactly one read for later Library call composition:
+
+```ts
+readManagedWorktreeAppointment(repo, contract): Promise<
+  | { kind: "appointed"; place: string; path: string }
+  | { kind: "unappointed" }
+  | { kind: "failed"; diagnostic: string }
+>
+```
+
+`appointed` comes only from the decoded register. `unappointed` includes an
+admitted managed Contract not yet appointed and every here Contract.
+Register corruption or an unavailable read is one `failed` arm. The reader
+does not inspect the journal, Git registration, or filesystem existence and
+does not reconcile. Public status uses that same appointment fact: an
+unappointed managed Contract reports a typed `unappointed` workspace
+observation, keeps `worktreePath` null, and never names `places.json` as a
+worktree path or issues Git workspace or target-lag probes against a
+nonexistent worktree. Contract journals, coordinates, state refs, delivery
+refs, candidate pins, selectors, Tasks, Dispatch, Alias, Akuma Heart, and
+guidance frontmatter never persist Place. Managed worktrees contain no
+second appointment marker; `.keiyaku/KEIYAKU.md` is guidance inside a
+managed worktree.
+
 ## Materialization And Cleanup
 
-After Git reconciliation, library orchestration passes the freshly folded
-Contract state to the workspace owner. The workspace owner creates or repairs
-these derived files atomically:
+Post-admission Place lifecycle composition has one private concrete Library
+owner at `src/library/reconcile.ts`. That owner appoints a managed Place
+before Git realization, then passes the freshly folded Contract state here
+for guidance. Mutation and Repo remain thin entry points and do not repeat
+that appointment, cleanup, release, or register-lag policy. The workspace
+owner creates or repairs these derived files atomically:
 
 ```text
 .keiyaku/.gitignore

@@ -256,8 +256,9 @@ line:
 
 The worktree state line is always visible. The complete path line expands for
 an active/hot Contract or any dirty or unavailable observation; a cold clean
-Contract may omit the path while retaining `worktree clean`. A here Contract
-renders `workspace here · clean|dirty|unavailable` and never fabricates a
-managed path. A path is always one complete coordinate; renderer truncation
+Contract may omit the path while retaining `worktree clean`. An unappointed
+managed Contract renders `worktree unappointed` and never names a worktree
+path. A here Contract renders `workspace here · clean|dirty|unavailable` and
+never fabricates a managed path. A path is always one complete coordinate; renderer truncation
 or an ellipsis is forbidden. The path line is subordinate fact syntax, not a
 cross-product relation, and does not use the entity attachment relation.

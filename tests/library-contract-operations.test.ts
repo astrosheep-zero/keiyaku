@@ -4,8 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { deliveryWorktreePath } from "../src/git/workspace.js";
-import { withGitShim } from "./support/git.js";
+import { appointedWorktreePath, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
 const CANONICAL_DESCRIPTION = "This is a read-only projection. Do not edit manually.";
@@ -279,7 +278,7 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
   });
   assert.equal((await dependent.keiyaku.state()).bound, null);
   const dependentId = (await dependent.keiyaku.state()).id;
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), dependentId);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), dependentId);
   await dependent.keiyaku.abandon();
   assert.equal(existsSync(path), false);
 

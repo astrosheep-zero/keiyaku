@@ -10,11 +10,10 @@ import { readRef, repositoryAt } from "../src/git/repository.js";
 import { readDeliveryDiff } from "../src/git/integration.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { reconcile } from "../src/git/reconcile.js";
-import { deliveryWorktreePath } from "../src/git/workspace.js";
-import { contractId } from "../src/core/facts/types.js";
+import { worktreePath } from "../src/git/workspace.js";
 import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
-import { makeGitRepository, observeContract, type TestGitRepository, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, makeGitRepository, observeContract, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function contractBody(): string {
   return [
@@ -89,7 +88,7 @@ async function targetedContract() {
     contract: bound.keiyaku,
     repository,
     state,
-    worktree: deliveryWorktreePath(await repositoryAt(repository.path), state.id),
+    worktree: await appointedWorktreePath(await repositoryAt(repository.path), state.id),
   };
 }
 
@@ -110,7 +109,7 @@ async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
     target: "refs/heads/main",
   });
   const state = await bound.keiyaku.state();
-  const worktree = deliveryWorktreePath(await repositoryAt(repository.path), state.id);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), state.id);
   repository.run(["-C", worktree, "rm", "-r", "artifact"]);
   writeFileSync(join(worktree, "artifact"), "candidate file\n");
   repository.run(["-C", worktree, "add", "artifact"]);
@@ -268,12 +267,9 @@ test("permissive integration reports unsupported Git while strict policy needs n
   assert.equal(strict.kind, "prepared");
 });
 
-test("Git materialization normalizes the complete prefixed identity", async () => {
+test("Git materialization uses the appointed Place basename", async () => {
   const repository = makeGitRepository();
-  assert.equal(
-    basename(deliveryWorktreePath(await repositoryAt(repository.path), contractId("kei/con"))),
-    "kei-con",
-  );
+  assert.equal(basename(worktreePath(await repositoryAt(repository.path), "atlantis")), "atlantis");
 });
 
 test("dirty delivery materializes a candidate without changing the caller index", async () => {
@@ -632,7 +628,7 @@ test("delivery preparation refuses an unregistered directory at the managed work
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   const state = await bound.keiyaku.state();
   const git = await repositoryAt(repository.path);
-  const path = deliveryWorktreePath(git, state.id);
+  const path = await appointedWorktreePath(git, state.id);
   repository.run(["worktree", "remove", path]);
   mkdirSync(path, { recursive: true });
   repository.run(["-C", path, "init", "--quiet"]);
@@ -653,7 +649,7 @@ test("reconcile recreates a registered managed worktree whose directory disappea
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   await bound.keiyaku.reconcile();
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   renameSync(path, `${path}-moved`);
 
   const repaired = await bound.keiyaku.reconcile();
@@ -843,7 +839,7 @@ test("targetless terminal cleanup retains tender custody for Delivery.diff", asy
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
 
   await bound.keiyaku.reconcile();
-  const worktreePath = deliveryWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const worktreePath = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   writeFileSync(join(worktreePath, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktreePath, "add", "candidate.txt"]);
   repository.run(["-C", worktreePath, "commit", "--quiet", "-m", "candidate"]);
@@ -869,7 +865,7 @@ test("terminal reconcile retains an untracked managed worktree and its reachabil
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
   await bound.keiyaku.reconcile();
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "tendered candidate"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
   await bound.keiyaku.deliver();
@@ -892,7 +888,7 @@ test("terminal reconcile retains a clean managed worktree whose HEAD is not the 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
   await bound.keiyaku.reconcile();
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "tendered candidate"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
   await bound.keiyaku.deliver();
@@ -917,7 +913,7 @@ test("terminal reconcile removes a delivered managed worktree reset to its seale
   const start = repository.run(["rev-parse", "HEAD"]).trim();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
   await bound.keiyaku.reconcile();
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   writeFileSync(join(path, "candidate.txt"), "candidate\n");
   repository.run(["-C", path, "add", "candidate.txt"]);
   repository.run(["-C", path, "commit", "--quiet", "-m", "tendered candidate"]);
@@ -941,7 +937,7 @@ test("terminal reconcile removes dirty deliver bytes over their sealed base HEAD
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
   await bound.keiyaku.reconcile();
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   writeFileSync(join(path, "candidate.txt"), "dirty candidate\n");
   const baseHead = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
 
@@ -963,7 +959,7 @@ test("terminal reconcile retains a tender merge second parent despite sealed byt
   const start = repository.run(["rev-parse", "HEAD"]).trim();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
   await bound.keiyaku.reconcile();
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   writeFileSync(join(path, "candidate.txt"), "candidate\n");
   repository.run(["-C", path, "add", "candidate.txt"]);
   const tenderTree = repository.run(["-C", path, "write-tree"]).trim();
@@ -990,7 +986,7 @@ test("a clean no-delivery abandonment releases the managed worktree from its sta
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   const start = repository.run(["rev-parse", "HEAD"]).trim();
   await bound.keiyaku.reconcile();
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   const abandoned = await bound.keiyaku.abandon();
 
   assert.deepEqual(abandoned.lags, []);

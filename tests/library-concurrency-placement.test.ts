@@ -8,8 +8,7 @@ import { encodeEntry } from "../src/core/facts/codec.js";
 import { entryUlid, type JournalEntry } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { deliveryWorktreePath } from "../src/git/workspace.js";
-import { withGitShim } from "./support/git.js";
+import { appointedWorktreePath, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
 test("public amend returns the recovered journal head after unknown recovery", async () => {
@@ -230,7 +229,7 @@ test("review stops placement when its verified target premise moves", async () =
     workspace: "worktree",
     gates: ["reviewed"],
   });
-  const worktree = deliveryWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
   writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);

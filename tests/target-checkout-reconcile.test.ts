@@ -9,10 +9,10 @@ import { gate, type ContractId } from "../src/core/facts/types.js";
 import { admitDecidedOffer, mintAttempts } from "../src/protocol/attempt.js";
 import { admitIntent } from "../src/protocol/intent.js";
 import { observeContractsForAdmissionAt } from "../src/git/observe.js";
-import { deliveryWorktreePath } from "../src/git/workspace.js";
+
 import { repositoryAt } from "../src/git/repository.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { makeGitRepository, observeContract, type TestGitRepository, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, makeGitRepository, observeContract, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithMain(): TestGitRepository {
   const repository = makeGitRepository();
@@ -60,7 +60,7 @@ async function managedCandidate(repository: TestGitRepository, gates: readonly s
     gates,
   });
   const contract = bound.keiyaku;
-  const path = deliveryWorktreePath(await repositoryAt(repository.path), contract.id);
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), contract.id);
   writeFileSync(resolve(path, "delivered.txt"), "candidate\n");
   repository.run(["-C", path, "add", "delivered.txt"]);
   repository.run(["-C", path, "commit", "--quiet", "-m", "candidate"]);

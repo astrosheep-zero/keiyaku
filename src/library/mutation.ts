@@ -1,11 +1,11 @@
 import type { ContractHead, ContractId, JournalEntry } from "../core/facts/types.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import { reconcileOperation, type ReconcileReport, type RepositoryScope } from "../protocol/operations.js";
+import type { ReconcileReport, RepositoryScope } from "../protocol/operations.js";
 import type { IntentOutcome } from "../protocol/operations.js";
-import { deferredTaskHolderSettlement, settle, type SettlementReport } from "../settlement/settle.js";
+import { deferredTaskHolderSettlement, type SettlementReport } from "../settlement/settle.js";
 import type { TaskHolderAdmission } from "../settlement/holder.js";
 import type { WorktreeHooks } from "./configuration.js";
-import { projectContractWorktree, type ContractFileEffect, type ContractFileLag } from "../contract-worktree.js";
+import { completeReconcile, type ReconcileCompletion } from "./reconcile.js";
 
 export type AcceptedIntent<Value> = Readonly<{
   kind: "accepted";
@@ -19,8 +19,8 @@ export type MutationResult<Value> = Readonly<{
   facts: readonly JournalEntry[];
   head: ContractHead;
   value: Value;
-  effects: readonly (ReconcileReport["effects"][number] | ContractFileEffect)[];
-  lags: readonly (ReconcileReport["lag"][number] | ContractFileLag)[];
+  effects: ReconcileCompletion["effects"];
+  lags: ReconcileCompletion["lag"];
   settlement: SettlementReport;
 }>;
 
@@ -37,21 +37,14 @@ export async function completeMutation<Value, PublicValue>(
   input: Completion<Value, PublicValue>,
 ): Promise<MutationResult<PublicValue>> {
   const { scope, channel, contractId, accepted, value, hooks } = input;
-  const retained = await reconcileOperation({ scope, channel, contractId, hooks, retryHooks: false, retainTerminalWorktree: true });
-  const projection = await projectContractWorktree(scope, retained.state);
-  const settlement = await settle({ repository: scope, channel, state: retained.state, effects: retained.report.effects });
-  const deferRemoval = retained.state !== null && retained.state.terminal !== null
-    && retained.state.coordinates.workspace === "worktree";
-  const cleanup = deferRemoval
-    ? await reconcileOperation({ scope, channel, contractId, hooks, retryHooks: false })
-    : null;
+  const report = await completeReconcile({ scope, channel, contractId, hooks, retryHooks: false });
   return {
     facts: accepted.facts,
     head: accepted.head,
     value: value(accepted.value),
-    effects: [...(accepted.physical?.effects ?? []), ...retained.report.effects, ...projection.effects, ...(cleanup?.report.effects ?? [])],
-    lags: [...(accepted.physical?.lag ?? []), ...retained.report.lag, ...projection.lag, ...(cleanup?.report.lag ?? [])],
-    settlement,
+    effects: [...(accepted.physical?.effects ?? []), ...report.effects],
+    lags: [...(accepted.physical?.lag ?? []), ...report.lag],
+    settlement: report.settlement,
   };
 }
 

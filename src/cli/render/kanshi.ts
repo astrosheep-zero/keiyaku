@@ -81,6 +81,7 @@ function targetFacts(row: ContractKanshiRow): readonly string[] {
 function workspaceState(row: ContractKanshiRow): string {
   const observation = row.workspaceObservation;
   if (row.workspace === "here") return `workspace here · ${observation.kind}`;
+  if (observation.kind === "unappointed") return "worktree unappointed";
   if (observation.kind === "unavailable") return "worktree unavailable";
   if (observation.kind === "clean") return "worktree clean";
   const counts = [
@@ -94,6 +95,7 @@ function workspaceState(row: ContractKanshiRow): string {
 
 function showWorkspacePath(row: ContractKanshiRow, hot: boolean): boolean {
   if (row.workspace !== "worktree") return false;
+  if (row.workspaceObservation.kind === "unappointed") return false;
   if (row.workspaceObservation.kind !== "clean") return true;
   return hot;
 }
@@ -104,7 +106,9 @@ function contractHot(row: ContractKanshiRow): boolean {
   if (row.holder.kind === "unavailable" || row.holder.kind === "held") return true;
   if (row.fleet.length > 0) return true;
   if (row.targetLag.kind === "counted" && row.targetLag.behind > 0) return true;
-  if (row.workspaceObservation.kind !== "clean") return true;
+  if (row.workspaceObservation.kind !== "clean" && row.workspaceObservation.kind !== "unappointed") {
+    return true;
+  }
   return row.gates.reports.some((report) =>
     report.current.kind === "stale"
     || (report.current.kind === "attested" && report.current.verdict === "unsatisfied"));
@@ -208,7 +212,11 @@ function renderContracts(report: KanshiReport, context: TextRenderContext, selec
     ));
     if (!compact) lines.push(...plumbFacts([phase, ...targetFacts(row)], context.columns));
     lines.push(...plumbFacts([workspaceState(row)], context.columns));
-    if (showWorkspacePath(row, hot || selection === "contract") && row.workspaceObservation.location.kind === "worktree") {
+    if (
+      showWorkspacePath(row, hot || selection === "contract")
+      && row.workspaceObservation.kind !== "unappointed"
+      && row.workspaceObservation.location.kind === "worktree"
+    ) {
       lines.push(plumbPath(row.workspaceObservation.location.path));
     }
     lines.push(...renderGates(row.gates.reports, report.observedAt, context.columns, selection === "contract"));

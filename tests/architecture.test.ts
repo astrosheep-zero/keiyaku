@@ -366,14 +366,14 @@ test("architecture policy permits the aggregate status read path", () => {
   const diagnostics = check({
     "core/facts/types.ts": "export type ContractId = string; export type ContractState = {}; export type SnapshotId = string;",
     "core/facts/gate.ts": "export function gateReports(): void {} export function gatesSatisfied(): void {}",
-    "git/workspace.ts": "export function deliveryWorktreePath(): string { return \"\"; }",
+    "git/workspace.ts": "export function worktreePath(): string { return \"\"; }",
     "protocol/read/status.ts": [
-      'import { deliveryWorktreePath } from "../../git/workspace.js";',
+      'import { worktreePath } from "../../git/workspace.js";',
       'import { gateReports } from "../../core/facts/gate.js";',
       'import type { ContractId, ContractState, SnapshotId } from "../../core/facts/types.js";',
       "export type ContractRow = { id: ContractId; delivery: unknown; targetObservation: unknown };",
       "export type ContractBoard = { rows: readonly ContractRow[] };",
-      "export function readContractBoard(state: ContractState): ContractBoard { void deliveryWorktreePath; gateReports(); void state; return { rows: [] }; }",
+      "export function readContractBoard(state: ContractState): ContractBoard { void worktreePath; gateReports(); void state; return { rows: [] }; }",
     ].join("\n"),
     "protocol/operations.ts": [
       'import { readContractBoard, type ContractBoard, type ContractRow } from "./read/status.js";',

@@ -3,11 +3,12 @@ import type { Preparation } from "../core/decide.js";
 import type { ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { registeredWorktreePaths, runGit, runGitWithEnvironment, type GitRepository } from "./repository.js";
-import { captureWorkspaceTree, deliveryWorktreePath } from "./workspace.js";
+import { captureWorkspaceTree, worktreePath } from "./workspace.js";
 
 export type TenderCaptureCoordinates = Readonly<{
   contractId: ContractId;
   coordinates: ContractCoordinates;
+  place?: string;
 }>;
 
 export type TenderCaptureRefusal = Readonly<{
@@ -45,8 +46,9 @@ async function workspaceExists(repository: GitRepository, workspace: "worktree" 
     || (exists && (await registeredWorktreePaths(repository)).includes(path));
 }
 
-function workspaceFor(repository: GitRepository, id: ContractId, workspace: "worktree" | "here"): string {
-  return workspace === "worktree" ? deliveryWorktreePath(repository, id) : repository.effectiveCwd;
+function workspaceFor(repository: GitRepository, input: TenderCaptureCoordinates): string | undefined {
+  if (input.coordinates.workspace === "here") return repository.effectiveCwd;
+  return input.place === undefined ? undefined : worktreePath(repository, input.place);
 }
 
 /** Capture the complete workspace tree through Git's private index mechanics. */
@@ -54,8 +56,8 @@ export async function captureTender(
   repository: GitRepository,
   input: TenderCaptureCoordinates,
 ): Promise<Preparation<TenderCapture, TenderCaptureRefusal>> {
-  const workspace = workspaceFor(repository, input.contractId, input.coordinates.workspace);
-  if (!(await workspaceExists(repository, input.coordinates.workspace, workspace))) {
+  const workspace = workspaceFor(repository, input);
+  if (workspace === undefined || !(await workspaceExists(repository, input.coordinates.workspace, workspace))) {
     return { kind: "refused", refusal: { kind: "worktree-missing", contractId: input.contractId } };
   }
   return { kind: "prepared", data: await captureWorkspaceTree(repository, workspace) };

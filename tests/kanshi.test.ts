@@ -805,6 +805,24 @@ test("Kanshi Split Horizon stays one line at standard widths", () => {
   }
 });
 
+test("unappointed managed Contracts render without a worktree path", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
+  const rows = report.contracts.value.rows.map((row) => row.id === "kei/cold-contract"
+    ? {
+      ...row,
+      worktreePath: null,
+      workspaceObservation: { kind: "unappointed" as const },
+    }
+    : row);
+  const text = renderKanshiText({
+    ...report,
+    contracts: { ...report.contracts, value: { ...report.contracts.value, rows } },
+  }, { columns: 120, color: false });
+  assert.match(text, /worktree unappointed/u);
+  assert.doesNotMatch(text, /kei\/cold-contract[\s\S]*↳ /u);
+});
+
 test("exact Contract Kanshi text keeps terminal gates and testimony summaries", () => {
   const selected = selectKanshi({ report: attentionReport(), contract: "kei/terminal-contract" });
   const text = renderKanshiText(selected, { columns: 80, color: false }, "contract");

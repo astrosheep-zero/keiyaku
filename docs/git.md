@@ -146,22 +146,49 @@ this one Git owner. The library boundary rejects a target that names any
 of them before coordinates are recorded; target input and canonicalization are
 defined only in [public-api.md](public-api.md).
 
-Git derives each managed delivery-ref leaf, candidate-pin leaf, and
-worktree basename from the complete ContractId using one private physical-name
-projection. It replaces the validated coordinate's structural `/` separator
-with `-`; for example, `kei/example` materializes as `kei-example`. The family
-prefix comes from the identity itself and is neither added nor reconstructed by
-Git. This stable projection does not reuse title normalization. These
-names are deterministic topology, not public identity or a second legality
-authority.
+Git derives each managed delivery-ref leaf and candidate-pin leaf from the
+complete ContractId using one private physical-name projection. It replaces
+the validated coordinate's structural `/` separator with `-`; for example,
+`kei/example` materializes as `kei-example`. The family prefix comes from
+the identity itself and is neither added nor reconstructed by Git. This
+stable projection does not reuse title normalization. These names are
+deterministic topology, not public identity or a second legality authority.
 
-A managed worktree has exactly one deterministic physical path:
-`<git-common-dir>/keiyaku/wt/<contract-physical-name>`. Primary and linked
-worktrees therefore derive the same path for one Contract. The path is a
-read-time projection from the pinned common Git directory and ContractId; it is
-not stored in the Contract journal, and there is no legacy-path fallback. Git
-owns workspace cleanliness and target lag there, or at the pinned caller
-worktree for `here`, counting workspace `HEAD` against the same-epoch frozen `targetObservation.head` and never a live target ref. A named target with a missing frozen head is unknown. Clean means empty staged, unstaged, untracked, and submodule sets; otherwise dirty; unavailable when unobservable. Here never fabricates a managed path. These facts are not persisted.
+Git does not derive a managed worktree path from ContractId. Workspace
+appointment owns Place allocation; Git consumes an explicit appointed Place
+and realizes the worktree only at
+`<git-common-dir>/keiyaku/wt/<place>` through the pure
+`worktreePath(repository, place)` projection. Primary and linked worktrees
+therefore share that appointed path. The path is not stored in the Contract
+journal. If realization finds no registered worktree at the appointed path
+but finds that Contract's pre-Place worktree at the retired
+`wt/<contract-physical-name>` coordinate, it uses `git worktree move` to
+adopt it. Terminal cleanup uses that same adoption before sealed removal
+when the appointed path is missing. The directory move preserves staged,
+unstaged, and untracked bytes. Failure is typed lag, leaves the
+appointment unchanged, and retries later. No reader ever returns the
+retired path; there is no fallback from appointed reads. This repair
+branch is the sole pre-Place hard-cut input and may be deleted after no
+such worlds remain.
+
+Git's terminal worktree cleanup proves the appointed path is physically
+absent before the workspace owner may release the Place. An
+unregistered-but-existing appointed path is typed `worktree-retained` lag
+and is not a successful cleanup. A path that is neither registered nor
+present may report `unchanged` and still prove absence. An ordinary
+unappointed terminal is not a missing-Place failure: appointment absence
+is the proof that physical cleanup already completed. An unappointed
+terminal still registered at the retired coordinate is the hard-cut
+exception and cannot be cleaned until it is appointed.
+
+Git owns workspace cleanliness and target lag at the appointed path, or at
+the pinned caller worktree for `here`, counting workspace `HEAD` against
+the same-epoch frozen `targetObservation.head` and never a live target ref.
+A named target with a missing frozen head is unknown. Clean means empty
+staged, unstaged, untracked, and submodule sets; otherwise dirty;
+unavailable when unobservable. An unappointed managed Contract has no
+worktree to probe. Here never fabricates a managed path. These facts are
+not persisted.
 
 ## Tender, Integration, And Diff Ownership
 

@@ -14,7 +14,13 @@ import {
   worktreeRoot,
   type GitRepository,
 } from "./git/repository.js";
-import { deliveryWorktreePath } from "./git/workspace.js";
+import { worktreePath } from "./git/workspace.js";
+import {
+  appointmentFor,
+  placeRegisterPath,
+  readPlaceRegister,
+  type PlaceRegister,
+} from "./workspace-place.js";
 
 const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
 const APPOINTMENT_DESCRIPTION = "This is a read-only projection. Do not edit manually.";
@@ -254,12 +260,34 @@ async function removeHere(repository: GitRepository, contract: ContractId): Prom
   }
 }
 
-export async function projectContractWorktree(repository: GitRepository, state: ContractState | null): Promise<ContractWorktreeResult> {
-  if (state === null) return { effects: [], lag: [] };
-  if (state.coordinates.workspace === "here") {
-    return state.terminal ? await removeHere(repository, state.id) : await here(repository, state, renderContractGuidance(state));
+export async function projectContractWorktree(
+  repository: GitRepository,
+  state: ContractState | null,
+  register?: PlaceRegister,
+): Promise<ContractWorktreeResult> {
+  if (state === null || state.terminal) {
+    return state?.coordinates.workspace === "here"
+      ? await removeHere(repository, state.id)
+      : { effects: [], lag: [] };
   }
-  return state.terminal
-    ? { effects: [], lag: [] }
-    : await materialize(repository, deliveryWorktreePath(repository, state.id), renderContractGuidance(state));
+  if (state.coordinates.workspace === "here") {
+    return await here(repository, state, renderContractGuidance(state));
+  }
+  const appointed = appointmentFor(register ?? await readPlaceRegister(repository), state.id);
+  if (appointed === undefined) {
+    return {
+      effects: [],
+      lag: [{
+        kind: "contract-file-failed",
+        worktree: repository.primaryWorktree,
+        path: placeRegisterPath(repository),
+        diagnostic: "managed Contract is unappointed",
+      }],
+    };
+  }
+  return await materialize(
+    repository,
+    worktreePath(repository, appointed.place),
+    renderContractGuidance(state),
+  );
 }
