@@ -20,7 +20,7 @@ import {
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
-import { claudeProvider } from "../src/akuma/providers/claude.js";
+import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
 import { World } from "../src/world.js";
 

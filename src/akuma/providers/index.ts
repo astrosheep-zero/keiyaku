@@ -1,6 +1,6 @@
 import type { ProviderAdapter } from "../provider.js";
 import type { ProviderExecution } from "../heart/index.js";
-import { claudeProvider, createClaudeProvider } from "./claude.js";
+import { claudeProvider, createClaudeProvider } from "./claude/index.js";
 import { createCodexAppServerProvider } from "./codex-app-server/index.js";
 
 const PROVIDERS = {

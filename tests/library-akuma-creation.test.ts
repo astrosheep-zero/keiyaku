@@ -8,7 +8,7 @@ import { AkumaHandle } from "../src/akuma/akuma.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
-import { claudeProvider } from "../src/akuma/providers/claude.js";
+import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/requests.js";

@@ -219,8 +219,27 @@ Terminal turn observation returns `turn-ended` for new steers immediately, but t
 the RPC transport alive until every already-submitted steer acknowledgement has
 settled; an independently ordered completion notification cannot erase native
 acceptance evidence.
-Claude's `streamInput()` acknowledgement proves only transport queueing, so the
-Claude adapter omits live tell and carries pending input through the next launch.
+
+Claude exposes live tell through the same long-lived streaming-input `Query`
+that consumes launch input. The adapter owns one pushable
+`AsyncIterable<SDKUserMessage>` for that Query; it does not call
+`streamInput()`, create a Query per Tell, or end the source after launch. A
+message is submitted only when the SDK requests the source item after it,
+because that post-yield pull proves that the preceding item entered the native
+consumer rather than merely waiting in the adapter queue. The resulting opaque
+fence is submission evidence only.
+
+Each successful Claude `result` is a consumption checkpoint. For every live
+Tell whose post-yield acknowledgement preceded that checkpoint, the adapter
+yields one exact receipt naming its TellId with provider receipt kind
+`consumed`. Receipt visibility remains gated until the matching `tell()` has
+resolved, so Body can persist the delivery first. A successful result that
+precedes the source acknowledgement is not evidence for that Tell. A Tell
+accepted without a later successful result receives no receipt and remains
+replayable after the Body ends. If Query terminality is already observed before
+submission, `tell()` returns `turn-ended`; source or Query failure before the
+post-yield acknowledgement rejects. Adapter submission ordinals and checkpoint
+tracking are ephemeral and never enter Heart.
 
 File-change adapters preserve every available native operation, path, and
 per-change diffstat. Missing optional facts make the public row shorter; an

@@ -3,10 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import { HeldAkumaLeash, admitRequest, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, readTurns, recordTell, requestPause, requestStop, stopRequested, type AkuId, type ProviderOptions } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { AgentEvent, ProviderAdapter, TurnResult } from "../src/akuma/provider.js";
+import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { requestBodyCall } from "../src/akuma/requests.js";
 
 function adapter(input: Readonly<{
@@ -352,6 +354,80 @@ test("a Tell after Session terminality stays pending without replacing the answe
     assert.deepEqual(readHeart(allocated.paths).pending, []);
     assert.equal(readHeart(allocated.paths).latestBody?.end, "exited");
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Claude settles a live Tell in the current Body through its result receipt", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-claude-live-tell-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c42" });
+    initializeHeart(allocated.paths);
+    const inputs: string[] = [];
+    let queries = 0;
+    const provider = createClaudeProvider(async () => ({
+      query({ prompt }) {
+        queries += 1;
+        const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+        const query = (async function* () {
+          const launch = await iterator.next();
+          if (!launch.done) inputs.push(launch.value.message.content as string);
+          const live = iterator.next();
+          yield { type: "system", subtype: "init", session_id: "claude-live-session" } as unknown as SDKMessage;
+          const tell = await live;
+          if (!tell.done) inputs.push(tell.value.message.content as string);
+          const end = iterator.next();
+          yield {
+            type: "assistant",
+            uuid: "claude-live-history",
+            session_id: "claude-live-session",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "text", text: "done" }] },
+          } as unknown as SDKMessage;
+          yield {
+            type: "result", subtype: "success", session_id: "claude-live-session", result: "done",
+          } as unknown as SDKMessage;
+          await end;
+        })() as unknown as Query;
+        query.close = () => {};
+        return query;
+      },
+    }));
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        confinement: { kind: "unconfined" },
+        cwd: root,
+      },
+      initialBody: "initial work",
+    }, provider, {
+      collar: { pid: 999_975, processGroup: 999_975, spawnedAt: "claude-live-tell" },
+      now: () => "2026-08-08T00:00:00.000Z",
+      async putDownOwnTree() {},
+    });
+    while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    recordTell(allocated.paths, {
+      id: "claude-live-tell", body: "steer in this turn", recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await body;
+
+    assert.equal(queries, 1);
+    assert.deepEqual(inputs, ["initial work", "steer in this turn"]);
+    assert.deepEqual(readHeart(allocated.paths).pending, []);
+    assert.equal(readHeart(allocated.paths).latestBody?.sequence, 1);
+    assert.equal(readTurns(allocated.paths).length, 1);
+    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
+      kind: "answered",
+      answer: "done",
+      historyId: "claude-live-history",
+      session: { sessionId: "claude-live-session" },
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("receipt persistence failure aborts the Session and terminates the Body", async () => {

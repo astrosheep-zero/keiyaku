@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   AGENT_EVENT_TEXT_LIMIT,
   decodeAgentEvent,
@@ -15,7 +15,7 @@ import {
   CLAUDE_MESSAGE_DISPOSITIONS,
   CLAUDE_SYSTEM_DISPOSITIONS,
   createClaudeProvider,
-} from "../src/akuma/providers/claude.js";
+} from "../src/akuma/providers/claude/index.js";
 import {
   CODEX_ITEM_DISPOSITIONS,
   CODEX_NOTIFICATION_DISPOSITIONS,
@@ -139,10 +139,98 @@ function fakeCodex(
   };
 }
 
-function fakeQuery(messages: readonly SDKMessage[]): Query {
+function fakeQuery(messages: readonly SDKMessage[], prompt?: AsyncIterable<unknown>): Query {
   return (async function* () {
+    if (prompt !== undefined) {
+      void (async () => {
+        for await (const _message of prompt) { /* pull the streaming input concurrently */ }
+      })();
+    }
     for (const message of messages) yield message;
   })() as unknown as Query;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((accept, refuse) => { resolve = accept; reject = refuse; });
+  return { promise, resolve, reject };
+}
+
+function claudeResult(index: number): readonly SDKMessage[] {
+  return [
+    {
+      type: "assistant",
+      uuid: `assistant-live-${index}`,
+      session_id: "session-live",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "text", text: `answer ${index}` }] },
+    } as unknown as SDKMessage,
+    {
+      type: "result",
+      subtype: "success",
+      session_id: "session-live",
+      result: `done ${index}`,
+    } as unknown as SDKMessage,
+  ];
+}
+
+function controlledClaude() {
+  const outputs: SDKMessage[] = [{ type: "system", subtype: "init", session_id: "session-live" } as unknown as SDKMessage];
+  const outputWaiters: Array<() => void> = [];
+  let inputIterator: AsyncIterator<SDKUserMessage> | undefined;
+  let pendingInput: Promise<IteratorResult<SDKUserMessage>> | undefined;
+  let failure: unknown;
+  let ended = false;
+  const wakeOutput = () => outputWaiters.shift()?.();
+  const pullInput = () => {
+    if (inputIterator === undefined) throw new Error("Claude input is not attached");
+    pendingInput = inputIterator.next();
+    void pendingInput.then((next) => {
+      if (!next.done) return;
+      ended = true;
+      wakeOutput();
+    }, () => {});
+  };
+  return {
+    sdk: {
+      query({ prompt }: { prompt: string | AsyncIterable<SDKUserMessage> }) {
+        inputIterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+        void inputIterator.next().then(() => {
+          pullInput();
+        });
+        const query = (async function* () {
+          try {
+            for (;;) {
+              if (failure !== undefined) throw failure;
+              const message = outputs.shift();
+              if (message !== undefined) yield message;
+              else if (ended) return;
+              else await new Promise<void>((resolve) => outputWaiters.push(resolve));
+            }
+          } catch (error) { throw error; }
+        })() as unknown as Query;
+        query.close = () => { ended = true; wakeOutput(); };
+        return query;
+      },
+    },
+    async receiveInput() {
+      while (pendingInput === undefined) await new Promise((resolve) => setImmediate(resolve));
+      return await pendingInput;
+    },
+    acknowledgeInput() {
+      pullInput();
+    },
+    output(...messages: SDKMessage[]) {
+      outputs.push(...messages);
+      wakeOutput();
+    },
+    fail(error: unknown) {
+      failure = error;
+      wakeOutput();
+    },
+    end() { ended = true; wakeOutput(); },
+  };
 }
 
 test("Claude observation dispositions are closed over the installed SDK union", () => {
@@ -194,7 +282,7 @@ test("Claude observation dispositions are closed over the installed SDK union", 
 test("Claude maps narration, drops native streams, and contains runtime skew", async () => {
   const longNotice = `line one\n${"x".repeat(220)}`;
   const provider = createClaudeProvider(async () => ({
-    query() {
+    query(input) {
       return fakeQuery([
         { type: "system", subtype: "init", session_id: "session-events" } as unknown as SDKMessage,
         {
@@ -220,13 +308,13 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
         { type: "future_type", secret: "must not escape", session_id: "session-events" } as unknown as SDKMessage,
         { type: "system", subtype: "future_subtype", secret: "must not escape", session_id: "session-events" } as unknown as SDKMessage,
         { type: "result", subtype: "success", result: "done", session_id: "session-events" } as unknown as SDKMessage,
-      ]);
+      ], input.prompt as AsyncIterable<unknown>);
     },
   }));
   const drive = await provider.start({
     body: "observe", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
   });
-  assert.equal(drive.tell, undefined);
+  assert.equal(typeof drive.tell, "function");
   const events = [];
   for await (const event of drive.events) events.push(event);
 
@@ -270,7 +358,7 @@ test("Claude adapter admits the native session before returning its answer", asy
           uuid: "result-history-1",
           result: "done",
         } as unknown as SDKMessage,
-      ]);
+      ], input.prompt as AsyncIterable<unknown>);
     },
   }));
   const drive = await provider.start({
@@ -301,7 +389,7 @@ test("Claude adapter restores only the native session coordinate it was given", 
         subtype: "error_during_execution",
         session_id: "session-1",
         errors: ["native resume failed"],
-      } as unknown as SDKMessage]);
+      } as unknown as SDKMessage], input.prompt as AsyncIterable<unknown>);
     },
   }));
   const drive = await provider.resume!({
@@ -318,14 +406,14 @@ test("Claude adapter restores only the native session coordinate it was given", 
 
 test("Claude never substitutes a result UUID for the assistant fork point", async () => {
   const provider = createClaudeProvider(async () => ({
-    query() {
+    query(input) {
       return fakeQuery([{
         type: "result",
         subtype: "success",
         session_id: "session-without-assistant",
         uuid: "result-only-uuid",
         result: "done",
-      } as unknown as SDKMessage]);
+      } as unknown as SDKMessage], input.prompt as AsyncIterable<unknown>);
     },
   }));
   const drive = await provider.start({
@@ -340,7 +428,7 @@ test("Claude never substitutes a result UUID for the assistant fork point", asyn
 
 test("Claude never substitutes a sidechain assistant UUID for the outer fork point", async () => {
   const provider = createClaudeProvider(async () => ({
-    query() {
+    query(input) {
       return fakeQuery([
         {
           type: "assistant",
@@ -363,7 +451,7 @@ test("Claude never substitutes a sidechain assistant UUID for the outer fork poi
           uuid: "result-uuid",
           result: "done",
         } as unknown as SDKMessage,
-      ]);
+      ], input.prompt as AsyncIterable<unknown>);
     },
   }));
   const drive = await provider.start({
@@ -397,7 +485,7 @@ test("Claude adapter consumes the admitted Archetype options", async () => {
           uuid: "result-history-options",
           result: "done",
         } as unknown as SDKMessage,
-      ]);
+      ], input.prompt as AsyncIterable<unknown>);
     },
   }));
   const admitted = provider.admitOptions({
@@ -442,7 +530,7 @@ test("Claude execution overlays literal env and selects its executable", async (
           message: { content: [] },
         } as unknown as SDKMessage,
         { type: "result", subtype: "success", session_id: "session-execution", result: "done" } as unknown as SDKMessage,
-      ]);
+      ], input.prompt as AsyncIterable<unknown>);
     },
   }), { executable: "/custom/claude", env: { SETTINGS_LITERAL: "yes" } });
   const drive = await provider.start({
@@ -459,7 +547,7 @@ test("Claude execution overlays literal env and selects its executable", async (
 test("Claude start consumes its admitted snapshot without a second admission", async () => {
   let called = false;
   const provider = createClaudeProvider(async () => ({
-    query() {
+    query(input) {
       called = true;
       return fakeQuery([
         {
@@ -476,7 +564,7 @@ test("Claude start consumes its admitted snapshot without a second admission", a
           uuid: "result-history-snapshot",
           result: "done",
         } as unknown as SDKMessage,
-      ]);
+      ], input.prompt as AsyncIterable<unknown>);
     },
   }));
   const drive = await provider.start({
@@ -489,6 +577,111 @@ test("Claude start consumes its admitted snapshot without a second admission", a
   for await (const _event of drive.events) { /* drain */ }
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "assistant-history-snapshot" });
   assert.equal(called, true);
+});
+
+test("Claude live tell waits for a post-yield source pull and shares one Query", async () => {
+  const harness = controlledClaude();
+  let queries = 0;
+  const provider = createClaudeProvider(async () => ({
+    query(input) { queries += 1; return harness.sdk.query(input); },
+  }));
+  const drive = await provider.start({
+    body: "initial", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  assert.equal(queries, 1);
+  let resolved = false;
+  const submission = drive.tell!({ id: "tell-live-1", text: "steer now" })
+    .then((value) => { resolved = true; return value; });
+  const yielded = await harness.receiveInput();
+  assert.equal(yielded.done, false);
+  assert.equal((yielded.value.message.content as string), "steer now");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(resolved, false);
+  harness.acknowledgeInput();
+  const accepted = await submission;
+  assert.equal(accepted.kind, "accepted");
+  assert.equal(queries, 1);
+  harness.output(...claudeResult(1));
+  const receipt = await drive.receipts![Symbol.asyncIterator]().next();
+  assert.deepEqual(receipt, { done: false, value: { evidence: "exact", tellId: "tell-live-1", kind: "consumed" } });
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 1", historyId: "assistant-live-1" });
+});
+
+test("Claude receipt waits for both acknowledgement and a later successful checkpoint", async () => {
+  const harness = controlledClaude();
+  const provider = createClaudeProvider(async () => harness.sdk);
+  const drive = await provider.start({
+    body: "initial", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  const tell = drive.tell!({ id: "tell-live-2", text: "after checkpoint" });
+  const yielded = await harness.receiveInput();
+  assert.equal(yielded.done, false);
+  harness.output(...claudeResult(1));
+  let received = false;
+  const receipt = drive.receipts![Symbol.asyncIterator]().next().then((value) => { received = true; return value; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(received, false);
+  harness.acknowledgeInput();
+  await tell;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(received, false);
+  harness.output(...claudeResult(2));
+  assert.deepEqual(await receipt, {
+    done: false,
+    value: { evidence: "exact", tellId: "tell-live-2", kind: "consumed" },
+  });
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 2", historyId: "assistant-live-2" });
+});
+
+test("Claude terminality and failure before source acknowledgement preserve honest tell outcomes", async () => {
+  const terminal = controlledClaude();
+  const terminalProvider = createClaudeProvider(async () => terminal.sdk);
+  const terminalDrive = await terminalProvider.start({
+    body: "initial", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  terminal.output(...claudeResult(1));
+  terminal.end();
+  await terminalDrive.completion;
+  assert.deepEqual(await terminalDrive.tell!({ id: "late", text: "too late" }), { kind: "turn-ended" });
+
+  const failing = controlledClaude();
+  const failingProvider = createClaudeProvider(async () => failing.sdk);
+  const failingDrive = await failingProvider.start({
+    body: "initial", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  const submission = failingDrive.tell!({ id: "failed", text: "not accepted" });
+  await failing.receiveInput();
+  failing.fail(new Error("native input failed"));
+  await assert.rejects(submission, /native input failed/u);
+  assert.deepEqual(await failingDrive.completion, { kind: "failed", diagnostic: "native input failed" });
+});
+
+test("Claude successful terminality wins over an in-flight tell acknowledgement", async () => {
+  const harness = controlledClaude();
+  const provider = createClaudeProvider(async () => harness.sdk);
+  const drive = await provider.start({
+    body: "initial", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  const submission = drive.tell!({ id: "ended-race", text: "too late" });
+  const yielded = await harness.receiveInput();
+  assert.equal(yielded.done, false);
+  harness.output(...claudeResult(1));
+  harness.end();
+  assert.deepEqual(await submission, { kind: "turn-ended" });
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 1", historyId: "assistant-live-1" });
+});
+
+test("Claude abort rejects an unacknowledged tell and settles the Query", async () => {
+  const harness = controlledClaude();
+  const provider = createClaudeProvider(async () => harness.sdk);
+  const drive = await provider.start({
+    body: "initial", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  const submission = drive.tell!({ id: "aborted", text: "pending" });
+  await harness.receiveInput();
+  await drive.abort();
+  await assert.rejects(submission, /aborted/u);
+  assert.equal((await drive.completion).kind, "failed");
 });
 
 test("Claude fork maps the exact native pair and returns a distinct child coordinate", async () => {
