@@ -135,7 +135,10 @@ open Turn, killed, stranded, hung, untidy, readonly-none, or no-outcome
 observation remains that snapshot, even when an older answered idle outcome is
 still retained. Multi-target wait remains identity-bearing snapshots for every
 selected member and never concatenates naked answers. A successful detached call writes its born AkuId and a final
-`$ keiyaku wait <AkuId> --timeout 5m` command without inventing life. Dispatch
+`$ keiyaku -C <world> wait <@alias|AkuId> --timeout 5m` command without inventing
+life. The wait selector is the successful Alias when one was requested,
+otherwise the complete AkuId; `<world>` is the canonical Akuma World used by
+the call. Dispatch
 failure, alias failure, readonly-none refusal, or observation failure keeps its
 diagnostic and does not add that wait command. Snapshot
 `said` and `thought` rows occupy at most two terminal lines, including a visible

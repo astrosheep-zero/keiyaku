@@ -216,7 +216,10 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   const cwd = executionCwdLine(result.result);
   if (result.result.observation.kind === "detached") {
     const lines = [...snapshotHeading(result.result.akuma, alias, contractId), ...cwd, ...restraint, ...facts];
-    if (!callFailed(result.result)) lines.push(`$ keiyaku wait ${result.result.akuma} --timeout 5m`);
+    if (!callFailed(result.result)) {
+      const selector = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : result.result.akuma;
+      lines.push(`$ keiyaku -C ${result.world} wait ${selector} --timeout 5m`);
+    }
     return lines.join("\n");
   }
   if (result.result.observation.kind === "failed") {

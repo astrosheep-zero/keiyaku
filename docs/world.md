@@ -76,6 +76,8 @@ writes the same fleet while retaining its actual execution cwd.
 Git discovery is an invocation-edge concern. A command carries one resolved
 `WorldRoot | null` and one optional `Repo` to all sections that need them.
 Explicit Contract `--repo` selection is a separate Git coordinate and never
-changes the invocation World.
+changes the invocation World. Contract-selector wait and kill read Dispatch
+from that Repo and operate on the resolved AkuIds in the `-C` World; they do
+not scan another World or replace `-C` with `--repo`.
 Two different repository coordinates name two Worlds and are never composed
 into one aggregate observation.

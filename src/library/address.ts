@@ -1,5 +1,6 @@
 import { readAliases } from "../alias/index.js";
 import { Akuma, type AkumaList } from "../akuma/akuma.js";
+import { probeBornAkuma } from "../akuma/index.js";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
 import { contractId } from "../core/facts/types.js";
 import { readDispatches } from "../dispatch/index.js";
@@ -31,6 +32,22 @@ export type AkumaSetAddressInput = Readonly<{
   settings?: Settings;
   repo?: Repo;
 }>;
+
+export type AkumaWorldScopeRefusal = Readonly<{
+  kind: "akuma-not-in-world";
+  ids: readonly AkuId[];
+  world: WorldRoot;
+}>;
+
+export class AkumaWorldScopeError extends TypeError {
+  readonly refusal: AkumaWorldScopeRefusal;
+
+  constructor(refusal: AkumaWorldScopeRefusal) {
+    super(`akuma-not-in-world ${refusal.world} ${refusal.ids.join(" ")}`);
+    this.name = "AkumaWorldScopeError";
+    this.refusal = refusal;
+  }
+}
 
 function nonblank(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) throw new TypeError(`${label} must be a nonblank string`);
@@ -113,6 +130,64 @@ function idsFromFleet(fleet: AkumaList): readonly AkuId[] {
   return fleet.rows.map((row) => row.id);
 }
 
+type ParsedSetSelector =
+  | Readonly<{ kind: "contract"; value: ReturnType<typeof contractId> }>
+  | Readonly<{ kind: "glob"; value: AkumaGlob }>
+  | Readonly<{ kind: "alias"; value: AkumaAlias }>
+  | Readonly<{ kind: "direct"; value: AkuId }>;
+type DispatchFact = Awaited<ReturnType<typeof readDispatches>>[number];
+
+function parseSetSelector(raw: string): ParsedSetSelector {
+  const selector = nonblank(raw, "akuma selector");
+  if (selector.startsWith("kei/")) return { kind: "contract", value: contractId(selector) };
+  if (selector.includes("*")) return { kind: "glob", value: parseAkumaGlob(selector) };
+  if (selector.startsWith("@")) return { kind: "alias", value: parseAkumaAlias(selector) };
+  return { kind: "direct", value: parseAkuId(selector).id };
+}
+
+function hasSelectorKind(selectors: readonly ParsedSetSelector[], kind: ParsedSetSelector["kind"]): boolean {
+  return selectors.some((selector) => selector.kind === kind);
+}
+
+function addSelectorIds(
+  selector: ParsedSetSelector,
+  sources: Readonly<{ fleetIds: readonly AkuId[]; aliases: ReadonlyMap<AkumaAlias, AkuId>; dispatches: readonly DispatchFact[] }>,
+  selected: Set<AkuId>,
+  contractMembers: Set<AkuId>,
+): void {
+  if (selector.kind === "contract") {
+    for (const dispatch of sources.dispatches) {
+      if (dispatch.contractId !== selector.value) continue;
+      selected.add(dispatch.akuId);
+      contractMembers.add(dispatch.akuId);
+    }
+    return;
+  }
+  if (selector.kind === "glob") {
+    for (const id of sources.fleetIds) if (matchesAkumaGlob(selector.value, id)) selected.add(id);
+    return;
+  }
+  if (selector.kind === "alias") {
+    const id = sources.aliases.get(selector.value);
+    if (id === undefined) throw new TypeError(`unknown Akuma alias: ${selector.value}`);
+    selected.add(id);
+    return;
+  }
+  selected.add(selector.value);
+}
+
+async function contractMemberInWorld(path: WorldRoot, id: AkuId): Promise<boolean> {
+  return await probeBornAkuma(path, id);
+}
+
+async function refuseForeignContractMembers(path: WorldRoot, ids: readonly AkuId[], contractMembers: ReadonlySet<AkuId>): Promise<void> {
+  const foreign: AkuId[] = [];
+  for (const id of ids) {
+    if (contractMembers.has(id) && !await contractMemberInWorld(path, id)) foreign.push(id);
+  }
+  if (foreign.length > 0) throw new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: foreign, world: path });
+}
+
 export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<Readonly<{
   path: WorldRoot;
   ids: readonly AkuId[];
@@ -125,45 +200,25 @@ export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<Read
   if (!Array.isArray(values.akuma) || values.akuma.length === 0) throw new TypeError("akuma must be a nonempty selector array");
   const path = nonblank(values.path, "path") as WorldRoot;
   const settings = settingsOption(values.settings);
-  const selectors = values.akuma.map((raw) => {
-    const selector = nonblank(raw, "akuma selector");
-    if (selector.startsWith("kei/")) return { kind: "contract" as const, value: contractId(selector) };
-    if (selector.includes("*")) return { kind: "glob" as const, value: parseAkumaGlob(selector) };
-    if (selector.startsWith("@")) return { kind: "alias" as const, value: parseAkumaAlias(selector) };
-    return { kind: "direct" as const, value: parseAkuId(selector).id };
-  });
-  if (selectors.some((selector) => selector.kind === "contract") && values.repo === undefined) {
+  const selectors = values.akuma.map(parseSetSelector);
+  if (hasSelectorKind(selectors, "contract") && values.repo === undefined) {
     throw new TypeError("Contract Akuma selector requires repo");
   }
-  const fleetIds = selectors.some((selector) => selector.kind === "glob")
+  const fleetIds = hasSelectorKind(selectors, "glob")
     ? idsFromFleet(await world(path, settings).list())
     : [];
-  const aliases = selectors.some((selector) => selector.kind === "alias")
+  const aliases = hasSelectorKind(selectors, "alias")
     ? new Map((await readAliases(path)).map((binding) => [binding.alias, binding.akuId]))
     : new Map<AkumaAlias, AkuId>();
-  const dispatches = selectors.some((selector) => selector.kind === "contract")
+  const dispatches = hasSelectorKind(selectors, "contract")
     ? await readDispatches(scopeForRepo(values.repo as Repo))
     : [];
   const selected = new Set<AkuId>();
-  for (const selector of selectors) {
-    if (selector.kind === "contract") {
-      const members = dispatches
-        .filter((dispatch) => dispatch.contractId === selector.value)
-        .map((dispatch) => dispatch.akuId);
-      for (const id of members) selected.add(id);
-      continue;
-    }
-    if (selector.kind === "glob") {
-      for (const id of fleetIds) if (matchesAkumaGlob(selector.value, id)) selected.add(id);
-      continue;
-    }
-    if (selector.kind === "alias") {
-      const id = aliases.get(selector.value);
-      if (id === undefined) throw new TypeError(`unknown Akuma alias: ${selector.value}`);
-      selected.add(id);
-    } else selected.add(selector.value);
-  }
+  const contractMembers = new Set<AkuId>();
+  const sources = { fleetIds, aliases, dispatches };
+  for (const selector of selectors) addSelectorIds(selector, sources, selected, contractMembers);
   const ids = [...selected].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
   if (ids.length === 0) throw new TypeError("Akuma selector snapshot is empty");
+  await refuseForeignContractMembers(path, ids, contractMembers);
   return { path, ids, ...(settings === undefined ? {} : { settings }) };
 }

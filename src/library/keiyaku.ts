@@ -30,6 +30,7 @@ export {
   SettingsError,
 } from "./configuration.js";
 export { worktreeHooksFrom } from "../git/hooks.js";
+export { AkumaWorldScopeError } from "./address.js";
 
 export type {
   AbandonInput,
@@ -115,6 +116,7 @@ export type { Catalog, CatalogInput, CatalogQuery } from "./catalog.js";
 export type {
   AkumaAddressInput,
   AkumaSetAddressInput,
+  AkumaWorldScopeRefusal,
   DirectAkumaSelector,
   SetAkumaSelector,
 } from "./address.js";

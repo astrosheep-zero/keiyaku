@@ -4,6 +4,9 @@ Dispatch is the sole Akuma-to-Contract association authority. It is a concrete
 integration owner between otherwise independent products: Akuma neither knows
 nor stores Contract identity, and Contract lifecycle neither reads nor changes
 Dispatch. A Dispatch fact says only which Contract an Akuma was sent for.
+It has no World field. Contract-selector expansion reads this Repo's facts
+once and never invents a global registry, reverse index, or cross-repository
+scan.
 
 ## Authority
 

@@ -159,7 +159,16 @@ Alias map for aliases, and the supplied Repo's Dispatch set for Contract
 selectors. An unused or failed product cannot suppress an exact selector. It unions
 duplicates, and returns AkuIds in byte order. Dispatch membership does not
 depend on compact-fleet visibility; a corrupt skipped member therefore remains
-an addressed worker and its operation reports its own failure. An empty set,
+an addressed worker and its operation reports its own failure. After that union,
+every member introduced by a `kei/...` selector is checked in the invocation
+World (`path`). An Akuma absent from that World refuses the whole frozen set
+with `AkumaWorldScopeError` before wait or kill starts. The refusal is
+`{ kind: "akuma-not-in-world", ids, world }`: it names the selected World and
+those AkuIds and does not claim where they live. A corrupt Heart keeps its
+existing diagnostic and is not relabeled as that refusal. A direct `aku/...`
+selector that is absent keeps `AkumaNotBornError`. A `kei/...` selector
+requires `repo`, reads Dispatch only from that Repo, and never scans another
+World or silently drops a Dispatch member. An empty set,
 unknown Alias, invalid selector, or Contract selector without a Repo is caller
 input failure. Akuma remains unaware of Alias, Dispatch, Contract, glob, and
 Repo.

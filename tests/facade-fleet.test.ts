@@ -8,7 +8,8 @@ import { driveAkumaBody } from "../src/akuma/body.js";
 import { HeldAkumaLeash, appendActivity, beginTurn, endTurn, initializeHeart, readHeart, recordSession, recordTell } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
-import { Keiyaku, Repo } from "../src/index.js";
+import { AkumaNotBornError } from "../src/akuma/akuma.js";
+import { AkumaWorldScopeError, Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { parseArgv } from "../src/cli/parse.js";
@@ -505,22 +506,136 @@ test("history last selects exactly one latest answered TurnFact by durable seque
   }
 });
 
+test("same-World Contract selector wait keeps Dispatch order and completion", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(repository.path);
+  const later = await answered(world, "worker", "bbbbbbbb");
+  const earlier = await answered(world, "worker", "aaaaaaaa");
+  const owner = contractId("kei/same-world");
+  const repo = await Repo.at({ path: world });
+  const git = await repositoryAt(world);
+  assert.equal((await publishDispatch({ repository: git, akuId: later.id, contractId: owner })).kind, "dispatched");
+  assert.equal((await publishDispatch({ repository: git, akuId: earlier.id, contractId: owner })).kind, "dispatched");
+  const waited = await Keiyaku.wait({
+    path: world,
+    akuma: ["kei/same-world", later.id],
+    repo,
+    completion: "all",
+    timeoutMs: 0,
+  });
+  assert.deepEqual(waited.statuses.map((view) => view.status.id), [earlier.id, later.id]);
+  assert.equal(waited.completion, "all");
+  const any = await Keiyaku.wait({
+    path: world,
+    akuma: ["kei/same-world"],
+    repo,
+    completion: "any",
+    timeoutMs: 0,
+  });
+  assert.equal(any.completion, "any");
+  assert.equal(any.statuses.length, 2);
+});
+
+test("cross-World Contract selector wait and kill refuse before operating", async () => {
+  const rawA = makeGitRepository();
+  const rawB = makeGitRepository();
+  for (const repository of [rawA, rawB]) {
+    repository.run(["config", "user.name", "Test User"]);
+    repository.run(["config", "user.email", "test@example.com"]);
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  }
+  const worldA = await World.at(rawA.path);
+  const worldB = await World.at(rawB.path);
+  const born = await answered(worldA, "worker", "deadbeef");
+  const owner = contractId("kei/foreign");
+  assert.equal((await publishDispatch({
+    repository: await repositoryAt(worldB),
+    akuId: born.id,
+    contractId: owner,
+  })).kind, "dispatched");
+  const repoB = await Repo.at({ path: worldB });
+  const wait = Keiyaku.wait({
+    path: worldB,
+    akuma: ["kei/foreign"],
+    repo: repoB,
+    timeoutMs: 0,
+  });
+  await assert.rejects(wait, (error: unknown) => {
+    assert.ok(error instanceof AkumaWorldScopeError);
+    assert.deepEqual(error.refusal, { kind: "akuma-not-in-world", ids: [born.id], world: worldB });
+    assert.doesNotMatch(error.message, /is not born/u);
+    return true;
+  });
+  await assert.rejects(
+    Keiyaku.kill({ path: worldB, akuma: ["kei/foreign"], repo: repoB }),
+    (error: unknown) => error instanceof AkumaWorldScopeError && error.refusal.kind === "akuma-not-in-world",
+  );
+});
+
+test("direct missing Aku remains AkumaNotBornError", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-direct-missing-"));
+  try {
+    const missing = akuId({ archetype: "worker", suffix: "deadbeef" });
+    await assert.rejects(Keiyaku.status({ path: root, akuma: missing }), AkumaNotBornError);
+    await assert.rejects(Keiyaku.wait({ path: root, akuma: [missing], timeoutMs: 0 }), AkumaNotBornError);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Contract selector preserves Dispatch membership skipped by compact fleet", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(repository.path);
   const missing = akuId({ archetype: "worker", suffix: "deadbeef" });
   assert.equal((await publishDispatch({
-    repository: await repositoryAt(repository.path),
+    repository: await repositoryAt(world),
     akuId: missing,
     contractId: contractId("kei/review"),
   })).kind, "dispatched");
-  assert.deepEqual((await addressAkumaSet({
-    path: repository.path,
-    akuma: ["kei/review"],
-    repo: await Repo.at({ path: repository.path }),
-  })).ids, [missing]);
+  await assert.rejects(
+    addressAkumaSet({
+      path: world,
+      akuma: ["kei/review"],
+      repo: await Repo.at({ path: world }),
+    }),
+    (error: unknown) => error instanceof AkumaWorldScopeError
+      && error.refusal.ids.length === 1
+      && error.refusal.ids[0] === missing
+      && error.refusal.world === world,
+  );
+});
+
+test("Contract selector preserves corrupt Heart diagnostic", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(repository.path);
+  const missing = akuId({ archetype: "worker", suffix: "deadbeef" });
+  const directory = join(world, ".keiyaku", "akuma", "run", "worker-deadbeef");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "heart.db"), "broken\n");
+  assert.equal((await publishDispatch({
+    repository: await repositoryAt(world),
+    akuId: missing,
+    contractId: contractId("kei/review"),
+  })).kind, "dispatched");
+  await assert.rejects(
+    addressAkumaSet({
+      path: world,
+      akuma: ["kei/review"],
+      repo: await Repo.at({ path: world }),
+    }),
+    (error: unknown) => !(error instanceof AkumaWorldScopeError)
+      && error instanceof Error
+      && /schema version|SQLITE|database|file is not a database/iu.test(error.message),
+  );
 });
 
 test("fleet status projects Dispatch association without changing Akuma core", async () => {
@@ -545,6 +660,66 @@ test("fleet status projects Dispatch association without changing Akuma core", a
     timeoutMs: 0,
   });
   assert.equal(waited.statuses[0]!.contractId, owner);
+});
+
+test("CLI wait and kill expose Contract selector world refusal as typed usage", async () => {
+  const rawA = makeGitRepository();
+  const rawB = makeGitRepository();
+  for (const repository of [rawA, rawB]) {
+    repository.run(["config", "user.name", "Test User"]);
+    repository.run(["config", "user.email", "test@example.com"]);
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  }
+  const worldA = await World.at(rawA.path);
+  const worldB = await World.at(rawB.path);
+  const born = await answered(worldA, "worker", "deadbeef");
+  assert.equal((await publishDispatch({
+    repository: await repositoryAt(worldB),
+    akuId: born.id,
+    contractId: contractId("kei/foreign"),
+  })).kind, "dispatched");
+  const argv = ["-C", worldB, "--repo", worldB, "wait", "kei/foreign", "--timeout", "0ms"];
+  await assert.rejects(
+    () => invoke(parseArgv(argv), { cwd: worldB, environment: {} }),
+    (error: unknown) => {
+      assert.ok(error instanceof AkumaWorldScopeError);
+      assert.deepEqual(error.refusal, { kind: "akuma-not-in-world", ids: [born.id], world: worldB });
+      return true;
+    },
+  );
+  await assert.rejects(
+    () => invoke(parseArgv(["-C", worldB, "--repo", worldB, "kill", "kei/foreign"]), { cwd: worldB, environment: {} }),
+    AkumaWorldScopeError,
+  );
+
+  const capture = async (args: readonly string[]) => {
+    let stdout = "";
+    let stderr = "";
+    const writeStdout = process.stdout.write;
+    const writeStderr = process.stderr.write;
+    process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
+    const cwd = process.cwd();
+    try {
+      process.chdir(worldB);
+      const code = await main(args);
+      return { code, stdout, stderr };
+    } finally {
+      process.chdir(cwd);
+      process.stdout.write = writeStdout;
+      process.stderr.write = writeStderr;
+    }
+  };
+  const text = await capture(["-C", worldB, "--repo", worldB, "wait", "kei/foreign", "--timeout", "0ms"]);
+  assert.equal(text.code, 1);
+  assert.equal(text.stdout, "");
+  assert.equal(text.stderr, `akuma-not-in-world ${worldB} ${born.id}\n`);
+  assert.doesNotMatch(text.stderr, /is not born/u);
+  const json = await capture(["-C", worldB, "--repo", worldB, "wait", "kei/foreign", "--json", "--timeout", "0ms"]);
+  assert.equal(json.code, 1);
+  assert.equal(json.stdout, "");
+  assert.deepEqual(JSON.parse(json.stderr), { kind: "akuma-not-in-world", ids: [born.id], world: worldB });
+  assert.doesNotMatch(json.stderr, /is not born/u);
 });
 
 test("exact set selection does not read unrelated Alias authority", async () => {

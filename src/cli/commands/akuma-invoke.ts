@@ -16,7 +16,7 @@ import type { WorldRoot } from "../../world.js";
 import type { AkumaPromptSource, ParsedAkumaCommand } from "./akuma.js";
 
 export type AkumaInvocationResult =
-  | Readonly<{ kind: "akuma"; action: "call"; result: CallResult }>
+  | Readonly<{ kind: "akuma"; action: "call"; result: CallResult; world: WorldRoot }>
   | Readonly<{ kind: "akuma"; action: "status"; status: AkumaStatusView; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
@@ -144,7 +144,7 @@ export async function invokeAkuma(
         ...(input.contract === undefined ? {} : { contract: input.contract }),
         ...(command.alias === undefined ? {} : { alias: command.alias }),
       });
-      return { kind: "akuma", action: "call", result };
+      return { kind: "akuma", action: "call", result, world: input.path };
     }
     case "wait": return await invokeWait(command, input);
     case "tell": return await invokeTell(command, input);

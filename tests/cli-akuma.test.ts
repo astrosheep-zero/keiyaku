@@ -496,6 +496,7 @@ test("Akuma status-oriented commands include life while tell excludes it", () =>
         kind: "akuma" as const,
         action: "call" as const,
         result: { kind: "called" as const, akuma: id, execution: { cwd: "/world", source: "world" as const }, dispatch: { kind: "none" as const }, alias: { kind: "none" as const }, observation: { kind: "observed" as const, status } },
+        world: "/world" as import("../src/index.js").WorldRoot,
       },
       hasLife: true,
     },
@@ -966,8 +967,9 @@ test("akuma call renders optional integration stages and maps partial success", 
       alias: { kind: "none" as const },
       observation: { kind: "detached" as const },
     },
+    world: "/world" as import("../src/index.js").WorldRoot,
   };
-  assert.equal(renderAkumaText(command, plain), `─────\n${akuma}\n$ keiyaku wait ${akuma} --timeout 5m`);
+  assert.equal(renderAkumaText(command, plain), `─────\n${akuma}\n$ keiyaku -C /world wait ${akuma} --timeout 5m`);
   const managed = {
     ...plain,
     result: {
@@ -977,7 +979,7 @@ test("akuma call renders optional integration stages and maps partial success", 
   };
   assert.equal(
     renderAkumaText(command, managed),
-    `─────\n${akuma}\ncwd /repo/.git/keiyaku/wt/atlantis\n$ keiyaku wait ${akuma} --timeout 5m`,
+    `─────\n${akuma}\ncwd /repo/.git/keiyaku/wt/atlantis\n$ keiyaku -C /world wait ${akuma} --timeout 5m`,
   );
   assert.deepEqual(akumaJsonValue(command, plain), plain.result);
   assert.equal(akumaExitCode(plain), 0);
@@ -997,7 +999,7 @@ test("akuma call renders optional integration stages and maps partial success", 
       },
     },
   };
-  assert.equal(renderAkumaText(command, integrated), `─────\n${akuma} (@worker)\n└─ kei/work\n$ keiyaku wait ${akuma} --timeout 5m`);
+  assert.equal(renderAkumaText(command, integrated), `─────\n${akuma} (@worker)\n└─ kei/work\n$ keiyaku -C /world wait @worker --timeout 5m`);
   assert.equal(akumaExitCode(integrated), 0);
 
   const partial = {
@@ -1500,6 +1502,7 @@ test("one raw-answer decision writes exact wait bytes and keeps unfinished obser
       alias: { kind: "none" as const },
       observation: { kind: "observed" as const, status: complete.result.statuses[0]!.status },
     },
+    world: "/world" as import("../src/index.js").WorldRoot,
   };
   const cases = [
     { name: "multiline", result: complete, raw: multiline },
@@ -1677,6 +1680,7 @@ test("akuma call renders the CallResult restraint on detached and failed observa
       dispatch: { kind: "none" as const },
       alias: { kind: "none" as const },
     },
+    world: "/world" as import("../src/index.js").WorldRoot,
   };
 
   const detached = renderAkumaText(command, { ...base, result: { ...base.result, observation: { kind: "detached" as const } } });
@@ -1832,8 +1836,23 @@ test("packaged CLI call writes missing, detached, answered, unfinished, and fail
     assert.equal(detachedLines[0], "─────");
     const akuId = detachedLines[1]!;
     assert.match(akuId, /^aku\/worker\/[0-9a-f]{8}$/u);
-    assert.equal(detached.stdout, `─────\n${akuId}\n$ keiyaku wait ${akuId} --timeout 5m\n`);
+    assert.equal(detached.stdout, `─────\n${akuId}\n$ keiyaku -C ${root} wait ${akuId} --timeout 5m\n`);
     assert.doesNotMatch(detached.stdout, /● running|○ asleep|success/u);
+
+    const aliased = await runPackagedCli(["-C", root, "call", "worker", "--detach", "--alias", "@worker", "-"], { cwd: root, env, stdin: "detach-alias" });
+    assert.equal(aliased.code, 0);
+    const aliasedHeader = aliased.stdout.trim().split("\n")[1]!;
+    const aliasedId = aliasedHeader.match(/^(aku\/worker\/[0-9a-f]{8})/u)?.[1];
+    assert.equal(typeof aliasedId, "string");
+    assert.equal(aliased.stdout, `─────\n${aliasedId} (@worker)\n$ keiyaku -C ${root} wait @worker --timeout 5m\n`);
+
+    const nested = join(root, "nested");
+    mkdirSync(nested);
+    const nestedCall = await runPackagedCli(["-C", nested, "call", "worker", "--detach", "-"], { cwd: nested, env, stdin: "detach-nested" });
+    assert.equal(nestedCall.code, 0);
+    const nestedId = nestedCall.stdout.trim().split("\n")[1]!;
+    assert.match(nestedId, /^aku\/worker\/[0-9a-f]{8}$/u);
+    assert.equal(nestedCall.stdout, `─────\n${nestedId}\n$ keiyaku -C ${root} wait ${nestedId} --timeout 5m\n`);
 
     const answered = await runPackagedCli(["-C", root, "call", "worker", "answer"], { cwd: root, env });
     assert.equal(answered.code, 0);

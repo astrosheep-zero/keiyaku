@@ -1,4 +1,4 @@
-export { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./library/keiyaku.js";
+export { AuthorityCorruptionError, AkumaWorldScopeError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./library/keiyaku.js";
 export { settings } from "./settings.js";
 export { World, WorldError } from "./world.js";
 export type { WorldResolution, WorldResolutionInput, WorldRoot } from "./world.js";
@@ -32,6 +32,7 @@ export type {
   AkumaTellResult,
   AkumaWaitInput,
   AkumaWaitResult,
+  AkumaWorldScopeRefusal,
   AliasBinding,
   AliasStage,
   AmendResult,

@@ -1,3 +1,4 @@
+import { AkumaWorldScopeError } from "../index.js";
 import {
   CliUsageError,
   parseArgv,
@@ -98,17 +99,28 @@ function writeResult(command: ParsedCommand, result: unknown): number {
   return contractResult.kind === "refused" ? 1 : contractResult.kind === "retry" ? 2 : 0;
 }
 
+function writeWorldScopeRefusal(error: AkumaWorldScopeError, output: "text" | "json"): number {
+  const body = output === "json"
+    ? JSON.stringify(error.refusal)
+    : `${error.refusal.kind} ${error.refusal.world} ${error.refusal.ids.join(" ")}`;
+  process.stderr.write(`${body}\n`);
+  return 1;
+}
+
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
+  let output: "text" | "json" = "text";
   try {
     const parsed = parseArgv(argv);
     if ("help" in parsed) {
       process.stdout.write(`${renderHelp(parsed.help)}\n`);
       return 0;
     }
+    output = parsed.command.output;
     const { invoke } = await import("./invoke.js");
     const result = await invoke(parsed, { cwd: process.cwd() });
     return writeResult(parsed.command, result);
   } catch (error) {
+    if (error instanceof AkumaWorldScopeError) return writeWorldScopeRefusal(error, output);
     const original = error instanceof BindDraftError ? error.original : error;
     process.stderr.write(`${original instanceof Error ? original.message : String(original)}\n`);
     if (error instanceof BindDraftError) process.stderr.write(`${renderBindDraftReceipt(error.draft)}\n`);

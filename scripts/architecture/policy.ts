@@ -86,7 +86,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("world.ts"),
       ],
     },
-    { source: "akuma/index.ts", allow: [any("akuma/akuma.ts"), any("akuma/archetype.ts"), any("akuma/requests.ts"), types("akuma/heart/index.ts"), types("akuma/identity.ts"), types("akuma/provider.ts"), types("akuma/provider-recipe.ts"), types("world.ts")] },
+    { source: "akuma/index.ts", allow: [any("akuma/akuma.ts"), any("akuma/archetype.ts"), any("akuma/requests.ts"), any("akuma/heart/index.ts", ["readSoul"]), types("akuma/heart/index.ts"), any("akuma/identity.ts", ["pathsForAkuId", "AkuId"]), types("akuma/identity.ts"), types("akuma/provider.ts"), types("akuma/provider-recipe.ts"), types("world.ts")] },
     {
       source: "dispatch/index.ts",
       allow: [
@@ -637,6 +637,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("alias/index.ts", ["readAliases"]),
         any("akuma/akuma.ts", ["Akuma", "AkumaList"]),
+        any("akuma/index.ts", ["probeBornAkuma"]),
         any("akuma/identity.ts", ["parseAkuId", "AkuId"]),
         any("core/facts/types.ts", ["contractId"]),
         any("dispatch/index.ts", ["readDispatches"]),

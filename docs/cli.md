@@ -277,14 +277,28 @@ typed Dispatch or Alias failure, or readonly-none refusal remains a visible
 diagnostic rather than an answer. `--wait <duration>` keeps wait mode and
 replaces the five-minute observation window. `-d` and `--detach` are identical
 and return after birth plus Dispatch and Alias integration. A successful detach
-prints `$ keiyaku wait <AkuId> --timeout 5m` with the complete born identity.
-Dispatch failure, Alias failure, or a readonly-none refusal keeps its existing
-factual lines and does not add that command. Detach does not fabricate a current
-life. It is mutually exclusive with `--wait`.
+prints one copyable wait command from the canonical invocation World and the
+successful Alias stage:
+`$ keiyaku -C <world> wait @name --timeout 5m` when `--alias @name` succeeded,
+otherwise `$ keiyaku -C <world> wait <AkuId> --timeout 5m`. The complete AkuId
+remains in the header and in JSON. A failed or skipped Alias never appears in
+the example. The example does not use `kei/...` and does not require `--repo`.
+If the caller's `-C` points at a subdirectory, the printed World is the
+canonical root used by the operation. Dispatch failure, Alias failure, or a
+readonly-none refusal keeps its existing factual lines and does not add that
+command. Detach does not fabricate a current life. It is mutually exclusive
+with `--wait`.
 `tell`, `history`, `fork`, and exact `status` accept a complete
 `aku/<akuma>/<hex8>` or world-local `@alias`. `wait` and `kill` additionally
 accept Akuma globs and complete `kei/...` worker selectors. Their positional
 set is expanded once, deduplicated, and byte-sorted before the operation.
+A `kei/...` selector reads Dispatch only from `--repo` (or the invocation Repo
+when `--repo` is omitted) and then operates in the `-C` World. One Contract
+member absent from that World refuses the whole set as typed usage
+`{ kind: "akuma-not-in-world", ids, world }` and never says the Akuma is unborn.
+Text prints those facts; `--json` prints the typed object. Both exit `1`.
+A corrupt Heart keeps its existing diagnostic. A missing direct `aku/...`
+selector keeps `Akuma ... is not born`.
 Multiple wait members require exactly one of `--any` or `--all`; a single
 member needs neither. Kill always applies to the complete frozen set.
 Bare `status` already exposes the Akuma fleet through Kanshi; there is no
@@ -350,7 +364,7 @@ tell compose the refreshed snapshot without a current-life claim; history does
 the same for its page, while `history --last` writes exact answer bytes. An
 ordinary answered single-target wait and an answered default call likewise
 write only those answer bytes; a successful detached call prints its born
-identity and `$ keiyaku wait <AkuId> --timeout 5m`. The id already contains the
+identity and `$ keiyaku -C <world> wait <@alias|AkuId> --timeout 5m`. The id already contains the
 Akuma name
 and the CLI never reverse-selects an Alias. Text never prints the storage
 words `retained`, `latest`, `body`, `heart`, or `turn`.

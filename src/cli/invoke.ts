@@ -1,4 +1,4 @@
-import { gatesFrom, Keiyaku, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type WorktreeHooks } from "../index.js";
+import { AkumaWorldScopeError, gatesFrom, Keiyaku, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type WorktreeHooks } from "../index.js";
 import { kanshi, selectKanshi, selectRegion, type KanshiRegionSelection } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromMutationCall } from "./accepted.js";
@@ -298,7 +298,11 @@ async function invokeAkumaCommand(parsed: ParsedAkumaCommand, input: AkumaEdgeIn
 
 async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, input: AkumaEdgeInput) {
   try { return await invokeAkumaCommand(parsed, input); }
-  catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
+  catch (error) {
+    if (error instanceof AkumaWorldScopeError) throw error;
+    if (error instanceof TypeError) throw new CliUsageError(error.message);
+    throw error;
+  }
 }
 
 async function akumaWorldFor(
