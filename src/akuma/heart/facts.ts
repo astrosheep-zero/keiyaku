@@ -14,7 +14,7 @@ export type ProviderOptions = Readonly<{
 
 export type ProviderExecution = Readonly<{
   name: string;
-  kind: "claude-agent-sdk" | "codex-app-server";
+  kind: "claude-agent-sdk" | "codex-app-server" | "opencode-sdk";
   executable?: string;
   config?: Readonly<Record<string, unknown>>;
   env?: Readonly<Record<string, string>>;

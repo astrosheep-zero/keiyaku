@@ -21,6 +21,132 @@ import {
   CODEX_NOTIFICATION_DISPOSITIONS,
   createCodexAppServerProvider,
 } from "../src/akuma/providers/codex-app-server/index.js";
+import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
+import { createEventState, mapEvent, OPENCODE_EVENT_DISPOSITIONS } from "../src/akuma/providers/opencode-sdk/events.js";
+import type { OpencodeSdkLoader, OpencodeSdkSession } from "../src/akuma/providers/opencode-sdk/session.js";
+
+function fakeOpencode() {
+  let closed = 0;
+  const switchedModels: unknown[] = [];
+  const events = [
+    { id: "event-1", durable: { aggregateID: "session-fresh", seq: 1, version: 1 }, type: "session.next.tool.called", data: { callID: "tool-1", tool: "shell", input: { command: "npm test" } } },
+    { id: "event-2", durable: { aggregateID: "session-fresh", seq: 2, version: 1 }, type: "session.next.tool.success", data: { callID: "tool-1" } },
+    { id: "event-3", durable: { aggregateID: "session-fresh", seq: 3, version: 1 }, type: "session.next.reasoning.ended", data: { text: "checked" } },
+    { id: "event-4", durable: { aggregateID: "session-fresh", seq: 4, version: 1 }, type: "session.next.text.ended", data: { text: "answer" } },
+    { id: "event-5", durable: { aggregateID: "session-fresh", seq: 5, version: 1 }, type: "session.next.future", data: { secret: "drop" } },
+  ];
+  const stream = async function* (): AsyncGenerator<Readonly<{ data: string }>> {
+    for (const event of events) yield { data: JSON.stringify(event) };
+  };
+  const session = {
+    async create() { return { data: { data: { id: "session-fresh" } } }; },
+    async get() { return { data: { data: { id: "session-resume" } } }; },
+    async prompt() { return { data: { data: { id: "prompt-1", admittedSeq: 3, sessionID: "session-fresh", prompt: { text: "" }, delivery: "queue", timeCreated: 1 } } }; },
+    async events() { return { stream: stream() }; },
+    async wait() { return undefined; },
+    async history() { return { data: { data: events, hasMore: false } }; },
+    async messages() { return { data: { data: [{ id: "message-1", type: "assistant", time: { created: 1 }, agent: "build", model: { providerID: "p", id: "m" }, content: [{ type: "text", id: "text-1", text: "answer" }] }] } }; },
+    async interrupt() { return undefined; },
+    async switchModel(input: unknown) { switchedModels.push(input); return undefined; },
+  } as unknown as OpencodeSdkSession;
+  const loader: OpencodeSdkLoader = async () => ({
+    client: {
+      v2: { session },
+      session: { async fork() { return { data: { id: "session-child" } }; } },
+    },
+    close: () => { closed += 1; },
+  });
+  return { loader, closed: () => closed, switchedModels };
+}
+
+test("OpenCode V2 adapter admits, maps, completes, and cleans up through a loader fake", async () => {
+  const fake = fakeOpencode();
+  const provider = createOpencodeProvider({ loader: fake.loader });
+  assert.equal(provider.admitOptions({ access: "write" }).kind, "refused");
+  const drive = await provider.start({ body: "build", launchTells: [{ id: "tell-1", text: "also check" }], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
+  assert.match(drive.admission.fence, /session-fresh:3/u);
+  const observed = [];
+  for await (const event of drive.events) observed.push(event);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "answer", historyId: "message-1" });
+  assert.deepEqual(observed.map((event) => event.type), ["session", "tool", "tool", "thought", "assistant", "unknown"]);
+  assert.equal(JSON.stringify(observed).includes("secret"), false);
+  assert.equal(fake.closed(), 1);
+});
+
+test("OpenCode V2 adapter resumes the supplied coordinate and forks the exact point", async () => {
+  const fake = fakeOpencode();
+  const provider = createOpencodeProvider({ loader: fake.loader });
+  const drive = await provider.resume!({ body: "continue", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "resume", coordinate: { sessionId: "session-resume" } } });
+  await drive.abort();
+  assert.equal((await drive.completion).kind, "failed");
+  assert.deepEqual(await provider.fork!({ session: { sessionId: "session-resume" }, at: "message-1", cwd: "/tmp" }), { session: { sessionId: "session-child" } });
+});
+
+test("OpenCode V2 abort cleanup does not await an uncooperative native interrupt", async () => {
+  let closed = 0;
+  const session = {
+    async create() { return { data: { data: { id: "session-stuck-interrupt" } } }; },
+    async events() { return { stream: (async function* () {})() }; },
+    async prompt() { return { data: { data: { id: "prompt-id", admittedSeq: 1 } } }; },
+    async wait() { await new Promise<void>(() => undefined); },
+    async interrupt() { await new Promise<void>(() => undefined); },
+  } as unknown as OpencodeSdkSession;
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { v2: { session } }, close: () => { closed += 1; } }) });
+  const drive = await provider.start({ body: "interrupt", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
+  await drive.abort();
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "OpenCode session interrupted" });
+  assert.equal(closed, 1);
+});
+
+test("OpenCode V2 cleans up when prompt admission rejects", async () => {
+  let closed = 0;
+  const session = {
+    async create() { return { data: { data: { id: "session-rejected" } } }; },
+    async events() { return { stream: (async function* () {})() }; },
+    async prompt() { throw new Error("prompt rejected"); },
+  } as unknown as OpencodeSdkSession;
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { v2: { session } }, close: () => { closed += 1; } }) });
+  await assert.rejects(() => provider.start({ body: "fail", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } }), /prompt rejected/u);
+  assert.equal(closed, 1);
+});
+
+test("OpenCode V2 refuses unsupported options before birth and applies resume model", async () => {
+  const fake = fakeOpencode();
+  const provider = createOpencodeProvider({ loader: fake.loader });
+  assert.equal(provider.admitOptions({ systemPrompt: "must enforce" }).kind, "refused");
+  assert.equal(provider.admitOptions({ effort: "high" }).kind, "refused");
+  assert.equal(provider.admitOptions({ model: "not-a-provider-model" }).kind, "refused");
+  assert.equal(provider.admitOptions({ model: "provider/model", effort: "high" }).kind, "admitted");
+  const drive = await provider.resume!({ body: "continue", launchTells: [], cwd: "/tmp", options: { model: "provider/model", effort: "high" }, session: { kind: "resume", coordinate: { sessionId: "session-resume" } } });
+  await drive.abort();
+  assert.deepEqual(fake.switchedModels, [{ sessionID: "session-resume", model: { providerID: "provider", id: "model", variant: "high" } }]);
+});
+
+test("OpenCode V2 pins every installed durable event kind and retains a future fallback", () => {
+  assert.equal(OPENCODE_EVENT_DISPOSITIONS["session.next.step.ended"], "dropped");
+  const observed: AgentEvent[] = [];
+  const emitter = { emit(event: AgentEvent) { observed.push(event); } };
+  mapEvent({ id: "step-ended", type: "session.next.step.ended", data: {} }, emitter, createEventState());
+  mapEvent({ id: "future", type: "session.next.future", data: {} }, emitter, createEventState());
+  assert.deepEqual(observed, [{ type: "unknown", kind: "session.next.future" }]);
+});
+
+test("OpenCode V2 fails an idle drain without native assistant evidence", async () => {
+  let closed = 0;
+  const session = {
+    async create() { return { data: { data: { id: "session-idle" } } }; },
+    async events() { return { stream: (async function* () {})() }; },
+    async prompt() { return { data: { data: { id: "prompt-id", admittedSeq: 1 } } }; },
+    async wait() { return undefined; },
+    async history() { return { data: { data: [], hasMore: false } }; },
+    async messages() { return { data: { data: [] } }; },
+    async interrupt() { return undefined; },
+  } as unknown as OpencodeSdkSession;
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { v2: { session } }, close: () => { closed += 1; } }) });
+  const drive = await provider.start({ body: "idle", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "OpenCode completed without a native assistant answer/history point" });
+  assert.equal(closed, 1);
+});
 
 test("provider activity codec round trips every closed event and tool-call arm", () => {
   const events: readonly AgentEvent[] = [

@@ -2,6 +2,7 @@ import type { ProviderAdapter } from "../provider.js";
 import type { ProviderExecution } from "../heart/index.js";
 import { claudeProvider, createClaudeProvider } from "./claude/index.js";
 import { createCodexAppServerProvider } from "./codex-app-server/index.js";
+import { createOpencodeProvider } from "./opencode-sdk/index.js";
 
 const PROVIDERS = {
   claude: claudeProvider,
@@ -28,6 +29,18 @@ function optionalText(value: Readonly<Record<string, unknown>>, field: "executab
   return selected;
 }
 
+function providerKind(value: unknown): value is ProviderExecution["kind"] {
+  return value === "claude-agent-sdk" || value === "codex-app-server" || value === "opencode-sdk";
+}
+
+function providerConfig(value: Readonly<Record<string, unknown>>, kind: ProviderExecution["kind"]): Readonly<Record<string, unknown>> | undefined {
+  const config = value.config === undefined ? undefined : record(value.config);
+  if (config === null) throw new TypeError("provider execution config must be an object");
+  if (kind === "claude-agent-sdk" && config !== undefined) throw new TypeError("provider execution config is unsupported by claude-agent-sdk");
+  if (kind === "opencode-sdk" && config !== undefined) throw new TypeError("provider execution config is unsupported by opencode-sdk");
+  return config;
+}
+
 export function decodeProviderExecution(input: unknown): ProviderExecution {
   const value = record(input);
   if (value === null) throw new TypeError("provider execution must be an object");
@@ -37,15 +50,11 @@ export function decodeProviderExecution(input: unknown): ProviderExecution {
   if (typeof value.name !== "string" || value.name.trim().length === 0) {
     throw new TypeError("provider execution name must be a nonblank string");
   }
-  if (value.kind !== "claude-agent-sdk" && value.kind !== "codex-app-server") {
+  if (!providerKind(value.kind)) {
     throw new TypeError("provider execution has unknown kind");
   }
   const executable = optionalText(value, "executable");
-  const config = value.config === undefined ? undefined : record(value.config);
-  if (config === null) throw new TypeError("provider execution config must be an object");
-  if (value.kind === "claude-agent-sdk" && config !== undefined) {
-    throw new TypeError("provider execution config is unsupported by claude-agent-sdk");
-  }
+  const config = providerConfig(value, value.kind);
   const env = value.env === undefined ? undefined : record(value.env);
   if (env === null) throw new TypeError("provider execution env must be an object");
   if (env !== undefined && Object.values(env).some((item) => typeof item !== "string")) {
@@ -67,5 +76,6 @@ export function providerNamed(execution: ProviderExecution): ProviderAdapter {
       : createClaudeProvider(async () => await import("@anthropic-ai/claude-agent-sdk"), execution);
   }
   if (execution.kind === "codex-app-server") return createCodexAppServerProvider(execution);
+  if (execution.kind === "opencode-sdk") return createOpencodeProvider(execution);
   throw new TypeError(`unknown Akuma provider kind ${(execution as ProviderExecution).kind}`);
 }

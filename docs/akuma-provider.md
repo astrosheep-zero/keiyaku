@@ -267,6 +267,13 @@ submission, `tell()` returns `turn-ended`; source or Query failure before the
 post-yield acknowledgement rejects. Adapter submission ordinals and checkpoint
 tracking are ephemeral and never enter Heart.
 
+OpenCode V2 omits live tell: its prompt response proves durable input admission,
+not terminal native processing evidence. Pending OpenCode tells are carried
+through the next launch. Its durable event union has an explicit disposition for
+every current kind and an `unknown` fallback for future kinds; output, deltas,
+usage, cost, and telemetry remain dropped. Its terminal answer is read from the
+complete assistant message after the durable event stream drains.
+
 File-change adapters preserve every available native operation, path, and
 per-change diffstat. Missing optional facts make the public row shorter; an
 adapter never invents a diffstat. Codex app-server derives diffstat only from a

@@ -2,7 +2,7 @@
 
 This chapter owns Akuma identity, heart facts, life, detached bodies, provider
 boundaries, lifecycle verbs, and persistence. The current surface ships the
-Claude and Codex app-server providers, public handles, status, wait, interrupt,
+Claude, Codex app-server, and OpenCode V2 providers, public handles, status, wait, interrupt,
 fork, Body Requests, CLI skin, and Kanshi rows. Body Requests reroute the
 existing call surface; they do not add a public verb.
 
@@ -183,9 +183,10 @@ catalog, and other IO failures remain exceptions for both reads.
 
 A provider entry is one strict object with required `kind`, optional nonblank
 `description` and `executable`, optional object `config`, and optional `env`
-whose values are strings. The two kinds are `claude-agent-sdk` and
-`codex-app-server`; only Codex consumes `config`. When no same-name Settings
-entry exists, Archetype names `claude` and `codex-app-server` select their
+whose values are strings. The built-in kinds are `claude-agent-sdk`,
+`codex-app-server`, and `opencode-sdk`; only Codex consumes `config`. When no
+same-name Settings entry exists, Archetype names `claude`, `codex-app-server`,
+and `opencode-sdk` select their
 Akuma-owned default executions. A configured same-name entry replaces that
 default wholly under Settings shadow law.
 
@@ -214,6 +215,16 @@ The frozen `config` object is supplied to native thread start/resume.
 Each app-server instance is a detached helper process tree. Drive completion
 awaits termination of that complete tree, so provider descendants cannot outlive
 the body turn or leave an answered Akuma headless.
+
+Provider kind `opencode-sdk` runs the selected executable, defaulting to
+`opencode`, through the official V2 Session API. It consumes `model`, `effort`,
+and the system prompt only where the native V2 request accepts them; explicit
+`access` and `network` values are refused. Fresh and resumed drives admit the
+native session id and prompt before returning a Session. Resume uses only the
+frozen session coordinate. Native root-session fork is optional and uses the
+exact supplied session and message point. Live tell is omitted because V2 prompt
+admission does not prove terminal native processing evidence; pending tells
+remain next-launch input.
 
 ## Placement
 
