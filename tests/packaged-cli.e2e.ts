@@ -34,6 +34,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
 
   const packageManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
     dependencies?: Readonly<Record<string, string>>;
+    version: string;
   };
   const dependencies = Object.fromEntries(Object.keys(packageManifest.dependencies ?? {}).map((name) => [
     name,
@@ -61,7 +62,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
     "utf8",
   )) as { name: string; version: string; bin: Record<string, string> };
   assert.equal(installedPackage.name, "@astrosheep/keiyaku");
-  assert.equal(installedPackage.version, "4.0.0");
+  assert.equal(installedPackage.version, packageManifest.version);
   assert.deepEqual(installedPackage.bin, { keiyaku: "build/src/cli/index.js" });
 
   const bin = join(installed, "node_modules", ".bin", "keiyaku");
