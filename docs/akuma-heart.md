@@ -2,6 +2,24 @@
 
 This chapter owns Akuma durable facts, custody, schemas, and projections.
 
+## Turn Timeline
+
+Heart schema version 10 is a hard cut. Its retained timeline sequence is the
+only order visible to public Akuma projections. A Body owns process, leash,
+collar, stop, pause, kill, and Body Request facts. A Turn is one provider start
+or resume within that Body, and one Body may contain many Turns.
+
+Every admitted Turn has a `turn-start` coordinate before provider invocation.
+The optional initial call, provider activity, tell admission and delivery, and
+one `turn-end` refer to that coordinate. An interrupted or crashed Turn may
+remain open; Heart never fabricates a provider outcome. Unsupported resume is
+refused before a Turn is admitted. Old schemas are rejected without migration
+or compatibility reading.
+
+Retention removes old closed Turn groups as a bounded dependency closure. It
+keeps pending tells, open Turns, and the Turn structure required by retained
+rows. Cursors, gaps, and history loss refer to persisted timeline sequence.
+
 ## The heart
 
 Row kinds and their atomic order are law. Table layout is implementation
@@ -16,11 +34,10 @@ dies; their existence does not depend on a current control-flow reader.
   confinement, created-at.
 - **bodies** — one row per body: collar, leash-taken-at, end (exited /
   broke-off / put-down).
-- **turns** — append-only completed turns. An answered outcome carries the
-  answer and the exact provider-owned fork pair: the `ResumeCoordinate` on
-  which that turn actually ran plus its provider-native `historyId`. A failed
-  outcome carries only its diagnostic and cannot be forked. History ids are
-  never reused and do not shift when retention drops an earlier turn.
+- **turns** — one row per admitted Turn, keyed by its `turn-start` timeline
+  sequence. It may remain open or carry exactly one `turn-end` outcome. An
+  answered outcome carries the complete answer and exact provider-owned fork
+  pair; a failed outcome carries only its diagnostic.
 - **session** — the provider's resumable coordinate, written the moment the
   adapter declares one resumable, not at turn completion. A new body resumes
   from the latest valid session fact; no
@@ -35,14 +52,14 @@ dies; their existence does not depend on a current control-flow reader.
   TellId's launch delivery in one Heart transaction. The adapter never echoes
   those product identities in its admission.
 - **activity** — the persistent execution-history sequence
-  `(sequence, body_sequence, event_json, at)`. `sequence` is monotonic and
-  never reused. Every row belongs to the body that observed it. The body keeps
+  `(sequence, turn_sequence, event_json, at)`. `sequence` is monotonic and
+  never reused. Every row belongs to the Turn that observed it. The body keeps
   the newest 5,000 rows with a bounded write buffer; crossing that buffer
   compacts in one batch rather than enforcing an exact count after every write.
   Recent status is a read-time selection, not a smaller persisted log. Typed, bounded activity is the first and only
   execution-history log. Raw native payloads are never activity facts.
 - **tells** — the admitted body and recorded timeline sequence, repeatable
-  deliveries with route plus Heart-owned `bodySequence`, provider fence, and
+  deliveries with route plus Heart-owned `turnSequence`, provider fence, and
   the live attempt's receipt requirement, provider-authored terminal receipts
   with exact or fence correlation;
   see Tell. Admission allocates its sequence from the same monotonic timeline
@@ -69,7 +86,7 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed `heart/` custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `9`; leash schema version remains `4`. Heart version 9
+Heart schema version is `10`; leash schema version remains `4`. Heart version 10
 hard-cuts every child origin to one `parent` field. It retains the shared
 activity-and-tell timeline, Body-scoped kill witnesses, and the Archetype and
 Contract-column hard cut. This is a hard cut: an
@@ -90,7 +107,7 @@ Provider events, turn completion, process liveness, and Body inference cannot
 manufacture tell delivery or processing facts. No observer store, capability
 registry, or compatibility copy of the old tell pipeline exists beside Heart.
 Exact provider receipts name their TellId. Fence receipts are admitted only
-when an existing delivery fact from the same `bodySequence` resolves that fence
+when an existing delivery fact from the same `turnSequence` resolves that fence
 to TellIds; an unknown or differently scoped fence cannot create a receipt fact.
 Delivery and receipt facts have two readers: the replay/terminality fold and the
 public two-state tell projection. They are not a second execution-history log.
@@ -133,24 +150,22 @@ Action feedback uses the same fold and selector with only the tail-three settled
 budget while retaining the same in-flight and pending pins. Full history pages
 do not apply snapshot pinning or category budgets.
 
-`readTurns()` is the sole retained completed-turn projection. Its named row
-statement returns retained `TurnFact` values in ascending sequence order for
-answer, failure, and boundary joins. The fork-point reader is the only targeted
+The shared timeline is the sole retained Turn projection. Its `turn-start` and
+`turn-end` rows provide answer, failure, and boundary order. The fork-point reader is the only targeted
 `turns` read: it exact-matches one answered `historyId` and returns that fact's
 inseparable session and native point. It also resolves that session
 coordinate's admitted provider, cwd, and options recipe for the native call and
 child birth; a retained answered turn without that recipe is authority
 corruption, not `unknown-history`.
 
-`readHeart()` does not read or reinterpret turns. `readCurrentTurn()` reads only
-the newest retained turn for `status()`. Public history joins activity pages to
-the relevant body and turn facts without copying answer bytes into activity.
-`history --last` reads at most one answered `TurnFact`, selected by descending
-durable turn sequence. No answered row projects typed absence; an answered row
+`readHeart()` does not reinterpret the timeline. Public history reads the same
+timeline projector without copying answer bytes into activity. `history --last`
+reads at most one answered Turn end, selected by its durable timeline sequence.
+No answered row projects typed absence; an answered row
 retains its exact `answer` bytes, including an empty string. Recovery,
-resume, fork, outcome, failure, and life never read activity. Thus activity
-owns execution chronology, `TurnFact` owns complete outcome bytes and native
-fork points, and session rows remain the sole resume authority.
+resume, fork, outcome, failure, and life never read activity. Thus the shared
+timeline owns execution chronology and complete outcome bytes, while session
+rows remain the sole resume authority.
 
 `list()` remains a compact fleet read and never scans activity or turns. It
 isolates each member read: malformed identity, heart, or schema silently omits

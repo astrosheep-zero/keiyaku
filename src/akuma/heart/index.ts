@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import type { AkuId, AkumaPaths } from "../identity.js";
 import type {
   BodyEnd,
@@ -8,53 +7,40 @@ import type {
   ForkPoint,
   HeartSnapshot,
   KillFact,
-  LeashProbe,
   RequestFact,
   RequestInput,
   SealFact,
   SessionFact,
   Soul,
-  StopFact,
   TellDeliveryInput,
   TellFact,
   TellReceiptInput,
+  TurnEndFact,
   TurnFact,
+  TurnOutcome,
+  TurnStartFact,
 } from "./facts.js";
-import {
-  HEART_SCHEMA,
-  LEASH_SCHEMA,
-  assertHeartSchemaVersion,
-  assertLeashSchemaVersion,
-} from "./schema.js";
+export type { CallFact } from "./facts.js";
 import {
   answeredTurnFact,
-  deletePauseControl,
-  deleteStopControl,
   endBodyFact,
   finishBodyFact,
-  historyFacts,
   insertActivityFact,
-  insertAnsweredTurnFact,
   insertBodyFact,
-  insertKillFact,
-  insertFailedTurnFact,
+  insertTurnEndFact,
+  insertTurnStartFact,
   insertPauseControl,
   insertRequestFact,
-  insertSealFact,
   insertSessionFact,
-  insertSoulFact,
   insertStopControl,
   killFactForBody,
   latestBodyFact,
   latestKillFact,
   latestSessionFact,
-  latestTurnFact,
   lastAnsweredTurnFact,
   nonterminalRequestFacts,
   pauseExists,
   requestFact,
-  sealExists,
-  sealFact,
   sessionFactForCoordinate,
   soulFact,
   stopFact,
@@ -75,6 +61,8 @@ import {
   tellIdsForFence,
   type ActivityFactSlice,
 } from "./tells.js";
+import { readSealFromLeash, transaction, withHeart } from "./storage.js";
+export { HeldAkumaLeash, initializeHeart, probeLeash } from "./storage.js";
 
 export { life } from "./facts.js";
 export type {
@@ -101,156 +89,16 @@ export type {
   Soul,
   StopFact,
   TellFact,
+  TellDelivery,
   TellDeliveryInput,
   TellReceiptInput,
+  TurnEndFact,
   TurnFact,
   TurnOutcome,
+  TurnStartFact,
 } from "./facts.js";
 
 const ACTIVITY_LIMIT = 5_000;
-
-function isBusy(error: unknown): boolean {
-  const value = error as { code?: unknown; errcode?: unknown; message?: unknown };
-  const message = String(value?.message ?? "").toLowerCase();
-  return value?.code === "ERR_SQLITE_BUSY" || value?.code === "ERR_SQLITE_LOCKED"
-    || value?.errcode === 5 || message.includes("database is locked") || message.includes("database is busy");
-}
-
-function openHeart(path: string, verify = true): DatabaseSync {
-  const database = new DatabaseSync(path);
-  database.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL");
-  if (verify) assertHeartSchemaVersion(database);
-  return database;
-}
-
-function withHeart<T>(paths: AkumaPaths, body: (database: DatabaseSync) => T): T {
-  const database = openHeart(paths.heart);
-  try { return body(database); } finally { database.close(); }
-}
-
-function transaction<T>(database: DatabaseSync, body: () => T): T {
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    const result = body();
-    database.exec("COMMIT");
-    return result;
-  } catch (error) {
-    try { database.exec("ROLLBACK"); } catch { /* preserve the adjudication failure */ }
-    throw error;
-  }
-}
-
-export function initializeHeart(paths: AkumaPaths): void {
-  const heart = openHeart(paths.heart, false);
-  try {
-    heart.exec(HEART_SCHEMA);
-    assertHeartSchemaVersion(heart);
-  } finally { heart.close(); }
-  const leash = new DatabaseSync(paths.leash);
-  try {
-    leash.exec(LEASH_SCHEMA);
-    assertLeashSchemaVersion(leash);
-  } finally { leash.close(); }
-}
-
-export class HeldAkumaLeash {
-  private closed = false;
-
-  private constructor(private readonly database: DatabaseSync) {}
-
-  static try(paths: AkumaPaths): HeldAkumaLeash | null {
-    const database = new DatabaseSync(paths.leash, { timeout: 0 });
-    try {
-      assertLeashSchemaVersion(database);
-      database.exec("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE");
-      return new HeldAkumaLeash(database);
-    } catch (error) {
-      database.close();
-      if (isBusy(error)) return null;
-      throw error;
-    }
-  }
-
-  birth(
-    paths: AkumaPaths,
-    soul: Soul,
-    session?: Omit<SessionFact, "sequence">,
-  ): "born" | "already-born" | "sealed" {
-    if (sealExists(this.database)) return "sealed";
-    return withHeart(paths, (heart) =>
-      transaction(heart, () => {
-        if (soulFact(heart) !== null) return "already-born";
-        insertSoulFact(heart, soul);
-        if (session !== undefined) insertSessionFact(heart, session);
-        return "born";
-      }));
-  }
-
-  sealIfUnborn(paths: AkumaPaths, input: Readonly<{ evidence: string; at: string }>): "born" | "sealed" {
-    if (withHeart(paths, (heart) => soulFact(heart)) !== null) return "born";
-    insertSealFact(this.database, input);
-    this.database.exec("COMMIT");
-    this.closed = true;
-    this.database.close();
-    return "sealed";
-  }
-
-  clearPause(paths: AkumaPaths): void { withHeart(paths, deletePauseControl); }
-
-  settleStop(
-    paths: AkumaPaths,
-    expectedBodySequence?: number,
-  ): Readonly<{ target: StopFact; result: "recorded" | "already-killed" }> | null {
-    return withHeart(paths, (heart) =>
-      transaction(heart, () => {
-        const target = stopFact(heart);
-        if (target === null) {
-          if (expectedBodySequence === undefined) return null;
-          const existing = killFactForBody(heart, expectedBodySequence);
-          return existing === null
-            ? null
-            : { target: { bodySequence: expectedBodySequence, requestedAt: existing.at }, result: "already-killed" };
-        }
-        if (expectedBodySequence !== undefined && target.bodySequence !== expectedBodySequence) {
-          throw new Error("Akuma stop target changed while kill was in progress");
-        }
-        const latest = latestBodyFact(heart);
-        if (latest?.sequence !== target.bodySequence) throw new Error("Akuma stop target is not the latest Body");
-        const result = latestKillFact(heart)?.bodySequence === target.bodySequence
-          ? "already-killed" as const
-          : (insertKillFact(heart, target.bodySequence, target.requestedAt), "recorded" as const);
-        deleteStopControl(heart);
-        return { target, result };
-      }));
-  }
-
-  recordInterruptTell(
-    paths: AkumaPaths,
-    tell: Omit<TellFact, "sequence" | "state">,
-  ): Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }> {
-    return withHeart(paths, (heart) =>
-      transaction(heart, () => {
-        deletePauseControl(heart);
-        if (soulFact(heart) === null) return { kind: "not-born" };
-        const sequence = insertTellFact(heart, tell);
-        pruneActivityFacts(heart, ACTIVITY_LIMIT);
-        return { kind: "recorded", tell: { sequence, ...tell, state: "pending" } };
-      }));
-  }
-
-  release(): void {
-    if (this.closed) return;
-    this.closed = true;
-    try { this.database.exec("ROLLBACK"); } finally { this.database.close(); }
-  }
-}
-
-export function probeLeash(paths: AkumaPaths): LeashProbe {
-  const claim = HeldAkumaLeash.try(paths);
-  if (claim === null) return "held";
-  claim.release();
-  return "free";
-}
 
 export function readSoul(paths: AkumaPaths): Soul | null {
   if (!existsSync(paths.heart)) return null;
@@ -261,11 +109,7 @@ export function heartExists(paths: AkumaPaths): boolean { return existsSync(path
 
 export function readSeal(paths: AkumaPaths): SealFact | null {
   if (!existsSync(paths.leash)) return null;
-  const leash = new DatabaseSync(paths.leash);
-  try {
-    assertLeashSchemaVersion(leash);
-    return sealFact(leash);
-  } finally { leash.close(); }
+  return readSealFromLeash(paths);
 }
 
 export function recordBody(paths: AkumaPaths, input: Readonly<{ collar: Collar; leashTakenAt: string }>): BodyFact {
@@ -280,7 +124,7 @@ export function recordSession(paths: AkumaPaths, input: Omit<SessionFact, "seque
 
 export function appendActivity(
   paths: AkumaPaths,
-  input: Readonly<{ bodySequence: number; event: unknown; at: string }>,
+  input: Readonly<{ turnSequence: number; event: unknown; at: string }>,
 ): number {
   return withHeart(paths, (heart) =>
     transaction(heart, () => {
@@ -302,14 +146,14 @@ export function activitySlice(paths: AkumaPaths, input: ActivitySliceInput = {})
 
 export function recordTell(
   paths: AkumaPaths,
-  tell: Omit<TellFact, "sequence" | "state">,
+  tell: Omit<TellFact, "sequence" | "state" | "deliveries">,
 ): Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }> {
   return withHeart(paths, (heart) =>
     transaction(heart, () => {
       if (soulFact(heart) === null) return { kind: "not-born" };
       const sequence = insertTellFact(heart, tell);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
-      return { kind: "recorded", tell: { sequence, ...tell, state: "pending" } };
+      return { kind: "recorded", tell: { sequence, ...tell, state: "pending", deliveries: [] } };
     }));
 }
 
@@ -336,7 +180,7 @@ export function recordTellReceipt(
     transaction(heart, () => {
       const tellIds = input.evidence === "exact"
         ? [input.tellId]
-        : tellIdsForFence(heart, input.bodySequence, input.fence);
+        : tellIdsForFence(heart, input.turnSequence, input.fence);
       if (tellIds.length === 0) throw new Error("tell receipt has no delivery mapping");
       insertTellReceiptFact(heart, input);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
@@ -473,21 +317,26 @@ export function breakBody(paths: AkumaPaths, input: Readonly<{ sequence: number;
   withHeart(paths, (heart) => endBodyFact(heart, input));
 }
 
-export function recordTurn(paths: AkumaPaths, input: Omit<TurnFact, "sequence">): TurnFact {
-  return withHeart(paths, (heart) => {
-    const sequence = input.outcome.kind === "answered"
-      ? insertAnsweredTurnFact(heart, {
-          bodySequence: input.bodySequence,
-          outcome: input.outcome,
-          completedAt: input.completedAt,
-        })
-      : insertFailedTurnFact(heart, {
-          bodySequence: input.bodySequence,
-          outcome: input.outcome,
-          completedAt: input.completedAt,
-        });
-    return { sequence, ...input };
-  });
+export function beginTurn(
+  paths: AkumaPaths,
+  input: Readonly<{ bodySequence: number; startedAt: string; call?: string }>,
+): TurnStartFact {
+  return withHeart(paths, (heart) => transaction(heart, () => {
+    const fact = insertTurnStartFact(heart, input);
+    pruneActivityFacts(heart, ACTIVITY_LIMIT);
+    return fact;
+  }));
+}
+
+export function endTurn(
+  paths: AkumaPaths,
+  input: Readonly<{ turnSequence: number; outcome: TurnOutcome; completedAt: string }>,
+): TurnEndFact {
+  return withHeart(paths, (heart) => transaction(heart, () => {
+    const fact = insertTurnEndFact(heart, { kind: "turn-end", ...input });
+    pruneActivityFacts(heart, ACTIVITY_LIMIT);
+    return fact;
+  }));
 }
 
 export function finishBodyIfIdle(paths: AkumaPaths, input: Readonly<{ sequence: number; at: string }>):
@@ -514,16 +363,8 @@ export function readHeart(paths: AkumaPaths): HeartSnapshot {
   }));
 }
 
-export function readTurns(paths: AkumaPaths): readonly TurnFact[] {
-  return withHeart(paths, historyFacts);
-}
-
 export function readLastAnsweredTurn(paths: AkumaPaths): TurnFact | null {
   return withHeart(paths, lastAnsweredTurnFact);
-}
-
-export function readCurrentTurn(paths: AkumaPaths): TurnFact | null {
-  return withHeart(paths, latestTurnFact);
 }
 
 export function readForkPoint(
@@ -533,12 +374,12 @@ export function readForkPoint(
   if (!existsSync(paths.heart)) return null;
   return withHeart(paths, (heart) => {
     const turn = answeredTurnFact(heart, historyId);
-    if (turn?.outcome.kind !== "answered") return null;
-    const recipe = sessionFactForCoordinate(heart, turn.outcome.session);
+    if (turn?.end?.outcome.kind !== "answered") return null;
+    const recipe = sessionFactForCoordinate(heart, turn.end.outcome.session);
     if (recipe === null) throw new Error(`Akuma fork point ${historyId} has no session recipe`);
     return {
-      historyId: turn.outcome.historyId,
-      session: turn.outcome.session,
+      historyId: turn.end.outcome.historyId,
+      session: turn.end.outcome.session,
       provider: recipe.provider,
       cwd: recipe.cwd,
       options: recipe.options,

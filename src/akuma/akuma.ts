@@ -7,10 +7,8 @@ import {
   activitySlice,
   life,
   probeLeash,
-  readCurrentTurn,
   readHeart,
   readLastAnsweredTurn,
-  readTurns,
   readForkPoint,
   readKill,
   readSeal,
@@ -67,11 +65,7 @@ export type AkumaStatus = Readonly<{
   id: AkuId;
   life: AkumaLife;
   collar: CollarProbe;
-  answer?: string;
-  answerHistoryId?: string;
-  failure?: string;
-  outcomeAt?: string;
-  activity: ActivitySnapshot;
+  timeline: ActivitySnapshot;
   strandedReason?: "resume-unsupported";
 }>;
 export type { ActivityHistory, ActivityRow, ActivitySnapshot, ActivitySnapshotEntry } from "./activity.js";
@@ -145,7 +139,7 @@ function recordTellBody(
   body: string,
 ): Readonly<{ kind: "recorded"; tellId: string }> {
   const id = randomUUID();
-  const admitted = recordTell(paths, { id, body, recordedAt: new Date().toISOString() });
+  const admitted = recordTell(paths, { kind: "tell", id, body, recordedAt: new Date().toISOString() });
   if (admitted.kind === "not-born") throw new AkumaNotBornError(akuma);
   return { kind: "recorded", tellId: admitted.tell.id };
 }
@@ -188,7 +182,6 @@ function bornStatus(paths: AkumaPaths, expected: AkuId, profile: "status" | "fee
   const snapshot = readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const current = bornListRow(paths, expected, snapshot);
-  const latest = readCurrentTurn(paths);
   const resumeUnsupported = current.life === "stranded"
     && snapshot.latestSession?.provider === snapshot.soul.provider.name
     && providerNamed(snapshot.soul.provider).resume === undefined;
@@ -196,13 +189,8 @@ function bornStatus(paths: AkumaPaths, expected: AkuId, profile: "status" | "fee
     id: current.id,
     life: current.life,
     collar: current.collar,
-    ...(latest === null ? {} : { outcomeAt: latest.completedAt }),
-    ...(latest?.outcome.kind === "answered"
-      ? { answer: latest.outcome.answer, answerHistoryId: latest.outcome.historyId }
-      : {}),
-    ...(latest?.outcome.kind === "failed" ? { failure: latest.outcome.diagnostic } : {}),
     ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
-    activity: (() => {
+    timeline: (() => {
       const slice = activitySlice(paths, { limit: Number.MAX_SAFE_INTEGER });
       return selectActivitySnapshot(slice.rows, {
         lowestRetained: slice.lowestRetained,
@@ -251,8 +239,9 @@ export class AkumaHandle {
       ...(input.since === undefined ? {} : { since: input.since }),
       limit: 5_000,
     });
-    return projectActivityHistory(slice, readTurns(this.paths), {
-      since: input.since !== undefined,
+    return projectActivityHistory(slice, {
+      ...(input.before === undefined ? {} : { before: input.before }),
+      ...(input.since === undefined ? {} : { since: input.since }),
       limit,
     });
   }
@@ -308,6 +297,7 @@ export class AkumaHandle {
     try {
       const id = randomUUID();
       const admitted = leash.recordInterruptTell(this.paths, {
+        kind: "tell",
         id,
         body,
         recordedAt: new Date().toISOString(),
@@ -398,8 +388,8 @@ export class AkumaHandle {
 
   lastAnswer(): LastAnswer {
     const turn = readLastAnsweredTurn(this.paths);
-    return turn?.outcome.kind === "answered"
-      ? { kind: "answer", answer: turn.outcome.answer }
+    return turn?.end?.outcome.kind === "answered"
+      ? { kind: "answer", answer: turn.end.outcome.answer }
       : { kind: "no-answer" };
   }
 }

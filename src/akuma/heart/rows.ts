@@ -4,6 +4,7 @@ import type {
   AkumaOrigin,
   BodyEnd,
   BodyFact,
+  CallFact,
   Collar,
   Confinement,
   KillFact,
@@ -17,6 +18,8 @@ import type {
   Soul,
   StopFact,
   TurnFact,
+  TurnStartFact,
+  TurnEndFact,
 } from "./facts.js";
 
 export type SoulRow = Readonly<{
@@ -55,12 +58,21 @@ export type SessionRow = Readonly<{
 export type TurnRow = Readonly<{
   sequence: number;
   body_sequence: number;
-  outcome: "answered" | "failed";
+  started_at: string;
+  end_sequence: number | null;
+  outcome: "answered" | "failed" | null;
   history_id: string | null;
   session_json: string | null;
   answer: string | null;
   diagnostic: string | null;
-  completed_at: string;
+  completed_at: string | null;
+}>;
+
+export type CallRow = Readonly<{
+  sequence: number;
+  turn_sequence: number;
+  body: string;
+  at: string;
 }>;
 
 export type RequestRow = Readonly<{
@@ -80,13 +92,14 @@ export type RequestRow = Readonly<{
 
 export type ActivityRow = Readonly<{
   sequence: number;
-  body_sequence: number;
+  turn_sequence: number;
   event_json: string;
   at: string;
 }>;
 export type ActivityFact = Readonly<{
+  kind: "activity";
   sequence: number;
-  bodySequence: number;
+  turnSequence: number;
   event: unknown;
   at: string;
 }>;
@@ -170,9 +183,17 @@ export function decodeBodyRow(row: BodyRow): BodyFact {
 }
 
 export function decodeTurnRow(row: TurnRow): TurnFact {
-  return {
+  const start: TurnStartFact = {
+    kind: "turn-start",
     sequence: row.sequence,
     bodySequence: row.body_sequence,
+    startedAt: row.started_at,
+  };
+  if (row.outcome === null) return start;
+  const end: TurnEndFact = {
+    kind: "turn-end",
+    sequence: row.end_sequence!,
+    turnSequence: row.sequence,
     outcome: row.outcome === "answered"
       ? {
           kind: "answered",
@@ -181,8 +202,13 @@ export function decodeTurnRow(row: TurnRow): TurnFact {
           answer: row.answer!,
         }
       : { kind: "failed", diagnostic: row.diagnostic! },
-    completedAt: row.completed_at,
+    completedAt: row.completed_at!,
   };
+  return { ...start, end };
+}
+
+export function decodeCallRow(row: CallRow): CallFact {
+  return { kind: "call", sequence: row.sequence, turnSequence: row.turn_sequence, body: row.body, at: row.at };
 }
 
 export function decodeRequestRow(row: RequestRow): RequestFact {
@@ -209,8 +235,9 @@ export function encodeActivityEvent(event: unknown): string {
 
 export function decodeActivityRow(row: ActivityRow): ActivityFact {
   return {
+    kind: "activity",
     sequence: row.sequence,
-    bodySequence: row.body_sequence,
+    turnSequence: row.turn_sequence,
     event: parsed(row.event_json),
     at: row.at,
   };
@@ -266,11 +293,11 @@ export function insertSessionFact(database: DatabaseSync, input: Omit<SessionFac
 
 export function insertActivityFact(
   database: DatabaseSync,
-  input: Readonly<{ bodySequence: number; event: unknown; at: string }>,
+  input: Readonly<{ turnSequence: number; event: unknown; at: string }>,
 ): number {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('activity')").run().lastInsertRowid);
-  database.prepare("INSERT INTO activity(sequence, body_sequence, event_json, at) VALUES (?, ?, ?, ?)")
-    .run(sequence, input.bodySequence, encodeActivityEvent(input.event), input.at);
+  database.prepare("INSERT INTO activity(sequence, turn_sequence, event_json, at) VALUES (?, ?, ?, ?)")
+    .run(sequence, input.turnSequence, encodeActivityEvent(input.event), input.at);
   return sequence;
 }
 
@@ -360,30 +387,35 @@ export function endBodyFact(
     .run(input.end, input.at, input.sequence);
 }
 
-type AnsweredTurn = Omit<TurnFact, "sequence" | "outcome"> & Readonly<{
-  outcome: Extract<TurnFact["outcome"], { kind: "answered" }>;
-}>;
-
-export function insertAnsweredTurnFact(database: DatabaseSync, input: AnsweredTurn): number {
-  const result = database.prepare(`INSERT INTO turns(body_sequence, outcome, history_id, session_json, answer, completed_at)
-    VALUES (?, 'answered', ?, ?, ?, ?)`).run(
-    input.bodySequence,
-    input.outcome.historyId,
-    encodeResumeCoordinate(input.outcome.session),
-    input.outcome.answer,
-    input.completedAt,
-  );
-  return Number(result.lastInsertRowid);
+export function insertTurnStartFact(
+  database: DatabaseSync,
+  input: Readonly<{ bodySequence: number; startedAt: string; call?: string }>,
+): TurnStartFact {
+  const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('turn-start')").run().lastInsertRowid);
+  database.prepare("INSERT INTO turns(sequence, body_sequence, started_at) VALUES (?, ?, ?)")
+    .run(sequence, input.bodySequence, input.startedAt);
+  if (input.call !== undefined) {
+    const callSequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('call')").run().lastInsertRowid);
+    database.prepare("INSERT INTO calls(sequence, turn_sequence, body, at) VALUES (?, ?, ?, ?)")
+      .run(callSequence, sequence, input.call, input.startedAt);
+  }
+  return { kind: "turn-start", sequence, bodySequence: input.bodySequence, startedAt: input.startedAt };
 }
 
-type FailedTurn = Omit<TurnFact, "sequence" | "outcome"> & Readonly<{
-  outcome: Extract<TurnFact["outcome"], { kind: "failed" }>;
-}>;
-
-export function insertFailedTurnFact(database: DatabaseSync, input: FailedTurn): number {
-  const result = database.prepare(`INSERT INTO turns(body_sequence, outcome, diagnostic, completed_at)
-    VALUES (?, 'failed', ?, ?)`).run(input.bodySequence, input.outcome.diagnostic, input.completedAt);
-  return Number(result.lastInsertRowid);
+export function insertTurnEndFact(database: DatabaseSync, input: Omit<TurnEndFact, "sequence">): TurnEndFact {
+  const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('turn-end')").run().lastInsertRowid);
+  const result = input.outcome.kind === "answered"
+    ? database.prepare(`UPDATE turns SET end_sequence = ?, outcome = 'answered', history_id = ?,
+        session_json = ?, answer = ?, completed_at = ? WHERE sequence = ? AND end_sequence IS NULL`).run(
+        sequence, input.outcome.historyId, encodeResumeCoordinate(input.outcome.session), input.outcome.answer,
+        input.completedAt, input.turnSequence,
+      )
+    : database.prepare(`UPDATE turns SET end_sequence = ?, outcome = 'failed', diagnostic = ?, completed_at = ?
+        WHERE sequence = ? AND end_sequence IS NULL`).run(
+        sequence, input.outcome.diagnostic, input.completedAt, input.turnSequence,
+      );
+  if (result.changes !== 1) throw new Error(`Akuma Turn ${input.turnSequence} is not open`);
+  return { ...input, kind: "turn-end", sequence };
 }
 
 export function finishBodyFact(database: DatabaseSync, input: Readonly<{ sequence: number; at: string }>): void {
@@ -432,27 +464,15 @@ export function killFactForBody(database: DatabaseSync, bodySequence: number): K
   };
 }
 
-export function historyFacts(database: DatabaseSync): readonly TurnFact[] {
-  const rows = database.prepare(`SELECT sequence, body_sequence, outcome, history_id, session_json,
-    answer, diagnostic, completed_at FROM turns ORDER BY sequence`).all() as unknown as readonly TurnRow[];
-  return rows.map(decodeTurnRow);
-}
-
 export function lastAnsweredTurnFact(database: DatabaseSync): TurnFact | null {
-  const row = database.prepare(`SELECT sequence, body_sequence, outcome, history_id, session_json,
-    answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' ORDER BY sequence DESC LIMIT 1`)
+  const row = database.prepare(`SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
+    session_json, answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' ORDER BY end_sequence DESC LIMIT 1`)
     .get() as TurnRow | undefined;
   return row === undefined ? null : decodeTurnRow(row);
 }
 
-export function latestTurnFact(database: DatabaseSync): TurnFact | null {
-  const row = database.prepare(`SELECT sequence, body_sequence, outcome, history_id, session_json,
-    answer, diagnostic, completed_at FROM turns ORDER BY sequence DESC LIMIT 1`).get() as TurnRow | undefined;
-  return row === undefined ? null : decodeTurnRow(row);
-}
-
 export function answeredTurnFact(database: DatabaseSync, historyId: string): TurnFact | null {
-  const row = database.prepare(`SELECT sequence, body_sequence, outcome, history_id, session_json,
-    answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' AND history_id = ?`).get(historyId) as TurnRow | undefined;
+  const row = database.prepare(`SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
+    session_json, answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' AND history_id = ?`).get(historyId) as TurnRow | undefined;
   return row === undefined ? null : decodeTurnRow(row);
 }

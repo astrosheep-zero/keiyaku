@@ -34,7 +34,7 @@ export type AkumaKillResult = Readonly<{
 export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string }>;
 export type AkumaTellResult = Readonly<{ akuma: AkumaStatus["id"]; tell: TellResult; observation: AkumaStatusView }>;
 export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string }>;
-export type AkumaInterruptResult = Readonly<{ id: AkumaStatus["id"]; receipt: InterruptReceipt; contractId?: ContractId }>;
+export type AkumaInterruptResult = Readonly<{ id: AkumaStatus["id"]; receipt: InterruptReceipt; observation: AkumaStatusView; contractId?: ContractId }>;
 export type AkumaHistoryInput = AkumaAddressInput & Readonly<{
   before?: number;
   since?: number;
@@ -73,26 +73,26 @@ function delay(milliseconds: number): Promise<void> {
 
 const PLURAL_DETAIL_LIMIT = 32;
 
-function pinned(entry: AkumaStatus["activity"]["entries"][number]): boolean {
+function pinned(entry: AkumaStatus["timeline"]["entries"][number]): boolean {
   return entry.kind === "row"
     && ((entry.row.kind === "tool" && entry.row.state === "running")
       || (entry.row.kind === "tell" && entry.row.state === "pending"));
 }
 
 function budgetStatus(status: AkumaStatus, allowance: number): Readonly<{ status: AkumaStatus; used: number }> {
-  const entries: typeof status.activity.entries[number][] = [];
-  const ordinary = status.activity.entries.filter((entry) => entry.kind === "row" && !pinned(entry));
+  const entries: typeof status.timeline.entries[number][] = [];
+  const ordinary = status.timeline.entries.filter((entry) => entry.kind === "row" && !pinned(entry));
   const kept = new Set(allowance === 0 ? [] : ordinary.slice(-allowance));
   const used = kept.size;
   let hidden = 0;
-  let single: Extract<typeof status.activity.entries[number], { kind: "row" }> | undefined;
+  let single: Extract<typeof status.timeline.entries[number], { kind: "row" }> | undefined;
   const flush = (): void => {
     if (hidden === 1 && single !== undefined) entries.push(single);
     else if (hidden > 0) entries.push({ kind: "gap", count: hidden });
     hidden = 0;
     single = undefined;
   };
-  for (const entry of status.activity.entries) {
+  for (const entry of status.timeline.entries) {
     if (pinned(entry)) {
       flush();
       entries.push(entry);
@@ -109,7 +109,7 @@ function budgetStatus(status: AkumaStatus, allowance: number): Readonly<{ status
     hidden += count;
   }
   flush();
-  return { status: { ...status, activity: { ...status.activity, entries } }, used };
+  return { status: { ...status, timeline: { ...status.timeline, entries } }, used };
 }
 
 function budgetPlural(statuses: readonly AkumaStatus[]): readonly AkumaStatus[] {
@@ -206,11 +206,8 @@ export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaI
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const addressed = addressAkuma(directAddress(values));
   const contractId = contractFor(values.repo as Repo | undefined, addressed.id);
-  return {
-    id: addressed.id,
-    receipt: await source(addressed.path, addressed.settings).of({ id: addressed.id }).interrupt(values.body),
-    ...(contractId === undefined ? {} : { contractId }),
-  };
+  const receipt = await source(addressed.path, addressed.settings).of({ id: addressed.id }).interrupt(values.body);
+  return { id: addressed.id, receipt, observation: statusView(readActionFeedbackStatus(addressed.path, addressed.id), values.repo as Repo | undefined), ...(contractId === undefined ? {} : { contractId }) };
 }
 
 export function historyAkuma(input: AkumaHistoryInput): AkumaHistoryResult {

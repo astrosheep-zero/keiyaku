@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { appendActivity, initializeHeart, recordBody, recordSession, recordTell, recordTurn } from "../src/akuma/heart/index.js";
+import { appendActivity, beginTurn, endTurn, initializeHeart, recordBody, recordSession, recordTell } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -35,6 +35,11 @@ const provider: ProviderAdapter = {
     };
   },
 };
+
+function completeTurn(paths: Parameters<typeof beginTurn>[0], bodySequence: number, outcome: Parameters<typeof endTurn>[1]["outcome"], completedAt: string): void {
+  const turn = beginTurn(paths, { bodySequence, startedAt: completedAt });
+  endTurn(paths, { turnSequence: turn.sequence, outcome, completedAt });
+}
 
 async function answered(root: string, archetype: string, suffix: string) {
   const allocated = allocateAkumaDirectory({ worldRoot: root, archetype, draw: () => suffix });
@@ -105,14 +110,14 @@ test("plural wait shares one detail budget without dropping pinned rows", async 
       const source = await answered(root, "worker", String(member).padStart(8, "0"));
       for (let index = 0; index < 5; index += 1) {
         appendActivity(source.paths, {
-          bodySequence: 1,
+          turnSequence: 1,
           event: { type: "assistant", text: `member-${member}-voice-${index}` },
           at: `2026-08-11T00:00:${String(index + 1).padStart(2, "0")}.000Z`,
         });
       }
       for (let index = 0; index < (member === 5 ? 3 : 2); index += 1) {
         appendActivity(source.paths, {
-          bodySequence: 1,
+          turnSequence: 1,
           event: { type: "note", text: `member-${member}-note-${index}` },
           at: `2026-08-11T00:00:${String(index + 6).padStart(2, "0")}.000Z`,
         });
@@ -120,7 +125,7 @@ test("plural wait shares one detail budget without dropping pinned rows", async 
       sources.push(source);
     }
     appendActivity(sources[4]!.paths, {
-      bodySequence: 1,
+      turnSequence: 1,
       event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } },
       at: "2026-08-11T00:01:00.000Z",
     });
@@ -128,13 +133,13 @@ test("plural wait shares one detail budget without dropping pinned rows", async 
     const exhausted = await answered(root, "worker", "00000006");
     for (let index = 0; index < 2; index += 1) {
       appendActivity(exhausted.paths, {
-        bodySequence: 1,
+        turnSequence: 1,
         event: { type: "note", text: `exhausted-${index}` },
         at: `2026-08-11T00:02:0${index}.000Z`,
       });
     }
     appendActivity(exhausted.paths, {
-      bodySequence: 1,
+      turnSequence: 1,
       event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } },
       at: "2026-08-11T00:02:02.000Z",
     });
@@ -147,28 +152,24 @@ test("plural wait shares one detail budget without dropping pinned rows", async 
       timeoutMs: 0,
     });
     const fifth = waited.statuses[4]!;
-    const ordinary = waited.statuses.flatMap((status) => status.activity.entries.filter((entry) =>
+    const ordinary = waited.statuses.flatMap((status) => status.timeline.entries.filter((entry) =>
       entry.kind === "row"
         && !((entry.row.kind === "tool" && entry.row.state === "running")
           || (entry.row.kind === "tell" && entry.row.state === "pending"))));
     assert.equal(ordinary.length, 32);
-    assert.deepEqual(fifth.activity.entries.map((entry) => entry.kind === "gap"
+    assert.deepEqual(fifth.timeline.entries.map((entry) => entry.kind === "gap"
       ? `gap:${entry.count}`
       : entry.row.kind === "said" || entry.row.kind === "note" ? entry.row.text : entry.row.kind), [
-      "gap:4",
-      "member-5-voice-4",
-      "member-5-note-0",
-      "member-5-note-1",
-      "member-5-note-2",
+      "gap:11",
       "tool",
       "tell",
     ]);
-    assert.equal(fifth.activity.entries.some((entry) => entry.kind === "row"
+    assert.equal(fifth.timeline.entries.some((entry) => entry.kind === "row"
       && entry.row.kind === "tool" && entry.row.state === "running"), true);
-    assert.equal(fifth.activity.entries.some((entry) => entry.kind === "row"
+    assert.equal(fifth.timeline.entries.some((entry) => entry.kind === "row"
       && entry.row.kind === "tell" && entry.row.state === "pending"), true);
-    assert.deepEqual(waited.statuses[5]!.activity.entries.map((entry) =>
-      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:2", "tool"]);
+    assert.deepEqual(waited.statuses[5]!.timeline.entries.map((entry) =>
+      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:5", "tool"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -183,7 +184,7 @@ test("facade tell preserves mutation authority beside a separate observation", a
     assert.equal(result.tell.admission.fact, "recorded");
     assert.equal(typeof result.tell.admission.tellId, "string");
     assert.equal(result.observation.id, source.id);
-    assert.ok(result.observation.activity.entries.some((entry) => entry.kind === "row"
+    assert.ok(result.observation.timeline.entries.some((entry) => entry.kind === "row"
       && entry.row.kind === "tell" && entry.row.tellId === result.tell.admission.tellId));
     assert.equal("receipt" in result, false);
     assert.equal("status" in result, false);
@@ -319,7 +320,7 @@ test("history last bypasses activity and glob grammar follows normalized archety
   try {
     const source = await answered(root, "worker", "00000001");
     appendActivity(source.paths, {
-      bodySequence: 1,
+      turnSequence: 1,
       event: { type: "activity", event: { provider: "legacy" } },
       at: "2026-08-11T00:00:01.000Z",
     });
@@ -358,35 +359,15 @@ test("history last selects exactly one latest answered TurnFact by durable seque
     const last = () => Keiyaku.history({ path: root, akuma: source.id, last: true });
 
     assert.deepEqual(last(), { kind: "no-answer", id: source.id });
-    recordTurn(source.paths, {
-      bodySequence: body.sequence,
-      outcome: { kind: "failed", diagnostic: "first failure" },
-      completedAt: "2026-08-11T00:00:01.000Z",
-    });
+    completeTurn(source.paths, body.sequence, { kind: "failed", diagnostic: "first failure" }, "2026-08-11T00:00:01.000Z");
     assert.deepEqual(last(), { kind: "no-answer", id: source.id });
-    recordTurn(source.paths, {
-      bodySequence: body.sequence,
-      outcome: { kind: "answered", answer: "first", historyId: "history-1", session: { sessionId: "session-1" } },
-      completedAt: "2026-08-11T00:00:02.000Z",
-    });
+    completeTurn(source.paths, body.sequence, { kind: "answered", answer: "first", historyId: "history-1", session: { sessionId: "session-1" } }, "2026-08-11T00:00:02.000Z");
     assert.deepEqual(last(), { kind: "last", id: source.id, answer: "first" });
-    recordTurn(source.paths, {
-      bodySequence: body.sequence,
-      outcome: { kind: "answered", answer: "second", historyId: "history-2", session: { sessionId: "session-2" } },
-      completedAt: "2026-08-11T00:00:03.000Z",
-    });
+    completeTurn(source.paths, body.sequence, { kind: "answered", answer: "second", historyId: "history-2", session: { sessionId: "session-2" } }, "2026-08-11T00:00:03.000Z");
     assert.deepEqual(last(), { kind: "last", id: source.id, answer: "second" });
-    recordTurn(source.paths, {
-      bodySequence: body.sequence,
-      outcome: { kind: "failed", diagnostic: "later failure" },
-      completedAt: "2026-08-11T00:00:04.000Z",
-    });
+    completeTurn(source.paths, body.sequence, { kind: "failed", diagnostic: "later failure" }, "2026-08-11T00:00:04.000Z");
     assert.deepEqual(last(), { kind: "last", id: source.id, answer: "second" });
-    recordTurn(source.paths, {
-      bodySequence: body.sequence,
-      outcome: { kind: "answered", answer: "", historyId: "history-3", session: { sessionId: "session-3" } },
-      completedAt: "2026-08-11T00:00:05.000Z",
-    });
+    completeTurn(source.paths, body.sequence, { kind: "answered", answer: "", historyId: "history-3", session: { sessionId: "session-3" } }, "2026-08-11T00:00:05.000Z");
     assert.deepEqual(last(), { kind: "last", id: source.id, answer: "" });
   } finally {
     rmSync(root, { recursive: true, force: true });

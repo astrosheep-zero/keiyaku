@@ -2,6 +2,13 @@
 
 This chapter owns the provider-neutral protocol and native adapter obligations.
 
+## Turn Correlation
+
+Provider fences and tell receipts are correlated to the admitted Turn, not to
+the enclosing Body and not to wall-clock order. Launch and live tell attempts
+remain typed attempts for the same Tell admission. A terminal provider result
+closes its Turn once; later narration cannot create another outcome.
+
 ## Provider boundary
 
 ```ts
@@ -52,8 +59,8 @@ type TellReceipt =
 ```
 
 `ProviderFence` is an adapter-authored opaque submission coordinate unique to
-one delivery group within one Body sequence. Its durable correlation key is the
-Heart-owned `bodySequence` plus that fence. One Body may drive successive
+one delivery group within one Turn. Its durable correlation key is the
+Heart-owned `turnSequence` plus that fence. One Body may drive successive
 Sessions; when a native coordinate has narrower scope, the adapter namespaces
 it inside the opaque fence. Provider Core adds no execution or Session identity.
 A fence is never matched across Body sequences or retries. Its codec is part of

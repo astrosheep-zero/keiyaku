@@ -2,7 +2,9 @@ import { fileURLToPath } from "node:url";
 import {
   HeldAkumaLeash,
   appendActivity,
+  beginTurn,
   breakBody,
+  endTurn,
   finishBodyIfIdle,
   heartExists,
   pauseRequested,
@@ -11,7 +13,6 @@ import {
   recordSession,
   recordTellDeliveries,
   recordTellReceipt,
-  recordTurn,
   stopRequested,
   type ResumeCoordinate,
   type TellFact,
@@ -119,12 +120,14 @@ type DriveTurnInput = Readonly<{
   adapter: ProviderAdapter;
   bodySequence: number;
   body: string;
+  call?: string;
   launchTells: readonly TellFact[];
   runtimeSpawn(launch: RequestChildLaunch): Promise<ProcessCollar>;
   now(): string;
 }>;
 
 type ActiveTurn = Readonly<{
+  turnSequence: number;
   drive: Session;
   requests: BodyRequestPump | null;
   cwd: string;
@@ -132,11 +135,18 @@ type ActiveTurn = Readonly<{
   resume?: ResumeCoordinate;
 }>;
 
-type StartTurnResult = ActiveTurn | Readonly<{ kind: "resume-unsupported" }>;
+type StartTurnResult = ActiveTurn
+  | Readonly<{ kind: "resume-unsupported" }>
+  | Readonly<{ kind: "start-failed"; turnSequence: number; diagnostic: string }>;
 
 async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
   const { cwd, options, session } = turnRecipe(input.paths, input.soul);
   if (session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
+  const turn = beginTurn(input.paths, {
+    bodySequence: input.bodySequence,
+    startedAt: input.now(),
+    ...(input.call === undefined ? {} : { call: input.call }),
+  });
   const requests = input.soul.confinement.kind === "declared"
     ? new BodyRequestPump({
         paths: input.paths,
@@ -161,21 +171,29 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
       recordTellDeliveries(input.paths, input.launchTells.map((tell) => ({
         tellId: tell.id,
         route: "launch" as const,
-        bodySequence: input.bodySequence,
+        turnSequence: turn.sequence,
         fence: selected.admission.fence,
         deliveredAt: input.now(),
       })));
     }
     if (requests !== null) void selected.completion.then(() => requests.stopAdmission());
-    return { drive: selected, requests, cwd, options, ...(session === undefined ? {} : { resume: session }) };
+    return { turnSequence: turn.sequence, drive: selected, requests, cwd, options,
+      ...(session === undefined ? {} : { resume: session }) };
   } catch (error) {
     if (requests !== null) await requests.close();
-    throw error;
+    const diagnostic = error instanceof Error ? error.message : String(error);
+    endTurn(input.paths, {
+      turnSequence: turn.sequence,
+      outcome: { kind: "failed", diagnostic },
+      completedAt: input.now(),
+    });
+    return { kind: "start-failed", turnSequence: turn.sequence, diagnostic };
   }
 }
 
 function pumpReceipts(
   input: DriveTurnInput,
+  turnSequence: number,
   drive: Session,
   writeWitness: ReturnType<typeof serializeEffects>,
 ): Promise<void> {
@@ -184,13 +202,14 @@ function pumpReceipts(
     for await (const receipt of drive.receipts) {
       await writeWitness(() => recordTellReceipt(input.paths, receipt.evidence === "exact"
         ? { ...receipt, receivedAt: input.now() }
-        : { ...receipt, bodySequence: input.bodySequence, receivedAt: input.now() }));
+        : { ...receipt, turnSequence, receivedAt: input.now() }));
     }
   })();
 }
 
 async function submitPendingLiveTells(
   input: DriveTurnInput,
+  turnSequence: number,
   drive: Session,
   attempted: Set<string>,
   writeWitness: ReturnType<typeof serializeEffects>,
@@ -205,7 +224,7 @@ async function submitPendingLiveTells(
       recordTellDeliveries(input.paths, [{
         tellId: tell.id,
         route: "live",
-        bodySequence: input.bodySequence,
+        turnSequence,
         fence: submission.fence,
         receipt: drive.receipts === undefined ? "unavailable" : "required",
         deliveredAt: input.now(),
@@ -221,11 +240,11 @@ async function consumeTurnDrive(
   input: DriveTurnInput,
   active: ActiveTurn,
 ): Promise<DrivenTurn | Readonly<{ kind: "stopped" }>> {
-  const { drive, requests, cwd, options, resume } = active;
+  const { turnSequence, drive, requests, cwd, options, resume } = active;
   let turnSession = resume;
   const attempted = new Set(input.launchTells.map((tell) => tell.id));
   const writeWitness = serializeEffects();
-  const receiptPump = pumpReceipts(input, drive, writeWitness);
+  const receiptPump = pumpReceipts(input, turnSequence, drive, writeWitness);
   const receiptFailure = receiptPump.then(
     () => new Promise<never>(() => {}),
     (error: unknown) => Promise.reject(error),
@@ -244,7 +263,7 @@ async function consumeTurnDrive(
         return { kind: "stopped" };
       }
       if (liveTells) {
-        liveTells = await submitPendingLiveTells(input, drive, attempted, writeWitness) === "live";
+        liveTells = await submitPendingLiveTells(input, turnSequence, drive, attempted, writeWitness) === "live";
       }
       const next = await Promise.race([
         pending,
@@ -267,7 +286,7 @@ async function consumeTurnDrive(
         });
       }
       appendActivity(input.paths, {
-        bodySequence: input.bodySequence,
+        turnSequence,
         event: encodeAgentEvent(event),
         at,
       });
@@ -290,8 +309,9 @@ async function consumeTurnDrive(
 
 async function driveTurn(
   input: DriveTurnInput,
-): Promise<DrivenTurn
-  | Readonly<{ kind: "stopped" }>
+): Promise<(DrivenTurn & Readonly<{ turnSequence: number }>)
+  | Readonly<{ kind: "stopped"; turnSequence: number }>
+  | Readonly<{ kind: "start-failed"; turnSequence: number; diagnostic: string }>
   | Readonly<{ kind: "heart-gone" }>
   | Readonly<{ kind: "resume-unsupported" }>> {
   let active: ActiveTurn;
@@ -300,17 +320,17 @@ async function driveTurn(
     if ("kind" in started) return started;
     active = started;
   } catch (error) {
-    return heartExists(input.paths)
-      ? { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) }
-      : { kind: "heart-gone" };
+    if (!heartExists(input.paths)) return { kind: "heart-gone" };
+    throw error;
   }
   try {
-    return await consumeTurnDrive(input, active);
+    return { ...await consumeTurnDrive(input, active), turnSequence: active.turnSequence };
   } catch (error) {
     const draining = active.requests?.close();
     if (heartExists(input.paths)) {
       await draining;
-      throw error;
+      return { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error),
+        turnSequence: active.turnSequence };
     }
     try { await active.drive.abort(); } catch { /* the heart loss still owns shutdown */ }
     try { await draining; } catch { /* the vanished heart owns the request loss */ }
@@ -346,12 +366,12 @@ function launchCwd(launch: BodyLaunch): string {
 
 function persistTurn(
   paths: AkumaPaths,
-  bodySequence: number,
+  turnSequence: number,
   result: DrivenTurn,
   completedAt: string,
 ): "answered" | "failed" {
-  recordTurn(paths, {
-    bodySequence,
+  endTurn(paths, {
+    turnSequence,
     outcome: result.kind === "answered" && result.session !== undefined
       ? { kind: "answered", historyId: result.historyId, session: result.session, answer: result.answer }
       : result.kind === "answered"
@@ -421,6 +441,7 @@ export async function driveAkumaBody(
         bodySequence: body.sequence,
         runtimeSpawn: childSpawner(runtime),
         body: initial ?? "",
+        ...(initial === undefined ? {} : { call: initial }),
         launchTells,
         now: runtime.now,
       });
@@ -436,7 +457,11 @@ export async function driveAkumaBody(
         breakBody(launch.paths, { sequence: body.sequence, end: "broke-off", at: runtime.now() });
         return;
       }
-      if (persistTurn(launch.paths, body.sequence, result, runtime.now()) === "failed") {
+      if (result.kind === "start-failed") {
+        breakBody(launch.paths, { sequence: body.sequence, end: "broke-off", at: runtime.now() });
+        return;
+      }
+      if (persistTurn(launch.paths, result.turnSequence, result, runtime.now()) === "failed") {
         breakBody(launch.paths, { sequence: body.sequence, end: "broke-off", at: runtime.now() });
         return;
       }

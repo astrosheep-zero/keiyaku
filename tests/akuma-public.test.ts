@@ -5,16 +5,16 @@ import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
-import { selectActivitySnapshot } from "../src/akuma/activity.js";
+import { projectActivityHistory, selectActivitySnapshot } from "../src/akuma/activity.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
+  activitySlice,
   appendActivity,
   HeldAkumaLeash,
   initializeHeart,
   pauseRequested,
   readHeart,
-  readTurns,
   recordBody,
   recordTell,
 } from "../src/akuma/heart/index.js";
@@ -29,6 +29,27 @@ const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 function akumaAt(root: string, value?: ReturnType<typeof settings>) {
   return Akuma.of(World.at(root), value);
 }
+
+function timeline(paths: Parameters<typeof activitySlice>[0]) {
+  return activitySlice(paths, { limit: 5_000 }).rows;
+}
+
+test("forward history reports a pruned interval after its cursor", () => {
+  const history = projectActivityHistory({
+    rows: [{
+      kind: "activity",
+      sequence: 9,
+      turnSequence: 1,
+      event: { type: "note", text: "retained" },
+      at: "2026-08-08T00:00:09.000Z",
+    }],
+    lowestRetained: 1,
+    highest: 9,
+  }, { since: 4, limit: 50 });
+
+  assert.equal(history.historyLost, true);
+  assert.deepEqual(history.rows.map((row) => row.sequence), [9]);
+});
 
 test("tell refuses an unborn address without leaving durable input", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-tell-unborn-"));
@@ -100,28 +121,22 @@ async function answeredSource(root: string, suffix: string) {
 type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapter[Key] };
 
 test("activity fold pairs tools and bounds settled rows without dropping in-flight tools", () => {
-  assert.deepEqual(selectActivitySnapshot([
-    { sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z", event: { type: "tool", phase: "started", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" } } },
-    { sequence: 2, bodySequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "note", text: "checking" } },
-    { sequence: 3, bodySequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "tool", phase: "completed", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" }, result: { status: "ok" } } },
-    { sequence: 4, bodySequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "tool", phase: "completed", id: "orphan", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } } },
-    { sequence: 5, bodySequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "tool", phase: "started", id: "open", name: "Search", call: { kind: "search", query: "TODO" } } },
-  ]), {
-    entries: [
-      { kind: "row", row: { kind: "tool", sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z", completedAt: "2026-08-10T00:00:03.000Z", durationMs: 2_000, name: "Bash", call: { kind: "run", command: "npm test" }, state: { status: "ok" } } },
-      { kind: "row", row: { kind: "note", sequence: 2, bodySequence: 1, at: "2026-08-10T00:00:02.000Z", text: "checking" } },
-      { kind: "row", row: { kind: "tool", sequence: 4, bodySequence: 1, at: "2026-08-10T00:00:04.000Z", name: "Read", call: { kind: "read", path: "README.md" }, state: { status: "error", message: "missing" } } },
-      { kind: "row", row: { kind: "tool", sequence: 5, bodySequence: 1, at: "2026-08-10T00:00:05.000Z", name: "Search", call: { kind: "search", query: "TODO" }, state: "running" } },
-    ],
-    lowestRetained: 1,
-    highest: 5,
-  });
+  const folded = selectActivitySnapshot([
+    { sequence: 1, turnSequence: 1, at: "2026-08-10T00:00:01.000Z", event: { type: "tool", phase: "started", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" } } },
+    { sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "note", text: "checking" } },
+    { sequence: 3, turnSequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "tool", phase: "completed", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" }, result: { status: "ok" } } },
+    { sequence: 4, turnSequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "tool", phase: "completed", id: "orphan", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } } },
+    { sequence: 5, turnSequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "tool", phase: "started", id: "open", name: "Search", call: { kind: "search", query: "TODO" } } },
+  ]);
+  assert.deepEqual(folded.entries.map((entry) => entry.kind === "gap" ? "gap" : entry.row.kind), ["tool", "note", "tool", "tool"]);
+  const foldedTools = folded.entries.filter((entry) => entry.kind === "row" && entry.row.kind === "tool").map((entry) => entry.row);
+  assert.deepEqual(foldedTools.map((row) => row.state), [{ status: "ok" }, { status: "error", message: "missing" }, "running"]);
 
   const bounded = selectActivitySnapshot([
-    { sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z", event: { type: "tool", phase: "started", id: "open", name: "Bash", call: { kind: "run", command: "long" } } },
+    { sequence: 1, turnSequence: 1, at: "2026-08-10T00:00:01.000Z", event: { type: "tool", phase: "started", id: "open", name: "Bash", call: { kind: "run", command: "long" } } },
     ...Array.from({ length: 10 }, (_, index) => ({
       sequence: index + 2,
-      bodySequence: 1,
+      turnSequence: 1,
       at: `2026-08-10T00:00:${String(index + 2).padStart(2, "0")}.000Z`,
       event: { type: "note", text: `note-${index + 1}` },
     })),
@@ -134,7 +149,7 @@ test("activity fold pairs tools and bounds settled rows without dropping in-flig
 
   const oneHidden = selectActivitySnapshot(Array.from({ length: 9 }, (_, index) => ({
     sequence: index + 1,
-    bodySequence: 1,
+    turnSequence: 1,
     at: `2026-08-10T00:00:${String(index + 1).padStart(2, "0")}.000Z`,
     event: index % 2 === 0 ? { type: "assistant" as const, text: `voice-${index}` } : { type: "note" as const, text: `note-${index}` },
   })));
@@ -213,7 +228,7 @@ test("fork publishes a sleeping child with lineage and its native birth session"
       options: { model: "fixture-model" },
       admittedAt: snapshot.latestSession?.admittedAt,
     });
-    assert.deepEqual(readTurns(childPaths), []);
+    assert.deepEqual(timeline(childPaths).filter((fact) => fact.kind === "turn-start"), []);
   } finally {
     mutable.fork = originalFork;
     rmSync(root, { recursive: true, force: true });
@@ -289,11 +304,11 @@ test("status names a durable session that the adapter cannot resume", async () =
     const status = handle.status();
     assert.equal(status.life, "stranded");
     assert.equal(status.strandedReason, "resume-unsupported");
-    assert.equal(status.failure, undefined);
+    assert.equal(status.timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "outcome" && entry.row.outcome.kind === "failed"), false);
     const listed = akumaAt(root).list().rows[0]!;
     assert.equal("pending" in listed && listed.pending.includes("resume-unsupported-tell"), true);
-    assert.equal(readTurns(source.paths).length, 1);
-    assert.equal(readTurns(source.paths)[0]?.outcome.kind, "answered");
+    assert.equal(timeline(source.paths).filter((fact) => fact.kind === "turn-start").length, 1);
+    assert.equal(timeline(source.paths).find((fact) => fact.kind === "turn-end")?.outcome.kind, "answered");
   } finally {
     mutable.resume = originalResume;
     rmSync(root, { recursive: true, force: true });
@@ -348,32 +363,24 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.equal("description" in status, false);
     assert.equal("confinement" in status, false);
     assert.equal("pending" in status, false);
-    assert.equal(status.answer, "public answer");
+    assert.equal(status.timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "outcome"), true);
     assert.equal("history" in status, false);
-    assert.deepEqual(handle.history().turns[0]?.outcome, {
+    assert.deepEqual(handle.history().rows.find((row) => row.kind === "outcome")?.outcome, {
       kind: "answered",
       answer: "public answer",
       historyId: "public-history",
       session: { sessionId: "public-session" },
     });
-    assert.deepEqual(status.activity, {
-      entries: [{ kind: "row", row: {
-        kind: "said",
-        sequence: 2,
-        bodySequence: 1,
-        at: "2026-08-08T00:00:00.000Z",
-        text: "working",
-      } }],
-      lowestRetained: 1,
-      highest: 2,
-    });
-    assert.deepEqual(await handle.wait((candidate) => candidate.answer === "public answer"), status);
+    assert.deepEqual(status.timeline.entries.map((entry) => entry.kind === "gap" ? "gap" : entry.row.kind), [
+      "turn", "call", "said", "outcome",
+    ]);
+    assert.deepEqual(await handle.wait((candidate) => candidate.timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "outcome" && entry.row.outcome.kind === "answered")), status);
     assert.equal(await handle.kill(), "killed");
     assert.equal(handle.status().life, "killed");
-    assert.equal(handle.status().answer, "public answer");
+    assert.equal(handle.status().timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "outcome"), true);
     assert.equal(await handle.kill(), "already-killed");
     assert.equal(pauseRequested(allocated.paths), false);
-    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(timeline(allocated.paths).find((fact) => fact.kind === "turn-end")?.outcome, {
       kind: "answered",
       answer: "public answer",
       historyId: "public-history",
@@ -448,10 +455,10 @@ test("tell after kill wakes the same Akuma through its retained session", async 
     });
     assert.equal(readHeart(allocated.paths).latestBody?.sequence, 2);
     assert.deepEqual(readHeart(allocated.paths).pending, []);
-    assert.equal(handle.status().activity.entries.some((entry) => entry.kind === "row"
+    assert.equal(handle.status().timeline.entries.some((entry) => entry.kind === "row"
       && entry.row.kind === "tell" && entry.row.tellId === told.admission.tellId && entry.row.state === "told"), true);
     assert.equal(handle.status().life, "asleep");
-    assert.equal(handle.status().answer, "continued");
+    assert.equal(handle.status().timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "outcome" && entry.row.outcome.kind === "answered"), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -791,13 +798,13 @@ test("a failed turn is durable public evidence and never masquerades as provider
       async putDownOwnTree() {},
     });
     const handle = akumaAt(root).of({ id: allocated.id });
-    assert.equal(handle.status().failure, "native failed");
+    assert.equal(handle.status().timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "outcome" && entry.row.outcome.kind === "failed"), true);
     const settled = await handle.wait();
     assert.equal(settled.life, "stranded");
-    assert.equal(settled.failure, "native failed");
+    assert.equal(settled.timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "outcome" && entry.row.outcome.kind === "failed"), true);
     assert.equal("pending" in settled, false);
-    assert.deepEqual(handle.history().turns, []);
-    assert.deepEqual(readTurns(allocated.paths).map((turn) => turn.outcome), [
+    assert.deepEqual(handle.history().rows.map((row) => row.kind), ["turn", "call", "outcome"]);
+    assert.deepEqual(timeline(allocated.paths).filter((fact) => fact.kind === "turn-end").map((turn) => turn.outcome), [
       { kind: "failed", diagnostic: "native failed" },
     ]);
   } finally {
@@ -816,18 +823,12 @@ test("activity is persistent narration and old raw events fail the public hard c
       heart.exec("PRAGMA foreign_keys=ON");
       heart.prepare("DELETE FROM timeline WHERE kind = 'activity'").run();
     } finally { heart.close(); }
-    assert.deepEqual(handle.status(), {
-      ...before,
-      activity: {
-        entries: [],
-        lowestRetained: null,
-        highest: null,
-      },
-    });
-    assert.deepEqual(handle.history().rows, []);
+    const after = handle.status();
+    assert.equal(after.timeline.entries.some((entry) => entry.kind === "row" && ["said", "thought", "note", "tool"].includes(entry.row.kind)), false);
+    assert.equal(handle.history().rows.some((row) => ["said", "thought", "note", "tool"].includes(row.kind)), false);
 
     appendActivity(source.paths, {
-      bodySequence: 1,
+      turnSequence: 1,
       event: { type: "activity", event: { provider: "legacy", secret: "raw" } },
       at: "2026-08-08T00:00:01.000Z",
     });

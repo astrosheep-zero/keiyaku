@@ -10,6 +10,8 @@ import {
   admitRequest,
   activitySlice,
   appendActivity,
+  beginTurn,
+  endTurn,
   finishBodyIfIdle,
   initializeHeart,
   life,
@@ -17,7 +19,6 @@ import {
   pauseRequested,
   readHeart,
   readForkPoint,
-  readTurns,
   readNonterminalRequests,
   readRequest,
   recordBody,
@@ -25,7 +26,6 @@ import {
   recordTell,
   recordTellDeliveries,
   recordTellReceipt,
-  recordTurn,
   requestPause,
   requestStop,
   reserveRequest,
@@ -107,8 +107,12 @@ test("tell admission shares activity order and delivery witnesses fold without m
       collar: { pid: 1, processGroup: 1, spawnedAt: "tell-witness" },
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
-    const firstActivity = appendActivity(value.allocated.paths, {
+    const turn = beginTurn(value.allocated.paths, {
       bodySequence: bodyFact.sequence,
+      startedAt: "2026-08-08T00:00:00.000Z",
+    });
+    const firstActivity = appendActivity(value.allocated.paths, {
+      turnSequence: turn.sequence,
       event: { type: "note", text: "before" },
       at: "2026-08-08T00:00:00.000Z",
     });
@@ -118,25 +122,25 @@ test("tell admission shares activity order and delivery witnesses fold without m
     assert.equal(admitted.kind, "recorded");
     if (admitted.kind !== "recorded") return;
     const afterActivity = appendActivity(value.allocated.paths, {
-      bodySequence: bodyFact.sequence,
+      turnSequence: turn.sequence,
       event: { type: "note", text: "after" },
       at: "2026-08-08T00:00:02.000Z",
     });
-    assert.deepEqual([firstActivity, admitted.tell.sequence, afterActivity], [1, 2, 3]);
-    assert.deepEqual(activitySlice(value.allocated.paths).rows.map((fact) => "id" in fact ? "tell" : "activity"), [
-      "activity", "tell", "activity",
+    assert.deepEqual([firstActivity, admitted.tell.sequence, afterActivity], [2, 3, 4]);
+    assert.deepEqual(activitySlice(value.allocated.paths).rows.map((fact) => fact.kind), [
+      "turn-start", "activity", "tell", "activity",
     ]);
 
     const delivery = {
       tellId: admitted.tell.id,
       route: "launch" as const,
-      bodySequence: bodyFact.sequence,
+      turnSequence: turn.sequence,
       fence: "launch-fence",
       deliveredAt: "2026-08-08T00:00:03.000Z",
     };
     recordTellDeliveries(value.allocated.paths, [delivery]);
     recordTellDeliveries(value.allocated.paths, [delivery]);
-    const told = activitySlice(value.allocated.paths).rows[1];
+    const told = activitySlice(value.allocated.paths).rows[2];
     assert.equal(told !== undefined && "id" in told ? told.state : null, "told");
     assert.equal(readHeart(value.allocated.paths).pending.length, 0);
     body.release();
@@ -163,6 +167,10 @@ test("live receipts are terminal only under their exact Heart correlation", () =
       collar: { pid: 1, processGroup: 1, spawnedAt: "receipt-1" },
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
+    const firstTurn = beginTurn(value.allocated.paths, {
+      bodySequence: firstBody.sequence,
+      startedAt: "2026-08-08T00:00:00.000Z",
+    });
     const required = recordTell(value.allocated.paths, {
       id: "tell-required", body: "wait for receipt", recordedAt: "2026-08-08T00:00:01.000Z",
     });
@@ -173,19 +181,21 @@ test("live receipts are terminal only under their exact Heart correlation", () =
     assert.equal(unavailable.kind, "recorded");
     recordTellDeliveries(value.allocated.paths, [{
       tellId: "tell-required", route: "live", receipt: "required",
-      bodySequence: firstBody.sequence, fence: "shared-fence", deliveredAt: "2026-08-08T00:00:03.000Z",
+      turnSequence: firstTurn.sequence,
+      fence: "shared-fence", deliveredAt: "2026-08-08T00:00:03.000Z",
     }, {
       tellId: "tell-unavailable", route: "live", receipt: "unavailable",
-      bodySequence: firstBody.sequence, fence: "ack-fence", deliveredAt: "2026-08-08T00:00:03.000Z",
+      turnSequence: firstTurn.sequence,
+      fence: "ack-fence", deliveredAt: "2026-08-08T00:00:03.000Z",
     }]);
     assert.deepEqual(readHeart(value.allocated.paths).pending.map((tell) => tell.id), ["tell-required"]);
     assert.throws(() => recordTellReceipt(value.allocated.paths, {
-      evidence: "fence", bodySequence: firstBody.sequence + 1, fence: "shared-fence",
+      evidence: "fence", turnSequence: firstTurn.sequence + 1, fence: "shared-fence",
       kind: "accepted", receivedAt: "2026-08-08T00:00:04.000Z",
     }), /no delivery mapping/u);
     assert.deepEqual(readHeart(value.allocated.paths).pending.map((tell) => tell.id), ["tell-required"]);
     recordTellReceipt(value.allocated.paths, {
-      evidence: "fence", bodySequence: firstBody.sequence, fence: "shared-fence",
+      evidence: "fence", turnSequence: firstTurn.sequence, fence: "shared-fence",
       kind: "accepted", receivedAt: "2026-08-08T00:00:05.000Z",
     });
     assert.deepEqual(readHeart(value.allocated.paths).pending, []);
@@ -247,12 +257,16 @@ test("kill witnesses one stopped Body without burning pending work", () => {
       collar: { pid: 2, processGroup: 2, spawnedAt: "kill-2" },
       leashTakenAt: "2026-08-08T00:00:04.000Z",
     });
+    const secondTurn = beginTurn(value.allocated.paths, {
+      bodySequence: secondBody.sequence,
+      startedAt: "2026-08-08T00:00:04.000Z",
+    });
     snapshot = readHeart(value.allocated.paths);
     assert.equal(life("free", { kind: "gone", end: "exited" }, secondBody, snapshot.latestKill), "asleep");
     recordTellDeliveries(value.allocated.paths, [{
       tellId: "tell-pending",
       route: "launch",
-      bodySequence: secondBody.sequence,
+      turnSequence: secondTurn.sequence,
       fence: "successor",
       deliveredAt: "2026-08-08T00:00:05.000Z",
     }]);
@@ -275,15 +289,19 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
       id: "tell-pinned", body: "keep me", recordedAt: "2026-08-08T00:00:00.000Z",
     });
     assert.equal(admitted.kind, "recorded");
+    const turn = beginTurn(value.allocated.paths, {
+      bodySequence: body.sequence,
+      startedAt: "2026-08-08T00:00:00.000Z",
+    });
     const heart = new DatabaseSync(value.allocated.paths.heart);
     try {
       heart.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
       heart.prepare(`WITH RECURSIVE rows(value) AS (
         VALUES(1) UNION ALL SELECT value + 1 FROM rows WHERE value < 5501
       ) INSERT INTO timeline(kind) SELECT 'activity' FROM rows`).run();
-      heart.prepare(`INSERT INTO activity(sequence, body_sequence, event_json, at)
+      heart.prepare(`INSERT INTO activity(sequence, turn_sequence, event_json, at)
         SELECT sequence, ?, '{"type":"note","text":"buffered"}', '2026-08-08T00:00:01.000Z'
-        FROM timeline WHERE kind = 'activity'`).run(body.sequence);
+        FROM timeline WHERE kind = 'activity'`).run(turn.sequence);
       heart.exec("COMMIT");
     } catch (error) {
       heart.exec("ROLLBACK");
@@ -291,20 +309,20 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
     } finally { heart.close(); }
 
     appendActivity(value.allocated.paths, {
-      bodySequence: body.sequence,
+    turnSequence: turn.sequence,
       event: { type: "note", text: "trigger compaction" },
       at: "2026-08-08T00:00:02.000Z",
     });
     let retained = activitySlice(value.allocated.paths, { limit: Number.MAX_SAFE_INTEGER });
     assert.equal(retained.rows.some((fact) => "id" in fact && fact.id === "tell-pinned"), true);
-    assert.equal(retained.rows.filter((fact) => !("id" in fact)).length, 5_000);
+    assert.equal(retained.rows.filter((fact) => fact.kind === "activity").length, 5_000);
 
     recordTellReceipt(value.allocated.paths, {
       evidence: "exact", tellId: "tell-pinned", kind: "consumed", receivedAt: "2026-08-08T00:00:03.000Z",
     });
     for (let index = 0; index < 501; index += 1) {
       appendActivity(value.allocated.paths, {
-        bodySequence: body.sequence,
+        turnSequence: turn.sequence,
         event: { type: "note", text: `after-${index}` },
         at: "2026-08-08T00:00:04.000Z",
       });
@@ -359,7 +377,7 @@ test("Body Request facts have one idempotent monotonic authority", () => {
   } finally { value.close(); }
 });
 
-test("heart schema version 9 and leash schema version 4 hard-refuse old authority", () => {
+test("heart schema version 10 and leash schema version 4 hard-refuse old authority", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -369,7 +387,7 @@ test("heart schema version 9 and leash schema version 4 hard-refuse old authorit
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 9/u);
+    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 10/u);
     assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -422,8 +440,9 @@ test("normal body completion refuses while a tell remains pending", () => {
     recordTell(value.allocated.paths, {
       id: "tell-1", body: "pending", recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    recordTurn(value.allocated.paths, {
-      bodySequence: body.sequence,
+    const firstTurn = beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: "2026-08-08T00:00:01.000Z" });
+    endTurn(value.allocated.paths, {
+      turnSequence: firstTurn.sequence,
       outcome: {
         kind: "answered",
         historyId: "turn-1",
@@ -435,12 +454,14 @@ test("normal body completion refuses while a tell remains pending", () => {
     assert.deepEqual(finishBodyIfIdle(value.allocated.paths, {
       sequence: body.sequence, at: "2026-08-08T00:00:02.000Z",
     }), { kind: "pending", tells: ["tell-1"] });
-    recordTurn(value.allocated.paths, {
-      bodySequence: body.sequence,
+    const secondTurn = beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: "2026-08-08T00:00:02.000Z" });
+    endTurn(value.allocated.paths, {
+      turnSequence: secondTurn.sequence,
       outcome: { kind: "failed", diagnostic: "later failure" },
       completedAt: "2026-08-08T00:00:03.000Z",
     });
-    assert.deepEqual(readTurns(value.allocated.paths).map((turn) => turn.outcome), [
+    assert.deepEqual(activitySlice(value.allocated.paths, { limit: 5_000 }).rows
+      .filter((fact) => fact.kind === "turn-end").map((turn) => turn.outcome), [
       {
         kind: "answered",
         historyId: "turn-1",

@@ -78,24 +78,51 @@ export type TurnOutcome =
   | Readonly<{ kind: "answered"; historyId: string; session: ResumeCoordinate; answer: string }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 
-export type TurnFact = Readonly<{
+export type TurnStartFact = Readonly<{
+  kind: "turn-start";
   sequence: number;
   bodySequence: number;
+  startedAt: string;
+}>;
+
+export type TurnEndFact = Readonly<{
+  kind: "turn-end";
+  sequence: number;
+  turnSequence: number;
   outcome: TurnOutcome;
   completedAt: string;
 }>;
 
+export type TurnFact = TurnStartFact & Readonly<{ end?: TurnEndFact }>;
+
+export type CallFact = Readonly<{
+  kind: "call";
+  sequence: number;
+  turnSequence: number;
+  body: string;
+  at: string;
+}>;
+
+export type TellDelivery = Readonly<{
+  turnSequence: number;
+  route: "launch" | "live";
+  receipt?: "unavailable" | "required";
+  deliveredAt: string;
+}>;
+
 export type TellFact = Readonly<{
+  kind: "tell";
   sequence: number;
   id: string;
   body: string;
   recordedAt: string;
   state: "pending" | "told";
+  deliveries: readonly TellDelivery[];
 }>;
 
 export type TellDeliveryInput = Readonly<{
   tellId: string;
-  bodySequence: number;
+  turnSequence: number;
   fence: string;
   deliveredAt: string;
 }> & (
@@ -108,7 +135,7 @@ export type TellReceiptInput = Readonly<{
   receivedAt: string;
 }> & (
   | Readonly<{ evidence: "exact"; tellId: string }>
-  | Readonly<{ evidence: "fence"; bodySequence: number; fence: string }>
+  | Readonly<{ evidence: "fence"; turnSequence: number; fence: string }>
 );
 
 export type RequestInput = Readonly<{

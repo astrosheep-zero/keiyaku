@@ -2,6 +2,14 @@
 
 This chapter owns help, rendering, and exit status.
 
+## Shared Akuma Rendering
+
+Status, wait, call, tell, interrupt, and kill share one snapshot renderer, and
+history uses the same row vocabulary without snapshot budgets. The renderer
+consumes typed public values only; it does not mine Heart facts or reconstruct
+outcomes. Full answer bytes remain available through `history --last` and are
+never clipped in JSON.
+
 `show` is a raw Contract read. Text writes the exact guidance Markdown with no
 status header or explanatory wrapper. JSON is exactly
 `{ "contract": ContractId, "guidance": string }`. Its bytes come from the

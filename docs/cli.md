@@ -5,6 +5,15 @@ renders their public results. It owns neither
 document decoding, lifecycle decisions, Git discovery, delivery preparation,
 Verification execution, or reconciliation semantics.
 
+## Akuma Timeline
+
+Akuma text is an agent-facing view of the public timeline. A Turn boundary is
+shown at the first visible row of a new Turn; frontier uses `⧖`, pending tell
+uses `⧗`, normal completion uses `✓ say`, and failure uses `! error`. There are
+no receipt banners, dynamic header life words, timestamp ordering, or derived
+asleep rows. `say` uses at most three lines, `tell` one, and other activity two.
+A run command remains one row with recognizable head and tail.
+
 ## Invocation And Scope
 
 The canonical spelling is:
@@ -312,10 +321,10 @@ Shared Akuma presentation and snapshot budgets are owned by
 [cli-output.md](cli-output.md); this command chapter owns only what each verb
 means and which public result it presents.
 
-Tell remains one input action. Text prints its typed receipt first (`tell
-recorded` and `wake spawned`, or an explicit wake failure), then a fresh
-observation. The current tell appears once at its observed two-state face; an
-asleep observation is never presented as the mutation result.
+Tell remains one input action. Text presents the refreshed shared snapshot;
+only a wake or interrupt failure adds an error line. The current tell appears
+once at its observed two-state face; mutation authority remains separately
+available in the typed Library result and JSON value.
 `⧗ tell` means it can still take effect, and `told` means the provider's
 strongest available evidence proves it took effect. Pending tells are never
 removed by the snapshot budget.
@@ -326,10 +335,9 @@ a CLI-only diagnostic projection. No output asks the caller to query a TellId.
 `tell --interrupt` selects the Library's fenced interrupt composition. It is
 one CLI input action, not a standalone lifecycle verb: the current Body is put
 down before the same stdin bytes are durably recorded and woken for its
-successor. Text reports the typed interrupt receipt with the same concise
-`tell recorded` and wake evidence lines as ordinary tell; JSON returns the
-Library result unchanged. It does not invent a post-action observation that
-the public result does not carry.
+successor. Text uses the same refreshed snapshot as the other Akuma mutations.
+JSON returns the Library result unchanged; the CLI does not infer a second
+receipt or observation.
 
 A stranded Akuma whose durable coordinate cannot be resumed prints
 `resume unsupported` as its typed reason. The CLI does not offer an automatic

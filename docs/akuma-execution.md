@@ -2,6 +2,15 @@
 
 This chapter owns body execution and the tell, interrupt, kill, and fork lifecycle verbs.
 
+## Body And Turn
+
+The Body is the process lifetime. Its loop may drive multiple provider Turns.
+Before `start` or `resume`, execution admits a Turn and its initial call into
+Heart. Provider activity and live tell delivery then carry that Turn coordinate.
+Normal completion writes exactly one Turn end with the complete answer or typed
+failure. Start failure writes a failed end. Stop, interrupt, kill, and process
+loss may leave the Turn open and do not synthesize a provider result.
+
 ## The body
 
 Wake -> take the leash (checking the seal) -> put down the predecessor ->
@@ -64,7 +73,7 @@ Heart records only tell facts with a named witness:
 - **delivered** — witnessed by provider submission evidence. Its route is
   `live` with a `Session.tell()` acknowledgement or `launch` with a session
   admission. Body correlates its immutable launch TellIds with the returned
-  fence. The durable correlation key is the current Heart-owned `bodySequence`
+  fence. The durable correlation key is the current Heart-owned `turnSequence`
   plus that provider fence.
 - **receipt** — provider-authored evidence attached without reinterpretation.
   Its kind preserves the provider's terminal evidence; its correlation is an
@@ -72,10 +81,10 @@ Heart records only tell facts with a named witness:
 
 ```ts
 type TellDelivery =
-  | { route: "launch"; bodySequence: number; fence: ProviderFence }
+  | { route: "launch"; turnSequence: number; fence: ProviderFence }
   | {
       route: "live";
-      bodySequence: number;
+      turnSequence: number;
       fence: ProviderFence;
       receipt: "unavailable" | "required";
     };
@@ -124,7 +133,7 @@ same launch path after a waker takes the leash.
 Body pumps the Session's two typed streams independently: events become
 activity, while receipts become tell receipt facts. An exact receipt names its
 TellId. A fence receipt applies only through the delivered fence-to-TellId
-mapping for that same `bodySequence`; an unknown fence is not evidence and writes
+mapping for that same `turnSequence`; an unknown fence is not evidence and writes
 nothing. For launch input, Body commits admission and delivery before consuming
 receipts. For live tell, the adapter exposes the receipt only after its
 acknowledgement resolves, and Body serializes acknowledgement persistence before

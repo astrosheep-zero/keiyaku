@@ -2,6 +2,14 @@
 
 This chapter owns package-root Akuma creation, addressing, fleet, and cross-product composition.
 
+## Observation
+
+All Akuma observations expose the same typed timeline snapshot. Mutation
+receipts and the fresh observation remain separate values, while status, wait,
+call, tell, interrupt, and kill use the same semantic rows. Snapshot selection
+pins the current frontier, latest outcome, open Turn, and pending tell; it does
+not add a derived lifecycle fact.
+
 ## Akuma Creation Facet
 
 The Akuma creation facet is the package-root owner for operations that produce

@@ -5,11 +5,15 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
-import { HeldAkumaLeash, admitRequest, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, readTurns, recordTell, requestPause, requestStop, stopRequested, type AkuId, type ProviderOptions } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, activitySlice, admitRequest, initializeHeart, pauseRequested, probeLeash, readHeart, readRequest, readSoul, recordTell, requestPause, requestStop, stopRequested, type AkuId, type ProviderOptions } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { AgentEvent, ProviderAdapter, TurnResult } from "../src/akuma/provider.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { requestBodyCall } from "../src/akuma/requests.js";
+
+function outcomes(paths: Parameters<typeof activitySlice>[0]) {
+  return activitySlice(paths, { limit: 5_000 }).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome);
+}
 
 function adapter(input: Readonly<{
   events: readonly AgentEvent[];
@@ -95,7 +99,7 @@ test("body births, admits native session, records the turn, and exits only when 
     assert.deepEqual(first.latestSession?.options, {
       model: "claude-sonnet-4-5", effort: "high", systemPrompt: "Build carefully.",
     });
-    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(outcomes(allocated.paths)[0], {
       kind: "answered",
       answer: "done",
       historyId: "history-1",
@@ -139,7 +143,7 @@ test("body births, admits native session, records the turn, and exits only when 
         session: "native-1",
       },
     ]);
-    assert.deepEqual(readTurns(allocated.paths)[1]?.outcome, {
+    assert.deepEqual(outcomes(allocated.paths)[1], {
       kind: "answered",
       answer: "adjusted",
       historyId: "history-2",
@@ -344,7 +348,7 @@ test("a Tell after Session terminality stays pending without replacing the answe
     closeEvents();
     await body;
 
-    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(outcomes(allocated.paths)[0], {
       kind: "answered",
       answer: "done",
       historyId: "terminal-history-1",
@@ -418,13 +422,12 @@ test("Claude settles a live Tell in the current Body through its result receipt"
     assert.deepEqual(inputs, ["initial work", "steer in this turn"]);
     assert.deepEqual(readHeart(allocated.paths).pending, []);
     assert.equal(readHeart(allocated.paths).latestBody?.sequence, 1);
-    assert.equal(readTurns(allocated.paths).length, 1);
-    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(outcomes(allocated.paths), [{
       kind: "answered",
       answer: "done",
       historyId: "claude-live-history",
       session: { sessionId: "claude-live-session" },
-    });
+    }]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -480,7 +483,7 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
     await body;
     assert.equal(aborted, true);
     assert.equal(readHeart(allocated.paths).latestBody?.end, "broke-off");
-    assert.deepEqual(readTurns(allocated.paths).at(-1)?.outcome, {
+    assert.deepEqual(outcomes(allocated.paths).at(-1), {
       kind: "failed",
       diagnostic: "tell receipt has no delivery mapping",
     });
@@ -581,7 +584,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
       requestId: "00000000-0000-4000-8000-000000000021",
     });
     assert.equal(readRequest(allocated.paths, "00000000-0000-4000-8000-000000000021")?.state, "served");
-    assert.equal(readTurns(allocated.paths).at(-1)?.outcome.kind, "answered");
+    assert.equal(outcomes(allocated.paths).at(-1)?.kind, "answered");
     assert.equal(requestDirectory === undefined ? true : existsSync(requestDirectory), false);
   } finally {
     if (priorHome === undefined) delete process.env.HOME;
@@ -629,7 +632,7 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
       async putDownOwnTree() {},
     });
     assert.deepEqual(starts, []);
-    assert.deepEqual(readTurns(allocated.paths), []);
+    assert.deepEqual(outcomes(allocated.paths), []);
     assert.equal(readHeart(allocated.paths).latestBody?.end, "exited");
 
     recordTell(allocated.paths, { id: "tell-fork", body: "continue", recordedAt: "2026-08-08T00:00:01.000Z" });
@@ -648,7 +651,7 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
       options: { model: "fork-recipe" },
       session: "native-child",
     }]);
-    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(outcomes(allocated.paths)[0], {
       kind: "answered",
       answer: "continued",
       historyId: "history-2",
@@ -687,7 +690,7 @@ test("the soul retains the summon cwd before native session admission", async ()
       async putDownOwnTree() {},
     });
     assert.equal(readHeart(allocated.paths).soul?.cwd, join(root, "custom-seat"));
-    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(outcomes(allocated.paths)[0], {
       kind: "failed", diagnostic: "failed before session",
     });
   } finally {
@@ -721,7 +724,7 @@ test("an answer without an admitted or resumed session is retained as a failed t
       now: () => "2026-08-08T00:00:00.000Z",
       async putDownOwnTree() {},
     });
-    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(outcomes(allocated.paths)[0], {
       kind: "failed",
       diagnostic: "Provider answered without a resumable session",
     });
@@ -782,7 +785,7 @@ test("a successor settles an abandoned Body-scoped stop before creating its Body
     assert.equal(snapshot.latestKill?.bodySequence, stopped.body.sequence);
     assert.equal(snapshot.latestBody?.sequence, stopped.body.sequence + 1);
     assert.notEqual(snapshot.latestKill?.bodySequence, snapshot.latestBody?.sequence);
-    assert.deepEqual(readTurns(allocated.paths).at(-1)?.outcome, {
+    assert.deepEqual(outcomes(allocated.paths).at(-1), {
       kind: "answered",
       answer: "continued",
       historyId: "orphan-history-2",

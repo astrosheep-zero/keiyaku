@@ -2,6 +2,15 @@
 
 This chapter owns Akuma public handles, status, wait, history, and fleet values.
 
+## One Timeline Projection
+
+Status and history read the retained Heart timeline once, project typed rows in
+persisted sequence order, then apply their cursor or snapshot policy. They do
+not join outcomes by timestamp or read a second Turn projection. Status exposes
+one timeline snapshot; `history` exposes pages of that same projection.
+`history --last` is the exact full-answer read for the latest retained answered
+Turn.
+
 ## Public surface
 
 ```ts
@@ -28,78 +37,11 @@ A rerouted call that reaches a terminal non-served request throws
 errors retain their existing types; Body Requests do not wrap them before
 heart admission.
 
-`status()` is a watch on one living Akuma: leash and collar probes, the newest
-retained turn, and one activity snapshot. It is not a fleet row and does not
-extend, embed, or inherit `AkumaListRow`. Its shape is:
-
-```ts
-type AkumaStatus = {
-  id: AkuId;
-  life: AkumaLife;
-  collar: CollarProbe;
-  answer?: string;
-  answerHistoryId?: string;
-  failure?: string;
-  outcomeAt?: string;
-  activity: ActivitySnapshot;
-  strandedReason?: "resume-unsupported";
-};
-
-type ActivitySnapshot = {
-  entries: readonly (
-    | { kind: "row"; row: ActivityRow }
-    | { kind: "gap"; count: number }
-  )[];
-  lowestRetained: number | null;
-  highest: number | null;
-};
-
-type TellAdmission = {
-  tellId: TellId;
-  fact: "recorded";
-};
-
-type TellResult = {
-  admission: TellAdmission;
-  wake: "spawned" | { kind: "failed"; diagnostic: string };
-};
-
-type ActivityHistory = {
-  rows: readonly ActivityRow[];
-  turns: readonly TurnFact[];
-  omitted: number;
-  hasEarlier: boolean;
-  hasLater: boolean;
-  historyLost: boolean;
-  lowestRetained: number | null;
-  highest: number | null;
-};
-
-type ActivityRow =
-  | { kind: "said"; sequence: number; bodySequence: number; at: string; text: string; truncated?: true }
-  | { kind: "thought"; sequence: number; bodySequence: number; at: string; text: string; truncated?: true }
-  | {
-      kind: "tool";
-      sequence: number;
-      bodySequence: number;
-      at: string;
-      completedAt?: string;
-      durationMs?: number;
-      name: string;
-      call: ToolCall;
-      state: "running" | ToolResult;
-      truncated?: true;
-    }
-  | { kind: "note"; sequence: number; bodySequence: number; at: string; text: string; truncated?: true }
-  | {
-      kind: "tell";
-      sequence: number;
-      at: string;
-      tellId: TellId;
-      text: string;
-      state: "pending" | "told";
-    };
-```
+`status()` watches one Akuma through fresh life evidence and one bounded
+timeline snapshot. It is not a fleet row and does not extend or embed the fleet
+projection. Outcome belongs to the timeline rather than duplicate top-level
+answer or failure fields. Every Turn-scoped row carries its durable Turn
+coordinate; Body coordinates remain private to Body lifecycle facts.
 
 `tell(body)` returns one typed mutation result: the allocated TellId, its
 recorded Heart admission, and whether the level-triggered waker was spawned. It
@@ -130,21 +72,19 @@ timeout result assembled from separate liveness and snapshot observations.
 `wait` does not promise that every recorded tell was delivered: a crash can
 kill body and waker together and legitimately leave tells pending.
 
-`history()` is the sole public execution-history read. It returns one stable
-activity page plus the completed-turn facts whose bodies occur in that page;
-the read model, not Heart or the CLI, owns that join. Cursor coordinates are
-persisted activity sequences. `before` and `since` are exclusive and mutually
-exclusive. Status and wait never carry a full history page. The final answer
-is not activity text: the explicit last-answer read selects the last answered
-`TurnFact` by durable sequence. The handle returns `{ kind: "answer", answer }`
-or `{ kind: "no-answer" }`; an empty answered string stays in the answer arm.
-CLI `history --last` writes exact answer bytes.
+`history()` is the sole public execution-history read. It pages the same
+persisted-order timeline projection used by status; it does not join a second
+Turn projection. Cursor coordinates are timeline sequences. `before` and
+`since` are exclusive and mutually exclusive. Status and wait never carry a
+full history page. The explicit last-answer read selects the latest retained
+answered Turn by durable order and preserves its complete bytes, including an
+empty answer.
 
-An akuma that answered and whose latest Body was later killed reports both:
-`life: "killed"` with the retained answer still attached. What to do about a
-stranded or headless
-akuma is the flagship's decision; the surface puts the state and available
-verbs in front of her and says nothing more.
+An Akuma that answered and whose latest Body was later killed keeps both facts
+visible on their independent axes: life remains killed while the answered Turn
+remains in the timeline. What to do about a stranded or headless Akuma is the
+flagship's decision; the surface puts the state and available verbs in front of
+her and says nothing more.
 
 `list()` is the compact fleet scan, not a smaller `status()`. Born fleet rows expose id,
 Archetype and description snapshots, life, collar evidence,
@@ -156,12 +96,12 @@ turn history of every akuma. A corrupt member is silently skipped at this
 boundary; healthy members remain visible. Confinement is triage evidence and future Body Request
 placement input, never an admission result; no read reaches back into home.
 
-Every attempted provider turn is durable as one outcome: `answered` carries its
-actual session, provider-owned history id, and answer; `failed` carries a
-diagnostic and no fork coordinates. Failure is not an activity invented by the
-body, and it cannot be forked. Activity
-contains only events authored by the provider. `status()` exposes the latest
-failed diagnostic from history instead of asking activity to reinterpret it.
+Every admitted provider Turn starts on the shared timeline and has at most one
+provider outcome. Answered outcomes retain the provider fork coordinate and
+complete answer; failed outcomes retain a diagnostic and cannot be forked. A
+terminated or crashed Turn may remain open rather than inventing an outcome.
+Provider activity contains only provider-authored events; neither Body nor CLI
+reinterprets failure as activity.
 Provider observation is defined in [akuma-provider.md](akuma-provider.md); this
 public surface does not reinterpret native events. Package-root selector and
 cross-product composition are owned by [public-akuma.md](public-akuma.md), CLI

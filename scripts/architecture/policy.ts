@@ -17,7 +17,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "akuma/heart/schema.ts", allow: [] },
     { source: "akuma/heart/rows.ts", allow: [types("akuma/heart/facts.ts"), types("akuma/identity.ts")] },
     { source: "akuma/heart/tells.ts", allow: [types("akuma/heart/facts.ts"), any("akuma/heart/rows.ts", ["decodeActivityRow", "ActivityFact"])] },
-    { source: "akuma/heart/index.ts", allow: [types("akuma/identity.ts"), any("akuma/heart/facts.ts"), any("akuma/heart/schema.ts"), any("akuma/heart/rows.ts"), any("akuma/heart/tells.ts")] },
+    { source: "akuma/heart/storage.ts", allow: [types("akuma/identity.ts"), types("akuma/heart/facts.ts"), any("akuma/heart/schema.ts"), any("akuma/heart/rows.ts"), any("akuma/heart/tells.ts", ["insertTellFact", "pruneActivityFacts"])] },
+    { source: "akuma/heart/index.ts", allow: [types("akuma/identity.ts"), any("akuma/heart/facts.ts"), any("akuma/heart/rows.ts"), any("akuma/heart/tells.ts"), any("akuma/heart/storage.ts")] },
     { source: "akuma/provider.ts", allow: [types("akuma/heart/index.ts")] },
     { source: "akuma/activity.ts", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts")] },
     { source: "akuma/providers/index.ts", allow: [types("akuma/heart/index.ts"), types("akuma/provider.ts"), any("akuma/providers/claude/index.ts"), any("akuma/providers/codex-app-server/index.ts")] },
@@ -753,7 +754,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { module: "node:sqlite", owners: [
       { source: "coordination/sqlite-transaction-lock.ts", symbols: ["DatabaseSync"] },
-      { source: "akuma/heart/index.ts", symbols: ["DatabaseSync"] },
+      { source: "akuma/heart/storage.ts", symbols: ["DatabaseSync"] },
       { source: "akuma/heart/schema.ts", symbols: ["DatabaseSync"], mode: "type-only" },
       { source: "akuma/heart/rows.ts", symbols: ["DatabaseSync"], mode: "type-only" },
       { source: "akuma/heart/tells.ts", symbols: ["DatabaseSync"], mode: "type-only" },
