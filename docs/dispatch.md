@@ -29,7 +29,7 @@ against the path. The current Git format marker governs this record; there is
 no record-local compatibility version, alternate path, reverse index, Akuma
 back-pointer, Contract back-pointer, update, delete, or reassignment.
 
-`src/dispatch/index.ts` is the sole path, codec, targeted read, complete read,
+Dispatch is the sole owner of its path, codec, targeted read, complete read,
 and immutable publication owner. A targeted read is proportional to one fact;
 a complete read scans the Dispatch subtree once and returns facts ordered by
 AkuId bytes. Malformed paths, non-canonical bytes, invalid identities,

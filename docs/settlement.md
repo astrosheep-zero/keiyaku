@@ -37,7 +37,7 @@ is never deleted. A new `bind({ task })` replaces that Task's record with
 the abandoning Contract is still the current `held` holder. An older Contract
 therefore cannot release or settle a Task after a newer bind supersedes it.
 
-`settlement/holder.ts` is the sole path, codec, read, and currentness judge.
+Settlement is the sole holder path, codec, read, and currentness judge.
 Library asks it to attach claim or release bytes to an Offer; Git sees only the
 generic companion path and bytes. The holder mutation and the bind or abandon
 journal entries publish in one private-root CAS. Release is retained rather

@@ -7,28 +7,18 @@ layer.
 
 ## Dependency Direction
 
-Each component answers one class of question and has one legal consumer:
+Each component answers one class of question. Pact maps facts and intent to
+pure state and decisions. Markdown and document methodology convert caller text
+to private Library values. Git owns observation, admission, persistence, and
+physical Git effects. Protocol is the only join between pact decisions and Git.
+Execution-side producers consume the shared process runtime and return to
+protocol. Library maps those capabilities to package-root operations; CLI only
+adapts argv and renders public values.
 
-| Component | Question | Legal consumer |
-| --- | --- | --- |
-| `core` (pact) | facts to state; intent to decision | every layer, as pure functions and types |
-| `markdown` | text to AST | `library` |
-| `body` | edge document methodology to private values | `library` |
-| `git` | fact observation, admission, persistence, and Git effects | `protocol` |
-| `runtime/proc` | process execution to typed outcome | `verification` |
-| `verification` | declarations to attempt and result | `protocol` |
-| `protocol` | observe, decide, admit, and public reads | `library` |
-| `library` | operations to public object syntax | `index.ts` |
-| `index.ts` | package-root API | CLI and external callers |
-| `cli` | argv to public operations and rendered output | no internal consumer |
-
-Imports follow those edges without skipping a layer. `core` is readable as
-pure functions and types throughout the graph. Pact has no repository handle,
-Git execution, ref/worktree effect, process, clock, current directory, or
-physical object-format validator. Protocol is the only join between pure pact
-decisions and Git observation/admission. Execution-side producers consume
-the shared process runtime without making either part of pact. Core knows no
-Markdown grammar, section name, or producer-specific declaration.
+Dependencies follow that direction without skipping a layer. Pact has no
+repository handle, Git execution, ref/worktree effect, process, clock, current
+directory, or physical object-format validator. Core knows no Markdown grammar,
+section name, or producer-specific declaration.
 
 A core `ContractsObservation` carries only the contract map that pure decisions
 actually read: every requested identity maps to its folded `ContractState` or
@@ -103,7 +93,7 @@ the same collision rule. Readers, folds, and gates compare the whole
 persisted.
 
 An Akuma alias is the input-only selector `@<name>`, where `name` matches
-`[a-z][a-z0-9-]{0,63}`. `src/identity/selector.ts` is the sole parser and
+`[a-z][a-z0-9-]{0,63}`. Identity is the sole parser and
 constructor for this grammar. The complete spelling, including `@`, is the
 selector value. Alias persistence and movement are owned by
 [alias.md](alias.md); selector expansion is a Library concern and never changes
@@ -112,7 +102,7 @@ the complete `aku/...` identity stored by an owner.
 An Akuma glob is the input-only selector
 `aku/<archetype-pattern>/<hex-pattern>`. Each nonempty pattern uses only the
 corresponding identity alphabet plus `*`, and at least one `*` is required.
-`src/identity/selector.ts` alone parses and matches this grammar. A Contract
+Identity alone parses and matches this grammar. A Contract
 worker selector is one complete `kei/...` identity. Alias, glob, and Contract
 worker expansion are read-time Library snapshots; none is persisted as Akuma
 identity or interpreted by Akuma.
@@ -228,7 +218,7 @@ raw producer logs, reports, patches, artifacts, or blob evidence.
 Its `at` values are the contract timeline. Counts and elapsed intervals are
 read-time projections; no telemetry file, persisted counter, duration field,
 or additional fact kind is needed for a value derivable from journal facts, Git,
-or the Akuma pillar's own records defined by [akuma.md](akuma.md).
+or the Akuma pillar's own records defined by [akuma-heart.md](akuma-heart.md).
 
 ## Folded State
 

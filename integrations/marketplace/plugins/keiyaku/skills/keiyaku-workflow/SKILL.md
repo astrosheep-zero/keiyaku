@@ -26,63 +26,8 @@ placement, and placement claims when the gates allow it.
 
 ## Bind
 
-### Decide The Threshold
-
-Bind when the document describes a decision, not an investigation: one
-objective, a clear delivery boundary, and Criteria decidable at acceptance
-without inventing taste. If a plausible unresolved fact could change the
-Objective, Design, or acceptance boundary, investigate first and bind after.
-
-### Write The Document
-
-Write one Markdown document with an H1 title, the sections `Context`,
-`Objective`, `Design`, a fenced `Region`, and H3 entries under `Criteria`.
-`Verification` is optional and holds the executable check that `deliver` will
-run.
-
-~~~markdown
-# <name this delivery>
-
-## Context
-<established facts that frame the decision>
-
-## Objective
-<one observable delivery outcome>
-
-## Design
-<ownership, boundaries, and constraints a test-green candidate could still violate>
-
-## Region
-```
-<expected write surface>
-```
-
-## Criteria
-### <criterion title>
-<one decidable acceptance condition>
-
-## Verification
-```bash
-<executable check>
-```
-~~~
-
-### Bind It
-
-```bash
-keiyaku bind -                       # managed worktree, default target and gates
-keiyaku bind --task <task/...> -     # associate an existing Task
-keiyaku bind --target <ref> -        # choose the placement ref
-keiyaku bind --here -                # work in the current worktree instead
-keiyaku bind --after <kei/...> -     # wait for prerequisite Contracts
-keiyaku bind --gates <name> -        # select a configured gate set
-```
-
-The receipt is your next state: it prints the complete Contract ID, the managed
-worktree path, and the target facts. Work from the receipt, not from memory.
-Omitting `--gates` selects the configured `gates.default`, or no gates when
-that entry is absent. `--task` ties the Task to this Contract: `claimed` marks
-the current held Task done, while `abandon` releases it.
+Use `keiyaku-bind` to decide readiness, author one bounded Contract, choose
+bind inputs, and read the receipt. Continue here from that receipt.
 
 ## Work In The Contract Worktree
 
@@ -164,13 +109,14 @@ negative judgment should remain in Contract history.
 Placement follows the Git mental model you already have:
 
 - Delivering from a managed worktree to a checked-out target behaves like a
-  merge. Non-overlapping unstaged and untracked files in that checkout are
-  preserved. Overlapping changes, colliding untracked files, or any staged
-  changes refuse placement with the exact paths. The deliver or review you
-  just ran still counts: the recorded candidate and any `✓ reviewed` verdict
-  are kept, but nothing claims and nothing moves. The target ref, its checkout,
-  and your bytes stay exactly where they were, and the Contract stays
-  `pending-delivery`.
+  merge. Non-overlapping staged, unstaged, and untracked files in that checkout
+  are preserved. A staged path refuses only when Git cannot carry it through
+  the predecessor-to-candidate merge; overlapping worktree changes and
+  colliding untracked files also refuse. The receipt lists the exact paths.
+  The deliver or review you just ran still counts: the recorded candidate and
+  any `✓ reviewed` verdict are kept, but nothing claims and nothing moves.
+  The target ref, its checkout, and your bytes stay exactly where they were,
+  and the Contract stays `pending-delivery`.
 - A `--here` Contract behaves like a commit with gates: it lands on the current
   branch and cannot deliver to a foreign checked-out target.
 
@@ -185,8 +131,8 @@ keiyaku reconcile <contract>                  # finish accepted lagging effects
 keiyaku abandon <contract> --note "<why>"     # terminal; target untouched
 ```
 
-`audit` shows the current document, candidate diff, verification, and gates
-without changing anything. `reconcile` completes physical effects of already
+`audit` is one aggregate read of the document, candidate diff, Verification,
+gates, and target status. `reconcile` completes physical effects of already
 accepted placements; it does not retry an ordinary placement refusal.
 `abandon` ends the Contract and never touches the target.
 

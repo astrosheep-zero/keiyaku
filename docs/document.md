@@ -50,7 +50,7 @@ A contract document has exactly one H1 title and these required H2 sections:
 | `Design` | Nonblank prose. |
 | `Region` | One closed fence with no info string and one or more nonblank path patterns. |
 | `Criteria` | One or more H3 criteria. Each title is unique after normalized comparison and each body is nonblank. |
-| `Verification` | Optional ordered v3 executor declarations owned by the library edge. |
+| `Verification` | Optional ordered executor declarations owned by the library edge. |
 
 The library owns interpretation of these sections and any extensions. They are
 not structural core facts. In particular, `Region` and every other decoded
@@ -78,7 +78,7 @@ supplies those opaque terms for persistence. It never supplies the decoded
 body. Core stores the bytes without parsing them. `gates` and `after` are
 machine terms, not Markdown-derived core fields.
 
-`Verification` retains the v3 edge grammar: one or more direct closed fences
+`Verification` uses one or more direct closed fences
 with an exact `bash`, `zsh`, or `pwsh` info string and a nonblank script body.
 The resulting declaration values are private library/verification values. Core
 receives only the opaque segment key and never sees executor, script, or section
@@ -113,7 +113,7 @@ extension title in the H2 target. A target occurs at most once for an operation
 kind when duplicate application would be ambiguous.
 
 Every operation body uses the grammar of its target section. `Replace:
-Verification` uses the v3 declaration grammar. The complete amended document is
+Verification` uses the declaration grammar above. The complete amended document is
 produced by applying the ordered operations at the edge; the library then mints
 replacement opaque document keys for core. A derivation selected from an older
 document is never silently retargeted to those replacement keys; the receiving

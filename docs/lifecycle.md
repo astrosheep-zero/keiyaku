@@ -48,7 +48,8 @@ It admits no `claimed` fact and moves no target ref. A completed targeted
 placement returns its checkout effects with the accepted step. Once the atomic
 ref transaction is accepted it cannot be reinterpreted as a refusal: a follow
 failure is returned as the recoverable physical lag defined by
-[git.md](git.md), and process death can leave that same recovery shape.
+[git-reconciliation.md](git-reconciliation.md), and process death can leave
+that same recovery shape.
 
 `deliver` tenders the selected current worktree content. Before admitting the
 fact, Git materializes the complete integration candidate that this attempt may
@@ -135,7 +136,7 @@ The current key set always contains the current document and ordered segment
 keys; integration snapshot and ChangeId keys join it only while a delivery
 exists. Tender identity is custody and observation data, not gate currency.
 
-Gate currency has one implementation in `core/facts/gate.ts`. Claimed
+Gate currency has one pure core judgment. Claimed
 admission and the public Contract status projection both call that
 implementation. The projection reports, in declaration order, whether each
 gate has a current attestation, only stale prior testimony, or no testimony;
@@ -322,7 +323,7 @@ independent, so one invocation may expose both Verification and placement
 stops. Placement reads only declared gates against admitted attestations:
 whether `verified` is declared decides what placement waits for, never whether
 the producer runs. The exact public shapes are owned by
-[public-api.md](public-api.md).
+[public-results.md](public-results.md).
 
 Admission alone controls a composed operation's outer outcome. Physical
 cleanup after an accepted admission never throws over that result, changes its

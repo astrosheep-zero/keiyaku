@@ -77,13 +77,27 @@ test("--all records failure and continues in fixed harness order", async () => {
   assert.match(renderInstallText(result), /claude failed: claude exited 7: not configured/);
 });
 
-test("the bundled plugin contains all four v4 skills", () => {
-  for (const name of ["keiyaku", "keiyaku-task", "keiyaku-workflow", "keiyaku-akuma"]) {
+test("the bundled plugin contains all five skills", () => {
+  for (const name of ["keiyaku", "keiyaku-task", "keiyaku-bind", "keiyaku-workflow", "keiyaku-akuma"]) {
     const path = join(installAssetsRoot(), "plugins", "keiyaku", "skills", name, "SKILL.md");
     const markdown = readFileSync(path, "utf8");
     assert.match(markdown, new RegExp(`^name: ${name}$`, "m"));
     assert.doesNotMatch(markdown, /keiyaku-v4/u);
   }
+});
+
+test("workflow delegates bind authorship to the bind skill", () => {
+  const skills = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
+  const bind = readFileSync(join(skills, "keiyaku-bind", "SKILL.md"), "utf8");
+  const workflow = readFileSync(join(skills, "keiyaku-workflow", "SKILL.md"), "utf8");
+
+  assert.match(bind, /keiyaku -C <repo> bind/);
+  assert.match(workflow, /Use `keiyaku-bind`/);
+  assert.doesNotMatch(workflow, /### Decide The Threshold|### Write The Document/);
+  assert.match(
+    workflow,
+    /`audit` is one aggregate read of the document, candidate diff, Verification,\n?gates, and target status\./,
+  );
 });
 
 test("bundled Akuma instructions use the current hard-cut call surface", () => {

@@ -96,7 +96,7 @@ of strings whose executable is nonblank. `timeoutMs` must be an integer from 1
 through 2,147,483,647. Commands execute directly without a shell; interpolation
 and environment loading are not part of Settings. The returned arrays and
 commands are deeply frozen. Their managed-worktree execution and durable
-freezing rules are owned by [git.md](git.md).
+freezing rules are owned by [git-reconciliation.md](git-reconciliation.md).
 
 The Git integration consumer publicly provides
 `requireBranchesToBeUpToDateFrom({ settings })`. It reads the one optional
@@ -107,8 +107,9 @@ for each deliver invocation and passes only the resulting boolean; Git custody
 never imports Settings. Project/user shadowing and provenance remain the
 generic namespace behavior above.
 
-Akuma owns the `providers` interpreter, its record grammar, defaults, and Soul
-freeze in [akuma.md](akuma.md). Settings contributes only the resolved opaque
+Akuma owns the `providers` interpreter and record grammar in
+[akuma-provider.md](akuma-provider.md), with Soul freezing in
+[akuma.md](akuma.md). Settings contributes only the resolved opaque
 entry and its provenance.
 
 Keiyaku does not load `<home>/.env`, `<root>/.keiyaku/.env`, or any other

@@ -11,7 +11,8 @@ read `<command> --help` before using flags.
 ## Model
 
 - `task` is planning; see `keiyaku-task`.
-- A Contract is delivery authority; see `keiyaku-workflow`.
+- A Contract is delivery authority; see `keiyaku-bind` to author and bind one,
+  then `keiyaku-workflow` for the remaining lifecycle.
 - An Akuma is a callable worker; see `keiyaku-akuma`.
 
 Settings owns named gate sets. Omitting `--gates` selects `gates.default`, or

@@ -1,51 +1,34 @@
 # Keiyaku v4 Authority Index
 
-This directory is the sole product and architecture authority for v4. Read
-this index first, then every chapter that owns the surface being changed. The
-source tree, tests, task board, v3 repository, and skills are evidence or
-operating guidance; none can introduce product law.
+This registry names the sole owner chapter for each product and architecture
+surface. Read every owner named for the surface being changed.
 
 ## Owner Chapters
 
 | Chapter | Owns |
 | --- | --- |
-| [public-api.md](public-api.md) | Package-root public library: composition boundary, `Keiyaku`, `Repo`, `Delivery`, exported value types, construction, and public result behavior. |
+| [public-api.md](public-api.md) | Package-root composition, Contract handles and operations, construction, and delivery diff. |
+| [public-akuma.md](public-akuma.md) | Package-root Akuma creation, addressing, fleet operations, and cross-product composition. |
+| [public-results.md](public-results.md) | Package-root mutation, refusal, retry, audit, and post-admission result shapes. |
 | [document.md](document.md) | Contract Markdown, H2 amend-operation grammar, arc document grammar, and reserved-section handling. |
 | [model.md](model.md) | Journal authority, envelope and fact shapes, identity coordinates, folded state, and dependency direction. |
 | [lifecycle.md](lifecycle.md) | Verb decisions, eligibility, phases, terminals, gates, review, protocol, and admission. |
 | [verification.md](verification.md) | Verification declarations, execution, result admission, and shared process runtime. |
-| [git.md](git.md) | Git world, worktrees, refs, pins, delivery-byte custody, and reconciliation. |
+| [git.md](git.md) | Git world, worktrees, refs, delivery preparation and placement, pins, and byte custody. |
+| [git-reconciliation.md](git-reconciliation.md) | Replayable Git effects, worktree hooks, reconciliation reports, and lag. |
 | [settlement.md](settlement.md) | Post-admission cross-product settlement, Task associations, namespace projection, and replay. |
 | [dispatch.md](dispatch.md) | Immutable Akuma-to-Contract dispatch facts, Git persistence, publication, and reads. |
 | [alias.md](alias.md) | World-local movable Akuma aliases, file authority, locking, and durable replacement. |
-| [cli.md](cli.md) | `keiyaku` argv, edge adaptation, selectors, rendering, exit codes, status board, and audit presentation. |
+| [cli.md](cli.md) | Root invocation, command grammar, inputs, Akuma text, and edge boundaries. |
+| [cli-task.md](cli-task.md) | Task command grammar and Task text presentation. |
+| [cli-output.md](cli-output.md) | Help composition, shared rendering, exit status, and install output. |
 | [task.md](task.md) | Separate in-package task product: document authority, identity, lifecycle, associations, concurrency, and persistence. |
-| [akuma.md](akuma.md) | Separate Akuma product: identity, heart facts, life, detached bodies, providers, lifecycle verbs, and persistence. |
+| [akuma.md](akuma.md) | Akuma identity, birth, life, Archetypes, placement, and confinement. |
+| [akuma-heart.md](akuma-heart.md) | Akuma durable facts, custody, schema gates, activity retention, and projections. |
+| [akuma-execution.md](akuma-execution.md) | Body execution and tell, interrupt, kill, fork, and wake semantics. |
+| [akuma-requests.md](akuma-requests.md) | Body Request admission, forwarding, serving, and recovery protocol. |
+| [akuma-provider.md](akuma-provider.md) | Provider-neutral event vocabulary, native adapters, execution recipes, and confinement. |
+| [akuma-public.md](akuma-public.md) | Separate Akuma product handles, status, wait, history, and fleet values. |
 | [settings.md](settings.md) | Shared Settings resource: coordinates, scope, shadowing, failure isolation, provenance, and observation. |
 | [kanshi.md](kanshi.md) | Composite world observation: section availability, read-time associations, selection, and public report shape. |
 | [world.md](world.md) | Shared directory coordinate, marker discovery, exact construction, and edge ownership. |
-
-## Hard-Cut Discipline
-
-v3, Square history, source, tests, tasks, and review reports are evidence, not
-additional authority. Newer settled rulings supersede older ones; the resulting
-law must be integrated into the owner chapter instead of copied as a chronology.
-
-v4 is current-version-only. A persisted-format change updates the current
-codec, facts, fixtures, and tests in one cut. It carries no compatibility
-decoder, migration path, legacy alias, or dormant format branch.
-
-Port behavior only when v4 still has a named reader and one clear owner. Rewrite
-anything that depends on a repository-wide ledger, detached evidence storage,
-current-state database, effect journal, accepted-tail replay, or compatibility
-format. Delete planning artifacts once their decision has been absorbed here.
-
-## Reading Rule
-
-One law has one home. Read the owner chapter before changing its surface, and
-link to a neighboring owner rather than copying a rule across chapters. A
-change that affects several surfaces updates each affected owner, with each
-rule written only in the chapter that owns it. A missing or contradictory rule
-is an authority gap: stop the dependent change and settle the concrete case
-before choosing public behavior, persistence, data flow, recovery, concurrency,
-or process topology.

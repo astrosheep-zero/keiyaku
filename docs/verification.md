@@ -4,7 +4,7 @@ This chapter owns the execution-side verification producer and shared process
 control. Verification is methodology, not a core fact vocabulary, core
 declaration type, or core-derived gate. The attestation fact shape is defined by
 [model.md](model.md), and generic gate meaning by [lifecycle.md](lifecycle.md).
-The v4 library retains the v3 `Verification` declaration grammar at this edge:
+The library owns the `Verification` declaration grammar at this edge:
 ordered `bash`, `zsh`, or `pwsh` fenced scripts. The declaration value and its
 producer-specific dependency rule remain private to this chapter; they are not
 core fact or core gate vocabulary.
@@ -45,7 +45,7 @@ diagnostic text. The derivation and resolved declaration list remain
 attempt-local; neither becomes a persisted derivation or second execution
 authority.
 
-If the edge's `verified` gate is declared without a valid v3 declaration, its
+If the edge's `verified` gate is declared without a valid declaration, its
 key-stamped absent declaration enters the owning outer legal decision. That
 decision rejects it after judging document currency; it is not a preflight
 readiness check, a journal deadlock, or a new core fact. Other opaque gate
@@ -93,10 +93,9 @@ eligibility judge.
 
 ## Runtime Contract
 
-`src/verification/` owns producer declaration resolution and verdict
-production. It does not define a core gate vocabulary or declaration type.
-`src/runtime/proc/` owns process spawn, normal stop, timeout, and process-tree
-kill. Its input is:
+Verification owns producer declaration resolution and verdict production. It
+does not define a core gate vocabulary or declaration type. The shared process
+runtime owns spawn, normal stop, timeout, and process-tree kill. Its input is:
 
 ```ts
 type ProcessInput = Readonly<{
@@ -149,17 +148,9 @@ changes an outcome arm, enters reconcile, or creates a cleanup ledger.
 
 ## Ownership
 
-The relevant dependencies are one-way:
-
-```text
-src/core/facts/gate.ts -> src/core/subject.ts
-src/verification/ -> src/runtime/proc/
-```
-
-`facts/gate.ts` performs the one generic currentness check over the declared
-gate and dependency-key set. It performs no IO, candidate recheck, or
-producer-specific declaration interpretation.
-`src/protocol/read/audit.ts` is the sole reader that derives audit rework and
-attestation counts, timeline entries, and elapsed milliseconds from raw facts. The
-package root exports readonly reports; the CLI renders them without journal
-access or timestamp arithmetic.
+The generic gate currentness judge is pure over the declared gate and
+dependency-key set. It performs no IO, candidate recheck, or producer-specific
+declaration interpretation. Protocol is the sole reader that derives audit
+rework and attestation counts, timeline entries, and elapsed milliseconds from
+raw facts. The package root exports readonly reports; the CLI renders them
+without journal access or timestamp arithmetic.

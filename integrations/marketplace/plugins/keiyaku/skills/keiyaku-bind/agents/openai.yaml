@@ -1,0 +1,4 @@
+interface:
+  display_name: "Keiyaku Bind"
+  short_description: "Author and bind a delivery Contract."
+  default_prompt: "Use $keiyaku-bind to author and bind this delivery."

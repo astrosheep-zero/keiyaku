@@ -25,7 +25,7 @@ The file is one canonical JSON line. Keys are sorted by byte order and every
 selector and complete AkuId is validated through its identity owner. A missing
 file is an empty map. A malformed, non-canonical, or non-current file throws
 `AuthorityCorruptionError`; it is never partly read or silently repaired.
-`src/alias/index.ts` solely owns this path, codec, read, and move operation.
+Alias solely owns this path, codec, read, and move operation.
 The selector grammar itself remains solely in [model.md](model.md).
 
 An alias move replaces or adds exactly one mapping and returns its previous
