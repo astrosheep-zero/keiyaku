@@ -59,7 +59,7 @@ import {
   pruneActivityFacts,
   type ActivityFactSlice,
 } from "./timeline.js";
-import { isHeartAbsent, readSealFromLeash, transaction, withHeart } from "./storage.js";
+import { isHeartAbsent, readSealFromLeash, readTransaction, transaction, withHeart } from "./storage.js";
 import { soulFact } from "./soul.js";
 export { HeartAbsentError, HeldAkumaLeash, initializeHeart, isHeartAbsent, probeLeash } from "./storage.js";
 
@@ -146,7 +146,7 @@ export type { TimelineFact } from "./timeline.js";
 
 export async function activitySlice(paths: AkumaPaths, input: ActivitySliceInput = {}): Promise<ActivitySlice> {
   const limit = input.limit ?? ACTIVITY_LIMIT;
-  return await withHeart(paths, (heart) => activityFactSlice(heart, { ...input, limit }));
+  return await withHeart(paths, (heart) => readTransaction(heart, () => activityFactSlice(heart, { ...input, limit })));
 }
 
 export async function recordTell(
@@ -370,7 +370,7 @@ Promise<Readonly<{ kind: "controlled" | "finished" } | { kind: "pending"; tells:
 
 export async function readHeart(paths: AkumaPaths): Promise<HeartSnapshot> {
   try {
-    return await withHeart(paths, (heart) => ({
+    return await withHeart(paths, (heart) => readTransaction(heart, () => ({
         soul: soulFact(heart),
         latestBody: latestBodyFact(heart),
         latestSession: latestSessionFact(heart),
@@ -378,7 +378,7 @@ export async function readHeart(paths: AkumaPaths): Promise<HeartSnapshot> {
         latestKill: latestKillFact(heart),
         stop: stopFact(heart),
         pause: pauseFact(heart),
-    }));
+    })));
   } catch (error) {
     if (isHeartAbsent(error)) {
       return { soul: null, latestBody: null, latestSession: null, pending: [], latestKill: null, stop: null, pause: null };

@@ -101,6 +101,18 @@ export function transaction<T>(database: DatabaseSync, body: () => T): T {
   }
 }
 
+export function readTransaction<T>(database: DatabaseSync, body: () => T): T {
+  database.exec("BEGIN DEFERRED");
+  try {
+    const result = body();
+    database.exec("COMMIT");
+    return result;
+  } catch (error) {
+    try { database.exec("ROLLBACK"); } catch { /* preserve the original failure */ }
+    throw error;
+  }
+}
+
 export async function initializeHeart(paths: AkumaPaths): Promise<void> {
   const heart = new DatabaseSync(paths.heart);
   try {

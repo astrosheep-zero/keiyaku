@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -38,7 +38,9 @@ import {
   voidRequest,
   type Soul,
 } from "../src/akuma/heart/index.js";
+import { insertActivityFact, insertKillFact, insertSessionFact, insertStopControl } from "../src/akuma/heart/rows.js";
 import { decodeSoul, decodeSoulRow, encodeSoul, encodeSoulRow } from "../src/akuma/heart/soul.js";
+import { insertTellFact } from "../src/akuma/heart/tells.js";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-"));
@@ -776,4 +778,176 @@ test("soul codec decodes canonically, deep-freezes, and round-trips", () => {
 
   assert.throws(() => encodeSoulRow({ ...codecSoul(), options: { readonly: true }, readonly: undefined }), undefined, "encode validates the consistency rule");
   assert.equal(encodeSoulRow(codecSoul())[0] === encodeSoulRow(codecSoul())[0], true, "canonical encoding is deterministic");
+});
+
+function afterPreparedSql(match: (sql: string) => boolean, after: () => void): () => void {
+  const proto = DatabaseSync.prototype;
+  const original = proto.prepare;
+  proto.prepare = function(this: DatabaseSync, sql: string) {
+    const statement = original.call(this, sql);
+    if (!match(sql)) return statement;
+    const get = statement.get;
+    const all = statement.all;
+    statement.get = function(this: typeof statement, ...args: Parameters<typeof statement.get>) {
+      const result = get.apply(this, args);
+      after();
+      return result;
+    };
+    statement.all = function(this: typeof statement, ...args: Parameters<typeof statement.all>) {
+      const result = all.apply(this, args);
+      after();
+      return result;
+    };
+    return statement;
+  };
+  return () => { proto.prepare = original; };
+}
+
+function writeHeart(path: string): DatabaseSync {
+  const database = new DatabaseSync(path);
+  database.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=0; PRAGMA journal_mode=WAL");
+  return database;
+}
+
+test("activitySlice returns one retained-bound and row epoch", async () => {
+  const value = await fixture();
+  try {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await body.birth(value.allocated.paths, value.soul);
+    const firstBody = await body.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    const turn = await beginTurn(value.allocated.paths, {
+      bodySequence: firstBody.sequence,
+      startedAt: "2026-08-08T00:00:00.000Z",
+    });
+    const first = await appendActivity(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      event: { type: "note", text: "before-commit" },
+      at: "2026-08-08T00:00:01.000Z",
+    });
+    const writer = writeHeart(value.allocated.paths.heart);
+    let committed: number | undefined;
+    const restore = afterPreparedSql((sql) => sql.includes("MIN(sequence) AS lowest"), () => {
+      if (committed !== undefined) return;
+      writer.exec("BEGIN IMMEDIATE");
+      committed = insertActivityFact(writer, {
+        turnSequence: turn.sequence,
+        event: { type: "note", text: "after-commit" },
+        at: "2026-08-08T00:00:02.000Z",
+      });
+      writer.exec("COMMIT");
+    });
+    try {
+      const slice = await activitySlice(value.allocated.paths);
+      const sequences = slice.rows.map((row) => row.sequence);
+      const pre = slice.highest === first && !sequences.includes(committed!);
+      const post = slice.highest === committed && sequences.includes(committed!);
+      assert.equal(pre || post, true);
+      assert.equal(slice.lowestRetained === 1, true);
+    } finally {
+      restore();
+      writer.close();
+    }
+    body.release();
+  } finally { value.close(); }
+});
+
+test("readHeart returns one related Heart-fact epoch", async () => {
+  const value = await fixture();
+  try {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await body.birth(value.allocated.paths, value.soul);
+    const firstBody = await body.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    body.release();
+    const writer = writeHeart(value.allocated.paths.heart);
+    let wrote = false;
+    const restore = afterPreparedSql((sql) => sql.includes("FROM sessions ORDER BY sequence DESC LIMIT 1"), () => {
+      if (wrote) return;
+      wrote = true;
+      writer.exec("BEGIN IMMEDIATE");
+      insertSessionFact(writer, {
+        provider: "claude",
+        options: value.soul.options,
+        coordinate: { sessionId: "concurrent-session" },
+        cwd: value.root,
+        admittedAt: "2026-08-08T00:00:01.000Z",
+      });
+      insertTellFact(writer, {
+        id: "tell-concurrent", body: "concurrent", recordedAt: "2026-08-08T00:00:02.000Z",
+      });
+      insertKillFact(writer, firstBody.sequence, "2026-08-08T00:00:03.000Z");
+      insertStopControl(writer, firstBody.sequence, "2026-08-08T00:00:04.000Z");
+      writer.exec("COMMIT");
+    });
+    try {
+      const snapshot = await readHeart(value.allocated.paths);
+      const pre = snapshot.latestSession === null
+        && snapshot.pending.length === 0
+        && snapshot.latestKill === null
+        && snapshot.stop === null;
+      const post = snapshot.latestSession?.coordinate.sessionId === "concurrent-session"
+        && snapshot.pending.map((tell) => tell.id).join() === "tell-concurrent"
+        && snapshot.latestKill?.bodySequence === firstBody.sequence
+        && snapshot.stop?.bodySequence === firstBody.sequence;
+      assert.equal(wrote, true);
+      assert.equal(pre || post, true);
+      assert.deepEqual(snapshot.soul, value.soul);
+      assert.equal(snapshot.latestBody?.sequence, firstBody.sequence);
+    } finally {
+      restore();
+      writer.close();
+    }
+  } finally { value.close(); }
+});
+
+test("Heart multi-query reads stay deferred and do not take the leash", async () => {
+  const storage = readFileSync(new URL("../src/akuma/heart/storage.ts", import.meta.url), "utf8");
+  const index = readFileSync(new URL("../src/akuma/heart/index.ts", import.meta.url), "utf8");
+  assert.match(storage, /export function readTransaction[\s\S]*database\.exec\("BEGIN DEFERRED"\)/u);
+  assert.match(storage, /export function transaction[\s\S]*database\.exec\("BEGIN IMMEDIATE"\)/u);
+  assert.match(index, /readTransaction\(heart, \(\) => activityFactSlice/u);
+  assert.match(index, /readTransaction\(heart, \(\) => \(\{/u);
+  assert.equal(/export async function activitySlice[\s\S]*?\n\}/u.exec(index)?.[0].includes("BEGIN IMMEDIATE"), false);
+  assert.equal(/export async function readHeart[\s\S]*?\n\}/u.exec(index)?.[0].includes("HeldAkumaLeash"), false);
+  assert.equal(/export async function readHeart[\s\S]*?\n\}/u.exec(index)?.[0].includes("BEGIN IMMEDIATE"), false);
+
+  const value = await fixture();
+  try {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await body.birth(value.allocated.paths, value.soul);
+    const firstBody = await body.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    const turn = await beginTurn(value.allocated.paths, {
+      bodySequence: firstBody.sequence,
+      startedAt: "2026-08-08T00:00:00.000Z",
+    });
+    body.release();
+    assert.equal(await probeLeash(value.allocated.paths), "free");
+    const writer = writeHeart(value.allocated.paths.heart);
+    let wrote = false;
+    const restore = afterPreparedSql((sql) => sql.includes("FROM control WHERE kind = 'pause'"), () => {
+      if (wrote) return;
+      wrote = true;
+      writer.exec("BEGIN IMMEDIATE");
+      insertActivityFact(writer, {
+        turnSequence: turn.sequence,
+        event: { type: "note", text: "writer-during-projection" },
+        at: "2026-08-08T00:00:05.000Z",
+      });
+      writer.exec("COMMIT");
+    });
+    try {
+      const snapshot = await readHeart(value.allocated.paths);
+      assert.equal(wrote, true);
+      assert.equal(snapshot.latestBody?.sequence, firstBody.sequence);
+      assert.equal(await probeLeash(value.allocated.paths), "free");
+    } finally {
+      restore();
+      writer.close();
+    }
+  } finally { value.close(); }
 });

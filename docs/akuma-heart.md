@@ -17,6 +17,10 @@ writer. This synchronous SQLite section preserves Heart's atomic row order and
 single-writer law; it is not a public synchronous API, cache, mirror, daemon,
 or queue.
 
+Any Heart observation assembled from multiple SQL queries uses one read-only
+SQLite transaction, so every value in that observation comes from one
+snapshot. It does not acquire writer or leash custody.
+
 SQLite open is the first and sole existence attempt for an existing Heart or
 leash. Existing custody opens read-write without create; initialization is the
 only create-capable path. `CANTOPEN` alone does not prove absence: only after
