@@ -49,6 +49,31 @@ function turnId(result: unknown): string {
   return id;
 }
 
+async function steerTurn(
+  server: LineRpcProcess,
+  state: CodexTurnState,
+  inFlight: Set<Promise<void>>,
+  tell: Readonly<{ id: string; text: string }>,
+): Promise<Readonly<{ fence: string }>> {
+  if (state.settled || state.threadId === undefined || state.turnId === undefined) {
+    throw new Error("codex app-server turn is not live");
+  }
+  const request = server.request("turn/steer", {
+    threadId: state.threadId,
+    expectedTurnId: state.turnId,
+    input: [{ type: "text", text: tell.text }],
+    clientUserMessageId: tell.id,
+  });
+  const settled = request.then(() => undefined, () => undefined);
+  inFlight.add(settled);
+  void settled.finally(() => inFlight.delete(settled));
+  const response = codexObject(await request);
+  const accepted = codexText(response?.turnId);
+  if (accepted === undefined) throw new Error("codex app-server steer did not return a turn id");
+  if (accepted !== state.turnId) throw new Error("codex app-server steer acknowledged a different turn");
+  return { fence: `${accepted}:${tell.id}` };
+}
+
 function sandbox(cwd: string, options: ProviderOptions, requests?: Readonly<{ dir: string }>): Readonly<Record<string, unknown>> {
   return {
     type: "workspaceWrite",
@@ -117,15 +142,19 @@ async function abortTurn(
   completion: Promise<TurnResult>,
   finish: Finish,
 ): Promise<void> {
-  if (!state.settled && state.threadId !== undefined && state.turnId !== undefined) {
+  if (state.settled) {
+    await completion;
+    return;
+  }
+  if (state.threadId !== undefined && state.turnId !== undefined) {
     try {
       await server.request("turn/interrupt", { threadId: state.threadId, turnId: state.turnId });
       await completion;
     } catch (error) { finish({ kind: "failed", diagnostic: diagnostic(error) }); }
-  } else if (!state.settled) {
+  } else {
     finish({ kind: "failed", diagnostic: "codex app-server aborted before turn admission" });
   }
-  await server.close(true);
+  await completion;
 }
 
 async function startCodex(execution: ProviderExecution, input: StartInput): Promise<Session> {
@@ -140,13 +169,14 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
     } }),
   });
   const state: CodexTurnState = { answers: [], settled: false, tools: new Map() };
+  const inFlightSteers = new Set<Promise<void>>();
   let settle!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
   const finish: Finish = (result) => {
     if (state.settled) return;
     state.settled = true;
     events.end();
-    void server.close().then(
+    void Promise.all([...inFlightSteers]).then(() => server.close()).then(
       () => settle(result),
       (error: unknown) => settle({ kind: "failed", diagnostic: `codex app-server cleanup failed: ${diagnostic(error)}` }),
     );
@@ -171,6 +201,7 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
     events,
     completion,
     abort: () => abortTurn(server, state, completion, finish),
+    tell: (tell) => steerTurn(server, state, inFlightSteers, tell),
   };
 }
 

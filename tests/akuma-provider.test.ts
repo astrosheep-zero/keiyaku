@@ -51,7 +51,8 @@ test("provider activity codec round trips every closed event and tool-call arm",
 
 function fakeCodex(
   root: string,
-  mode: "complete" | "interrupt" | "observations" | "failed-notification" | "failed-turn" = "complete",
+  mode: "complete" | "interrupt" | "observations" | "failed-notification" | "failed-turn"
+    | "steer" | "steer-complete-first" | "steer-mismatch" | "steer-missing" = "complete",
 ): Readonly<{
   executable: string;
   requests(): readonly Readonly<Record<string, unknown>>[];
@@ -101,6 +102,15 @@ function fakeCodex(
     "    if(mode==='failed-turn'){",
     "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'failed',error:{message:'native turn failed',additionalDetails:'turn detail'}}}});",
     "    }",
+    "    return;",
+    "  }",
+    "  if(message.method==='turn/steer'){",
+    "    if(mode==='steer-complete-first'){",
+    "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:message.params.expectedTurnId,status:'completed'}}});",
+    "      return setTimeout(()=>reply(message,{turnId:message.params.expectedTurnId}),10);",
+    "    }",
+    "    reply(message,mode==='steer-missing'?{}:{turnId:mode==='steer-mismatch'?'turn-other':message.params.expectedTurnId});",
+    "    if(mode==='steer') send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:message.params.expectedTurnId,status:'completed'}}});",
     "    return;",
     "  }",
     "  if(message.method==='turn/interrupt'){",
@@ -207,6 +217,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
   const drive = await provider.start({
     body: "observe", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
   });
+  assert.equal(drive.tell, undefined);
   const events = [];
   for await (const event of drive.events) events.push(event);
 
@@ -788,4 +799,46 @@ test("Codex app-server abort requests native interruption and waits for terminal
       turnId: "turn-1",
     });
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex app-server live tell steers the admitted turn with exact correlation", async () => {
+  for (const mode of ["steer", "steer-complete-first"] as const) {
+    const root = mkdtempSync(join(tmpdir(), `keiyaku-codex-${mode}-`));
+    try {
+      const fake = fakeCodex(root, mode);
+      const drive = await createCodexAppServerProvider(fake.executable).start({
+        body: "work", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+      });
+      assert.ok(drive.tell !== undefined);
+      const acknowledgement = drive.tell!({ id: "tell-live-1", text: "check the race" });
+      if (mode === "steer-complete-first") await drive.abort();
+      assert.deepEqual(await acknowledgement, {
+        fence: "turn-1:tell-live-1",
+      });
+      assert.equal((await drive.completion).kind, "answered");
+      assert.deepEqual(fake.requests().find((request) => request.method === "turn/steer")?.params, {
+        threadId: "thread-fresh",
+        expectedTurnId: "turn-1",
+        input: [{ type: "text", text: "check the race" }],
+        clientUserMessageId: "tell-live-1",
+      });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("Codex live tell rejects a mismatched native turn acknowledgement", async () => {
+  for (const [mode, expected] of [
+    ["steer-mismatch", /acknowledged a different turn/u],
+    ["steer-missing", /did not return a turn id/u],
+  ] as const) {
+    const root = mkdtempSync(join(tmpdir(), `keiyaku-codex-${mode}-`));
+    try {
+      const fake = fakeCodex(root, mode);
+      const drive = await createCodexAppServerProvider(fake.executable).start({
+        body: "work", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+      });
+      await assert.rejects(drive.tell!({ id: "tell-live-2", text: "check the turn" }), expected);
+      await drive.abort();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
 });

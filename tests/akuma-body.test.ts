@@ -219,6 +219,65 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
   }
 });
 
+test("a receipt-free live acknowledgement settles the tell in the current Body", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-live-ack-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "codex", draw: () => "1a2b3c40" });
+    initializeHeart(allocated.paths);
+    let releaseEvents!: () => void;
+    const eventsReleased = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    let tellObserved!: () => void;
+    const observed = new Promise<void>((resolve) => { tellObserved = resolve; });
+    const live: ProviderAdapter = {
+      confinement: () => ({ kind: "declared", writableRoots: [root] }),
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        return {
+          admission: { fence: "initial-turn" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "live-session" } };
+              await eventsReleased;
+            },
+          },
+          completion: Promise.resolve({ kind: "answered", answer: "done", historyId: "live-history" }),
+          async tell() { tellObserved(); return { fence: "turn-1:tell-live" }; },
+          async abort() {},
+        };
+      },
+    };
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "codex",
+        provider: { name: "codex", kind: "codex-app-server" },
+        options: {},
+        origin: { kind: "direct" },
+        confinement: { kind: "declared", writableRoots: [root] },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, live, {
+      collar: { pid: 999_977, processGroup: 999_977, spawnedAt: "live-ack" },
+      now: () => "2026-08-08T00:00:00.000Z",
+      async putDownOwnTree() {},
+    });
+    while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    recordTell(allocated.paths, {
+      id: "tell-live", body: "steer", recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await observed;
+    while (readHeart(allocated.paths).pending.length > 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.deepEqual(readHeart(allocated.paths).pending, []);
+    releaseEvents();
+    await body;
+    assert.equal(readHeart(allocated.paths).latestBody?.sequence, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("receipt persistence failure aborts the Session and terminates the Body", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-receipt-failure-"));
   try {

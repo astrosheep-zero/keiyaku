@@ -204,6 +204,18 @@ Claude's terminal answer is exactly `result.result`. Codex joins all completed
 the native explanation from an `error` notification or `turn.error`, using a
 generic status diagnostic only when no native detail exists.
 
+Codex exposes live tell through native `turn/steer`. The adapter submits one
+text input with the TellId as `clientUserMessageId` to the admitted thread and
+active turn, accepts only a response naming that same turn, and then returns an
+opaque fence scoped to that native acknowledgement. Codex supplies no receipt
+stream: successful `turn/steer` acceptance is its strongest terminal evidence.
+Terminal turn observation stops new steers immediately, but the adapter keeps
+the RPC transport alive until every already-submitted steer acknowledgement has
+settled; an independently ordered completion notification cannot erase native
+acceptance evidence.
+Claude's `streamInput()` acknowledgement proves only transport queueing, so the
+Claude adapter omits live tell and carries pending input through the next launch.
+
 File-change adapters preserve every available native operation, path, and
 per-change diffstat. Missing optional facts make the public row shorter; an
 adapter never invents a diffstat. Codex app-server derives diffstat only from a
