@@ -47,6 +47,10 @@ dies; their existence does not depend on a current control-flow reader.
   provider options preserve the exact native resume recipe.
   Before any session admission, wake starts fresh from the soul's summon cwd
   and options.
+  The coordinate is the closed union `{ sessionId } | { sessionFile,
+  sessionId? }`; its strict codec rejects blank, mixed, or additional fields.
+  Claude and Codex use the first arm. Pi uses the exact persisted-file arm.
+  Heart stores that union without provider tags or parallel Pi custody.
 - **launch admissions** — one provider submission fence. Body pairs it with the
   immutable launch TellIds it supplied and records the admission and each
   TellId's launch delivery in one Heart transaction. The adapter never echoes

@@ -3,6 +3,7 @@ import type { ProviderExecution } from "../heart/index.js";
 import { claudeProvider, createClaudeProvider } from "./claude/index.js";
 import { createCodexAppServerProvider } from "./codex-app-server/index.js";
 import { createOpencodeProvider } from "./opencode-sdk/index.js";
+import { createPiProvider } from "./pi/index.js";
 
 const PROVIDERS = {
   claude: claudeProvider,
@@ -30,7 +31,7 @@ function optionalText(value: Readonly<Record<string, unknown>>, field: "executab
 }
 
 function providerKind(value: unknown): value is ProviderExecution["kind"] {
-  return value === "claude-agent-sdk" || value === "codex-app-server" || value === "opencode-sdk";
+  return value === "claude-agent-sdk" || value === "codex-app-server" || value === "opencode-sdk" || value === "pi";
 }
 
 function providerConfig(value: Readonly<Record<string, unknown>>, kind: ProviderExecution["kind"]): Readonly<Record<string, unknown>> | undefined {
@@ -77,5 +78,6 @@ export function providerNamed(execution: ProviderExecution): ProviderAdapter {
   }
   if (execution.kind === "codex-app-server") return createCodexAppServerProvider(execution);
   if (execution.kind === "opencode-sdk") return createOpencodeProvider(execution);
+  if (execution.kind === "pi") return createPiProvider(execution);
   throw new TypeError(`unknown Akuma provider kind ${(execution as ProviderExecution).kind}`);
 }

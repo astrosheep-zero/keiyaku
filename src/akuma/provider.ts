@@ -1,5 +1,7 @@
-import type { Confinement, ProviderOptions, ResumeCoordinate } from "./heart/index.js";
-export type { ProviderOptions, ResumeCoordinate } from "./heart/index.js";
+import type { Confinement, ProviderOptions } from "./heart/index.js";
+import { decodeResumeCoordinate, encodeResumeCoordinate, type ResumeCoordinate } from "./coordinate.js";
+export type { ResumeCoordinate } from "./coordinate.js";
+export type { ProviderOptions } from "./heart/index.js";
 
 export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
 
@@ -59,6 +61,8 @@ function object(value: unknown): Readonly<Record<string, unknown>> | null {
     ? value as Readonly<Record<string, unknown>>
     : null;
 }
+
+export { decodeResumeCoordinate, encodeResumeCoordinate };
 
 function optionText(
   options: Readonly<Record<string, unknown>>,
@@ -175,8 +179,8 @@ function decodeTypedEvent(type: AgentEvent["type"], event: Readonly<Record<strin
     case "note": return typeof event.text === "string" ? { type, text: event.text, ...truncated } : null;
     case "unknown": return typeof event.kind === "string" ? { type, kind: event.kind, ...truncated } : null;
     case "session": {
-      const coordinate = object(event.coordinate);
-      return typeof coordinate?.sessionId === "string" ? { type, coordinate: { sessionId: coordinate.sessionId } } : null;
+      const coordinate = decodeResumeCoordinate(event.coordinate);
+      return coordinate === null ? null : { type, coordinate };
     }
     case "tool": return decodeToolEvent(event);
     default: return type satisfies never;
@@ -225,7 +229,7 @@ export function encodeAgentEvent(event: AgentEvent): unknown {
     ...(changed || ("truncated" in event && event.truncated === true) ? { truncated: true } : {}),
   });
   switch (event.type) {
-    case "session": return { type: event.type, coordinate: { sessionId: event.coordinate.sessionId } };
+    case "session": return { type: event.type, coordinate: encodeResumeCoordinate(event.coordinate) };
     case "assistant": return marked({ type: event.type, text: boundedEventText(event.text) }, event.text.length > AGENT_EVENT_TEXT_LIMIT);
     case "thought": return marked({ type: event.type, text: boundedThoughtText(event.text) }, event.text.length > AGENT_THOUGHT_TEXT_LIMIT);
     case "note": return marked({ type: event.type, text: boundedEventText(event.text) }, event.text.length > AGENT_EVENT_TEXT_LIMIT);

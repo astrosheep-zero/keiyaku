@@ -127,6 +127,7 @@ async function admitTurn(
 }
 
 async function forkCodex(execution: ProviderExecution, input: ForkInput): Promise<Readonly<{ session: { sessionId: string } }>> {
+  if (!("sessionId" in input.session)) throw new Error("Codex app-server fork requires sessionId");
   const server = new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
     cwd: input.cwd,
@@ -165,6 +166,7 @@ async function abortTurn(
 }
 
 async function startCodex(execution: ProviderExecution, input: StartInput): Promise<Session> {
+  if (input.session.kind === "resume" && !("sessionId" in input.session.coordinate)) throw new Error("Codex app-server resume requires sessionId");
   const events = new AgentEventChannel();
   const server = new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],

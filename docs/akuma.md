@@ -184,9 +184,9 @@ catalog, and other IO failures remain exceptions for both reads.
 A provider entry is one strict object with required `kind`, optional nonblank
 `description` and `executable`, optional object `config`, and optional `env`
 whose values are strings. The built-in kinds are `claude-agent-sdk`,
-`codex-app-server`, and `opencode-sdk`; only Codex consumes `config`. When no
-same-name Settings entry exists, Archetype names `claude`, `codex-app-server`,
-and `opencode-sdk` select their
+`codex-app-server`, `opencode-sdk`, and `pi`; only Codex consumes `config`.
+When no same-name Settings entry exists, Archetype names `claude`,
+`codex-app-server`, `opencode-sdk`, and `pi` select their
 Akuma-owned default executions. A configured same-name entry replaces that
 default wholly under Settings shadow law.
 
@@ -225,6 +225,20 @@ frozen session coordinate. Native root-session fork is optional and uses the
 exact supplied session and message point. Live tell is omitted because V2 prompt
 admission does not prove terminal native processing evidence; pending tells
 remain next-launch input.
+
+Provider kind `pi` uses the in-process `@earendil-works/pi-coding-agent`
+SDK. Model is an exact `<provider>/<id>` lookup through `ModelRuntime`; effort
+is one native thinking level; the system prompt is supplied through the native
+resource loader. Pi refuses portable access and network claims,
+`executable`, `config`, and non-empty `env`. Its confinement is the call
+cwd. Resume and fork use the exact persisted session file. Native steer proves
+queueing only, so Pi does not expose live tell.
+
+The pinned Pi dependency contains a broken internal transitive declaration
+path. Project compilation therefore uses `skipLibCheck`; project source and
+direct official SDK usage remain strictly checked under NodeNext. No ambient
+SDK shim, vendored declaration patch, CommonJS require, or nonliteral import
+replaces that narrow compiler setting.
 
 ## Placement
 

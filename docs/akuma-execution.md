@@ -279,6 +279,10 @@ dressed up as a local child. Claude maps the primitive to native `forkSession`
 with the answered turn's session id and outer assistant-message UUID. The SDK
 must return a distinct nonblank child session id; a missing source or message
 point, native failure, or reused coordinate is `fork-failed`.
+Pi opens the selected turn's exact `sessionFile`, passes its `historyId` to
+`createBranchedSession`, and requires a distinct returned file. The child
+coordinate enters ordinary publication; Pi has no checkpoint, seen-state, or
+second fork ledger.
 Authenticated provider evidence proves that the child transcript retains the
 selected prefix and that later parent and child writes do not enter each
 other's transcript.

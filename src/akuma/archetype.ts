@@ -177,6 +177,7 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
   if (name === "claude") return Object.freeze({ name, kind: "claude-agent-sdk" });
   if (name === "codex-app-server") return Object.freeze({ name, kind: "codex-app-server" });
   if (name === "opencode-sdk") return Object.freeze({ name, kind: "opencode-sdk" });
+  if (name === "pi") return Object.freeze({ name, kind: "pi" });
   throw new TypeError(`unknown provider ${name}`);
 }
 

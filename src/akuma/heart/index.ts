@@ -85,7 +85,6 @@ export type {
   RequestFact,
   RequestInput,
   RequestRecipe,
-  ResumeCoordinate,
   SealFact,
   SessionFact,
   Soul,
@@ -99,6 +98,7 @@ export type {
   TurnOutcome,
   TurnStartFact,
 } from "./facts.js";
+export type { ResumeCoordinate } from "../coordinate.js";
 
 const ACTIVITY_LIMIT = 5_000;
 

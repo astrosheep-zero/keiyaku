@@ -1,4 +1,6 @@
 import type { AkuId } from "../identity.js";
+import type { ResumeCoordinate } from "../coordinate.js";
+export type { ResumeCoordinate } from "../coordinate.js";
 
 export type Confinement =
   | Readonly<{ kind: "unconfined" }>
@@ -14,7 +16,7 @@ export type ProviderOptions = Readonly<{
 
 export type ProviderExecution = Readonly<{
   name: string;
-  kind: "claude-agent-sdk" | "codex-app-server" | "opencode-sdk";
+  kind: "claude-agent-sdk" | "codex-app-server" | "opencode-sdk" | "pi";
   executable?: string;
   config?: Readonly<Record<string, unknown>>;
   env?: Readonly<Record<string, string>>;
@@ -54,8 +56,6 @@ export type BodyFact = Readonly<{
   end?: BodyEnd;
   endedAt?: string;
 }>;
-
-export type ResumeCoordinate = Readonly<{ sessionId: string }>;
 
 export type SessionFact = Readonly<{
   sequence: number;

@@ -13,6 +13,7 @@ import {
   type ClaudeObservationState,
 } from "./events.js";
 import { claudeUserMessage, createClaudeInput, isClaudeTurnEnded, type ClaudeInput } from "./input.js";
+import type { ResumeCoordinate } from "../../provider.js";
 
 export { CLAUDE_MESSAGE_DISPOSITIONS, CLAUDE_SYSTEM_DISPOSITIONS } from "./events.js";
 
@@ -73,6 +74,13 @@ function permissionMode(access: ProviderOptions["access"]): "plan" | "acceptEdit
   return "bypassPermissions";
 }
 
+function claudeSessionId(coordinate: ResumeCoordinate): string {
+  if (!("sessionId" in coordinate) || coordinate.sessionId === undefined) {
+    throw new Error("Claude resume requires sessionId");
+  }
+  return coordinate.sessionId;
+}
+
 function claudeQueryOptions(
   input: ClaudeDriveInput,
   execution: ClaudeExecution,
@@ -92,7 +100,7 @@ function claudeQueryOptions(
     ...(input.options.systemPrompt === undefined || input.options.systemPrompt.length === 0 ? {} : {
       systemPrompt: { type: "preset", preset: "claude_code", append: input.options.systemPrompt },
     }),
-    ...(input.session.kind === "fresh" ? {} : { resume: input.session.coordinate.sessionId }),
+    ...(input.session.kind === "fresh" ? {} : { resume: claudeSessionId(input.session.coordinate) }),
   };
 }
 
@@ -101,12 +109,13 @@ async function forkClaude(
   execution: ClaudeExecution,
   input: Parameters<NonNullable<ProviderAdapter["fork"]>>[0],
 ): Promise<Readonly<{ session: { sessionId: string } }>> {
+  const sessionId = claudeSessionId(input.session);
   if (execution.env !== undefined) throw new Error("Claude fork cannot apply the frozen provider environment");
   const sdk = await load();
   if (sdk.forkSession === undefined) throw new Error("Claude SDK does not expose forkSession");
-  const forked = await sdk.forkSession(input.session.sessionId, { dir: input.cwd, upToMessageId: input.at });
+  const forked = await sdk.forkSession(sessionId, { dir: input.cwd, upToMessageId: input.at });
   if (forked.sessionId.trim().length === 0) throw new Error("Claude fork returned an empty child session id");
-  if (forked.sessionId === input.session.sessionId) throw new Error("Claude fork reused the source session id");
+  if (forked.sessionId === sessionId) throw new Error("Claude fork reused the source session id");
   return { session: { sessionId: forked.sessionId } };
 }
 
@@ -233,6 +242,7 @@ async function driveClaude(
   execution: ClaudeExecution,
   drive: ClaudeDriveInput,
 ): Promise<Session> {
+  if (drive.session.kind === "resume") claudeSessionId(drive.session.coordinate);
   const sdk = await load();
   const events = new AgentEventChannel();
   const receipts = new ReceiptChannel();

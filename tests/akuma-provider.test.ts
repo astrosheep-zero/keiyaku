@@ -24,6 +24,7 @@ import {
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
 import { createEventState, mapEvent, OPENCODE_EVENT_DISPOSITIONS } from "../src/akuma/providers/opencode-sdk/events.js";
 import type { OpencodeSdkLoader, OpencodeSdkSession } from "../src/akuma/providers/opencode-sdk/session.js";
+import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 
 function fakeOpencode() {
   let closed = 0;
@@ -59,6 +60,75 @@ function fakeOpencode() {
   return { loader, closed: () => closed, switchedModels };
 }
 
+function fakePiSdk(input: {
+  events?: readonly Record<string, unknown>[];
+  fail?: Error;
+  waitForAbort?: boolean;
+  promptNeverSettles?: boolean;
+  abortNeverSettles?: boolean;
+} = {}): {
+  sdk: PiSdk;
+  seen: { options?: Record<string, unknown>; opened?: string; branched?: string; aborted: number; disposed: number };
+} {
+  const seen = { aborted: 0, disposed: 0 } as {
+    options?: Record<string, unknown>;
+    opened?: string;
+    branched?: string;
+    aborted: number;
+    disposed: number;
+  };
+  const manager = {
+    getLeafId: () => "entry-final",
+    createBranchedSession: (id: string) => {
+      seen.branched = id;
+      return "/sessions/child.jsonl";
+    },
+  };
+  const session = {
+    sessionFile: "/sessions/pi.jsonl",
+    sessionId: "pi-session",
+    sessionManager: manager,
+    subscribe(listener: (event: Record<string, unknown>) => void) {
+      this.listener = listener;
+      return () => { this.listener = undefined; };
+    },
+    listener: undefined as ((event: Record<string, unknown>) => void) | undefined,
+    async prompt() {
+      if (input.fail !== undefined) throw input.fail;
+      if (input.promptNeverSettles === true) await new Promise<void>(() => undefined);
+      if (input.waitForAbort === true) await new Promise<void>((resolve) => { this.resolveAbort = resolve; });
+      for (const event of input.events ?? []) this.listener?.(event);
+    },
+    resolveAbort: undefined as (() => void) | undefined,
+    async abort() {
+      seen.aborted += 1;
+      if (input.abortNeverSettles === true) await new Promise<void>(() => undefined);
+      this.resolveAbort?.();
+    },
+    dispose() { seen.disposed += 1; },
+  };
+  class ResourceLoader { async reload() {} }
+  return {
+    seen,
+    sdk: {
+      createAgentSession: async (options) => {
+        seen.options = options as Record<string, unknown>;
+        return { session } as never;
+      },
+      DefaultResourceLoader: ResourceLoader as never,
+      getAgentDir: () => "/agent",
+      ModelRuntime: { create: async () => ({ getModel: () => ({ id: "model" }) }) } as never,
+      SessionManager: {
+        create: () => manager,
+        open: (path: string) => {
+          seen.opened = path;
+          return manager;
+        },
+      } as never,
+    },
+  };
+}
+
 test("OpenCode V2 adapter admits, maps, completes, and cleans up through a loader fake", async () => {
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
@@ -80,6 +150,26 @@ test("OpenCode V2 adapter resumes the supplied coordinate and forks the exact po
   await drive.abort();
   assert.equal((await drive.completion).kind, "failed");
   assert.deepEqual(await provider.fork!({ session: { sessionId: "session-resume" }, at: "message-1", cwd: "/tmp" }), { session: { sessionId: "session-child" } });
+});
+
+test("OpenCode V2 refuses a Pi coordinate before loading its native runtime", async () => {
+  let loaded = false;
+  const provider = createOpencodeProvider({ loader: async () => {
+    loaded = true;
+    throw new Error("must not load");
+  } });
+  await assert.rejects(provider.resume!({
+    body: "continue",
+    launchTells: [],
+    cwd: "/tmp",
+    options: {},
+    session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
+  }), /OpenCode resume requires sessionId/u);
+  await assert.rejects(
+    provider.fork!({ session: { sessionFile: "/sessions/pi.jsonl" }, at: "message-1", cwd: "/tmp" }),
+    /OpenCode resume requires sessionId/u,
+  );
+  assert.equal(loaded, false);
 });
 
 test("OpenCode V2 abort cleanup does not await an uncooperative native interrupt", async () => {
@@ -148,9 +238,154 @@ test("OpenCode V2 fails an idle drain without native assistant evidence", async 
   assert.equal(closed, 1);
 });
 
+test("Pi adapter maps completed native evidence and disposes after answer", async () => {
+  const fake = fakePiSdk({ events: [
+    { type: "message_update", secret: "delta" },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "consider" }, { type: "text", text: "done" }] } },
+    { type: "tool_execution_start", toolCallId: "tool-1", toolName: "bash", args: { command: "npm test" } },
+    { type: "tool_execution_update", toolCallId: "tool-1", toolName: "bash", partialResult: { secret: true } },
+    { type: "tool_execution_end", toolCallId: "tool-1", toolName: "bash", result: { secret: true }, isError: false },
+    { type: "future_event", secret: "hidden" },
+  ] });
+  const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
+  const drive = await provider.start({
+    body: "work",
+    launchTells: [{ id: "tell-1", text: "also" }],
+    cwd: "/work",
+    options: {},
+    session: { kind: "fresh" },
+  });
+  assert.equal(drive.tell, undefined);
+  const events = [];
+  for await (const event of drive.events) events.push(event);
+  assert.deepEqual(events, [
+    { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
+    { type: "assistant", text: "done" },
+    { type: "tool", phase: "started", id: "tool-1", name: "bash", call: { kind: "run", command: "npm test" } },
+    { type: "tool", phase: "completed", id: "tool-1", name: "bash", call: { kind: "run", command: "npm test" }, result: { status: "ok" } },
+    { type: "unknown", kind: "future_event" },
+  ]);
+  assert.equal(events.some((event) => event.type === "thought"), false);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
+  assert.equal(fake.seen.disposed, 1);
+});
+
+test("Pi rejects wrong coordinates before loading its native SDK", async () => {
+  let loaded = false;
+  const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => {
+    loaded = true;
+    throw new Error("must not load");
+  });
+  await assert.rejects(provider.resume!({
+    body: "bad", launchTells: [], cwd: "/work", options: {},
+    session: { kind: "resume", coordinate: { sessionId: "wrong" } },
+  }), /requires sessionFile/u);
+  await assert.rejects(provider.fork!({ session: { sessionId: "wrong" }, at: "entry", cwd: "/work" }), /requires sessionFile/u);
+  assert.equal(loaded, false);
+});
+
+test("Pi adapter disposes once on failure and repeated abort", async () => {
+  const failed = fakePiSdk({ fail: new Error("native failure") });
+  const failedDrive = await createPiProvider({ name: "pi", kind: "pi" }, async () => failed.sdk).start({
+    body: "fail", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  for await (const _event of failedDrive.events) { /* drain */ }
+  assert.deepEqual(await failedDrive.completion, { kind: "failed", diagnostic: "native failure" });
+  assert.equal(failed.seen.disposed, 1);
+
+  const aborted = fakePiSdk({ waitForAbort: true });
+  const abortedDrive = await createPiProvider({ name: "pi", kind: "pi" }, async () => aborted.sdk).start({
+    body: "wait", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  await Promise.all([abortedDrive.abort(), abortedDrive.abort()]);
+  for await (const _event of abortedDrive.events) { /* drain */ }
+  assert.equal(aborted.seen.aborted, 1);
+  assert.equal(aborted.seen.disposed, 1);
+  assert.deepEqual(await abortedDrive.completion, { kind: "failed", diagnostic: "Pi session aborted" });
+});
+
+test("Pi abort closes the adapter when native prompt and abort never settle", async () => {
+  const fake = fakePiSdk({ promptNeverSettles: true, abortNeverSettles: true });
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+    body: "wait", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  await drive.abort();
+  for await (const _event of drive.events) { /* drain */ }
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Pi session aborted" });
+  assert.equal(fake.seen.aborted, 1);
+  assert.equal(fake.seen.disposed, 1);
+});
+
+test("Pi fails a prompt without assistant evidence", async () => {
+  const fake = fakePiSdk();
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+    body: "wait", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  for await (const _event of drive.events) { /* drain */ }
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Pi completed without a native assistant answer" });
+});
+
+test("Pi adapter resumes and forks only exact sessionFile coordinates", async () => {
+  const fake = fakePiSdk({ events: [
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "resumed" }] } },
+  ] });
+  const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
+  const drive = await provider.resume!({
+    body: "continue",
+    launchTells: [],
+    cwd: "/work",
+    options: {},
+    session: { kind: "resume", coordinate: { sessionFile: "/sessions/source.jsonl" } },
+  });
+  for await (const _event of drive.events) { /* drain */ }
+  await drive.completion;
+  assert.equal(fake.seen.opened, "/sessions/source.jsonl");
+  assert.deepEqual(
+    await provider.fork!({ session: { sessionFile: "/sessions/source.jsonl" }, at: "entry-exact", cwd: "/work" }),
+    { session: { sessionFile: "/sessions/child.jsonl" } },
+  );
+  assert.equal(fake.seen.branched, "entry-exact");
+  await assert.rejects(provider.resume!({
+    body: "bad",
+    launchTells: [],
+    cwd: "/work",
+    options: {},
+    session: { kind: "resume", coordinate: { sessionId: "wrong" } },
+  }), /requires sessionFile/u);
+  await assert.rejects(
+    provider.fork!({ session: { sessionId: "wrong" }, at: "entry", cwd: "/work" }),
+    /requires sessionFile/u,
+  );
+});
+
+test("Pi option admission maps native terms and refuses unsupported policy", async () => {
+  const fake = fakePiSdk({ events: [
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } },
+  ] });
+  const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
+  assert.equal(provider.admitOptions({ access: "write" }).kind, "refused");
+  assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
+  assert.equal(provider.admitOptions({ model: "bad" }).kind, "refused");
+  assert.equal(provider.admitOptions({ effort: "extreme" }).kind, "refused");
+  const drive = await provider.start({
+    body: "work",
+    launchTells: [],
+    cwd: "/work",
+    options: { model: "openai/gpt", effort: "high", systemPrompt: "System" },
+    session: { kind: "fresh" },
+  });
+  for await (const _event of drive.events) { /* drain */ }
+  await drive.completion;
+  assert.equal(fake.seen.options?.thinkingLevel, "high");
+  assert.ok(fake.seen.options?.model);
+  assert.ok(fake.seen.options?.resourceLoader);
+  assert.equal(createPiProvider({ name: "pi", kind: "pi", env: { A: "x" } }).admitOptions({}).kind, "refused");
+});
+
 test("provider activity codec round trips every closed event and tool-call arm", () => {
   const events: readonly AgentEvent[] = [
     { type: "session", coordinate: { sessionId: "native-1" } },
+    { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-1" } },
     { type: "assistant", text: "complete answer" },
     { type: "note", text: "Retrying" },
     { type: "unknown", kind: "future/event" },
@@ -171,6 +406,10 @@ test("provider activity codec round trips every closed event and tool-call arm",
   );
   assert.throws(
     () => decodeAgentEvent({ type: "tool", phase: "started", id: "bad", name: "Bash", call: { kind: "run", command: "x" }, result: { status: "ok" } }),
+    /invalid event shape/u,
+  );
+  assert.throws(
+    () => decodeAgentEvent({ type: "session", coordinate: { sessionFile: "/x", extra: true } }),
     /invalid event shape/u,
   );
 });
@@ -548,6 +787,26 @@ test("Claude adapter restores only the native session coordinate it was given", 
   for await (const _event of drive.events) { /* drain */ }
   assert.equal(resume, "session-1");
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "native resume failed" });
+});
+
+test("Claude refuses a Pi coordinate before loading its native SDK", async () => {
+  let loaded = false;
+  const provider = createClaudeProvider(async () => {
+    loaded = true;
+    throw new Error("must not load");
+  });
+  await assert.rejects(provider.resume!({
+    body: "continue",
+    launchTells: [],
+    cwd: "/work",
+    options: {},
+    session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
+  }), /Claude resume requires sessionId/u);
+  await assert.rejects(
+    provider.fork!({ session: { sessionFile: "/sessions/pi.jsonl" }, at: "message-1", cwd: "/work" }),
+    /Claude resume requires sessionId/u,
+  );
+  assert.equal(loaded, false);
 });
 
 test("Claude never substitutes a result UUID for the assistant fork point", async () => {
@@ -1217,6 +1476,26 @@ test("Codex app-server resumes and forks only the supplied native coordinates", 
       threadId: "thread-source",
       lastTurnId: "turn-exact",
     });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex app-server refuses a Pi coordinate before starting a native process", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-wrong-coordinate-"));
+  try {
+    const fake = fakeCodex(root);
+    const provider = createCodexAppServerProvider(fake.executable);
+    await assert.rejects(provider.resume!({
+      body: "continue",
+      launchTells: [],
+      cwd: root,
+      options: {},
+      session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
+    }), /Codex app-server resume requires sessionId/u);
+    await assert.rejects(
+      provider.fork!({ session: { sessionFile: "/sessions/pi.jsonl" }, at: "turn-1", cwd: root }),
+      /Codex app-server fork requires sessionId/u,
+    );
+    assert.deepEqual(fake.requests(), []);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

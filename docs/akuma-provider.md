@@ -274,6 +274,9 @@ every current kind and an `unknown` fallback for future kinds; output, deltas,
 usage, cost, and telemetry remain dropped. Its terminal answer is read from the
 complete assistant message after the durable event stream drains.
 
+Pi's `steer()` acknowledgement likewise proves queueing only. Pi omits live
+tell and receives pending text in the next launch input.
+
 File-change adapters preserve every available native operation, path, and
 per-change diffstat. Missing optional facts make the public row shorter; an
 adapter never invents a diffstat. Codex app-server derives diffstat only from a

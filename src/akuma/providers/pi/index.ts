@@ -1,0 +1,171 @@
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  getAgentDir,
+  ModelRuntime,
+  SessionManager,
+  type CreateAgentSessionOptions,
+} from "@earendil-works/pi-coding-agent";
+import type { ProviderExecution } from "../../heart/index.js";
+import type { ResumeCoordinate } from "../../coordinate.js";
+import { AgentEventChannel, type ProviderAdapter, type ProviderOptions, type Session, type TurnResult } from "../../provider.js";
+import { piTerminalFailure, translatePiEvent, type PiEventState } from "./events.js";
+
+export type PiSdk = Readonly<{
+  createAgentSession(options?: CreateAgentSessionOptions): ReturnType<typeof createAgentSession>;
+  DefaultResourceLoader: typeof DefaultResourceLoader;
+  getAgentDir: typeof getAgentDir;
+  ModelRuntime: typeof ModelRuntime;
+  SessionManager: typeof SessionManager;
+}>;
+
+type PiThinkingLevel = NonNullable<CreateAgentSessionOptions["thinkingLevel"]>;
+const PI_THINKING_LEVELS = new Set<PiThinkingLevel>(["minimal", "low", "medium", "high", "xhigh", "max"]);
+const MODEL_PATTERN = /^[^/\s]+\/[^/\s]+$/u;
+
+function diagnostic(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+
+function admitPiOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
+  if (options.access !== undefined) return { kind: "refused", diagnostic: "Pi provider does not support the Archetype access option" };
+  if (options.network !== undefined) return { kind: "refused", diagnostic: "Pi provider does not support the Archetype network option" };
+  if (options.model !== undefined && !MODEL_PATTERN.test(options.model)) {
+    return { kind: "refused", diagnostic: "Pi provider model must use <provider>/<id>" };
+  }
+  if (options.effort !== undefined && !PI_THINKING_LEVELS.has(options.effort as PiThinkingLevel)) {
+    return { kind: "refused", diagnostic: "Pi provider effort must be minimal, low, medium, high, xhigh, or max" };
+  }
+  return { kind: "admitted", options: Object.freeze({ ...options }) };
+}
+
+async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateAgentSessionOptions> {
+  let model: CreateAgentSessionOptions["model"];
+  let modelRuntime: Awaited<ReturnType<typeof ModelRuntime.create>> | undefined;
+  if (input.options.model !== undefined) {
+    const slash = input.options.model.indexOf("/");
+    modelRuntime = await sdk.ModelRuntime.create();
+    model = modelRuntime.getModel(input.options.model.slice(0, slash), input.options.model.slice(slash + 1));
+    if (model === undefined) throw new Error(`Pi model '${input.options.model}' is unavailable`);
+  }
+  const resourceLoader = input.options.systemPrompt === undefined ? undefined : new sdk.DefaultResourceLoader({
+    cwd: input.cwd,
+    agentDir: sdk.getAgentDir(),
+    systemPromptOverride: () => input.options.systemPrompt,
+  });
+  await resourceLoader?.reload();
+  const sessionManager = input.session.kind === "fresh"
+    ? sdk.SessionManager.create(input.cwd)
+    : "sessionFile" in input.session.coordinate
+      ? sdk.SessionManager.open(input.session.coordinate.sessionFile)
+      : (() => { throw new Error("Pi resume requires sessionFile"); })();
+  return {
+    cwd: input.cwd,
+    sessionManager,
+    ...(model === undefined || modelRuntime === undefined ? {} : { model, modelRuntime }),
+    ...(resourceLoader === undefined ? {} : { resourceLoader }),
+    ...(input.options.effort === undefined ? {} : { thinkingLevel: input.options.effort as PiThinkingLevel }),
+  };
+}
+
+type PiDriveInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
+
+async function drivePi(sdk: PiSdk, input: PiDriveInput): Promise<Session> {
+  const created = await sdk.createAgentSession(await piCreateOptions(sdk, input));
+  const native = created.session;
+  if (native.sessionFile === undefined || native.sessionFile.trim().length === 0) {
+    native.dispose();
+    throw new Error("Pi session admitted without sessionFile");
+  }
+  const events = new AgentEventChannel();
+  const state: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+  let terminalFailure: string | null = null;
+  let disposed = false;
+  let abortRequest: Promise<void> | undefined;
+  let settled = false;
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    try { unsubscribe(); } finally {
+      try { native.dispose(); } finally { events.end(); }
+    }
+  };
+  const unsubscribe = native.subscribe((event) => {
+    if (event.type === "agent_end" && !event.willRetry) terminalFailure = piTerminalFailure(event.messages);
+    for (const translated of translatePiEvent(event, state)) events.emit(translated);
+  });
+  events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
+  let settleCompletion!: (result: TurnResult) => void;
+  const completion = new Promise<TurnResult>((resolve) => { settleCompletion = resolve; });
+  const settle = (result: TurnResult): void => {
+    if (settled) return;
+    settled = true;
+    dispose();
+    settleCompletion(result);
+  };
+  void (async () => {
+    try {
+      await native.prompt([input.body, ...input.launchTells.map((tell) => tell.text)].join("\n\n"));
+      if (terminalFailure !== null) {
+        settle({ kind: "failed", diagnostic: terminalFailure });
+        return;
+      }
+      if (!state.assistantSeen) {
+        settle({ kind: "failed", diagnostic: "Pi completed without a native assistant answer" });
+        return;
+      }
+      const historyId = native.sessionManager.getLeafId();
+      settle(historyId === null
+        ? { kind: "failed", diagnostic: "Pi completed without a forkable history entry" }
+        : { kind: "answered", answer: state.answer, historyId });
+    } catch (error) { settle({ kind: "failed", diagnostic: diagnostic(error) }); }
+  })();
+  return {
+    admission: { fence: native.sessionId }, events, completion,
+    abort: () => {
+      abortRequest ??= (async () => {
+        try {
+          void native.abort().catch(() => undefined);
+        } catch { /* best effort: local settlement already owns lifecycle */ }
+        settle({ kind: "failed", diagnostic: "Pi session aborted" });
+      })();
+      return abortRequest;
+    },
+  };
+}
+
+function piSessionFile(coordinate: ResumeCoordinate): string {
+  if (!("sessionFile" in coordinate)) throw new Error("Pi requires sessionFile");
+  return coordinate.sessionFile;
+}
+
+async function forkPi(sdk: PiSdk, input: Parameters<NonNullable<ProviderAdapter["fork"]>>[0]) {
+  const sessionFile = piSessionFile(input.session);
+  const manager = sdk.SessionManager.open(sessionFile);
+  const child = manager.createBranchedSession(input.at);
+  if (child === undefined || child === sessionFile) throw new Error("Pi fork did not create a distinct child session file");
+  return { session: { sessionFile: child } };
+}
+
+const defaultSdk: PiSdk = { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager };
+
+export function createPiProvider(
+  execution: ProviderExecution = { name: "pi", kind: "pi" },
+  load: () => Promise<PiSdk> = async () => defaultSdk,
+): ProviderAdapter {
+  return {
+    confinement: ({ cwd }) => ({ kind: "declared", writableRoots: [cwd] }),
+    admitOptions(options) {
+      if (execution.executable !== undefined || execution.config !== undefined) return { kind: "refused", diagnostic: "Pi provider does not support executable or config" };
+      if (execution.env !== undefined && Object.keys(execution.env).length > 0) return { kind: "refused", diagnostic: "env injection not supported for provider pi" };
+      return admitPiOptions(options);
+    },
+    start: async (input) => drivePi(await load(), input),
+    resume: async (input) => {
+      piSessionFile(input.session.coordinate);
+      return drivePi(await load(), input);
+    },
+    fork: async (input) => {
+      piSessionFile(input.session);
+      return forkPi(await load(), input);
+    },
+  };
+}

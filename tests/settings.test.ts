@@ -152,6 +152,24 @@ test("Archetype resolves the OpenCode V2 provider execution as one frozen recipe
   } finally { value.close(); }
 });
 
+test("Archetype resolves builtin and configured Pi executions", () => {
+  const value = fixture();
+  try {
+    writeFileSync(join(value.home, "akuma", "pi-worker.md"), "---\nprovider: pi\nmodel: openai/gpt\neffort: high\n---\nWork.\n");
+    let loaded = loadArchetype({ name: "pi-worker", settings: settings({ root: value.project, home: value.home }) });
+    assert.deepEqual(loaded.provider, { name: "pi", kind: "pi" });
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: { kind: "pi", env: {} } } }));
+    writeFileSync(join(value.home, "akuma", "pi-worker.md"), "---\nprovider: local\nmodel: openai/gpt\n---\nWork.\n");
+    loaded = loadArchetype({ name: "pi-worker", settings: settings({ root: value.project, home: value.home }) });
+    assert.deepEqual(loaded.provider, { name: "local", kind: "pi", env: {} });
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: { kind: "pi", env: { A: "x" } } } }));
+    assert.throws(
+      () => loadArchetype({ name: "pi-worker", settings: settings({ root: value.project, home: value.home }) }),
+      /env injection not supported for provider pi/u,
+    );
+  } finally { value.close(); }
+});
+
 test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
   const value = fixture();
   try {

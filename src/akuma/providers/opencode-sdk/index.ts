@@ -7,6 +7,12 @@ type Input = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<Pr
 export type OpencodeProviderTestOptions = Readonly<{ loader?: OpencodeSdkLoader }>;
 
 function diagnostic(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+function opencodeSessionId(coordinate: ResumeCoordinate): string {
+  if (!("sessionId" in coordinate) || coordinate.sessionId === undefined) {
+    throw new Error("OpenCode resume requires sessionId");
+  }
+  return coordinate.sessionId;
+}
 function admit(options: ProviderOptions): void {
   if (options.access !== undefined) throw new Error("OpenCode does not support explicit access");
   if (options.network !== undefined) throw new Error("OpenCode does not support explicit network");
@@ -27,6 +33,9 @@ function eventValue(value: unknown): unknown {
 
 async function drive(execution: ProviderExecution, input: Input, loader?: OpencodeSdkLoader): Promise<Session> {
   admit(input.options);
+  const resumeSessionId = input.session.kind === "resume"
+    ? opencodeSessionId(input.session.coordinate)
+    : undefined;
   const events = new AgentEventChannel();
   const state = createEventState();
   const abortController = new AbortController();
@@ -42,10 +51,10 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
     const model = input.options.model === undefined ? undefined : parseModel(input.options.model, input.options.effort);
     const response = input.session.kind === "fresh"
       ? await session.create({ location: { directory: input.cwd }, ...(model === undefined ? {} : { model }) }, { throwOnError: true })
-      : await session.get({ sessionID: input.session.coordinate.sessionId }, { throwOnError: true });
+      : await session.get({ sessionID: resumeSessionId! }, { throwOnError: true });
     const responseData = objectData(objectData(response)?.data);
     const info = objectData(responseData?.data) ?? responseData;
-    const sessionId = textData(info?.id) ?? (input.session.kind === "resume" ? input.session.coordinate.sessionId : undefined);
+    const sessionId = textData(info?.id) ?? resumeSessionId;
     if (sessionId === undefined) throw new Error("OpenCode did not return a session id");
     if (input.session.kind === "resume" && model !== undefined) {
       await session.switchModel({ sessionID: sessionId, model }, { throwOnError: true });
@@ -146,13 +155,14 @@ export function createOpencodeProvider(input: ProviderExecution | OpencodeProvid
     start: (input) => drive(execution, input, loader),
     resume: (input) => drive(execution, input, loader),
     fork: async (input: { session: ResumeCoordinate; at: string; cwd: string }) => {
+      const sessionId = opencodeSessionId(input.session);
       const runtime = await loadOpencode(execution, input.cwd, new AbortController().signal, loader);
       try {
         const fork = runtime.client.session?.fork;
         if (fork === undefined) throw new Error("OpenCode fork is unavailable");
-        const result = objectData(await fork({ sessionID: input.session.sessionId, messageID: input.at }));
+        const result = objectData(await fork({ sessionID: sessionId, messageID: input.at }));
         const data = objectData(result?.data);
-        const id = textData(data?.id); if (id === undefined || id === input.session.sessionId) throw new Error("OpenCode fork returned an invalid session id");
+        const id = textData(data?.id); if (id === undefined || id === sessionId) throw new Error("OpenCode fork returned an invalid session id");
         return { session: coordinate(id) };
       } finally { await runtime.close(); }
     },

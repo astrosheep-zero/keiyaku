@@ -98,6 +98,26 @@ test("session admission survives before turn completion", () => {
   } finally { value.close(); }
 });
 
+test("Pi sessionFile coordinates round trip through Heart custody", () => {
+  const value = fixture();
+  try {
+    const body = HeldAkumaLeash.try(value.allocated.paths)!;
+    body.birth(value.allocated.paths, value.soul);
+    recordSession(value.allocated.paths, {
+      provider: "pi",
+      options: { model: "openai/gpt" },
+      coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-native" },
+      cwd: value.root,
+      admittedAt: "2026-08-08T00:00:01.000Z",
+    });
+    body.release();
+    assert.deepEqual(readHeart(value.allocated.paths).latestSession?.coordinate, {
+      sessionFile: "/sessions/pi.jsonl",
+      sessionId: "pi-native",
+    });
+  } finally { value.close(); }
+});
+
 test("tell admission shares activity order and delivery witnesses fold without mutable stages", () => {
   const value = fixture();
   try {

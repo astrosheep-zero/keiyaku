@@ -21,6 +21,7 @@ import type {
   TurnStartFact,
   TurnEndFact,
 } from "./facts.js";
+import { decodeResumeCoordinate, encodeResumeCoordinate as encodeCoordinate } from "../coordinate.js";
 
 export type SoulRow = Readonly<{
   id: string;
@@ -115,6 +116,12 @@ function parsed<T>(value: unknown): T {
   return JSON.parse(value) as T;
 }
 
+function resumeCoordinate(value: unknown): ResumeCoordinate {
+  const coordinate = decodeResumeCoordinate(value);
+  if (coordinate === null) throw new Error("Akuma authority contains an invalid resume coordinate");
+  return coordinate;
+}
+
 export function encodeSoulRow(soul: Soul): readonly [
   AkuId,
   string,
@@ -154,18 +161,18 @@ export function decodeSoulRow(row: SoulRow): Soul {
 }
 
 export function encodeSessionRow(session: Omit<SessionFact, "sequence">): readonly [string, string, string, string, string] {
-  return [session.provider, json(session.coordinate), session.cwd, json(session.options), session.admittedAt];
+  return [session.provider, encodeResumeCoordinate(session.coordinate), session.cwd, json(session.options), session.admittedAt];
 }
 
 export function encodeResumeCoordinate(coordinate: ResumeCoordinate): string {
-  return json(coordinate);
+  return json(encodeCoordinate(coordinate));
 }
 
 export function decodeSessionRow(row: SessionRow): SessionFact {
   return {
     sequence: row.sequence,
     provider: row.provider,
-    coordinate: parsed<ResumeCoordinate>(row.coordinate_json),
+    coordinate: resumeCoordinate(parsed<unknown>(row.coordinate_json)),
     cwd: row.cwd,
     options: parsed<ProviderOptions>(row.options_json),
     admittedAt: row.admitted_at,
@@ -198,7 +205,7 @@ export function decodeTurnRow(row: TurnRow): TurnFact {
       ? {
           kind: "answered",
           historyId: row.history_id!,
-          session: parsed<ResumeCoordinate>(row.session_json),
+          session: resumeCoordinate(parsed<unknown>(row.session_json)),
           answer: row.answer!,
         }
       : { kind: "failed", diagnostic: row.diagnostic! },
