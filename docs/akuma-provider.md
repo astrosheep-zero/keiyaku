@@ -11,13 +11,8 @@ type ProviderAdapter = {
     options: ProviderOptions;
   }): Confinement;
   admitOptions(options: ProviderOptions): ProviderOptionAdmission;
-  start(input: {
-    prompt: string;
-    cwd: string;
-    options: ProviderOptions;
-    session?: ResumeCoordinate;
-    requests?: { dir: string };
-  }): Promise<Drive>;
+  start(input: FreshDrive): Promise<Session>;
+  resume?(input: ResumeDrive): Promise<Session>;
   fork?(input: {
     session: ResumeCoordinate;
     at: string;
@@ -25,12 +20,91 @@ type ProviderAdapter = {
   }): Promise<{ session: ResumeCoordinate }>;
 };
 
-type Drive = {
+type DriveInput = {
+  body: string;
+  launchTells: readonly { id: TellId; text: string }[];
+  cwd: string;
+  options: ProviderOptions;
+  requests?: { dir: string };
+};
+
+type FreshDrive = DriveInput & { session: { kind: "fresh" } };
+type ResumeDrive = DriveInput & {
+  session: { kind: "resume"; coordinate: ResumeCoordinate };
+};
+
+type Session = {
+  admission: SessionAdmission;
   events: AsyncIterable<AgentEvent>;
+  receipts?: AsyncIterable<TellReceipt>;
   completion: Promise<TurnResult>;
   abort: () => Promise<void>;
+  tell?: (tell: { id: TellId; text: string }) => Promise<SubmitAck>;
 };
+
+type SubmitAck = { fence: ProviderFence };
+type SessionAdmission = { fence: ProviderFence };
+type TellReceipt =
+  | { evidence: "exact"; tellId: TellId; kind: ReceiptKind }
+  | { evidence: "fence"; fence: ProviderFence; kind: ReceiptKind };
 ```
+
+`ProviderFence` is an adapter-authored opaque submission coordinate unique to
+one delivery group within one Body sequence. Its durable correlation key is the
+Heart-owned `bodySequence` plus that fence. One Body may drive successive
+Sessions; when a native coordinate has narrower scope, the adapter namespaces
+it inside the opaque fence. Provider Core adds no execution or Session identity.
+A fence is never matched across Body sequences or retries. Its codec is part of
+the adapter boundary.
+`ReceiptKind` is the provider-authored receipt word; Provider Core does not
+close or reinterpret that vocabulary.
+
+Fresh start, typed events, completion, abort, confinement and option admission,
+and `launchTells` are unconditional Provider Core. Resume, fork, and live tell
+are capabilities expressed only by the corresponding optional operation. An
+adapter without live tell still receives pending tells at the next turn
+boundary through `launchTells`; an adapter without resume starts fresh only
+when no durable resume promise exists. There is no capability registry,
+declaration table, probe, independent `SteerControl`, or `ExecutionObserver`.
+
+`Session` owns only one live native execution. A successful live `tell` returns
+a provider submission fence. When `receipts` exists, that acknowledgement
+proves submission only and terminal evidence must arrive through the receipt
+stream. When `receipts` is absent, exposing live `tell` promises that its
+acknowledgement is the adapter's strongest terminal native evidence for the
+text; a harness whose acknowledgement proves only queueing or submission must
+omit live `tell` and carry the text through the next launch instead. Start or
+resume returns only after its launch input is admitted;
+`SessionAdmission` supplies only the provider fence and never echoes TellIds or
+other product data. Body pairs that fence with the `launchTells` it constructed
+and records the launch delivery.
+
+`events` and `receipts` are separate pull streams with separate vocabularies and
+readers. Events remain closed execution narration. The optional receipt stream
+is the capability to produce terminal native tell evidence; nonterminal native
+observations do not enter Provider Core. Body is its sole reader and the sole
+writer of the corresponding Heart facts. An exact receipt names one TellId. For
+a fence receipt, Body resolves the fence only through delivery facts it already
+wrote; an unresolvable fence produces no fact. `kind` preserves the provider's
+strongest evidence without becoming a product state. Missing receipts remain
+missing; the adapter and Body never synthesize them. Provider fences do not
+cross the public Akuma boundary.
+
+Receipt visibility is causally ordered at the adapter boundary. A launch
+receipt is not yielded until `start` or `resume` has returned its admission; a
+live receipt is not yielded until the matching `tell()` has resolved its
+acknowledgement. Body records the corresponding delivery transaction before it
+starts consuming launch receipts or resumes consuming live receipts. Thus a
+valid receipt cannot outrun its durable Body-scoped delivery mapping; an
+unresolvable fence is corruption or unrelated evidence, not an ordering race.
+
+The presence of `receipts` is the Session's terminal-receipt capability. When
+absent, the live-tell contract above makes a successful acknowledgement terminal
+for that tell. When present, each yielded receipt is terminal evidence; a live
+acknowledgement alone remains replayable after that Body ends.
+Launch admission is terminal evidence for its immutable `launchTells` batch.
+Body copies that one distinction into the live delivery fact; no capability
+table or provider-name branch exists in Heart.
 
 Provider observation is the closed public vocabulary:
 
@@ -79,7 +153,7 @@ with it. Heart remains the opaque persistence owner and does not import provider
 semantics.
 
 Each native adapter separates process/session control from pure native-event
-translation. The driver consumes the typed translation result and does not
+translation. The Body consumes the typed translation result and does not
 reinterpret native event payloads.
 
 `session` is authored when the native harness grants a resumable coordinate.
@@ -141,7 +215,7 @@ substitute. Together with the session observed by the body, it forms the
 answered turn's durable fork coordinate.
 
 Provider execution and option admission are provider-owned validation at the
-public boundary, before identity allocation. `start()` is their effect reader.
+public boundary, before identity allocation. `start()` and `resume()` are their effect readers.
 The execution crosses the detached process boundary in the soul; each native
 session records the execution name and exact options. Tell, resume, recovery,
 and fork reconstruct the adapter only from those durable facts. A rerouted Body
@@ -165,6 +239,6 @@ nothing gates call admission on it. During a declared drive the adapter grants
 the body-owned request transport as one additional writable root and injects
 `AKUMA_REQUESTS`; an unconfined adapter never receives that input.
 
-No `probe`, plugin registry, or registration schema exists. Provider instance
+No `probe`, capability or plugin registry, or registration schema exists. Provider instance
 names are Settings data; built-in provider kinds remain a closed composition
 used by the public boundary and detached body.

@@ -146,13 +146,25 @@ Keiyaku.wait(input: AkumaWaitInput): Promise<AkumaWaitResult>
 Keiyaku.kill(input: AkumaSetAddressInput): Promise<AkumaKillResult>
 ```
 
+```ts
+type AkumaTellResult = {
+  akuma: AkuId;
+  tell: TellResult;
+  observation: AkumaStatus;
+};
+```
+
 Wait and kill freeze their subject set at entry. A one-member wait defaults to
 `all`; a multi-member wait requires `completion: "any" | "all"`. Any returns
 after one member satisfies the ordinary Akuma wait predicate; all returns after
 every member does. Timeout returns one complete aggregate of fresh statuses
 and is not a streaming or partial result. Kill returns one evidence member per
-selected AkuId in the same stable order. Tell returns its receipt with the one
-subsequent public status observation. Direct verbs accept only AkuId or Alias.
+selected AkuId in the same stable order. `Keiyaku.tell` composes the handle's
+typed mutation result with one subsequent whole-Akuma status observation. The
+two fields have separate authority: `tell` alone states what this invocation
+caused; `observation` gives the flagship current life, activity, outcomes, and
+the three-state tell projection. Facade code never derives delivery or receipt
+facts from that observation. Direct verbs accept only AkuId or Alias.
 Their result carries the resolved AkuId, so an adapter never resolves a movable
 Alias twice. `history({ last: true })` is the distinct last-answer arm: it reads
 only the last answered turn and never reads status or activity history.

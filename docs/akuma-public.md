@@ -16,7 +16,7 @@ a.id                                       // aku/<archetype>/<hex8>
 a.status()                                 // current state + bounded activity
 a.wait(predicate?, { timeoutMs? })         // same status carrier on either outcome
 a.history({ before?, since?, limit? })      // persistent execution-history page
-a.tell(body)
+a.tell(body)                               // typed mutation result
 a.interrupt(body)                         // synchronous put-down, then tell
 a.fork({ at: historyId })                 // exact retained native fork point
 a.kill()                                   // evidence: four values
@@ -43,16 +43,25 @@ type AkumaStatus = {
   answerHistoryId?: string;
   failure?: string;
   outcomeAt?: string;
-  pending: readonly TellId[];
   activity: ActivitySnapshot;
+  strandedReason?: "resume-unsupported";
 };
 
 type ActivitySnapshot = {
   rows: readonly ActivityRow[];
-  pendingTells: readonly { id: TellId; body: string; recordedAt: string }[];
   omitted: number;
   lowestRetained: number | null;
   highest: number | null;
+};
+
+type TellAdmission = {
+  tellId: TellId;
+  fact: "recorded";
+};
+
+type TellResult = {
+  admission: TellAdmission;
+  wake: "spawned" | { kind: "failed"; diagnostic: string };
 };
 
 type ActivityHistory = {
@@ -80,8 +89,34 @@ type ActivityRow =
       call: ToolCall;
       state: "running" | ToolResult;
     }
-  | { kind: "note"; sequence: number; bodySequence: number; at: string; text: string };
+  | { kind: "note"; sequence: number; bodySequence: number; at: string; text: string }
+  | {
+      kind: "tell";
+      sequence: number;
+      at: string;
+      tellId: TellId;
+      text: string;
+      state: "pending" | "told" | "voided";
+    };
 ```
+
+`tell(body)` returns one typed mutation result: the allocated TellId, its
+recorded Heart admission, and whether the level-triggered waker was spawned. It
+does not imply delivery, provider observation, or turn entry. Delivery and
+provider receipts fold into ordinary Akuma observation as one `pending`, `told`,
+or `voided` tell row at the admission's original timeline position. Pending tell
+rows are pinned outside snapshot budgets because they can still change the
+caller's action; settled tell rows share the ordinary activity budget. Text and
+JSON expose the same three-state row and no provider fence, five-stage
+lifecycle, or stage timeline. Tell
+rows are the sole detailed public tell projection; `AkumaStatus` carries no
+second pending-ID collection. There
+is no separate public TellId browsing workflow. A global `status()` value is
+useful context but is not a mutation receipt and cannot alter this result.
+
+`strandedReason: "resume-unsupported"` appears when a durable native coordinate
+exists but the selected adapter lacks resume. The coordinate and pending tells
+remain intact; status does not suggest or perform a fresh start.
 
 `wait(predicate?, options?)` polls `status()` and returns the first complete
 `AkumaStatus` accepted by the predicate. Its default predicate is
@@ -90,7 +125,7 @@ nonnegative millisecond duration. If it arrives first, `wait` returns the
 current `AkumaStatus`; it adds no timeout arm or flag. The caller can reapply
 its predicate to the returned observation. One status read prevents a torn
 timeout result assembled from separate liveness and snapshot observations.
-`wait` does not promise that every recorded tell was consumed: a crash can
+`wait` does not promise that every recorded tell was delivered: a crash can
 kill body and waker together and legitimately leave tells pending.
 
 `history()` is the sole public execution-history read. It returns one stable
@@ -108,7 +143,7 @@ verbs in front of her and says nothing more.
 
 `list()` is deliberately smaller than `status()`: born fleet rows expose id,
 Archetype and description snapshots, life, collar evidence,
-confinement, and pending tell ids, but no activity, history, or latest outcome. The id is
+confinement, and pending tell count, but no activity, history, or latest outcome. The id is
 projected verbatim and has no endpoint-state interpretation here. Unborn/stillborn rows retain
 their existing evidence. This keeps a fleet read from scanning the complete
 turn history of every akuma. A corrupt member is silently skipped at this

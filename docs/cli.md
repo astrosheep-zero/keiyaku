@@ -244,33 +244,55 @@ lays those rows onto one ruler and spine. No CLI branch repairs, reselects, or
 reinterprets activity. JSON exposes the same public value with complete ISO
 `at` values and no text-only time suppression.
 
-The ruler carries only facts fixed for the invocation: the life mark and complete
-Akuma id. The id already contains the Archetype, so the
-Archetype is never repeated. The closed marks are `●` running, `○` nonterminal
+The header is fixed for the complete rendering or a future stream: it carries
+the complete AkuId and, only when the command was addressed through one Alias
+or just bound one, that frozen Alias in v3's `(@alias)` form. It never
+reverse-selects an Alias. Life and elapsed time cannot appear in the header
+because they may change after a stream fixes its head. The id already contains
+the Archetype, so the Archetype is never repeated. The closed marks are `●` running, `○` nonterminal
 idle, `×` dead, `!` stillborn or warning, `│` spine, `⋮` omitted history, `⧗`
-tell, `✂` interrupted, and `✓` answered. Text never prints the storage words
-`retained`, `latest`, `body`, `heart`, or `turn`, and never emits a standalone
-`running` line. An unfinished tool row, which has no duration or result suffix,
-expresses the running work.
+pending tell, `told` effective tell, `†` voided tell, `✂` interrupted, and `✓`
+answered. Text never prints the storage words
+`retained`, `latest`, `body`, `heart`, or `turn`. Every status snapshot ends in
+one copied life footer such as `● running`; it never infers life from tools,
+activity, or outcomes.
 
 ```text
-── ● aku/worker/1234abcd ──────────────────────────────────
+aku/worker/1234abcd (@review) ─────────────────────────────
       ⋮ +12
-09:31 │ say      narrowing the failing suite
-      │ run      $ npm test — 41s · exit 1
-09:32 │ edit     src/akuma.ts — +12 -3
+09:31 │      say narrowing the failing suite
+      │      run $ npm test — 41s · exit 1
+09:32 │     edit src/akuma.ts — +12 -3
       │ thought  the collar probe races the pid check
-      │ run      $ npm test
-      │ ⧗ tell   "also check the leash timeout"
+      │      run $ npm test
+      │   ⧗ tell “also check the leash timeout”
+      ● running
 ```
 
-The spine prints the first visible row's `HH:MM`. It then suppresses a row's
+Activity labels are display-width-aware and right-aligned in one fixed field,
+with one space before content. The spine prints the first visible row's `HH:MM`. It then suppresses a row's
 gutter while that row is less than 60 seconds after the last timestamp actually
-printed, and prints again at 60 seconds or more. A row without `at`, such as an
-unconsumed tell, always has an empty gutter and does not move the anchor. There
+printed, and prints again at 60 seconds or more. A row without `at`, such as a
+pending tell, always has an empty gutter and does not move the anchor. There
 is no date line, cross-day exception, seconds display, or derived silence row.
 The same pure gutter function serves exact status, running wait results, tell,
 interrupt, kill, and history.
+
+Tell remains one input action: the flagship submits stdin text once. Its output
+renders the ordinary post-action Akuma status and appends the current tell at
+its observed three-state face, or as `⧗ tell` when the observation has not yet
+reached it, excluding the same TellId from the observed rows so it appears once.
+`⧗ tell` means it can still take effect, `told` means the provider's strongest
+available evidence proves it took effect, and `† tell` means death proves it
+cannot. Pending tells are never removed by the snapshot budget; told and voided
+rows share the ordinary activity budget. Provider-specific receipt kinds,
+handoff stages, fences, and `bodySequence` never enter text. JSON preserves the
+mutation/observation separation as `{ akuma, tell, observation }` without adding
+a CLI-only diagnostic projection. No output asks the caller to query a TellId.
+
+A stranded Akuma whose durable coordinate cannot be resumed prints
+`resume unsupported` as its typed reason. The CLI does not offer an automatic
+fresh fallback or delete the coordinate.
 
 Tool presentation is one pure function. A completed run prints immutable
 duration and then `ok`, `exit <code>`, or `error`; an unfinished run omits the

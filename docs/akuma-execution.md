@@ -11,10 +11,10 @@ the whole job: heart rows become provider actions; provider events become
 heart rows; body requests become in-process calls.
 
 **Wake is level-triggered.** A waker that finds the leash held does not exit
-blind: it waits for the leash to free and re-observes, and it may stop only
-when the tell that woke it is consumed, voided by death, or it takes the
-leash itself and serves it. Two wakers converge through the same rule: the
-leash serializes them, and the second one finds the work already done.
+blind: it nudges the current Body and re-observes, and it may stop only when
+the tell that woke it is terminally told, is voided by death, or it takes
+the leash itself and serves it. Two wakers converge through the same rule: the
+leash serializes replacement Bodies, and the second one finds the work already done.
 (The naive "loser exits" rule loses a tell forever when the incumbent's
 final exit check and the new tell interleave across the two locks.)
 
@@ -49,7 +49,7 @@ proves the body; the collar answers for the tree. Neither claim is asked of
 the other.
 
 For each turn the body tracks the actual resumable session: it begins with the
-session passed to `start()`, when any, and advances when the provider emits a
+session passed to `resume()`, when any, and advances when the provider emits a
 session-admission event. An answered result is persisted only with that exact
 session and the provider-authored history id. Answering before either a resumed
 or newly admitted session exists violates the provider boundary and is recorded
@@ -57,21 +57,104 @@ as a failed turn; the body never manufactures a fork coordinate.
 
 ## Tell
 
-Four facts, at-least-once; the provider deduplicates:
+Heart records only tell facts with a named witness:
 
-- **recorded** — the heart holds it; survives anything
-- **delivered** — handed to the provider
-- **seen** — the provider acknowledged it
-- **consumed** — it entered a turn
+- **recorded** — witnessed by the Heart admission transaction.
+- **delivered** — witnessed by provider submission evidence. Its route is
+  `live` with a `Session.tell()` acknowledgement or `launch` with a session
+  admission. Body correlates its immutable launch TellIds with the returned
+  fence. The durable correlation key is the current Heart-owned `bodySequence`
+  plus that provider fence.
+- **receipt** — provider-authored evidence attached without reinterpretation.
+  Its kind preserves the provider's terminal evidence; its correlation is an
+  exact TellId or shared fence.
+- **voided-by-death** — witnessed by the death transaction for a tell that had
+  no terminal `told` evidence.
 
-`tell()` = record + wake (level-triggered, above). Asleep and stranded wake
-the same way: spawn a body, which resumes from the latest session fact. A
-tell recorded but never
-consumed when death arrives gets a typed `voided-by-death` receipt from the
-killer — nothing recorded is ever silently unreachable.
+```ts
+type TellDelivery =
+  | { route: "launch"; bodySequence: number; fence: ProviderFence }
+  | {
+      route: "live";
+      bodySequence: number;
+      fence: ProviderFence;
+      receipt: "unavailable" | "required";
+    };
+```
 
-There is no `resume` verb. Providers cannot continue a broken-off turn;
-waking means new input through `tell`. The verb set is call, of,
+Deliveries are repeatable evidence, not a mutable stage. `receipt` preserves
+the one fact needed after restart: whether this live acknowledgement settles
+the tell or terminal provider evidence is still required. There is no durable
+capability registry.
+
+The product fold has exactly three states because only these change the
+flagship's next action:
+
+- **pending** (`⧗`) — the tell can still take effect, so observe. This includes
+  a recorded tell not yet handed off and a receipt-capable live delivery whose
+  terminal receipt has not arrived.
+- **told** — the strongest evidence available from that provider proves the
+  tell took effect: launch admission, a terminal live acknowledgement under the
+  provider contract, or terminal provider receipt evidence.
+- **voided** (`†`) — death proves the tell can never take effect, so the caller
+  may resend to a successor, fork, or accept the loss.
+
+These are projections, not persisted stages. There is no persisted "in
+delivery" state and no harness-owned seen/consumed lifecycle. Nonterminal
+native tell observations stay adapter-private; terminal receipt kinds remain
+exact evidence and never become product state words. Body is the sole
+mover and the sole writer of tell facts after admission. It writes delivered
+only after submission evidence and never infers processing from an arbitrary
+provider event or completed turn.
+
+`tell()` records one TellId and wakes level-triggered. While a Body holds the
+leash, wake nudges it to read pending tells at its checkpoint. When its current
+Session supports live tell, Body submits pending tells in recorded order and
+records the returned acknowledgement. Otherwise they stay pending until the
+turn boundary. A fresh or resumed drive carries every pending tell in
+`launchTells`; the Session's launch admission supplies only a provider fence.
+Body pairs that fence with the immutable
+`launchTells` it constructed and atomically records their shared delivery
+witness. Asleep and stranded addresses use this
+same launch path after a waker takes the leash.
+
+Body pumps the Session's two typed streams independently: events become
+activity, while receipts become tell receipt facts. An exact receipt names its
+TellId. A fence receipt applies only through the delivered fence-to-TellId
+mapping for that same `bodySequence`; an unknown fence is not evidence and writes
+nothing. For launch input, Body commits admission and delivery before consuming
+receipts. For live tell, the adapter exposes the receipt only after its
+acknowledgement resolves, and Body serializes acknowledgement persistence before
+receipt consumption continues.
+
+Delivery is at-least-once and correlated by TellId, not exactly-once. If a
+provider accepts input and the process dies before Heart records its evidence,
+the tell remains pending and may be submitted again. Providers that can
+deduplicate by TellId may do so; Keiyaku does not promise it. A reboot can kill
+Body and waker together, leaving the tell visibly pending until a later wake.
+For a live delivery with `receipt: "required"`, absence of a receipt returns the
+tell to the replay set when that Body ends; its successor may add another
+delivery attempt. A live delivery with `receipt: "unavailable"` is terminal and
+never replayed. Launch admission is terminal. Any terminal witness settles the
+tell even when another attempt was already admitted; at-least-once permits that
+race without rollback. There is no permanently handed-off product state. Death
+atomically voids every tell without terminal evidence. Heart serialization is
+the sole receipt-versus-death judge: a terminal receipt admitted first yields
+`told`; death admitted first yields `voided` and rejects every later receipt for
+that TellId. Neither terminal can flip afterward, so admitted work is never
+silently unreachable.
+
+If Heart has a durable resume coordinate but the selected adapter has no
+`resume` capability, Body refuses before `start` and exposes the existing
+nonterminal stranded state with reason `resume-unsupported`. It never starts
+fresh, deletes the coordinate, or creates a recovery machine. Pending tells
+remain pending. Every later wake rejudges the same durable coordinate against
+the adapter's current method set, so adding resume capability lets ordinary
+wake continue.
+
+There is no public `resume` verb. A capable provider can resume a durable native
+session when Body starts the next drive; waking remains an input through
+`tell`. The verb set is call, of,
 listArchetypes, list, status, wait, tell, interrupt, history, fork, and kill.
 
 ## Interrupt
