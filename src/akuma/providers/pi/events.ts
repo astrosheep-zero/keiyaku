@@ -39,6 +39,14 @@ function textContent(content: unknown): string {
   }).join("");
 }
 
+function hasTextContent(content: unknown): boolean {
+  if (typeof content === "string") return true;
+  return Array.isArray(content) && content.some((block) => {
+    const value = record(block);
+    return value?.type === "text" && typeof value.text === "string";
+  });
+}
+
 function toolCall(name: string, args: unknown): ToolCall {
   const value = record(args) ?? {};
   if (name === "bash" && typeof value.command === "string") return { kind: "run", command: value.command };
@@ -83,6 +91,7 @@ function translateToolEnd(event: Extract<AgentSessionEvent, { type: "tool_execut
 function translateMessage(event: Extract<AgentSessionEvent, { type: "message_end" }>, state: PiEventState): readonly AgentEvent[] {
   const message = record(event.message);
   if (message?.role !== "assistant") return [];
+  state.assistantSeen = true;
   const translated: AgentEvent[] = [];
   if (Array.isArray(message.content)) {
     for (const block of message.content) {
@@ -98,9 +107,8 @@ function translateMessage(event: Extract<AgentSessionEvent, { type: "message_end
     }
   }
   const text = textContent(message.content);
-  if (text.length > 0) {
-    state.assistantSeen = true;
-    state.answer = text;
+  state.answer = text;
+  if (hasTextContent(message.content)) {
     translated.push({ type: "assistant", text });
   }
   return translated;

@@ -325,15 +325,36 @@ test("Pi fails a prompt without assistant evidence", async () => {
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Pi completed without a native assistant answer" });
 });
 
-test("Pi fails a thinking-only assistant message", async () => {
+test("Pi preserves thinking-only and explicit empty assistant answers", async () => {
   const fake = fakePiSdk({ events: [
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "earlier" }] } },
     { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "consider" }] } },
   ] });
   const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
     body: "wait", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
   });
-  for await (const _event of drive.events) { /* drain */ }
-  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Pi completed without a native assistant answer" });
+  const events = [];
+  for await (const event of drive.events) events.push(event);
+  assert.deepEqual(events, [
+    { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
+    { type: "assistant", text: "earlier" },
+    { type: "thought", text: "consider" },
+  ]);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "entry-final" });
+
+  const empty = fakePiSdk({ events: [
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "" }] } },
+  ] });
+  const emptyDrive = await createPiProvider({ name: "pi", kind: "pi" }, async () => empty.sdk).start({
+    body: "wait", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  const emptyEvents = [];
+  for await (const event of emptyDrive.events) emptyEvents.push(event);
+  assert.deepEqual(emptyEvents, [
+    { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
+    { type: "assistant", text: "" },
+  ]);
+  assert.deepEqual(await emptyDrive.completion, { kind: "answered", answer: "", historyId: "entry-final" });
 });
 
 test("Pi adapter resumes and forks only exact sessionFile coordinates", async () => {
