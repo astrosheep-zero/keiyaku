@@ -356,20 +356,24 @@ derivation and has no `document-moved` refusal. Its captured subject names the
 document and patch identities it actually reviewed; later currentness is a gate
 question, not an admission condition.
 
-Audit's leading act observes the Contract, derives the current document, and
-prepares a prospective delivery with the same `prepareDelivery` path as
-deliver. Missing Contract and moved document remain top-level refusals.
-Candidate-preparation failures are accepted `preview.blocked` observations and
-admit no Verification fact. A prepared candidate runs Verification against its
-integration snapshot, then the shared no-effects target precheck, and returns
-accepted `preview.ready`. Audit never requests placement, admits claimed, or
-moves a target. When audit admits a `verified` attestation, protocol performs
-no admission-side lifecycle pre-judgment: the captured preparation enters
-`decideAttestation`. No `decideAuditEligibility` exists.
+Audit's leading act applies the shared `activeContract` guard before observing
+workspace state, deriving the current document, or preparing a candidate.
+Missing and terminal Contracts remain top-level refusals; audit never inspects
+a released Place or prospective delivery after claim or abandonment. An active
+Contract then prepares a prospective delivery with the same `prepareDelivery`
+path as deliver. A moved document remains a top-level refusal.
+Candidate-preparation failures are accepted `candidate.blocked` observations
+and admit no Verification fact. A prepared candidate runs Verification against
+its integration snapshot. The target adjudicator runs only after no
+declarations or a terminal Verification answer; stopped Verification answers
+`not-observed`. Audit never requests placement, admits claimed, or moves a
+target. When audit admits a `verified` attestation, the captured preparation
+still enters `decideAttestation`; protocol does not add a second lifecycle
+judgment. No `decideAuditEligibility` exists.
 
 A composed operation has one leading act: the invoked verb's own journal
 admission for bind, amend, deliver, review, abandon, and arc, and the accepted
-audit preview for audit. That leading act alone selects the outer outcome arm.
+three-answer audit report for audit. That leading act alone selects the outer outcome arm.
 `refused` and `retry` assert that this invocation landed no journal fact. Once
 the leading act completes, the outcome is irrevocably `accepted`; no trailing
 result may flip it.

@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import test from "node:test";
 import { prepareDelivery, prepareReview } from "../src/protocol/operations.js";
 import { mintSnapshotId } from "../src/git/identity.js";
-import { observeTargetPlacement } from "../src/git/target-placement.js";
+import { adjudicateAuditTarget, observeTargetPlacement } from "../src/git/target-placement.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
 import { readDeliveryDiff } from "../src/git/integration.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
@@ -452,6 +452,87 @@ test("target placement observation reports a ready targeted candidate without fo
   assert.deepEqual(observed.arms.map((arm) => arm.kind), ["ordinary"]);
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
   assert.equal(existsSync(join(repository.path, "candidate.txt")), false);
+});
+
+test("audit target adjudicator reports initial movement without observing followability", async () => {
+  const { repository, worktree, state } = await targetedContract();
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
+  const git = await repositoryAt(repository.path);
+  const prepared = await prepareDelivery(git, preparationCoordinates(state), { title: "Delivery patch identity" });
+  assert.equal(prepared.kind, "prepared");
+  if (prepared.kind !== "prepared") throw new Error("delivery preparation was refused");
+  const targetName = state.coordinates.target;
+  assert.notEqual(targetName, undefined);
+  if (targetName === undefined) return;
+  const expected = prepared.data.integration.predecessor;
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "move-target"]);
+  const observed = repository.run(["rev-parse", "refs/heads/main"]).trim();
+
+  const answer = await withGitShim(
+    [
+      'if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then',
+      '  printf "followability must not run after initial movement\\n" >&2',
+      "  exit 1",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    () => adjudicateAuditTarget(git, {
+      contractId: state.id,
+      coordinates: { ...state.coordinates, target: targetName },
+      predecessor: expected,
+      candidate: prepared.data.integration.snapshot,
+    }),
+  );
+
+  assert.deepEqual(answer, {
+    kind: "moved",
+    ref: "refs/heads/main",
+    expected,
+    observed,
+  });
+});
+
+test("audit target adjudicator reobserves movement after followability", async () => {
+  const { repository, worktree, state } = await targetedContract();
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
+  const git = await repositoryAt(repository.path);
+  const prepared = await prepareDelivery(git, preparationCoordinates(state), { title: "Delivery patch identity" });
+  assert.equal(prepared.kind, "prepared");
+  if (prepared.kind !== "prepared") throw new Error("delivery preparation was refused");
+  const targetName = state.coordinates.target;
+  assert.notEqual(targetName, undefined);
+  if (targetName === undefined) return;
+  const expected = prepared.data.integration.predecessor;
+
+  const answer = await withGitShim(
+    [
+      'if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then',
+      '  "$KEIYAKU_REAL_GIT" -C "$KEIYAKU_TEST_REPO" commit --allow-empty --quiet -m move-during-follow',
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    { KEIYAKU_TEST_REPO: repository.path },
+    () => adjudicateAuditTarget(git, {
+      contractId: state.id,
+      coordinates: { ...state.coordinates, target: targetName },
+      predecessor: expected,
+      candidate: prepared.data.integration.snapshot,
+    }),
+  );
+
+  const observed = repository.run(["rev-parse", "refs/heads/main"]).trim();
+  assert.notEqual(observed, expected);
+  assert.deepEqual(answer, {
+    kind: "moved",
+    ref: "refs/heads/main",
+    expected,
+    observed,
+  });
 });
 
 test("ignored custody treats candidate metacharacters as a literal path", async () => {

@@ -94,7 +94,7 @@ test("workflow delegates bind authorship to the bind skill", () => {
   assert.match(bind, /keiyaku -C <repo> bind/);
   assert.match(workflow, /Use `keiyaku-bind`/);
   assert.doesNotMatch(workflow, /### Decide The Threshold|### Write The Document/);
-  assert.match(workflow, /Audit is the aggregate Contract view and the exact pre-delivery preview\./);
+  assert.match(workflow, /Audit answers three already-adjudicated questions: candidate, Verification,\nand target\./);
   assert.match(workflow, /uses the same candidate preparation as deliver/);
 });
 

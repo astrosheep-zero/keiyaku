@@ -283,9 +283,12 @@ under the existing target fence after the offered movement matches the
 admitted delivery. The target-placement protocol owner may call the same
 observation prospectively for audit without fencing or placing. Actual
 placement remains the only publisher. Later drift or local-byte changes may
-produce a different result. A stream, spawn, or other expected operational
-failure while that owner observes a targeted candidate is
-`preview.target.failed`; audit does not throw.
+produce a different result. One audit target adjudicator owns the complete
+post-Verification answer. Movement has precedence over placeability,
+including a later moved head after the followability check. A stream, spawn,
+or other expected operational failure while that owner observes a targeted
+candidate is `target.failed`; audit does not throw. Stopped Verification
+never invokes the adjudicator and answers `not-observed`.
 
 When the target checkout is not the tender source, placement follows Git merge semantics.
 Before publication, each registered checkout must admit the predecessor-to-candidate

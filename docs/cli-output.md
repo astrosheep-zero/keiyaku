@@ -261,17 +261,18 @@ placement stops, lags, cleanup failures, and leaks. The public `placement`
 channel keeps that lifecycle and JSON name; text projects it to the lowercase
 label `claim`. Every obligation row uses its product subject as the label:
 `verification`, `claim`, `cleanup`, `leak`, `lag`, or `settlement`. Audit
-`report.attempt` is a verification attempt and renders as `verification`.
-Never render `gate` as the label for verification or claim, and never render
+Verification answers use the existing glyph vocabulary and the `verification`
+label. Never render `gate` as the label for verification or claim, and never render
 the stop-union prefixes `refusal=`, `retry=`, or `failure=` inside an accepted
 receipt. The typed reason word is followed only by existing public scalar
 evidence. A foreign refusal coordinate appears only when it differs from the
 addressed Contract. `target-moved` uses `<expected> -> <observed>`. Deviation
-rows contain Region warnings, accepted review workspace bytes, and typed audit
-drift. The record tail contains admitted journal facts, head, bind `target`,
-deliver `verificationReuse`, normal Git effects, normal settlement actions,
-reports, and the document diff. Changed effects precede unchanged
-confirmations; unchanged effects remain visible.
+rows contain Region warnings and accepted review workspace bytes. The record
+tail contains admitted journal facts, head, bind `target`, deliver
+`verificationReuse`, normal Git effects, normal settlement actions, and the
+document diff. Changed effects precede unchanged confirmations; unchanged
+effects remain visible. Accepted audit text does not fall through to those
+generic unchanged effects or settlement actions.
 
 An opaque Contract ID, entry, ref, path, hash, diagnostic, or diff coordinate
 is indivisible. The renderer never inserts bytes, whitespace, ellipses, or a
@@ -294,15 +295,18 @@ observation renders no overlap block. JSON exposes the same `overlaps` or
 
 Document diff is labeled, then the exact public content, including an empty
 string. The CLI never computes another diff or makes availability a lifecycle
-decision. Audit omits diff unless `--show-diff-body` is present. That flag
-keeps the public value only on `report.preview.diff`; text consumes that
-report-owned value exactly once and never adds a second top-level `diff`. A
-`null` preview diff renders the typed `git-unavailable` facts. Default audit
-text makes ready versus blocked, candidate identity, Verification verdict or
-stop, target readiness or exact conflict, drift, and history scannable inside
-the report. Deliver text makes `verificationReuse` visible when present. Audit
-also renders its public report, head, and facts; it does not inspect journal
-entries or raw process output.
+decision. Audit omits diff unless `--diff` is present. That flag keeps the
+public value only on `report.candidate.diff`; text consumes that report-owned
+value exactly once, including an empty string, and never adds a second
+top-level `diff`. `src/cli/render/audit.ts` owns the complete accepted audit
+receipt. After the invocation line the required order is candidate,
+verification, target. Workspace is subordinate evidence under candidate, not
+a row before it. Ready identity uses `tender=`, `integration=`, and `change=`.
+Recorded delivery evidence is `delivery change=<id>` with its relation.
+Verification `summary` is a subordinate bounded payload, not inline. Each
+answer uses the existing glyph vocabulary. `--json` retains the complete typed
+mutation result. Deliver text makes `verificationReuse` visible when present.
+Audit text does not inspect journal entries or raw process output.
 
 The flat `lag` array remains the public `ReconcileResult` shape defined in
 [git-reconciliation.md](git-reconciliation.md). JSON exposes that same array.

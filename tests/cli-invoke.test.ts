@@ -591,7 +591,7 @@ test("bind freezes the selected gate snapshot", async () => {
   );
 });
 
-test("audit --show-diff-body renders the prospective candidate without a prior Delivery read", async () => {
+test("audit --diff renders the prospective candidate without a prior Delivery read", async () => {
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(
     repository.path,
@@ -611,20 +611,23 @@ test("audit --show-diff-body renders the prospective candidate without a prior D
   try {
     const result = await invokeWithDocument(
       repository.path,
-      ["audit", id, "--include-dirty", "--show-diff-body", "--actor", "external-test"],
+      ["audit", id, "--include-dirty", "--diff", "--actor", "external-test"],
       "",
     );
     assert.equal(result.kind, "accepted");
     if (result.kind !== "accepted") return;
     const text = renderText(result);
-    const json = JSON.parse(JSON.stringify(result)) as { diff?: unknown; report?: { preview?: { kind?: string; diff?: unknown } } };
+    const json = JSON.parse(JSON.stringify(result)) as {
+      diff?: unknown;
+      report?: { candidate?: { kind?: string; diff?: unknown } };
+    };
     assert.equal("diff" in result, false);
     assert.equal("diff" in json, false);
-    assert.equal(result.report?.preview?.kind === "ready" ? result.report.preview.diff?.includes("+candidate") : false, true);
-    assert.equal(typeof json.report?.preview?.diff, "string");
-    assert.match(String(json.report?.preview?.diff), /\+candidate/);
+    assert.equal(result.report?.candidate.kind === "ready" ? result.report.candidate.diff?.includes("+candidate") : false, true);
+    assert.equal(typeof json.report?.candidate?.diff, "string");
+    assert.match(String(json.report?.candidate?.diff), /\+candidate/);
     assert.equal(text.split("+candidate").length - 1, 1);
-    assert.match(text, /preview ready /);
+    assert.match(text, /✓ candidate ready/);
     assert.doesNotMatch(text, /"diff":"diff --git/);
     assert.equal(deliveryReads, 0);
     assert.equal((await contract.delivery()), null);
@@ -636,54 +639,11 @@ test("audit --show-diff-body renders the prospective candidate without a prior D
     );
     assert.equal(hidden.kind, "accepted");
     if (hidden.kind !== "accepted") return;
-    assert.equal(hidden.report?.preview?.kind === "ready" && "diff" in hidden.report.preview, false);
+    assert.equal(hidden.report?.candidate.kind === "ready" && "diff" in hidden.report.candidate, false);
     assert.equal("diff" in hidden, false);
     assert.equal(renderText(hidden).includes("+candidate"), false);
   } finally {
     Keiyaku.prototype.delivery = delivery;
-  }
-});
-
-test("audit renders an unavailable public delivery diff as accepted", async () => {
-  const repository = repositoryWithMain();
-  const bound = await invokeWithDocument(
-    repository.path,
-    ["bind", "--here", "--actor", "external-test", "-"],
-    contractDocument("Unavailable audit diff"),
-  );
-  const id = acceptedContract(bound);
-  writeFileSync(resolve(repository.path, "candidate.txt"), "candidate\n");
-  repository.run(["add", "candidate.txt"]);
-  repository.run(["commit", "--quiet", "-m", "candidate"]);
-  const delivered = await invokeWithDocument(repository.path, ["deliver", id, "--actor", "external-test"], "");
-  assert.equal(delivered.kind, "accepted");
-
-  const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id });
-  const delivery = await contract.delivery();
-  if (delivery === null) throw new Error("delivery was not available for audit");
-  const audit = Keiyaku.prototype.audit;
-  Keiyaku.prototype.audit = async function(input) {
-    const result = await audit.call(this, input);
-    if (result.value.preview?.kind === "ready") {
-      return { ...result, value: { ...result.value, preview: { ...result.value.preview, diff: null } } };
-    }
-    return result;
-  };
-  try {
-    const result = await invokeWithDocument(repository.path, ["audit", id, "--show-diff-body"], "");
-    assert.equal(result.kind, "accepted");
-    if (result.kind !== "accepted") return;
-    const json = JSON.parse(JSON.stringify(result)) as { diff?: unknown; report?: { preview?: { kind?: string; diff?: unknown } } };
-    assert.equal("diff" in result, false);
-    assert.equal("diff" in json, false);
-    assert.equal(result.report?.preview?.kind === "ready" ? result.report.preview.diff : undefined, null);
-    assert.equal(json.report?.preview?.diff, null);
-    assert.match(
-      renderText(result, { columns: 200, color: false }),
-      new RegExp(`git-unavailable integrationSnapshot=${delivery.integration.snapshot} changeId=${delivery.integration.changeId}`),
-    );
-  } finally {
-    Keiyaku.prototype.audit = audit;
   }
 });
 
@@ -719,7 +679,9 @@ test("managed delivery reads without realigning its deterministic worktree", asy
   const audit = await fromManaged(["audit"]);
   assert.equal(audit.kind, "accepted");
   if (audit.kind !== "accepted") throw new Error("audit was not accepted");
-  assert.equal(audit.report?.attempt, undefined);
+  assert.equal(audit.report?.candidate.kind, "ready");
+  assert.equal(audit.report?.verification.kind, "not-run");
+  assert.equal(audit.report?.target.kind, "placeable");
 
   repository.run(["-C", path, "reset", "--hard", target]);
   const reconcileRepository = await repositoryAt(repository.path);

@@ -3,14 +3,15 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ChangeId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, gitObjectIdForSnapshot, mintChangeId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import {
+  decodeGitNameOnly,
+  decodeGitNumstat,
   GitPlumbingError,
   readRef,
   runGit,
   runGitWithEnvironment,
   type GitRepository,
 } from "./repository.js";
-import type { TenderCapture } from "./tender.js";
-import type { WorkspaceDirtyDelta } from "./tender.js";
+import type { TenderCapture, WorkspaceDirtyDelta } from "./tender.js";
 
 const REQUIRED_GIT = "2.38" as const;
 
@@ -272,6 +273,41 @@ async function deliverySnapshotAvailability(
     throw new AuthorityCorruptionError("recorded delivery snapshot is not a Git commit");
   }
   return "available";
+}
+
+export type DeliveryDiffScope = Readonly<{
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+  paths?: readonly string[];
+}>;
+
+/** Compute predecessor-to-candidate scope from the exact integration trees. */
+export async function readDeliveryScope(
+  repository: GitRepository,
+  predecessor: SnapshotId,
+  candidate: SnapshotId,
+  includePaths: boolean,
+): Promise<DeliveryDiffScope> {
+  const scope = decodeGitNumstat(await runGit(repository, [
+    "diff",
+    "--numstat",
+    "-z",
+    gitObjectIdForSnapshot(predecessor),
+    gitObjectIdForSnapshot(candidate),
+  ]));
+  if (!includePaths) return scope;
+  return {
+    ...scope,
+    paths: decodeGitNameOnly(await runGit(repository, [
+      "diff",
+      "--name-only",
+      "--no-renames",
+      "-z",
+      gitObjectIdForSnapshot(predecessor),
+      gitObjectIdForSnapshot(candidate),
+    ])),
+  };
 }
 
 /** Read a recorded integration pair's patch, or null when Git no longer has it. */

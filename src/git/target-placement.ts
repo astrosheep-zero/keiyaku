@@ -379,6 +379,34 @@ export async function observeTargetPlacement(
   return { kind: "ready", arms };
 }
 
+export type AuditTargetAnswer =
+  | Readonly<{ kind: "placeable"; ref: string; head: SnapshotId }>
+  | Readonly<{ kind: "moved"; ref: string; expected: SnapshotId; observed: SnapshotId | null }>
+  | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+
+/** Adjudicate the complete post-Verification audit target answer without placing. */
+export async function adjudicateAuditTarget(
+  repository: GitRepository,
+  input: TargetPlacementObservationInput,
+): Promise<AuditTargetAnswer> {
+  const ref = input.coordinates.target;
+  const expected = input.predecessor;
+  try {
+    const head = await observeTargetHead(repository, ref);
+    if (head !== expected) return { kind: "moved", ref, expected, observed: head };
+    const follow = await observeTargetPlacement(repository, input);
+    const observed = await observeTargetHead(repository, ref);
+    if (observed !== expected) return { kind: "moved", ref, expected, observed };
+    return follow.kind === "refused"
+      ? { kind: "refused", refusal: follow.refusal }
+      : { kind: "placeable", ref, head: expected };
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError)) throw error;
+    return { kind: "failed", diagnostic: error.message };
+  }
+}
+
 export async function prepareTargetPlacement(
   repository: GitRepository,
   state: ContractState,

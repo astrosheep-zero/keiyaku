@@ -12,6 +12,8 @@ const SUMMARY_BYTES = 32 * 1024;
 export type VerificationTerminalOutcome = Readonly<{
   kind: "terminal";
   verdict: VerificationVerdict;
+  passed: number;
+  total: number;
   summary?: string;
 }>;
 
@@ -89,6 +91,8 @@ async function executeDeclarations(input: Readonly<{
   signal?: AbortSignal;
 }>): Promise<VerificationTerminalOutcome | VerificationNonterminalOutcome> {
   let verdict: VerificationVerdict = "satisfied";
+  let passed = 0;
+  const total = input.declarations.length;
   let summary: string | undefined;
   for (const [index, declaration] of input.declarations.entries()) {
     const outcome = await runProcess({
@@ -104,10 +108,11 @@ async function executeDeclarations(input: Readonly<{
       continue;
     }
     if (outcome.kind === "spawn-error" || outcome.kind === "unknown-exit" || outcome.kind === "cancelled") return outcome;
-    if (outcome.code !== 0) verdict = "unsatisfied";
+    if (outcome.code === 0) passed += 1;
+    else verdict = "unsatisfied";
     summary = appendSummary(summary, processDiagnostic(declaration, index, outcome));
   }
-  return { kind: "terminal", verdict, ...(summary === undefined ? {} : { summary }) };
+  return { kind: "terminal", verdict, passed, total, ...(summary === undefined ? {} : { summary }) };
 }
 
 /** Execute one disposable Verification attempt over the exact integration snapshot. */

@@ -94,15 +94,18 @@ successful runs omit the summary. `spawn-error`, `unknown-exit`, and caller
 cancellation admit no attestation. A declaration timeout is instead a terminal
 unsatisfied verdict and may be attested. `candidate-unavailable` and
 `spawn-error` carry their verbatim diagnostic through the transient public
-attempt so a failed Git executable is not reported without its cause.
-Placement is still attempted afterward. The
+stop so a failed Git executable is not reported without its cause.
+Deliver still attempts placement afterward. Audit does not: a stopped or
+nonterminal Verification answer forces target `not-observed`. The
 integration remains pending only when its declared gates are unsatisfied.
 
 Producer nonterminal outcomes, typed environment failure, and attestation-
 admission refusals or retries are one public Verification-stop vocabulary: the
 obligation ran and admitted no fact, with the typed reason retained. Deliver
-exposes that stop on its accepted value. Audit exposes the same stop through
-its transient `AuditReport.attempt`.
+exposes that stop on its accepted value. Audit exposes the same stop as
+`verification.stopped`. A terminal run is `satisfied` or `unsatisfied` with
+producer-owned `passed` and `total`; silent successful declarations omit
+`summary`. No renderer or test may parse summary or process output for counts.
 Audit's leading observation remains accepted with zero facts when no
 attestation lands. It never persists the process outcome, report, artifact, or
 blob evidence outside the bounded attestation summary.
@@ -206,8 +209,9 @@ never recovers the run or executes candidate commands.
 The generic gate currentness judge is pure over the declared gate and
 dependency-key set. It performs no IO, candidate recheck, or producer-specific
 declaration interpretation. The Verification protocol owner is the sole
-protocol reader of that judge for current `verified` evidence. Protocol is
-the sole reader that derives audit
-rework and attestation counts, timeline entries, and elapsed milliseconds from
-raw facts. The package root exports readonly reports; the CLI renders them
-without journal access or timestamp arithmetic.
+protocol reader of that judge for current `verified` evidence. The producer
+owns `passed` and `total` on a terminal run. Protocol maps that outcome onto
+the closed audit Verification answer and does not derive a journal timeline,
+rework count, or elapsed-millisecond projection. The package root exports
+readonly reports; the CLI renders those adjudicated arms without journal
+access or timestamp arithmetic.

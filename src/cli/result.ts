@@ -3,6 +3,7 @@ import type {
   ChangeId,
   ContractId,
   Fact,
+  MutationResult,
   PlacementStop,
   ReconcileReport,
   RegionOverlap,
@@ -49,8 +50,8 @@ export type AcceptedResult = Readonly<{
   verification?: VerificationStop;
   verificationReuse?: VerificationReuse;
   placement?: PlacementStop;
-  cleanup?: NonNullable<AuditReport["cleanup"]>;
-  leak?: NonNullable<AuditReport["leak"]>;
+  cleanup?: MutationResult<unknown>["cleanup"];
+  leak?: MutationResult<unknown>["leak"];
   overlaps?: readonly RegionOverlap[];
   overlapFailure?: string;
   report?: AuditReport;

@@ -1,9 +1,16 @@
 import type { ContractHead, ContractState, JournalEntry } from "../core/facts/types.js";
-import type { AcceptedAdmission } from "./attempt.js";
-import type { ProtocolResult, ProtocolTerminal } from "./run.js";
+import type { WorktreeLeak } from "../git/scratch.js";
 import type { ReconcileResult } from "../git/reconcile.js";
+import type { AcceptedAdmission } from "./attempt.js";
+import type { VerificationCleanupFailure } from "./intent.js";
+import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 
 export type AcceptedProtocolStep = AcceptedAdmission & Readonly<{ physical?: ReconcileResult }>;
+
+export type AcceptedObligations = Readonly<{
+  cleanup?: VerificationCleanupFailure;
+  leak?: WorktreeLeak;
+}>;
 
 export type IntentOutcome<Value, Refusal = never> =
   | Readonly<{
@@ -12,7 +19,7 @@ export type IntentOutcome<Value, Refusal = never> =
       head: ContractHead;
       value: Value;
       physical?: ReconcileResult;
-    }>
+    } & AcceptedObligations>
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | Readonly<{ kind: "retry"; reason: ProtocolTerminal }>;
 
@@ -21,6 +28,7 @@ export function accepted<Value, Refusal = never>(
   facts: readonly JournalEntry[],
   value: Value,
   physical?: ReconcileResult,
+  obligations?: AcceptedObligations,
 ): IntentOutcome<Value, Refusal> {
   if (state.head === null) throw new Error("accepted contract is missing its journal head");
   return {
@@ -29,6 +37,8 @@ export function accepted<Value, Refusal = never>(
     head: state.head,
     value,
     ...(physical === undefined ? {} : { physical }),
+    ...(obligations?.cleanup === undefined ? {} : { cleanup: obligations.cleanup }),
+    ...(obligations?.leak === undefined ? {} : { leak: obligations.leak }),
   };
 }
 

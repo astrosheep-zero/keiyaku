@@ -11,7 +11,7 @@ test("changed worktree after audit prevents Verification reuse", async () => {
   const contract = await bind(repository, "exit 0");
   commitCandidate(repository);
   const audited = await contract.audit();
-  assert.equal(audited.value.preview?.kind, "ready");
+  assert.equal(audited.value.candidate.kind, "ready");
 
   writeFileSync(join(repository.path, "candidate.txt"), "changed\n");
   repository.run(["add", "candidate.txt"]);
@@ -20,8 +20,8 @@ test("changed worktree after audit prevents Verification reuse", async () => {
   const delivered = await contract.deliver();
   assert.equal(delivered.value.verificationReuse, undefined);
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
-  assert.notEqual(delivered.value.integration.snapshot, audited.value.preview?.kind === "ready"
-    ? audited.value.preview.candidate.integration.snapshot
+  assert.notEqual(delivered.value.integration.snapshot, audited.value.candidate.kind === "ready"
+    ? audited.value.candidate.identity.integration.snapshot
     : undefined);
 });
 
@@ -71,10 +71,12 @@ test("status and audit expose only current Verification testimony", async () => 
   });
 
   const audited = await bound.keiyaku.audit();
-  assert.deepEqual(audited.value.timeline.at(-1)?.attestation, {
-    gate: "verified",
-    ...expected,
-  });
+  assert.equal(audited.value.candidate.kind, "ready");
+  assert.equal(audited.value.verification.kind, "satisfied");
+  if (audited.value.verification.kind !== "satisfied") return;
+  assert.equal(audited.value.verification.passed, 1);
+  assert.equal(audited.value.verification.total, 1);
+  assert.equal(audited.value.verification.summary, expected.summary);
 
   const amended = await bound.keiyaku.amend({
     markdown: "## Replace: Verification\n~~~bash\nprintf changed\n~~~\n",

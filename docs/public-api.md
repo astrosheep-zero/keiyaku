@@ -317,8 +317,9 @@ internals. Omission and `false` are identical. Git performs the capture without
 changing the caller's real `HEAD`, index, branch, or files. Audit receives the
 same clean-worktree default and the same `includeDirty` authorization. It does
 not accept a custom commit message. `showDiff: true` asks the accepted audit
-result to carry the prospective predecessor-to-candidate diff; omission leaves
-those bytes off the report.
+result to carry the prospective predecessor-to-candidate `diff` and `scope.paths`;
+omission leaves those bytes off the report. An explicitly requested empty
+string remains visible.
 
 When a delivery or audit runs Verification, the library materializes the
 integration snapshot into a private scratch worktree and derives its worktree
@@ -380,10 +381,11 @@ Diff text is presentation data. It is never persisted, folded, admitted,
 cached, supplied to a gate, or retained through a Keiyaku-owned ref. Terminal
 cleanup may release delivery refs, candidate pins, and managed worktrees only
 under the Git-owned cleanup rule; byte availability remains Git
-custody. The CLI renders a `null` result for
-`--show-diff-body` as
+custody. The CLI renders a `null` Delivery.diff result as
 `{ reason: "git-unavailable", integrationSnapshot, changeId }`, without a raw Git
-diagnostic and with observation exit status `0`.
+diagnostic and with observation exit status `0`. Audit never uses that
+unavailable arm: `--diff` either omits `candidate.diff` or retains the exact
+requested bytes, including `""`.
 
 ## Document Boundary
 

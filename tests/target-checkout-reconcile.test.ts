@@ -97,20 +97,12 @@ test("claimed target observation is current at integration and drifts after rewi
   assert.equal(placed.kind, "present");
   if (placed.kind !== "present") return;
   assert.deepEqual(placed.row.targetObservation, { head: delivery.integration.snapshot, drift: false });
-  assert.deepEqual((await contract.audit()).value.targetObservation, {
-    head: delivery.integration.snapshot,
-    drift: false,
-  });
 
   repository.run(["reset", "--hard", delivery.integration.predecessor]);
   const rewound = await Keiyaku.observe({ repo, id: contract.id });
   assert.equal(rewound.kind, "present");
   if (rewound.kind !== "present") return;
   assert.deepEqual(rewound.row.targetObservation, { head: delivery.integration.predecessor, drift: true });
-  assert.deepEqual((await contract.audit()).value.targetObservation, {
-    head: delivery.integration.predecessor,
-    drift: true,
-  });
 });
 
 test("ordinary placement carries unrelated staged index bytes through the follow", async () => {

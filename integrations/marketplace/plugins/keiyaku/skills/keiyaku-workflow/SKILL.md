@@ -162,15 +162,16 @@ old Contract onto a different delivery.
 Audit is how you see a delivery before it exists:
 
 ```bash
-keiyaku audit <contract> --show-diff-body
+keiyaku audit <contract> --diff
 ```
 
-Audit is the aggregate Contract view and the exact pre-delivery preview. It
-uses the same candidate preparation as deliver, shows the prospective diff and
-integration or checkout conflicts, and runs declared Verification against that
-candidate. A terminal run records ordinary subject-bound `verified` testimony;
-it does not record a delivery or request placement. Read the preview instead of
-trusting a worker's completion report.
+Audit answers three already-adjudicated questions: candidate, Verification,
+and target. It uses the same candidate preparation as deliver, shows the
+prospective identity and optional requested diff, and runs declared
+Verification against that candidate. A terminal run records ordinary
+subject-bound `verified` testimony; it does not record a delivery or request
+placement. Read those three answers instead of trusting a worker's completion
+report.
 
 ## Deliver
 

@@ -36,6 +36,8 @@ type MutationResult<A> = Readonly<{
   effects: readonly TopologyEffect[]
   lags: readonly Lag[]
   settlement: SettlementReport
+  cleanup?: VerificationCleanupFailure
+  leak?: WorktreeLeak
 }>
 
 class KeiyakuRefused extends Error {
@@ -343,61 +345,63 @@ retrying bind mints a new identity. Adapters keep their addressed input instead
 of mining another coordinate from an error.
 
 ```ts
-type AuditPreview =
-  | Readonly<{ kind: "blocked"; refusal: DeliveryPreparationRefusal }>
-  | Readonly<{
-      kind: "ready"
-      candidate: DeliveryIdentity
-      target?:
-        | { kind: "ready" }
-        | { kind: "refused"; refusal: CheckoutNotFollowableRefusal | DeliveryWorkspaceRefusal }
-        | { kind: "failed"; diagnostic: string }
-      diff?: string | null
-    }>
-
-type AuditReport = Readonly<{
-  reworks: number
-  reviews: number
-  timeline: readonly TimelineEntry[]
-  preview?: AuditPreview
-  delivery?: DeliveryIdentity
-  targetObservation?: Readonly<{ head: SnapshotId | null; drift: boolean }>
-  attempt?: VerificationStop
-  cleanup?: VerificationCleanupFailure
-  leak?: WorktreeLeak
+type AuditWorkspace = Readonly<{ kind: "worktree" | "here"; path: string }>
+type DiffScope = Readonly<{
+  filesChanged: number
+  insertions: number
+  deletions: number
+  paths?: readonly string[]
 }>
-
-type TimelineEntry = Readonly<{
-  kind: FactKind
-  at: string
-  sincePrior: number | null
-  attestation?: Readonly<{
-    gate: string
-    verdict: "satisfied" | "unsatisfied"
-    summary?: string
-  }>
+type AuditReport = Readonly<{
+  candidate:
+    | { kind: "blocked"; refusal: DeliveryPreparationRefusal }
+    | {
+        kind: "ready"
+        workspace: AuditWorkspace
+        identity: DeliveryIdentity
+        scope: DiffScope
+        diff?: string
+      }
+  verification:
+    | { kind: "not-run" }
+    | { kind: "satisfied"; passed: number; total: number; summary?: string }
+    | { kind: "unsatisfied"; passed: number; total: number; summary?: string }
+    | { kind: "stopped"; stop: VerificationStop }
+  target:
+    | { kind: "not-observed" }
+    | { kind: "placeable"; ref: string; head: SnapshotId }
+    | { kind: "moved"; ref: string; expected: SnapshotId; observed: SnapshotId | null }
+    | { kind: "refused"; refusal: TargetPlacementRefusal }
+    | { kind: "failed"; diagnostic: string }
+  delivery?: { changeId: ChangeId; relation: "identical" | "differs" }
 }>
 ```
 
-`reworks` counts `deliver` facts and `reviews` counts attestations emitted by
-the review operation. Timeline entries are in journal order; `at` is copied from the fact and `sincePrior` is
-the integer millisecond difference from the immediately preceding value. The
-first entry yields `null`; a negative difference is preserved. Canonical
-journal decoding rejects an unparseable timestamp before this projection.
-Attestation timeline entries copy their gate, verdict, and optional bounded
-summary from that fact. Reports include the current delivery identity and
-fresh target observation when available, but no journal entries, body snapshots,
-detached raw logs, artifacts, or evidence bytes.
+`audit()` accepts only an active Contract. A missing or terminal Contract uses
+the ordinary top-level refusal before workspace observation, candidate
+preparation, Verification, or target adjudication. It returns
+`MutationResult<AuditReport>` when that leading judgment and mandatory
+reconciliation complete. The report is one already-adjudicated
+triple: candidate, Verification, and target. There is no journal timeline,
+rework count, preview wrapper, or optional attempt combination. A blocked
+candidate produces Verification `not-run` and target `not-observed` and admits
+no Verification fact. A ready candidate names the exact prospective identity
+and predecessor-to-candidate `DiffScope`, and alone carries the workspace path
+that was actually used. An active managed Contract with no Place appointment
+returns blocked `worktree-missing`; it carries no workspace field and never
+derives a retired or prospective path. `diff` is present only when the
+public input requested it, including the empty string; Git-unavailable is not
+a public audit arm. Paths appear on `scope` only with that same request.
 
-`audit()` returns `MutationResult<AuditReport>` when its leading observation and
-mandatory reconciliation complete. An accepted pre-delivery audit always
-carries `preview`. `preview.blocked` is an accepted observation of a
-candidate-preparation failure and admits no Verification fact. `preview.ready`
-names the exact prospective candidate; `diff` is present only when the public
-input requested it, and `null` retains the typed Git-unavailable presentation.
-A Verification stop remains a successful result with that candidate preview and
-zero or more facts. A successful Verification attestation appears in `facts`;
-a process nonterminal or attestation refusal/retry appears in `report.attempt`.
+A successful Verification attestation appears in `facts` and as a terminal
+`satisfied` or `unsatisfied` answer with producer-owned `passed` and `total`.
+No renderer, protocol reader, or test may parse `summary`, stdout, or stderr
+for those counts. A process nonterminal or attestation refusal/retry is
+`stopped` and forces target `not-observed`. The target adjudicator runs only
+after no declarations or a terminal Verification answer. Movement has
+precedence over placeability, including during the followability check. Audit
+never places or moves the target.
+
 A leading refusal or retry, such as a missing contract, uses the same
 `KeiyakuRefused` or `KeiyakuRetry` rejection as every other public mutation.
 None of these cases creates a second observation authority or duplicate
@@ -407,6 +411,7 @@ Verification or no declarations applied.
 
 Verification may use one process-local disposable worktree. Failure to remove
 it after a fact was admitted cannot change the accepted arm, facts, or exit
-status. `Delivery.leak` and `AuditReport.leak` report that physical residue with
-its path and verbatim diagnostic. They are transient reports, not journal
-facts, cleanup authority, or reconcile input.
+status. `Delivery.leak` and accepted `MutationResult.leak` report that physical
+residue with its path and verbatim diagnostic. Cleanup and leak stay on the
+generic accepted result, not on `AuditReport`. They are transient reports, not
+journal facts, cleanup authority, or reconcile input.

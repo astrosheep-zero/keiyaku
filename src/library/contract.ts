@@ -41,7 +41,6 @@ import {
   deliveryOperation,
   reviewOperation,
   stateOperation,
-  type AuditPreview,
   type AuditReport,
   type ContractBoard,
   type ContractDisposition,
@@ -56,7 +55,6 @@ import {
   type ReconcileReport as ProtocolReconcileReport,
   type RepositoryScope,
   type ReviewValue,
-  type TimelineEntry,
   type VerificationReuse,
   type VerificationStop,
   type DeliveryPreparationRefusal,
@@ -92,7 +90,6 @@ export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "./con
 export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks } from "./configuration.js";
 
 export type {
-  AuditPreview,
   AuditReport,
   DeliveryPreparationRefusal,
   ChangeId,
@@ -107,7 +104,6 @@ export type {
   ContractRow,
   FactKind,
   SnapshotId,
-  TimelineEntry,
 };
 export type { TaskId };
 export type { RegionOverlap };

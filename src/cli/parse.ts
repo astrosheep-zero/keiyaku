@@ -108,7 +108,7 @@ export type ParsedAudit = Output & Readonly<{
   command: "audit";
   contract?: string;
   includeDirty: boolean;
-  showDiffBody: boolean;
+  showDiff: boolean;
   actor?: string;
 }>;
 type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
@@ -437,7 +437,7 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
         command: "audit",
         ...(contract === undefined ? {} : { contract }),
         includeDirty: parts.flags["include-dirty"] === true,
-        showDiffBody: parts.flags["show-diff-body"] === true,
+        showDiff: parts.flags.diff === true,
         ...(parts.actor === undefined ? {} : { actor: parts.actor }),
         output: parts.output,
       };

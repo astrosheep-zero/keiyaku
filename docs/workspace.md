@@ -38,7 +38,7 @@ and complete rendered guidance, so `Keiyaku.guidance()`, `keiyaku show`,
 managed worktree materialization, here projection, and reconciliation cannot
 diverge. `show` text is exactly those bytes; JSON contains the Contract
 identity and identical guidance. `audit` does not include guidance by default,
-and `--show-diff-body` retains its delivery-diff meaning. The description is
+and `--diff` retains its delivery-diff meaning. The description is
 not a public result field.
 
 The source document reserves `Arc` and `Fulfillment` so caller extensions

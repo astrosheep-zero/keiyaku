@@ -2,7 +2,7 @@ import { access } from "node:fs/promises";
 import type { Preparation } from "../core/decide.js";
 import type { ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { registeredWorktreePaths, runGit, runGitWithEnvironment, type GitRepository } from "./repository.js";
+import { decodeGitNumstat, registeredWorktreePaths, runGit, runGitWithEnvironment, type GitRepository } from "./repository.js";
 import { captureWorkspaceTree, worktreePath } from "./workspace.js";
 
 export type TenderCaptureCoordinates = Readonly<{
@@ -64,34 +64,13 @@ export async function captureTender(
 }
 
 async function dirtyShortStat(repository: GitRepository, tender: TenderCapture): Promise<WorkspaceDirtyDelta["shortStat"]> {
-  const fields = (await runGit(repository, [
+  return decodeGitNumstat(await runGit(repository, [
     "diff",
     "--numstat",
     "-z",
     gitObjectIdForSnapshot(tender.head),
     tender.tree,
-  ])).toString("utf8").split("\0");
-  if (fields.at(-1) !== "") throw new Error("Git numstat output is not NUL terminated");
-  let filesChanged = 0;
-  let insertions = 0;
-  let deletions = 0;
-  for (let index = 0; index < fields.length - 1; index += 1) {
-    const field = fields[index]!;
-    const [added, deleted, path, extra] = field.split("\t");
-    if (added === undefined || deleted === undefined || path === undefined || extra !== undefined) {
-      throw new Error("Git numstat output is malformed");
-    }
-    if (path.length === 0) {
-      if (fields[index + 1] === undefined || fields[index + 2] === undefined) {
-        throw new Error("Git rename numstat output is missing paths");
-      }
-      index += 2;
-    }
-    filesChanged += 1;
-    insertions += added === "-" ? 0 : Number.parseInt(added, 10);
-    deletions += deleted === "-" ? 0 : Number.parseInt(deleted, 10);
-  }
-  return { filesChanged, insertions, deletions };
+  ]));
 }
 
 export async function dirtyTenderRefusal(

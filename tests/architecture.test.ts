@@ -341,23 +341,25 @@ test("architecture policy gives public audit invocation one library owner", () =
   assert.deepEqual(rules(rejectedObserver), ["architecture/dependency-direction"]);
 });
 
-test("architecture policy keeps physical target observation behind placement protocol", () => {
+test("architecture policy lets audit operations call the Git target adjudicator", () => {
   const accepted = check({
-    "git/target-placement.ts": "export function observeTargetPlacement(): void {} export type TargetPlacementRefusal = {};",
+    "git/target-placement.ts": "export function observeTargetPlacement(): void {} export function adjudicateAuditTarget(): void {} export type TargetPlacementRefusal = {};",
     "protocol/placement.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export function observe(): void { observeTargetPlacement(); }',
     "verification/declaration.ts": "export type VerificationDeclarationPreparation = {};",
     "protocol/operations.ts": [
+      'import { adjudicateAuditTarget } from "../git/target-placement.js";',
       'import type { TargetPlacementRefusal } from "../git/target-placement.js";',
       'import type { VerificationDeclarationPreparation } from "../verification/declaration.js";',
       "export type Refusal = TargetPlacementRefusal;",
       "export type Prep = VerificationDeclarationPreparation;",
+      "export function audit(): void { adjudicateAuditTarget(); }",
     ].join("\n"),
   });
   assert.deepEqual(accepted, []);
 
   const rejected = check({
     "git/target-placement.ts": "export function observeTargetPlacement(): void {}",
-    "protocol/operations.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export function audit(): void { observeTargetPlacement(); }',
+    "library/audit.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export function audit(): void { observeTargetPlacement(); }',
   });
   assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
 });

@@ -2,6 +2,7 @@ import type { ContractHead, ContractId, JournalEntry } from "../core/facts/types
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { ReconcileReport, RepositoryScope } from "../protocol/operations.js";
 import type { IntentOutcome } from "../protocol/operations.js";
+import type { AcceptedObligations } from "../protocol/outcome.js";
 import { deferredTaskHolderSettlement, type SettlementReport } from "../settlement/settle.js";
 import type { TaskHolderAdmission } from "../settlement/holder.js";
 import type { WorktreeHooks } from "./configuration.js";
@@ -13,7 +14,7 @@ export type AcceptedIntent<Value> = Readonly<{
   head: ContractHead;
   value: Value;
   physical?: ReconcileReport;
-}>;
+} & AcceptedObligations>;
 
 export type MutationResult<Value> = Readonly<{
   facts: readonly JournalEntry[];
@@ -22,7 +23,7 @@ export type MutationResult<Value> = Readonly<{
   effects: ReconcileCompletion["effects"];
   lags: ReconcileCompletion["lag"];
   settlement: SettlementReport;
-}>;
+} & AcceptedObligations>;
 
 type Completion<Value, PublicValue> = Readonly<{
   scope: RepositoryScope;
@@ -38,6 +39,10 @@ export async function completeMutation<Value, PublicValue>(
 ): Promise<MutationResult<PublicValue>> {
   const { scope, channel, contractId, accepted, value, hooks } = input;
   const report = await completeReconcile({ scope, channel, contractId, hooks, retryHooks: false });
+  const obligations: AcceptedObligations = {
+    ...(accepted.cleanup === undefined ? {} : { cleanup: accepted.cleanup }),
+    ...(accepted.leak === undefined ? {} : { leak: accepted.leak }),
+  };
   return {
     facts: accepted.facts,
     head: accepted.head,
@@ -45,6 +50,7 @@ export async function completeMutation<Value, PublicValue>(
     effects: [...(accepted.physical?.effects ?? []), ...report.effects],
     lags: [...(accepted.physical?.lag ?? []), ...report.lag],
     settlement: report.settlement,
+    ...obligations,
   };
 }
 

@@ -8,8 +8,8 @@ import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { entryUlid, gate } from "../src/core/facts/types.js";
 import { dependencyKeySet } from "../src/core/subject.js";
 import { verifyDelivery } from "../src/protocol/intent.js";
-import { auditOperation, deliverOperation, scopeOperation, type AuditReport } from "../src/protocol/operations.js";
-import { readAuditAt } from "../src/protocol/read/audit.js";
+import { auditOperation, deliverOperation, scopeOperation } from "../src/protocol/operations.js";
+import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { makeGitRepository, type TestGitRepository } from "./support/git.js";
 
@@ -154,7 +154,7 @@ test("a stale document derivation is refused inside its E-decision", async () =>
   });
 });
 
-test("audit without Verification still returns an accepted candidate preview", async () => {
+test("audit without Verification still returns an accepted ready candidate", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
@@ -163,8 +163,8 @@ test("audit without Verification still returns an accepted candidate preview", a
 
   const scope = await scopeOperation({ coordinate: repository.path });
   const contractId = (await bound.keiyaku.state()).id;
-  const initial = await withGitDecodeChannel(scope, (channel) => readAuditAt(scope, channel, contractId, gate("reviewed")));
-  const decoded = decodeContractDocument(initial.state!.terms.document.bytes);
+  const observed = await withGitDecodeChannel(scope, (channel) => observeContractAt(scope, channel, contractId));
+  const decoded = decodeContractDocument(observed.state!.terms.document.bytes);
   const result = await withGitDecodeChannel(scope, (channel) => auditOperation({
     scope,
     channel,
@@ -173,23 +173,25 @@ test("audit without Verification still returns an accepted candidate preview", a
       document: decoded.document.key,
       title: decoded.title,
       verification: prepareVerificationDeclaration({
-        gates: initial.state!.terms.gates,
+        gates: observed.state!.terms.gates,
         definition: verificationDefinition(decoded),
         contractId,
       }),
     }),
   }));
+  assert.equal(result.kind, "accepted");
+  if (result.kind !== "accepted") return;
   assert.deepEqual(result.facts, []);
-  assert.equal(result.head, initial.state.head);
-  assert.equal(result.value.preview?.kind, "ready");
-  if (result.value.preview?.kind !== "ready") return;
-  assert.equal(result.value.preview.candidate.method, "squash");
-  assert.equal("diff" in result.value.preview, false);
-  assert.equal("target" in result.value.preview, false);
-  assert.equal(result.value.attempt, undefined);
+  assert.equal(result.head, observed.state!.head);
+  assert.equal(result.value.candidate.kind, "ready");
+  if (result.value.candidate.kind !== "ready") return;
+  assert.equal(result.value.candidate.identity.method, "squash");
+  assert.equal("diff" in result.value.candidate, false);
+  assert.equal(result.value.verification.kind, "not-run");
+  assert.equal(result.value.target.kind, "not-observed");
 });
 
-test("audit accepts an attestation refusal as a typed attempt without facts", async () => {
+test("audit accepts an attestation refusal as a stopped answer without facts", async () => {
   const { contract } = await failedStoredVerification();
   const amended = await contract.amend({ markdown: [
     "## Replace: Verification",
@@ -214,9 +216,12 @@ test("audit accepts an attestation refusal as a typed attempt without facts", as
   const result = await pending;
   await abandoned;
   assert.deepEqual(result.facts, []);
-  assert.deepEqual(result.value.attempt, {
-    refusal: { kind: "terminal", contractId: (await contract.state()).id },
+  assert.equal(result.value.candidate.kind, "ready");
+  assert.deepEqual(result.value.verification, {
+    kind: "stopped",
+    stop: { refusal: { kind: "terminal", contractId: (await contract.state()).id } },
   });
+  assert.equal(result.value.target.kind, "not-observed");
 });
 
 test("audit admits Verification testimony for its captured old subject", async () => {

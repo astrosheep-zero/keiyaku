@@ -95,6 +95,7 @@ export type VerificationCleanupFailure = Readonly<{
 export type VerificationStep = ProtocolResult<AttestationRefusal> | VerificationRuntimeStop;
 export type VerificationResult = Readonly<{
   step: VerificationStep;
+  counts?: Readonly<{ passed: number; total: number; verdict: "satisfied" | "unsatisfied"; summary?: string }>;
   cleanup?: VerificationCleanupFailure;
   leak?: WorktreeLeak;
 }>;
@@ -182,6 +183,16 @@ export async function verifyDelivery(
   }
   return {
     step,
+    ...(execution.outcome.kind === "terminal"
+      ? {
+        counts: {
+          passed: execution.outcome.passed,
+          total: execution.outcome.total,
+          verdict: execution.outcome.verdict,
+          ...(execution.outcome.summary === undefined ? {} : { summary: execution.outcome.summary }),
+        },
+      }
+      : {}),
     ...(execution.cleanup === undefined ? {} : { cleanup: execution.cleanup }),
     ...(execution.leak === undefined ? {} : { leak: execution.leak }),
   };

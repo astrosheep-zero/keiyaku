@@ -6,6 +6,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
+import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { makeGitRepository, observeContract, withGitShim } from "./support/git.js";
 
 async function repositoryWithCandidate() {
@@ -150,41 +151,41 @@ test("dirty --here delivery materializes and lands the verified candidate cleanl
 
 test("audit stays accepted when it admits a verified attestation", async () => {
   const pending = await bindAndDeliver("exit 1");
-  const audit = await invoke(parseArgv(["audit", pending.id, "--show-diff-body", "--actor", "audit-user"]), {
+  const audit = await invoke(parseArgv(["audit", pending.id, "--diff", "--actor", "audit-user"]), {
     cwd: pending.raw.path,
     environment: {},
   });
   assert.equal(audit.kind, "accepted");
   if (audit.kind !== "accepted") return;
   assert.deepEqual(audit.facts.map((fact) => fact.kind), ["attestation"]);
-  assert.equal(audit.report.attempt, undefined);
+  assert.equal(audit.report.candidate.kind, "ready");
+  assert.equal(audit.report.verification.kind, "unsatisfied");
+  if (audit.report.verification.kind === "unsatisfied") {
+    assert.equal(audit.report.verification.passed, 0);
+    assert.equal(audit.report.verification.total, 1);
+  }
+  assert.equal(audit.report.target.kind, "placeable");
   assert.equal("diff" in audit, false);
-  assert.equal(audit.report.preview?.kind === "ready" ? typeof audit.report.preview.diff : undefined, "string");
+  assert.equal(audit.report.candidate.kind === "ready" ? typeof audit.report.candidate.diff : undefined, "string");
   assert.equal((await observeContract(pending.repository, pending.id)).state?.attestations.at(-1)?.actor, "audit-user");
 });
 
-test("audit renders a pure read as accepted with its public report and optional diff", async () => {
+test("audit refuses a claimed contract before observing its released workspace", async () => {
   const complete = await bindAndDeliver(undefined, []);
+  assert.deepEqual(
+    await readManagedWorktreeAppointment(complete.repository, complete.id),
+    { kind: "unappointed" },
+  );
   const plain = await invoke(parseArgv(["audit", complete.id]), {
     cwd: complete.raw.path,
     environment: {},
   });
-  assert.equal(plain.kind, "accepted");
-  if (plain.kind !== "accepted") return;
-  assert.equal(plain.report?.attempt, undefined);
-  assert.equal(plain.report?.reworks, 1);
-  assert.equal("diff" in plain, false);
-
-  const detailed = await invoke(parseArgv(["audit", complete.id, "--show-diff-body"]), {
-    cwd: complete.raw.path,
-    environment: {},
+  assert.deepEqual(plain, {
+    kind: "refused",
+    verb: "audit",
+    contract: complete.id,
+    refusal: { kind: "terminal", contractId: complete.id },
   });
-  assert.equal(detailed.kind, "accepted");
-  if (detailed.kind !== "accepted") return;
-  assert.equal(detailed.report?.attempt, undefined);
-  assert.equal(detailed.report?.reworks, 1);
-  assert.equal(detailed.report?.preview?.kind, "blocked");
-  assert.equal("diff" in detailed, false);
 });
 
 test("audit renders transient Verification cleanup leaks after accepted and observation paths", async () => {
@@ -204,11 +205,12 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
   assert.equal(acceptedAudit.kind, "accepted");
   if (acceptedAudit.kind !== "accepted") return;
   assert.deepEqual(acceptedAudit.facts.map((fact) => fact.kind), ["attestation"]);
-  assert.match(acceptedAudit.report?.leak?.diagnostic ?? "", /forced verification cleanup failure/);
+  assert.match(acceptedAudit.leak?.diagnostic ?? "", /forced verification cleanup failure/);
+  assert.equal("leak" in acceptedAudit.report, false);
   const acceptedText = renderText(acceptedAudit, { columns: 400, color: false });
-  assert.equal(acceptedText.includes(acceptedAudit.report!.leak!.path), true);
-  assert.equal(acceptedText.includes(acceptedAudit.report!.leak!.diagnostic.trimEnd()), true);
-  accepted.raw.run(["worktree", "remove", "--force", acceptedAudit.report!.leak!.path]);
+  assert.equal(acceptedText.includes(acceptedAudit.leak!.path), true);
+  assert.equal(acceptedText.includes(acceptedAudit.leak!.diagnostic.trimEnd()), true);
+  accepted.raw.run(["worktree", "remove", "--force", acceptedAudit.leak!.path]);
 
   const observed = await bindAndDeliver("kill -TERM $$");
   const observationAudit = await withGitShim(cleanupFailure, {}, () => invoke(parseArgv(["audit", observed.id]), {
@@ -218,8 +220,12 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
 
   assert.equal(observationAudit.kind, "accepted");
   if (observationAudit.kind !== "accepted") return;
-  assert.deepEqual(observationAudit.report?.attempt, { failure: "unknown-exit" });
-  const leak = observationAudit.report?.leak;
+  assert.equal(observationAudit.report.verification.kind, "stopped");
+  if (observationAudit.report.verification.kind === "stopped") {
+    assert.equal(observationAudit.report.verification.stop.failure, "unknown-exit");
+  }
+  assert.equal(observationAudit.report.target.kind, "not-observed");
+  const leak = observationAudit.leak;
   assert.match(leak?.diagnostic ?? "", /forced verification cleanup failure/);
   const observedText = renderText(observationAudit, { columns: 400, color: false });
   assert.match(observedText, /unknown-exit/);

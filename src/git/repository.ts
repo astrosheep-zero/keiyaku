@@ -636,3 +636,36 @@ export async function updateRefsAtomically(
     throw error;
   }
 }
+
+export type GitDiffStat = Readonly<{ filesChanged: number; insertions: number; deletions: number }>;
+
+export function decodeGitNumstat(output: Buffer): GitDiffStat {
+  const fields = output.toString("utf8").split("\0");
+  if (fields.at(-1) !== "") throw new Error("Git numstat output is not NUL terminated");
+  let filesChanged = 0;
+  let insertions = 0;
+  let deletions = 0;
+  for (let index = 0; index < fields.length - 1; index += 1) {
+    const field = fields[index]!;
+    const [added, deleted, path, extra] = field.split("\t");
+    if (added === undefined || deleted === undefined || path === undefined || extra !== undefined) {
+      throw new Error("Git numstat output is malformed");
+    }
+    if (path.length === 0) {
+      if (fields[index + 1] === undefined || fields[index + 2] === undefined) {
+        throw new Error("Git rename numstat output is missing paths");
+      }
+      index += 2;
+    }
+    filesChanged += 1;
+    insertions += added === "-" ? 0 : Number.parseInt(added, 10);
+    deletions += deleted === "-" ? 0 : Number.parseInt(deleted, 10);
+  }
+  return { filesChanged, insertions, deletions };
+}
+
+export function decodeGitNameOnly(output: Buffer): readonly string[] {
+  const names = output.toString("utf8").split("\0");
+  if (names.at(-1) !== "") throw new Error("Git name-only output is not NUL terminated");
+  return names.slice(0, -1);
+}

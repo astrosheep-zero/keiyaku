@@ -341,27 +341,40 @@ test("accepted audit deviations and diagnostics keep their slots and bytes", () 
     contract,
     head,
     facts: [{ contract, entry, kind: "attestation" }],
-    placement: { failure: "target-placement-failed", diagnostic: "stop first\nstop second" },
     cleanup,
     leak: { path: "/tmp/leaked", diagnostic: "leak first\nleak second" },
     report: {
-      reworks: 0,
-      reviews: 0,
-      timeline: [],
-      targetObservation: { head, drift: true },
-      cleanup,
-      leak: { path: "/tmp/leaked", diagnostic: "leak first\nleak second" },
+      candidate: {
+        kind: "ready",
+        workspace: { kind: "here", path: "/repo" },
+        identity: {
+          tenderSnapshot: "tender" as never,
+          integration: {
+            predecessor: "predecessor" as never,
+            snapshot: "snapshot" as never,
+            changeId: "change" as never,
+          },
+          method: "squash",
+          policy: { requireBranchesToBeUpToDate: false },
+        },
+        scope: { filesChanged: 1, insertions: 1, deletions: 0 },
+      },
+      verification: {
+        kind: "stopped",
+        stop: { failure: "candidate-unavailable", diagnostic: "stop first\nstop second" },
+      },
+      target: { kind: "not-observed" },
     },
-    effects: [],
-    settlement: { actions: [], lags: [] },
+    effects: [{ kind: "ref", name: "refs/heads/main", action: "unchanged", before: null, after: null }],
+    settlement: { actions: [{ kind: "task", action: "unchanged", taskId: "task/unused" as never }], lags: [] },
   };
   const text = renderText(result, wide);
-  assertBefore(text, "! claim target-placement-failed", "! cleanup");
-  assertBefore(text, "! cleanup", "~ target");
-  assertBefore(text, "~ target", "head");
+  assert.equal(text.split("\n")[0], `✓ audit accepted — ${contract}`);
+  assertBefore(text, "✓ candidate ready", "! verification candidate-unavailable");
+  assertBefore(text, "! verification candidate-unavailable", "· target not-observed");
+  assertBefore(text, "· target not-observed", "! cleanup");
   assert.doesNotMatch(text, /! gate |failure=/);
-  assert.equal(text.split("report cleanup").length, 1);
-  assert.equal(text.split("report leak").length, 1);
+  assert.doesNotMatch(text, /· ref unchanged|· settle /);
   for (const payload of ["stop first\nstop second", "cleanup first\ncleanup second", "leak first\nleak second"]) {
     assert.equal(text.includes(`diagnostic\n\n${payload}\n`), true, payload);
   }
@@ -526,7 +539,7 @@ test("addressed Contract ID appears once on a refusal receipt", () => {
 
 test("audit text emits a requested diff body once and omits it without the presentation field", () => {
   const contract = contractId("kei/render-audit-diff");
-  const candidate = {
+  const identity = {
     tenderSnapshot: "tender" as never,
     integration: {
       predecessor: "predecessor" as never,
@@ -546,22 +559,35 @@ test("audit text emits a requested diff body once and omits it without the prese
     effects: [],
     settlement: { actions: [], lags: [] },
     report: {
-      reworks: 0,
-      reviews: 0,
-      timeline: [],
-      preview: { kind: "ready", candidate, diff: body },
+      candidate: {
+        kind: "ready",
+        workspace: { kind: "here", path: "/repo" },
+        identity,
+        scope: { filesChanged: 1, insertions: 1, deletions: 0, paths: ["candidate.txt"] },
+        diff: body,
+      },
+      verification: { kind: "not-run" },
+      target: { kind: "not-observed" },
+      delivery: { changeId: "recorded" as never, relation: "differs" },
     },
   };
   const shownText = renderText(shown, wide);
   assert.equal("diff" in shown, false);
   assert.equal(shownText.split("\n")[0], `✓ audit accepted — ${contract}`);
-  assert.match(shownText, /preview ready tender snapshot change/);
+  assertBefore(shownText, "✓ candidate ready", "tender=tender");
+  assertBefore(shownText, "tender=tender", "integration=snapshot");
+  assertBefore(shownText, "integration=snapshot", "change=change");
+  assertBefore(shownText, "change=change", "workspace here /repo");
+  assertBefore(shownText, "workspace here /repo", "delivery change=recorded differs");
+  assertBefore(shownText, "delivery change=recorded differs", "diff\n\n");
+  assertBefore(shownText, "diff\n\n", "· verification not-run");
+  assertBefore(shownText, "· verification not-run", "· target not-observed");
   assert.equal(shownText.split("unique-audit-diff-marker").length - 1, 1);
   assert.match(shownText, /^\+unique-audit-diff-marker$/m);
-  assert.equal(shown.report?.preview?.kind === "ready" ? shown.report.preview.diff : undefined, body);
+  assert.equal(shown.report?.candidate.kind === "ready" ? shown.report.candidate.diff : undefined, body);
   assert.doesNotMatch(shownText, /"diff":"diff --git/);
 
-  const unavailable: InvocationResult = {
+  const empty: InvocationResult = {
     kind: "accepted",
     verb: "audit",
     contract,
@@ -570,17 +596,21 @@ test("audit text emits a requested diff body once and omits it without the prese
     effects: [],
     settlement: { actions: [], lags: [] },
     report: {
-      reworks: 0,
-      reviews: 0,
-      timeline: [],
-      preview: { kind: "ready", candidate, diff: null },
+      candidate: {
+        kind: "ready",
+        workspace: { kind: "here", path: "/repo" },
+        identity,
+        scope: { filesChanged: 0, insertions: 0, deletions: 0 },
+        diff: "",
+      },
+      verification: { kind: "satisfied", passed: 2, total: 2 },
+      target: { kind: "placeable", ref: "refs/heads/main", head: "predecessor" as never },
     },
   };
-  const unavailableText = renderText(unavailable, wide);
-  assert.equal("diff" in unavailable, false);
-  assert.equal(unavailable.report?.preview?.kind === "ready" ? unavailable.report.preview.diff : undefined, null);
-  assert.match(unavailableText, /git-unavailable integrationSnapshot=snapshot changeId=change/);
-  assert.doesNotMatch(unavailableText, /"diff":null/);
+  const emptyText = renderText(empty, wide);
+  assert.equal(empty.report?.candidate.kind === "ready" ? empty.report.candidate.diff : undefined, "");
+  assert.match(emptyText, /^diff\n\n\n$/m);
+  assertBefore(emptyText, "✓ verification satisfied 2 of 2", "✓ target placeable");
 
   const hidden: InvocationResult = {
     kind: "accepted",
@@ -591,14 +621,18 @@ test("audit text emits a requested diff body once and omits it without the prese
     effects: [],
     settlement: { actions: [], lags: [] },
     report: {
-      reworks: 0,
-      reviews: 0,
-      timeline: [],
-      preview: { kind: "ready", candidate },
+      candidate: {
+        kind: "ready",
+        workspace: { kind: "here", path: "/repo" },
+        identity,
+        scope: { filesChanged: 1, insertions: 1, deletions: 0 },
+      },
+      verification: { kind: "not-run" },
+      target: { kind: "not-observed" },
     },
   };
   const hiddenText = renderText(hidden, wide);
-  assert.match(hiddenText, /preview ready tender snapshot change/);
+  assert.match(hiddenText, /tender=tender/);
   assert.equal(hiddenText.includes("unique-audit-diff-marker"), false);
   assert.equal(hiddenText.includes("diff --git"), false);
 });

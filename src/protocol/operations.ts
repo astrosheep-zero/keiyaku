@@ -3,6 +3,8 @@ import {
   planIntegration,
   prepareReviewIntegration,
   readDeliveryDiff,
+  readDeliveryScope,
+  type DeliveryDiffScope,
   type IntegrationPreparationRefusal,
 } from "../git/integration.js";
 import {
@@ -34,8 +36,8 @@ import type { WorktreeLeak } from "../git/scratch.js";
 import { dependencyKeySet } from "../core/subject.js";
 import type { AttemptContext } from "../core/decide.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import { contractState, documentIsCurrent } from "../core/facts/observation.js";
-import type { ActorId, AmendData, ArcData, AttestationData, ContractId, ContractState, ContractTerms, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
+import { activeContract, contractState, documentIsCurrent } from "../core/facts/observation.js";
+import type { ActorId, AmendData, ArcData, AttestationData, ChangeId, ContractId, ContractState, ContractTerms, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
 import { gate } from "../core/facts/types.js";
 import { decideAbandon, type AbandonRefusal } from "../core/verbs/abandon.js";
 import { decideAmend, type AmendInput, type AmendRefusal } from "../core/verbs/amend.js";
@@ -56,12 +58,9 @@ import {
 } from "./intent.js";
 import {
   admitPlacement,
-  observeProspectiveTargetPlacement,
   type PlacementProtocolResult,
-  type ProspectiveTargetPreview,
 } from "./placement.js";
-import type { TargetPlacementRefusal } from "../git/target-placement.js";
-import { auditReport, readAuditAt, type AuditReport as AuditReadReport } from "./read/audit.js";
+import { adjudicateAuditTarget, type AuditTargetAnswer, type TargetPlacementRefusal } from "../git/target-placement.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import {
   readContractBoard,
@@ -75,7 +74,12 @@ import {
   type ContractRow,
 } from "./read/status.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission, type DecidedOfferResult } from "./attempt.js";
-import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
+import {
+  appointmentFor,
+  readManagedWorktreeAppointment,
+  readPlaceRegister,
+  type ManagedWorktreeAppointment,
+} from "../workspace-place.js";
 export { bindOperation } from "./bind.js";
 export { reconcileObservationFailure } from "../git/reconcile.js";
 import type { BindRefusal, TargetInputRefusal } from "./bind.js";
@@ -89,7 +93,7 @@ import {
 import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 import type { CompanionDecorator } from "./run.js";
 
-export type { FactKind, TimelineEntry } from "./read/audit.js";
+export type { FactKind } from "../core/facts/types.js";
 export type { ContractDocumentProjection } from "./read/documents.js";
 export type DeliveryPreparationRefusal = Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
   | DirtyWorkspaceRefusal
@@ -115,22 +119,32 @@ export type IntentOutcome<Value, Refusal = IntentRefusal> = ProtocolIntentOutcom
 type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId; actor?: ActorId }>;
 type MutationOperationInput = OperationInput & Readonly<{ channel: GitDecodeChannel }>;
 
-export type AuditTargetPreview = ProspectiveTargetPreview;
+export type AuditWorkspace = Readonly<{
+  kind: "worktree" | "here";
+  path: string;
+}>;
 
-export type AuditPreview =
-  | Readonly<{ kind: "blocked"; refusal: DeliveryPreparationRefusal }>
-  | Readonly<{
+export type DiffScope = DeliveryDiffScope;
+
+export type AuditReport = Readonly<{
+  candidate:
+    | Readonly<{ kind: "blocked"; refusal: DeliveryPreparationRefusal }>
+    | Readonly<{
       kind: "ready";
-      candidate: DeliveryIdentity;
-      target?: AuditTargetPreview;
-      diff?: string | null;
+      workspace: AuditWorkspace;
+      identity: DeliveryIdentity;
+      scope: DiffScope;
+      diff?: string;
     }>;
-
-export type AuditReport = AuditReadReport & Readonly<{
-  preview?: AuditPreview;
-  attempt?: VerificationStop;
-  cleanup?: VerificationCleanupFailure;
-  leak?: WorktreeLeak;
+  verification:
+    | Readonly<{ kind: "not-run" }>
+    | Readonly<{ kind: "satisfied"; passed: number; total: number; summary?: string }>
+    | Readonly<{ kind: "unsatisfied"; passed: number; total: number; summary?: string }>
+    | Readonly<{ kind: "stopped"; stop: VerificationStop }>;
+  target:
+    | Readonly<{ kind: "not-observed" }>
+    | AuditTargetAnswer;
+  delivery?: Readonly<{ changeId: ChangeId; relation: "identical" | "differs" }>;
 }>;
 
 export type VerificationReuse = CurrentVerifiedAttestation;
@@ -171,6 +185,7 @@ function unpackVerificationOutcome(verification: VerificationResult): Readonly<{
   leak?: WorktreeLeak;
   stop?: VerificationStop;
   admission?: AcceptedProtocolStep;
+  counts?: NonNullable<VerificationResult["counts"]>;
 }> {
   const stop = verificationStop(verification.step);
   const admission = !("failure" in verification.step) && verification.step.kind === "accepted"
@@ -181,6 +196,7 @@ function unpackVerificationOutcome(verification: VerificationResult): Readonly<{
     ...(verification.leak === undefined ? {} : { leak: verification.leak }),
     ...(stop === undefined ? {} : { stop }),
     ...(admission === undefined ? {} : { admission }),
+    ...(verification.counts === undefined ? {} : { counts: verification.counts }),
   };
 }
 
@@ -354,7 +370,11 @@ type PreparedDelivery = Readonly<{ delivery: DeliveryIdentity; derivation: Docum
 
 export async function prepareDelivery(
   repository: GitRepository,
-  stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"] }>,
+  stage: Readonly<{
+    contractId: ContractId;
+    coordinates: ContractState["coordinates"];
+    appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
+  }>,
   input: Readonly<{ title: string; message?: string; requireBranchesToBeUpToDate?: boolean; includeDirty?: boolean }>,
 ): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal }> {
   const { contractId, coordinates } = stage;
@@ -365,10 +385,13 @@ export async function prepareDelivery(
     }
   }
   const appointed = coordinates.workspace === "worktree"
-    ? appointmentFor(await readPlaceRegister(repository), contractId)
+    ? stage.appointment === undefined
+      ? appointmentFor(await readPlaceRegister(repository), contractId)
+      : { contract: contractId, place: stage.appointment.place }
     : undefined;
   const tender = await captureTender(repository, {
-    ...stage,
+    contractId,
+    coordinates,
     ...(appointed === undefined ? {} : { place: appointed.place }),
   });
   if (tender.kind === "refused") return tender;
@@ -381,7 +404,12 @@ export async function prepareDelivery(
     ...(input.message === undefined ? {} : { message: input.message }),
   });
   const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
-  const integration = await planIntegration(repository, stage, { ...tender.data, head: tenderSnapshot }, requireBranchesToBeUpToDate);
+  const integration = await planIntegration(
+    repository,
+    { contractId, coordinates },
+    { ...tender.data, head: tenderSnapshot },
+    requireBranchesToBeUpToDate,
+  );
   if (integration.kind === "refused") return integration;
   const integrationSnapshot = coordinates.target === undefined
     ? tenderSnapshot
@@ -687,6 +715,35 @@ type AuditOperationInput = MutationOperationInput & Readonly<{
   signal?: AbortSignal;
 }>;
 
+async function auditWorkspace(
+  repository: RepositoryScope,
+  state: ContractState,
+): Promise<
+  | Readonly<{ kind: "ready"; answer: AuditWorkspace; appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }> }>
+  | Readonly<{ kind: "unappointed" }>
+> {
+  if (state.coordinates.workspace === "here") {
+    return { kind: "ready", answer: { kind: "here", path: repository.effectiveCwd } };
+  }
+  const appointed = await readManagedWorktreeAppointment(repository, state.id);
+  if (appointed.kind === "failed") throw new Error(appointed.diagnostic);
+  if (appointed.kind === "unappointed") return appointed;
+  return {
+    kind: "ready",
+    answer: { kind: "worktree", path: appointed.path },
+    appointment: appointed,
+  };
+}
+
+function auditDeliveryRelation(state: ContractState, candidate: DeliveryIdentity): AuditReport["delivery"] {
+  const recorded = state.delivery?.data.integration.changeId;
+  if (recorded === undefined) return undefined;
+  return {
+    changeId: recorded,
+    relation: recorded === candidate.integration.changeId ? "identical" : "differs",
+  };
+}
+
 async function auditCandidateVerification(
   input: AuditOperationInput,
   state: ContractState,
@@ -711,71 +768,121 @@ async function auditCandidateVerification(
   return unpackVerificationOutcome(verification);
 }
 
-async function readyAuditPreview(
-  repository: RepositoryScope,
-  state: ContractState,
-  candidate: DeliveryIdentity,
-  showDiff: boolean,
-): Promise<Extract<AuditPreview, { kind: "ready" }>> {
-  const targetName = state.coordinates.target;
-  const target = targetName === undefined
-    ? undefined
-    : await observeProspectiveTargetPlacement(repository, {
-      contractId: state.id,
-      coordinates: { ...state.coordinates, target: targetName },
-      predecessor: candidate.integration.predecessor,
-      candidate: candidate.integration.snapshot,
-    });
-  const diff = showDiff
-    ? await readDeliveryDiff(repository, candidate.integration.predecessor, candidate.integration.snapshot)
-    : undefined;
+function auditVerificationAnswer(
+  verified: ReturnType<typeof unpackVerificationOutcome> | undefined,
+): AuditReport["verification"] {
+  if (verified === undefined) return { kind: "not-run" };
+  if (verified.stop !== undefined) return { kind: "stopped", stop: verified.stop };
+  if (verified.counts === undefined) {
+    throw new Error("terminal Verification is missing producer counts");
+  }
   return {
-    kind: "ready",
-    candidate,
-    ...(target === undefined ? {} : { target }),
-    ...(diff === undefined ? {} : { diff }),
+    kind: verified.counts.verdict,
+    passed: verified.counts.passed,
+    total: verified.counts.total,
+    ...(verified.counts.summary === undefined ? {} : { summary: verified.counts.summary }),
   };
 }
 
+async function readyAuditCandidate(
+  repository: RepositoryScope,
+  candidate: DeliveryIdentity,
+  workspace: AuditWorkspace,
+  showDiff: boolean,
+): Promise<Extract<AuditReport["candidate"], { kind: "ready" }>> {
+  const predecessor = candidate.integration.predecessor;
+  const snapshot = candidate.integration.snapshot;
+  const scope = await readDeliveryScope(repository, predecessor, snapshot, showDiff);
+  const diff = showDiff ? await readDeliveryDiff(repository, predecessor, snapshot) : undefined;
+  return {
+    kind: "ready",
+    workspace,
+    identity: candidate,
+    scope,
+    ...(diff === undefined || diff === null ? {} : { diff }),
+  };
+}
+
+async function auditTargetAnswer(
+  repository: RepositoryScope,
+  state: ContractState,
+  candidate: DeliveryIdentity,
+): Promise<AuditReport["target"]> {
+  const target = state.coordinates.target;
+  if (target === undefined) return { kind: "not-observed" };
+  return await adjudicateAuditTarget(repository, {
+    contractId: state.id,
+    coordinates: { ...state.coordinates, target },
+    predecessor: candidate.integration.predecessor,
+    candidate: candidate.integration.snapshot,
+  });
+}
+
 export async function auditOperation(input: AuditOperationInput): Promise<IntentOutcome<AuditReport>> {
-  const initial = await readAuditAt(input.scope, input.channel, input.contractId, REVIEWED);
-  if (initial.state === null) return { kind: "refused", refusal: { kind: "contract-missing", contractId: input.contractId } };
-  const derivation = input.deriveDocument?.(initial.state);
-  if (derivation === undefined || !documentIsCurrent(initial.state, derivation.document)) {
+  const observed = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const state = activeContract(observed.decision, input.contractId);
+  if ("kind" in state) return { kind: "refused", refusal: state };
+  const derivation = input.deriveDocument?.(state);
+  if (derivation === undefined || !documentIsCurrent(state, derivation.document)) {
     return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
   }
   if (derivation.verification.kind === "refused") {
     return { kind: "refused", refusal: derivation.verification.refusal };
   }
 
+  const workspace = await auditWorkspace(input.scope, state);
+  if (workspace.kind === "unappointed") {
+    return accepted(state, [], {
+      candidate: { kind: "blocked", refusal: { kind: "worktree-missing", contractId: state.id } },
+      verification: { kind: "not-run" },
+      target: { kind: "not-observed" },
+    });
+  }
   const prepared = await prepareDelivery(input.scope, {
-    contractId: initial.state.id,
-    coordinates: initial.state.coordinates,
+    contractId: state.id,
+    coordinates: state.coordinates,
+    ...(workspace.appointment === undefined ? {} : { appointment: workspace.appointment }),
   }, {
     title: derivation.title,
     requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate ?? false,
     includeDirty: input.includeDirty ?? false,
   });
   if (prepared.kind === "refused") {
-    return accepted(initial.state, [], { ...initial.report, preview: { kind: "blocked", refusal: prepared.refusal } });
+    return accepted(state, [], {
+      candidate: { kind: "blocked", refusal: prepared.refusal },
+      verification: { kind: "not-run" },
+      target: { kind: "not-observed" },
+    });
   }
 
   const verified = derivation.verification.data === null
     ? undefined
-    : await auditCandidateVerification(input, initial.state, prepared.data.integration.snapshot, derivation.verification.data);
-  const report = verified?.admission === undefined
-    ? initial.report
-    : auditReport(verified.admission.journal, REVIEWED, initial.state, initial.report.targetObservation);
+    : await auditCandidateVerification(input, state, prepared.data.integration.snapshot, derivation.verification.data);
+  const delivery = auditDeliveryRelation(state, prepared.data);
+  const verification = auditVerificationAnswer(verified);
   const value: AuditReport = {
-    ...report,
-    preview: await readyAuditPreview(input.scope, initial.state, prepared.data, input.showDiff === true),
-    ...(verified?.stop === undefined ? {} : { attempt: verified.stop }),
+    candidate: await readyAuditCandidate(
+      input.scope,
+      prepared.data,
+      workspace.answer,
+      input.showDiff === true,
+    ),
+    verification,
+    target: verification.kind === "stopped"
+      ? { kind: "not-observed" }
+      : await auditTargetAnswer(input.scope, state, prepared.data),
+    ...(delivery === undefined ? {} : { delivery }),
+  };
+  const obligations = {
     ...(verified?.cleanup === undefined ? {} : { cleanup: verified.cleanup }),
     ...(verified?.leak === undefined ? {} : { leak: verified.leak }),
   };
   return verified?.admission === undefined
-    ? accepted(initial.state, [], value)
-    : admitted(verified.admission, value);
+    ? accepted(state, [], value, undefined, obligations)
+    : {
+      ...admitted(verified.admission, value),
+      ...obligations,
+    };
 }
 
 export type ReconcileReport = ReconcileResult;

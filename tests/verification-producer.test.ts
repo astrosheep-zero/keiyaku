@@ -52,7 +52,7 @@ test("execution runs every declaration after a nonzero exit and returns only its
     const outcome = await executeVerification(input(root, declarations));
 
     assert.deepEqual(outcome, {
-      outcome: { kind: "terminal", verdict: "unsatisfied", summary: "[1 bash exit 1]" },
+      outcome: { kind: "terminal", verdict: "unsatisfied", passed: 1, total: 2, summary: "[1 bash exit 1]" },
     });
     assert.equal(readFileSync(counter, "utf8"), "12");
   });
@@ -67,7 +67,7 @@ test("producer leaves an omitted declaration unbounded", async (t) => {
 
   const outcome = await executeVerification(input("/tmp", [declaration("true")]));
 
-  assert.deepEqual(outcome, { outcome: { kind: "terminal", verdict: "satisfied" } });
+  assert.deepEqual(outcome, { outcome: { kind: "terminal", verdict: "satisfied", passed: 1, total: 1 } });
   assert.deepEqual(timeouts, []);
 });
 
@@ -80,7 +80,7 @@ test("a declaration timeout is terminally unsatisfied and later declarations sti
     ]));
 
     assert.deepEqual(outcome, {
-      outcome: { kind: "terminal", verdict: "unsatisfied", summary: "[1 bash timeout after 25ms]" },
+      outcome: { kind: "terminal", verdict: "unsatisfied", passed: 1, total: 2, summary: "[1 bash timeout after 25ms]" },
     });
     assert.equal(existsSync(secondStarted), true);
   });
@@ -111,7 +111,7 @@ test("execution returns an unsatisfied verdict, unknown-exit, and spawn-error wi
   await inTemporaryDirectory(async (root) => {
     const failed = await executeVerification(input(root, [declaration("false")]));
     assert.deepEqual(failed, {
-      outcome: { kind: "terminal", verdict: "unsatisfied", summary: "[1 bash exit 1]" },
+      outcome: { kind: "terminal", verdict: "unsatisfied", passed: 0, total: 1, summary: "[1 bash exit 1]" },
     });
 
     const unknownExit = await executeVerification(input(root, [declaration("kill -TERM $$")]));
@@ -172,7 +172,7 @@ test("producer invokes bash, zsh, and pwsh with their declared script argument",
       },
     }));
 
-    assert.deepEqual(outcome, { outcome: { kind: "terminal", verdict: "satisfied" } });
+    assert.deepEqual(outcome, { outcome: { kind: "terminal", verdict: "satisfied", passed: 3, total: 3 } });
     assert.equal(readFileSync(capture, "utf8"), [
       "bash:<-c><printf bash>",
       "zsh:<-c><printf zsh>",

@@ -189,13 +189,17 @@ test("flag specs preserve value and boolean option behavior", () => {
     () => parseArgv(["amend", "kei/example", "--clear-after", "--clear-after", "-"]),
     /duplicate option: --clear-after/,
   );
-  assert.deepEqual(parseArgv(["audit", "kei/example", "--show-diff-body"]), {
-    command: { command: "audit", contract: "kei/example", includeDirty: false, showDiffBody: true, output: "text" },
+  assert.deepEqual(parseArgv(["audit", "kei/example", "--diff"]), {
+    command: { command: "audit", contract: "kei/example", includeDirty: false, showDiff: true, output: "text" },
   });
   assert.deepEqual(parseArgv(["audit", "kei/example", "--actor", "audit-user"]), {
-    command: { command: "audit", contract: "kei/example", includeDirty: false, showDiffBody: false, actor: "audit-user", output: "text" },
+    command: { command: "audit", contract: "kei/example", includeDirty: false, showDiff: false, actor: "audit-user", output: "text" },
   });
-  assert.deepEqual(parseArgv(["audit", "kei/example", "--include-dirty", "--show-diff-body"]), {
-    command: { command: "audit", contract: "kei/example", includeDirty: true, showDiffBody: true, output: "text" },
+  assert.deepEqual(parseArgv(["audit", "kei/example", "--include-dirty", "--diff"]), {
+    command: { command: "audit", contract: "kei/example", includeDirty: true, showDiff: true, output: "text" },
   });
+  assert.throws(
+    () => parseArgv(["audit", "kei/example", "--show-diff-body"]),
+    /option --show-diff-body is not valid for audit/,
+  );
 });

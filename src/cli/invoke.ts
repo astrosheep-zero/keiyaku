@@ -204,13 +204,19 @@ async function invokeAudit(
     () => seat.contract.audit({
       ...(seat.actor === undefined ? {} : { actor: seat.actor }),
       includeDirty: parsed.includeDirty,
-      showDiff: parsed.showDiffBody,
+      showDiff: parsed.showDiff,
       requireBranchesToBeUpToDate,
       hooks: seat.hooks,
     }),
     {
       coordinate: seat.id,
-      project: (result) => ({ report: result.value }),
+      project: (result) => ({
+        report: result.value,
+        obligations: {
+          ...(result.cleanup === undefined ? {} : { cleanup: result.cleanup }),
+          ...(result.leak === undefined ? {} : { leak: result.leak }),
+        },
+      }),
     },
   );
 }
