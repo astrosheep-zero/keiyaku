@@ -19,12 +19,11 @@ absolute common Git directory once when constructing the internal repository
 capability; later operations read that pinned value and do not rediscover it
 per Contract.
 
-Targeted observation and admission are
-`O(touched journal size + bounded ancestor depth)`, never `O(world)`. A
-full-world observation is `O(N)`. The private Git map has no independently
-updated cache, current-state snapshot, second or per-contract Git ref, or
-fact index: the prohibition is a second update timeline, not organizing the
-one atomically updated state-tree. Managed refs and pins are topology only.
+Targeted observation and admission are bounded by the touched journal and
+selected ancestor depth, never by the complete world; a full-world observation
+is the only complete-tree read. The private Git map has no independently
+updated cache, current-state snapshot, second or per-contract Git ref, or fact
+index. Managed refs and pins are topology only.
 Git also owns the invocation worktree's current branch: the canonical
 `refs/heads/...` symbolic `HEAD`, or absence when detached. No higher layer
 runs or interprets Git for this fact.
@@ -39,71 +38,28 @@ moves the complete journal from `active` to `terminal` in the same state-tree
 update and state-ref CAS. A targeted lookup probes both classes; an active-world
 reader enumerates only `contracts/active/**`.
 
-The active/terminal layout is a hard format boundary. Existing state is moved
-to the fold-derived locator before code that reads the new format is installed.
-Runtime code has no predecessor-path reader, migration branch, or fallback.
+The active/terminal layout is the only accepted format; runtime has no
+predecessor-path reader, migration branch, or fallback.
 
 ## Call-Scoped Read Observation
 
-A complete composite read uses one package-internal `GitReadObservation` for
-one repository and one call. Git freezes `refs/heads/keiyaku-state` once,
-reads that commit through one persistent `cat-file --batch`, obtains its root
-tree from the commit object, enumerates that tree once, and validates the
-format blob through the same batch. The resulting immutable path-to-object map
-is shared by the Contract, TaskHolder, and Dispatch readers. Each owner selects
-only its own paths and object IDs, requests its blobs, and remains the sole
-decoder, canonical-byte validator, duplicate judge, sorter, and projection
-owner. Git does not know any product path or codec.
+A composite read freezes `refs/heads/keiyaku-state` once and shares one
+immutable path-to-object observation across Contract, TaskHolder, and Dispatch
+readers. Each product selects only its paths and remains the sole decoder,
+canonical-byte validator, duplicate judge, sorter, and projector; Git knows no
+product codec. Missing objects and transport failure remain typed read results.
 
-The observation memoizes completed object results by object ID and target
-resolution by refname. A missing requested object is a typed per-object result;
-the product owner decides how that absence affects its read. Repeated rows that
-name one target cause one target-ref read. That shared observation is
-`O(1) + O(distinct target refs)` Git processes, independent of owner count,
-row count, and blob count. Workspace cleanliness and target lag are not that
-shared observation: they use the existing workspace owner once per observable
-Contract workspace and count that workspace `HEAD` against the already-frozen
-`targetObservation.head`. They do not reread a target ref or open another
-ref epoch. An empty private state needs no batch process unless a consumer
-explicitly requests an object.
+Only Git creates and closes the read capability. It memoizes content-addressed
+objects and target refs within the call, is invalid after the call, and never
+restarts a failed transport. Workspace cleanliness is observed separately per
+workspace against the target head frozen in that same call.
 
-Only Git creates a decode channel or a read observation. A package-root public
-call may own one channel and pass that read-only capability through protocol,
-reconciliation, and settlement. The consumer may neither construct nor close
-it, and returning or throwing from the public call closes its batch. The
-capability is invalid afterward. If the batch process dies, remaining
-dependent reads receive that same transport failure; Git does not start a
-replacement channel. The channel carries only content-addressed object decode;
-it does not carry a repository handle. An epoch receives the repository from
-its caller's existing scope capability. Callback failure remains primary over
-a simultaneous close failure; when the callback succeeds, a close failure is
-returned to the caller.
-
-Each legal observation boundary freezes refs independently. A public Contract
-mutation uses one channel but opens a fresh ref epoch for every decision
-attempt and, when reached, for publication recovery, a holder or target fence,
-reconciliation, and settlement. Immutable objects already named by OID may be
-decoded once and reused through the channel; ref resolutions are memoized only
-inside their epoch and never authorize a later boundary. Admission consumes
-the decision epoch's frozen journal bytes and tree-directory entries, so it
-does not rediscover or decode that immutable base tree. The process topology
-of one mutation is therefore `O(lawful epochs) + O(1)` decode processes, not
-`O(contracts)` or `O(read sites)`.
-
-A targeted epoch walks only the bounded tree ancestors of its exact paths and
-the explicitly selected owner subtrees. It never expands the complete private
-tree. A full-world read remains the only complete-tree traversal. When a
-post-decision companion adds a path, Git extends the admission directories for
-that path from the same frozen tree before object construction; it does not
-reread the state ref or discard untouched siblings.
-
-`Keiyaku.list`, each public single-Contract read, a complete Dispatch read, and
-Kanshi own their call boundary. Git process invocation, filesystem observation,
-and lifecycle are asynchronous at every repository capability boundary; callers
-await typed results. There is no all-tree blob prefetch, owner prepare/finish
-protocol, owner-created Git process, cross-call cache, cross-epoch ref cache,
-synchronous Contract-reader fallback, or product-named Git reader. This leaves
-subprocess custody, process identity, Git decision order, and bounded walks unchanged.
+Every decision, recovery, fence, reconciliation, and settlement boundary
+freezes refs independently. Immutable OID-addressed objects may be reused only
+inside that epoch; ref results never authorize a later boundary. Targeted reads
+walk only selected paths and bounded ancestors, while full-world reads alone
+enumerate the complete tree. All repository observations are asynchronous, and
+product owners create neither Git readers nor cross-call caches.
 
 Git mints `ContractCoordinates.start` at bind. With a target it is the
 resolved target head; without a target it is the caller worktree's current
@@ -157,8 +113,7 @@ deterministic topology, not public identity or a second legality authority.
 Git does not derive a managed worktree path from ContractId. Workspace
 appointment owns Place allocation; Git consumes an explicit appointed Place
 and realizes the worktree only at
-`<git-common-dir>/keiyaku/wt/<place>` through the pure
-`worktreePath(repository, place)` projection. Primary and linked worktrees
+`<git-common-dir>/keiyaku/wt/<place>`. Primary and linked worktrees
 therefore share that appointed path. The path is not stored in the Contract
 journal. Git never derives, scans, or adopts another managed-worktree
 coordinate from Contract identity.
@@ -182,21 +137,15 @@ not persisted.
 
 ## Tender, Integration, And Diff Ownership
 
-Tender capture and materialization live in `src/git/tender.ts`, including the
-private-index workspace observation, dirty-workspace policy statistics, and
-tender commit creation. `src/git/integration.ts` owns target observation,
-ancestry and merge-tree semantics, integration snapshot and worktree-content
-ChangeId materialization, and recorded integration-pair diff reads.
-Protocol composes those typed capabilities directly for deliver and review;
-there is no generic preparation wrapper.
-
-`src/git/scratch.ts` owns only disposable Verification scratch worktrees,
-including process-derived naming, materialization, disposal, and orphan
-judgment. Managed worktrees remain governed by the reconciliation rules below.
+Git owns tender capture, integration preparation, worktree-content ChangeId
+materialization, recorded integration-pair diff reads, and disposable
+Verification scratch custody. Protocol composes these typed capabilities
+directly; there is no generic preparation wrapper. Managed worktrees remain
+governed by the reconciliation rules below.
 
 ## Delivery Preparation And Placement
 
-Preparation consumes only the state coordinates projected from that attempt,
+Delivery preparation consumes only the state coordinates projected from that attempt,
 pure `requireBranchesToBeUpToDate` and `includeDirty` values, and a title
 stamped with the `DocumentKey` from which it was derived. It does not observe,
 fold, or judge contract lifecycle state, decode a document, request a callback,
@@ -206,23 +155,12 @@ targetless contract, the supplied `start` coordinate is the integration
 predecessor, the tender is also the integration snapshot, and there is no target
 ref operation.
 
-Preparation uses the one core mechanical-result primitive. Delivery returns
-`Preparation<DeliverData, DeliveryPreparationFailure>` and review returns a
-prepared review projection; the prepared payload field is always `data`. Git
-defines neither bespoke delivery/review preparation unions nor a wrapper
-supertype. Delivery's data contains the tender snapshot, integration topology,
-the tender's worktree-content ChangeId, squash method, and frozen policy;
-review's data contains that same worktree-content ChangeId and any dirty
-workspace disclosure for that observation. A mechanical preparation failure is
-data for the attempt's completed legal decision, not a lifecycle refusal. The tender is the selected workspace
-content: the deterministic managed worktree in worktree mode or the pinned
-caller worktree in here mode. Clean content uses its existing `HEAD`. A dirty
-workspace refuses before delivery or Verification unless `includeDirty` is
-true. Review is observation, not delivery authorization: ordinary dirty bytes
-do not refuse review, but the accepted review result discloses every
-non-ignored staged, unstaged, and untracked path plus insertion/deletion totals
-for the complete final tree relative to `HEAD`. Dirty submodule internals
-always refuse because the superproject tree cannot seal or observe those bytes.
+It returns mechanical data or failure to the one lifecycle decision;
+it is not a lifecycle judge. The tender is the selected managed or here
+workspace content. Dirty content refuses delivery and Verification unless
+`includeDirty` is true. Review needs no such authorization and discloses the
+ordinary dirty paths and totals it observed. Dirty submodule internals always
+refuse because the superproject tree cannot seal them.
 
 When `includeDirty` is true, Git captures all non-ignored staged, unstaged, and
 untracked final bytes through one private index and materializes a deterministic
@@ -233,18 +171,12 @@ Its commit message defaults to `<contract-id>: <title>` followed by
 message bytes only; tender tree, parent, identity rules, and lifecycle meaning
 do not change.
 
-Git uses commit identity for `SnapshotId` and one byte-sensitive stable patch
-identity as ChangeId for the immutable Contract start to captured tender tree,
-including binary, mode, path, and whitespace bytes, independent of repository
-and user diff presentation configuration. Delivery and review use that
-one worktree-content identity without creating a durable review snapshot, running
-Verification, or changing a worktree. Integration predecessor, tree, and snapshot remain
-placement topology only. The identity is therefore stable across target movement
-and changes only with reviewed worktree content. A satisfied review may then ask
-Git whether that content can integrate at the current target. An integration
-failure is returned as its trailing placement stop after the attestation has
-been admitted; it neither changes the review subject nor creates lifecycle
-authority.
+`SnapshotId` is commit identity. ChangeId is one byte-sensitive identity for the
+immutable Contract start to captured tender tree, including binary, mode, path,
+and whitespace bytes, independent of diff presentation configuration. Delivery
+and review share it without creating a durable review snapshot. It changes only
+with reviewed content, not target movement; later integration failure is a
+placement stop and never changes the admitted review subject.
 
 `requireBranchesToBeUpToDate` is a delivery-attempt policy. When true, a
 targeted tender that does not descend from the observed target head returns
@@ -277,23 +209,13 @@ placement returns `target-moved` with the expected and freshly observed target
 coordinates. It appends no claimed fact, does not move the target, and never
 re-integrates or reuses Verification inside that attempt.
 
-The checkout observation used by targeted placement is one no-effects precheck
-in `src/git/target-placement.ts`. It accepts targeted Contract coordinates plus
-prospective predecessor and candidate snapshots, lists registered checkouts of
-the named target, and returns ready follow arms or a typed checkout or
-workspace refusal. It never publishes, follows a checkout, or claims a
-Contract. Callers decide targetless Contracts at their boundary and do not
-invoke the observation. `prepareTargetPlacement` calls that same observation
-under the existing target fence after the offered movement matches the
-admitted delivery. The target-placement protocol owner may call the same
-observation prospectively for audit without fencing or placing. Actual
-placement remains the only publisher. Later drift or local-byte changes may
-produce a different result. One audit target adjudicator owns the complete
-post-Verification answer. Movement has precedence over placeability,
-including a later moved head after the followability check. A stream, spawn,
-or other expected operational failure while that owner observes a targeted
-candidate is `target.failed`; audit does not throw. Stopped Verification
-never invokes the adjudicator and answers `not-observed`.
+The targeted checkout observation is a no-effects precheck. It accepts the
+targeted coordinates and prospective snapshots, lists registered checkouts,
+and returns ready follow arms or typed checkout/workspace refusals. It never
+publishes, follows, or claims. Placement invokes it under the target fence;
+audit may invoke it prospectively. Actual placement remains the only
+publisher. Movement has precedence over placeability, operational observation
+failure is `target.failed`, and stopped Verification answers `not-observed`.
 
 When the target checkout is not the tender source, placement follows Git merge semantics.
 Before publication, each registered checkout must admit the predecessor-to-candidate
@@ -304,21 +226,11 @@ the checkout, target, exact paths, and reason `staged`, `conflict`, or `untracke
 the claimed fact and target ref remain untouched. Success performs the same two-tree
 update after publication and reports its checkout effect.
 
-The dry-run is the only followability judge. After it passes, ignored-byte
-custody considers only predecessor-to-candidate
-`diff --name-only --no-renames --diff-filter=ACMRT` writes. A bounded `lstat`
-walk stops at the first local non-directory and never follows symlinks. It also
-selects a final local directory when the candidate replaces it with a blob;
-missing paths and continuing directory ancestors select nothing. The selector
-never enumerates directories or classifies Git state.
-
-Leaf scopes share one literal, candidate-scoped `ls-files --others --ignored
---exclude-standard --directory --no-empty -z` query. Each displaced directory
-uses that query alone and streams stdout into one existence bit. Any record
-refuses the known shallow scope as `untracked`; empty output passes. Git alone
-owns the untracked-and-ignored conjunction, unrelated siblings never enter the
-query, and stream, spawn, or nonzero-exit failure is a nonpublishing
-`target-placement-failed`.
+The dry-run is the only followability judge. Ignored-byte custody then examines
+only predecessor-to-candidate writes, never follows symlinks or enumerates
+unrelated siblings, and lets Git judge whether a displaced scope contains
+ignored untracked bytes. Any such byte refuses as `untracked`; observation
+failure is nonpublishing `target-placement-failed`.
 
 When a targeted here workspace is itself the target checkout, placement
 follows Git commit semantics. Its captured dirty bytes are the verified
@@ -329,21 +241,14 @@ candidate. Bytes edited after capture remain ordinary unstaged changes.
 Staging intent created after capture may be reclassified as unstaged, but its
 worktree bytes are never discarded.
 
-The target fence removes ordinary post-admission projection. Process death or
-a failed follow after ref publication can leave only the current placement's
-unfinished second half. It has no marker and no ancestor search. Recovery
-proceeds only while the target still names the claimed candidate. Each checkout
-is recovered from its own provable shape rather than a remembered arm. For an
-ordinary checkout, candidate index and worktree entries on every
-predecessor-to-candidate changed path prove the follow complete while preserving
-unrelated staged and unstaged entries. Candidate worktree entries with
-predecessor index entries on those paths complete through an index-only
-two-tree merge; predecessor entries in both may complete the same index and
-worktree update. A full candidate worktree whose changed-path index is not yet
-at the candidate completes through full candidate index alignment. Any other
-shape or failed update reports typed target-checkout lag and performs no further
-mutation. A later placement cannot pass its preconditions while that checkout
-is behind, so unfinished placements do not accumulate.
+The target fence has no post-admission marker or ancestor search. Recovery is
+allowed only while the target names the claimed candidate. Candidate index and
+worktree on every changed path prove completion. Candidate worktree with
+predecessor index completes by index-only merge; predecessor index and
+worktree complete by the full two-tree update; a full candidate worktree with a
+noncandidate changed-path index completes by candidate index alignment. Other
+shapes or failed updates report target-checkout lag without further mutation,
+and later placement cannot pass while that checkout is behind.
 
 Git admission builds raw Git objects and uses one
 `update-ref --stdin --no-deref` transaction. It recognizes canonical admitted
@@ -380,13 +285,6 @@ derivation. Review preparation receives no document-derived value. Protocol
 combines its mechanical patch identity with the document key from the attempt
 observation to form the testimony subject. Git does not judge whether that
 subject is current.
-
-The one internal post-admission document read is a protocol projection over one
-full-world Git observation. It folds and filters nonterminal contracts and
-returns exactly `{ contract, documentBytes }` for the library's Region reader.
-It exposes no `DocumentKey`, decoded field, Region token, Git snapshot, or
-public method. This read is not an admission handoff or receipt and does not
-alter the result of the write that preceded it.
 
 ## Identities And Bytes
 

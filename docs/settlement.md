@@ -47,12 +47,12 @@ compatibility decoder, or independent holder writer.
 
 Holder claim and release serialize on one per-Task fence: a SQLite transaction
 lock per `TaskId` at
-`<commonGitDir>/keiyaku/locks/settlement/<sha256(TaskId)>.sqlite`
-(`src/settlement/fence.ts`), acquired in `immediate` mode and held for the
+`<commonGitDir>/keiyaku/locks/settlement/<sha256(TaskId)>.sqlite`, acquired in
+`immediate` mode and held for the
 duration of an admission action. Bind's holder claim and abandon's holder
 release run inside it. The fence serializes holder claim and release only. The
-post-admission Task `done` write does not pass through the fence: Task's
-`replaceAuthority` predecessor-CAS (`src/task/store.ts`) adjudicates it against
+post-admission Task `done` write does not pass through the fence: the Task
+store's predecessor-CAS adjudicates it against
 the on-disk document, and a concurrent Task write is reported as a Task lag
 reconsidered on replay.
 
@@ -71,16 +71,12 @@ Settlement has exactly these rules:
    namespace context installed or repaired. The default namespace is the
    ContractId's human contract segment. A valid local override is kept.
 
-The canonical namespace for a ContractId is the one-segment value
-`[contractSegment(contractId)]`. Settlement owns that pure projection.
-Worktree repair and Kanshi consume its exact result; Kanshi does not
-re-encode the mapping. A Task matches a Contract only when its complete
-TaskId namespace equals that one-segment namespace. Root Tasks, sibling
-namespaces, and nested descendants do not match. The current world-local
-namespace marker and any valid managed-worktree override are not this
-observation and do not change it. A namespace match creates no holder,
-endpoint, lifecycle consequence, or association. TaskHolder remains the
-sole Contract-to-Task association.
+Settlement owns the canonical Contract namespace
+`[contractSegment(contractId)]`. Worktree repair and Kanshi consume that exact
+one-segment projection. A Task matches only when its complete namespace equals
+it; root, sibling, nested, world-current, and managed override namespaces do
+not change the observation. A match creates no holder, endpoint, lifecycle
+effect, or association; TaskHolder remains their sole authority.
 
 Settlement observes TaskHolder authority only when a candidate is `claimed`,
 because only a `claimed` candidate can reach the Task rule. A call with no

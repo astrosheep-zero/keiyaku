@@ -30,15 +30,10 @@ contain the contract itself. An amend replaces the complete opaque terms and
 may change `after` at any point before a terminal fact, including after `bound`
 or `deliver`. Coordinates never change.
 
-The prerequisite graph is acyclic by construction. An amend whose resulting
-`after` would make the contract reachable from its own transitive prerequisite
-closure is refused as `cyclic-prerequisite`. Bind cannot create a cycle: a
-freshly minted identity is referenced by no existing `after`. Because every
-admission preserves acyclicity, the reachability judgment traverses only the
-prerequisite closure touched by the amendment; it needs neither a reverse index
-nor a full-world observation. Protocol assembles that closure, while
-`decideAmend` remains the sole legal judge. Fold does not re-adjudicate graph
-acyclicity.
+The prerequisite graph is acyclic by construction. Amend refuses
+`cyclic-prerequisite` when its resulting `after` reaches the addressed Contract;
+bind's fresh identity cannot already be referenced. The judgment reads only the
+touched prerequisite closure, and fold never re-adjudicates it.
 
 An explicit placement request uses one placement adjudicator. The adjudicator
 admits `claimed` only when every ContractId in the current `after` snapshot is
@@ -65,27 +60,16 @@ failure is returned as the recoverable physical lag defined by
 [git-reconciliation.md](git-reconciliation.md), and process death can leave
 that same recovery shape.
 
-The target fence first asks Git's `read-tree --dry-run -m -u` whether each
-ordinary checkout can follow the predecessor-to-candidate merge. It then
-protects only ignored local bytes inside the candidate's physical destruction
-scopes. A stream, spawn, or nonzero-exit failure while making that observation
-is a mechanical `target-placement-failed` stop; it cannot publish or become a
-claimed fact. The custody observation never changes lifecycle eligibility and
-does not replace Git's dry-run judge.
+Git owns checkout followability and ignored-byte custody. Its mechanical
+`target-placement-failed` stop cannot publish, become claimed, or change
+lifecycle eligibility.
 
-`deliver` tenders the selected current worktree content. Before admitting the
-fact, Git materializes the complete integration candidate that this attempt may
-verify and place. The fact records the tender snapshot, integration predecessor
-and snapshot, the tender's one worktree-content ChangeId, squash method, and
-the attempt's frozen up-to-date policy. A later tender replaces the current
-delivery on the read model. After admission, deliver asks the Verification protocol owner, which
-uses the one generic currentness implementation, for latest `verified`
-evidence. If that attestation names the exact delivered snapshot and current
-Verification segment, satisfied or unsatisfied, deliver does not execute the
-declarations again and exposes a transient `verificationReuse` observation.
-Otherwise it runs Verification. Placement consumes only generic current gate
-evidence. The
-tender and integration preparation rules live in [git.md](git.md).
+`deliver` tenders the selected worktree content and records the Git-owned
+snapshot, integration, ChangeId, squash, and frozen-policy identity. A later
+tender replaces the current delivery. After admission, current `verified`
+testimony for that exact delivery and Verification segment is reused, whether
+satisfied or unsatisfied; otherwise Verification runs. Placement consumes only
+generic current gate evidence. Git owns preparation details.
 
 `review` is a contract operation and may record testimony before any `deliver`.
 Git captures its subject as the document key projected by the decision
@@ -247,14 +231,11 @@ are no longer current. The package-root facade performs no document pre-read,
 and retry never carries an offer or Git observation from an earlier epoch into
 a new decision.
 
-Core owns one `activeContract` guard for the shared existence-and-terminal
-law. Amend, deliver, placement, attestation, abandon, and arc begin their legal
-decision with that guard and then apply only their verb-specific rules. The
-guard returns the active state or the typed `contract-missing` or `terminal`
-refusal for the addressed contract. Bind does not use it because bind owns the
-opposite `contract-exists` law. Protocol, Git, and the library do not
-repeat this lifecycle judgment as a pre-check, base class, middleware, or
-runner.
+Core owns the shared existence-and-terminal judgment. Amend, deliver,
+placement, attestation, abandon, and arc apply it before their verb-specific
+rules, returning active state or `contract-missing`/`terminal`. Bind instead
+owns `contract-exists`. Protocol, Git, and the library do not repeat this
+judgment.
 
 A decision receives plain data, its one observation, and fresh attempt ULIDs.
 It returns a typed refusal or an `Offer`; it has no clock, randomness, current
@@ -293,121 +274,44 @@ operation.
 ## Protocol And Admission
 
 Protocol is the sole layer that joins pact decisions to Git observation and
-admission. Its decision projection contains only the readers of that one legal
-decision. Snapshot identity remains Git-private; pact does not name a
-Git commit.
+admission. Snapshot identity remains Git-private; pact never names a commit.
+Mechanical preparation and the completed decision remain one judge over one
+frozen observation, with lifecycle refusal taking precedence over mechanical
+failure. There is no lifecycle preflight, and retries never reuse preparation.
 
-An attempt may be staged as one state-only projection, mechanical preparation,
-and a completed `decide`, but those stages remain one judge: the state-only
-stage produces no readiness verdict, preparation produces only mechanical
-facts, and the completed `decide` consumes the original decision observation.
-There is no lifecycle preflight. The core `Preparation` union is the one
-mechanical result shape; operations whose fact claims the current document use
-the core `StampedPreparation` union. Attestations use ordinary `Preparation`
-because their captured subject already names exactly what was judged. A document or other lifecycle refusal from the
-completed decision takes priority over a mechanical preparation failure.
-Bind coordinate preparation is one such stage: every semantic attempt derives
-its complete `BindInput` from current Git facts, and admission atomically
-asserts exactly the ref OID sealed into its coordinates. A targeted `here`
-branch mismatch is an eligibility refusal of that fresh observation, not an
-admission currentness fact. Collision and CAS retries never reuse an earlier
-bind preparation.
+One decision submits at most one Offer. Git alone constructs objects and
+atomically asserts the sealed OIDs; those assertions are the only admission
+currentness judge. Placement may wrap the unchanged Offer in the target fence,
+which judges physical followability but adds no lifecycle decision. A companion
+may add only opaque tree updates derived from the same frozen observation; it
+cannot replace facts, target assertions, or the decision and is recomputed on
+retry.
 
-The one decision submits at most one offer. Git admission owns raw Git
-object construction and one atomic `update-ref --stdin` operation; it does not
-parse Git prose. Admission's non-mutating expected-OID assertions remain the
-only currentness adjudicator for the facts sealed into that offer. Eligibility
-observations do not enlarge that assertion scope.
+After rejection, asserted coordinate movement discards the Offer and starts a
+fresh bounded semantic attempt. Three unsuccessful attempts return `exhausted`;
+no movement returns `publication-failed`. Unknown outcomes are classified only
+from durable canonical facts: exact entries prove acceptance, conflicting bytes
+are collision, and absence permits a fresh attempt. `document-moved` is returned
+without automatic retry. The journal is the sole recovery and handoff receipt.
 
-Placement alone may wrap that decided offer in the Git target fence. The fence
-does not make another legal decision: it checks only whether a registered
-checkout can physically follow the offered predecessor-to-candidate movement,
-then publishes the unchanged offer and performs that follow. A physical
-refusal returns the Git-owned `checkout-not-followable` value. Protocol does
-not publish first and reinterpret checkout state afterward.
+Amend compares its complete source terms with the current terms and returns
+`terms-moved` when they differ. Deliver and audit use stamped document
+derivations; review uses the document and patch identity it actually observed
+and has no `document-moved` refusal. Later review currency is a gate question.
 
-An optional companion decorator runs after that attempt's pure decision and before
-admission. It receives the exact immutable Git observation used by the attempt
-and may only add companion updates; it cannot replace journal entries, target
-assertions, or the decision. A retry re-runs the decorator from the fresh
-observation, so a stale companion can never be replayed against a newer Git
-root.
-If a companion introduces a path outside the decision's initially selected
-paths, Protocol asks Git to extend only that path's ancestor directories from
-the same frozen tree. The decorator still neither reads Git nor becomes a tree
-authority.
+Audit applies active-contract eligibility before workspace or candidate
+observation. Missing, terminal, and moved-document cases are top-level refusals;
+candidate preparation failure is accepted `candidate.blocked` with no
+Verification fact. Prepared candidates run Verification, and target observation
+occurs only after no declarations or a terminal result; stopped Verification
+answers `not-observed`. Audit never requests placement, admits claimed, or moves
+a target, and admitted `verified` testimony uses the ordinary attestation
+decision.
 
-After a known rejected transaction, protocol compares the Git and optional
-target ref with the coordinates asserted by that attempt. Any movement discards
-the offer; the next bounded semantic attempt observes, folds, and decides
-afresh. A newly ineligible placement returns that decision's typed refusal. Three
-unsuccessful semantic attempts return `exhausted`; a rejection with no asserted
-coordinate movement remains `publication-failed` with its diagnostic. This
-classification reads no Git prose and never turns a failed CAS into acceptance.
-
-A typed `unknown` probes durable facts. Exact canonical entries prove
-acceptance, conflicting bytes report collision, and absence discards the old
-offer for a fresh semantic attempt. A `document-moved` refusal returns to the
-caller and is not auto-retried by the library or protocol.
-
-The journal is the only recovery and handoff authority. A process-local
-accepted-operation return cannot become a second receipt authority; this
-chapter intentionally specifies no composite receipt shape.
-
-`deliver`, `review`, and `audit` are composed operations, not generic lifecycle
-runners. `amend` carries the complete source `ContractTerms` from which it
-derived its complete replacement. Its decision compares those opaque document,
-segment, gate, and prerequisite values with the current terms and returns
-`terms-moved` when any changed; unrelated facts do not stale it. `deliver` and
-`audit` use the stamped document derivation
-defined in [document.md](document.md). `review` receives no decoded-document
-derivation and has no `document-moved` refusal. Its captured subject names the
-document and patch identities it actually reviewed; later currentness is a gate
-question, not an admission condition.
-
-Audit's leading act applies the shared `activeContract` guard before observing
-workspace state, deriving the current document, or preparing a candidate.
-Missing and terminal Contracts remain top-level refusals; audit never inspects
-a released Place or prospective delivery after claim or abandonment. An active
-Contract then prepares a prospective delivery with the same `prepareDelivery`
-path as deliver. A moved document remains a top-level refusal.
-Candidate-preparation failures are accepted `candidate.blocked` observations
-and admit no Verification fact. A prepared candidate runs Verification against
-its integration snapshot. The target adjudicator runs only after no
-declarations or a terminal Verification answer; stopped Verification answers
-`not-observed`. Audit never requests placement, admits claimed, or moves a
-target. When audit admits a `verified` attestation, the captured preparation
-still enters `decideAttestation`; protocol does not add a second lifecycle
-judgment. No `decideAuditEligibility` exists.
-
-A composed operation has one leading act: the invoked verb's own journal
-admission for bind, amend, deliver, review, abandon, and arc, and the accepted
-three-answer audit report for audit. That leading act alone selects the outer outcome arm.
-`refused` and `retry` assert that this invocation landed no journal fact. Once
-the leading act completes, the outcome is irrevocably `accepted`; no trailing
-result may flip it.
-
-Trailing obligations are independent domain duties, not a short-circuiting
-pipeline. After a delivery fact lands, deliver either reuses a now-current
-`verified` attestation or runs Verification, then attempts placement. Every
-applicable obligation runs even when an earlier one stops without a fact. Their only communication is
-through admitted facts. A trailing fact joins the accepted outcome's `facts`;
-a trailing refusal, retry, or nonterminal process result appears on that
-obligation's own presence-discriminated stop channel. The channels are
-independent, so one invocation may expose both Verification and placement
-stops. Placement reads the current `after` snapshot and declared gates against
-admitted facts: whether `verified` is declared decides what placement waits for,
-never whether the producer runs. The exact public shapes are owned by
+The leading admission selects the outer result. `refused` and `retry` mean no
+journal fact landed; once the leading act completes the result remains
+`accepted`. Verification, placement, cleanup, reconciliation, and settlement
+are independent trailing duties whose facts or typed stops remain on their own
+channels. They never reverse acceptance, change exit status, append abandonment,
+or hide the admitted Contract. Exact public shapes are owned by
 [public-results.md](public-results.md).
-
-Admission alone controls a composed operation's outer outcome. Physical
-cleanup after an accepted admission never throws over that result, changes its
-arm, or changes its exit status. A caller may receive the transient residue
-report defined by the owning public surface, but cleanup is not lifecycle
-authority and does not create a journal, recovery, or reconcile duty.
-
-After protocol admission, the public facade runs mandatory Git
-reconciliation and [settlement](settlement.md). Their failures are typed lags
-on the successful public result, never a different lifecycle outcome. They do
-not change the protocol result to `refused` or `retry`, automatically append an
-`abandoned` fact, or hide the admitted Contract identity.

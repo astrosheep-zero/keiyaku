@@ -13,7 +13,7 @@ stamp; `title` and the Verification definition are derived from exactly that
 decoded document. The `verification` member carries the one typed declaration
 preparation defined by [verification.md](verification.md); protocol may compose
 that prepared or refused value into a verb input but never re-derive its
-legality. The derivation carries neither a `ContractBody`, section tree, raw
+legality. The derivation carries neither a structured body, section tree, raw
 body callback, nor a protocol body reader. It is attempt-local and is never a
 persisted fact, cache, or replacement document authority. Its currency is
 decided against the attempt observation by the one legal `decide` in
@@ -29,15 +29,12 @@ handled by generic gate currentness rather than by another document projection.
 The Markdown layer accepts column-zero ATX H1, H2, and H3 headings, one
 repository-wide fence law, YAML frontmatter, blockquotes, nested lists, and
 opaque inline and fence bytes. Setext headings and inline AST interpretation
-are outside this dialect. `parseToAST(source)` is pure and source-aware.
-Tokens and nodes carry UTF-16 `SourceSpan` coordinates. Token spans tile the
-original source after an optional BOM without gaps or overlap, and
-`rawSlice(span)` returns that exact source interval, including CRLF bytes.
-Logical BOM and line normalization do not change those coordinates.
-
-`indexDocument(document)` derives normalized title and level indexes. Consumers
-read those indexes and typed children instead of scanning children, rendering a
-section, or parsing it again. A section's content is read from its source span.
+are outside this dialect. Parsing is pure and source-aware. Tokens and nodes
+carry UTF-16 `SourceSpan` coordinates that tile the original source after an
+optional BOM without gaps or overlap. Slicing a span returns its exact source
+interval, including CRLF bytes; logical normalization does not change those
+coordinates. Normalized title and level indexes are derived once, and section
+content is read from its source span.
 
 ## Contract Document
 

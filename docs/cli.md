@@ -26,21 +26,14 @@ the invocation cwd and may name any path inside the intended repository. It
 does not replace the invocation Repo used for World resolution or change Task,
 Settings, or Akuma execution cwd.
 
-The edge discovers the optional invocation Repo once, calls `World.resolve`
-once, and reuses that resolution across every reader and creating operation.
-Read commands use its current root, Akuma call uses its non-writing candidate,
-and operations that require marker custody use its establishing operation. A
-call refusal before Akuma birth therefore creates no World marker or runtime
-storage.
-Without `--repo`, the invocation Repo also serves Contract selectors, verbs,
-reconciliation, Dispatch, and composite observation. Explicit `--repo` adds a
-separate Contract Repo consumed by Contract verbs, `reconcile`, `call
---contract`, fork inheritance, and `wait` or `kill` with a complete `kei/...`
-selector. Composite `status` and every `ls` projection use only the invocation
-Repo so a report cannot join two Worlds. Fleet reads use it only for public
-Dispatch association. Task, Settings, install, Contract-free call, and
-non-Contract catalogs do not consume Repo. Any unused explicit `--repo` is a
-typed usage refusal.
+The edge resolves the optional invocation Repo and World once per call. Without
+`--repo`, that Repo also serves Contract selectors, verbs, reconciliation,
+Dispatch, and composite observation. Explicit `--repo` adds a separate Contract
+Repo for Contract operations and complete `kei/...` Akuma selectors. Composite
+`status` and every `ls` use only the invocation World, so reports never join two
+Worlds. Contracted call and fork inheritance use the selected Contract Repo.
+Commands that consume no Contract Repo refuse an unused `--repo`. A call
+refused before Akuma birth creates no World marker or runtime storage.
 
 The CLI uses only public `Repo`, `Keiyaku`, and `Delivery` values. No package
 operation resolves a path or reads the working directory again.
@@ -48,16 +41,10 @@ operation resolves a path or reads the working directory again.
 On Windows, every CLI-owned child process is created without a visible
 auxiliary console window.
 
-The parser performs argv lexing and syntax only. It extracts the two global path inputs,
-then recognizes command words, an optional contract positional, flags, and a final `-`; it
-checks arity, missing values, duplicates, unknown flags, and mutual exclusion.
-It emits pure parsed data without reading Git, folding state, resolving actors,
-or judging a command.
-
-After syntax parsing, the invocation adapter directly calls the corresponding
-public `Repo` or `Keiyaku` operation. Deliver, review, arc, abandon, and audit
-have no command-specific forwarding wrapper: a wrapper that only renames or
-casts public input owns no behavior and is not an architectural boundary.
+The parser owns argv syntax, including arity, duplicates, unknown flags, mutual
+exclusion, and final-stdin selection. It performs no product observation or
+judgment. The invocation adapter then calls the corresponding public operation
+without a second command-specific behavior layer.
 
 ## Command Surface
 
@@ -80,7 +67,7 @@ The command vocabulary is:
 | `install` | Installs the bundled Keiyaku skills through one or more native harness installers. |
 | `task ...` | Calls the separate `./task` public surface described below. |
 | `call`, `fork` | Call the package-root Akuma facet so Dispatch and Alias integration is not reimplemented at the edge. |
-| `wait`, `tell`, `history`, `kill` | Route `history kei/...` to the Contract handle; otherwise call the corresponding package-root Akuma facade capability as root verbs. `tell --interrupt` selects the composed interrupt capability. |
+| `wait`, `tell`, `history`, `kill` | Call the corresponding package-root capability; Contract history uses its handle and `tell --interrupt` selects composed interrupt. |
 
 `bind` accepts no contract positional. Existing Contract commands accept a full
 `kei/<contract-segment>` or active `@<contract-segment>` reference. The short
@@ -130,17 +117,11 @@ Contract command reads stdin. Akuma and Task stdin entry points are specified
 by their command grammars below. The grammar of all document inputs is owned
 by [document.md](document.md).
 
-The parser decides only whether stdin is syntactically required or allowed.
-Source selection that can be decided from argv is refused during parsing,
-before stdin is acquired. Failure while acquiring bytes from stdin is an
-internal invocation failure and uses exit `3`; it is not converted into a
-usage error. A genuine `CliUsageError` raised by syntax or edge validation
-remains a usage refusal. Stdin acquisition is awaited and completes before
-command adaptation begins; no synchronous read, lazy stream wrapper, or
-background input queue exists. A selected required stdin source that is empty
-or Unicode-whitespace-only is usage after those bytes are acquired and before
-World, Repo, or package-root invocation. Valid acquired bytes pass through
-unchanged, including line endings and surrounding whitespace.
+Argv decides whether stdin is required or allowed before bytes are acquired.
+Acquisition failure exits `3`; syntax and edge validation remain usage
+refusals. Required blank input is usage before any product invocation. Valid
+bytes pass through unchanged, including line endings and surrounding
+whitespace.
 
 After complete bind stdin has been acquired, a bind refusal or invalid Contract
 document preserves those exact bytes as a CLI receipt at
@@ -183,18 +164,11 @@ minimal stdin:
   <complete replacement>
 ```
 
-Every Contract mutation and `reconcile` reads one Settings observation at the
-CLI edge and derives one `WorktreeHooks` value through the package-root
-consumer. It passes that pure value into the public operation; the CLI never
-runs hook commands or reads marker files. `reconcile --retry-hooks` maps to
-`retryHooks: true`. It retries only a failed marker phase with its frozen
-commands and does not recapture edited settings for an existing worktree.
-
-`deliver` and `audit` do not pass that caller-derived value into Verification
-scratch. Their package-root operation reads only the tracked project Settings
-in the materialized integration snapshot before Verification starts. The CLI
-has no Verification timeout or caller-cancellation flag; an optional timeout
-belongs to each declaration fence in Contract Markdown.
+Every Contract mutation and `reconcile` passes one CLI-observed `WorktreeHooks`
+value to the public operation; the CLI never runs hooks or reads markers.
+`--retry-hooks` retries only a frozen failed phase. Verification instead reads
+tracked Settings from the integration snapshot. The CLI has no global
+Verification timeout or cancellation flag.
 
 Repository `.keiyaku/settings.json` may supply named gate snapshots and the Git
 delivery policy for the edge:
@@ -219,33 +193,14 @@ omitted and uses `[]` when that entry is absent; amend retains its current
 public value when its flag is omitted. A malformed Settings scope, malformed
 selected entry, or explicitly selected unknown name is a typed usage refusal.
 
-`deliver` accepts an optional materialized-commit `--message`, `--actor`,
-`--include-dirty`, and `--json`. It requires a clean workspace by default.
-`--include-dirty` authorizes one complete capture of all non-ignored staged,
-unstaged, and untracked final bytes; it is not a staged-only mode or path
-selector. Dirty submodule internals still refuse. Its up-to-date policy comes
-from the settings consumer at `git.requireBranchesToBeUpToDate`; there is no
-per-deliver policy flag.
-`review` requires exactly one of `--satisfied` or `--unsatisfied`, exactly one
-summary source, and optional `--actor` and `--json`. Package-root review still
-treats summary as optional. Explicit empty or Unicode-whitespace-only
-`--target`, `--message`, `--note`, `--summary`, `--actor`, and other required
-argv operands are usage at parse time. It has no dirty authorization flag; if
-the observed projection is dirty, the accepted result discloses the ordinary
-dirty paths and short stat.
-Dirty submodule internals still refuse because no review projection can seal
-them. `abandon` accepts optional `--note`, `--actor`, and `--json`; it has no
-reason flag or hidden reason classification. `arc` accepts `--actor` and `--json`. `audit` accepts `--actor`, `--json`,
-the same `--include-dirty` authorization as deliver, and `--diff`.
-`--diff` selects the public `showDiff` input. The prospective
-predecessor-to-candidate value lives only on `report.candidate.diff`; text
-renders that report-owned body once, including an empty string, and JSON does
-not add a second `diff` field. `--show-diff-body` is a typed usage refusal.
-This is not a Delivery read performed before audit. Audit does not accept a custom commit
-message. Its up-to-date policy is the same Settings consumer used by deliver.
-`status`, `show`, and `reconcile` accept `--json`.
-`--json` is output-only. It is only for automation script input/output and
-should not be used for daily interactive use.
+`deliver` and `audit` require a clean workspace unless `--include-dirty`
+authorizes the complete non-ignored final tree; dirty submodule internals still
+refuse. Their up-to-date policy comes only from Settings. `review` requires one
+verdict and one summary source, has no dirty authorization, and discloses
+ordinary dirty bytes when accepted. `--diff` maps to audit `showDiff`; the value
+lives only at `report.candidate.diff`, including `""`. `--show-diff-body` is
+usage. Other listed scalar operands must be nonblank. `--json` affects output
+only.
 
 `install` is the one edge command that does not read a repository or Git. It
 installs the bundled `keiyaku`, `keiyaku-task`, `keiyaku-workflow`, and
@@ -266,99 +221,55 @@ rollback occurs. Text prints one result per harness. JSON returns
 `failed` and a diagnostic on failure. Any failed harness makes the command exit
 `1`; successful installation exits `0`.
 
-`call` and `tell` each accept exactly one nonblank prompt source: one
-positional `<prompt>` argument, or a final `-` that reads stdin. Supplying
-both, neither, or a blank selected source is a usage refusal. The selected
-argument text or stdin bytes become the public body input unchanged. The CLI
-maps `KEIYAKU_HOME` once to an explicit home and uses that same value for
-Settings construction and Archetype placement; the library never reads that
-environment variable. The `call` positional `<akuma-name>` names
-`<home>/akuma/<name>.md`, defaulting to `~/.keiyaku/akuma/<name>.md`; its
-provider must resolve through the
-Settings-backed provider interpretation. When no same-name Settings entry
-exists, the built-in fallback execution names are `claude` and
-`codex-app-server`. A missing name prints exactly `` `<name>` was not found ``
-and `` use `keiyaku ls aku/` to list available Akuma ``. Its typed error retains
-the searched coordinate, but text does not print that path. `--contract`
-accepts one complete `kei/...` identity, constructs its
-handle from the selected Contract Repo, and asks the package-root call to publish
-Dispatch after birth. It is not a lifecycle gate and does not accept an
-omitted or `@` Contract selector. `--alias` accepts the sole `@name` grammar and
-assigns that world-local selector to the born Akuma after any Dispatch succeeds;
-when the Alias already exists, it moves to the born Akuma. Both flags are
-optional. For `call --contract`, explicit `-C` or `--cwd` supplies the
-canonical invocation cwd; omission lets Library use the appointed managed
-worktree. Contract-free calls always use the invocation cwd. The CLI has no
-other execution-cwd input and never derives a Place path.
-Call waits on the born Akuma for five minutes by default and consumes the same
-public status carrier as `wait` when it stops running or that window ends. An
-answered terminal observation writes the exact answer bytes and nothing else.
-An open observation uses the shared snapshot text. A terminal failed outcome,
-typed Dispatch or Alias failure, or readonly-none refusal remains a visible
-diagnostic rather than an answer. `--wait <duration>` keeps wait mode and
-replaces the five-minute observation window. `-d` and `--detach` are identical
-and return after birth plus Dispatch and Alias integration. A successful detach
-prints one copyable wait command from the canonical invocation World and the
-successful Alias stage:
-`$ keiyaku -C <world> wait @name --timeout 5m` when `--alias @name` succeeded,
-otherwise `$ keiyaku -C <world> wait <AkuId> --timeout 5m`. The complete AkuId
-remains in the header and in JSON. A failed or skipped Alias never appears in
-the example. The example does not use `kei/...` and does not require `--repo`.
-If the caller's `-C` points at a subdirectory, the printed World is the
-canonical root used by the operation. Dispatch failure, Alias failure, or a
-readonly-none refusal keeps its existing factual lines and does not add that
-command. Detach does not fabricate a current life. It is mutually exclusive
-with `--wait`.
-`tell`, `fork`, and exact `status` accept a complete
-`aku/<akuma>/<hex8>` or world-local `@alias`. `history` accepts that same
-Akuma selector or one complete `kei/...`. It does not accept `@contract`, a
-bare Contract segment, globs, or multiple selectors. `wait` and `kill`
-additionally accept Akuma globs and complete `kei/...` worker selectors. Their
-positional set is expanded once, deduplicated, and byte-sorted before the
-operation.
-A `kei/...` selector reads Dispatch only from `--repo` (or the invocation Repo
-when `--repo` is omitted) and then operates in the `-C` World. One Contract
-member absent from that World refuses the whole set as typed usage
-`{ kind: "akuma-not-in-world", ids, world }` and never says the Akuma is unborn.
-Text prints those facts; `--json` prints the typed object. Both exit `1`.
-A corrupt Heart keeps its existing diagnostic. A missing direct `aku/...`
-selector keeps `Akuma ... is not born`.
-Named `status @name` makes one Kanshi observation, then asks Address to resolve
-the active Contract short selector and complete Alias register retained by that
-same observation. A Contract result projects that report; an Akuma result uses
-the resolved complete AkuId for its direct status observation. It never reads a
-separate Contract board or Alias authority before selection.
-Multiple wait members require exactly one of `--any` or `--all`; a single
-member needs neither. Kill always applies to the complete frozen set.
-Bare `status` already exposes the Akuma fleet through Kanshi; there is no
-second raw-roster flag. Library `world.of()`
-constructs the addressed handle and has no CLI command of its own.
+`call` and `tell` accept exactly one nonblank positional or final-stdin prompt
+and pass its bytes unchanged. The CLI maps `KEIYAKU_HOME` once to the explicit
+home used for Settings and Archetype placement; the library never reads that
+environment variable. `call <akuma-name>` resolves
+`<home>/akuma/<name>.md` and its Settings-backed provider, including the
+`claude` and `codex-app-server` fallback executions. Missing-name text names
+the input and points to `keiyaku ls aku/`; only the typed error retains the
+searched path.
+
+`--contract` accepts one complete `kei/...` and requests Dispatch after birth;
+`--alias` accepts `@name` and moves that world-local Alias only after Dispatch
+succeeds. Explicit invocation cwd wins for a contracted call, otherwise its
+appointed managed worktree is used; a Contract-free call uses invocation cwd.
+Call waits five minutes by default. `--wait` replaces that duration, while
+`-d`/`--detach` returns after birth and composition and excludes `--wait`.
+Answered terminal observations write exact answer bytes. Successful detach
+prints the canonical-world wait command using the successful Alias or complete
+AkuId; failure adds no command and fabricates no life.
+
+`tell`, `fork`, and exact `status` accept one AkuId or Alias. `history` also
+accepts one complete ContractId. `wait` and `kill` additionally accept Akuma
+globs and complete Contract worker selectors; their set expands once,
+deduplicates, and byte-sorts. A Contract selector reads Dispatch from the
+selected Repo and operates only in the invocation World. A foreign member
+refuses the whole set as `akuma-not-in-world`; a corrupt Heart retains its
+diagnostic, and a missing direct AkuId remains not-born. Multi-wait requires
+exactly one of `--any` or `--all`; kill covers the frozen set. Bare `status`
+uses Kanshi. Named `status @name` resolves active Contract short names and the
+retained Alias register from one Kanshi observation, refuses cross-kind
+ambiguity, and performs no preliminary board or Alias reread.
 Bare `ls` renders the command's own help and exits successfully. It does not
 locate or create a World, construct a Repo or Settings value, or read Git,
 Task, Akuma configuration, or Akuma state. The accepted path grammar is closed and uses
 the canonical directory spellings above; missing trailing slashes, exact
 identities, Alias selectors, and other paths are usage errors.
 
-`ls task/` lists Task rows from one complete Task-owned catalog snapshot. `ls kei/` lists Contract rows whose persisted
-identities remain `kei/...`, and `ls aku/` lists Akuma configurations with
-name, optional model, and complete description. `ls aku/<akuma>/` lists
-compact instances of that named Akuma, while `ls "aku/*/*"` explicitly lists all
-compact instances. Each invocation reads only the selected owner and performs
-no Kanshi join or activity/history read. JSON is the selected Catalog result,
-not an aggregate envelope. `status @name` remains an Address-facet decision
-and refuses explicitly when the spelling is both an active Contract short
-selector and an Akuma Alias.
+Each `ls` path reads only its selected Task, Contract, Akuma configuration, or
+Akuma identity catalog. JSON is that catalog, not an aggregate envelope.
+`status @name` refuses ambiguity between an active Contract short selector and
+an Akuma Alias.
 CLI `wait` uses the public default predicate (`life !== "running"`). Its
 optional `--timeout` value and `call --wait` value match exactly
 `^(0|[1-9][0-9]*)(ms|s|m|h)$`: integers and units are required, leading zeroes
 are refused except for zero itself, and the units convert to milliseconds
 before the public call. A converted value beyond the safe integer range is
-refused. Each duration passes that value as `timeoutMs`, while predicate
-functions remain library-only input. A complete `kei/...` history selector
-requires Repo, refuses `--before`, `--since`, `--limit`, and `--last`, and
-calls `Keiyaku.of({ repo, id }).history()` with no Akuma World. `history`
-with an Akuma selector and no mode renders the newest page of at most 50
-semantic rows. `--limit`
+refused. Contract history requires a Repo, accepts no cursor, limit, or
+`--last`, and calls the selected Contract handle without constructing an Akuma
+World. Akuma history with no mode renders the newest page of at most 50 semantic
+rows. `--limit`
 selects a positive page size no greater than 5000 and otherwise keeps that
 default. `--before`
 reads the page preceding an already visible activity index; `--since` reads
@@ -372,31 +283,26 @@ no answered turn, text writes `no answer retained` and JSON exposes the typed
 an answer and writes zero bytes in text mode. Both last-answer arms exit zero
 because each is a successful read result.
 `fork` requires one nonblank `--at` history id and has no stdin body.
-The adapter supplies an explicit Contract Repo when selected, otherwise the
-invocation Repo when `-C` is inside Git, and no Repo outside Git. The facade
-alone reads and propagates a parent Dispatch; CLI never reads Dispatch or Alias
-files.
+Fork passes the selected Contract Repo, otherwise the invocation Repo when
+available. The facade alone reads and propagates parent Dispatch; CLI never
+reads Dispatch or Alias files.
 
 ## Akuma Text Surface
 
-Akuma text is one pure projection over public values. Provider adapters retain
-facts, the Akuma timeline projection folds and selects rows, and the CLI chooses
-which public result a command presents without repairing, reselecting, or
-reinterpreting activity. JSON exposes that same value with complete ISO `at`
-values and no text-only time suppression.
+Akuma text is a pure projection over public values; JSON exposes the same value
+with complete timestamps. Shared row layout, budgets, clipping, time gutter,
+glyphs, omission placement, tool presentation, and snapshot framing are owned
+by [cli-output.md](cli-output.md).
 
-Readonly `none` renders its diagnostic as an existing `!` line; native or
-absent renders nothing. This presents the public fact and adds no CLI judgment.
-Every rendered snapshot begins with the five-column `U+2500` opening stroke,
-then the complete AkuId and optional frozen Alias. When a Contract is
-associated, its complete `kei/...` identity is one hanging relation line
-beginning with `U+2514` and `U+2500`; an unassociated Akuma omits that line.
-Identity rows never contain current life, and no divider or blank line splits
-the relation from the following activity. Status, unfinished or non-answered
-single-target wait, every multi-target wait, unfinished observed call, and kill
-end with the public life on a subdued trailing line. Wherever a returned
-`AkumaObservation` is rendered, the shared snapshot appends created Task
-context after that existing snapshot body, including after the life footer:
+Readonly `none` renders its diagnostic; native or absent restraint renders
+nothing. Snapshots name the complete AkuId, optional frozen Alias, and optional
+Contract relation. Status, non-answer waits, multi-waits, unfinished call, and
+kill include public life; tell and history do not. Answered default call,
+answered single wait, and `history --last` write exact answer bytes. Detached
+call prints the copyable canonical-world wait command. Text never exposes
+provider receipt/fence stages or Heart storage vocabulary.
+
+Created Task context follows the snapshot, including after its life footer:
 
 ```text
   tasks <N>
@@ -404,71 +310,22 @@ context after that existing snapshot body, including after the life footer:
 ```
 
 Zero matches render `tasks 0`; failure renders `! tasks failed <diagnostic>`.
-Use the existing Task disposition glyphs and wrapping rules. Complete TaskIds
-and titles are never truncated, and the block does not consume or alter
-timeline row budgets. The existing exact-answer optimization for an answered
-ordinary one-member wait remains byte-for-byte raw and therefore has no
-snapshot block; JSON still contains the complete `AkumaObservation`. Call,
-history, and compact Kanshi FLEET text remain unchanged. Ordinary and interrupt
-tell compose the refreshed snapshot without a current-life claim; history does
-the same for its page, while `history --last` writes exact answer bytes. An
-ordinary answered single-target wait and an answered default call likewise
-write only those answer bytes; a successful detached call prints its born
-identity and `$ keiyaku -C <world> wait <@alias|AkuId> --timeout 5m`. The id already contains the
-Akuma name
-and the CLI never reverse-selects an Alias. Text never prints the storage
-words `retained`, `latest`, `body`, `heart`, or `turn`.
+Complete TaskIds and titles are never truncated, and this block does not
+consume the timeline budget.
 
-Shared activity-row layout, snapshot budgets, clipping, time gutter, glyphs,
-and omission placement are owned by [cli-output.md](cli-output.md). This command
-chapter delegates that presentation: it adds no TIMELINE or STATUS header,
-full-width decorative rule, equal-sign divider, semantic icon on the opening
-stroke, or second rule between relation and activity.
+Tell appears once as pending (`⧗ tell`) or terminally evidenced (`told`), and
+pending tells survive the snapshot budget. JSON preserves
+`{ akuma, tell, observation }`. `tell --interrupt` selects the Library's fenced
+composition and reports hung or untidy outcomes without external signaling.
+A stranded unresumable Akuma prints `resume unsupported`; the CLI never creates
+a fresh fallback or deletes its coordinate.
 
-Tell remains one input action. Text presents the refreshed shared snapshot;
-only a wake or interrupt failure adds an error line. The current tell appears
-once at its observed two-state face; mutation authority remains separately
-available in the typed Library result and JSON value.
-`⧗ tell` means it can still take effect, and `told` means the provider's
-strongest available evidence proves it took effect. Pending tells are never
-removed by the snapshot budget.
-Provider-specific receipt kinds, handoff stages, fences, and `bodySequence` never enter text. JSON preserves the
-mutation/observation separation as `{ akuma, tell, observation }` without adding
-a CLI-only diagnostic projection. No output asks the caller to query a TellId.
-
-`tell --interrupt` selects the Library's fenced interrupt composition. It is
-one CLI input action, not a standalone lifecycle verb: the current Body is
-asked to yield through its owned capability, the leash proves clean settlement,
-and only then is the selected prompt durably recorded before its successor is
-woken. A hung or untidy result is reported without external process
-signaling. Text uses the same refreshed snapshot as the other Akuma mutations.
-JSON returns the Library result unchanged; the CLI does not infer a second
-receipt or observation.
-
-A stranded Akuma whose durable coordinate cannot be resumed prints
-`resume unsupported` as its typed reason. The CLI does not offer an automatic
-fresh fallback or delete the coordinate.
-
-Tool presentation is one pure function. A completed run prints immutable
-duration and then `ok`, `exit <code>`, or `error`; an unfinished run omits the
-suffix. At narrow width the outcome is omitted before the command subject is
-lost. Conservative bash/zsh and PowerShell transport unwrapping is
-display-only and leaves an ambiguous command unchanged. A read prints its path
-and, when present, `L<start>-<end>`, `from L<start>`, or a positive line count.
-Search scope chooses the label: `search` for content or an absent scope,
-`find` for files, and `web` for web. The body is the query plus supplied path
-and glob only; the internal scope token is never printed.
-One file change prints its operation and path. Multiple changes print
-`edit <n> files · <representative-path> ...`; an aggregate `+<n> -<n>` appears
-only when every change has a diffstat. Missing optional provider facts shorten
-the row and never produce placeholders. The renderer does not reconstruct
-provider payloads, classify shell commands, or look up cwd or repository paths.
-
-History pages retain the same public row order and unbounded row text, rendered
-through the shared timeline presentation without a current-life observation.
-Answer boundaries name the complete AkuId in `keiyaku history <AkuId> --last`;
-native provider history ids never become CLI selectors. `history --last`
-bypasses the page and writes only exact answer bytes.
+History retains public row order without current-life observation. Native
+provider history ids never become CLI selectors; `history --last` bypasses the
+page and writes exact answer bytes. Wherever an `AkumaObservation` is rendered,
+created Task context follows the snapshot without consuming its timeline
+budget; exact-answer call/wait, Akuma history, and compact FLEET remain raw as
+defined in [cli-output.md](cli-output.md).
 
 ## Product Boundary
 

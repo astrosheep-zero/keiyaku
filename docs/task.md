@@ -67,16 +67,11 @@ equal the path-derived coordinate. Unknown keys and malformed documents are
 authority corruption. Manual editing is authoritative; a manual move that
 breaks the witness is corruption.
 
-Board reads and every public Task operation that consumes authority are
-asynchronous and observe complete files before fulfillment. Task retains one
-synchronous filesystem exception inside its compare-and-replace commit: after
-the expected bytes are re-observed, the unique temporary file is written and
-fsynced, atomically renamed, and the parent directory is fsynced when the host
-platform supports directory fsync. Windows does not support fsync on an opened
-directory; the file fsync and atomic rename remain the commit boundary there.
-This bounded section preserves one atomic authority replacement; directory walks,
-metadata, reads, and cleanup remain asynchronous, and no second sync API or
-parallel writer exists.
+Public Task reads and writes are asynchronous and observe complete files. One
+compare-and-replace commit may synchronously fsync a unique temporary file,
+rename it, and fsync the parent where supported; Windows uses file fsync plus
+atomic rename. All surrounding observation and cleanup remains asynchronous,
+with no second sync API or parallel writer.
 
 `priority` is `0 | 1 | 2 | 3` and defaults to `2`. Relation arrays are ordered,
 duplicate-free full TaskIds. `note` is a string and defaults to empty.

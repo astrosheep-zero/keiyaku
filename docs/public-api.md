@@ -16,19 +16,12 @@ its branded `WorldRoot` coordinate are defined by [world.md](world.md).
 
 ## Composition Boundary
 
-The Library is the package-root composition boundary. It validates
-caller-shaped values, presents public handles and result values, and composes
-capabilities by calling their concrete owner modules. It owns no persisted
-authority, codec, storage mechanism, lifecycle judgment, selector grammar, or
-physical Git, Task, or Akuma mechanism. A public operation may sequence owner
-capabilities, but it does not restate their decisions or persist their facts.
-
-Contract operations, pinned Git-world capability, Akuma composition, addressing,
-fleet operations, and catalog remain coherent public facets. The static
-`Keiyaku` facade only assembles them. There is no generic orchestration layer,
-package-root registry, or second authority behind that facade. Cross-product
-facts and projections remain with their named concrete owners; the Library
-only exposes their typed results.
+The Library validates caller values, presents public handles/results, and
+composes concrete owner capabilities. It owns no persisted authority, codec,
+lifecycle judgment, selector grammar, or physical Git, Task, or Akuma
+mechanism. The static `Keiyaku` facade assembles coherent Contract and Akuma
+facets without a generic orchestrator, registry, second authority, or copied
+decision.
 
 Every package-root domain operation that accepts input takes exactly one
 readonly object. Public operations have no positional value parameters and no
@@ -42,12 +35,9 @@ value projection, and handle construction over already resolved coordinates
 remain synchronous; no constructor or getter hides external observation, and
 there is no synchronous compatibility surface.
 
-At the JavaScript boundary, validation always accepts `unknown` input and
-returns the validated domain or branded value. A caller is never required to
-pre-brand a runtime value, and an implementation does not cast an unvalidated
-record back into a narrower domain type. Validation is performed once at the
-owning package boundary; no schema framework or parallel validation model is
-part of the surface.
+JavaScript validation accepts `unknown` and returns a domain or branded value;
+callers never pre-brand. The owning package boundary validates once, with no
+parallel validation model in the public surface.
 
 Caller value-shape and Markdown errors throw `TypeError` before repository
 observation, including when an addressed contract does not exist. Persisted
@@ -62,15 +52,13 @@ single structured detail value.
 
 Settings construction and generic resource behavior are owned by
 [settings.md](settings.md). This package root exports `settings`, `Settings`,
-its observation value types, and the Contract-owned pure consumers
+their observation values, and the Contract-owned consumers
 `gatesFrom({ settings, name? })`, `worktreeHooksFrom({ settings })`, and
-`requireBranchesToBeUpToDateFrom({ settings })`. They
-return concrete immutable values; no Contract operation reads a settings file
-or retains a Settings observation. Git receives only the opaque hook value
-and never imports Settings. Their selected-entry and resource-view
-failures throw the exported Contract-owned `SettingsError`; generic Settings
-construction represents its own failures as scope and namespace states and
-never produces that error.
+`requireBranchesToBeUpToDateFrom({ settings })`. They return immutable values;
+Contract operations retain no Settings observation, and Git receives only the
+opaque hook value. Selected-entry and resource-view failures throw
+`SettingsError`; generic Settings construction instead returns scope and
+namespace states.
 
 `Repo.at` is the only public construction point for a Git world. Its public
 surface is exactly:
@@ -158,45 +146,26 @@ birth. A later deliver from a here workspace rechecks the immutable coordinate;
 when that branch moved. Both refusals report the expected target and observed
 branch; `null` denotes detached HEAD. Targetless here remains valid.
 
-`Repo.at` asynchronously resolves and pins its repository coordinate before it
-returns. An omitted `path` uses the caller's current working directory. The
-library has
-exactly one `process.cwd()` call, in the private scope resolver used by
-`Repo.at`. `Keiyaku.of` and `Keiyaku.bind` require that already-pinned `Repo`
-capability; they accept neither a path nor an ambient repository default. No
-raw scope, token, registry, or orchestrator is public. Instance operations
-accept no repository coordinate.
-
-`currentBranch()` observes the invocation worktree through that pinned Repo and
-returns its canonical `refs/heads/...` symbolic `HEAD`, or `null` for detached
-HEAD. It does not choose a target or change `Keiyaku.bind`'s explicit
-targetless semantics; the CLI consumes this mechanical fact for its default.
-
-`Repo` is the pinned Git-world capability. It owns reconciliation and the
-coordinate needed by Contract operations, not Contract reads or construction.
+`Repo.at` resolves and pins the Git world before returning; omitted `path` uses
+the caller cwd. `currentBranch()` returns the invocation worktree's canonical
+symbolic branch or `null`, without choosing a target. `Keiyaku.of` and
+`Keiyaku.bind` require that Repo; instance operations accept no repository
+coordinate, and no raw scope, token, registry, or orchestrator is public.
 
 The `@astrosheep/keiyaku/kanshi` surface additionally exports the optional
 read-time `KanshiInput.region` selection and typed `RegionRead` values. This is
 a current active-document read using the document Region owner; it is not
 persisted and is independent of delivery or audit paths.
-`Keiyaku` is the sole branded Contract front door. There is no `repo.bind`,
-`repo.status`, or `repo.contract` convenience path.
-
-`Repo.at` resolves the enclosing Git world immediately and throws for a path
-outside a repository. `root` is the resolved primary-worktree absolute path.
-Different worktrees in the same Git world therefore address the same journal
-while retaining the construction coordinate needed by `workspace: "here"`.
+`Repo.at` throws outside a repository; `root` is the primary-worktree absolute
+path, so its worktrees share one journal while retaining the caller coordinate
+needed by `workspace: "here"`.
 `Keiyaku.list` enumerates the Contract world; `Keiyaku.observe` performs one
 targeted journal observation without enumerating it. Both project the same row
 shape. The return contract and behavior of `reconcile` are defined by
 [git.md](git.md).
 
-`Keiyaku` has a private constructor. It is born only through `Keiyaku.of` or a
-successful `Keiyaku.bind`, and is a stateless handle containing its contract
-identity and the supplied Repo's pinned coordinate. These static operations do
-not acquire repository scope. `Keiyaku` is not a repository registry, stored
-authority, or second orchestrator. There is no alternate package-root contract
-construction point.
+`Keiyaku` is a stateless branded handle born only through `Keiyaku.of` or a
+successful bind. There is no `Repo` convenience path or alternate constructor.
 
 ```ts
 type ContractGateCurrent =
@@ -334,15 +303,13 @@ nonterminal stop and admits no attestation.
 
 `state()` and `guidance()` observe and fold afresh for each call. `guidance()`
 returns the canonical derived bytes owned by [workspace.md](workspace.md).
-`history()` is a handle read of the selected journal and matching Dispatch
-facts from one keiyaku-state observation. It needs no WorldRoot or Akuma
-Settings. Static `Keiyaku.history` remains the unchanged Akuma operation.
-Absence is the existing `contract-missing` refusal; corruption in either
-authority fails the whole read. `ContractHistory.state` is that observation's
-non-null snapshot. Events are one journal event per exact `Fact` and one
-dispatch event per exact Contract membership, ordered by recorded time with
-the deterministic non-causal ties in [model.md](model.md). The public value
-has no parallel source collections, cursor, or persisted merge.
+`history()` reads the selected journal and matching Dispatch facts from one
+`keiyaku-state` observation. It needs no WorldRoot or Akuma Settings; static
+`Keiyaku.history` remains the Akuma operation. Missing Contract is the existing
+refusal, and corruption in either authority fails the read. Events preserve
+their exact facts and use the deterministic, non-causal recorded-time ordering
+owned by [model.md](model.md). There is no cursor, parallel source collection,
+or persisted merge.
 
 ```ts
 type ContractHistoryEvent =
@@ -426,7 +393,7 @@ requested bytes, including `""`.
 Document decoding and amendment are internal library work. Public callers pass
 Markdown to the construction and amendment operations above. The library owns
 the Keiyaku Markdown methodology at this edge and may expose only the opaque
-document keys needed by core. It does not expose a structured `ContractBody`, a
+document keys needed by core. It does not expose a structured body, a
 render function, a Git handle, direct journal writer, placement operation,
 or verification-run operation.
 

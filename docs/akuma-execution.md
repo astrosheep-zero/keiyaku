@@ -20,19 +20,16 @@ aborts its owned provider custody through the same Body signal.
 
 ## The body
 
-Wake -> take the leash (checking the seal) -> judge any abandoned control ->
-write the body row -> resume the provider from the latest session fact
-(fresh at `soul.cwd` when none exists) -> pump. The pump is
-the whole job: heart rows become provider actions; provider events become
-heart rows; body requests become in-process calls.
+On wake, Body claims the leash under the seal, judges abandoned control,
+records its Body fact, and resumes the latest session or starts fresh at
+`soul.cwd`. While it owns the leash, Heart rows become provider actions,
+provider events become Heart facts, and Body Requests become in-process calls.
 
 **Wake is level-triggered.** A waker that finds the leash held does not exit
 blind: it nudges the current Body and re-observes, and it may stop only when
 the tell that woke it is told, or it takes
 the leash itself and serves it. Two wakers converge through the same rule: the
-leash serializes replacement Bodies, and the second one finds the work already done.
-(The naive "loser exits" rule loses a tell forever when the incumbent's
-final exit check and the new tell interleave across the two locks.)
+leash serializes replacement Bodies, and the second finds the work already done.
 
 The pursuit is only as alive as its pursuers: a reboot can kill body and
 waker together, leaving a recorded tell honestly pending — served at the
@@ -304,15 +301,9 @@ answered turn's provider, cwd, and options recipe. Thus the child is born
 asleep with zero turns and its first tell resumes the forked native session.
 Upstream success followed by any local allocation, birth, session-admission, or
 publication failure returns `{ kind: "upstream-forked", childSession,
-diagnostic }`. It is not written into the unchanged parent heart and is not
-dressed up as a local child. Claude maps the primitive to native `forkSession`
-with the answered turn's session id and outer assistant-message UUID. The SDK
-must return a distinct nonblank child session id; a missing source or message
-point, native failure, or reused coordinate is `fork-failed`.
-Pi opens the selected turn's exact `sessionFile`, passes its `historyId` to
-`createBranchedSession`, and requires a distinct returned file. The child
-coordinate enters ordinary publication; Pi has no checkpoint, seen-state, or
-second fork ledger.
+diagnostic }`. It is not written into the unchanged parent heart or presented
+as a local child. Native adapter fork obligations are owned by
+[akuma-provider.md](akuma-provider.md).
 Authenticated provider evidence proves that the child transcript retains the
 selected prefix and that later parent and child writes do not enter each
 other's transcript.

@@ -227,34 +227,19 @@ recent snapshots, but never recovery, resume, fork, outcome, failure, or life.
 Complete answer bytes and fork coordinates remain authoritative only in `TurnFact`;
 a session row remains the sole resume authority.
 
-Every adapter owns a total disposition of its native events. Known native
-kinds are mapped or explicitly dropped, and every unrecognized kind becomes
-`unknown`. Tool, command, and file-change lifecycle maps to `tool`; bounded
-completed reasoning summaries map to `thought`; plan or todo updates and
-retry, warning, and refusal map to `note`. A native completion must provide
-the matching typed tool result. Partial and delta streams, input
-echoes, tool-result bodies and command output streams, raw thinking and
-reasoning deltas, and token, cost, and rate-limit telemetry are dropped. The Claude adapter's SDK
-union disposition is compile-time exhaustive with a runtime unknown fallback.
-The Codex app-server method set is open, so its explicit known dispositions end
-in an unknown fallback. Tests pin both tables and both unknown paths.
+Every adapter totally disposes native events: known kinds are mapped or
+explicitly dropped, and unknown kinds become `unknown`. Tool lifecycle maps to
+`tool`, completed reasoning summaries to `thought`, and plan, retry, warning,
+or refusal narration to `note`. Deltas, input echoes, result bodies, raw
+thinking, and usage telemetry are dropped. Closed native unions are exhaustive;
+open method sets end in the unknown fallback.
 
-Codex notification admission has one adapter-local native transport boundary.
-Notifications received through that boundary are translated in native arrival
-order. `turn/completed` freezes the first terminal `TurnResult`, but does not
-close narration: every notification already admitted through the same boundary
-is translated and emitted in order. The adapter closes request admission and
-pending RPCs, ends native stdin, and keeps reading stdout until the producer
-honors EOF and stdio closes. A bounded one-second drain fallback force-terminates
-an uncooperative producer after that observation window; it then ends the
-Session event stream and resolves the already frozen completion rather than
-waiting indefinitely or rewriting the provider result as cleanup failure.
-Terminal translation freezes steer immediately, and any unacknowledged live
-steer rejects when request admission closes instead of delaying terminal
-settlement. An interrupt request uses the same bounded observation window before
-the existing abort terminal path settles. Only a real native `item/completed`
-produces a completed tool event and typed `ToolResult`; terminal observation
-never repairs or synthesizes a completion for an unmatched start.
+Codex translates admitted notifications in native order. The first
+`turn/completed` freezes the terminal result while already admitted narration
+drains; a bounded one-second fallback ends an uncooperative producer without
+rewriting that result. Terminal observation closes steer admission and rejects
+unacknowledged steers. Only native `item/completed` produces a completed tool;
+terminality never repairs an unmatched start.
 
 The public projector inserts an unmatched start as `active` in its owning open
 Turn. On that Turn's end it converts each remaining active row to `unsettled`
@@ -282,40 +267,20 @@ is rejected when terminal observation closes request admission; terminal
 settlement never waits indefinitely for it, and a later response cannot invent
 acceptance across the closed boundary.
 
-Claude exposes live tell through the same long-lived streaming-input `Query`
-that consumes launch input. The adapter owns one pushable
-`AsyncIterable<SDKUserMessage>` for that Query; it does not call
-`streamInput()`, create a Query per Tell, or end the source after launch. A
-message is submitted only when the SDK requests the source item after it,
-because that post-yield pull proves that the preceding item entered the native
-consumer rather than merely waiting in the adapter queue. The resulting opaque
-fence is submission evidence only.
+Claude uses one long-lived streaming-input Query. SDK demand for the next item
+proves submission and yields only a submission fence. A later successful
+`result` is the consumption checkpoint and yields exact `consumed` receipts for
+previously acknowledged tells, after `tell()` resolves. Earlier results prove
+nothing; accepted tells without a later checkpoint remain replayable. Terminal
+Query returns `turn-ended`, and pre-acknowledgement failure rejects.
 
-Each successful Claude `result` is a consumption checkpoint. For every live
-Tell whose post-yield acknowledgement preceded that checkpoint, the adapter
-yields one exact receipt naming its TellId with provider receipt kind
-`consumed`. Receipt visibility remains gated until the matching `tell()` has
-resolved, so Body can persist the delivery first. A successful result that
-precedes the source acknowledgement is not evidence for that Tell. A Tell
-accepted without a later successful result receives no receipt and remains
-replayable after the Body ends. If Query terminality is already observed before
-submission, `tell()` returns `turn-ended`; source or Query failure before the
-post-yield acknowledgement rejects. Adapter submission ordinals and checkpoint
-tracking are ephemeral and never enter Heart.
-
-OpenCode uses the public V1 Session API. `promptAsync` acceptance is launch
-admission. The adapter gives each launch a native message identity, and only
-the matching native user-message observation opens that Turn's terminal epoch.
-A subsequent same-session busy-to-idle transition or session error is the sole
-terminal evidence. A same-session error after submission begins also closes a
-launch that failed before it could publish that identity. After terminal
-evidence, the complete assistant message is
-read only for the answer and fork coordinate and cannot create a second
-completion decision. The directory-wide event stream is isolated by native
-session id. The adapter does not use V2 APIs and does not claim a live tell
-boundary that V1 cannot prove; pending tells are carried in the next prompt.
-OpenCode maps the frozen Archetype `effort` to its native model `variant`;
-Provider Core does not validate provider-specific variant names.
+OpenCode V1 treats `promptAsync` as launch admission. Only the matching native
+user message opens the Turn's terminal epoch; same-session idle or error closes
+it, and a same-session error after submission may close a launch before that
+identity appears. The final assistant message supplies answer and fork coordinate but cannot
+create another completion decision. Events are isolated by session id. V1
+claims no live tell; pending tells enter the next prompt. Archetype `effort`
+maps to native `variant`.
 
 Pi's `steer()` acknowledgement likewise proves queueing only. Pi omits live
 tell and receives pending text in the next launch input.
@@ -341,28 +306,19 @@ the outer assistant message UUID associated with the successful result; the
 result UUID is not a valid substitute. Together with the session observed by
 the body, it forms the answered turn's durable fork coordinate.
 
-Provider execution and option admission are provider-owned validation at the
-public boundary, before identity allocation. `start()` and `resume()` are their effect readers.
-`admitOptions()` is the sole judge of readonly realization. A native restraint
-has no diagnostic; a `none` restraint has one concrete diagnostic naming the
-enforcement gap. Missing native enforcement remains admitted. No generic claim
-collection, warning type, capability registry, or prompt-based enforcement
-sits beside this named fact.
-The execution crosses the detached process boundary in the soul; each native
-session records the execution name and exact options. Tell, resume, recovery,
-and fork reconstruct the adapter only from those durable facts. A rerouted Body
-Request carries its already resolved recipe and readonly restraint into the
-parent heart, so the body does not reopen Settings or rejudge realization to
-birth the child. A fork inherits its parent's execution and exact restraint.
-`executable` constrains each provider process start. Literal provider `env`
-values overlay the ambient environment at every provider interaction whose
-native boundary accepts an environment. The ambient environment remains
-launch-local and is not a Settings scope or durable fact. Codex start and fork
-both use the frozen execution. Claude start uses its frozen executable and env,
-but the in-process SDK `forkSession` primitive accepts neither; a Claude
-execution carrying env therefore refuses fork instead of silently consulting
-the default native session world. Akuma loads no dotenv file and performs no
-environment interpolation.
+Provider option admission occurs before identity allocation; `admitOptions()`
+alone judges readonly realization. Native restraint has no diagnostic; `none`
+names the enforcement gap, and missing enforcement remains admitted. Sessions
+persist execution name and exact options, from which tell, resume, recovery,
+and fork reconstruct adapters. Fork inherits execution and restraint.
+`executable` constrains process start; literal `env` overlays only ambient
+launch environment and is neither durable nor interpolated. Claude execution
+with `env` refuses fork because native `forkSession` cannot accept it.
+
+Claude fork uses the answered session and outer assistant-message UUID and
+requires a distinct nonblank child session. Pi uses the exact answered
+`sessionFile` and `historyId` and requires a distinct returned file. Missing
+source points, native failure, or reused coordinates are `fork-failed`.
 
 Alongside its adapter, each provider states its confinement for a
 given call: declared writable roots, or `unconfined`. The soul records it;

@@ -50,8 +50,8 @@ owners' source timestamps in the assembled rows. Kanshi does not persist or
 precompute an age. Text derives every displayed age against this report's one
 `observedAt`; JSON retains only the source timestamps.
 
-When a Repo is present, Kanshi creates one call-scoped
-`GitReadObservation` and passes it to the complete Contract, TaskHolder, and
+When a Repo is present, Kanshi creates one call-scoped Git read observation and
+passes it to the complete Contract, TaskHolder, and
 Dispatch readers. Kanshi only composes their returned values into sections and
 joins; it does not inspect the frozen Git snapshot, select product paths or
 object IDs, decode product bytes, or create Git processes. The owners may read
@@ -137,8 +137,8 @@ lifecycle, and never changes or repairs either authority.
 
 ## Selection
 
-`selectKanshi({ report, contract })` projects an assembled report without new
-reads. It keeps the addressed Contract row, Task rows whose joined endpoint id
+Contract selection projects an assembled report without new reads. It keeps
+the addressed Contract row, Task rows whose joined endpoint id
 exactly matches the selector, and Akuma rows whose Dispatch endpoint names that
 Contract. The selected Contract row already carries `namespaceTasks`; do not
 copy namespace matches into the TASK section. Section presence, absence, and

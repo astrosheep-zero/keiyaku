@@ -17,9 +17,9 @@ writer. This synchronous SQLite section preserves Heart's atomic row order and
 single-writer law; it is not a public synchronous API, cache, mirror, daemon,
 or queue.
 
-Any Heart observation assembled from multiple SQL queries uses one read-only
-SQLite transaction, so every value in that observation comes from one
-snapshot. It does not acquire writer or leash custody.
+Any observation assembled from multiple Heart queries uses one read-only
+SQLite transaction. Every returned value therefore comes from one snapshot
+without acquiring writer or leash custody.
 
 SQLite open is the first and sole existence attempt for an existing Heart or
 leash. Existing custody opens read-write without create; initialization is the
@@ -139,7 +139,7 @@ The seal is the one row that must not live in `heart.db`: the birth claim is a l
 transaction, and "check the seal in the same claim" is only atomic if the
 seal sits under the same lock. The seal therefore rides the leash's
 database, not `heart.db`. Both schemas and their typed interpretation are
-owned inside the closed `heart/` custody core; no store or repository interface
+owned inside the closed Heart custody core; no store or repository interface
 sits between callers and its index.
 
 Heart schema version is `14`; leash schema version remains `4`. Version 14
@@ -179,25 +179,23 @@ become told because Body recovery and status still read them. A
 settled fact may remain in the bounded buffer until a later write crosses the
 compaction threshold; no command promises an exact physical row count.
 
-The retained activity read is the sole raw activity-history primitive. It
-returns the complete retained provider-activity and tell fact window in
-ascending timeline sequence, together with `lowestRetained` and `highest`. It
-joins those facts by their one shared timeline sequence and does not copy tell
-state into activity persistence. It does not accept or apply public history
-`before`, `since`, or the semantic-row `limit`. Those coordinates belong to
-the public Turn-ledger selector. The bound numbers are persisted timeline
-sequence coordinates, not semantic-row counts. A sequence below
+The sole raw activity-history read returns the complete retained provider and
+tell fact window in ascending timeline order with `lowestRetained` and
+`highest`. It does not copy tell state into activity persistence or apply
+public `before`, `since`, or semantic-row `limit`; those belong to the public
+Turn-ledger selector. The bounds are persisted timeline coordinates, not
+semantic-row counts. A sequence below
 `lowestRetained` is permanently unavailable. Gaps inside the retained range
 are reported arithmetically from the rows, never by persisted marker facts.
 
 The activity fold and the snapshot selector are separate pure readers. The
 fold decodes events, pairs tool start and completion by provider id, retains
 both timestamps, derives completed duration, and keeps a completed tool at its
-start-fact sequence. Completion enriches that row and does not mint another
+start-fact sequence. Completion enriches that row without minting another
 cursor coordinate. Each tell projects as exactly one `pending` or `told`
-semantic row at its recorded sequence, and semantic rows exist before any
-budget is applied. A completed event whose start was pruned is a settled row
-without duration and does not reconstruct that start; a retained start without
+semantic row at its recorded sequence before any budget applies. A completed
+event whose start was pruned is settled without duration and does not
+reconstruct that start; a retained start without
 completion is in flight. The snapshot selector pins every in-flight tool and
 every pending tell outside the independent tail-three and voice-three budgets.
 Tail is the newest non-pinned ordinary window rows; voice is the newest eligible
@@ -220,8 +218,8 @@ coordinate's admitted provider, cwd, and options recipe for the native call and
 child birth; a retained answered turn without that recipe is authority
 corruption, not `unknown-history`.
 
-`readHeart()` does not reinterpret the timeline. Public history reads the same
-timeline projector without copying answer bytes into activity. `history --last`
+Heart reads do not reinterpret the timeline. Public history uses the same
+projector without copying answer bytes into activity. `history --last`
 reads at most one answered Turn end, selected by its durable timeline sequence.
 No answered row projects typed absence; an answered row
 retains its exact `answer` bytes, including an empty string. Recovery,
@@ -230,12 +228,12 @@ timeline owns execution chronology and complete outcome bytes, while session
 rows remain the sole resume authority.
 
 `list()` remains a compact fleet read and never scans activity or turns. A
-directory that is not a canonical physical AkuId is not a member and may be
-ignored. Known absence of Heart or leash in the initialization window is not a
-member failure; it projects the existing unborn row. After a valid physical
-identity, schema mismatch, IO corruption, and other read failures fail the
-complete fleet read. The error names the AkuId and directory and retains the
-original cause. There is no per-member diagnostic or partial marker.
+noncanonical physical AkuId is not a member and may be ignored. Known absence
+of Heart or leash during initialization projects the existing unborn row.
+After a valid physical identity, schema mismatch, corruption, and other read
+failures fail the complete fleet read, naming the AkuId and directory while
+retaining the original cause. There is no per-member diagnostic or partial
+marker.
 
 One judge per question:
 

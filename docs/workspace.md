@@ -33,7 +33,7 @@ file as a derived view and requires work to remain in its Contract worktree.
 lifecycle and, when an Arc is active, stays within that current chapter. `Reviewer` reviews the complete current worktree snapshot without
 modifying it. Candidate commits are only for historical review.
 
-The same canonical frontmatter helper feeds initial here-worktree reservation
+The same canonical frontmatter projection feeds initial here-worktree reservation
 and complete rendered guidance, so `Keiyaku.guidance()`, `keiyaku show`,
 managed worktree materialization, here projection, and reconciliation cannot
 diverge. `show` text is exactly those bytes; JSON contains the Contract
@@ -101,16 +101,14 @@ appointment are corruption. Mutation surfaces propagate the verbatim
 corruption diagnostic as exit 3; observation returns a typed failed arm
 without suppressing other independently readable status sections.
 
-The first-generation Place vocabulary is the exact ordered 173-entry v3
-catalog owned as one source constant in the workspace Place owner
-(`src/workspace-place.ts`). A later
+The first-generation Place vocabulary is the exact ordered 173-entry catalog
+owned by the workspace Place owner. A later
 generation appends its canonical decimal integer, at least 2 and without a
 leading zero, to each base. Allocation order is generation-major: the
 complete catalog in listed order, then the same catalog with suffix `2`,
 then suffix `3`, without bound. Generation arithmetic is exact beyond
 `Number.MAX_SAFE_INTEGER`. Allocation chooses the first unappointed Place.
-The v3 random-base allocator and shared-ledger Place field are not part of
-this owner. The register stores only current appointments; it has no cursor,
+The register stores only current appointments; it has no cursor,
 free list, tombstone, reverse index, migration bit, or physical occupancy
 fact. Decode builds one immutable in-memory snapshot with derived by-Place
 and by-Contract indexes. Those indexes are not persisted authority.
@@ -155,17 +153,9 @@ Place never hides managed bytes. The next reconcile retries that same
 absence proof and release. Release corruption propagates. There is no
 second persisted release marker.
 
-This owner exposes exactly one read for later Library call composition:
-
-```ts
-readManagedWorktreeAppointment(repo, contract): Promise<
-  | { kind: "appointed"; place: string; path: string }
-  | { kind: "unappointed" }
-  | { kind: "failed"; diagnostic: string }
->
-```
-
-`appointed` comes only from the decoded register. `unappointed` includes an
+The sole appointment read returns `appointed` with place and path,
+`unappointed`, or `failed` with a diagnostic. `appointed` comes only from the
+decoded register. `unappointed` includes an
 admitted managed Contract not yet appointed and every here Contract.
 Register corruption or an unavailable read is one `failed` arm. The reader
 does not inspect the journal, Git registration, or filesystem existence and
@@ -182,7 +172,7 @@ managed worktree.
 ## Materialization And Cleanup
 
 Post-admission Place lifecycle composition has one private concrete Library
-owner at `src/library/reconcile.ts`. That owner appoints a managed Place
+owner. That owner appoints a managed Place
 before Git realization, then passes the freshly folded Contract state here
 for guidance. Mutation and Repo remain thin entry points and do not repeat
 that appointment, cleanup, release, or register-lag policy. The workspace

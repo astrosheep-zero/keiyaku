@@ -236,8 +236,8 @@ or additional fact kind is needed for a value derivable from journal facts, Git,
 or the Akuma pillar's own records defined by [akuma-heart.md](akuma-heart.md).
 
 A Contract history read is not a third authority. Library composes the selected
-journal and successful Dispatch facts from one `GitReadObservation` of
-keiyaku-state into a non-authoritative recorded-time projection: `fact.at`
+journal and successful Dispatch facts from one call-scoped Git read observation
+of keiyaku-state into a non-authoritative recorded-time projection: `fact.at`
 ascending, then `dispatchedAt`, with journal before Dispatch on equal
 timestamps. Journal ties keep append order; Dispatch ties use AkuId bytes. The
 tie rule is presentation only and asserts no causality, publication order, or

@@ -4,15 +4,11 @@ This chapter owns help, rendering, and exit status.
 
 ## Shared Akuma Rendering
 
-Status, unfinished or non-answered wait, every multi-target wait, unfinished
-observed call, tell, interrupt, and kill share one snapshot renderer, and
-history uses the same row vocabulary without snapshot budgets. The renderer
-consumes typed public values only; it does not mine Heart facts, reconstruct
-outcomes or tool lifecycle, or read history. One typed raw-answer decision,
-shared with stdout newline custody, writes exact answer bytes for an answered
-default call and an ordinary answered single-target wait. `history --last`
-remains the explicit exact read independent of waiting. Full answer bytes are
-never clipped in JSON.
+Status, non-answered waits and calls, tell, interrupt, and kill share one
+snapshot renderer; history reuses its row vocabulary without snapshot budgets.
+It consumes typed public values only. Answered default call, answered ordinary
+single wait, and `history --last` write exact answer bytes; JSON never clips
+them.
 
 `show` is a raw Contract read. Text writes the exact guidance Markdown with no
 status header or explanatory wrapper. JSON is exactly
@@ -20,57 +16,34 @@ status header or explanatory wrapper. JSON is exactly
 workspace renderer owned by [workspace.md](workspace.md); the CLI does not
 assemble a second projection. Audit remains unchanged and omits guidance.
 
-`history kei/...` is that same-snapshot two-authority projection. Text begins
-with `history <kei/...> · <J> journal · <D> dispatch`, then one recorded-time
-timeline. Counts come from event source. Zero Dispatch facts render `0
-dispatch` and no placeholder row. A journal event is
-`<fact.at> <fact.kind> · <fact.entry>[ · <fact.actor>]` plus the
-decision-relevant subordinate facts for that kind; a Dispatch event is
-`<dispatchedAt> dispatch · <complete AkuId>`. Opaque coordinates and payloads
-are never truncated. Equal timestamps stay visibly equal and claim no
-causality. JSON is the exact `ContractHistory` value and exits `0`.
-`contract-missing` exits `1`; authority corruption keeps the exception exit.
-Akuma history text, `--last`, cursors, JSON, and exits remain unchanged. There
-is no Contract cursor, pagination, last-event shortcut, or section split.
-
-The installed executable is `keiyaku`. The package declares no alternate or
-versioned command name.
+`history kei/...` renders the same-snapshot Contract history. Text begins
+`history <kei/...> · <J> journal · <D> dispatch`, then orders journal and
+Dispatch events by their recorded times. Each row retains the exact kind,
+entry or AkuId, actor when present, and decision-relevant fact fields. Equal
+times claim no causality. JSON is the exact `ContractHistory`; missing
+Contract exits `1`, corruption exits `3`, and success exits `0`. There is no
+Contract cursor, pagination, last-event shortcut, section split, or Akuma
+history expansion.
 
 ## Help
 
-CLI grammar has one table owner for each command family: Contract and shared
-root commands, Task commands, Akuma commands, and install. Root help composes
-those owner rows without copying their grammar; only Task remains a namespace. Each
-owner row contains its machine syntax, the corresponding usage
-line or block, and one help-only purpose line.
-Validation, usage refusal, namespace help, and leaf help read that row.
-Structural rules that are clearer as command code remain adjacent to their row
-rather than creating a grammar language.
+Each command family owns one grammar table. Root help composes those rows;
+validation, usage refusal, namespace help, and leaf help read the same syntax,
+usage, and purpose values. Only Task remains a namespace.
 
-`--help` is a reserved parser token, not a command or command flag. After the
-optional `-C <path>` prefix is removed, its presence anywhere makes the
-invocation a help request for the longest legal command-word prefix. Other
-tokens do not need to form a valid invocation: `task unknown --help` describes
-the Task namespace. Root help lists the root command vocabulary and points one
-hop to `task --help`; Task namespace help lists every action and its usage.
-Root Akuma and Contract leaf help give the owning row's purpose and full usage.
-Command-specific supplemental guidance or one minimal example may follow the
-usage block in leaf help; it does not appear in syntax-refusal usage. There is no
-`help` command, `-h` alias, or per-row `--help` flag.
+`--help` is a reserved parser token. After optional `-C`, its presence requests
+help for the longest legal command-word prefix even when later tokens are
+invalid. Root, namespace, and leaf help render their owning rows; leaf help may
+add supplemental guidance or one minimal example. There is no `help` command,
+`-h`, per-row flag, or JSON help.
 
-Help is a terminal parser observation. It writes text to stdout, exits `0`,
-does not read stdin, does not enter invocation, and never constructs or reads
-`Repo`, `Tasks`, or `Akuma`. `-C` is accepted but has no effect and `--json`
-does not give help a JSON form. Therefore help works from a directory with no
-Keiyaku world.
+Help writes stdout, exits `0`, reads no stdin or product state, and works
+without a Keiyaku world. `-C` is accepted but has no effect.
 
-A syntax refusal carries the deepest grammar coordinate reached and renders
-that owner's stored usage, never an ancestor's. It writes stderr and exits `1`.
-Source-selection and nonblank refusals are that same usage class: they name
-the command or input and the accepted form, and they occur before World,
-Repo, or package-root invocation. A bare invocation remains an
-incomplete-call refusal whose body is the root projection; requesting root
-help produces that projection on stdout with exit `0`.
+A syntax refusal renders the deepest reached owner's usage to stderr and exits
+`1`. Source-selection and nonblank refusals are the same pre-invocation class.
+A bare invocation is refusal; root help renders the same root projection as
+successful help.
 
 The adapter chooses actor testimony in this order: explicit nonblank `--actor`,
 then `KEIYAKU_ACTOR_ID`, then no actor. Explicit input wins over the
@@ -79,25 +52,14 @@ CLI does not prompt.
 
 ## Rendering And Exit Status
 
-Plain text is the primary CLI interface for both the flagship agent and the
-human directing it. Text is their default usage choice and the designer's
-default design surface, not merely the parser behavior when `--json` is
-omitted. They share one presentation: what a human reads is what the flagship
-reads. Every command is designed text-first, and its text receipt or board must
-carry the decision-relevant product facts. `--json` is an explicit secondary
-projection for debugging or non-interactive bulk scripting; its availability
-never excuses missing, opaque, or degraded text output.
+Plain text is the primary CLI projection. `--json` is a secondary projection
+of the same typed value; it never excuses missing or degraded text facts.
 
-Before opaque work that may run external commands or substantial Git work, a
-text invocation writes exactly one start line to stderr after selected stdin is
-fully acquired and before the operation begins. The closed vocabulary is
-`⧖ preparing keiyaku` for bind, `⧖ delivering` for deliver, `⧖ auditing` for
-audit, `⧖ reconciling` for reconcile, and `⧖ installing skills` for install.
-This line states only that the named work has begun; it is not a result object,
-progress percentage, internal-phase report, or durable fact. Explicit waiting
-and Akuma observation commands do not repeat their already-visible intent.
-`--json` writes no start line, so automation receives only the final JSON value
-and diagnostics.
+After stdin acquisition, external-command or substantial Git work writes one
+stderr line: `⧖ preparing keiyaku` for bind, `⧖ delivering`,
+`⧖ auditing`, `⧖ reconciling`, or `⧖ installing skills`. It is a start fact,
+not progress or durable state. Wait/Akuma observation add none; `--json`
+suppresses it.
 
 ## Shared Scanner Grammar
 
@@ -150,27 +112,15 @@ Text and `--json` render this same object. Both write to stdout; JSON serializes
 it without another output schema. A corrupted authority or other exception
 writes its verbatim diagnostic to stderr and exits `3`.
 
-Akuma text has one shared snapshot presentation across status, unfinished or
-non-answered single wait, every multi-target wait, unfinished observed call,
-tell, interrupt, and kill; history remains the unbounded browsing surface. An
-answered default call and an ordinary single-target wait that observes
-`life: asleep` with an idle answered outcome write the exact persisted answer
-bytes, including the empty string, with no identity, timeline row, life footer,
-clipping, sanitization, or extra newline. A running timeout, failed outcome,
-open Turn, killed, stranded, hung, untidy, readonly-none, or no-outcome
-observation remains that snapshot, even when an older answered idle outcome is
-still retained. Multi-target wait remains identity-bearing snapshots for every
-selected member and never concatenates naked answers. A successful detached call writes its born AkuId and a final
-`$ keiyaku -C <world> wait <@alias|AkuId> --timeout 5m` command without inventing
-life. The wait selector is the successful Alias when one was requested,
-otherwise the complete AkuId; `<world>` is the canonical Akuma World used by
-the call. Dispatch
-failure, alias failure, readonly-none refusal, or observation failure keeps its
-diagnostic and does not add that wait command. Snapshot
-`said` and `thought` rows occupy at most two terminal lines, including a visible
-truncation marker when clipped. Other semantic-kind budgets remain unchanged.
-Text clipping and receipt presentation never alter the public value serialized
-by `--json`.
+Akuma text shares that snapshot across the named commands; history remains the
+unbounded browsing surface. An idle answered default call or ordinary single
+wait writes the exact answer, including empty bytes, with no framing or added
+newline. Every other state remains an identity-bearing snapshot, and plural
+wait never concatenates raw answers. Successful detach ends with
+`$ keiyaku -C <world> wait <@alias|AkuId> --timeout 5m`, using the successful
+Alias or complete AkuId and canonical World; failure adds no command or life.
+`said` and `thought` occupy at most two terminal lines with visible clipping.
+Text never changes the public JSON value.
 
 Akuma life words are rendered verbatim from the public union. `hung` means the
 latest Body durably recorded provider custody that did not retire; a public
@@ -234,9 +184,8 @@ Activity follows the identity and optional relation directly. Status, wait,
 unfinished observed call, and kill place life on one two-space-indented
 trailing line immediately after activity. Ordinary and interrupt tell output
 and history omit life. The life vocabulary remains `● running`, `○ asleep`,
-`× killed`, `? stranded`, `? hung`, and `? untidy`. The shared snapshot then
-appends created Task context from the typed `AkumaObservation` after that
-existing body, including after the life footer on commands that show one:
+`× killed`, `? stranded`, `? hung`, and `? untidy`. A returned
+`AkumaObservation` then appends created Task context after the snapshot body:
 
 ```text
   tasks <N>
@@ -244,24 +193,22 @@ existing body, including after the life footer on commands that show one:
 ```
 
 Zero matches render `tasks 0`; failure renders `! tasks failed <diagnostic>`.
-Use the existing Task disposition glyphs and wrapping rules. Complete TaskIds
-and titles are never truncated, and the block does not consume or alter
-timeline row budgets. Raw answered wait, call, history, compact FLEET,
-timeline selection, and activity budgets remain unchanged. Renderers perform
-no Task, Heart, or Dispatch lookup. JSON values, timeline row
-semantics, and history model remain unchanged.
+The block preserves Task wrapping and complete identities, never truncates
+TaskIds or titles, and consumes no timeline budget. Raw answered wait/call,
+history, and compact FLEET remain unchanged. Renderers perform no Task, Heart,
+or Dispatch lookup. JSON values, timeline semantics, and history model remain
+unchanged.
 
 Post-admission physical or settlement failures remain inside the accepted
 object as typed lags. Text and JSON expose them without changing the Contract
 fact, command kind, or exit status. The adapter never hides the existing
 Contract or automatically abandons it.
 
-Accepted Contract mutation results are one closed union discriminated by the
-literal verbs `bind`, `amend`, `deliver`, `review`, `arc`, `abandon`, and
-`audit`. Reconcile remains an observation and is outside this union. The
-common envelope is `kind: "accepted"`, that literal `verb`, `contract`, the
-non-null mutation `head`, `facts`, `effects`, `settlement`, and optional
-nonempty reconciliation `lag`. Verb payloads stay flat on that object: bind
+Accepted Contract mutation results are one flat closed union discriminated by
+`bind`, `amend`, `deliver`, `review`, `arc`, `abandon`, and `audit`; reconcile
+remains an observation. The common envelope carries `kind`, `verb`, `contract`,
+non-null `head`, `facts`, `effects`, `settlement`, and optional nonempty `lag`.
+Verb fields remain flat: bind
 requires `target` and exactly one Region answer (`overlaps` or
 `overlapFailure`); amend requires `diff`, including the empty string, and
 that same Region answer; deliver alone may carry `verification`,
@@ -272,12 +219,9 @@ and `leak`. An arm cannot carry another arm's fields. JSON remains that same
 flat value; there is no payload envelope, second schema, or compatibility
 arm.
 
-Bind, amend, deliver, review, arc, and abandon share one Contract mutation
-receipt. The renderer remains a pure projection over `InvocationResult`: it
-invents no fields, rereads no authorities, and does not change exit
-semantics. JSON is byte-for-byte the serialization of that same public value.
-Accepted renderer dispatch is exhaustive on `verb`; audit text is selected
-only by `verb: "audit"`.
+The renderer is a pure exhaustive projection over `InvocationResult`; it
+invents no fields, rereads no authority, and does not change exit semantics.
+JSON serializes that same public value.
 
 The receipt answers four things in a fixed order: the invocation verdict, the
 Contract identity, unresolved obligations, then deviations and the exact record.
@@ -356,8 +300,8 @@ string. The CLI never computes another diff or makes availability a lifecycle
 decision. Audit omits diff unless `--diff` is present. That flag keeps the
 public value only on `report.candidate.diff`; text consumes that report-owned
 value exactly once, including an empty string, and never adds a second
-top-level `diff`. `src/cli/render/audit.ts` owns the complete accepted audit
-receipt. After the invocation line the required order is candidate,
+top-level `diff`. The accepted audit renderer owns the complete receipt. After
+the invocation line the required order is candidate,
 verification, target. Workspace is subordinate evidence under candidate, not
 a row before it. Ready identity uses `tender=`, `integration=`, and `change=`.
 Recorded delivery evidence is `delivery change=<id>` with its relation.

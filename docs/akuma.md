@@ -22,7 +22,7 @@ before fulfillment. Pure identity parsing, path derivation, projection of
 already-read facts, and construction of a handle over a resolved WorldRoot stay
 synchronous.
 
-- **heart** — the closed custody core in `heart/`. It privately owns `heart.db`
+- **heart** — the closed custody core. It privately owns `heart.db`
   and `leash.db`; typed facts cross its index boundary, SQL rows and schemas do
   not. One authority boundary does not require one source file: facts, row
   mechanics, and transaction judges remain separate paragraphs of the same
@@ -47,27 +47,12 @@ synchronous.
   kind selected by its frozen execution recipe. Its writable reach is a typed
   confinement fact, never an admission gate.
 
-The dependency direction is fixed:
-
-```text
-cli -> akuma -> {body, heart, identity, archetype, provider, publication, requests, providers(map), settings}
-archetype -> {identity, provider-recipe, provider, providers(map), settings}
-body -> {heart, provider, providers, requests, runtime/proc}
-requests -> {heart, identity, provider, provider-recipe, providers(map), publication}
-publication -> {heart, identity, runtime/proc}
-heart/facts -> provider-recipe
-heart/soul -> {identity, provider-recipe, heart/facts}
-provider -> {heart types, provider-recipe}
-providers/map -> {provider-recipe, provider adapters}
-providers/* -> {provider, provider-recipe, runtime/proc/stdio}
-providers/{acp/index,grok-build} -> providers/acp/core
-providers/acp/core -> {provider, runtime/proc/stdio}
-providers/codex-app-server/index -> {events, provider, provider-recipe, runtime/proc/line-rpc}
-providers/codex-app-server/events -> {provider, runtime/proc/line-rpc(type)}
-runtime/proc/line-rpc -> runtime/proc/stdio
-runtime/proc/stdio -> runtime/proc/run
-kanshi -> akuma public values
-```
+Dependency direction is fixed: the public Akuma surface composes identity,
+Archetype, Heart, Body, provider, Request, publication, Settings, and runtime
+capabilities. Body drives providers and writes only typed Heart facts; Requests
+compose Heart, identity, provider recipe, and publication; provider adapters
+depend on the provider-neutral vocabulary and process runtime, never on public
+or lifecycle projections. Kanshi consumes only public Akuma values.
 
 Process custody is a live capability, not a durable description. The Body may
 terminate only provider descendants represented by handles it directly owns.
@@ -125,13 +110,13 @@ spawned.
 Birth order: create directory -> spawn body -> body takes the leash and, in
 the same claim, checks for a seal (sealed -> self-abort) -> soul row written
 under that claim -> visible. The ordinary birth timeout is 30 seconds, and
-`call()` returns only after birth. A Body that fails before writing Soul seals
-the directory under the leash with its exact diagnostic; the caller observes
-that seal and reports the same spawn failure. The remaining window between
-create and claim is owned by `call()` while it lives: on timeout it takes the
-leash itself if it can, seals with `call-timeout` evidence, and reports the
-timeout. Process output never decides whether the Body failed or what evidence
-the Seal contains.
+`call()` returns only after birth. A Body that
+fails before writing Soul seals the directory under the leash with its exact
+diagnostic; the caller observes that seal and reports the same spawn failure.
+The remaining window between create and claim is owned by `call()` while it
+lives: on timeout it takes the leash itself if it can, seals with
+`call-timeout` evidence, and reports the timeout. Process output never decides
+whether the Body failed or what evidence the Seal contains.
 If the caller crashes inside the window, the directory is unborn until someone
 pays the leash to seal it. Nothing sweeps blind; nothing adjudicates by age.
 
@@ -158,14 +143,12 @@ Akuma-owned read with one optional Archetype selection: Akuma validates the
 name, decodes each physical identity, and includes only matching rows. The
 caller does not parse AkuIds or filter a complete result itself.
 
-Every valid allocated directory remains in that fleet as born, unborn, or
-stillborn from the evidence that exists. Missing Heart or leash in the ordinary
-initialization window is unborn. A seal without Soul is stillborn. Soul selects
-the born row. A name that is not a canonical physical AkuId is not an identity
-and may be ignored. After a valid physical identity, schema mismatch, IO
-corruption, and other read failures fail the fleet read; they are not absence.
-That failure names the complete AkuId and physical directory and retains the
-original cause. `list()` does not seal, sweep, repair, retry, or judge age.
+Every valid allocated directory remains visible as born, unborn, or stillborn.
+Missing Heart or leash during initialization is unborn; a seal without Soul
+is stillborn; Soul selects the born row. A noncanonical physical name may be
+ignored. After a valid identity, schema mismatch, corruption, and other read
+failures fail the fleet read with that AkuId, directory, and original cause.
+The read never seals, sweeps, repairs, retries, or judges age.
 
 ## Archetype
 
@@ -186,15 +169,13 @@ soul snapshot. A nonempty Markdown body after frontmatter overrides the system
 prompt; an empty body leaves that option absent so the native harness keeps its
 default.
 
-`Akuma.of(root, { home?, settings? })` consumes one already resolved
-WorldRoot. All worktrees of one Git repository therefore share one fleet,
-Alias authority, and Heart storage. The Soul's execution cwd remains the
-actual invocation worktree or subdirectory and does not participate in World
-identity. `home` is Akuma's own coordinate and defaults to `~/.keiyaku`;
-Archetype definitions are read only from `<home>/akuma`. An injected Settings
-snapshot is configuration for provider resolution and is never the source of
-home. When Settings is omitted, Akuma constructs one Settings value with the
-same WorldRoot and home. `call({ archetype })` validates the name, reads this one Archetype file,
+`Akuma.of(root, { home?, settings? })` consumes one resolved WorldRoot. All
+worktrees of one Git repository share one fleet, Alias authority, and Heart
+storage; the Soul's execution cwd does not participate in World identity.
+`home` is Akuma's coordinate and defaults to `~/.keiyaku`; definitions come
+only from `<home>/akuma`. Injected Settings configures provider resolution but
+never supplies home. Without Settings, Akuma constructs it from the same World
+and home. `call({ archetype })` validates the name, reads this one Archetype file,
 resolves its `provider` as an execution name in the Settings `providers`
 namespace, and asks the selected built-in adapter kind to admit the Archetype
 options before allocating an identity. Missing, malformed, unknown-provider,

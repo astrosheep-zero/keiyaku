@@ -43,10 +43,9 @@ segment key. Core only mints and compares those opaque keys; it does not know
 how the producer chose them.
 
 Before execution, the producer captures its `AttestationData.subject`.
-Admission receives it through the core `Preparation` primitive, never
-re-derives the set, and never silently retargets the result. The sole
-`decideAttestation` call judges contract existence and terminal state against
-its own attempt observation. It does not reject an older document or subject:
+Admission receives that captured value, never re-derives or silently retargets
+it. The sole attestation decision judges contract existence and terminal state
+against its attempt observation. It does not reject an older document or subject:
 the completed run remains a truthful fact about the integration and Verification
 segment it names. Subject currentness remains placement's sole law as defined
 in [lifecycle.md](lifecycle.md). The
@@ -112,7 +111,7 @@ blob evidence outside the bounded attestation summary.
 
 Audit may refuse a missing or moved document before any candidate exists.
 Once a producer has run,
-its captured preparation enters the same `decideAttestation` used by every
+its captured preparation enters the same attestation decision used by every
 producer, and only that decision may issue `contract-missing` or `terminal`.
 Document movement can make the resulting testimony stale for a gate; it cannot
 erase the completed observation. Verification defines no audit-specific
@@ -120,14 +119,12 @@ eligibility judge.
 
 ## Runtime Contract
 
-Verification owns declaration resolution and verdict production. The complete
-attempt is implemented only by `src/verification/execution.ts`:
-it materializes the exact integration snapshot, decodes tracked Settings,
-runs create commands, executes every declaration, runs destroy commands
-best-effort, and disposes scratch. Git scratch and Settings decoding are
-injected concrete capabilities; there is no producer compatibility module,
-registry, cache, or asynchronous runner. Protocol admits only a terminal
-outcome as an attestation.
+Verification owns declaration resolution and verdict production. An attempt
+materializes the exact integration snapshot, decodes tracked Settings, runs
+create commands and declarations, runs destroy commands best-effort, and
+disposes scratch. Git scratch and Settings decoding are injected concrete
+capabilities; there is no producer compatibility module, registry, cache, or
+asynchronous runner. Protocol admits only a terminal outcome as an attestation.
 
 Verification owns declaration resolution and verdict production. It
 does not define a core gate vocabulary or declaration type. The shared process
@@ -159,19 +156,12 @@ capability only for one displaced-directory ignored-byte existence probe. The
 buffered process result and its bounded stdout/stderr semantics remain
 unchanged for every existing caller.
 
-`runProcessToExit` is the separate unbounded wait for a detached supervisor
-process whose owned operation already enforces its own finite timeout. It takes
-the same argv, cwd, and environment but no timeout and returns the same process
-outcome without a `timeout` arm in practice. It never runs an unbounded user
-command directly; managed-worktree Hook runners are its sole consumer.
-
-The same domain-free runtime owns direct spawn and live process custody for
-long-lived callers. `spawnDetachedProcess` returns an `OwnedProcess` capability
-closed over the actual `ChildProcess`: diagnostic `pid`, `terminate(force?)`,
-and `release()`. Termination requires the live child handle; `release()` gives
-up that authority. There is no process identity probe, start token, external
-put-down primitive, or reconstruction of authority from persisted numeric
-coordinates.
+Detached supervisor waits have no timeout because their owning operation
+already enforces one; they never run an unbounded user command directly.
+The same domain-free runtime gives long-lived callers a closure-backed live
+process capability whose termination and release require the actual child
+handle. No persisted pid, process-group, start token, or reconstructed signal
+authority exists.
 
 Each declaration has only its optional Markdown timeout, written with an
 explicit `ms`, `s`, `m`, or `h` unit; omission is unbounded.

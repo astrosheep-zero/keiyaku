@@ -39,7 +39,7 @@ AkuId bytes. Malformed paths, non-canonical bytes, invalid identities,
 unparseable timestamps, and duplicate authority are
 `AuthorityCorruptionError`.
 
-A complete Dispatch read consumes one call-scoped `GitReadObservation` from
+A complete Dispatch read consumes one call-scoped Git read observation from
 the Git owner. Dispatch selects its paths and object IDs from the immutable
 snapshot, requests those blobs once, and exclusively performs path, codec,
 canonical-byte, duplicate, and sorting judgment. A missing Dispatch object is
