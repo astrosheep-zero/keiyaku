@@ -142,6 +142,51 @@ test("one-target Kanshi observation has a seven-process Git topology", async () 
   assert.equal(invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)), false);
 });
 
+test("named status selects an active Contract from one pinned Kanshi observation", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repo = await Repo.at({ path: repository.path });
+  const bound = await Keiyaku.bind({ repo, markdown: document("Barrier"), workspace: "worktree" });
+  await bound.keiyaku.reconcile();
+  const contract = await bound.keiyaku.state();
+  const activeRow = (await Keiyaku.list({ repo })).rows.find((row) => row.id === contract.id);
+  assert.equal(activeRow?.disposition, "active");
+  assert.equal(activeRow?.workspace, "worktree");
+  assert.notEqual(activeRow?.worktreePath, null);
+  const active = repository.run(["rev-parse", GIT_REF]).trim();
+  await bound.keiyaku.abandon();
+  const terminal = repository.run(["rev-parse", GIT_REF]).trim();
+  repository.run(["update-ref", GIT_REF, active, terminal]);
+  await bound.keiyaku.reconcile();
+  const marker = join(repository.path, "named-status-barrier");
+
+  const result = await withGitShim(
+    [
+      'if [ "$*" = "rev-parse --verify --quiet refs/heads/keiyaku-state" ] && [ ! -e "$KEIYAKU_BARRIER_MARKER" ]; then',
+      '  "$KEIYAKU_REAL_GIT" "$@"',
+      '  "$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$KEIYAKU_TERMINAL_OID" "$KEIYAKU_ACTIVE_OID"',
+      '  : > "$KEIYAKU_BARRIER_MARKER"',
+      "  exit 0",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {
+      KEIYAKU_ACTIVE_OID: active,
+      KEIYAKU_BARRIER_MARKER: marker,
+      KEIYAKU_TERMINAL_OID: terminal,
+    },
+    async () => await invoke(parseArgv(["-C", repository.path, "status", `@${contract.id.slice("kei/".length)}`])),
+  );
+
+  assert.equal(result.kind, "status");
+  assert.equal(result.kind === "status" && result.selection, "contract");
+  assert.equal(result.kind === "status" && result.report.contracts.kind === "present"
+    && result.report.contracts.value.rows.find((row) => row.id === contract.id)?.disposition, "active");
+  assert.equal(repository.run(["rev-parse", GIT_REF]).trim(), terminal);
+});
+
 test("same-target lag counts each workspace HEAD against the one frozen target head", async () => {
   const { repository, contract } = await populatedWorld();
   const tasks = Tasks.of(await World.at(repository.path));

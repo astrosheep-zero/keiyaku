@@ -20,6 +20,7 @@ import { World } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 import { matchesAkumaGlob, parseAkumaGlob } from "../src/identity/selector.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
+import { observeKanshi } from "../src/kanshi/read.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { akuId } from "../src/akuma/identity.js";
@@ -437,12 +438,47 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   assert.equal((await bound.keiyaku.state()).id, "kei/review");
   const source = await answered(repository.path, "worker", "00000001");
   await moveAlias({ world: repository.path, alias: "@review", akuId: source.id });
-  const contracts = (await Keiyaku.list({ repo })).rows;
   const path = await World.at(repository.path);
-  await assert.rejects(
-    resolveNamedAddress({ path, selector: "@review", contracts }),
+  const observation = await observeKanshi({ world: path, repo });
+  assert.throws(
+    () => resolveNamedAddress({ selector: "@review", report: observation.report, aliases: observation.aliases }),
     /ambiguous selector matches Contract and Akuma/u,
   );
+});
+
+test("named Address refuses failed Kanshi Contract and Alias observations", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-named-kanshi-failed-"));
+  try {
+    const observation = await observeKanshi({ world: root as import("../src/index.js").WorldRoot });
+    const failure = { kind: "failed" as const, failure: { message: "unavailable" } };
+    assert.throws(
+      () => resolveNamedAddress({ selector: "@missing", report: { ...observation.report, contracts: failure }, aliases: observation.aliases }),
+      /Contract world is failed/u,
+    );
+    assert.throws(
+      () => resolveNamedAddress({ selector: "@missing", report: observation.report, aliases: failure }),
+      /Alias authority is failed/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("named Address resolves a retained Alias outside Kanshi fleet rows", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-named-kanshi-alias-"));
+  try {
+    const id = akuId({ archetype: "worker", suffix: "deadbeef" });
+    await moveAlias({ world: root, alias: "@outside", akuId: id });
+    const observation = await observeKanshi({ world: root as import("../src/index.js").WorldRoot });
+    assert.equal(observation.report.akuma.kind, "present");
+    assert.equal(observation.report.akuma.kind === "present" && observation.report.akuma.value.rows.some((row) => row.id === id), false);
+    assert.deepEqual(resolveNamedAddress({ selector: "@outside", report: observation.report, aliases: observation.aliases }), {
+      kind: "akuma",
+      id,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("history last bypasses activity and glob grammar follows normalized archetypes", async () => {

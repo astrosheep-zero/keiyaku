@@ -317,6 +317,11 @@ member absent from that World refuses the whole set as typed usage
 Text prints those facts; `--json` prints the typed object. Both exit `1`.
 A corrupt Heart keeps its existing diagnostic. A missing direct `aku/...`
 selector keeps `Akuma ... is not born`.
+Named `status @name` makes one Kanshi observation, then asks Address to resolve
+the active Contract short selector and complete Alias register retained by that
+same observation. A Contract result projects that report; an Akuma result uses
+the resolved complete AkuId for its direct status observation. It never reads a
+separate Contract board or Alias authority before selection.
 Multiple wait members require exactly one of `--any` or `--all`; a single
 member needs neither. Kill always applies to the complete frozen set.
 Bare `status` already exposes the Akuma fleet through Kanshi; there is no

@@ -1,4 +1,4 @@
-import { readAliases } from "../alias/index.js";
+import { readAliases, type AliasBinding } from "../alias/index.js";
 import { Akuma, type AkumaList } from "../akuma/akuma.js";
 import { probeBornAkuma } from "../akuma/index.js";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
@@ -12,6 +12,7 @@ import {
   type AkumaGlob,
 } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
+import type { KanshiReport, Section } from "../kanshi/report.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
@@ -65,34 +66,33 @@ async function directId(path: WorldRoot, selector: string): Promise<AkuId> {
   return parseAkuId(selector).id;
 }
 
-export type NamedAddressContract = Readonly<{
-  id: string;
-  disposition: "active" | "terminal";
-  workspace: "worktree" | "here";
-  worktreePath: string | null;
-}>;
-
 export type NamedAddress =
   | Readonly<{ kind: "contract"; id: string }>
   | Readonly<{ kind: "akuma"; id: AkuId }>;
 
 export type NamedAddressInput = Readonly<{
-  path: WorldRoot | null;
   selector: string;
-  contracts: readonly NamedAddressContract[];
+  report: KanshiReport;
+  aliases: Section<readonly AliasBinding[]>;
 }>;
 
-export async function resolveNamedAddress(input: NamedAddressInput): Promise<NamedAddress> {
+export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   const selector = nonblank(input.selector, "selector");
   if (selector.startsWith("kei/")) return { kind: "contract", id: contractId(selector) };
   if (selector.startsWith("aku/")) return { kind: "akuma", id: parseAkuId(selector).id };
   const alias = parseAkumaAlias(selector);
-  const contractMatches = input.contracts.filter((row) => row.disposition === "active"
+  if (input.report.contracts.kind === "failed") {
+    throw new TypeError("cannot resolve a named selector while the Contract world is failed");
+  }
+  if (input.aliases.kind === "failed") {
+    throw new TypeError("cannot resolve a named selector while Alias authority is failed");
+  }
+  const contractMatches = (input.report.contracts.kind === "present" ? input.report.contracts.value.rows : []).filter((row) => row.disposition === "active"
     && row.workspace === "worktree" && row.worktreePath !== null
     && `@${row.id.slice("kei/".length)}` === alias);
-  const aliasId = input.path === null
-    ? null
-    : (await readAliases(input.path)).find((binding) => binding.alias === alias)?.akuId ?? null;
+  const aliasId = input.aliases.kind === "present"
+    ? input.aliases.value.find((binding) => binding.alias === alias)?.akuId ?? null
+    : null;
   if (contractMatches.length > 0 && aliasId !== null) throw new TypeError(`ambiguous selector matches Contract and Akuma: ${selector}`);
   if (contractMatches.length === 1) return { kind: "contract", id: contractMatches[0]!.id };
   if (contractMatches.length > 1) throw new TypeError(`ambiguous Contract selector: ${selector}`);

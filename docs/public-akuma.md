@@ -283,8 +283,9 @@ Catalog performs no path or Git discovery, Kanshi join, provider admission, or
 activity/history read.
 
 Named `status` selection remains an Address-facet operation. CLI composition
-passes one world coordinate, selector, and already observed Contract rows to
-the Address owner. That owner is the sole judge: it resolves a complete
-Contract, complete AkuId, or `@name`, and explicitly refuses a name shared by
-an active Contract short reference and an Akuma Alias. Catalog has no role in
-this decision, and package-root callers do not receive a second selector API.
+passes one Kanshi observation's report and retained Alias register with the
+selector to the Address owner. That owner is the sole judge: it resolves a
+complete Contract, complete AkuId, or `@name`, and explicitly refuses a name
+shared by an active Contract short reference and an Akuma Alias. Catalog has
+no role in this decision, and package-root callers do not receive a second
+selector API.

@@ -1,5 +1,6 @@
 import { AkumaWorldScopeError, gatesFrom, Keiyaku, Repo, requireBranchesToBeUpToDateFrom, settings, SettingsError, worktreeHooksFrom, type ActorId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type WorktreeHooks } from "../index.js";
 import { kanshi, selectKanshi, selectRegion, type KanshiRegionSelection } from "../kanshi/index.js";
+import { observeKanshi } from "../kanshi/read.js";
 import { resolveActor } from "./actor.js";
 import {
   acceptedAbandon,
@@ -374,17 +375,17 @@ async function invokeStatus(
   }
   if (parsed.contract.startsWith("@")) {
     try {
-      const address = await resolveNamedAddress({
-        path: world,
+      const observation = await observeKanshi({ world, ...(repo === undefined ? {} : { repo }) });
+      const address = resolveNamedAddress({
         selector: parsed.contract,
-        contracts: repo === undefined ? [] : (await Keiyaku.list({ repo })).rows,
+        report: observation.report,
+        aliases: observation.aliases,
       });
       if (address.kind === "akuma") {
         if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
         return invokeAkumaStatus(world, address.id, parsed.contract, repo);
       }
-      const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
-      return { kind: "status" as const, report: selectKanshi({ report, contract: address.id }), selection: "contract" as const };
+      return { kind: "status" as const, report: selectKanshi({ report: observation.report, contract: address.id }), selection: "contract" as const };
     } catch (error) {
       if (error instanceof TypeError) throw new CliUsageError(error.message);
       throw error;

@@ -114,12 +114,14 @@ remain structured refs with `title: null` and `state: "missing"`. Kanshi does
 not import Task persistence, reread the Task board, or derive blockers from
 text.
 
-Kanshi reads Dispatch and Alias through their concrete owners after the compact
-Akuma fleet read. Each Akuma row carries its current world-local Alias list and,
-when a Dispatch exists, one `{ id, observed }` Contract endpoint using the same
-disposition join as Task endpoints. A malformed Alias or Dispatch fails only
-the Akuma section. Kanshi does not infer association through Task, cwd, origin,
-or Contract lifecycle, and never changes or repairs either authority.
+Kanshi reads Dispatch and the complete Alias register through their concrete
+owners. Each Akuma row carries only its current world-local Alias list and, when
+a Dispatch exists, one `{ id, observed }` Contract endpoint using the same
+disposition join as Task endpoints. The call-scoped observation retains the
+complete Alias register for named status selection without adding it to the
+public report. A malformed Alias or Dispatch fails only the Akuma section.
+Kanshi does not infer association through Task, cwd, origin, or Contract
+lifecycle, and never changes or repairs either authority.
 
 ## Selection
 
@@ -129,6 +131,13 @@ exactly matches the selector, and Akuma rows whose Dispatch endpoint names that
 Contract. Section presence, absence, and
 failure remain unchanged. The text renderer consumes only this public report
 and renders each present endpoint as `keiyaku <id> (<observed>)`.
+
+For named status, the same call-scoped observation supplies the complete Alias
+register and report to Address. Address resolves active managed Contract short
+selectors from the report and Alias selectors from that retained register,
+refuses an explicit cross-kind ambiguity, and never rereads either authority.
+An unavailable required Contract section or Alias observation remains typed
+unavailability rather than an empty match set.
 
 Kanshi joins each present Contract row with the already-read Task holder and
 Akuma Dispatch facts as typed attachments. It does not invent a second

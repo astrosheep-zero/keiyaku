@@ -3,7 +3,7 @@ import type { ContractBoard, ContractDisposition } from "../library/contract.js"
 import { scopeForRepo } from "../library/repo.js";
 import { observeTaskStatusRows } from "../task/operations.js";
 import { Akuma } from "../akuma/index.js";
-import { readAliases } from "../alias/index.js";
+import { readAliases, type AliasBinding } from "../alias/index.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
 import { readContractBoard } from "../protocol/read/status.js";
@@ -27,6 +27,11 @@ import type {
 import type { WorldRoot } from "../world.js";
 
 export type KanshiInput = Readonly<{ world: WorldRoot | null; repo?: Repo; region?: KanshiRegionSelection }>;
+
+export type KanshiObservation = Readonly<{
+  report: KanshiReport;
+  aliases: Section<readonly AliasBinding[]>;
+}>;
 
 function diagnostic(error: unknown): string {
   let source: string;
@@ -220,12 +225,13 @@ async function joinAkuma(
   path: WorldRoot,
   observeContract: ObserveContractEndpoint,
   dispatches: readonly Dispatch[],
+  aliases: Section<readonly AliasBinding[]>,
 ): Promise<Section<AkumaKanshiWorld>> {
+  if (aliases.kind !== "present") return aliases;
   try {
     const source = await Akuma.of(path).list();
-    const aliases = await readAliases(path);
-    const aliasById = new Map<string, typeof aliases>();
-    for (const binding of aliases) aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
+    const aliasById = new Map<string, typeof aliases.value>();
+    for (const binding of aliases.value) aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
     const dispatchById = new Map(dispatches.map((dispatch) => [dispatch.akuId, dispatch]));
     return {
       kind: "present",
@@ -251,6 +257,14 @@ async function joinAkuma(
   }
 }
 
+async function readAliasBindings(path: WorldRoot): Promise<Section<readonly AliasBinding[]>> {
+  try {
+    return { kind: "present", value: await readAliases(path) };
+  } catch (error) {
+    return { kind: "failed", failure: { message: diagnostic(error) } };
+  }
+}
+
 async function readDispatches(observation: GitReadObservation): Promise<
   | Readonly<{ kind: "present"; value: readonly Dispatch[] }>
   | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>
@@ -262,7 +276,7 @@ async function readDispatches(observation: GitReadObservation): Promise<
   }
 }
 
-export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
+export async function observeKanshi(input: KanshiInput): Promise<KanshiObservation> {
   const observedAt = new Date().toISOString();
   const { world, repo } = coordinate(input);
   const branch = await readBranch(repo);
@@ -271,8 +285,12 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
     const holders = { kind: "absent" as const };
     const observeContract = contractEndpointObserver(contracts);
     const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
-    const akuma = world === null ? { kind: "absent" as const } : await joinAkuma(world, observeContract, []);
-    return { root: world, observedAt, branch, contracts, tasks, akuma, ...(input.region === undefined ? {} : { region: { kind: "absent" as const } }) };
+    const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
+    const akuma = world === null ? { kind: "absent" as const } : await joinAkuma(world, observeContract, [], aliases);
+    return {
+      report: { root: world, observedAt, branch, contracts, tasks, akuma, ...(input.region === undefined ? {} : { region: { kind: "absent" as const } }) },
+      aliases,
+    };
   }
   try {
     const repository = scopeForRepo(repo);
@@ -285,32 +303,43 @@ export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
       ]);
       const contracts = decorateContracts(contractSection, holders);
       const observeContract = contractEndpointObserver(contracts);
+      const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
       const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
       const akuma = world === null
         ? { kind: "absent" as const }
         : dispatches.kind === "failed"
           ? dispatches
-          : await joinAkuma(world, observeContract, dispatches.value);
+          : await joinAkuma(world, observeContract, dispatches.value, aliases);
       return {
-        root: world,
-        observedAt,
-        branch,
-        contracts: attachFleet(contracts, akuma),
-        tasks,
-        akuma,
-        ...(region === undefined ? {} : { region }),
+        report: {
+          root: world,
+          observedAt,
+          branch,
+          contracts: attachFleet(contracts, akuma),
+          tasks,
+          akuma,
+          ...(region === undefined ? {} : { region }),
+        },
+        aliases,
       };
     }));
   } catch (error) {
     const failure = { kind: "failed" as const, failure: { message: diagnostic(error) } };
     return {
-      root: world,
-      observedAt,
-      branch,
-      contracts: failure,
-      tasks: world === null ? { kind: "absent" } : failure,
-      akuma: world === null ? { kind: "absent" } : failure,
-      ...(input.region === undefined ? {} : { region: failure }),
+      report: {
+        root: world,
+        observedAt,
+        branch,
+        contracts: failure,
+        tasks: world === null ? { kind: "absent" } : failure,
+        akuma: world === null ? { kind: "absent" } : failure,
+        ...(input.region === undefined ? {} : { region: failure }),
+      },
+      aliases: world === null ? { kind: "absent" } : failure,
     };
   }
+}
+
+export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
+  return (await observeKanshi(input)).report;
 }
