@@ -160,16 +160,8 @@ and realizes the worktree only at
 `<git-common-dir>/keiyaku/wt/<place>` through the pure
 `worktreePath(repository, place)` projection. Primary and linked worktrees
 therefore share that appointed path. The path is not stored in the Contract
-journal. If realization finds no registered worktree at the appointed path
-but finds that Contract's pre-Place worktree at the retired
-`wt/<contract-physical-name>` coordinate, it uses `git worktree move` to
-adopt it. Terminal cleanup uses that same adoption before sealed removal
-when the appointed path is missing. The directory move preserves staged,
-unstaged, and untracked bytes. Failure is typed lag, leaves the
-appointment unchanged, and retries later. No reader ever returns the
-retired path; there is no fallback from appointed reads. This repair
-branch is the sole pre-Place hard-cut input and may be deleted after no
-such worlds remain.
+journal. Git never derives, scans, or adopts another managed-worktree
+coordinate from Contract identity.
 
 Git's terminal worktree cleanup proves the appointed path is physically
 absent before the workspace owner may release the Place. An
@@ -177,9 +169,7 @@ unregistered-but-existing appointed path is typed `worktree-retained` lag
 and is not a successful cleanup. A path that is neither registered nor
 present may report `unchanged` and still prove absence. An ordinary
 unappointed terminal is not a missing-Place failure: appointment absence
-is the proof that physical cleanup already completed. An unappointed
-terminal still registered at the retired coordinate is the hard-cut
-exception and cannot be cleaned until it is appointed.
+is the proof that physical cleanup already completed.
 
 Git owns workspace cleanliness and target lag at the appointed path, or at
 the pinned caller worktree for `here`, counting workspace `HEAD` against

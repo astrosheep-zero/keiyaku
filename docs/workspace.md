@@ -144,12 +144,6 @@ absence for an ordinary terminal Contract is the proof that terminal
 physical cleanup already completed, because release is ordered after
 hooks and removal. Repeated per-Contract and whole-repo reconcile must
 remain unappointed and clean.
-
-The sole pre-Place exception is a terminal still registered at the
-retired ContractId-derived coordinate: that world is appointed, adopted
-onto the Place, removed, and released. Dirty or otherwise retained bytes
-keep the appointment.
-
 Managed terminal cleanup keeps the appointment through hooks and physical
 Git worktree removal. Git's cleanup result must prove the appointed path
 is physically absent before one locked durable register mutation removes

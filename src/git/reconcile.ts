@@ -1,5 +1,5 @@
 import { access, mkdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { acquireSqliteTransactionLock, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
@@ -116,18 +116,6 @@ function deliveryRefFor(contract: ContractId): string {
 function candidatePinRefFor(contract: ContractId): string {
   return `${CANDIDATE_PIN_REF_NAMESPACE}/${contractPhysicalName(contract)}`;
 }
-function retiredWorktreePath(repository: GitRepository, contract: ContractId): string {
-  return resolve(repository.commonDirectory, "keiyaku", "wt", contractPhysicalName(contract));
-}
-
-export async function retiredManagedWorktreePresent(
-  repository: GitRepository,
-  contract: ContractId,
-): Promise<boolean> {
-  const retired = retiredWorktreePath(repository, contract);
-  const topology = await acquireWorktreeTopology(repository);
-  return topology.paths.has(retired) && await pathExists(retired);
-}
 
 function missingPlaceLag(repository: GitRepository): ReconcileFailure {
   return {
@@ -204,36 +192,17 @@ function reconcileLockPath(repository: GitRepository, contract: ContractId): str
   return join(commonGitDirectory(repository), "keiyaku", "locks", "reconcile", locator.slice(0, 2), `${locator.slice(2)}.sqlite`);
 }
 
-async function adoptRetiredWorktree(
-  repository: GitRepository,
-  topology: WorktreeTopology,
-  contract: ContractId,
-  path: string,
-): Promise<boolean> {
-  const retired = retiredWorktreePath(repository, contract);
-  if (retired === path || !topology.paths.has(retired) || !await pathExists(retired)) return false;
-  await mkdir(dirname(path), { recursive: true });
-  await runGit(repository, ["worktree", "move", retired, path]);
-  topology.paths.delete(retired);
-  topology.paths.add(path);
-  return true;
-}
-
 async function worktree(
   repository: GitRepository,
   topology: WorktreeTopology,
   path: string,
   desired: SnapshotId,
-  contract: ContractId,
 ): Promise<Effect> {
   const registered = topology.paths.has(path);
   if (registered && await pathExists(path)) return { kind: "worktree", path, action: "unchanged" };
   if (registered) {
     await runGit(repository, ["worktree", "remove", path]);
     topology.paths.delete(path);
-  }
-  if (await adoptRetiredWorktree(repository, topology, contract, path)) {
-    return { kind: "worktree", path, action: "created" };
   }
   if (await pathExists(path)) throw new Error(`delivery worktree path is occupied: ${path}`);
   await mkdir(dirname(path), { recursive: true });
@@ -457,7 +426,6 @@ async function reconcileTerminalManagedWorktree(
     acc.effects.push(await updateRef(primary, pin, state.delivery.data.integration.snapshot));
   }
   if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag);
-  await adoptRetiredWorktree(primary, topology, state.id, path);
   const retained = await removeSealedTerminalWorktree({
     repository: primary,
     topology,
@@ -482,7 +450,7 @@ async function reconcileActiveManagedWorktree(
   const path = worktreePath(repository, place);
   const desired = state.delivery?.data.tenderSnapshot ?? state.coordinates.start;
   effects.push(await updateRef(repository, deliveryRefFor(state.id), desired));
-  effects.push(await worktree(repository, topology, path, desired, state.id));
+  effects.push(await worktree(repository, topology, path, desired));
   const hookLag = await runCreateHooks(path, await worktreeGitDirectory(repository, path), hooks, retryHooks);
   if (hookLag !== null) lag.push(hookLag);
   effects.push(await (state.delivery

@@ -555,7 +555,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ]),
         types("core/facts/types.ts"),
         any("core/facts/errors.ts", ["AuthorityCorruptionError"]),
-        any("git/reconcile.ts", ["retiredManagedWorktreePresent"]),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
         any("protocol/operations.ts", [
           "reconcileAllOperation",

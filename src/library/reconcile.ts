@@ -1,7 +1,6 @@
 import type { ContractId, ContractState } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import { retiredManagedWorktreePresent } from "../git/reconcile.js";
 import {
   reconcileAllOperation,
   reconcileObservationFailure,
@@ -65,25 +64,17 @@ function isManagedTerminal(state: ContractState | null): boolean {
   return state !== null && isManagedWorktree(state) && state.terminal !== null;
 }
 
-async function appointableManagedContracts(
-  scope: RepositoryScope,
-  states: readonly ContractState[],
-): Promise<readonly ContractId[]> {
-  const managed: ContractId[] = [];
-  for (const state of states) {
-    if (!isManagedWorktree(state)) continue;
-    if (state.terminal === null || await retiredManagedWorktreePresent(scope, state.id)) {
-      managed.push(state.id);
-    }
-  }
-  return managed;
+function appointableManagedContracts(states: readonly ContractState[]): readonly ContractId[] {
+  return states
+    .filter((state) => isManagedWorktree(state) && state.terminal === null)
+    .map((state) => state.id);
 }
 
 async function appointPlaces(
   scope: RepositoryScope,
   states: readonly ContractState[],
 ): Promise<PlaceRegister> {
-  return await appointManagedWorktrees(scope, await appointableManagedContracts(scope, states));
+  return await appointManagedWorktrees(scope, appointableManagedContracts(states));
 }
 
 function releaseEligible(
