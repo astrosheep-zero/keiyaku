@@ -305,45 +305,28 @@ aku/worker/1234abcd (@review) ────────────────�
      │ ⧗ tell “also check the leash timeout”
 ```
 
-Every typed gap renders in place as `⋮ +<count>`. Activity text wraps to at
-most three terminal-width lines in snapshots and ends in `…` when display text
-remains or the persisted row carries `truncated: true`. Tool representation
-uses the same visible bound, except a `run` command always occupies one row and
-middle-truncates when necessary so both its command head and tail remain
-visible. A completed run's outcome is a separate suffix outside that command
-truncation region when the row can also retain a recognizable command head and
-tail. On narrower rows the command wins and the outcome is omitted. Display-width
-truncation preserves grapheme clusters and never exceeds the requested width.
-History uses the same row renderer without the voice three-line cap;
-`run` remains one row there too. Rendering never changes the JSON fact, and copyable history
-commands remain indivisible. Activity labels are display-width-aware and
-left-aligned in one fixed field. Quoted voice reserves its closing delimiter
-outside the truncatable payload, so wrapping and truncation preserve balanced
-quotes. The spine prints the first visible row's `HH:MM`. It then suppresses a row's
-gutter while that row is less than 60 seconds after the last timestamp actually
-printed, and prints again at 60 seconds or more. A row without `at`, such as a
-pending tell, always has an empty gutter and does not move the anchor. There
-is no date line, cross-day exception, seconds display, or derived silence row.
-The same pure gutter function serves exact status, running wait results, tell,
-kill, and history.
+Shared Akuma presentation and snapshot budgets are owned by
+[cli-output.md](cli-output.md); this command chapter owns only what each verb
+means and which public result it presents.
 
-Tell remains one input action: the flagship submits stdin text once. Its output
-renders the ordinary post-action Akuma status and appends the current tell at
-its observed two-state face, or as `⧗ tell` when the observation has not yet
-reached it, excluding the same TellId from the observed rows so it appears once.
+Tell remains one input action. Text prints its typed receipt first (`tell
+recorded` and `wake spawned`, or an explicit wake failure), then a fresh
+observation. The current tell appears once at its observed two-state face; an
+asleep observation is never presented as the mutation result.
 `⧗ tell` means it can still take effect, and `told` means the provider's
 strongest available evidence proves it took effect. Pending tells are never
-removed by the snapshot budget; told rows share the ordinary activity budget.
-Provider-specific receipt kinds,
-handoff stages, fences, and `bodySequence` never enter text. JSON preserves the
+removed by the snapshot budget.
+Provider-specific receipt kinds, handoff stages, fences, and `bodySequence` never enter text. JSON preserves the
 mutation/observation separation as `{ akuma, tell, observation }` without adding
 a CLI-only diagnostic projection. No output asks the caller to query a TellId.
 
 `tell --interrupt` selects the Library's fenced interrupt composition. It is
 one CLI input action, not a standalone lifecycle verb: the current Body is put
 down before the same stdin bytes are durably recorded and woken for its
-successor. Text reports the typed interrupt receipt; JSON returns the Library
-result unchanged.
+successor. Text reports the typed interrupt receipt with the same concise
+`tell recorded` and wake evidence lines as ordinary tell; JSON returns the
+Library result unchanged. It does not invent a post-action observation that
+the public result does not carry.
 
 A stranded Akuma whose durable coordinate cannot be resumed prints
 `resume unsupported` as its typed reason. The CLI does not offer an automatic

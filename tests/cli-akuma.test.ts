@@ -166,13 +166,14 @@ test("Akuma status aligns and counts omitted activity", () => {
     },
   };
   const recordedText = renderAkumaText(command, recorded);
-  assert.match(recordedText.split("\n")[0]!, /^aku\/worker\/1234abcd \(@review\) ─+$/u);
+  assert.deepEqual(recordedText.split("\n").slice(0, 3), ["tell recorded", "wake spawned", "observation"]);
+  assert.match(recordedText.split("\n")[3]!, /^aku\/worker\/1234abcd \(@review\) ─+$/u);
   assert.match(recordedText, /│ ⧗ tell “current input”$/u);
   assert.deepEqual(akumaJsonValue(command, recorded), recorded.result);
   assert.equal(renderAkumaText(command, {
     ...recorded,
     result: { ...recorded.result, tell: { admission: { tellId: "tell-1", fact: "recorded" }, wake: { kind: "failed" as const, diagnostic: "spawn\nfailed" } } },
-  }), `${recordedText}\nwake failed: spawn failed`);
+  }), recordedText.replace("wake spawned", "wake failed: spawn failed"));
   const observedTell = {
     kind: "akuma" as const,
     action: "tell" as const,
@@ -199,6 +200,107 @@ test("Akuma status aligns and counts omitted activity", () => {
   };
   assert.equal(renderAkumaText(command, observedTell).match(/current input/gu)?.length, 1);
   assert.deepEqual(akumaJsonValue(command, observedTell), observedTell.result);
+});
+
+test("Akuma snapshot rows use fixed semantic line budgets", () => {
+  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
+  const base = {
+    id: "aku/worker/1234abcd" as const,
+    archetype: "worker",
+    life: "running" as const,
+    collar: { kind: "alive" as const },
+    confinement: { kind: "unconfined" as const },
+    pending: [],
+  };
+  const longText = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda";
+  const renderRow = (row: import("../src/akuma/index.js").ActivityRow): readonly string[] => {
+    const status = {
+      ...base,
+      activity: { entries: [{ kind: "row" as const, row }], lowestRetained: row.sequence, highest: row.sequence },
+    };
+    return renderAkumaText(command, { kind: "akuma", action: "status", status }, { columns: 34, color: false }).split("\n").slice(1);
+  };
+  const rows: readonly Readonly<{ kind: import("../src/akuma/index.js").ActivityRow["kind"]; lines: number; row: import("../src/akuma/index.js").ActivityRow }>[] = [
+    {
+      kind: "said",
+      lines: 3,
+      row: { kind: "said", sequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z", text: longText },
+    },
+    {
+      kind: "thought",
+      lines: 2,
+      row: { kind: "thought", sequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z", text: longText },
+    },
+    {
+      kind: "note",
+      lines: 2,
+      row: { kind: "note", sequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z", text: longText },
+    },
+    {
+      kind: "tell",
+      lines: 1,
+      row: { kind: "tell", sequence: 1, at: "2026-08-10T16:42:00.000Z", tellId: "tell-1", text: longText, state: "told" },
+    },
+    {
+      kind: "tool",
+      lines: 2,
+      row: {
+        kind: "tool", sequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z", name: "Read",
+        call: { kind: "read", path: longText }, state: { status: "ok" },
+      },
+    },
+  ];
+  for (const item of rows) {
+    const lines = renderRow(item.row);
+    assert.equal(lines.length, item.lines, item.kind);
+    assert.match(lines.at(-1)!, /…(?:”)?$/u, item.kind);
+  }
+
+  const history = {
+    kind: "akuma" as const,
+    action: "history" as const,
+    akuma: base.id,
+    mode: "page" as const,
+    history: {
+      rows: [rows[1]!.row],
+      turns: [],
+      omitted: 0,
+      hasEarlier: false,
+      hasLater: false,
+      historyLost: false,
+      lowestRetained: 1,
+      highest: 1,
+    },
+  };
+  assert.ok(renderAkumaText(parseArgv(["history", base.id]).command, history, { columns: 34, color: false }).split("\n").length > 3);
+});
+
+test("ordinary tell leads with mutation authority before an asleep observation", () => {
+  const command = parseArgv(["tell", "aku/worker/1234abcd", "-"]).command;
+  const observation = {
+    id: "aku/worker/1234abcd" as const,
+    archetype: "worker",
+    life: "asleep" as const,
+    collar: { kind: "gone" as const, end: "exited" as const },
+    confinement: { kind: "unconfined" as const },
+    pending: [],
+    activity: { entries: [], lowestRetained: null, highest: null },
+  };
+  const result = {
+    kind: "akuma" as const,
+    action: "tell" as const,
+    mode: "ordinary" as const,
+    body: "continue",
+    result: {
+      akuma: observation.id,
+      tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
+      observation,
+    },
+  };
+  const text = renderAkumaText(command, result);
+  assert.deepEqual(text.split("\n").slice(0, 3), ["tell recorded", "wake spawned", "observation"]);
+  assert.match(text, /○ asleep$/u);
+  assert.deepEqual(akumaJsonValue(command, result), result.result);
 });
 
 test("Akuma voice is quoted and running tools carry the live mark", () => {
@@ -478,7 +580,11 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
       },
     },
   };
-  assert.equal(renderAkumaText(parsed.command, interrupted), "aku/claude/1d1e0004 interrupted self-aborted");
+  assert.equal(renderAkumaText(parsed.command, interrupted), [
+    "aku/claude/1d1e0004 interrupted self-aborted",
+    "tell recorded",
+    "wake spawned",
+  ].join("\n"));
   assert.equal(akumaExitCode(interrupted), 0);
 
   const wakeFailed = {
@@ -496,7 +602,11 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
   };
   assert.equal(
     renderAkumaText(parsed.command, wakeFailed),
-    "aku/claude/1d1e0004 interrupted self-aborted · wake failed: spawn",
+    [
+      "aku/claude/1d1e0004 interrupted self-aborted",
+      "tell recorded",
+      "wake failed: spawn",
+    ].join("\n"),
   );
   assert.equal(akumaExitCode(wakeFailed), 2);
 

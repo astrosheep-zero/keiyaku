@@ -24,6 +24,7 @@ type SpineRow = Readonly<{
   indivisible?: true;
   overflow?: "middle-ellipsis";
   suffix?: string;
+  snapshotLines?: number;
 }>;
 type SpineGap = Readonly<{ kind: "gap"; count: number }>;
 type SpineItem = SpineRow | SpineGap;
@@ -67,6 +68,11 @@ function clock(at: string | undefined): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function rowLineLimit(item: SpineRow, profile: "snapshot" | "history"): number {
+  if (profile === "history") return Number.MAX_SAFE_INTEGER;
+  return item.snapshotLines === undefined ? 3 : item.snapshotLines;
+}
+
 function renderSpine(
   items: readonly SpineItem[],
   context: TextRenderContext,
@@ -101,7 +107,7 @@ function renderSpine(
       first,
       continuation,
       columns: context.columns - displayColumns(quote),
-      lines: profile === "snapshot" ? 3 : Number.MAX_SAFE_INTEGER,
+      lines: rowLineLimit(item, profile),
       ...(item.truncated === true ? { truncated: true } : {}),
     });
     return item.quoted === true
@@ -112,15 +118,20 @@ function renderSpine(
 
 function activityItem(row: ActivityRow): SpineRow {
   const truncated = "truncated" in row && row.truncated === true ? { truncated: true as const } : {};
-  if (row.kind === "said") return { kind: "row", at: row.at, label: "say", text: row.text, quoted: true, ...truncated };
-  if (row.kind === "thought") return { kind: "row", at: row.at, label: "think", text: row.text, quoted: true, ...truncated };
-  if (row.kind === "note") return { kind: "row", at: row.at, label: "note", text: row.text, ...truncated };
+  if (row.kind === "said") return {
+    kind: "row", at: row.at, label: "say", text: row.text, quoted: true, snapshotLines: 3, ...truncated,
+  };
+  if (row.kind === "thought") return {
+    kind: "row", at: row.at, label: "think", text: row.text, quoted: true, snapshotLines: 2, ...truncated,
+  };
+  if (row.kind === "note") return { kind: "row", at: row.at, label: "note", text: row.text, snapshotLines: 2, ...truncated };
   if (row.kind === "tell") return {
     kind: "row",
     at: row.at,
     label: row.state === "pending" ? "⧗ tell" : "told",
     text: row.text,
     quoted: true,
+    snapshotLines: 1,
   };
   const repr = toolRepr(row);
   return {
@@ -131,6 +142,7 @@ function activityItem(row: ActivityRow): SpineRow {
     ...(repr.overflow === undefined ? {} : { overflow: repr.overflow }),
     ...(repr.suffix === undefined ? {} : { suffix: repr.suffix }),
     ...(row.state === "running" ? { active: true } : {}),
+    snapshotLines: 2,
     ...truncated,
   };
 }
@@ -178,7 +190,7 @@ type StatusTextOptions = Readonly<{
   tail?: readonly SpineItem[];
 }>;
 
-function statusText(status: AkumaStatus, context: TextRenderContext, options: StatusTextOptions = {}): string {
+function snapshotText(status: AkumaStatus, context: TextRenderContext, options: StatusTextOptions = {}): string {
   return [
     ruler(identity(status.id, options.alias), context.columns),
     ...(options.facts ?? []),
@@ -230,10 +242,10 @@ function historyText(
 }
 
 function waitText(status: AkumaStatus, context: TextRenderContext, alias?: string): string {
-  if (status.life === "running") return statusText(status, context, alias === undefined ? {} : { alias });
+  if (status.life === "running") return snapshotText(status, context, alias === undefined ? {} : { alias });
   if (status.answer !== undefined) return status.answer;
   if (status.failure !== undefined) return `failure ${status.failure}`;
-  return statusText(status, context, alias === undefined ? {} : { alias });
+  return snapshotText(status, context, alias === undefined ? {} : { alias });
 }
 
 function waitMemberText(status: AkumaStatus, context: TextRenderContext, alias?: string): string {
@@ -256,6 +268,13 @@ function wakeFailure(result: TellResult): string | null {
   return typeof result.wake === "string" ? null : `wake failed: ${safeText(result.wake.diagnostic)}`;
 }
 
+function tellReceiptLines(result: TellResult): readonly string[] {
+  return [
+    `tell ${result.admission.fact}`,
+    wakeFailure(result) ?? "wake spawned",
+  ];
+}
+
 function tellText(
   result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>,
   context: TextRenderContext,
@@ -265,14 +284,13 @@ function tellText(
     entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === tellId);
   const current = observed?.kind === "row"
     ? activityItem(observed.row)
-    : { kind: "row" as const, label: "⧗ tell", text: result.body, quoted: true as const };
-  const status = statusText(result.result.observation, context, {
+    : { kind: "row" as const, label: "⧗ tell", text: result.body, quoted: true as const, snapshotLines: 1 };
+  const observation = snapshotText(result.result.observation, context, {
     ...(result.alias === undefined ? {} : { alias: result.alias }),
     exceptTell: tellId,
     tail: [current],
   });
-  const failure = wakeFailure(result.result.tell);
-  return failure === null ? status : `${status}\n${failure}`;
+  return [...tellReceiptLines(result.result.tell), "observation", observation].join("\n");
 }
 
 function dispatchLines(stage: DispatchStage): readonly string[] {
@@ -294,7 +312,7 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   }
   const status = called.observation.status;
   if (status.answer !== undefined || status.failure !== undefined) return [identity(called.akuma, alias), ...stages, waitText(status, context, alias)].join("\n");
-  return statusText(status, context, { facts: stages, ...(alias === undefined ? {} : { alias }) });
+  return snapshotText(status, context, { facts: stages, ...(alias === undefined ? {} : { alias }) });
 }
 
 export function renderAkumaText(
@@ -304,15 +322,14 @@ export function renderAkumaText(
 ): string {
   switch (result.action) {
     case "call": return callText(result, context);
-    case "status": return statusText(result.status, context, result.alias === undefined ? {} : { alias: result.alias });
+    case "status": return snapshotText(result.status, context, result.alias === undefined ? {} : { alias: result.alias });
     case "wait": return waitResultText(result.result.statuses, context, result.alias);
     case "tell": {
       if (result.mode === "ordinary") return tellText(result, context);
       const receipt = result.result.receipt;
       const name = identity(result.result.id, result.alias);
       if (receipt.kind === "unstoppable") return `${name} interrupt unstoppable ${receipt.evidence}`;
-      const failure = wakeFailure(receipt.tell);
-      return `${name} interrupted ${receipt.putDown}${failure === null ? "" : ` · ${failure}`}`;
+      return [`${name} interrupted ${receipt.putDown}`, ...tellReceiptLines(receipt.tell)].join("\n");
     }
     case "history": return historyText(command as Extract<ParsedCommand, { command: "history" }>, result, context);
     case "fork": {
@@ -323,7 +340,7 @@ export function renderAkumaText(
       if (receipt.kind === "fork-failed") return receipt.diagnostic;
       return `session ${receipt.childSession.sessionId}\n${receipt.diagnostic}`;
     }
-    case "kill": return result.result.results.map((member) => statusText(member.observation, context, {
+    case "kill": return result.result.results.map((member) => snapshotText(member.observation, context, {
       facts: [`kill ${member.evidence}`],
       ...(result.alias === undefined ? {} : { alias: result.alias }),
     })).join("\n\n");

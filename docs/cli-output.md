@@ -57,6 +57,21 @@ Text and `--json` render this same object. Both write to stdout; JSON serializes
 it without another output schema. A corrupted authority or other exception
 writes its verbatim diagnostic to stderr and exits `3`.
 
+Akuma text has one shared snapshot presentation across status, wait, call, tell,
+interrupt, and kill; history remains the unbounded browsing surface. Snapshot
+budgets are fixed by semantic kind: `say` at most three lines, `tell` one, and
+every other activity row two. Text clipping and receipt presentation never alter
+the public value serialized by `--json`.
+
+Gaps remain at their activity position and report their hidden-row count. Text
+is clipped by terminal display width without splitting grapheme clusters; quoted
+voice keeps balanced delimiters. A `run` command remains one row and preserves
+recognizable head and tail when clipped; its outcome is shown only when space
+allows. History uses the same presentation vocabulary without snapshot budgets.
+The first visible activity prints `HH:MM`; timestamps within 60 seconds are
+omitted, while rows without a timestamp do not move that anchor. There is no
+derived silence or date line.
+
 Post-admission physical or settlement failures remain inside the accepted
 object as typed lags. Text and JSON expose them without changing the Contract
 fact, command kind, or exit status. The adapter never hides the existing
