@@ -277,9 +277,9 @@ reinterprets activity. JSON exposes the same public value with complete ISO
 `at` values and no text-only time suppression.
 
 The header is fixed for the complete rendering or a future stream: it carries
-the complete AkuId and, only when the command was addressed through one Alias
-or just bound one, that frozen Alias in v3's `(@alias)` form. It never
-reverse-selects an Alias. Life and elapsed time cannot appear in the header
+the complete AkuId, the optional frozen Alias in v3's `(@alias)` form, and the
+complete `kei/...` Contract ID when the Akuma has a Dispatch association. It
+never reverse-selects an Alias. Life and elapsed time cannot appear in the header
 because they may change after a stream fixes its head. The id already contains
 the Archetype, so the Archetype is never repeated. A one-member wait still
 writes a finished answer as exact bytes with no header. A plural wait prefixes
@@ -298,7 +298,7 @@ rows pay no extra prefix width. Activity labels use one fixed six-column field.
 A future longer label may extend its own row but never widens or shifts the page.
 
 ```text
-aku/worker/1234abcd (@review) ─────────────────────────────
+aku/worker/1234abcd (@review) ───────────────────────────── kei/provider-core
      ⋮ +12
 09:31│ say    “narrowing the failing suite”
      │ run    $ npm test — 41s · exit 1

@@ -138,7 +138,7 @@ Repo.
 The Fleet facet composes only public Akuma handles after that expansion:
 
 ```ts
-Keiyaku.status(input: AkumaAddressInput): AkumaStatus
+Keiyaku.status(input: AkumaAddressInput): AkumaStatusView
 Keiyaku.tell(input: AkumaTellInput): Promise<AkumaTellResult>
 Keiyaku.interrupt(input: AkumaInterruptInput): Promise<AkumaInterruptResult>
 Keiyaku.history(input: AkumaHistoryInput): AkumaHistoryResult
@@ -150,17 +150,26 @@ Keiyaku.kill(input: AkumaSetAddressInput): Promise<AkumaKillResult>
 type AkumaTellResult = {
   akuma: AkuId;
   tell: TellResult;
-  observation: AkumaStatus;
+  observation: AkumaStatusView;
 };
 
 type AkumaKillResult = {
   results: readonly {
     id: AkuId;
     evidence: KillEvidence;
-    observation: AkumaStatus;
+    observation: AkumaStatusView;
   }[];
 };
+
+type AkumaStatusView = AkumaStatus & {
+  contractId?: ContractId;
+};
 ```
+
+The optional `repo` coordinate enables this read-only Dispatch projection.
+Without it, Fleet returns the ordinary Akuma status unchanged. With it, Fleet
+adds only the associated `contractId`; Akuma core still knows no Contract,
+Dispatch, or Repo, and renderers perform no lookup.
 
 Wait and kill freeze their subject set at entry. A one-member wait defaults to
 `all`; a multi-member wait requires `completion: "any" | "all"`. Any returns

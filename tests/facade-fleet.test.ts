@@ -411,6 +411,28 @@ test("Contract selector preserves Dispatch membership skipped by compact fleet",
   })).ids, [missing]);
 });
 
+test("fleet status projects Dispatch association without changing Akuma core", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const source = await answered(repository.path, "worker", "deadbeef");
+  const owner = contractId("kei/provider-core");
+  assert.equal(publishDispatch({ repository: repositoryAt(repository.path), akuId: source.id, contractId: owner }).kind, "dispatched");
+
+  const plain = Keiyaku.status({ path: repository.path, akuma: source.id });
+  assert.equal("contractId" in plain, false);
+  const projected = Keiyaku.status({ path: repository.path, akuma: source.id, repo: Repo.at({ path: repository.path }) });
+  assert.equal(projected.contractId, owner);
+  const waited = await Keiyaku.wait({
+    path: repository.path,
+    akuma: [source.id],
+    repo: Repo.at({ path: repository.path }),
+    timeoutMs: 0,
+  });
+  assert.equal(waited.statuses[0]!.contractId, owner);
+});
+
 test("exact set selection does not read unrelated Alias authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-exact-address-"));
   try {

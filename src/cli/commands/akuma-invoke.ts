@@ -1,12 +1,10 @@
 import { resolve } from "node:path";
-import {
-  type AkuId,
-  type ActivityHistory,
-  type AkumaStatus,
-} from "../../akuma/index.js";
+import { type AkuId, type ActivityHistory } from "../../akuma/index.js";
 import {
   Keiyaku,
   type AkumaKillResult,
+  type AkumaHistoryResult,
+  type AkumaStatusView,
   type AkumaTellResult,
   type AkumaWaitResult,
   type CallResult,
@@ -20,13 +18,13 @@ import type { ParsedAkumaCommand } from "./akuma.js";
 
 export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; result: CallResult }>
-  | Readonly<{ kind: "akuma"; action: "status"; status: AkumaStatus; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "status"; status: AkumaStatusView; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "wait"; result: AkumaWaitResult; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "interrupt"; result: Awaited<ReturnType<typeof Keiyaku.interrupt>>; body: string; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "page"; history: ActivityHistory; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "last"; answer: string; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "no-answer"; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "page"; history: ActivityHistory; historyResult: AkumaHistoryResult; contractId?: import("../../core/facts/types.js").ContractId; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "last"; answer: string; historyResult: AkumaHistoryResult; contractId?: import("../../core/facts/types.js").ContractId; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "history"; akuma: AkuId; mode: "no-answer"; historyResult: AkumaHistoryResult; contractId?: import("../../core/facts/types.js").ContractId; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "fork"; receipt: ForkResult }>
   | Readonly<{ kind: "akuma"; action: "kill"; result: AkumaKillResult; alias?: string }>;
 
@@ -63,11 +61,11 @@ async function invokeWait(command: Extract<ParsedAkumaCommand, { command: "wait"
 async function invokeTell(command: ParsedAkumaCommand & Readonly<{ command: "tell"; akuma: string }>, input: InvokeInput): Promise<AkumaInvocationResult> {
   const body = input.readStdin();
   if (command.interrupt) {
-    const result = await Keiyaku.interrupt({ path: input.path, akuma: command.akuma, settings: input.settings, body });
+    const result = await Keiyaku.interrupt({ path: input.path, akuma: command.akuma, settings: input.settings, body, ...(input.repo === undefined ? {} : { repo: input.repo }) });
     const alias = inputAlias(command.akuma);
     return { kind: "akuma", action: "tell", mode: "interrupt", result, body, ...(alias === undefined ? {} : { alias }) };
   }
-  const result = await Keiyaku.tell({ path: input.path, akuma: command.akuma, settings: input.settings, body });
+  const result = await Keiyaku.tell({ path: input.path, akuma: command.akuma, settings: input.settings, body, ...(input.repo === undefined ? {} : { repo: input.repo }) });
   const alias = inputAlias(command.akuma);
   return { kind: "akuma", action: "tell", mode: "ordinary", result, body, ...(alias === undefined ? {} : { alias }) };
 }
@@ -77,6 +75,7 @@ function invokeHistory(command: Extract<ParsedAkumaCommand, { command: "history"
     path: input.path,
     akuma: command.akuma,
     settings: input.settings,
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
     ...(command.before === undefined ? {} : { before: command.before }),
     ...(command.since === undefined ? {} : { since: command.since }),
     last: command.last,
@@ -85,6 +84,8 @@ function invokeHistory(command: Extract<ParsedAkumaCommand, { command: "history"
     kind: "akuma",
     action: "history",
     akuma: result.id,
+    historyResult: result,
+    ...(result.contractId === undefined ? {} : { contractId: result.contractId }),
     ...(inputAlias(command.akuma) === undefined ? {} : { alias: command.akuma }),
     ...(result.kind === "history"
       ? { mode: "page" as const, history: result.history }
@@ -152,6 +153,11 @@ export async function invokeAkuma(
   }
 }
 
-export function invokeAkumaStatus(path: WorldRoot, akuma: string, settings: Settings, alias?: string): AkumaInvocationResult {
-  return { kind: "akuma", action: "status", status: Keiyaku.status({ path, akuma, settings }), ...(alias === undefined ? {} : { alias }) };
+export function invokeAkumaStatus(path: WorldRoot, akuma: string, settings: Settings, alias?: string, repo?: Repo): AkumaInvocationResult {
+  return {
+    kind: "akuma",
+    action: "status",
+    status: Keiyaku.status({ path, akuma, settings, ...(repo === undefined ? {} : { repo }) }),
+    ...(alias === undefined ? {} : { alias }),
+  };
 }

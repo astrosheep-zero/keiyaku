@@ -300,19 +300,16 @@ async function invokeAkumaCommand(
       readStdin: edge.readStdin,
     });
   }
-  if (parsed.command === "fork" || parsed.command === "wait" || parsed.command === "kill") {
-    let repo: Repo | undefined;
-    try { repo = repoAt(path); }
-    catch (error) { if (!(error instanceof NoGitWorldError)) throw error; }
-    return await invokeAkuma(parsed, {
-      path,
-      executionCwd,
-      settings: configuration,
-      ...(repo === undefined ? {} : { repo }),
-      readStdin: edge.readStdin,
-    });
-  }
-  return await invokeAkuma(parsed, { path, executionCwd, settings: configuration, readStdin: edge.readStdin });
+  let repo: Repo | undefined;
+  try { repo = repoAt(path); }
+  catch (error) { if (!(error instanceof NoGitWorldError)) throw error; }
+  return await invokeAkuma(parsed, {
+    path,
+    executionCwd,
+    settings: configuration,
+    ...(repo === undefined ? {} : { repo }),
+    readStdin: edge.readStdin,
+  });
 }
 
 async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, path: WorldRoot, executionCwd: string, configuration: Settings, edge: InvocationEdge) {
@@ -349,7 +346,7 @@ async function invokeStatus(parsed: Extract<ParsedCommand, { command: "status" }
   const configuration = settingsAt(world ?? undefined, edge.environment);
   if (parsed.akuma === true) {
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-    return invokeAkumaStatus(world, parsed.contract, configuration);
+    return invokeAkumaStatus(world, parsed.contract, configuration, undefined, repo);
   }
   if (parsed.contract === undefined) {
     const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
@@ -364,7 +361,7 @@ async function invokeStatus(parsed: Extract<ParsedCommand, { command: "status" }
       });
       if (address.kind === "akuma") {
         if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-        return invokeAkumaStatus(world, address.id, configuration, parsed.contract);
+        return invokeAkumaStatus(world, address.id, configuration, parsed.contract, repo);
       }
       const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
       return { kind: "status" as const, report: selectKanshi({ report, contract: address.id }), selection: "contract" as const };

@@ -22,6 +22,7 @@ export type AkumaAddressInput = Readonly<{
   path: WorldRoot;
   akuma: string;
   settings?: Settings;
+  repo?: Repo;
 }>;
 
 export type AkumaSetAddressInput = Readonly<{
@@ -100,8 +101,9 @@ export function addressAkuma(input: AkumaAddressInput): Readonly<{
 }> {
   const values = requireInput(input, "Akuma address input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "settings"].includes(key)) throw new TypeError(`Akuma address input has unknown field: ${key}`);
+    if (!["path", "akuma", "settings", "repo"].includes(key)) throw new TypeError(`Akuma address input has unknown field: ${key}`);
   }
+  if (values.repo !== undefined) scopeForRepo(values.repo);
   const path = nonblank(values.path, "path") as WorldRoot;
   const settings = settingsOption(values.settings);
   return { path, id: directId(path, nonblank(values.akuma, "akuma")), ...(settings === undefined ? {} : { settings }) };

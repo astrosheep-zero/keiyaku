@@ -261,6 +261,14 @@ test("Akuma snapshot rows use fixed semantic line budgets", () => {
     action: "history" as const,
     akuma: base.id,
     mode: "page" as const,
+    historyResult: {
+      kind: "history" as const,
+      id: base.id,
+      history: {
+        rows: [], turns: [], omitted: 0, hasEarlier: false, hasLater: false,
+        historyLost: false, lowestRetained: null, highest: null,
+      },
+    },
     history: {
       rows: [rows[1]!.row],
       turns: [],
@@ -353,6 +361,27 @@ test("Akuma voice is quoted and running tools carry the live mark", () => {
   assert.match(voice, /…”$/u);
   assert.equal(voice.match(/“/gu)?.length, 1);
   assert.equal(voice.match(/”/gu)?.length, 1);
+});
+
+test("Akuma header shows a complete associated Contract without truncating identity", () => {
+  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
+  const text = renderAkumaText(command, {
+    kind: "akuma",
+    action: "status",
+    status: {
+      id: "aku/worker/1234abcd",
+      archetype: "worker",
+      life: "running",
+      collar: { kind: "alive" },
+      confinement: { kind: "unconfined" },
+      pending: [],
+      contractId: "kei/provider-core-review",
+      activity: { entries: [], lowestRetained: null, highest: null },
+    },
+  }, { columns: 28, color: false });
+  const lines = text.split("\n");
+  assert.equal(lines[0], "aku/worker/1234abcd");
+  assert.match(lines[1]!, /^─+ kei\/provider-core-review$/u);
 });
 
 test("Akuma run commands stay on one row and preserve their head and tail", () => {
@@ -472,7 +501,7 @@ test("akuma call renders optional integration stages and maps partial success", 
       },
     },
   };
-  assert.equal(renderAkumaText(command, integrated), `${akuma} (@worker)\ndispatch kei/work`);
+  assert.match(renderAkumaText(command, integrated), new RegExp(`^${akuma} \\(@worker\\) ─+ kei/work$`, "u"));
   assert.equal(akumaExitCode(integrated), 0);
 
   const partial = {
@@ -548,7 +577,7 @@ test("akuma fork renders the public receipt and maps every exit class", () => {
       },
     },
   });
-  assert.equal(renderAkumaText(command, dispatched), "aku/claude/87654321\ndispatch kei/work");
+  assert.match(renderAkumaText(command, dispatched), /^aku\/claude\/87654321 ─+ kei\/work$/u);
 
   const incapable = result({ kind: "provider-cannot-fork", provider: "claude", parent });
   assert.equal(renderAkumaText(command, incapable), "claude cannot fork");
@@ -573,6 +602,7 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
     body: "replace",
     result: {
       id: "aku/claude/1d1e0004" as const,
+      contractId: "kei/provider-core-review" as const,
       receipt: {
         kind: "interrupted" as const,
         putDown: "self-aborted" as const,
@@ -580,11 +610,15 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
       },
     },
   };
-  assert.equal(renderAkumaText(parsed.command, interrupted), [
-    "aku/claude/1d1e0004 interrupted self-aborted",
-    "tell recorded",
-    "wake spawned",
-  ].join("\n"));
+  assert.equal(
+    renderAkumaText(parsed.command, interrupted),
+    [
+      "aku/claude/1d1e0004 ─────────────────────────────────── kei/provider-core-review",
+      "interrupted self-aborted",
+      "tell recorded",
+      "wake spawned",
+    ].join("\n"),
+  );
   assert.equal(akumaExitCode(interrupted), 0);
 
   const wakeFailed = {
@@ -603,7 +637,8 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
   assert.equal(
     renderAkumaText(parsed.command, wakeFailed),
     [
-      "aku/claude/1d1e0004 interrupted self-aborted",
+      "aku/claude/1d1e0004 ─────────────────────────────────── kei/provider-core-review",
+      "interrupted self-aborted",
       "tell recorded",
       "wake failed: spawn",
     ].join("\n"),
@@ -619,7 +654,7 @@ test("tell --interrupt renders the public receipt and maps every exit class", ()
   };
   assert.equal(
     renderAkumaText(parsed.command, unstoppable),
-    "aku/claude/1d1e0004 interrupt unstoppable leash-held-after-put-down",
+    "aku/claude/1d1e0004 ─────────────────────────────────── kei/provider-core-review\ninterrupt unstoppable leash-held-after-put-down",
   );
   assert.equal(akumaExitCode(unstoppable), 1);
 });
@@ -744,20 +779,100 @@ test("history --last renders typed no-answer and preserves answered empty bytes"
     action: "history" as const,
     akuma: "aku/worker/00000001" as const,
     mode: "no-answer" as const,
+    contractId: "kei/provider-core-review" as const,
+    historyResult: {
+      kind: "no-answer" as const,
+      id: "aku/worker/00000001" as const,
+      contractId: "kei/provider-core-review" as const,
+    },
   };
   assert.equal(renderAkumaText(command, noAnswer), "no answer retained");
   assert.deepEqual(akumaJsonValue(command, noAnswer), {
     kind: "no-answer",
     id: "aku/worker/00000001",
+    contractId: "kei/provider-core-review",
   });
   assert.equal(akumaExitCode(noAnswer), 0);
 
-  const emptyAnswer = { ...noAnswer, mode: "last" as const, answer: "" };
+  const emptyAnswer = {
+    ...noAnswer,
+    mode: "last" as const,
+    answer: "",
+    historyResult: {
+      kind: "last" as const,
+      id: noAnswer.akuma,
+      answer: "",
+      contractId: noAnswer.contractId,
+    },
+  };
   assert.equal(renderAkumaText(command, emptyAnswer), "");
   assert.deepEqual(akumaJsonValue(command, emptyAnswer), {
     kind: "last",
     id: "aku/worker/00000001",
     answer: "",
+    contractId: "kei/provider-core-review",
   });
   assert.equal(akumaExitCode(emptyAnswer), 0);
+});
+
+test("history JSON preserves an associated Contract for every result mode", () => {
+  const akuma = "aku/worker/00000001" as const;
+  const contractId = "kei/provider-core-review" as const;
+  const pageCommand = parseArgv(["history", akuma, "--json"]).command;
+  const page = {
+    kind: "akuma" as const,
+    action: "history" as const,
+    akuma,
+    mode: "page" as const,
+    contractId,
+    history: {
+      rows: [],
+      turns: [],
+      omitted: 0,
+      hasEarlier: false,
+      hasLater: false,
+      historyLost: false,
+      lowestRetained: null,
+      highest: null,
+    },
+    historyResult: {
+      kind: "history" as const,
+      id: akuma,
+      history: {
+        rows: [], turns: [], omitted: 0, hasEarlier: false, hasLater: false,
+        historyLost: false, lowestRetained: null, highest: null,
+      },
+      contractId,
+    },
+  };
+  assert.deepEqual(akumaJsonValue(pageCommand, page), {
+    kind: "history",
+    id: akuma,
+    history: page.history,
+    contractId,
+  });
+
+  const lastCommand = parseArgv(["history", akuma, "--last", "--json"]).command;
+  const last = {
+    ...page,
+    mode: "last" as const,
+    answer: "answer",
+    historyResult: { kind: "last" as const, id: akuma, answer: "answer", contractId },
+  };
+  assert.deepEqual(akumaJsonValue(lastCommand, last), {
+    kind: "last",
+    id: akuma,
+    answer: "answer",
+    contractId,
+  });
+  const noAnswer = {
+    ...page,
+    mode: "no-answer" as const,
+    historyResult: { kind: "no-answer" as const, id: akuma, contractId },
+  };
+  assert.deepEqual(akumaJsonValue(lastCommand, noAnswer), {
+    kind: "no-answer",
+    id: akuma,
+    contractId,
+  });
 });

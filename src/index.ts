@@ -27,6 +27,7 @@ export type {
   AkumaKillResult,
   AkumaSetAddressInput,
   AkumaStatus,
+  AkumaStatusView,
   AkumaTellInput,
   AkumaTellResult,
   AkumaWaitInput,

@@ -1,5 +1,5 @@
 import type { ActivityHistory, ActivityRow, ActivitySnapshotEntry, AkumaStatus, TellResult } from "../../akuma/index.js";
-import type { DispatchStage } from "../../index.js";
+import type { AkumaStatusView, ContractId, DispatchStage } from "../../index.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
 import { toolRepr } from "./akuma-tool.js";
@@ -186,13 +186,14 @@ function statusItems(status: AkumaStatus, exceptTell?: string, tail: readonly Sp
 type StatusTextOptions = Readonly<{
   facts?: readonly string[];
   alias?: string;
+  contractId?: ContractId;
   exceptTell?: string;
   tail?: readonly SpineItem[];
 }>;
 
-function snapshotText(status: AkumaStatus, context: TextRenderContext, options: StatusTextOptions = {}): string {
+function snapshotText(status: AkumaStatusView, context: TextRenderContext, options: StatusTextOptions = {}): string {
   return [
-    ruler(identity(status.id, options.alias), context.columns),
+    ruler(identity(status.id, options.alias), context.columns, options.contractId ?? status.contractId),
     ...(options.facts ?? []),
     ...renderSpine(statusItems(status, options.exceptTell, options.tail), context),
     ...lifeFooter(status),
@@ -227,7 +228,8 @@ function historyText(
   const scope = command.before === undefined && command.since === undefined
     ? "history"
     : `history ── ${command.before === undefined ? `since ${command.since}` : `before ${command.before}`}`;
-  const lines = [ruler(identity(result.akuma, result.alias), context.columns, scope)];
+  const headerScope = result.contractId === undefined ? scope : `${scope} · ${result.contractId}`;
+  const lines = [ruler(identity(result.akuma, result.alias), context.columns, headerScope)];
   const first = history.rows[0]?.sequence;
   const last = history.rows.at(-1)?.sequence;
   if (history.hasEarlier && first !== undefined) {
@@ -241,7 +243,7 @@ function historyText(
   return lines.join("\n");
 }
 
-function waitText(status: AkumaStatus, context: TextRenderContext, alias?: string): string {
+function waitText(status: AkumaStatusView, context: TextRenderContext, alias?: string): string {
   if (status.life === "running") return snapshotText(status, context, alias === undefined ? {} : { alias });
   if (status.answer !== undefined) return status.answer;
   if (status.failure !== undefined) return `failure ${status.failure}`;
@@ -298,24 +300,37 @@ function tellText(
 
 function dispatchLines(stage: DispatchStage): readonly string[] {
   if (stage.kind === "none") return [];
-  if (stage.kind === "dispatched") return [`dispatch ${stage.dispatch.contractId}`];
+  if (stage.kind === "dispatched") return [];
   if (stage.failure.kind === "conflict") return [`dispatch failed conflict ${stage.failure.current.contractId}`];
   if (stage.failure.kind === "contention") return ["dispatch failed contention"];
   return [`dispatch failed ${stage.failure.kind} ${safeText(stage.failure.diagnostic)}`];
+}
+
+function dispatchContract(stage: DispatchStage): ContractId | undefined {
+  if (stage.kind === "dispatched") return stage.dispatch.contractId;
+  return undefined;
 }
 
 function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, context: TextRenderContext): string {
   const called = result.result;
   const stages = [...dispatchLines(called.dispatch)];
   const alias = called.alias.kind === "aliased" ? called.alias.alias.alias : undefined;
+  const contractId = dispatchContract(called.dispatch);
+  const head = contractId === undefined
+    ? identity(called.akuma, alias)
+    : ruler(identity(called.akuma, alias), context.columns, contractId);
   if (called.alias.kind === "failed") stages.push(`alias failed ${called.alias.failure.kind} ${safeText(called.alias.failure.diagnostic)}`);
-  if (called.observation.kind === "detached") return [identity(called.akuma, alias), ...stages].join("\n");
+  if (called.observation.kind === "detached") return [head, ...stages].join("\n");
   if (called.observation.kind === "failed") {
-    return [identity(called.akuma, alias), ...stages, `wait failed ${called.observation.failure.kind} ${safeText(called.observation.failure.diagnostic)}`].join("\n");
+    return [head, ...stages, `wait failed ${called.observation.failure.kind} ${safeText(called.observation.failure.diagnostic)}`].join("\n");
   }
   const status = called.observation.status;
-  if (status.answer !== undefined || status.failure !== undefined) return [identity(called.akuma, alias), ...stages, waitText(status, context, alias)].join("\n");
-  return snapshotText(status, context, { facts: stages, ...(alias === undefined ? {} : { alias }) });
+  if (status.answer !== undefined || status.failure !== undefined) return [head, ...stages, waitText(status, context, alias)].join("\n");
+  return snapshotText(status, context, {
+    facts: stages,
+    ...(alias === undefined ? {} : { alias }),
+    ...(contractId === undefined ? {} : { contractId }),
+  });
 }
 
 export function renderAkumaText(
@@ -331,13 +346,20 @@ export function renderAkumaText(
       if (result.mode === "ordinary") return tellText(result, context);
       const receipt = result.result.receipt;
       const name = identity(result.result.id, result.alias);
-      if (receipt.kind === "unstoppable") return `${name} interrupt unstoppable ${receipt.evidence}`;
-      return [`${name} interrupted ${receipt.putDown}`, ...tellReceiptLines(receipt.tell)].join("\n");
+      const head = result.result.contractId === undefined
+        ? name
+        : ruler(name, context.columns, result.result.contractId);
+      if (receipt.kind === "unstoppable") return `${head}\ninterrupt unstoppable ${receipt.evidence}`;
+      return [`${head}\ninterrupted ${receipt.putDown}`, ...tellReceiptLines(receipt.tell)].join("\n");
     }
     case "history": return historyText(command as Extract<ParsedCommand, { command: "history" }>, result, context);
     case "fork": {
       const receipt = result.receipt;
-      if (receipt.kind === "forked") return [receipt.child, ...dispatchLines(receipt.dispatch)].join("\n");
+      if (receipt.kind === "forked") {
+        const contractId = dispatchContract(receipt.dispatch);
+        const head = contractId === undefined ? receipt.child : ruler(receipt.child, context.columns, contractId);
+        return [head, ...dispatchLines(receipt.dispatch)].join("\n");
+      }
       if (receipt.kind === "provider-cannot-fork") return `${receipt.provider} cannot fork`;
       if (receipt.kind === "unknown-history") return `${receipt.at} has no matching retained answered turn`;
       if (receipt.kind === "fork-failed") return receipt.diagnostic;
@@ -376,13 +398,8 @@ export function akumaJsonValue(command: ParsedCommand, result: AkumaInvocationRe
   if (result.action === "wait") return result.result;
   if (result.action === "tell") return result.result;
   if (result.action === "history") {
-    if (command.command === "history" && command.last) {
-      if (result.mode === "no-answer") return { kind: "no-answer", id: result.akuma };
-      if (result.mode !== "last") throw new Error("history last result lacks its typed outcome");
-      return { kind: "last", id: result.akuma, answer: result.answer };
-    }
-    if (result.mode !== "page") throw new Error("history result lacks its activity page");
-    return result.history;
+    if (command.command !== "history") throw new Error("history result requires the history command");
+    return result.historyResult;
   }
   return result;
 }

@@ -515,9 +515,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("akuma/index.ts"),
         any("akuma/akuma.ts", ["readActionFeedbackStatus"]),
+        types("core/facts/types.ts", ["ContractId"]),
+        any("dispatch/index.ts", ["readDispatch"]),
         types("settings.ts"),
         any("library/address.ts"),
         any("library/input.ts", ["requireInput"]),
+        any("library/repo.ts", ["Repo", "scopeForRepo"]),
         types("world.ts"),
       ],
     },

@@ -121,6 +121,7 @@ export type {
   AkumaInterruptInput,
   AkumaInterruptResult,
   AkumaKillResult,
+  AkumaStatusView,
   AkumaTellInput,
   AkumaTellResult,
   AkumaWaitInput,
