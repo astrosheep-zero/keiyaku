@@ -34,6 +34,28 @@ for detached HEAD, or when that observation fails. The immutable
 `ContractBoard.state`, not copied into another report field. It is not the
 invocation worktree HEAD.
 
+When a Repo is present, Kanshi creates one call-scoped
+`GitReadObservation` and passes it to the complete Contract, TaskHolder, and
+Dispatch readers. Kanshi only composes their returned values into sections and
+joins; it does not inspect the frozen Git snapshot, select product paths or
+object IDs, decode product bytes, or create Git processes. The owners may read
+concurrently, but all requested objects use the observation's one shared batch
+and repeated Contract target refs resolve once per distinct refname.
+
+Failure follows the information the user could not observe. Failure to freeze
+or validate the shared Git state makes every Git-backed section failed. A
+missing owner object, malformed owner bytes, or owner codec failure fails only
+the section that depends on that owner: Contract failure fails the Contract
+section, TaskHolder failure fails the Task section and makes Contract holder
+decorations unavailable, and Dispatch failure fails the Akuma section. If the
+shared batch process itself dies, every remaining section that requires it
+fails from that one transport failure; Kanshi does not retry through another
+reader. Task files, Alias files, branch metadata, and the compact Akuma fleet
+retain their existing independent failure boundaries.
+
+The observation exists only for this report call. Kanshi keeps no cross-report
+cache and has no prepare/finish exchange with the product owners.
+
 ## Contract endpoints
 
 Task endpoints come only from current `held` TaskHolder facts read through the

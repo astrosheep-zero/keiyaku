@@ -20,10 +20,11 @@ import {
 } from "../src/git/repository.js";
 import {
   observeBindCoordinates,
-  observeGit,
+  observeContractWorld,
   observeContract,
   observeContractsForAdmission,
 } from "../src/git/observe.js";
+import { withGitReadObservation } from "../src/git/read-observation.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { bindOperation as rawBindOperation, amendOperation as rawAmendOperation } from "../src/protocol/operations.js";
 import { contractId, documentKey, entryUlid, gate, type AmendData, type ContractId, type ContractTerms, type JournalEntry, type SnapshotId } from "../src/core/facts/types.js";
@@ -179,7 +180,7 @@ function publishMalformedUnrelatedJournal(repository: ReturnType<typeof reposito
   publishMalformedJournal(repository, "contracts/unrelated.jsonl");
 }
 
-test("batches full-Git journal observation into one Git invocation", async () => {
+test("batches full Contract observation through one call-scoped object process", async () => {
   const repository = repositoryWithHead();
   for (let index = 0; index < 4; index += 1) {
     await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
@@ -189,16 +190,16 @@ test("batches full-Git journal observation into one Git invocation", async () =>
   const journals = [...git.paths.keys()].filter((path) => path.startsWith("contracts/") && path.endsWith(".jsonl"));
   assert.equal(journals.length, 4);
   const log = join(repository.path, "cat-file.log");
-  const observed = withGitShim(
+  const observed = await withGitShim(
     "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_READ_LOG: log },
-    () => observeGit(repositoryAt(repository.path)),
+    () => withGitReadObservation(repositoryAt(repository.path), observeContractWorld),
   );
 
   assert.equal(observed.contracts.size, journals.length);
   const invocations = readFileSync(log, "utf8").trim().split("\n");
   assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
-  assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 1);
+  assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 0);
 });
 
 function gitProcessCounts(invocations: readonly string[]): Record<string, number> {
@@ -743,7 +744,8 @@ test("amend emits bound atomically when its resulting after set is claimed", asy
   assert.equal(claimedDependency.kind, "accepted");
   if (claimedDependency.kind !== "accepted") throw new Error("claimable dependency bind was not accepted");
   const git = repositoryAt(repository.path);
-  const state = observeGit(git).contracts.get(claimedDependency.value.contractId)?.state;
+  const state = (await withGitReadObservation(git, observeContractWorld))
+    .contracts.get(claimedDependency.value.contractId)?.state;
   if (state === undefined || state === null) throw new Error("claimable dependency state was not observed");
   const delivery = prepareDelivery(git, preparationCoordinates(state), { title: "Targeted" });
   assert.equal(delivery.kind, "prepared");

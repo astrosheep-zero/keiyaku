@@ -7,7 +7,6 @@ import {
   GIT_FORMAT_PATH,
   GIT_REF,
   readBlob,
-  readGit,
   readGitPaths,
   updateGitTree,
   updateRefsAtomically,
@@ -17,6 +16,7 @@ import {
   type GitSnapshot,
   type TreeChange,
 } from "../git/repository.js";
+import { withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 
 const DISPATCH_ROOT = "dispatch";
 const DISPATCH_PREFIX = `${DISPATCH_ROOT}/`;
@@ -112,21 +112,29 @@ export function readDispatch(repository: GitRepository, value: AkuId): Dispatch 
   return dispatchFromSnapshot(repository, readGitPaths(repository, [path]), akuId);
 }
 
-export function readDispatches(repository: GitRepository): readonly Dispatch[] {
-  const snapshot = readGit(repository);
+export async function readDispatchesAt(observation: GitReadObservation): Promise<readonly Dispatch[]> {
+  const entries = [...observation.snapshot.paths]
+    .filter(([path, entry]) => path.startsWith(DISPATCH_PREFIX) && entry.type === "blob");
+  const blobs = await observation.readBlobs(entries.map(([, entry]) => entry.oid));
   const dispatches: Dispatch[] = [];
   const seen = new Set<AkuId>();
-  for (const [path, entry] of snapshot.paths) {
+  for (const [path, entry] of observation.snapshot.paths) {
     if (path === DISPATCH_ROOT) corruption(`Dispatch authority root is not a tree: ${path}`);
     if (!path.startsWith(DISPATCH_PREFIX)) continue;
     if (!path.endsWith(DISPATCH_SUFFIX)) corruption(`unexpected Dispatch authority path: ${path}`);
     if (entry.type !== "blob") corruption(`Dispatch path is not a blob: ${path}`);
-    const dispatch = decode(path, readBlob(repository, entry.oid));
+    const result = blobs.get(entry.oid);
+    if (result?.kind !== "present") corruption(`missing Dispatch Git object: ${path}`);
+    const dispatch = decode(path, result.bytes);
     if (seen.has(dispatch.akuId)) corruption(`duplicate Dispatch identity: ${dispatch.akuId}`);
     seen.add(dispatch.akuId);
     dispatches.push(dispatch);
   }
   return dispatches.sort((left, right) => Buffer.compare(Buffer.from(left.akuId), Buffer.from(right.akuId)));
+}
+
+export async function readDispatches(repository: GitRepository): Promise<readonly Dispatch[]> {
+  return withGitReadObservation(repository, readDispatchesAt);
 }
 
 function observedPublication(

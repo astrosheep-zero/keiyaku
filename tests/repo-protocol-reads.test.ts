@@ -68,14 +68,14 @@ test("git repository resolution rejects omitted and empty coordinates", () => {
   assert.throws(() => repositoryAt(""), /repository path must be a nonempty string/);
 });
 
-test("Contract board keeps an absent Keiyaku state snapshot explicit", () => {
+test("Contract board keeps an absent Keiyaku state snapshot explicit", async () => {
   const repository = repositoryWithMain();
-  const report = contractsOperation({ scope: scopeOperation({ coordinate: repository.path }) });
+  const report = await contractsOperation({ scope: scopeOperation({ coordinate: repository.path }) });
   assert.equal(report.state, null);
   assert.deepEqual(report.rows, []);
 });
 
-test("Contract reads return plain pinned data from one git snapshot", () => {
+test("Contract reads return plain pinned data from one git snapshot", async () => {
   const repository = repositoryWithMain();
   const first = bind(repository, "First status row", "here");
   const second = bind(repository, "Second status row", "worktree");
@@ -83,7 +83,7 @@ test("Contract reads return plain pinned data from one git snapshot", () => {
   const log = resolve(repository.path, "status-blob-reads.log");
   writeFileSync(log, "");
 
-  const report = withGitShim(
+  const report = await withGitShim(
     "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_STATUS_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_STATUS_READ_LOG: log },
     () => contractsOperation({ scope }),
@@ -120,7 +120,7 @@ test("Contract reads return plain pinned data from one git snapshot", () => {
   });
   const invocations = readFileSync(log, "utf8").trim().split("\n");
   assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
-  assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 1);
+  assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 0);
 
   assert.deepEqual(contractObservationOperation({ scope, contractId: first }), {
     kind: "present",

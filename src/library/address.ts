@@ -109,11 +109,11 @@ function idsFromFleet(fleet: AkumaList): readonly AkuId[] {
   return fleet.rows.map((row) => row.id);
 }
 
-export function addressAkumaSet(input: AkumaSetAddressInput): Readonly<{
+export async function addressAkumaSet(input: AkumaSetAddressInput): Promise<Readonly<{
   path: WorldRoot;
   ids: readonly AkuId[];
   settings?: Settings;
-}> {
+}>> {
   const values = requireInput(input, "Akuma set address input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "settings", "repo"].includes(key)) throw new TypeError(`Akuma set address input has unknown field: ${key}`);
@@ -138,7 +138,7 @@ export function addressAkumaSet(input: AkumaSetAddressInput): Readonly<{
     ? new Map(readAliases(path).map((binding) => [binding.alias, binding.akuId]))
     : new Map<AkumaAlias, AkuId>();
   const dispatches = selectors.some((selector) => selector.kind === "contract")
-    ? readDispatches(scopeForRepo(values.repo as Repo))
+    ? await readDispatches(scopeForRepo(values.repo as Repo))
     : [];
   const selected = new Set<AkuId>();
   for (const selector of selectors) {

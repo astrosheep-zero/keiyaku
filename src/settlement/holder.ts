@@ -5,10 +5,10 @@ import { contractId, type ContractId } from "../core/facts/types.js";
 import {
   expandGitSnapshot,
   readBlob,
-  readGit,
   type GitRepository,
   type GitSnapshot,
 } from "../git/repository.js";
+import { withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 
 const HOLDER_ROOT = "settlement/task-holders";
@@ -125,10 +125,35 @@ export function releaseTaskHolder(
     : update({ ...current, disposition: "released" });
 }
 
-export function readTaskHolders(repository: GitRepository): readonly TaskHolder[] {
-  return holderEntries(repository, readGit(repository), "complete");
+export async function readTaskHoldersAt(observation: GitReadObservation): Promise<readonly TaskHolder[]> {
+  const entries = [...observation.snapshot.paths]
+    .filter(([path, entry]) => path.startsWith(HOLDER_PREFIX) && entry.type === "blob");
+  const blobs = await observation.readBlobs(entries.map(([, entry]) => entry.oid));
+  const holders: TaskHolder[] = [];
+  const seen = new Set<TaskId>();
+  for (const [path, entry] of observation.snapshot.paths) {
+    if (path === HOLDER_ROOT) corruption(`TaskHolder authority root is not a tree: ${path}`);
+    if (!path.startsWith(HOLDER_PREFIX)) continue;
+    if (!path.endsWith(HOLDER_SUFFIX)) corruption(`unexpected TaskHolder authority path: ${path}`);
+    if (entry.type !== "blob") corruption(`TaskHolder path is not a blob: ${path}`);
+    const result = blobs.get(entry.oid);
+    if (result?.kind !== "present") corruption(`missing TaskHolder Git object: ${path}`);
+    const holder = decodeHolder(path, result.bytes);
+    if (seen.has(holder.taskId)) corruption(`duplicate TaskHolder identity: ${holder.taskId}`);
+    seen.add(holder.taskId);
+    holders.push(holder);
+  }
+  return holders.sort((left, right) => Buffer.compare(Buffer.from(left.taskId), Buffer.from(right.taskId)));
 }
 
-export function readTaskHolderProjection(repository: GitRepository): TaskHolderProjection {
-  return projectTaskHolders(readTaskHolders(repository));
+export async function readTaskHolderProjectionAt(observation: GitReadObservation): Promise<TaskHolderProjection> {
+  return projectTaskHolders(await readTaskHoldersAt(observation));
+}
+
+export async function readTaskHolders(repository: GitRepository): Promise<readonly TaskHolder[]> {
+  return withGitReadObservation(repository, readTaskHoldersAt);
+}
+
+export async function readTaskHolderProjection(repository: GitRepository): Promise<TaskHolderProjection> {
+  return withGitReadObservation(repository, readTaskHolderProjectionAt);
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,6 +11,7 @@ import { HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import {
+  GIT_FORMAT_PATH,
   GIT_REF,
   readGit,
   repositoryAt,
@@ -19,21 +20,22 @@ import {
   writeBlob,
   writeCommit,
 } from "../src/git/repository.js";
+import { contractJournalPath } from "../src/git/identity.js";
 import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
 import { Tasks } from "../src/task/index.js";
 import { authorityPath } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import { moveAlias } from "../src/alias/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
-import { makeGitRepository } from "./support/git.js";
+import { makeGitRepository, withGitShim } from "./support/git.js";
 
 function observe(path: string, repo?: Repo) {
   return kanshi({ world: World.at(path), ...(repo === undefined ? {} : { repo }) });
 }
 
-function document(): string {
+function document(title = "Kanshi contract"): string {
   return [
-    "# Kanshi contract", "", "## Context", "status", "", "## Objective", "render", "",
+    `# ${title}`, "", "## Context", "status", "", "## Objective", "render", "",
     "## Design", "project public values", "", "## Region", "```", "src/**", "```", "",
     "## Criteria", "### Visible", "The status row is visible.", "",
   ].join("\n");
@@ -67,7 +69,13 @@ async function populatedWorld() {
   const added = await tasks.add({ title: "Render status", priority: 0 });
   assert.equal(added.kind, "accepted");
   if (added.kind !== "accepted") throw new Error("task add failed");
-  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), task: added.value.id, markdown: document(), workspace: "here" });
+  const bound = await Keiyaku.bind({
+    repo: Repo.at({ path: repository.path }),
+    task: added.value.id,
+    markdown: document(),
+    workspace: "here",
+    target: "main",
+  });
   const contract = await bound.keiyaku.state();
   const renamed = await tasks.task({ id: added.value.id }).update({ title: "Investigate status rendering" });
   assert.equal(renamed.kind, "accepted");
@@ -77,6 +85,157 @@ async function populatedWorld() {
   await moveAlias({ world: repository.path, alias: "@watch", akuId: akumaId });
   return { repository, contract, taskId: added.value.id, akumaId };
 }
+
+function gitInvocations(path: string): readonly string[] {
+  const text = readFileSync(path, "utf8").trim();
+  return text.length === 0 ? [] : text.split("\n");
+}
+
+async function observedGitInvocations(repository: ReturnType<typeof makeGitRepository>): Promise<readonly string[]> {
+  const log = join(repository.path, "kanshi-git-invocations.log");
+  writeFileSync(log, "");
+  await withGitShim(
+    "printf '%s\\n' \"$*\" >> \"$KEIYAKU_KANSHI_GIT_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    { KEIYAKU_KANSHI_GIT_LOG: log },
+    () => observe(repository.path, Repo.at({ path: repository.path })),
+  );
+  return gitInvocations(log);
+}
+
+function deleteLooseObject(repository: ReturnType<typeof makeGitRepository>, oid: string): void {
+  unlinkSync(join(repository.path, ".git", "objects", oid.slice(0, 2), oid.slice(2)));
+}
+
+test("one-target Kanshi observation has a six-process Git topology", async () => {
+  const { repository } = await populatedWorld();
+  const tasks = Tasks.of(World.at(repository.path));
+  const added = await tasks.add({ title: "Second status row" });
+  assert.equal(added.kind, "accepted");
+  if (added.kind !== "accepted") return;
+  const bound = await Keiyaku.bind({
+    repo: Repo.at({ path: repository.path }),
+    task: added.value.id,
+    markdown: document("Second Kanshi contract"),
+    workspace: "worktree",
+    target: "main",
+  });
+  const secondContract = await bound.keiyaku.state();
+  const secondAkuma = bornAkuma(repository.path, "a0000009");
+  assert.equal(publishDispatch({
+    repository: repositoryAt(repository.path),
+    akuId: secondAkuma,
+    contractId: secondContract.id,
+  }).kind, "dispatched");
+  const invocations = await observedGitInvocations(repository);
+
+  assert.equal(invocations.length, 6);
+  assert.equal(invocations.filter((command) => command === "worktree list --porcelain -z").length, 1);
+  assert.equal(invocations.filter((command) => command === "symbolic-ref --quiet HEAD").length, 1);
+  assert.equal(invocations.filter((command) => command === `rev-parse --verify --quiet ${GIT_REF}`).length, 1);
+  assert.equal(invocations.filter((command) => command.startsWith("ls-tree -r -z --full-tree ")).length, 1);
+  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
+  assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
+  assert.equal(invocations.some((command) => command.startsWith("cat-file blob ")), false);
+});
+
+test("Kanshi Git topology adds one ref read per distinct Contract target", async () => {
+  const { repository } = await populatedWorld();
+  repository.run(["branch", "other"]);
+  await Keiyaku.bind({
+    repo: Repo.at({ path: repository.path }),
+    markdown: document("Other target contract"),
+    workspace: "worktree",
+    target: "other",
+  });
+
+  const invocations = await observedGitInvocations(repository);
+
+  assert.equal(invocations.length, 7);
+  assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/main").length, 1);
+  assert.equal(invocations.filter((command) => command === "rev-parse --verify --quiet refs/heads/other").length, 1);
+  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
+});
+
+test("a dead shared Kanshi batch fails every Git-backed owner without restarting", async () => {
+  const { repository } = await populatedWorld();
+  const log = join(repository.path, "kanshi-dead-batch.log");
+  writeFileSync(log, "");
+
+  const report = await withGitShim(
+    [
+      "printf '%s\\n' \"$*\" >> \"$KEIYAKU_KANSHI_GIT_LOG\"",
+      "if [ \"$1 $2\" = \"cat-file --batch\" ]; then exit 74; fi",
+      "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    ].join("\n"),
+    { KEIYAKU_KANSHI_GIT_LOG: log },
+    () => observe(repository.path, Repo.at({ path: repository.path })),
+  );
+
+  assert.equal(report.contracts.kind, "failed");
+  assert.equal(report.tasks.kind, "failed");
+  assert.equal(report.akuma.kind, "failed");
+  assert.equal(gitInvocations(log).filter((command) => command === "cat-file --batch").length, 1);
+});
+
+test("a missing Contract object fails only the Contract-dependent section", async () => {
+  const { repository, contract } = await populatedWorld();
+  const snapshot = readGit(repositoryAt(repository.path));
+  deleteLooseObject(repository, snapshot.paths.get(contractJournalPath(contract.id))!.oid);
+
+  const report = await observe(repository.path, Repo.at({ path: repository.path }));
+
+  assert.equal(report.contracts.kind, "failed");
+  assert.equal(report.tasks.kind, "present");
+  assert.equal(report.akuma.kind, "present");
+});
+
+test("a missing TaskHolder object fails only the TaskHolder-dependent section", async () => {
+  const { repository } = await populatedWorld();
+  const snapshot = readGit(repositoryAt(repository.path));
+  const holder = [...snapshot.paths].find(([path]) => path.startsWith("settlement/task-holders/"));
+  assert.notEqual(holder, undefined);
+  deleteLooseObject(repository, holder![1].oid);
+
+  const report = await observe(repository.path, Repo.at({ path: repository.path }));
+
+  assert.equal(report.contracts.kind, "present");
+  assert.equal(report.tasks.kind, "failed");
+  assert.equal(report.akuma.kind, "present");
+  if (report.contracts.kind === "present") {
+    assert.equal(report.contracts.value.rows.every((row) => row.holder.kind === "unavailable"), true);
+  }
+});
+
+test("a missing Dispatch object fails only the Dispatch-dependent section", async () => {
+  const { repository } = await populatedWorld();
+  const snapshot = readGit(repositoryAt(repository.path));
+  const dispatch = [...snapshot.paths].find(([path]) => path.startsWith("dispatch/"));
+  assert.notEqual(dispatch, undefined);
+  deleteLooseObject(repository, dispatch![1].oid);
+
+  const report = await observe(repository.path, Repo.at({ path: repository.path }));
+
+  assert.equal(report.contracts.kind, "present");
+  assert.equal(report.tasks.kind, "present");
+  assert.equal(report.akuma.kind, "failed");
+});
+
+test("a corrupt shared Git format fails every state-backed Kanshi section", async () => {
+  const { repository } = await populatedWorld();
+  const git = repositoryAt(repository.path);
+  const snapshot = readGit(git);
+  const tree = updateGitTree(git, snapshot.tree, new Map([
+    [GIT_FORMAT_PATH, { oid: writeBlob(git, "not the current format\n") }],
+  ]));
+  const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
+
+  const report = await observe(repository.path, Repo.at({ path: repository.path }));
+
+  assert.equal(report.contracts.kind, "failed");
+  assert.equal(report.tasks.kind, "failed");
+  assert.equal(report.akuma.kind, "failed");
+});
 
 test("kanshi joins TaskHolder, Dispatch, and Alias without moving their authorities", async () => {
   const { repository, contract, taskId, akumaId } = await populatedWorld();
@@ -160,6 +319,23 @@ test("a malformed TaskHolder root fails only the Kanshi Task section", async () 
   if (report.contracts.kind === "present") {
     assert.equal(report.contracts.value.rows.every((row) => row.holder.kind === "unavailable"), true);
   }
+});
+
+test("a malformed Contract journal fails only the Kanshi Contract section", async () => {
+  const { repository, contract } = await populatedWorld();
+  const git = repositoryAt(repository.path);
+  const snapshot = readGit(git);
+  const tree = updateGitTree(git, snapshot.tree, new Map([
+    [contractJournalPath(contract.id), { oid: writeBlob(git, "not a Contract journal\n") }],
+  ]));
+  const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
+
+  const report = await observe(repository.path, Repo.at({ path: repository.path }));
+
+  assert.equal(report.contracts.kind, "failed");
+  assert.equal(report.tasks.kind, "present");
+  assert.equal(report.akuma.kind, "present");
 });
 
 test("kanshi samples observedAt before section reads", async () => {

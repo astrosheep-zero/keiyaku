@@ -65,7 +65,7 @@ import {
   type VerificationStop,
 } from "../protocol/operations.js";
 import { settle, type SettlementReport } from "../settlement/settle.js";
-import { claimTaskHolder, readTaskHolderProjection, releaseTaskHolder, type TaskHolderProjection } from "../settlement/holder.js";
+import { claimTaskHolder, releaseTaskHolder } from "../settlement/holder.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
@@ -312,7 +312,7 @@ export class KeiyakuHandle {
     return {
       ...await mutationResult(this.scope, this.id, accepted, () => undefined, hooks),
       documentDiff: documentDiff("before", "after", before, after),
-      ...observeRegion(this.scope, this.id, document.region),
+      ...await observeRegion(this.scope, this.id, document.region),
     };
   }
 
@@ -453,7 +453,7 @@ export function keiyakuOf(input: KeiyakuOfInput): Keiyaku {
 export async function listKeiyaku(input: ContractListInput): Promise<ContractBoard> {
   const values = requireInput(input, "Keiyaku.list input");
   for (const key of Object.keys(values)) if (key !== "repo") throw new TypeError(`Keiyaku.list input has unknown field: ${key}`);
-  return contractsOperation({ scope: scopeForRepo(values.repo) });
+  return await contractsOperation({ scope: scopeForRepo(values.repo) });
 }
 
 export async function observeKeiyaku(input: ContractObservationInput): Promise<ContractObservation> {
@@ -509,11 +509,6 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     effects: result.effects,
     lags: result.lags,
     settlement: result.settlement,
-    ...observeRegion(scope, id, document.region),
+    ...await observeRegion(scope, id, document.region),
   };
-}
-
-/** Internal package composition read used by Kanshi; not a package-root export. */
-export function taskHolderProjectionForRepo(repo: Repo): TaskHolderProjection {
-  return readTaskHolderProjection(scopeForRepo(repo));
 }

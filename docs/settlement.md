@@ -45,6 +45,15 @@ than represented by absence because post-abandon settlement and replay must
 still know which Task to reopen. There is no reverse index, Task-side copy,
 delete operation, compatibility decoder, or independent holder writer.
 
+A complete holder read consumes one call-scoped `GitReadObservation` from the
+Git owner. Settlement selects TaskHolder paths and object IDs from its
+immutable snapshot, requests those blobs once, and exclusively performs path,
+codec, canonical-byte, duplicate, sorting, and projection judgment. A missing
+holder object or malformed holder fact fails the holder observation; Git does
+not decode it. The complete Settlement entry point creates one observation at
+its Promise boundary, while offer decoration and release keep their targeted
+write-side reads.
+
 ## Rules
 
 Settlement has exactly these rules:
@@ -123,7 +132,8 @@ predecessor-byte comparison remains the Task write adjudicator; concurrent
 movement becomes a lag and is reconsidered later.
 World reconciliation reads and validates one immutable TaskHolder projection,
 then reuses it across every Contract settlement in that invocation; it does not
-rescan the private Git tree per Contract.
+rescan the private Git tree per Contract or retain the observation across
+invocations.
 
 ## Hook Boundary
 

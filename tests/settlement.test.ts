@@ -80,7 +80,7 @@ test("accepted claim synchronously settles its current held Task", async () => {
   const state = await bound.keiyaku.state();
   const git = repositoryAt(world.path);
   assert.equal(readGit(git).paths.has(contractJournalPath(state.id)), true);
-  assert.deepEqual(readTaskHolders(git), [{
+  assert.deepEqual(await readTaskHolders(git), [{
     version: 1,
     taskId,
     contractId: state.id,
@@ -222,8 +222,8 @@ test("TaskHolder reads reject unexpected paths in their authority namespace", as
   const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
   assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
 
-  assert.throws(
-    () => readTaskHolders(git),
+  await assert.rejects(
+    readTaskHolders(git),
     (error: unknown) => error instanceof AuthorityCorruptionError
       && error.message === "TaskHolder authority root is not a tree: settlement/task-holders",
   );

@@ -73,6 +73,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/identity.ts", ["parseAkuId", "AkuId"]),
         any("core/facts/errors.ts"),
         any("core/facts/types.ts"),
+        any("git/read-observation.ts"),
         any("git/repository.ts"),
       ],
     },
@@ -123,6 +124,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "git/tree.ts", allow: [any("git/identity.ts")] },
     { source: "git/repository.ts", allow: [any("git/identity.ts"), any("git/tree.ts"), any("core/facts/errors.ts")] },
     {
+      source: "git/read-observation.ts",
+      allow: [any("core/facts/errors.ts"), any("git/identity.ts"), any("git/repository.ts")],
+    },
+    {
       source: "git/admission.ts",
       allow: [
         any("git/identity.ts"),
@@ -138,6 +143,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "git/observe.ts",
       allow: [
         any("git/identity.ts"),
+        types("git/read-observation.ts"),
         any("git/repository.ts"),
         any("core/facts/errors.ts"),
         any("core/facts/codec.ts"),
@@ -183,6 +189,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/hooks.ts"),
         any("git/identity.ts"),
         any("git/observe.ts"),
+        any("git/read-observation.ts", ["withGitReadObservation"]),
         any("git/repository.ts"),
         any("git/target-placement.ts"),
         any("git/workspace.ts", ["deliveryWorktreePath"]),
@@ -211,6 +218,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "protocol/run.ts",
       allow: [
         any("git/observe.ts"),
+        types("git/read-observation.ts"),
         types("git/repository.ts"),
         types("core/decide.ts"),
         types("core/facts/offer.ts"),
@@ -276,6 +284,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("git/hooks.ts"),
         any("git/identity.ts"),
         any("git/observe.ts"),
+        any("git/read-observation.ts", ["withGitReadObservation"]),
         any("git/reconcile.ts"),
         any("git/repository.ts"),
         types("git/target-placement.ts"),
@@ -310,6 +319,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "protocol/read/**",
       allow: [
         any("git/observe.ts"),
+        types("git/read-observation.ts"),
         types("git/repository.ts"),
         any("git/workspace.ts", ["deliveryWorktreePath"]),
         any("core/facts/gate.ts", ["GateCurrent", "gateReports"]),
@@ -477,12 +487,28 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/errors.ts"),
         types("core/facts/offer.ts"),
         any("core/facts/types.ts"),
+        any("git/read-observation.ts"),
         any("git/repository.ts"),
         any("task/identity.ts"),
       ],
     },
     { source: "settlement/settle.ts", allow: [any("world.ts"), types("git/reconcile.ts"), types("git/repository.ts"), any("core/facts/types.ts"), any("settlement/holder.ts"), any("task/context.ts"), any("task/operations.ts"), types("task/identity.ts"), types("task/store.ts")] },
-    { source: "kanshi/read.ts", allow: [types("world.ts"), any("akuma/index.ts"), any("alias/index.ts", ["readAliases"]), any("dispatch/index.ts", ["readDispatches"]), any("kanshi/**"), any("library/contract.ts", ["listKeiyaku", "taskHolderProjectionForRepo", "ContractBoard", "ContractDisposition"]), any("library/repo.ts", ["NoGitWorldError", "Repo", "scopeForRepo"]), any("task/operations.ts", ["observeTaskStatusRows"])] },
+    {
+      source: "kanshi/read.ts",
+      allow: [
+        types("world.ts"),
+        any("akuma/index.ts"),
+        any("alias/index.ts", ["readAliases"]),
+        any("dispatch/index.ts", ["Dispatch", "readDispatchesAt"]),
+        any("git/read-observation.ts", ["GitReadObservation", "withGitReadObservation"]),
+        any("kanshi/**"),
+        types("library/contract.ts"),
+        any("library/repo.ts", ["Repo", "scopeForRepo"]),
+        any("protocol/read/status.ts", ["readContractBoard"]),
+        any("settlement/holder.ts", ["TaskHolderProjection", "readTaskHolderProjectionAt"]),
+        any("task/operations.ts", ["observeTaskStatusRows"]),
+      ],
+    },
     { source: "kanshi/report.ts", allow: [types("world.ts"), types("akuma/index.ts"), types("identity/selector.ts"), types("library/contract.ts"), types("task/index.ts")] },
     { source: "kanshi/**", allow: [any("index.ts"), any("kanshi/**"), any("task/index.ts")] },
     { source: "markdown/diff.ts", allow: [] },
@@ -571,6 +597,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       module: "node:child_process",
       owners: [
         { source: "git/repository.ts", symbols: ["execFileSync"] },
+        { source: "git/read-observation.ts", symbols: ["ChildProcessWithoutNullStreams", "spawn"] },
         { source: "runtime/proc/**", symbols: ["ChildProcessWithoutNullStreams", "spawn", "spawnSync"] },
         { source: "scripts/model-change-impact.ts", symbols: ["execFileSync"] },
       ],
@@ -631,6 +658,16 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { module: "crypto", owners: [] },
   ],
   forbiddenSourcePatterns: [
+    {
+      source: "git/read-observation.ts",
+      pattern: /(?:contracts\/|settlement\/task-holders|dispatch\/|decodeJournal|decodeHolder)/u,
+      detail: "Git read observation is product-blind; product paths and codecs remain with their owners",
+    },
+    {
+      source: "kanshi/read.ts",
+      pattern: /(?:\.snapshot\b|\.readBlobs\s*\(|\.resolveRef\s*\()/u,
+      detail: "Kanshi composes owner projections and must not inspect or consume Git observation mechanics",
+    },
     {
       source: "akuma/heart/index.ts",
       pattern: /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/iu,

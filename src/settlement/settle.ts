@@ -106,9 +106,9 @@ function settleNamespace(state: ContractState, effects: readonly Effect[], actio
   }
 }
 
-function observeSettlement(repository: GitRepository): SettlementObservation {
+async function observeSettlement(repository: GitRepository): Promise<SettlementObservation> {
   try {
-    return { kind: "present", holders: readTaskHolderProjection(repository) };
+    return { kind: "present", holders: await readTaskHolderProjection(repository) };
   } catch (error) {
     return { kind: "failed", diagnostic: diagnostic(error) };
   }
@@ -127,11 +127,11 @@ async function settleObserved(input: SettlementInput, observation: SettlementObs
 }
 
 export async function settle(input: SettlementInput): Promise<SettlementReport> {
-  return settleObserved(input, observeSettlement(input.repository));
+  return settleObserved(input, await observeSettlement(input.repository));
 }
 
 export async function settleAll(input: SettlementBatchInput): Promise<readonly SettlementReport[]> {
-  const observation = observeSettlement(input.repository);
+  const observation = await observeSettlement(input.repository);
   return Promise.all(input.contracts.map((contract) => settleObserved({
     repository: input.repository,
     ...contract,

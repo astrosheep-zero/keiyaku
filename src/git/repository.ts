@@ -234,7 +234,7 @@ function parseTreeEntries(output: Buffer): Map<string, TreeEntry> {
   return entries;
 }
 
-function readTreeEntries(repository: GitRepository, tree: GitOid): Map<string, TreeEntry> {
+export function readTreeEntries(repository: GitRepository, tree: GitOid): Map<string, TreeEntry> {
   assertOid(tree, "tree");
   const output = runGit(repository, ["ls-tree", "-r", "-z", "--full-tree", tree]);
   return parseTreeEntries(output);

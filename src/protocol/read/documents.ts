@@ -1,5 +1,5 @@
-import { observeGit } from "../../git/observe.js";
-import type { GitRepository } from "../../git/repository.js";
+import { observeContractWorld } from "../../git/observe.js";
+import type { GitReadObservation } from "../../git/read-observation.js";
 import type { ContractId } from "../../core/facts/types.js";
 
 export type ContractDocumentProjection = Readonly<{
@@ -8,10 +8,10 @@ export type ContractDocumentProjection = Readonly<{
 }>;
 
 /** Read every live contract document from one immutable Git snapshot. */
-export function readDocuments(
-  repository: GitRepository,
-): readonly ContractDocumentProjection[] {
-  const observed = observeGit(repository);
+export async function readDocuments(
+  observation: GitReadObservation,
+): Promise<readonly ContractDocumentProjection[]> {
+  const observed = await observeContractWorld(observation);
   const documents: ContractDocumentProjection[] = [];
   for (const [contract, observation] of observed.contracts) {
     const state = observation.state;

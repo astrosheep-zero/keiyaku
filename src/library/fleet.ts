@@ -84,7 +84,7 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
       throw new TypeError(`Keiyaku.wait input has unknown field: ${key}`);
     }
   }
-  const addressed = addressAkumaSet(setAddress(values));
+  const addressed = await addressAkumaSet(setAddress(values));
   const completion = values.completion;
   if (addressed.ids.length > 1 && completion !== "any" && completion !== "all") {
     throw new TypeError("completion must be any or all when waiting for multiple Akuma");
@@ -106,7 +106,7 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
 }
 
 export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillResult> {
-  const addressed = addressAkumaSet(input);
+  const addressed = await addressAkumaSet(input);
   const handles = addressed.ids.map((id) => source(addressed.path, addressed.settings).of({ id }));
   const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
   return { results: addressed.ids.map((id, index) => ({ id, evidence: evidence[index]! })) };

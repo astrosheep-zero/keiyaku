@@ -162,7 +162,7 @@ test("history last bypasses activity and glob grammar follows normalized archety
   }
 });
 
-test("Contract selector preserves Dispatch membership skipped by compact fleet", () => {
+test("Contract selector preserves Dispatch membership skipped by compact fleet", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
@@ -173,11 +173,11 @@ test("Contract selector preserves Dispatch membership skipped by compact fleet",
     akuId: missing,
     contractId: contractId("kei/review"),
   }).kind, "dispatched");
-  assert.deepEqual(addressAkumaSet({
+  assert.deepEqual((await addressAkumaSet({
     path: repository.path,
     akuma: ["kei/review"],
     repo: Repo.at({ path: repository.path }),
-  }).ids, [missing]);
+  })).ids, [missing]);
 });
 
 test("exact AkuId catalog selection survives an unrelated Contract failure", () => {
@@ -194,13 +194,13 @@ test("exact AkuId catalog selection survives an unrelated Contract failure", () 
   assert.deepEqual(selected.akuma.kind === "present" ? selected.akuma.value.rows.map((row) => row.id) : [], [id]);
 });
 
-test("exact set selection does not read unrelated Alias authority", () => {
+test("exact set selection does not read unrelated Alias authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-exact-address-"));
   try {
     mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
     writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "broken\n");
     const id = akuId({ archetype: "worker", suffix: "deadbeef" });
-    assert.deepEqual(addressAkumaSet({ path: root, akuma: [id] }).ids, [id]);
+    assert.deepEqual((await addressAkumaSet({ path: root, akuma: [id] })).ids, [id]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

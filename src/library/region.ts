@@ -17,10 +17,10 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function observeRegion(scope: RepositoryScope, self: ContractId, mine: readonly string[]): RegionObservation {
+export async function observeRegion(scope: RepositoryScope, self: ContractId, mine: readonly string[]): Promise<RegionObservation> {
   try {
     const overlaps: RegionOverlap[] = [];
-    for (const peer of documentsOperation({ scope })) {
+    for (const peer of await documentsOperation({ scope })) {
       if (peer.contract === self) continue;
       try {
         const pairs = regionsOverlap(mine, decodeContractDocument(peer.documentBytes).region);

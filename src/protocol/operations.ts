@@ -7,7 +7,7 @@ import {
 import {
   currentBranch,
   extendContractsForAdmission,
-  observeGit,
+  observeContractWorld,
   observeContract,
   observeContractsForAdmission,
   type GitDecisionObservation,
@@ -15,6 +15,7 @@ import {
 import { reconcile, reconcileBatch, reconcileObservationFailure, type ReconcileResult } from "../git/reconcile.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import { NoGitWorldError, repositoryAt, type GitRepository } from "../git/repository.js";
+import { withGitReadObservation } from "../git/read-observation.js";
 import { readDeliveryDiff } from "../git/verification.js";
 import type { WorktreeLeak } from "../git/verification.js";
 import { dependencyKeySet } from "../core/subject.js";
@@ -131,7 +132,9 @@ export function currentBranchOperation(input: Readonly<{ scope: RepositoryScope 
   return currentBranch(input.scope);
 }
 
-export function contractsOperation(input: Readonly<{ scope: RepositoryScope }>): ContractBoard { return readContractBoard(input.scope); }
+export async function contractsOperation(input: Readonly<{ scope: RepositoryScope }>): Promise<ContractBoard> {
+  return withGitReadObservation(input.scope, readContractBoard);
+}
 
 export function contractObservationOperation(input: OperationInput): ContractObservation {
   return readContractObservation(input.scope, input.contractId);
@@ -139,7 +142,9 @@ export function contractObservationOperation(input: OperationInput): ContractObs
 
 export type { ContractBoard, ContractDisposition, ContractGateCurrent, ContractGateReport, ContractObservation, ContractPhase, ContractRow };
 
-export function documentsOperation(input: Readonly<{ scope: RepositoryScope }>): readonly ContractDocumentProjection[] { return readDocuments(input.scope); }
+export async function documentsOperation(input: Readonly<{ scope: RepositoryScope }>): Promise<readonly ContractDocumentProjection[]> {
+  return withGitReadObservation(input.scope, readDocuments);
+}
 
 export function stateOperation(input: OperationInput): ContractState {
   const state = observeContract(input.scope, input.contractId).state;
@@ -537,7 +542,7 @@ export async function reconcileAllOperation(
   input: Readonly<{ scope: RepositoryScope }> & ReconcileOptions,
 ): Promise<RepoReconcileReport> {
   const git = input.scope;
-  const observation = observeGit(git);
+  const observation = await withGitReadObservation(git, (read) => observeContractWorld(read));
   const contracts = (await reconcileBatch(
     git,
     observation.contracts.keys(),

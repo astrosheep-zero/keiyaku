@@ -393,6 +393,18 @@ test("architecture policy keeps Kanshi off Task persistence", () => {
   assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
 
+test("architecture policy keeps shared Git observation product-blind and Kanshi composition-only", () => {
+  const gitProductKnowledge = check({
+    "git/read-observation.ts": "export const path = 'dispatch/item.json';",
+  });
+  assert.ok(rules(gitProductKnowledge).includes("architecture/forbidden-source-pattern"));
+
+  const kanshiGitMechanics = check({
+    "kanshi/read.ts": "export function read(observation: any): unknown { return observation.snapshot; }",
+  });
+  assert.ok(rules(kanshiGitMechanics).includes("architecture/forbidden-source-pattern"));
+});
+
 test("architecture policy matches recursive wildcards between exact path segments", () => {
   const policy = {
     ...KEIYAKU_ARCHITECTURE_POLICY,

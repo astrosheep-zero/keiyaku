@@ -31,6 +31,40 @@ bounded-fanout Git tree path, while the journal bytes retain and canonically
 verify the complete identity. The digest is a private locator, never contract
 identity or a second uniqueness authority.
 
+## Call-Scoped Read Observation
+
+A complete composite read uses one package-internal `GitReadObservation` for
+one repository and one call. Git freezes `refs/heads/keiyaku-state` once,
+reads that commit through one persistent `cat-file --batch`, obtains its root
+tree from the commit object, enumerates that tree once, and validates the
+format blob through the same batch. The resulting immutable path-to-object map
+is shared by the Contract, TaskHolder, and Dispatch readers. Each owner selects
+only its own paths and object IDs, requests its blobs, and remains the sole
+decoder, canonical-byte validator, duplicate judge, sorter, and projection
+owner. Git does not know any product path or codec.
+
+The observation memoizes completed object results by object ID and target
+resolution by refname. A missing requested object is a typed per-object result;
+the product owner decides how that absence affects its read. Repeated rows that
+name one target cause one target-ref read. The complete read therefore uses
+`O(1) + O(distinct target refs)` Git processes, independent of owner count,
+row count, and blob count. An empty private state needs no batch process unless
+a consumer explicitly requests an object.
+
+Only `withGitReadObservation(repository, consume)` creates this capability.
+The callback may neither construct nor close it, and returning or throwing
+closes its batch before the call completes. The capability is invalid after
+the callback. A format or freeze failure fails the shared Git observation. If
+the batch process dies, remaining dependent reads receive that same transport
+failure; Git does not start a replacement or freeze a second snapshot.
+
+`Keiyaku.list`, a complete Settlement holder observation, a complete Dispatch
+read, and Kanshi each create an observation at their own Promise boundary.
+Targeted admission, publication, read-back, and other write-side operations
+keep their targeted synchronous primitives. There is no all-tree blob
+prefetch, owner prepare/finish protocol, owner-created Git process,
+cross-call cache, or product-named Git reader.
+
 Git mints `ContractCoordinates.start` at bind. With a target it is
 the resolved target head; without a target it is the caller worktree's current
 `HEAD`. It is the initial managed-worktree commit and the original comparison

@@ -22,6 +22,7 @@ import {
   type GitOid,
   type GitRepository,
 } from "./repository.js";
+import type { GitReadObservation } from "./read-observation.js";
 
 /** Observe a target ref as a branded snapshot without changing Git state. */
 export function observeTargetHead(repository: GitRepository, target: string): SnapshotId | null {
@@ -43,12 +44,28 @@ export function observeDeliveryTarget(repository: GitRepository, state: Contract
   return { head, drift: head !== expected };
 }
 
+export async function observeDeliveryTargetAt(
+  observation: GitReadObservation,
+  state: ContractState,
+): Promise<TargetObservation | null> {
+  const target = state.coordinates.target;
+  if (target === undefined) return null;
+  const value = await observation.resolveRef(target);
+  const head = value === null ? null : mintSnapshotId(value);
+  const delivery = state.delivery?.data;
+  if (delivery === undefined) return { head, drift: false };
+  const expected = state.terminal?.kind === "claimed"
+    ? delivery.integration.snapshot
+    : delivery.integration.predecessor;
+  return { head, drift: head !== expected };
+}
+
 type GitJournalRecord = Readonly<{
   entries: readonly JournalEntry[];
   state: ContractState | null;
 }>;
 
-type GitObservation = Readonly<{
+export type ContractWorldObservation = Readonly<{
   snapshot: SnapshotId | null;
   contracts: ReadonlyMap<ContractId, GitJournalRecord>;
 }>;
@@ -225,16 +242,27 @@ function enumerateContractObservations(
   return observations;
 }
 
-/** Read one immutable Git snapshot, enumerate its journals, and include requested absence. */
-export function observeGit(
-  repository: GitRepository,
+export async function observeContractWorld(
+  observation: GitReadObservation,
   requested: readonly ContractId[] = [],
-): GitObservation {
-  const git = readGit(repository);
-  const observed = observeFrozenGitSnapshot(repository, git, requested);
+): Promise<ContractWorldObservation> {
+  const git = observation.snapshot;
+  const journals = [...git.paths]
+    .filter(([path, entry]) => path.startsWith("contracts/") && path.endsWith(".jsonl") && entry.type === "blob");
+  const results = await observation.readBlobs(journals.map(([, entry]) => entry.oid));
+  const blobs = new Map<GitOid, Buffer>();
+  for (const [path, entry] of journals) {
+    const result = results.get(entry.oid);
+    if (result?.kind !== "present") throw new AuthorityCorruptionError(`missing Git journal object: ${path}`);
+    blobs.set(entry.oid, result.bytes);
+  }
+  const contracts = new Map(enumerateContractObservations(git, blobs));
+  for (const id of requested) {
+    if (!contracts.has(id)) contracts.set(id, observeFromGit(git, id, blobs));
+  }
   return {
     snapshot: git.commit === null ? null : mintSnapshotId(git.commit),
-    contracts: observed.contracts,
+    contracts,
   };
 }
 
@@ -260,7 +288,7 @@ function observeFrozenGitSnapshot(
 export function observeContracts(
   repository: GitRepository,
   ids: readonly ContractId[],
-): GitObservation {
+): ContractWorldObservation {
   const git = readGitPaths(repository, ids.map((id) => contractJournalPath(id)));
   const observed = observeFrozenContractsSnapshot(repository, git, ids);
   return {
@@ -289,7 +317,7 @@ function observeFrozenContractsSnapshot(
   };
 }
 
-function decisionProjection(observation: Pick<GitObservation, "contracts">): ContractsObservation {
+function decisionProjection(observation: Pick<ContractWorldObservation, "contracts">): ContractsObservation {
   return new Map([...observation.contracts].map(([id, record]) => [id, record.state]));
 }
 

@@ -12,7 +12,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { makeGitRepository } from "./support/git.js";
 
-test("Dispatch publishes one immutable association and preserves its first timestamp", () => {
+test("Dispatch publishes one immutable association and preserves its first timestamp", async () => {
   const raw = makeGitRepository();
   const repository = repositoryAt(raw.path);
   const akuma = parseAkuId("aku/worker/1234abcd").id;
@@ -23,7 +23,7 @@ test("Dispatch publishes one immutable association and preserves its first times
   assert.equal(first.kind, "dispatched");
   if (first.kind !== "dispatched") return;
   assert.deepEqual(readDispatch(repository, akuma), first.dispatch);
-  assert.deepEqual(readDispatches(repository), [first.dispatch]);
+  assert.deepEqual(await readDispatches(repository), [first.dispatch]);
 
   const repeated = publishDispatch({ repository, akuId: akuma, contractId: owner });
   assert.deepEqual(repeated, first);

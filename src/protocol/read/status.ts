@@ -1,6 +1,7 @@
-import { observeDeliveryTarget, observeGit, observeContract } from "../../git/observe.js";
+import { observeContractWorld, observeDeliveryTarget, observeDeliveryTargetAt, observeContract } from "../../git/observe.js";
 import { deliveryWorktreePath } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/repository.js";
+import type { GitReadObservation } from "../../git/read-observation.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import type { ContractId, ContractState, DeliverData, SnapshotId } from "../../core/facts/types.js";
 
@@ -44,7 +45,11 @@ function phaseFor(state: ContractState): ContractPhase {
   return "waiting";
 }
 
-function rowFor(repository: GitRepository, state: ContractState): ContractRow {
+function rowFor(
+  repository: GitRepository,
+  state: ContractState,
+  targetObservation: ContractRow["targetObservation"],
+): ContractRow {
   const workspace = state.coordinates.workspace;
   const gates = gateReports(state);
   return {
@@ -55,7 +60,7 @@ function rowFor(repository: GitRepository, state: ContractState): ContractRow {
     worktreePath: workspace === "worktree" ? deliveryWorktreePath(repository, state.id) : null,
     target: state.coordinates.target ?? null,
     delivery: state.delivery?.data ?? null,
-    targetObservation: observeDeliveryTarget(repository, state),
+    targetObservation,
     gates: {
       reports: gates.reports.map((report) => ({ gate: report.gate, current: report.current })),
       satisfied: gates.satisfied,
@@ -64,18 +69,22 @@ function rowFor(repository: GitRepository, state: ContractState): ContractRow {
 }
 
 /** Build the Contract board from one immutable git observation. */
-export function readContractBoard(repository: GitRepository): ContractBoard {
-  const observed = observeGit(repository);
-  const rows: ContractRow[] = [];
+export async function readContractBoard(observation: GitReadObservation): Promise<ContractBoard> {
+  const observed = await observeContractWorld(observation);
+  const rows: Promise<ContractRow>[] = [];
   for (const value of observed.contracts.values()) {
     if (value.state === null) continue;
-    rows.push(rowFor(repository, value.state));
+    const state = value.state;
+    rows.push(observeDeliveryTargetAt(observation, state).then((target) =>
+      rowFor(observation.repository, state, target)));
   }
-  return { root: repository.primaryWorktree, state: observed.snapshot, rows };
+  return { root: observation.repository.primaryWorktree, state: observed.snapshot, rows: await Promise.all(rows) };
 }
 
 /** Observe one Contract without enumerating the Contract world. */
 export function readContractObservation(repository: GitRepository, id: ContractId): ContractObservation {
   const state = observeContract(repository, id).state;
-  return state === null ? { kind: "missing", id } : { kind: "present", row: rowFor(repository, state) };
+  return state === null
+    ? { kind: "missing", id }
+    : { kind: "present", row: rowFor(repository, state, observeDeliveryTarget(repository, state)) };
 }
