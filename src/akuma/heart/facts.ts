@@ -22,7 +22,7 @@ export type ProviderExecution = Readonly<{
 
 export type AkumaOrigin =
   | Readonly<{ kind: "direct" }>
-  | Readonly<{ kind: "request"; parentId: AkuId; requestId: string }>
+  | Readonly<{ kind: "request"; parent: AkuId; requestId: string }>
   | Readonly<{ kind: "fork"; parent: AkuId; at: string }>;
 
 export type Soul = Readonly<{

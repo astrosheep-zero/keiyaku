@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 8;
+const HEART_SCHEMA_VERSION = 9;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(

@@ -271,7 +271,7 @@ async function serveClaim(input: Readonly<{
           provider: request.recipe.provider,
           options: request.recipe.options,
           cwd,
-          origin: { kind: "request", parentId: input.parent.id, requestId: request.id },
+          origin: { kind: "request", parent: input.parent.id, requestId: request.id },
           confinement: request.recipe.confinement,
         },
         initialBody: request.body,
@@ -356,7 +356,7 @@ export function clearBodyRequestTransport(paths: AkumaPaths): void {
 
 function matchingRequestOrigin(soul: Soul, parent: AkuId, requestId: string): boolean {
   return soul.origin.kind === "request"
-    && soul.origin.parentId === parent
+    && soul.origin.parent === parent
     && soul.origin.requestId === requestId;
 }
 

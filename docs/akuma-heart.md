@@ -69,10 +69,10 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed `heart/` custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `8`; leash schema version remains `4`. Heart version 8
-removes tell death-void and permanent death control, and adds Body-scoped kill
-witnesses. It retains the shared activity-and-tell timeline and the Archetype
-and Contract-column hard cut. This is a hard cut: an
+Heart schema version is `9`; leash schema version remains `4`. Heart version 9
+hard-cuts every child origin to one `parent` field. It retains the shared
+activity-and-tell timeline, Body-scoped kill witnesses, and the Archetype and
+Contract-column hard cut. This is a hard cut: an
 older heart fails the existing schema gate; no migration or compatibility
 decoder exists. Absence is stored as SQL `NULL` and omitted from public values.
 

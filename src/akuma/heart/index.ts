@@ -227,10 +227,11 @@ export class HeldAkumaLeash {
   recordInterruptTell(
     paths: AkumaPaths,
     tell: Omit<TellFact, "sequence" | "state">,
-  ): Readonly<{ kind: "recorded"; tell: TellFact }> {
+  ): Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }> {
     return withHeart(paths, (heart) =>
       transaction(heart, () => {
         deletePauseControl(heart);
+        if (soulFact(heart) === null) return { kind: "not-born" };
         const sequence = insertTellFact(heart, tell);
         pruneActivityFacts(heart, ACTIVITY_LIMIT);
         return { kind: "recorded", tell: { sequence, ...tell, state: "pending" } };
@@ -302,9 +303,10 @@ export function activitySlice(paths: AkumaPaths, input: ActivitySliceInput = {})
 export function recordTell(
   paths: AkumaPaths,
   tell: Omit<TellFact, "sequence" | "state">,
-): Readonly<{ kind: "recorded"; tell: TellFact }> {
+): Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }> {
   return withHeart(paths, (heart) =>
     transaction(heart, () => {
+      if (soulFact(heart) === null) return { kind: "not-born" };
       const sequence = insertTellFact(heart, tell);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
       return { kind: "recorded", tell: { sequence, ...tell, state: "pending" } };

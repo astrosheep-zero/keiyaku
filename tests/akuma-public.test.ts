@@ -30,6 +30,27 @@ function akumaAt(root: string, value?: ReturnType<typeof settings>) {
   return Akuma.of(World.at(root), value);
 }
 
+test("tell refuses an unborn address without leaving durable input", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-tell-unborn-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10004" });
+    initializeHeart(allocated.paths);
+    await assert.rejects(akumaAt(root).of({ id: allocated.id }).tell("future input"), AkumaNotBornError);
+    assert.deepEqual(readHeart(allocated.paths).pending, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("interrupt refuses an unborn address without leaving durable input or control", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-interrupt-unborn-"));
+  try {
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10005" });
+    initializeHeart(allocated.paths);
+    await assert.rejects(akumaAt(root).of({ id: allocated.id }).interrupt("future input"), AkumaNotBornError);
+    assert.deepEqual(readHeart(allocated.paths).pending, []);
+    assert.equal(pauseRequested(allocated.paths), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 const provider: ProviderAdapter = {
   confinement: () => ({ kind: "unconfined" }),
   admitOptions(options) { return { kind: "admitted", options }; },

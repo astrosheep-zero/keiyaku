@@ -78,7 +78,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
     assert.equal(readRequest(value.parent.paths, requestId)?.state, "served");
     assert.deepEqual(origin, {
       kind: "request",
-      parentId: value.parent.id,
+      parent: value.parent.id,
       requestId,
     });
 
@@ -150,7 +150,7 @@ test("a new body settles old requests by observation without replay", async () =
       ...value.soul,
       id: born.id,
       archetype: "worker",
-      origin: { kind: "request", parentId: value.parent.id, requestId: bornId },
+      origin: { kind: "request", parent: value.parent.id, requestId: bornId },
     });
     bornLeash.release();
 

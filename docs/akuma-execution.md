@@ -104,7 +104,10 @@ mover and the sole writer of tell facts after admission. It writes delivered
 only after submission evidence and never infers processing from an arbitrary
 provider event or completed turn.
 
-`tell()` records one TellId and wakes level-triggered. While a Body holds the
+`tell()` records one TellId and wakes level-triggered. Soul existence and Tell
+insertion are one Heart transaction: an unborn address is refused without a
+Tell fact, and no orchestration-layer born pre-check duplicates that judge.
+While a Body holds the
 leash, wake nudges it to read pending tells at its checkpoint. When its current
 Session supports live tell, Body submits pending tells in recorded order and
 records the returned acknowledgement. Otherwise they stay pending until the

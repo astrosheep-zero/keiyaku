@@ -136,15 +136,18 @@ async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<Held
   }
 }
 
-function recordTellBody(paths: AkumaPaths, body: string): Readonly<{ kind: "recorded"; tellId: string }> {
+function recordTellBody(
+  paths: AkumaPaths,
+  akuma: AkuId,
+  body: string,
+): Readonly<{ kind: "recorded"; tellId: string }> {
   const id = randomUUID();
   const admitted = recordTell(paths, { id, body, recordedAt: new Date().toISOString() });
+  if (admitted.kind === "not-born") throw new AkumaNotBornError(akuma);
   return { kind: "recorded", tellId: admitted.tell.id };
 }
 
-async function wakeTell(paths: AkumaPaths, akuma: AkuId, tellId: string): Promise<TellResult> {
-  const soul = readSoul(paths);
-  if (soul === null) throw new Error(`Akuma ${akuma} has no soul`);
+async function wakeTell(paths: AkumaPaths, tellId: string): Promise<TellResult> {
   try {
     await spawnAkumaBody({ paths });
     return { admission: { tellId, fact: "recorded" }, wake: "spawned" };
@@ -266,8 +269,8 @@ export class AkumaHandle {
   }
 
   async tell(body: string): Promise<TellResult> {
-    const recorded = recordTellBody(this.paths, body);
-    return await wakeTell(this.paths, this.id, recorded.tellId);
+    const recorded = recordTellBody(this.paths, this.id, body);
+    return await wakeTell(this.paths, recorded.tellId);
   }
 
   async interrupt(body: string): Promise<InterruptReceipt> {
@@ -302,11 +305,12 @@ export class AkumaHandle {
         body,
         recordedAt: new Date().toISOString(),
       });
+      if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
       recorded = { kind: "recorded", tellId: admitted.tell.id };
     } finally {
       leash.release();
     }
-    return { kind: "interrupted", putDown, tell: await wakeTell(this.paths, this.id, recorded.tellId) };
+    return { kind: "interrupted", putDown, tell: await wakeTell(this.paths, recorded.tellId) };
   }
 
   async fork(input: Readonly<{ at: string }>): Promise<ForkReceipt> {

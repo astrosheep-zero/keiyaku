@@ -143,6 +143,17 @@ test("tell admission shares activity order and delivery witnesses fold without m
   } finally { value.close(); }
 });
 
+test("tell admission refuses an unborn heart without writing its timeline", () => {
+  const value = fixture();
+  try {
+    assert.deepEqual(recordTell(value.allocated.paths, {
+      id: "tell-unborn", body: "future input", recordedAt: "2026-08-08T00:00:01.000Z",
+    }), { kind: "not-born" });
+    assert.deepEqual(activitySlice(value.allocated.paths).rows, []);
+    assert.deepEqual(readHeart(value.allocated.paths).pending, []);
+  } finally { value.close(); }
+});
+
 test("live receipts are terminal only under their exact Heart correlation", () => {
   const value = fixture();
   try {
@@ -348,7 +359,7 @@ test("Body Request facts have one idempotent monotonic authority", () => {
   } finally { value.close(); }
 });
 
-test("heart schema version 8 and leash schema version 4 hard-refuse old authority", () => {
+test("heart schema version 9 and leash schema version 4 hard-refuse old authority", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -358,7 +369,7 @@ test("heart schema version 8 and leash schema version 4 hard-refuse old authorit
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 8/u);
+    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 9/u);
     assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

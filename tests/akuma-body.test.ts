@@ -366,7 +366,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
     assert.equal(readRequest(allocated.paths, recoveredRequestId)?.state, "voided");
     assert.deepEqual(readSoul(pathsForAkuId(root, childId))?.origin, {
       kind: "request",
-      parentId: allocated.id,
+      parent: allocated.id,
       requestId: "00000000-0000-4000-8000-000000000021",
     });
     assert.equal(readRequest(allocated.paths, "00000000-0000-4000-8000-000000000021")?.state, "served");

@@ -123,6 +123,12 @@ typed spawn failure). If the caller crashes inside the window, the directory
 is unborn until someone pays the leash to seal it. Nothing sweeps blind;
 nothing adjudicates by age.
 
+Tell input to an existing address requires a born Soul. Heart judges that
+condition in the same transaction that would append the Tell: an
+unborn address is refused without a timeline or Tell fact. The public handle
+reports the existing not-born error; it never reports failure after leaving a
+future input behind.
+
 Public world and summon coordinates are normalized once at the Akuma boundary.
 Soul cwd, heart paths, and detached launch paths are absolute below that point;
 downstream layers do not reinterpret relative paths.
