@@ -229,10 +229,13 @@ resume, fork, outcome, failure, and life never read activity. Thus the shared
 timeline owns execution chronology and complete outcome bytes, while session
 rows remain the sole resume authority.
 
-`list()` remains a compact fleet read and never scans activity or turns. It
-isolates each member read: malformed identity, heart, or schema silently omits
-that member. Only inability to read the Akuma run root fails the list. There is
-no member diagnostic or partial marker.
+`list()` remains a compact fleet read and never scans activity or turns. A
+directory that is not a canonical physical AkuId is not a member and may be
+ignored. Known absence of Heart or leash in the initialization window is not a
+member failure; it projects the existing unborn row. After a valid physical
+identity, schema mismatch, IO corruption, and other read failures fail the
+complete fleet read. The error names the AkuId and directory and retains the
+original cause. There is no per-member diagnostic or partial marker.
 
 One judge per question:
 

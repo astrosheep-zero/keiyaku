@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -1256,6 +1258,113 @@ test("Archetype definition catalog reports the first invalid definition in byte 
     );
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("list keeps every ordinary birth window visible without creating files", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-list-birth-windows-"));
+  try {
+    const directoryOnly = await allocateAkumaDirectory({
+      worldRoot: root, archetype: "claude", draw: () => "b1000001",
+    });
+    const before = readdirSync(directoryOnly.paths.directory);
+    const heartOnly = await allocateAkumaDirectory({
+      worldRoot: root, archetype: "claude", draw: () => "b1000002",
+    });
+    await initializeHeart(heartOnly.paths);
+    unlinkSync(heartOnly.paths.leash);
+    const both = await allocateAkumaDirectory({
+      worldRoot: root, archetype: "reviewer", draw: () => "b1000003",
+    });
+    await initializeHeart(both.paths);
+    const sealed = await allocateAkumaDirectory({
+      worldRoot: root, archetype: "claude", draw: () => "b1000004",
+    });
+    await initializeHeart(sealed.paths);
+    const holder = (await HeldAkumaLeash.try(sealed.paths))!;
+    assert.equal(await holder.sealIfUnborn(sealed.paths, {
+      evidence: "call-timeout",
+      at: "2026-08-08T00:00:00.000Z",
+    }), "sealed");
+    mkdirSync(join(akumaRunRoot(root), "not-an-identity"));
+
+    const world = await akumaAt(root);
+    assert.deepEqual((await world.list()).rows, [
+      { id: directoryOnly.id, life: "unborn" },
+      { id: heartOnly.id, life: "unborn" },
+      { id: sealed.id, life: "stillborn", seal: {
+        evidence: "call-timeout", at: "2026-08-08T00:00:00.000Z",
+      } },
+      { id: both.id, life: "unborn" },
+    ]);
+    assert.deepEqual((await world.list({ archetype: "claude" })).rows.map((row) => row.id), [
+      directoryOnly.id, heartOnly.id, sealed.id,
+    ]);
+    assert.deepEqual((await world.list({ archetype: "reviewer" })).rows, [
+      { id: both.id, life: "unborn" },
+    ]);
+    assert.deepEqual(readdirSync(directoryOnly.paths.directory), before);
+    assert.equal(existsSync(directoryOnly.paths.heart), false);
+    assert.equal(existsSync(directoryOnly.paths.leash), false);
+    assert.equal(existsSync(heartOnly.paths.leash), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("list rejects post-identity schema corruption with AkuId and directory", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-list-schema-cut-"));
+  try {
+    const heartCut = await allocateAkumaDirectory({
+      worldRoot: root, archetype: "claude", draw: () => "c1000001",
+    });
+    const heart = new DatabaseSync(heartCut.paths.heart);
+    heart.exec([
+      "CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL);",
+      "INSERT INTO akuma_schema VALUES (1, 13)",
+    ].join(""));
+    heart.close();
+    const noise = join(akumaRunRoot(root), "NOISE-notid");
+    mkdirSync(noise);
+
+    const world = await akumaAt(root);
+    const worldRoot = await World.at(root);
+    await assert.rejects(world.list(), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(
+        error.message,
+        `Akuma list failed for ${heartCut.id} at ${pathsForAkuId(worldRoot, heartCut.id).directory}`,
+      );
+      assert.ok(error.cause instanceof Error);
+      assert.match(error.cause.message, /heart schema version must be 14/u);
+      return true;
+    });
+    assert.equal(existsSync(noise), true);
+
+    rmSync(heartCut.paths.directory, { recursive: true, force: true });
+    const leashCut = await allocateAkumaDirectory({
+      worldRoot: root, archetype: "claude", draw: () => "c1000002",
+    });
+    await initializeHeart(leashCut.paths);
+    unlinkSync(leashCut.paths.leash);
+    const leash = new DatabaseSync(leashCut.paths.leash);
+    leash.exec([
+      "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL);",
+      "INSERT INTO leash_schema VALUES (1, 2)",
+    ].join(""));
+    leash.close();
+    await assert.rejects(world.list(), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(
+        error.message,
+        `Akuma list failed for ${leashCut.id} at ${pathsForAkuId(worldRoot, leashCut.id).directory}`,
+      );
+      assert.ok(error.cause instanceof Error);
+      assert.match(error.cause.message, /leash schema version must be 4/u);
+      return true;
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

@@ -5,6 +5,7 @@ import { CONTROL_RESPONSE_MS, spawnAkumaBody } from "./body.js";
 import {
   HeldAkumaLeash,
   activitySlice,
+  isHeartAbsent,
   life,
   lifeAt,
   probeLeash,
@@ -152,6 +153,29 @@ async function wakeTell(paths: AkumaPaths, tellId: string): Promise<TellResult> 
       wake: { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) },
     };
   }
+}
+
+async function unbornListRow(
+  paths: AkumaPaths,
+  id: AkuId,
+): Promise<UnbornAkumaListRow> {
+  try {
+    if (await probeLeash(paths) === "held") return { id, life: "unborn" };
+    const seal = await readSeal(paths);
+    return seal === null ? { id, life: "unborn" } : { id, life: "stillborn", seal };
+  } catch (error) {
+    if (isHeartAbsent(error)) return { id, life: "unborn" };
+    throw error;
+  }
+}
+
+async function fleetListRow(
+  paths: AkumaPaths,
+  expected: AkuId,
+): Promise<AkumaListRow | UnbornAkumaListRow> {
+  const snapshot = await readHeart(paths);
+  if (snapshot.soul !== null) return await bornListRow(paths, expected, snapshot);
+  return await unbornListRow(paths, expected);
 }
 
 async function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot?: HeartSnapshot): Promise<AkumaListRow> {
@@ -509,25 +533,18 @@ export class Akuma {
     }
     const rows: AkumaList["rows"][number][] = [];
     for (const name of names) {
+      let physical: ReturnType<typeof akuIdFromDirectoryName>;
       try {
-        const physical = akuIdFromDirectoryName(name);
-        if (selected !== undefined && physical.archetype !== selected) continue;
-        const paths = akumaPaths({ runRoot, archetype: physical.archetype, suffix: physical.suffix });
-        const snapshot = await readHeart(paths);
-        if (snapshot.soul !== null) {
-          rows.push(await bornListRow(paths, physical.id, snapshot));
-          continue;
-        }
-        if (await probeLeash(paths) === "held") {
-          rows.push({ id: physical.id, life: "unborn" });
-          continue;
-        }
-        const seal = await readSeal(paths);
-        rows.push(seal === null
-          ? { id: physical.id, life: "unborn" }
-          : { id: physical.id, life: "stillborn", seal });
+        physical = akuIdFromDirectoryName(name);
       } catch {
         continue;
+      }
+      if (selected !== undefined && physical.archetype !== selected) continue;
+      const paths = akumaPaths({ runRoot, archetype: physical.archetype, suffix: physical.suffix });
+      try {
+        rows.push(await fleetListRow(paths, physical.id));
+      } catch (error) {
+        throw new Error(`Akuma list failed for ${physical.id} at ${paths.directory}`, { cause: error });
       }
     }
     return {

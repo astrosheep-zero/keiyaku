@@ -158,6 +158,15 @@ Akuma-owned read with one optional Archetype selection: Akuma validates the
 name, decodes each physical identity, and includes only matching rows. The
 caller does not parse AkuIds or filter a complete result itself.
 
+Every valid allocated directory remains in that fleet as born, unborn, or
+stillborn from the evidence that exists. Missing Heart or leash in the ordinary
+initialization window is unborn. A seal without Soul is stillborn. Soul selects
+the born row. A name that is not a canonical physical AkuId is not an identity
+and may be ignored. After a valid physical identity, schema mismatch, IO
+corruption, and other read failures fail the fleet read; they are not absence.
+That failure names the complete AkuId and physical directory and retains the
+original cause. `list()` does not seal, sweep, repair, retry, or judge age.
+
 ## Archetype
 
 An Archetype is the mask that combines an akuma's personality and provider
