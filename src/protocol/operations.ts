@@ -12,6 +12,7 @@ import {
   dirtyTenderDelta,
   dirtyTenderRefusal,
   materializeTenderSnapshot,
+  prepareDeliveryCommitMetadata,
   type DirtyWorkspaceRefusal,
   type TenderCapture,
   type WorkspaceDirtyDelta,
@@ -149,7 +150,12 @@ export type AuditReport = Readonly<{
 
 export type VerificationReuse = CurrentVerifiedAttestation;
 
-export type DocumentDerivation = Readonly<{ document: DocumentKey; title: string; verification: VerificationDeclarationPreparation }>;
+export type DocumentDerivation = Readonly<{
+  document: DocumentKey;
+  bytes: string;
+  title: string;
+  verification: VerificationDeclarationPreparation;
+}>;
 
 export type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: IntentRetry; refusal?: never }>;
 
@@ -375,9 +381,17 @@ export async function prepareDelivery(
     coordinates: ContractState["coordinates"];
     appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
   }>,
-  input: Readonly<{ title: string; message?: string; requireBranchesToBeUpToDate?: boolean; includeDirty?: boolean }>,
+  input: Readonly<{
+    title: string;
+    document: string;
+    actor?: ActorId;
+    message?: string;
+    requireBranchesToBeUpToDate?: boolean;
+    includeDirty?: boolean;
+  }>,
 ): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal }> {
   const { contractId, coordinates } = stage;
+  const at = timestamp();
   if (coordinates.workspace === "here" && coordinates.target !== undefined) {
     const branch = await currentBranch(repository);
     if (branch !== coordinates.target) {
@@ -398,11 +412,15 @@ export async function prepareDelivery(
   if ((tender.data.dirty && input.includeDirty !== true) || tender.data.changes.submodules.length > 0) {
     return { kind: "refused", refusal: await dirtyTenderRefusal(repository, contractId, tender.data) };
   }
-  const tenderSnapshot = await materializeTenderSnapshot(repository, tender.data, {
+  const commit = await prepareDeliveryCommitMetadata(repository, {
     contractId,
     title: input.title,
+    document: input.document,
+    at,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(input.message === undefined ? {} : { message: input.message }),
   });
+  const tenderSnapshot = await materializeTenderSnapshot(repository, tender.data, commit);
   const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
   const integration = await planIntegration(
     repository,
@@ -413,11 +431,7 @@ export async function prepareDelivery(
   if (integration.kind === "refused") return integration;
   const integrationSnapshot = coordinates.target === undefined
     ? tenderSnapshot
-    : await materializeIntegrationSnapshot(repository, integration.data.tree, integration.data.predecessor, {
-      contractId,
-      title: input.title,
-      ...(input.message === undefined ? {} : { message: input.message }),
-    });
+    : await materializeIntegrationSnapshot(repository, integration.data.tree, integration.data.predecessor, commit);
   return {
     kind: "prepared",
     data: {
@@ -503,6 +517,8 @@ async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptCont
       coordinates: state.coordinates,
     }, {
       title: derivation.title,
+      document: derivation.bytes,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
       ...(input.message === undefined ? {} : { message: input.message }),
       requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
       includeDirty: input.includeDirty,
@@ -893,6 +909,8 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
     ...(workspace.appointment === undefined ? {} : { appointment: workspace.appointment }),
   }, {
     title: derivation.title,
+    document: derivation.bytes,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
     requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate ?? false,
     includeDirty: input.includeDirty ?? false,
   });

@@ -145,11 +145,11 @@ governed by the reconciliation rules below.
 
 ## Delivery Preparation And Placement
 
-Delivery preparation consumes only the state coordinates projected from that attempt,
-pure `requireBranchesToBeUpToDate` and `includeDirty` values, and a title
-stamped with the `DocumentKey` from which it was derived. It does not observe,
-fold, or judge contract lifecycle state, decode a document, request a callback,
-import Settings, or import a protocol body. For a target contract, Git observes
+Delivery preparation consumes only the state coordinates and current document
+projection from that attempt, pure `requireBranchesToBeUpToDate` and
+`includeDirty` values, and optional caller message and actor testimony. It does
+not observe, fold, or judge contract lifecycle state, decode a document,
+request a callback, import Settings, or import a protocol body. For a target contract, Git observes
 the current target head and constructs one squash integration against it. For a
 targetless contract, the supplied `start` coordinate is the integration
 predecessor, the tender is also the integration snapshot, and there is no target
@@ -166,10 +166,16 @@ When `includeDirty` is true, Git captures all non-ignored staged, unstaged, and
 untracked final bytes through one private index and materializes a deterministic
 tender commit/tree without changing the real `HEAD`, index, branch, or files.
 It is complete-workspace authorization, not a staged-only mode or path selector.
-Its commit message defaults to `<contract-id>: <title>` followed by
-`Keiyaku-Contract: <contract-id>`. A caller-supplied `message` replaces the
-message bytes only; tender tree, parent, identity rules, and lifecycle meaning
-do not change.
+Its commit message is the default `<contract-id>: <title>` subject or the
+caller-supplied subject, one blank line, the complete current Contract Markdown
+with one trailing newline, then one blank line and the final
+`Keiyaku-Contract: <contract-id>` trailer. A supplied message replaces only the
+subject. Tender and integration materialized by one preparation share one real
+non-epoch timestamp and one author/committer pair. Actor testimony wins and
+uses `keiyaku@localhost`; otherwise a complete repository-effective
+`user.name`/`user.email` pair wins, with `Keiyaku <keiyaku@localhost>` as the
+fallback when either value is absent. Private state commits retain their own
+identity and message law.
 
 `SnapshotId` is commit identity. ChangeId is one byte-sensitive identity for the
 immutable Contract start to captured tender tree, including binary, mode, path,

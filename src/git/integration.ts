@@ -11,7 +11,7 @@ import {
   runGitWithEnvironment,
   type GitRepository,
 } from "./repository.js";
-import type { TenderCapture } from "./tender.js";
+import type { DeliveryCommitMetadata, TenderCapture } from "./tender.js";
 
 const REQUIRED_GIT = "2.38" as const;
 
@@ -88,19 +88,19 @@ export async function materializeIntegrationSnapshot(
   repository: GitRepository,
   tree: GitObjectId,
   parent: SnapshotId,
-  input: Readonly<{ contractId: ContractId; title: string; message?: string }>,
+  metadata: DeliveryCommitMetadata,
 ): Promise<SnapshotId> {
   const commit = (await runGitWithEnvironment(
     repository,
     ["commit-tree", tree, "-p", gitObjectIdForSnapshot(parent)],
-    `${input.message ?? `${input.contractId}: ${input.title}`}\n\nKeiyaku-Contract: ${input.contractId}\n`,
+    metadata.message,
     {
-      GIT_AUTHOR_NAME: "Keiyaku",
-      GIT_AUTHOR_EMAIL: "keiyaku@localhost",
-      GIT_COMMITTER_NAME: "Keiyaku",
-      GIT_COMMITTER_EMAIL: "keiyaku@localhost",
-      GIT_AUTHOR_DATE: "Thu, 01 Jan 1970 00:00:00 +0000",
-      GIT_COMMITTER_DATE: "Thu, 01 Jan 1970 00:00:00 +0000",
+      GIT_AUTHOR_NAME: metadata.identity.name,
+      GIT_AUTHOR_EMAIL: metadata.identity.email,
+      GIT_COMMITTER_NAME: metadata.identity.name,
+      GIT_COMMITTER_EMAIL: metadata.identity.email,
+      GIT_AUTHOR_DATE: metadata.at,
+      GIT_COMMITTER_DATE: metadata.at,
     },
   )).toString("utf8").trim();
   return mintSnapshotId(commit);

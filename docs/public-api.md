@@ -367,7 +367,8 @@ It returns `null` only when the contract has never tendered. A returned
 Delivery exposes the tender snapshot and the complete integration identity;
 `deliver()` and `delivery()` are its two birth paths. A Delivery has no review
 operation. `message` overrides only a mechanically materialized commit message;
-omitting it uses the Git template in [git.md](git.md).
+it replaces the subject, while the current Contract Markdown and final Contract
+trailer remain present. Omitting it uses the Git template in [git.md](git.md).
 
 ## Delivery Diff
 

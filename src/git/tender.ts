@@ -1,8 +1,15 @@
 import { access } from "node:fs/promises";
 import type { Preparation } from "../core/decide.js";
-import type { ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
+import type { ActorId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { decodeGitNumstat, registeredWorktreePaths, runGit, runGitWithEnvironment, type GitRepository } from "./repository.js";
+import {
+  decodeGitNumstat,
+  GitPlumbingError,
+  registeredWorktreePaths,
+  runGit,
+  runGitWithEnvironment,
+  type GitRepository,
+} from "./repository.js";
 import { captureWorkspaceTree, worktreePath } from "./workspace.js";
 
 export type TenderCaptureCoordinates = Readonly<{
@@ -92,30 +99,81 @@ export async function dirtyTenderDelta(repository: GitRepository, tender: Tender
   return { staged, unstaged, untracked, shortStat: await dirtyShortStat(repository, tender) };
 }
 
-function commitMessage(contractId: ContractId, title: string, message?: string): string {
-  const subject = message ?? `${contractId}: ${title}`;
-  return `${subject}\n\nKeiyaku-Contract: ${contractId}\n`;
+type GitCommitIdentity = Readonly<{ name: string; email: string }>;
+
+export type DeliveryCommitMetadata = Readonly<{
+  message: string;
+  at: string;
+  identity: GitCommitIdentity;
+}>;
+
+async function effectiveConfig(
+  repository: GitRepository,
+  key: "user.name" | "user.email",
+): Promise<string | undefined> {
+  try {
+    const value = (await runGit(repository, ["config", "--get", key])).toString("utf8").trim();
+    return value.length === 0 ? undefined : value;
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 1) return undefined;
+    throw error;
+  }
+}
+
+function contractBody(bytes: string): string {
+  return `${bytes.replace(/(?:\r\n|\r|\n)+$/u, "")}\n`;
+}
+
+export async function prepareDeliveryCommitMetadata(
+  repository: GitRepository,
+  input: Readonly<{
+    contractId: ContractId;
+    title: string;
+    document: string;
+    at: string;
+    actor?: ActorId;
+    message?: string;
+  }>,
+): Promise<DeliveryCommitMetadata> {
+  let identity: GitCommitIdentity;
+  if (input.actor !== undefined) {
+    identity = { name: input.actor, email: "keiyaku@localhost" };
+  } else {
+    const [name, email] = await Promise.all([
+      effectiveConfig(repository, "user.name"),
+      effectiveConfig(repository, "user.email"),
+    ]);
+    identity = name !== undefined && email !== undefined
+      ? { name, email }
+      : { name: "Keiyaku", email: "keiyaku@localhost" };
+  }
+  const subject = input.message ?? `${input.contractId}: ${input.title}`;
+  return {
+    message: `${subject}\n\n${contractBody(input.document)}\nKeiyaku-Contract: ${input.contractId}\n`,
+    at: input.at,
+    identity,
+  };
 }
 
 /** Materialize the tender tree when it contains admitted dirty workspace bytes. */
 export async function materializeTenderSnapshot(
   repository: GitRepository,
   tender: TenderCapture,
-  input: Readonly<{ contractId: ContractId; title: string; message?: string }>,
+  commit: DeliveryCommitMetadata,
 ): Promise<SnapshotId> {
   if (!tender.dirty) return tender.head;
-  const commit = (await runGitWithEnvironment(
+  const oid = (await runGitWithEnvironment(
     repository,
     ["commit-tree", tender.tree, "-p", gitObjectIdForSnapshot(tender.head)],
-    commitMessage(input.contractId, input.title, input.message),
+    commit.message,
     {
-      GIT_AUTHOR_NAME: "Keiyaku",
-      GIT_AUTHOR_EMAIL: "keiyaku@localhost",
-      GIT_COMMITTER_NAME: "Keiyaku",
-      GIT_COMMITTER_EMAIL: "keiyaku@localhost",
-      GIT_AUTHOR_DATE: "Thu, 01 Jan 1970 00:00:00 +0000",
-      GIT_COMMITTER_DATE: "Thu, 01 Jan 1970 00:00:00 +0000",
+      GIT_AUTHOR_NAME: commit.identity.name,
+      GIT_AUTHOR_EMAIL: commit.identity.email,
+      GIT_COMMITTER_NAME: commit.identity.name,
+      GIT_COMMITTER_EMAIL: commit.identity.email,
+      GIT_AUTHOR_DATE: commit.at,
+      GIT_COMMITTER_DATE: commit.at,
     },
   )).toString("utf8").trim();
-  return mintSnapshotId(commit);
+  return mintSnapshotId(oid);
 }

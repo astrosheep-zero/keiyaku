@@ -108,6 +108,7 @@ export function documentDerivation(
 ): DocumentDerivation {
   return {
     document: document.document.key,
+    bytes: document.document.bytes,
     title: document.title,
     verification: prepareVerificationDeclaration({
       gates,

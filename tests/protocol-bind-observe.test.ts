@@ -48,6 +48,7 @@ import { runProtocol } from "../src/protocol/run.js";
 import { makeGitRepository, observeContract, withGitShim } from "./support/git.js";
 
 const NO_VERIFICATION = { kind: "prepared", data: null } as const;
+const DELIVERY_DOCUMENT = "# Contract\n";
 
 function protocolContractId(title: string): ContractId {
   return contractIdFromSegment(fitIdentityStem({
@@ -751,6 +752,7 @@ test("placement claims only the selected contract", async () => {
   if (sourceState === null) throw new Error("source state was not observed");
   const prepared = await prepareDelivery(git, preparationCoordinates(sourceState), {
     title: "Frozen journal bytes",
+    document: DELIVERY_DOCUMENT,
   });
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind !== "prepared") throw new Error("source delivery was not prepared");
@@ -979,7 +981,10 @@ test("delivery binds before after and placement reads amended prerequisites", as
 
   const dependentState = (await observeContract(git, dependent.value.contractId)).state;
   if (dependentState === null) throw new Error("dependent state was not observed");
-  const dependentDelivery = await prepareDelivery(git, preparationCoordinates(dependentState), { title: "Dependent" });
+  const dependentDelivery = await prepareDelivery(git, preparationCoordinates(dependentState), {
+    title: "Dependent",
+    document: DELIVERY_DOCUMENT,
+  });
   assert.equal(dependentDelivery.kind, "prepared");
   if (dependentDelivery.kind !== "prepared") throw new Error("dependent delivery was not prepared");
   const delivered = await withGitDecodeChannel(git, (channel) => admitIntent(channel, git, {
@@ -1020,7 +1025,10 @@ test("delivery binds before after and placement reads amended prerequisites", as
 
   const prerequisiteState = (await observeContract(git, replacementPrerequisite.value.contractId)).state;
   if (prerequisiteState === null) throw new Error("replacement prerequisite state was not observed");
-  const prerequisiteDelivery = await prepareDelivery(git, preparationCoordinates(prerequisiteState), { title: "Prerequisite" });
+  const prerequisiteDelivery = await prepareDelivery(git, preparationCoordinates(prerequisiteState), {
+    title: "Prerequisite",
+    document: DELIVERY_DOCUMENT,
+  });
   assert.equal(prerequisiteDelivery.kind, "prepared");
   if (prerequisiteDelivery.kind !== "prepared") throw new Error("prerequisite delivery was not prepared");
   const prerequisiteDelivered = await withGitDecodeChannel(git, (channel) => admitIntent(channel, git, {
@@ -1094,7 +1102,10 @@ test("bind and amend leave eligible prerequisites unmaterialized", async () => {
   const state = (await withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, observeContractWorld)))
     .contracts.get(claimedDependency.value.contractId)?.state;
   if (state === undefined || state === null) throw new Error("claimable dependency state was not observed");
-  const delivery = await prepareDelivery(git, preparationCoordinates(state), { title: "Targeted" });
+  const delivery = await prepareDelivery(git, preparationCoordinates(state), {
+    title: "Targeted",
+    document: DELIVERY_DOCUMENT,
+  });
   assert.equal(delivery.kind, "prepared");
   if (delivery.kind !== "prepared") throw new Error("claimable dependency delivery was not prepared");
   const delivered = await withGitDecodeChannel(git, (channel) => admitIntent(channel, git, {
@@ -1147,7 +1158,10 @@ test("placement redecides after a world advance without binding a dependent", as
   const git = await repositoryAt(repository.path);
   const sourceState = (await observeContract(git, source.value.contractId)).state;
   if (sourceState === null) throw new Error("source state was not observed");
-  const prepared = await prepareDelivery(git, preparationCoordinates(sourceState), { title: "Concurrent placement" });
+  const prepared = await prepareDelivery(git, preparationCoordinates(sourceState), {
+    title: "Concurrent placement",
+    document: DELIVERY_DOCUMENT,
+  });
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind !== "prepared") throw new Error("source delivery was not prepared");
   const delivered = await withGitDecodeChannel(git, (channel) => admitIntent(channel, git, {
@@ -1214,5 +1228,8 @@ test("delivery preparation ignores an unrelated malformed journal", async () => 
 
   const state = (await observeContract(git, id)).state;
   if (state === null) throw new Error("bound contract state was not observed");
-  assert.equal((await prepareDelivery(git, preparationCoordinates(state), { title: "Observation" })).kind, "prepared");
+  assert.equal((await prepareDelivery(git, preparationCoordinates(state), {
+    title: "Observation",
+    document: DELIVERY_DOCUMENT,
+  })).kind, "prepared");
 });
