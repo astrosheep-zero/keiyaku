@@ -120,21 +120,22 @@ own cursor, gap, and loss metadata. Text is clipped by terminal display width wi
 voice keeps balanced delimiters. A `run` command remains one row and preserves
 recognizable head and tail when clipped; its outcome is shown only when space
 allows. History uses the same presentation vocabulary without snapshot budgets.
-Each distinct activity timestamp starts a group with a standalone `HH:MM`
-heading. Every event row beneath it is indented by two spaces, and adjacent
-groups are separated by one blank line. Distinct timestamps in the same minute
-repeat the same readable heading. The heading and whitespace are the only
-group boundary: Akuma output has no equals-sign divider, horizontal rule, box,
-or decorative status column. There is no derived silence or date line.
+Each displayed activity minute starts one `── HH:MM ──` divider, and every
+event whose rendered clock is that same minute follows without indentation.
+Adjacent minute groups are separated by one blank line. The divider uses line
+glyphs rather than equals signs and adds no event column. Wrapped continuation
+text aligns beneath the first content byte. There is no derived silence or date
+line.
 
 ```text
-18:08
-  ✓ say: previous conclusion
+── 18:08 ──
+✓ say: previous conclusion
 
-18:09
-  · say: checking again
-  · think: projection may own the bug
-  ⧖ run: $ npm test
+── 18:09 ──
+· say: checking again; the projection still carries
+       activity from the previous Turn
+· think: projection may own the bug
+⧖ run: $ npm test
 ```
 
 Post-admission physical or settlement failures remain inside the accepted

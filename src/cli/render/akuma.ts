@@ -53,14 +53,14 @@ function rowText(row: ActivityRow | SnapshotRow): Readonly<{ text: string; lines
 
 function renderRow(row: ActivityRow | SnapshotRow, context: TextRenderContext, history: boolean): readonly string[] {
   const value = rowText(row);
-  const first = `  ${mark(row)} ${label(row)}: `;
+  const first = `${mark(row)} ${label(row)}: `;
   if (value.middle === true) {
     const suffix = value.suffix ?? "";
     return [`${first}${truncateMiddleDisplayText(value.text, Math.max(1, context.columns - first.length - suffix.length))}${suffix}`];
   }
   return renderBoundedTextBlock(value.text, {
     first,
-    continuation: "    ",
+    continuation: " ".repeat(first.length),
     columns: context.columns,
     lines: history ? Number.MAX_SAFE_INTEGER : value.lines,
     ...("truncated" in row && row.truncated === true ? { truncated: true } : {}),
@@ -70,13 +70,13 @@ function renderRow(row: ActivityRow | SnapshotRow, context: TextRenderContext, h
 function groupedRows(rows: readonly (ActivityRow | SnapshotRow)[], context: TextRenderContext, history = false): readonly string[] {
   const visible = rows.filter((row) => row.kind !== "turn");
   const lines: string[] = [];
-  let previousAt: string | undefined;
+  let previousClock: string | undefined;
   for (const row of visible) {
     const at = clock(row.at);
-    if (previousAt !== undefined && row.at !== previousAt) lines.push("");
-    if (row.at !== previousAt) lines.push(at);
+    if (previousClock !== undefined && at !== previousClock) lines.push("");
+    if (at !== previousClock) lines.push(`── ${at} ──`);
     lines.push(...renderRow(row, context, history));
-    previousAt = row.at;
+    previousClock = at;
   }
   return lines;
 }
