@@ -260,12 +260,12 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   for await (const event of drive.events) events.push(event);
   assert.deepEqual(events, [
     { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
+    { type: "thought", text: "consider" },
     { type: "assistant", text: "done" },
     { type: "tool", phase: "started", id: "tool-1", name: "bash", call: { kind: "run", command: "npm test" } },
     { type: "tool", phase: "completed", id: "tool-1", name: "bash", call: { kind: "run", command: "npm test" }, result: { status: "ok" } },
     { type: "unknown", kind: "future_event" },
   ]);
-  assert.equal(events.some((event) => event.type === "thought"), false);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
   assert.equal(fake.seen.disposed, 1);
 });
@@ -318,6 +318,17 @@ test("Pi abort closes the adapter when native prompt and abort never settle", as
 
 test("Pi fails a prompt without assistant evidence", async () => {
   const fake = fakePiSdk();
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
+    body: "wait", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  for await (const _event of drive.events) { /* drain */ }
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Pi completed without a native assistant answer" });
+});
+
+test("Pi fails a thinking-only assistant message", async () => {
+  const fake = fakePiSdk({ events: [
+    { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "consider" }] } },
+  ] });
   const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start({
     body: "wait", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
   });

@@ -83,13 +83,27 @@ function translateToolEnd(event: Extract<AgentSessionEvent, { type: "tool_execut
 function translateMessage(event: Extract<AgentSessionEvent, { type: "message_end" }>, state: PiEventState): readonly AgentEvent[] {
   const message = record(event.message);
   if (message?.role !== "assistant") return [];
-  state.assistantSeen = true;
+  const translated: AgentEvent[] = [];
+  if (Array.isArray(message.content)) {
+    for (const block of message.content) {
+      const value = record(block);
+      if (
+        value?.type === "thinking" &&
+        value.redacted !== true &&
+        typeof value.thinking === "string" &&
+        value.thinking.trim().length > 0
+      ) {
+        translated.push({ type: "thought", text: value.thinking });
+      }
+    }
+  }
   const text = textContent(message.content);
   if (text.length > 0) {
+    state.assistantSeen = true;
     state.answer = text;
-    return [{ type: "assistant", text }];
+    translated.push({ type: "assistant", text });
   }
-  return [];
+  return translated;
 }
 
 export function translatePiEvent(event: AgentSessionEvent, state: PiEventState): readonly AgentEvent[] {
