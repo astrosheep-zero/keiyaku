@@ -16,7 +16,7 @@ import {
 } from "./commands/akuma.js";
 import type { CatalogQuery } from "../index.js";
 import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
-import { CONTRACT_COMMAND_SPECS, type ContractCommand as Command, type ContractCommandSpec as CommandSpec } from "./commands/contract.js";
+import { AMEND_MINIMAL_STDIN_HELP, CONTRACT_COMMAND_SPECS, type ContractCommand as Command, type ContractCommandSpec as CommandSpec } from "./commands/contract.js";
 import { CliUsageError, usageLine } from "./usage.js";
 export { CliUsageError } from "./usage.js";
 
@@ -44,7 +44,8 @@ export function renderRootHelp(): string {
 
 export function renderContractHelp(command: Command): string {
   const spec = CONTRACT_COMMAND_SPECS[command];
-  return `${spec.purpose}\n\n${usageLine(spec.usage)}`;
+  const help = `${spec.purpose}\n\n${usageLine(spec.usage)}`;
+  return command === "amend" ? `${help}\n\n${AMEND_MINIMAL_STDIN_HELP}` : help;
 }
 
 function contractUsage(command: Command): string {

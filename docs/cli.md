@@ -158,7 +158,14 @@ default.
 and `--gates` to `keiyaku.amend`. Its omitted `after` leaves the current value
 unchanged, while `--clear-after` maps to `after: []`; it is mutually exclusive
 with `--after`. `bind`, `amend`, and `arc` require their final `-` document
-input.
+input. Amend leaf help includes this one minimal legal stdin operation. The
+complete amendment-operation grammar remains in [document.md](document.md).
+
+```text
+minimal stdin:
+  ## Replace: Design
+  <complete replacement>
+```
 
 Every Contract mutation and `reconcile` reads one Settings observation at the
 CLI edge and derives one `WorktreeHooks` value through the package-root

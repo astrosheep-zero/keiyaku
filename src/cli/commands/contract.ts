@@ -8,6 +8,12 @@ export type ContractCommandSpec = Readonly<{
   purpose: string;
 }>;
 
+export const AMEND_MINIMAL_STDIN_HELP = [
+  "minimal stdin:",
+  "  ## Replace: Design",
+  "  <complete replacement>",
+].join("\n");
+
 export const CONTRACT_COMMAND_SPECS = {
   bind: { positional: "none", stdin: "required", flags: { actor: "value", task: "value", target: "value", here: "boolean", after: "repeat-value", gates: "value", json: "boolean" }, usage: "bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -", purpose: "Create one Contract from stdin Markdown." },
   amend: { positional: "optional", stdin: "required", flags: { actor: "value", after: "repeat-value", "clear-after": "boolean", gates: "value", json: "boolean" }, usage: "amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -", purpose: "Apply stdin amendment operations to one Contract." },

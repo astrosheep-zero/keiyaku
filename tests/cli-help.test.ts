@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
+import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "../src/cli/commands/contract.js";
 import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp } from "../src/cli/parse.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderTaskHelp } from "../src/cli/commands/task.js";
+import { usageLine } from "../src/cli/usage.js";
 
 test("help resolves the longest legal command-word prefix before syntax scanning", () => {
   assert.deepEqual(parseArgv(["--help"]), { help: { kind: "root" } });
@@ -63,6 +65,38 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   );
 });
 
+test("amend leaf help shows one minimal stdin example", () => {
+  assert.equal(renderContractHelp("amend"), [
+    "Apply stdin amendment operations to one Contract.",
+    "",
+    "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -",
+    "",
+    "minimal stdin:",
+    "  ## Replace: Design",
+    "  <complete replacement>",
+  ].join("\n"));
+});
+
+test("only amend leaf help carries the stdin example", () => {
+  assert.doesNotMatch(renderRootHelp(), /minimal stdin/u);
+  for (const command of Object.keys(CONTRACT_COMMAND_SPECS) as ContractCommand[]) {
+    if (command === "amend") continue;
+    const spec = CONTRACT_COMMAND_SPECS[command];
+    assert.equal(renderContractHelp(command), `${spec.purpose}\n\n${usageLine(spec.usage)}`);
+    assert.doesNotMatch(renderContractHelp(command), /minimal stdin/u);
+  }
+});
+
+test("amend syntax refusal keeps the stored usage block", () => {
+  assert.throws(
+    () => parseArgv(["amend"]),
+    (error: unknown) => error instanceof CliUsageError
+      && error.message.includes("amend requires stdin")
+      && error.message.includes("usage: keiyaku amend [<contract>|@<contract>]")
+      && !error.message.includes("minimal stdin"),
+  );
+});
+
 test("syntax refusal retains the deepest reached grammar", () => {
   assert.throws(
     () => parseArgv(["task", "unknown"]),
@@ -87,6 +121,25 @@ test("help is stdout zero and does not enter an absent world", async () => {
     process.stderr.write = writeStderr;
   }
   assert.match(stdout, /^usage: keiyaku task <command>/u);
+  assert.equal(stderr, "");
+  assert.doesNotMatch(stdout, /^\{/u);
+});
+
+test("amend help is stdout zero and does not enter an absent world", async () => {
+  let stdout = "";
+  let stderr = "";
+  const writeStdout = process.stdout.write;
+  const writeStderr = process.stderr.write;
+  process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
+  try {
+    const exit = await main(["-C", "/definitely/absent/keiyaku-world", "amend", "--json", "-", "--help"]);
+    assert.equal(exit, 0);
+  } finally {
+    process.stdout.write = writeStdout;
+    process.stderr.write = writeStderr;
+  }
+  assert.equal(stdout, `${renderContractHelp("amend")}\n`);
   assert.equal(stderr, "");
   assert.doesNotMatch(stdout, /^\{/u);
 });
