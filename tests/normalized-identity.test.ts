@@ -13,6 +13,13 @@ test("contract identity construction and parsing own the kei family prefix", () 
   assert.throws(() => contractId("kei/one/two"), /kei\/<contract-segment>/u);
 });
 
+test("contract identity parsing accepts existing long persisted segments", () => {
+  const segment = "legacy-contract-name-that-predates-the-current-generated-id-budget-0123456789";
+  const id = contractIdFromSegment(segment);
+  assert.equal(contractId(id), id);
+  assert.equal(contractSegment(id), segment);
+});
+
 test("identity coordinates preserve family ownership without importing another family", () => {
   const id = identityCoordinate({ family: "task", segments: ["one", "two"] });
   assert.equal(id, "task/one/two");

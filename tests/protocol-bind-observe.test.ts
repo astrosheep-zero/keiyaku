@@ -510,6 +510,44 @@ test("bind reobserves and atomically asserts target coordinates after an identit
   assert.equal(state?.coordinates.start, moved);
 });
 
+test("bind fits Contract identity stems to 48 UTF-8 bytes", async () => {
+  const repository = repositoryWithHead();
+  const git = repositoryAt(repository.path);
+  const ascii = await bindOperation({
+    scope: git,
+    title: "a".repeat(100),
+    terms: terms([]),
+    workspace: "here",
+  });
+  assert.equal(ascii.kind, "accepted");
+  if (ascii.kind !== "accepted") throw new Error("long ASCII bind was not accepted");
+  assert.equal(ascii.value.contractId, `kei/${"a".repeat(48)}`);
+  assert.equal(Buffer.byteLength(ascii.value.contractId), 52);
+
+  const unicode = await bindOperation({
+    scope: git,
+    title: "👩‍💻".repeat(20),
+    terms: terms([]),
+    workspace: "here",
+  });
+  assert.equal(unicode.kind, "accepted");
+  if (unicode.kind !== "accepted") throw new Error("long Unicode bind was not accepted");
+  assert.equal(unicode.value.contractId, `kei/${"👩‍💻".repeat(4)}`);
+  assert.equal(Buffer.byteLength(unicode.value.contractId.slice("kei/".length)) <= 48, true);
+
+  const collision = await bindOperation({
+    scope: git,
+    title: "a".repeat(100),
+    terms: terms([]),
+    workspace: "here",
+  });
+  assert.equal(collision.kind, "accepted");
+  if (collision.kind !== "accepted") throw new Error("long identity collision bind was not accepted");
+  const collisionStem = collision.value.contractId.slice("kei/".length);
+  assert.equal(Buffer.byteLength(collisionStem), 65);
+  assert.match(collisionStem, /^a{48}-[0-9a-f]{16}$/u);
+});
+
 test("bind never restores a targeted here checkout that moved to a same-OID branch", async () => {
   const repository = repositoryWithHead();
   repository.run(["branch", "feature"]);

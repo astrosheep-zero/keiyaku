@@ -78,15 +78,19 @@ segment after `task/` and may have any number of namespace segments before it;
 no namespace denotes the task root. Identity bytes are exact: no Unicode
 normalization or visual-confusable deduplication applies.
 
-Bind derives the first ContractId as `kei/<fitted-normalized-title>`. Admission
-is the sole uniqueness adjudicator. An existing unsuffixed identity causes bind
-to mint one random collision suffix, refit the same normalized stem with space
-reserved for that suffix, and make one new identity attempt. Suffixing is not
-part of normalization. Other Git movement retries reuse the selected
-identity; they never silently remint it. A second identity collision remains the
-typed `contract-exists` refusal. An empty normalized stem uses `contract` before
-the same collision rule. Readers, folds, and gates compare the whole
-`ContractId` and never renormalize an admitted identity.
+Bind derives the first ContractId as `kei/<fitted-normalized-title>`. Its
+title-derived stem has a 48 UTF-8 byte budget; the `kei/` prefix is outside that
+budget. Admission is the sole uniqueness adjudicator. When the unsuffixed
+identity exists, bind may make at most three more admission attempts. Each one
+appends `-` and a newly minted eight-byte lowercase hexadecimal suffix to the
+same fitted title stem; neither separator nor suffix consumes its 48-byte
+budget. Suffixing is not part of normalization. Other Git movement retries
+reuse the selected identity; they never silently remint it. A third suffixed
+collision remains the typed `contract-exists` refusal. An empty normalized stem
+uses `contract` before the same collision rule. Readers, folds, and gates
+compare the whole `ContractId` and never renormalize an admitted identity.
+Complete-ID validation does not retroactively enforce the generation budget, so
+existing longer identities remain valid.
 
 `@` is input-only. A slash denotes a full registered identity after removing
 `@`; no slash denotes a context-resolved movable reference. Neither form is

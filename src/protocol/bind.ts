@@ -34,25 +34,16 @@ type BindOperationInput = Readonly<{
   decorateOffer?: CompanionDecorator;
 }>;
 
-const CONTRACT_ID_STEM_BYTES = 72;
-const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const CONTRACT_ID_STEM_BYTES = 48;
+const COLLISION_ATTEMPTS = 3;
 
 function mintCollisionSuffix(): string {
-  let random = BigInt(`0x${randomBytes(5).toString("hex")}`);
-  let suffix = "";
-  for (let index = 0; index < 8; index += 1) {
-    suffix = CROCKFORD_BASE32[Number(random & 31n)]! + suffix;
-    random >>= 5n;
-  }
-  return suffix.toLowerCase();
+  return randomBytes(8).toString("hex");
 }
 
 function contractIdFromStem(stem: string, suffix?: string): ContractId {
-  return contractIdFromSegment(fitIdentityStem({
-    stem,
-    maxBytes: CONTRACT_ID_STEM_BYTES,
-    ...(suffix === undefined ? {} : { suffix }),
-  }));
+  const fitted = fitIdentityStem({ stem, maxBytes: CONTRACT_ID_STEM_BYTES });
+  return contractIdFromSegment(suffix === undefined ? fitted : `${fitted}-${suffix}`);
 }
 
 type BindRefusalUnion = BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal;
@@ -123,8 +114,11 @@ export async function bindOperation(
     ),
     { contractId: id },
   );
-  const first = await attempt(contractIdFromStem(stem));
-  return first.kind === "refused" && first.refusal.kind === "contract-exists"
-    ? await attempt(contractIdFromStem(stem, mintCollisionSuffix()))
-    : first;
+  let outcome = await attempt(contractIdFromStem(stem));
+  for (let collision = 0;
+    collision < COLLISION_ATTEMPTS && outcome.kind === "refused" && outcome.refusal.kind === "contract-exists";
+    collision += 1) {
+    outcome = await attempt(contractIdFromStem(stem, mintCollisionSuffix()));
+  }
+  return outcome;
 }
