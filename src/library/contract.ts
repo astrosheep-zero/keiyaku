@@ -152,7 +152,7 @@ export type BindInput = Readonly<{
 }>;
 
 export type AmendInput = Readonly<{
-  markdown: string;
+  markdown?: string;
   actor?: ActorId;
   after?: readonly ContractId[];
   gates?: readonly Gate[];
@@ -273,12 +273,15 @@ export class KeiyakuHandle {
   async amend(input: AmendInput): Promise<AmendResult> {
     const values = requireInput(input, "amend input");
     const hooks = worktreeHooksOption(values.hooks);
-    const markdown = requireMarkdown(values.markdown);
+    const markdown = values.markdown === undefined ? undefined : requireMarkdown(values.markdown);
     const actor = actorOption(values.actor);
     const gates = values.gates === undefined ? undefined : normalizedGates(values.gates);
     const prerequisites = values.after === undefined
       ? undefined
       : normalizedList(values.after, "after", contractId);
+    if (markdown === undefined && gates === undefined && prerequisites === undefined) {
+      throw new TypeError("amend requires markdown, after, or gates");
+    }
     return withGitDecodeChannel(this.scope, async (channel) => {
       const accepted = requireAccepted(await amendOperation({
         scope: this.scope,
@@ -286,15 +289,20 @@ export class KeiyakuHandle {
         contractId: this.id,
         ...actor,
         deriveAmendment: (source) => {
-          const document = decodeContractDocument(applyAmendDocument(
-            markdown,
-            decodeContractDocument(source.document.bytes),
-          ));
-          const terms = contractTerms(
-            document,
-            gates ?? source.gates,
-            prerequisites ?? source.after,
-          );
+          const document = markdown === undefined
+            ? decodeContractDocument(source.document.bytes)
+            : decodeContractDocument(applyAmendDocument(
+              markdown,
+              decodeContractDocument(source.document.bytes),
+            ));
+          const terms = markdown === undefined
+            ? {
+                document: source.document,
+                segments: source.segments,
+                gates: gates ?? source.gates,
+                after: prerequisites ?? source.after,
+              }
+            : contractTerms(document, gates ?? source.gates, prerequisites ?? source.after);
           return {
             terms,
             verification: documentDerivation(document, terms.gates, this.id).verification,

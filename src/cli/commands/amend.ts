@@ -6,7 +6,7 @@ type AmendCommandInput = Readonly<{
   command: ParsedAmend;
   repo: Repo;
   contract: Keiyaku;
-  markdown: string;
+  markdown?: string;
   gates: readonly Gate[] | undefined;
   actor?: ActorId;
   hooks?: WorktreeHooks;
@@ -17,7 +17,7 @@ export function amendFromCommand({ command, repo, contract, markdown, gates, act
     ? []
     : command.after?.map((id) => contractFromInput(repo, id).id);
   return contract.amend({
-    markdown,
+    ...(markdown === undefined ? {} : { markdown }),
     ...(actor === undefined ? {} : { actor }),
     ...(hooks === undefined ? {} : { hooks }),
     ...(after === undefined ? {} : { after }),

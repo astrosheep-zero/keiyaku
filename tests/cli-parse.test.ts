@@ -159,7 +159,27 @@ test("bind and amend retain complete after snapshots and gate-set selectors", ()
   );
   assert.deepEqual(
     parseArgv(["amend", "kei/example", "--clear-after", "-"]),
+    { command: { command: "amend", contract: "kei/example", clearAfter: true, stdin: true, output: "text" } },
+  );
+  assert.deepEqual(
+    parseArgv(["amend", "kei/example", "--after", "kei/one"]),
+    { command: { command: "amend", contract: "kei/example", after: ["kei/one"], output: "text" } },
+  );
+  assert.deepEqual(
+    parseArgv(["amend", "kei/example", "--clear-after"]),
     { command: { command: "amend", contract: "kei/example", clearAfter: true, output: "text" } },
+  );
+  assert.deepEqual(
+    parseArgv(["amend", "kei/example", "--gates", "default"]),
+    { command: { command: "amend", contract: "kei/example", gates: "default", output: "text" } },
+  );
+  assert.throws(
+    () => parseArgv(["amend", "kei/example"]),
+    /amend requires stdin or --after, --clear-after, or --gates/,
+  );
+  assert.throws(
+    () => parseArgv(["amend", "kei/example", "--actor", "operator", "--json"]),
+    /amend requires stdin or --after, --clear-after, or --gates/,
   );
   assert.throws(
     () => parseArgv(["amend", "kei/example", "--after", "kei/one", "--clear-after", "-"]),

@@ -656,6 +656,39 @@ test("a changed worktree patch leaves the reviewed placement pending", async () 
   assert.equal((await result.keiyaku.state()).terminal, null);
 });
 
+test("terms-only amend copies Markdown bytes and identities without rendering", async () => {
+  const repository = repositoryWithMain();
+  const markdown = document().replace("## Context\n", "## Context\n\n\n");
+  const prerequisite = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: document().replace("# Library verbs", "# Prerequisite"),
+    workspace: "worktree",
+  });
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown,
+    workspace: "here",
+    gates: ["reviewed", "held"],
+  });
+  commitCandidate(repository);
+  await bound.keiyaku.deliver();
+  await bound.keiyaku.review({ verdict: "satisfied" });
+  const before = await bound.keiyaku.state();
+  const reviewed = await Keiyaku.observe({ repo: await Repo.at({ path: repository.path }), id: bound.keiyaku.id });
+  assert.equal(reviewed.kind === "present" && reviewed.row.gates.reports[0]?.current.kind, "attested");
+
+  const amended = await bound.keiyaku.amend({ after: [prerequisite.keiyaku.id] });
+  const after = await bound.keiyaku.state();
+  assert.equal(amended.documentDiff, "");
+  assert.deepEqual(after.terms.after, [prerequisite.keiyaku.id]);
+  assert.deepEqual(after.terms.gates, before.terms.gates);
+  assert.equal(after.terms.document.bytes, markdown);
+  assert.equal(after.terms.document.key, before.terms.document.key);
+  assert.deepEqual(after.terms.segments, before.terms.segments);
+  const observed = await Keiyaku.observe({ repo: await Repo.at({ path: repository.path }), id: bound.keiyaku.id });
+  assert.equal(observed.kind === "present" && observed.row.gates.reports[0]?.current.kind, "attested");
+});
+
 test("a changed document leaves an otherwise unchanged reviewed patch pending", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });

@@ -76,6 +76,7 @@ export type ParsedAmend = Output & Actor & Readonly<{
   after?: readonly string[];
   clearAfter?: true;
   gates?: string;
+  stdin?: true;
 }>;
 export type ParsedDeliver = Output & Actor & Readonly<{
   command: "deliver";
@@ -257,6 +258,9 @@ function parseAmend(parts: ParsedParts): ParsedAmend {
   const after = parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
   if (parts.flags["clear-after"] === true && after.length > 0) refuse("amend", "--clear-after and --after are mutually exclusive");
   const gates = optionalFlag(parts.flags, "gates");
+  if (!parts.stdin && parts.flags.after === undefined && parts.flags["clear-after"] !== true && gates === undefined) {
+    refuse("amend", "amend requires stdin or --after, --clear-after, or --gates");
+  }
   return {
     command: "amend",
     ...(contract === undefined ? {} : { contract }),
@@ -264,6 +268,7 @@ function parseAmend(parts: ParsedParts): ParsedAmend {
     ...(parts.flags["clear-after"] === true ? { clearAfter: true as const } : {}),
     ...(gates === undefined ? {} : { gates }),
     ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+    ...(parts.stdin ? { stdin: true as const } : {}),
     output: parts.output,
   };
 }

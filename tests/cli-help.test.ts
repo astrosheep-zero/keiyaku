@@ -100,9 +100,9 @@ test("each grammar owner renders its own namespace and leaf help", () => {
 
 test("amend leaf help shows one minimal stdin example", () => {
   assert.equal(renderContractHelp("amend"), [
-    "Apply stdin amendment operations to one Contract.",
+    "Amend one Contract's document operations or structured terms.",
     "",
-    "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -",
+    "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] [-]",
     "",
     "minimal stdin:",
     "  ## Replace: Design",
@@ -147,7 +147,7 @@ test("amend syntax refusal keeps the stored usage block", () => {
   assert.throws(
     () => parseArgv(["amend"]),
     (error: unknown) => error instanceof CliUsageError
-      && error.message.includes("amend requires stdin")
+      && error.message.includes("amend requires stdin or --after, --clear-after, or --gates")
       && error.message.includes("usage: keiyaku amend [<contract>|@<contract>]")
       && !error.message.includes("minimal stdin"),
   );

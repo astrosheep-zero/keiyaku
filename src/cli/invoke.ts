@@ -78,9 +78,10 @@ async function readStdin(): Promise<string> {
 function selectedStdinDiagnostic(command: Exclude<ParsedCommand, { command: "install" }>): string | undefined {
   switch (command.command) {
     case "bind":
-    case "amend":
     case "arc":
       return `${command.command} requires a nonblank stdin document`;
+    case "amend":
+      return command.stdin === true ? "amend requires a nonblank stdin document" : undefined;
     case "review":
       return command.summaryFromStdin === true ? "review requires a nonblank summary" : undefined;
     case "call":
@@ -278,13 +279,21 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
 
   switch (parsed.command) {
     case "amend": {
-      const markdown = await edge.readStdin();
+      const markdown = parsed.stdin === true ? await edge.readStdin() : undefined;
       const gates = parsed.gates === undefined
         ? undefined
         : selectedGates(configuration, parsed.gates);
       return resultFromMutationCall(
         "amend",
-        () => amendFromCommand({ command: parsed, repo, contract, markdown, gates, ...(actor === undefined ? {} : { actor }), hooks }),
+        () => amendFromCommand({
+          command: parsed,
+          repo,
+          contract,
+          ...(markdown === undefined ? {} : { markdown }),
+          gates,
+          ...(actor === undefined ? {} : { actor }),
+          hooks,
+        }),
         (result) => acceptedAmend(result, id),
         { coordinate: id },
       );

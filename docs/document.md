@@ -145,6 +145,11 @@ rendered from its admitted operation value; removal omits that section. This
 keeps untouched segment identities stable without making formatting or segment
 meaning part of core.
 
+When `Keiyaku.amend` supplies no operation document, the current opaque
+document bytes and ordered segment keys are copied unchanged. That path does
+not apply H2 operations or pass the current document through the amendment
+renderer.
+
 ## Arc Document
 
 `Keiyaku.arc` accepts exactly one document in this shape:

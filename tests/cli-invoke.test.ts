@@ -469,6 +469,45 @@ test("targetless bind accepts detached HEAD without a reward operation", async (
   assert.equal(result.kind === "accepted" ? result.target : undefined, null);
 });
 
+test("amend structured terms do not acquire stdin", async () => {
+  const repository = repositoryWithMain();
+  const prerequisite = await invokeWithDocument(
+    repository.path,
+    ["bind", "--actor", "external-test", "-"],
+    contractDocument("Terms prerequisite"),
+  );
+  const bound = await invokeWithDocument(
+    repository.path,
+    ["bind", "--actor", "external-test", "-"],
+    contractDocument("Terms only"),
+  );
+  const prerequisiteId = acceptedContract(prerequisite);
+  const id = acceptedContract(bound);
+  let reads = 0;
+  const command = (argv: readonly string[]) => invoke(parseArgv(argv), {
+    cwd: repository.path,
+    environment: {},
+    readStdin: async () => {
+      reads += 1;
+      return "should not be read";
+    },
+  });
+
+  const after = await command(["amend", id, "--after", prerequisiteId]);
+  const cleared = await command(["amend", id, "--clear-after"]);
+  const gated = await command(["amend", id, "--gates", "default"]);
+  assert.equal(reads, 0);
+  assert.equal(after.kind, "accepted");
+  assert.equal(cleared.kind, "accepted");
+  assert.equal(gated.kind, "accepted");
+  assert.equal(after.kind === "accepted" && after.diff, "");
+  assert.equal(cleared.kind === "accepted" && cleared.diff, "");
+  assert.equal(gated.kind === "accepted" && gated.diff, "");
+  const terms = (await observeContract(await repositoryAt(repository.path), id)).state?.terms;
+  assert.deepEqual(terms?.after, []);
+  assert.deepEqual(terms?.gates, ["reviewed"]);
+});
+
 test("amend applies H2 operations into a complete Markdown replacement", async () => {
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(

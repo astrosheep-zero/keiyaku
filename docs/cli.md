@@ -95,7 +95,7 @@ Command syntax:
 
 ```text
 bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -
-amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -
+amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] [-]
 deliver [<contract>|@<contract>] [--message <text>] [--actor <actor>] [--json]
 review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>] [--json]
 abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
@@ -123,8 +123,8 @@ kill <akuma-selector>... [--json]
 ## Inputs And Flags
 
 A final bare `-` reads stdin. For `bind`, it reads one contract document; for
-`amend`, one amendment-operation document; for `arc`, one arc document; and for
-`review`, the required summary. Review takes exactly one summary source:
+`amend`, one amendment-operation document when `-` is present; for `arc`, one
+arc document; and for `review`, the required summary. Review takes exactly one summary source:
 `--summary <text>` or final `-`. Neither or both is a usage refusal. No other
 Contract command reads stdin. Akuma and Task stdin entry points are specified
 by their command grammars below. The grammar of all document inputs is owned
@@ -167,12 +167,15 @@ maps to `workspace: "here"`; on an attached branch the same default target
 makes it a commit-in-place contract. An explicit foreign target with `--here`
 is a typed bind refusal. The omitted form maps to the public managed-worktree
 default.
-`amend` maps Markdown, `--actor`, repeated `--after`,
+`amend` maps optional Markdown, `--actor`, repeated `--after`,
 and `--gates` to `keiyaku.amend`. Its omitted `after` leaves the current value
 unchanged, while `--clear-after` maps to `after: []`; it is mutually exclusive
-with `--after`. `bind`, `amend`, and `arc` require their final `-` document
-input. Amend leaf help includes this one minimal legal stdin operation. The
-complete amendment-operation grammar remains in [document.md](document.md).
+with `--after`. Final `-` selects one nonblank H2 operation document. Its
+absence requires at least one of `--after`, `--clear-after`, or `--gates` and
+does not acquire stdin; otherwise parsing is usage before observation. `bind`
+and `arc` still require their final `-` document input. Amend leaf help
+includes this one minimal legal stdin operation. The complete
+amendment-operation grammar remains in [document.md](document.md).
 
 ```text
 minimal stdin:

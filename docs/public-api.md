@@ -273,7 +273,7 @@ keiyaku.guidance(): Promise<string>
 keiyaku.history(): Promise<ContractHistory>
 keiyaku.delivery(): Promise<Delivery | null>
 keiyaku.amend(input: {
-  markdown: string
+  markdown?: string
   actor?: ActorId
   after?: readonly ContractId[]
   gates?: readonly Gate[]
@@ -360,8 +360,17 @@ Worktree paths are projected
 by `status()` for selectors and board views; a contract handle has no duplicate
 path getter.
 
-`amend` takes an H2 operation document, and `arc` takes an arc document. Their
-input grammars are owned by [document.md](document.md). `deliver`, `review`,
+`amend` takes an optional H2 operation document. At least one of `markdown`,
+`after`, or `gates` must be present; otherwise the Library throws `TypeError`
+before observation or admission. `actor` and `hooks` do not count as a change.
+When `markdown` is present, the H2 grammar, validation, ordered application,
+rendering, retries, and document-diff behavior remain as owned by
+[document.md](document.md). When it is absent, the current `document` and
+`segments` are copied unchanged and only supplied `after` or `gates` replace
+their current values; omitted structured terms retain their current values,
+explicit empty arrays remain valid replacements, and `documentDiff` is `""`.
+`arc` takes an arc document. Their input grammars are owned by
+[document.md](document.md). `deliver`, `review`,
 `abandon`, and `audit` apply the lifecycle rules in
 [lifecycle.md](lifecycle.md). `reconcile` requests the Git operation
 defined in [git-reconciliation.md](git-reconciliation.md). `ReconcileReport`

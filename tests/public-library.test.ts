@@ -68,6 +68,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'const taskId = "task/consumer" as TaskId;',
     'const input: BindInput = { repo, task: taskId, markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", after: [id], gates: ["reviewed"] };',
     'const amendment: AmendInput = { markdown: "## Append: Context\\nMore\\n", after: [id] };',
+    'const termsOnly: AmendInput = { after: [id] };',
     'const existing = Keiyaku.of({ repo, id });',
     'const akuma = "aku/worker/1234abcd" as AkuId;',
     'const alias = "@worker" as AkumaAlias;',
@@ -207,7 +208,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'type InternalReviewValue = import("@astrosheep/keiyaku").ReviewValue;',
     '// @ts-expect-error legacy DeliverValue alias is not a package-root export',
     'type InternalDeliverValue = import("@astrosheep/keiyaku").DeliverValue;',
-    'void new AuthorityCorruptionError("corrupt"); void new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [akuma], world }); void (null as unknown as AkumaWorldScopeRefusal); void new SettingsError("invalid"); void existing; void delivery; void bound; void repo; void taskId; void akuma; void alias; void worldInput; void worldResolution; void callResult; void callStatus; void forkResult; void statusResult; void createdTasks; void historyResult; void contractHistory; void contractHistoryEvent; void aliasBinding; void aliasStage; void dispatch; void dispatchFailure; void dispatchStage; void integrationFailure; void report; void preparationRefusal; void verificationReuse; void kind; void amendment; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void hook; void selectedHooks; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry; void settlementAction; void settlementLag; void settlementReport;',
+    'void new AuthorityCorruptionError("corrupt"); void new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [akuma], world }); void (null as unknown as AkumaWorldScopeRefusal); void new SettingsError("invalid"); void existing; void delivery; void bound; void repo; void taskId; void akuma; void alias; void worldInput; void worldResolution; void callResult; void callStatus; void forkResult; void statusResult; void createdTasks; void historyResult; void contractHistory; void contractHistoryEvent; void aliasBinding; void aliasStage; void dispatch; void dispatchFailure; void dispatchStage; void integrationFailure; void report; void preparationRefusal; void verificationReuse; void kind; void amendment; void termsOnly; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void hook; void selectedHooks; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry; void settlementAction; void settlementLag; void settlementReport;',
   ].join("\n");
   writeFileSync(join(directory, "consumer.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer.ts"], { cwd: directory, stdio: "ignore" });
@@ -386,6 +387,10 @@ test("amend applies Markdown once and preserves structured values unless replace
   await assert.rejects(
     bound.keiyaku.amend({ markdown: "## Append: Context\ninvalid gate\n", gates: ["Edge-owned"] }),
     (error: unknown) => error instanceof TypeError && error.message === "gates[0] must match ^[a-z][a-z0-9-]{0,63}$",
+  );
+  await assert.rejects(
+    bound.keiyaku.amend({ actor: "operator" }),
+    (error: unknown) => error instanceof TypeError && error.message === "amend requires markdown, after, or gates",
   );
 
   await bound.keiyaku.amend({
