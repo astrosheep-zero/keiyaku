@@ -27,11 +27,6 @@ export function taskAuthorityPath(tasksDirectory: string, coordinate: TaskCoordi
   return join(tasksDirectory, ...coordinate.namespace, `${coordinate.localId}.md`);
 }
 
-export function taskAuthorityRelativePath(id: TaskId): string {
-  const coordinate = parseTaskId(id);
-  return [".keiyaku", "tasks", ...coordinate.namespace, `${coordinate.localId}.md`].join("/");
-}
-
 export function deriveLocalStem(title: string): string {
   const stem = normalizeIdentityStem({ source: title });
   if (stem.length === 0) throw new TypeError("task title must contain a normalized identity segment");

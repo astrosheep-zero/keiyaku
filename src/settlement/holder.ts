@@ -3,7 +3,14 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { TreeUpdate } from "../core/facts/offer.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import type { GitDecisionObservation } from "../git/observe.js";
-import type { GitRepository } from "../git/repository.js";
+import {
+  GIT_REF,
+  updateGitTree,
+  updateRefsAtomically,
+  writeBlob,
+  writeCommit,
+  type GitRepository,
+} from "../git/repository.js";
 import {
   withGitTargetedReadObservation,
   type GitDecodeChannel,
@@ -27,14 +34,6 @@ export type TaskHolder = Readonly<{
   contractId: ContractId;
   disposition: "held" | "released";
 }>;
-
-export type TaskHolderBindRefusal = Readonly<{
-  kind: "task-already-held";
-  taskId: TaskId;
-  holder: ContractId;
-}>;
-
-type TaskHolderBindOutcome = Readonly<{ kind: "refused"; refusal: TaskHolderBindRefusal }>;
 
 function holderPath(taskId: TaskId): string {
   const digest = createHash("sha256").update(taskId).digest("hex");
@@ -152,25 +151,12 @@ async function admitWithTaskHolderFence<T extends AdmissionOutcome>(
   return finishTaskHolderAdmission(taskId, result, () => held.close());
 }
 
-export async function claimTaskHolderWithFence<T extends AdmissionOutcome>(
+export function claimTaskHolderWithFence<T extends AdmissionOutcome>(
   repository: GitRepository,
-  channel: GitDecodeChannel,
   taskId: TaskId,
   action: () => T | Promise<T>,
-): Promise<TaskHolderAdmission<T | TaskHolderBindOutcome>> {
-  const held = await acquireTaskSettlementFence(repository, taskId);
-  let result: T | TaskHolderBindOutcome;
-  try {
-    const current = [...(await observeTaskHolderProjection(repository, channel)).values()]
-      .find((holder) => holder.taskId === taskId && holder.disposition === "held");
-    result = current === undefined
-      ? await action()
-      : { kind: "refused", refusal: { kind: "task-already-held", taskId, holder: current.contractId } };
-  } catch (error) {
-    try { held.close(); } catch { /* The operation failure remains decisive before admission. */ }
-    throw error;
-  }
-  return finishTaskHolderAdmission(taskId, result, () => held.close());
+): Promise<TaskHolderAdmission<T>> {
+  return admitWithTaskHolderFence(repository, taskId, action);
 }
 
 export async function releaseTaskHolder(
@@ -182,6 +168,39 @@ export async function releaseTaskHolder(
   return current === null || current.disposition !== "held"
     ? null
     : update({ ...current, disposition: "released" });
+}
+
+export type TaskHolderReleasePublication =
+  | Readonly<{ kind: "released" }>
+  | Readonly<{ kind: "not-held" }>
+  | Readonly<{ kind: "non-published"; diagnostic: string }>;
+
+/** Publish the released holder against the same frozen observation that decided the release. */
+export async function publishTaskHolderRelease(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+  observation: GitDecisionObservation,
+  owner: ContractId,
+): Promise<TaskHolderReleasePublication> {
+  const release = await releaseTaskHolder(channel, observation, owner);
+  if (release === null) return { kind: "not-held" };
+  const tree = await updateGitTree(repository, observation.admission.snapshot.tree, new Map([[release.path, { oid: await writeBlob(repository, release.bytes) }]]));
+  const commit = await writeCommit({
+    repository,
+    tree,
+    parent: observation.admission.snapshot.commit,
+    message: `release held Task completion: ${owner}`,
+  });
+  const publication = await updateRefsAtomically(repository, [{
+    ref: GIT_REF,
+    newOid: commit,
+    expectedOid: observation.admission.snapshot.commit,
+  }]);
+  if (publication.kind === "published") return { kind: "released" };
+  return {
+    kind: "non-published",
+    diagnostic: publication.kind === "non-published" ? detail(publication.error) : "Task holder release publication state is unknown",
+  };
 }
 
 export async function readTaskHolderProjectionFromDecision(

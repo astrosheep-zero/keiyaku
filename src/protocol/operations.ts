@@ -1,10 +1,8 @@
 import {
   materializeIntegrationSnapshot,
   planIntegration,
-  readIntegrationBlob,
+  prepareReviewIntegration,
   readDeliveryDiff,
-  updateIntegrationPlan,
-  type IntegrationPlan,
   type IntegrationPreparationRefusal,
 } from "../git/integration.js";
 import {
@@ -53,7 +51,7 @@ import {
   type VerificationRuntimeStop,
   type VerificationCleanupFailure,
 } from "./intent.js";
-import { admitPlacement, type PlacementCurrentnessRefusal, type PlacementProtocolResult } from "./placement.js";
+import { admitPlacement, type PlacementProtocolResult } from "./placement.js";
 import type { TargetPlacementRefusal } from "../git/target-placement.js";
 import { auditReport, readAuditAt, type AuditReport as AuditReadReport } from "./read/audit.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
@@ -69,10 +67,6 @@ import {
   type ContractRow,
 } from "./read/status.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission, type DecidedOfferResult } from "./attempt.js";
-import { readTaskHolderProjectionFromDecision, taskHolderObservationSelection } from "../settlement/holder.js";
-import type { TaskHolderBindRefusal } from "../settlement/holder.js";
-import { completeTaskDocument, parseTaskDocument } from "../task/document.js";
-import { parseTaskId, taskAuthorityRelativePath, type TaskId } from "../task/identity.js";
 export { bindOperation } from "./bind.js";
 import type { BindRefusal, TargetInputRefusal } from "./bind.js";
 import {
@@ -87,22 +81,13 @@ import type { CompanionDecorator } from "./run.js";
 
 export type { FactKind, TimelineEntry } from "./read/audit.js";
 export type { ContractDocumentProjection } from "./read/documents.js";
-type TaskCompletionRefusal = Readonly<{
-  kind: "task-completion-refused";
-  contractId: ContractId;
-  taskId: TaskId;
-  reason: "missing" | "not-a-blob" | "corrupt" | "terminal";
-  diagnostic?: string;
-}>;
 type DeliveryPreparationRefusal = Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
   | DirtyWorkspaceRefusal
   | IntegrationPreparationRefusal
-  | TaskCompletionRefusal
   | TargetPlacementRefusal;
 type ReviewPreparationRefusal = Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
   | DirtyWorkspaceRefusal
-  | IntegrationPreparationRefusal
-  | TaskCompletionRefusal;
+  | IntegrationPreparationRefusal;
 type DeliveryFailure = DeliveryPreparationRefusal | VerificationDeclarationRefusal | DeliverRefusal;
 
 type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
@@ -110,7 +95,7 @@ type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
 const REVIEWED = gate("reviewed");
 
 export type IntentRefusal = AbandonRefusal | AmendRefusal | ArcRefusal | BindRefusal | DeliverRefusal
-  | DeliveryPreparationRefusal | PlacementRefusal | ReviewRefusal | TargetInputRefusal | TaskHolderBindRefusal | VerificationDeclarationRefusal;
+  | DeliveryPreparationRefusal | PlacementRefusal | ReviewRefusal | TargetInputRefusal | VerificationDeclarationRefusal;
 
 export type { TargetInputRefusal } from "./bind.js";
 
@@ -128,7 +113,7 @@ export type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: Inte
 
 export type VerificationStop = StepStop<AttestationRefusal> | VerificationRuntimeStop;
 export type PlacementStop =
-  | StepStop<PlacementRefusal | TargetPlacementRefusal | PlacementCurrentnessRefusal>
+  | StepStop<PlacementRefusal | TargetPlacementRefusal>
   | Readonly<{ failure: "target-moved"; contractId: ContractId; target: string; expected: SnapshotId; observed: SnapshotId | null }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>;
 
@@ -313,55 +298,11 @@ type DeliverOperationInput = MutationOperationInput & Readonly<{
   signal?: AbortSignal;
 }>;
 
-type PreparedDelivery = Readonly<{ delivery: DeliveryIdentity; derivation: DocumentDerivation; taskId?: TaskId }>;
-
-async function heldTaskId(
-  channel: GitDecodeChannel,
-  observation: Parameters<typeof readTaskHolderProjectionFromDecision>[1],
-  contractId: ContractId,
-): Promise<TaskId | undefined> {
-  const holder = (await readTaskHolderProjectionFromDecision(channel, observation)).get(contractId);
-  return holder?.disposition === "held" ? holder.taskId : undefined;
-}
-
-async function completeHeldTaskIntegration(
-  repository: GitRepository,
-  contractId: ContractId,
-  integration: IntegrationPlan,
-  taskId: TaskId,
-): Promise<{ kind: "prepared"; data: typeof integration } | { kind: "refused"; refusal: TaskCompletionRefusal }> {
-  const path = taskAuthorityRelativePath(taskId);
-  const source = await readIntegrationBlob(repository, integration.tree, path);
-  if (source.kind !== "present") {
-    return { kind: "refused", refusal: { kind: "task-completion-refused", contractId, taskId, reason: source.kind } };
-  }
-  try {
-    const document = parseTaskDocument(source.data.bytes, parseTaskId(taskId));
-    if (document.state === "done" || document.state === "drop") {
-      return { kind: "refused", refusal: { kind: "task-completion-refused", contractId, taskId, reason: "terminal" } };
-    }
-    const bytes = completeTaskDocument(source.data.bytes, parseTaskId(taskId));
-    return {
-      kind: "prepared",
-      data: await updateIntegrationPlan(repository, integration, { path, bytes, mode: source.data.mode }),
-    };
-  } catch (error) {
-    return {
-      kind: "refused",
-      refusal: {
-        kind: "task-completion-refused",
-        contractId,
-        taskId,
-        reason: "corrupt",
-        diagnostic: error instanceof Error ? error.message : String(error),
-      },
-    };
-  }
-}
+type PreparedDelivery = Readonly<{ delivery: DeliveryIdentity; derivation: DocumentDerivation }>;
 
 export async function prepareDelivery(
   repository: GitRepository,
-  stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"]; taskId?: TaskId }>,
+  stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"] }>,
   input: Readonly<{ title: string; message?: string; requireBranchesToBeUpToDate?: boolean; includeDirty?: boolean }>,
 ): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal }> {
   const { contractId, coordinates } = stage;
@@ -382,13 +323,9 @@ export async function prepareDelivery(
     ...(input.message === undefined ? {} : { message: input.message }),
   });
   const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
-  const planned = await planIntegration(repository, stage, { ...tender.data, head: tenderSnapshot }, requireBranchesToBeUpToDate);
-  if (planned.kind === "refused") return planned;
-  const integration = stage.taskId === undefined
-    ? planned
-    : await completeHeldTaskIntegration(repository, contractId, planned.data, stage.taskId);
+  const integration = await planIntegration(repository, stage, { ...tender.data, head: tenderSnapshot }, requireBranchesToBeUpToDate);
   if (integration.kind === "refused") return integration;
-  const integrationSnapshot = coordinates.target === undefined && stage.taskId === undefined
+  const integrationSnapshot = coordinates.target === undefined
     ? tenderSnapshot
     : await materializeIntegrationSnapshot(repository, integration.data.tree, integration.data.predecessor, {
       contractId,
@@ -408,7 +345,7 @@ export async function prepareDelivery(
 
 export async function prepareReview(
   repository: GitRepository,
-  stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"]; taskId?: TaskId }>,
+  stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"] }>,
 ): Promise<{ kind: "prepared"; data: Readonly<{ changeId: DeliverData["integration"]["changeId"]; workspace?: WorkspaceDirtyDelta }> }
   | { kind: "refused"; refusal: ReviewPreparationRefusal }> {
   const tender = await captureTender(repository, stage);
@@ -417,25 +354,12 @@ export async function prepareReview(
     return { kind: "refused", refusal: await dirtyTenderRefusal(repository, stage.contractId, tender.data) };
   }
   const workspace = await dirtyTenderDelta(repository, tender.data);
-  const planned = await planIntegration(repository, stage, tender.data, false);
-  if (planned.kind === "refused") return planned;
-  const integration = stage.taskId === undefined
-    ? planned
-    : await completeHeldTaskIntegration(repository, stage.contractId, planned.data, stage.taskId);
-  return integration.kind === "refused"
-    ? integration
-    : { kind: "prepared", data: { changeId: integration.data.changeId, ...(workspace === undefined ? {} : { workspace }) } };
+  return await prepareReviewIntegration(repository, stage, tender.data, workspace);
 }
 
 async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptContext): Promise<AttemptDecision<PreparedDelivery>> {
-  const decisionObservation = await observeContractsForAdmissionAt(
-    input.scope,
-    input.channel,
-    [input.contractId],
-    taskHolderObservationSelection(),
-  );
+  const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
-  const taskId = state === null ? undefined : await heldTaskId(input.channel, decisionObservation, state.id);
   const derivation = state === null || input.deriveDocument === undefined
     ? undefined
     : input.deriveDocument(state);
@@ -452,7 +376,6 @@ async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptCont
     const prepared = await prepareDelivery(input.scope, {
       contractId: state.id,
       coordinates: state.coordinates,
-      ...(taskId === undefined ? {} : { taskId }),
     }, {
       title: derivation.title,
       ...(input.message === undefined ? {} : { message: input.message }),
@@ -484,7 +407,7 @@ async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptCont
   });
   if (admitted.kind === "accepted") {
     if (derivation === undefined) throw new Error("accepted delivery is missing its document derivation");
-    return { ...admitted, value: { delivery: preparation.data, derivation, ...(taskId === undefined ? {} : { taskId }) } };
+    return { ...admitted, value: { delivery: preparation.data, derivation } };
   }
   return admitted;
 }
@@ -524,8 +447,6 @@ async function completeDelivery(
   }
   const placement = await admitPlacement(input.channel, input.scope, first.state.coordinates.target, {
     contractId: input.contractId,
-    changeId: first.value.delivery.integration.changeId,
-    ...(first.value.taskId === undefined ? {} : { taskId: first.value.taskId }),
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
   });
@@ -599,41 +520,23 @@ type ReviewOperationInput = MutationOperationInput & Readonly<{ verdict: Attesta
 
 export type ReviewValue = Readonly<{ placement?: PlacementStop; workspace?: WorkspaceDirtyDelta }>;
 
-type PreparedReview = Readonly<{
-  changeId?: DeliverData["integration"]["changeId"];
-  taskId?: TaskId;
-  workspace?: WorkspaceDirtyDelta;
-}>;
-
 async function reviewAttempt(
   input: ReviewOperationInput,
   attempt: AttemptContext,
-): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
+): Promise<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>> {
   return await reviewAttemptObserved(input, attempt);
 }
 
 async function reviewAttemptObserved(
   input: ReviewOperationInput,
   attempt: AttemptContext,
-): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
-  const decisionObservation = await observeContractsForAdmissionAt(
-    input.scope,
-    input.channel,
-    [input.contractId],
-    taskHolderObservationSelection(),
-  );
+): Promise<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>> {
+  const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
   let preparation: AttestationInput<ReviewRefusal>["preparation"];
-  let changeId: DeliverData["integration"]["changeId"] | undefined;
-  let taskId: TaskId | undefined;
   let workspace: WorkspaceDirtyDelta | undefined;
   if (state !== null) {
-    taskId = await heldTaskId(input.channel, decisionObservation, state.id);
-    const prepared = await prepareReview(input.scope, {
-      contractId: state.id,
-      coordinates: state.coordinates,
-      ...(taskId === undefined ? {} : { taskId }),
-    });
+    const prepared = await prepareReview(input.scope, { contractId: state.id, coordinates: state.coordinates });
     preparation = prepared.kind === "refused"
       ? { kind: "refused", refusal: prepared.refusal }
       : {
@@ -648,10 +551,7 @@ async function reviewAttemptObserved(
           ...(input.summary === undefined ? {} : { summary: input.summary }),
         },
       };
-    if (prepared.kind === "prepared") {
-      changeId = prepared.data.changeId;
-      workspace = prepared.data.workspace;
-    }
+    if (prepared.kind === "prepared") workspace = prepared.data.workspace;
   }
   const decisionInput: AttestationInput<ReviewRefusal> = {
     contractId: input.contractId,
@@ -671,11 +571,7 @@ async function reviewAttemptObserved(
   });
   if (admitted.kind === "accepted") return {
     ...admitted,
-    value: {
-      ...(changeId === undefined ? {} : { changeId }),
-      ...(taskId === undefined ? {} : { taskId }),
-      ...(workspace === undefined ? {} : { workspace }),
-    },
+    value: workspace === undefined ? {} : { workspace },
   };
   return admitted;
 }
@@ -685,7 +581,7 @@ export async function reviewOperation(
 ): Promise<IntentOutcome<ReviewValue, ReviewRefusal>> {
   const git = input.scope;
   const attempts = mintAttempts({ entryCount: 1 });
-  let review: Extract<AttemptDecision<PreparedReview, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
+  let review: Extract<AttemptDecision<Readonly<{ workspace?: WorkspaceDirtyDelta }>, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
     const result = await reviewAttempt(input, attempts[index]!);
     if (result.kind === "accepted" || result.kind === "refused") {
@@ -701,8 +597,6 @@ export async function reviewOperation(
 
   const placement = await admitPlacement(input.channel, git, review.state.coordinates.target, {
     contractId: input.contractId,
-    ...(review.value.changeId === undefined ? {} : { changeId: review.value.changeId }),
-    ...(review.value.taskId === undefined ? {} : { taskId: review.value.taskId }),
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
   });

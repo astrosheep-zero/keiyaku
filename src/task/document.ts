@@ -119,11 +119,3 @@ export function serializeTaskDocument(document: TaskDocument): Uint8Array {
   };
   return Buffer.from(`---\n${stringify(value, { lineWidth: 0 })}---\n${document.body}`);
 }
-
-export function completeTaskDocument(bytes: Uint8Array, expected: TaskCoordinate): Uint8Array {
-  const document = parseTaskDocument(bytes, expected);
-  if (document.state === "done" || document.state === "drop") {
-    throw new TaskAuthorityCorruptionError(`Task cannot be completed from terminal state: ${document.state}`);
-  }
-  return serializeTaskDocument({ ...document, state: "done" });
-}

@@ -21,15 +21,3 @@ export function acquireTaskSettlementFence(
     mode: "immediate",
   });
 }
-
-export async function withTaskSettlementFence<T>(input: Readonly<{
-  repository: GitRepository;
-  taskId: TaskId;
-}>, action: () => T | Promise<T>): Promise<T> {
-  const held = await acquireTaskSettlementFence(input.repository, input.taskId);
-  try {
-    return await action();
-  } finally {
-    held.close();
-  }
-}

@@ -13,10 +13,6 @@ returning. Post-admission failure is reported as lag without hiding or
 rejecting the admitted Contract. CLI calls this same facade; it does not
 interpret protocol outcomes or repeat either follow-up stage.
 
-Settlement in this result covers holder-fence release and namespace projection;
-it never reports or retries a Task lifecycle write. Held-Task completion is
-already part of the reviewed delivery integration.
-
 `MutationResult` is invocation-scoped observation, never Contract state or a
 durable receipt. `facts` and `head` come only from accepted protocol admission.
 `effects` and `lags` first contain any physical result produced inside targeted
@@ -121,14 +117,6 @@ type IntegrationRefusal = Readonly<{
   requiredGit: "2.38"
 }>
 
-type TaskCompletionRefusal = Readonly<{
-  kind: "task-completion-refused"
-  contractId: ContractId
-  taskId: TaskId
-  reason: "missing" | "not-a-blob" | "corrupt" | "terminal"
-  diagnostic?: string
-}>
-
 type CheckoutNotFollowableRefusal = Readonly<{
   kind: "checkout-not-followable"
   contractId: ContractId
@@ -173,12 +161,6 @@ type TargetInputRefusal =
       branch: string | null
     }>
 
-type TaskHolderBindRefusal = Readonly<{
-  kind: "task-already-held"
-  taskId: TaskId
-  holder: ContractId
-}>
-
 type VerificationStop =
   | StepStop<AttestationRefusal>
   | Readonly<{ failure: "candidate-unavailable"; diagnostic: string }>
@@ -195,16 +177,7 @@ type VerificationStop =
   | Readonly<{ failure: "spawn-error"; diagnostic: string }>
 
 type PlacementStop =
-  | StepStop<
-      | PlacementRefusal
-      | CheckoutNotFollowableRefusal
-      | DeliveryWorkspaceRefusal
-      | Readonly<{
-          kind: "placement-content-moved" | "task-holder-moved"
-          contractId: ContractId
-          taskId?: TaskId
-        }>
-    >
+  | StepStop<PlacementRefusal | CheckoutNotFollowableRefusal | DeliveryWorkspaceRefusal>
   | Readonly<{
       failure: "target-moved"
       contractId: ContractId

@@ -7,13 +7,10 @@ import {
   readRef,
   runGit,
   runGitWithEnvironment,
-  readBlob,
-  readTreeEntries,
-  updateGitTree,
-  writeBlob,
   type GitRepository,
 } from "./repository.js";
 import type { TenderCapture } from "./tender.js";
+import type { WorkspaceDirtyDelta } from "./tender.js";
 
 const REQUIRED_GIT = "2.38" as const;
 
@@ -49,29 +46,6 @@ export type IntegrationPlan = Readonly<{
   tree: GitObjectId;
   changeId: ChangeId;
 }>;
-
-export type IntegrationBlob = Readonly<{ bytes: Uint8Array; mode: string }>;
-
-export async function readIntegrationBlob(
-  repository: GitRepository,
-  tree: GitObjectId,
-  path: string,
-): Promise<Readonly<{ kind: "present"; data: IntegrationBlob } | { kind: "missing" | "not-a-blob" }>> {
-  const entry = (await readTreeEntries(repository, tree)).get(path);
-  if (entry === undefined) return { kind: "missing" };
-  if (entry.type !== "blob") return { kind: "not-a-blob" };
-  return { kind: "present", data: { bytes: await readBlob(repository, entry.oid), mode: entry.mode } };
-}
-
-export async function updateIntegrationPlan(
-  repository: GitRepository,
-  plan: IntegrationPlan,
-  update: Readonly<{ path: string; bytes: Uint8Array; mode: string }>,
-): Promise<IntegrationPlan> {
-  const blob = await writeBlob(repository, update.bytes);
-  const tree = gitObjectId(await updateGitTree(repository, plan.tree, new Map([[update.path, { oid: blob, mode: update.mode, type: "blob" }]])), "updated integration tree");
-  return { ...plan, tree, changeId: await stablePatchId(repository, plan.predecessor, tree) };
-}
 
 async function stablePatchId(repository: GitRepository, predecessor: SnapshotId, tree: GitObjectId): Promise<ChangeId> {
   const diff = await runGit(repository, ["diff", "--binary", gitObjectIdForSnapshot(predecessor), tree]);
@@ -263,6 +237,24 @@ export async function planIntegration(
     },
   };
 }
+
+/** Prepare the integration-derived review subject from one captured tender. */
+export async function prepareReviewIntegration(
+  repository: GitRepository,
+  input: IntegrationCoordinates,
+  tender: TenderCapture,
+  workspace?: WorkspaceDirtyDelta,
+): Promise<Preparation<ReviewIntegration, Readonly<{ kind: "target-missing"; contractId: ContractId }> | IntegrationPreparationRefusal>> {
+  const integration = await planIntegration(repository, input, tender, false);
+  return integration.kind === "refused"
+    ? integration
+    : { kind: "prepared", data: { changeId: integration.data.changeId, ...(workspace === undefined ? {} : { workspace }) } };
+}
+
+export type ReviewIntegration = Readonly<{
+  changeId: ChangeId;
+  workspace?: WorkspaceDirtyDelta;
+}>;
 
 async function deliverySnapshotAvailability(
   repository: GitRepository,

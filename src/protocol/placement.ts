@@ -1,7 +1,7 @@
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ChangeId, ContractId, SnapshotId } from "../core/facts/types.js";
+import type { ActorId, ContractId, SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { observeGitForAdmissionAt } from "../git/observe.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
@@ -15,8 +15,6 @@ import {
   type TargetPlacementRefusal,
 } from "../git/target-placement.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
-import { readTaskHolderProjectionFromDecision, taskHolderObservationSelection } from "../settlement/holder.js";
-import type { TaskId } from "../task/identity.js";
 import {
   prepareProtocolAttempt,
   runProtocol,
@@ -39,23 +37,11 @@ export type TargetMovedStop = Readonly<{
 
 export type PlacementProtocolResult =
   | (AcceptedAdmission & Readonly<{ physical?: ReconcileResult }>)
-  | Exclude<ProtocolResult<PlacementRefusal | TargetPlacementRefusal | PlacementCurrentnessRefusal>, AcceptedAdmission>
+  | Exclude<ProtocolResult<PlacementRefusal | TargetPlacementRefusal>, AcceptedAdmission>
   | TargetMovedStop
   | PlacementExecutionFailure;
 
-export type PlacementCurrentnessRefusal = Readonly<{
-  kind: "placement-content-moved" | "task-holder-moved";
-  contractId: ContractId;
-  taskId?: TaskId;
-}>;
-
-type PlacementProtocolInput = Readonly<{
-  contractId: ContractId;
-  actor?: ActorId;
-  at: string;
-  changeId?: ChangeId;
-  taskId?: TaskId;
-}>;
+type PlacementProtocolInput = Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
 
 function placementFailure(error: unknown): PlacementExecutionFailure {
   return { kind: "placement-failed", diagnostic: error instanceof Error ? error.message : String(error) };
@@ -69,7 +55,7 @@ function expectedPlacementFailure(error: unknown): PlacementExecutionFailure {
 async function runFencedPlacement(
   repository: GitRepository,
   input: PlacementProtocolInput,
-  protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal | PlacementCurrentnessRefusal>,
+  protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal>,
 ): Promise<PlacementProtocolResult> {
   for (let index = 0; index < protocol.attempts.length; index += 1) {
     const prepared = await prepareProtocolAttempt(protocol, protocol.attempts[index]!);
@@ -114,39 +100,16 @@ export async function admitPlacement(
   input: PlacementProtocolInput,
 ): Promise<PlacementProtocolResult> {
   const attempts = mintAttempts({ entryCount: 1 });
-  const protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal | PlacementCurrentnessRefusal> = {
+  const protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal> = {
     input,
     channel,
     repository,
     contracts: [input.contractId],
     attempts,
     decide: decidePlacement,
-    observe: (observedRepository, observedChannel, contracts) => observeGitForAdmissionAt(
-      observedRepository,
-      observedChannel,
-      contracts,
-      taskHolderObservationSelection(),
-    ),
-    prepareInput: async (observation, original) => {
-      const state = contractState(observation.decision, original.contractId);
-      if (
-        original.changeId !== undefined
-        && state?.delivery !== null
-        && state?.delivery !== undefined
-        && state.delivery.data.integration.changeId !== original.changeId
-      ) {
-        return { kind: "refused", refusal: { kind: "placement-content-moved", contractId: original.contractId } };
-      }
-      if (original.taskId !== undefined) {
-        const holder = (await readTaskHolderProjectionFromDecision(channel, observation)).get(original.contractId);
-        if (holder?.disposition !== "held" || holder.taskId !== original.taskId) {
-          return { kind: "refused", refusal: { kind: "task-holder-moved", contractId: original.contractId, taskId: original.taskId } };
-        }
-      }
-      return { kind: "prepared", input: original };
-    },
+    observe: (observedRepository, observedChannel, contracts) => observeGitForAdmissionAt(observedRepository, observedChannel, contracts),
   };
-  const run = (): Promise<ProtocolResult<PlacementRefusal | TargetPlacementRefusal | PlacementCurrentnessRefusal>> => runProtocol(protocol);
+  const run = (): Promise<ProtocolResult<PlacementRefusal | TargetPlacementRefusal>> => runProtocol(protocol);
 
   if (target === undefined) return await run();
 
