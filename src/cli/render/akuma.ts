@@ -229,11 +229,27 @@ function historyText(
   return lines.join("\n");
 }
 
-function waitText(status: AkumaStatus, context: TextRenderContext): string {
-  if (status.life === "running") return statusText(status, context);
+function waitText(status: AkumaStatus, context: TextRenderContext, alias?: string): string {
+  if (status.life === "running") return statusText(status, context, alias === undefined ? {} : { alias });
   if (status.answer !== undefined) return status.answer;
   if (status.failure !== undefined) return `failure ${status.failure}`;
-  return statusText(status, context);
+  return statusText(status, context, alias === undefined ? {} : { alias });
+}
+
+function waitMemberText(status: AkumaStatus, context: TextRenderContext, alias?: string): string {
+  const body = waitText(status, context, alias);
+  if (status.life === "running") return body;
+  if (status.answer === undefined && status.failure === undefined) return body;
+  return [ruler(identity(status.id, alias), context.columns), body].join("\n");
+}
+
+function waitResultText(
+  statuses: readonly AkumaStatus[],
+  context: TextRenderContext,
+  alias?: string,
+): string {
+  const render = statuses.length > 1 ? waitMemberText : waitText;
+  return statuses.map((status) => render(status, context, alias)).join("\n\n");
 }
 
 function wakeFailure(result: TellResult): string | null {
@@ -277,7 +293,7 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
     return [identity(called.akuma, alias), ...stages, `wait failed ${called.observation.failure.kind} ${safeText(called.observation.failure.diagnostic)}`].join("\n");
   }
   const status = called.observation.status;
-  if (status.answer !== undefined || status.failure !== undefined) return [identity(called.akuma, alias), ...stages, waitText(status, context)].join("\n");
+  if (status.answer !== undefined || status.failure !== undefined) return [identity(called.akuma, alias), ...stages, waitText(status, context, alias)].join("\n");
   return statusText(status, context, { facts: stages, ...(alias === undefined ? {} : { alias }) });
 }
 
@@ -289,9 +305,7 @@ export function renderAkumaText(
   switch (result.action) {
     case "call": return callText(result, context);
     case "status": return statusText(result.status, context, result.alias === undefined ? {} : { alias: result.alias });
-    case "wait": return result.result.statuses.map((status) => status.life === "running"
-      ? statusText(status, context, result.alias === undefined ? {} : { alias: result.alias })
-      : waitText(status, context)).join("\n\n");
+    case "wait": return waitResultText(result.result.statuses, context, result.alias);
     case "tell": {
       if (result.mode === "ordinary") return tellText(result, context);
       const receipt = result.result.receipt;

@@ -92,11 +92,8 @@ test("Akuma status aligns and counts omitted activity", () => {
   const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
   const status = {
     id: "aku/worker/1234abcd",
-    archetype: "worker",
     life: "running" as const,
     collar: { kind: "alive" as const },
-    confinement: { kind: "unconfined" as const },
-    pending: [],
     activity: {
       entries: [{ kind: "gap" as const, count: 12 }, { kind: "row" as const, row: {
         kind: "note" as const,
@@ -132,6 +129,30 @@ test("Akuma status aligns and counts omitted activity", () => {
     result: { completion: "all", statuses: [status] },
   });
   assert.match(aliasedWait.split("\n")[0]!, /^aku\/worker\/1234abcd \(@review\) ─+$/u);
+  const answered = {
+    ...status,
+    life: "asleep" as const,
+    collar: { kind: "gone" as const, end: "exited" as const },
+    answer: "first answer",
+    activity: { entries: [], lowestRetained: null, highest: null },
+  };
+  const other = {
+    ...answered,
+    id: "aku/reviewer/deadbeef",
+    answer: "second answer",
+  };
+  assert.equal(renderAkumaText(command, {
+    kind: "akuma",
+    action: "wait",
+    result: { completion: "any", statuses: [answered] },
+  }), "first answer");
+  const plural = renderAkumaText(command, {
+    kind: "akuma",
+    action: "wait",
+    result: { completion: "all", statuses: [answered, other] },
+  });
+  assert.match(plural, /^aku\/worker\/1234abcd ─+\nfirst answer\n\naku\/reviewer\/deadbeef ─+\nsecond answer$/u);
+  assert.doesNotMatch(plural, /came back|N of M/u);
   const recorded = {
     kind: "akuma",
     action: "tell" as const,
@@ -184,11 +205,8 @@ test("Akuma voice is quoted and running tools carry the live mark", () => {
   const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
   const status = {
     id: "aku/worker/1234abcd",
-    archetype: "worker",
     life: "running" as const,
     collar: { kind: "alive" as const },
-    confinement: { kind: "unconfined" as const },
-    pending: [],
     activity: { entries: [
       { kind: "row" as const, row: {
         kind: "said" as const, sequence: 1, bodySequence: 1,
@@ -239,11 +257,8 @@ test("Akuma run commands stay on one row and preserve their head and tail", () =
   const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
   const status = {
     id: "aku/worker/1234abcd",
-    archetype: "worker",
     life: "running" as const,
     collar: { kind: "alive" as const },
-    confinement: { kind: "unconfined" as const },
-    pending: [],
     activity: { entries: [{ kind: "row" as const, row: {
       kind: "tool" as const, sequence: 1, bodySequence: 1,
       at: "2026-08-10T16:42:00.000Z", name: "Shell",
@@ -377,11 +392,8 @@ test("akuma call renders optional integration stages and maps partial success", 
         kind: "observed" as const,
         status: {
           id: akuma,
-          archetype: "worker",
           life: "asleep" as const,
           collar: { kind: "gone" as const, end: "exited" as const },
-          confinement: { kind: "unconfined" as const },
-          pending: [],
           answer: "finished",
           activity: { entries: [], lowestRetained: null, highest: null },
         },

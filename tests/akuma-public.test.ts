@@ -290,7 +290,8 @@ test("status names a durable session that the adapter cannot resume", async () =
     assert.equal(status.life, "stranded");
     assert.equal(status.strandedReason, "resume-unsupported");
     assert.equal(status.failure, undefined);
-    assert.equal(status.pending.includes("resume-unsupported-tell"), true);
+    const listed = akumaAt(root).list().rows[0]!;
+    assert.equal("pending" in listed && listed.pending.includes("resume-unsupported-tell"), true);
     assert.equal(readTurns(source.paths).length, 1);
     assert.equal(readTurns(source.paths)[0]?.outcome.kind, "answered");
   } finally {
@@ -337,13 +338,17 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.equal(listed.life, "asleep");
     assert.equal("history" in listed, false);
     assert.equal("answer" in listed, false);
+    assert.equal(listed.archetype, "claude");
+    assert.equal(listed.description, "Fixture akuma");
+    assert.deepEqual(listed.confinement, { kind: "unconfined" });
+    assert.deepEqual(listed.pending, []);
     const status = handle.status();
     assert.equal(status.life, "asleep");
-    assert.equal(status.archetype, "claude");
-    assert.equal(status.description, "Fixture akuma");
-    assert.deepEqual(status.confinement, { kind: "unconfined" });
+    assert.equal("archetype" in status, false);
+    assert.equal("description" in status, false);
+    assert.equal("confinement" in status, false);
+    assert.equal("pending" in status, false);
     assert.equal(status.answer, "public answer");
-    assert.deepEqual(status.pending, []);
     assert.equal("history" in status, false);
     assert.deepEqual(handle.history().turns[0]?.outcome, {
       kind: "answered",
@@ -790,7 +795,7 @@ test("a failed turn is durable public evidence and never masquerades as provider
     const settled = await handle.wait();
     assert.equal(settled.life, "stranded");
     assert.equal(settled.failure, "native failed");
-    assert.deepEqual(settled.pending, []);
+    assert.equal("pending" in settled, false);
     assert.deepEqual(handle.history().turns, []);
     assert.deepEqual(readTurns(allocated.paths).map((turn) => turn.outcome), [
       { kind: "failed", diagnostic: "native failed" },

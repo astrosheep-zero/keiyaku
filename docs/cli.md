@@ -281,7 +281,11 @@ the complete AkuId and, only when the command was addressed through one Alias
 or just bound one, that frozen Alias in v3's `(@alias)` form. It never
 reverse-selects an Alias. Life and elapsed time cannot appear in the header
 because they may change after a stream fixes its head. The id already contains
-the Archetype, so the Archetype is never repeated. The closed marks are `●` running, `○` nonterminal
+the Archetype, so the Archetype is never repeated. A one-member wait still
+writes a finished answer as exact bytes with no header. A plural wait prefixes
+every member with that identity header, then the wait body (status spine, exact
+answer bytes, or `failure <diagnostic>`), members blank-line separated, with no
+`came back`, `N of M`, or elapsed clocks. JSON remains `AkumaWaitResult`. The closed marks are `●` running, `○` nonterminal
 idle, `×` killed, `!` stillborn or warning, `│` spine, `⋮` omitted history,
 `⧗` pending tell, `told` effective tell, `✂` interrupted, and `✓`
 answered. Text never prints the storage words

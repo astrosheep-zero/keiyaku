@@ -63,7 +63,10 @@ export type AkumaListRow = Readonly<{
   pending: readonly string[];
 }>;
 
-export type AkumaStatus = AkumaListRow & Readonly<{
+export type AkumaStatus = Readonly<{
+  id: AkuId;
+  life: AkumaLife;
+  collar: CollarProbe;
   answer?: string;
   answerHistoryId?: string;
   failure?: string;
@@ -190,7 +193,9 @@ function bornStatus(paths: AkumaPaths, expected: AkuId, profile: "status" | "fee
     && snapshot.latestSession?.provider === snapshot.soul.provider.name
     && providerNamed(snapshot.soul.provider).resume === undefined;
   return {
-    ...current,
+    id: current.id,
+    life: current.life,
+    collar: current.collar,
     ...(latest === null ? {} : { outcomeAt: latest.completedAt }),
     ...(latest?.outcome.kind === "answered"
       ? { answer: latest.outcome.answer, answerHistoryId: latest.outcome.historyId }

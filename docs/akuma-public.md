@@ -28,17 +28,15 @@ A rerouted call that reaches a terminal non-served request throws
 errors retain their existing types; Body Requests do not wrap them before
 heart admission.
 
-`status()` combines the current compact heart snapshot, leash and collar probes,
-the newest retained turn, and one activity snapshot. Its shape is:
+`status()` is a watch on one living Akuma: leash and collar probes, the newest
+retained turn, and one activity snapshot. It is not a fleet row and does not
+extend, embed, or inherit `AkumaListRow`. Its shape is:
 
 ```ts
 type AkumaStatus = {
   id: AkuId;
-  archetype: string;
-  description?: string;
   life: AkumaLife;
   collar: CollarProbe;
-  confinement: Confinement;
   answer?: string;
   answerHistoryId?: string;
   failure?: string;
@@ -113,7 +111,8 @@ caller's action; settled tell rows share the ordinary activity budget. Text and
 JSON expose the same two-state row and no provider fence, five-stage
 lifecycle, or stage timeline. Tell
 rows are the sole detailed public tell projection; `AkumaStatus` carries no
-second pending-ID collection. There
+pending-ID collection, description, Archetype name, or confinement. Those stay
+on the fleet row, the identity, or the soul. There
 is no separate public TellId browsing workflow. A global `status()` value is
 useful context but is not a mutation receipt and cannot alter this result.
 
@@ -147,9 +146,10 @@ stranded or headless
 akuma is the flagship's decision; the surface puts the state and available
 verbs in front of her and says nothing more.
 
-`list()` is deliberately smaller than `status()`: born fleet rows expose id,
+`list()` is the compact fleet scan, not a smaller `status()`. Born fleet rows expose id,
 Archetype and description snapshots, life, collar evidence,
-confinement, and pending tell count, but no activity, history, or latest outcome. The id is
+confinement, and pending tell count, but no activity, history, or latest outcome. The public
+types share `id`, `life`, and `collar` by coincidence, not by inheritance. The id is
 projected verbatim and has no endpoint-state interpretation here. Unborn/stillborn rows retain
 their existing evidence. This keeps a fleet read from scanning the complete
 turn history of every akuma. A corrupt member is silently skipped at this
