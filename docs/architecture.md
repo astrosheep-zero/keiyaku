@@ -47,12 +47,44 @@ coordinate.
 A transaction plan contains contract appends, evidence writes, expected
 contract heads, and verb-owned ref operations. The facts log owns raw Git
 object construction and one atomic `update-ref` transaction. It performs one
-semantic attempt, mechanically rebuilding on unrelated carrier movement. Any
-watched contract, evidence path, or verb-owned ref change returns a typed
-conflict instead of re-deciding policy.
+semantic attempt. It mechanically rebuilds only on unrelated carrier movement,
+within a bounded retry budget supplied as mechanics options rather than plan
+data. Exhaustion returns typed `contention`; it never loops forever. Any watched
+contract, evidence path, or verb-owned ref change returns a typed conflict.
 
-`protocol/run.ts` owns retry and accepted-attempt recognition. It must never
-branch on verb kind. Each verb owns one pure decision function.
+Facts outcomes are closed: committed, contract conflict, evidence conflict,
+ref conflict, contention, or indeterminate. Validation, codec, corruption, and
+ordinary Git errors before atomic ref publication remain exceptions. A clean
+`update-ref` abort is a definite non-publication. Only a process-level failure
+after the ref subprocess starts, where its exit cannot be known, is typed
+`indeterminate`.
+
+Every semantic decision and acceptance check uses exactly one carrier snapshot.
+Multi-contract observation reads the carrier once and folds every journal from
+that tree. An attempted append is accepted only when every planned entry is
+present under its contract and its canonical bytes match exactly. Entry ULIDs
+are coordinates, not a second authority. The planned entries are the attempt
+identity; `TransactionPlan` has no separate attempt ID.
+
+`protocol/run.ts` owns bounded semantic retry and never branches on verb kind.
+A definite conflict invalidates the old decision: the protocol re-observes one
+snapshot, invokes the pure decision again, and uses fresh entry ULIDs.
+Contention resubmits the byte-identical plan with the same identities.
+Indeterminate is the only outcome that permits accepted-attempt recognition:
+
+- all planned entries match canonically: report committed;
+- none appear and expected contract heads are unchanged: resubmit the same plan;
+- none appear and expected heads moved: make a fresh semantic decision;
+- an ULID appears with different canonical content: surface the collision and
+  make a fresh semantic decision.
+
+A partial match of a multi-entry attempt is impossible under atomic publication
+and therefore fails closed as corrupted authority.
+
+Process recovery needs no attempt ledger. A new process observes durable facts
+and runs the pure decision from them.
+
+Each verb owns one pure decision function.
 
 ## Derived State
 
