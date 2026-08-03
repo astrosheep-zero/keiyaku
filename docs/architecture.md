@@ -30,12 +30,26 @@ An evidence path is write-once. Its journal `EvidenceRef` names the entry,
 sequence, kind, and blob OID; the path is derived rather than persisted.
 Journal append and evidence bytes publish in one carrier commit.
 
+`ContractState` is a fold, not another persisted authority. It contains only
+the current phase, journal head, effective body, current delivery endpoint,
+current petition and terminal entries, and inline evidence entries. Historical
+seat and delivery collections are projections over journal entries, never
+parallel state fields.
+
+Transaction mechanics never enter entry payloads. Membership grouping belongs
+to `TransactionPlan`, accepted-attempt identity belongs to entry ULIDs, and CAS
+old values belong to ref operations. In particular, `seal` has no owner
+payload, `claim` names only its petition, and `forfeit` stores no final ref
+coordinate.
+
 ## Transactions
 
 A transaction plan contains contract appends, evidence writes, expected
 contract heads, and verb-owned ref operations. The facts log owns raw Git
 object construction and one atomic `update-ref` transaction. It performs one
-attempt and returns either success or current conflicting contract heads.
+semantic attempt, mechanically rebuilding on unrelated carrier movement. Any
+watched contract, evidence path, or verb-owned ref change returns a typed
+conflict instead of re-deciding policy.
 
 `protocol/run.ts` owns retry and accepted-attempt recognition. It must never
 branch on verb kind. Each verb owns one pure decision function.
