@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { encodeEntry } from "../src/core/facts/codec.js";
-import { commitContractTransaction } from "../src/core/facts/log.js";
+import { admit } from "../src/core/facts/admission.js";
 import {
   CARRIER_FORMAT_BYTES,
   CARRIER_FORMAT_PATH,
@@ -14,7 +14,10 @@ import {
   writeTree,
 } from "../src/core/facts/repository.js";
 import { foldJournal } from "../src/core/facts/fold.js";
-import { observeContract } from "../src/core/protocol/observe.js";
+import {
+  observeContract,
+  observeContracts,
+} from "../src/core/protocol/observe.js";
 import {
   blobOid,
   contractId,
@@ -30,12 +33,12 @@ import { makeGitRepository } from "./support/git.js";
 
 const AT = "2026-08-03T00:00:00Z";
 
-function bindEntry(id: ContractId): BindEntry {
+function bindEntry(id: ContractId, entry = "01ARZ3NDEKTSV4RRFFQ69G5FAV"): BindEntry {
   return {
     v: 1,
     kind: "bind",
     contract: id,
-    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+    entry: entryUlid(entry),
     at: AT,
     actor: "test",
     data: {
@@ -100,8 +103,8 @@ test("observing a bound journal returns its exact head, entries, and folded stat
   const repo = repositoryAt(repository.path);
   const id = contractId("observed-contract");
   const entries: JournalEntry[] = [bindEntry(id)];
-  const result = commitContractTransaction(repo, {
-    contractAppends: [{ contractId: id, expectedHead: null, entries }],
+  const result = admit(repo, {
+    facts: [{ contractId: id, expectedHead: null, entries }],
   });
   assert.equal(result.ok, true);
   if (!result.ok) return;
@@ -167,4 +170,32 @@ test("observation rejects a dangling journal evidence reference without reading 
     [contractJournalPath(id), { oid: writeBlob(repo, entries.map((entry) => encodeEntry(entry)).join("")) }],
   ]));
   assert.throws(() => observeContract(repo, id), /journal evidence is not reachable/);
+});
+
+test("observing two contracts reads both journals from the captured carrier tree", () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const first = contractId("first-contract");
+  const second = contractId("second-contract");
+  const evidence = writeBlob(repo, "payload is never read by observation");
+  const reviewed = reviewEntry(second);
+  const reference = reviewed.data.evidence[0]!;
+  const secondReview: ReviewEntry = {
+    ...reviewed,
+    data: { ...reviewed.data, evidence: [{ ...reference, oid: blobOid(evidence) }] },
+  };
+  const secondEntries: JournalEntry[] = [bindEntry(second, "01ARZ3NDEKTSV4RRFFQ69G5FAY"), secondReview];
+  const result = admit(repo, {
+    facts: [
+      { contractId: first, expectedHead: null, entries: [bindEntry(first)] },
+      { contractId: second, expectedHead: null, entries: secondEntries },
+    ],
+    evidence: [{ contractId: second, ref: secondReview.data.evidence[0]!, bytes: "payload is never read by observation" }],
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const observation = observeContracts(repo, [first, second]);
+  assert.equal(observation.carrierCommit, result.carrierCommit);
+  assert.deepEqual(observation.contracts.get(first)?.entries, [bindEntry(first)]);
+  assert.deepEqual(observation.contracts.get(second)?.entries, secondEntries);
 });
