@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import {
@@ -24,6 +27,7 @@ import {
   blobOid,
   commitOid,
   contractId,
+  contractJournalPath,
   entryUlid,
   type AmendEntry,
   type BindEntry,
@@ -101,6 +105,15 @@ function installCarrier(repository: ReturnType<typeof repositoryAt>, format: str
     : buildTree(repository, emptyTree, new Map([[CARRIER_FORMAT_PATH, { oid: writeBlob(repository, format) }]]));
   const commit = writeCommit(repository, tree, null);
   updateRefsAtomically(repository, [{ ref: CARRIER_REF, newOid: commit, expectedOid: null }]);
+}
+
+function gitShim(body: string): { readonly env: NodeJS.ProcessEnv } {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-git-shim-"));
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const path = join(directory, "git");
+  writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  chmodSync(path, 0o755);
+  return { env: { ...process.env, PATH: `${directory}:${process.env.PATH ?? ""}`, KEIYAKU_REAL_GIT: realGit } };
 }
 
 test("initializes the current format and publishes journal plus evidence in one carrier commit", () => {
@@ -393,6 +406,102 @@ test("a persistent ref lock failure terminates instead of retrying forever", asy
   assert.equal(result.threw, true);
   assert.match(result.message ?? "", /cannot lock ref/);
   assert.equal(readRef(repo, CARRIER_REF), null);
+});
+
+test("a killed update-ref child returns indeterminate without probing the journal", async () => {
+  const repository = makeGitRepository();
+  const script = [
+    "import { commitContractTransaction } from './src/core/facts/log.ts';",
+    "import { repositoryAt } from './src/core/facts/repository.ts';",
+    "const id = 'killed-contract';",
+    "const entry = { v: 1, kind: 'bind', contract: id, entry: '01ARZ3NDEKTSV4RRFFQ69G5FAV', at: '2026-01-01T00:00:00Z', actor: 'child', data: { title: id, context: 'c', objective: 'o', design: 'd', region: [], criteria: [], verification: [], extensions: [] } };",
+    "process.stdout.write(JSON.stringify(commitContractTransaction(repositoryAt(process.argv[1]), { contractAppends: [{ contractId: id, expectedHead: null, entries: [entry] }] })));",
+  ].join("\n");
+  const shim = gitShim([
+    'if [ "$1" = "update-ref" ]; then',
+    '  "$KEIYAKU_REAL_GIT" "$@" || exit $?',
+    '  kill -9 $$',
+    'fi',
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n"));
+  const child = await execFileAsync(
+    process.execPath,
+    ["--import", "tsx", "-e", script, repository.path],
+    { env: shim.env },
+  );
+  const result = JSON.parse(child.stdout) as { ok: boolean; kind: string };
+  assert.equal(result.ok, false);
+  assert.equal(result.kind, "indeterminate");
+  const repo = repositoryAt(repository.path);
+  assert.ok(readRef(repo, CARRIER_REF));
+  assert.match(repository.run(["show", `${CARRIER_REF}:contracts/killed-contract.jsonl`]), /"kind":"bind"/);
+});
+
+test("persistent unrelated carrier movement returns contention within the rebuild budget", async () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const baseId = contractId("base-contract");
+  const base = commitContractTransaction(repo, journalPlan(baseId, null, [bindEntry(baseId)]));
+  assert.equal(base.ok, true);
+  if (!base.ok) return;
+
+  let parent: string = base.carrierCommit;
+  const chain: string[] = [];
+  for (let index = 0; index < 3; index += 1) {
+    const next = writeCommit(repo, base.carrierTree, parent);
+    chain.push(next);
+    parent = next;
+  }
+  const queue = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-carrier-queue-")), "queue");
+  writeFileSync(queue, `${chain.join("\n")}\n`);
+  const count = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-update-ref-count-")), "count");
+  writeFileSync(count, "");
+  const script = [
+    'if [ "$1" = "update-ref" ]; then',
+    '  printf "1\\n" >> "$KEIYAKU_UPDATE_REF_COUNT"',
+    '  next=$(sed -n "1p" "$KEIYAKU_QUEUE")',
+    '  tail -n +2 "$KEIYAKU_QUEUE" > "$KEIYAKU_QUEUE.next"',
+    '  mv "$KEIYAKU_QUEUE.next" "$KEIYAKU_QUEUE"',
+    '  current=$("$KEIYAKU_REAL_GIT" rev-parse --verify --quiet refs/heads/keiyaku-state)',
+    '  "$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$next" "$current" || exit $?',
+    'fi',
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+  const shim = gitShim(script);
+  const env = { ...shim.env, KEIYAKU_QUEUE: queue, KEIYAKU_UPDATE_REF_COUNT: count };
+  const childScript = [
+    "import { commitContractTransaction } from './src/core/facts/log.ts';",
+    "import { repositoryAt } from './src/core/facts/repository.ts';",
+    "const id = process.argv[2];",
+    "const entry = { v: 1, kind: 'bind', contract: id, entry: '01ARZ3NDEKTSV4RRFFQ69G5FAW', at: '2026-01-01T00:00:00Z', actor: 'child', data: { title: id, context: 'c', objective: 'o', design: 'd', region: [], criteria: [], verification: [], extensions: [] } };",
+    "process.stdout.write(JSON.stringify(commitContractTransaction(repositoryAt(process.argv[1]), { contractAppends: [{ contractId: id, expectedHead: null, entries: [entry] }] }, { carrierRebuildBudget: Number(process.argv[3]) })));",
+  ].join("\n");
+  const child = await execFileAsync(
+    process.execPath,
+    ["--import", "tsx", "-e", childScript, repository.path, "contention-contract", "2"],
+    { env },
+  );
+  const result = JSON.parse(child.stdout) as { ok: boolean; kind: string; rebasable: boolean };
+  assert.equal(result.ok, false);
+  assert.equal(result.kind, "contention");
+  assert.equal(result.rebasable, true);
+  assert.equal(readFileSync(count, "utf8").split("\n").filter(Boolean).length, 3);
+  assert.equal(readCarrier(repo).paths.has(contractJournalPath(contractId("contention-contract"))), false);
+
+  const next = writeCommit(repo, base.carrierTree, readRef(repo, CARRIER_REF));
+  writeFileSync(queue, `${next}\n`);
+  writeFileSync(count, "");
+  const zeroChild = await execFileAsync(
+    process.execPath,
+    ["--import", "tsx", "-e", childScript, repository.path, "contention-zero", "0"],
+    { env },
+  );
+  const zeroResult = JSON.parse(zeroChild.stdout) as { ok: boolean; kind: string; rebasable: boolean };
+  assert.equal(zeroResult.ok, false);
+  assert.equal(zeroResult.kind, "contention");
+  assert.equal(zeroResult.rebasable, true);
+  assert.equal(readFileSync(count, "utf8").split("\n").filter(Boolean).length, 1);
+  assert.equal(readCarrier(repo).paths.has(contractJournalPath(contractId("contention-zero"))), false);
 });
 
 test("unrelated carrier movement is rebased into the next transaction", () => {

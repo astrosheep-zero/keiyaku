@@ -12,6 +12,7 @@ import {
   type GitRepository,
   type TreeChange,
   buildTree,
+  GitPlumbingError,
   readBlob,
   readCarrier,
   readRef,
@@ -36,6 +37,13 @@ import {
 } from "./types.js";
 
 export type BlobInput = string | Uint8Array;
+
+/** Number of unrelated carrier rebuilds allowed after the initial publication attempt. */
+export const DEFAULT_CARRIER_REBUILD_BUDGET = 3;
+
+export type FactsMechanicsOptions = Readonly<{
+  readonly carrierRebuildBudget?: number;
+}>;
 
 export interface ContractJournalAppend {
   readonly contractId: ContractId;
@@ -81,7 +89,7 @@ export interface FactsSuccess {
 
 export interface FactsConflict {
   readonly ok: false;
-  readonly kind: "conflict";
+  readonly kind: "facts-conflict";
   readonly reason: "watched-path-changed";
   readonly carrierCommit: CommitOid | null;
   readonly currentHeads: readonly CurrentContractHead[];
@@ -109,7 +117,18 @@ export interface EvidenceConflict {
   readonly currentHeads: readonly CurrentContractHead[];
 }
 
-export type FactsResult = FactsSuccess | FactsConflict | RefConflict | EvidenceConflict;
+export type FactsContention = Readonly<{
+  readonly ok: false;
+  readonly kind: "contention";
+  readonly rebasable: true;
+}>;
+
+export type FactsIndeterminate = Readonly<{
+  readonly ok: false;
+  readonly kind: "indeterminate";
+}>;
+
+export type FactsResult = FactsSuccess | FactsConflict | EvidenceConflict | RefConflict | FactsContention | FactsIndeterminate;
 
 function validatePath(path: string): void {
   if (
@@ -166,12 +185,27 @@ function conflict(
     .map((state) => ({ ...state, expectedHead: expected.get(state.contractId) ?? null }));
   return {
     ok: false,
-    kind: "conflict",
+    kind: "facts-conflict",
     reason: "watched-path-changed",
     carrierCommit: snapshot.commit === null ? null : commitOid(snapshot.commit),
     currentHeads: states,
     conflicts,
     rebasable: false,
+  };
+}
+
+function contention(): FactsContention {
+  return {
+    ok: false,
+    kind: "contention",
+    rebasable: true,
+  };
+}
+
+function indeterminate(): FactsIndeterminate {
+  return {
+    ok: false,
+    kind: "indeterminate",
   };
 }
 
@@ -324,7 +358,19 @@ function prepareEvidenceWrites(
 }
 
 function transactionErrorIsRace(error: unknown): boolean {
-  return error instanceof Error && /cannot lock ref|is at .* but expected|transaction failed/i.test(error.message);
+  return error instanceof GitPlumbingError
+    && error.command[0] === "update-ref"
+    && error.status !== null
+    && error.signal === null
+    && (/is at .* but expected/i.test(error.message) || error.message.includes(`cannot lock ref '${CARRIER_REF}'`));
+}
+
+function transactionOutcomeIsUnknown(error: unknown): boolean {
+  return error instanceof GitPlumbingError
+    && error.command[0] === "update-ref"
+    && error.pid !== null
+    && error.pid > 0
+    && error.status === null;
 }
 
 function evidenceConflict(
@@ -420,9 +466,15 @@ function commitAttempt(
   return { carrierCommit, carrierTree };
 }
 
-export function commitContractTransaction(repository: GitRepository, plan: TransactionPlan): FactsResult {
+export function commitContractTransaction(
+  repository: GitRepository,
+  plan: TransactionPlan,
+  options: FactsMechanicsOptions = {},
+): FactsResult {
   if (!plan || typeof plan !== "object") throw new TypeError("transaction plan must be an object");
   if (!Array.isArray(plan.contractAppends)) throw new TypeError("contractAppends must be an array");
+  const rebuildBudget = options.carrierRebuildBudget ?? DEFAULT_CARRIER_REBUILD_BUDGET;
+  if (!Number.isSafeInteger(rebuildBudget) || rebuildBudget < 0) throw new TypeError("carrierRebuildBudget must be a nonnegative safe integer");
 
   const appends = normalizeAppends(plan.contractAppends);
   const evidenceWrites = asArray(plan.evidenceWrites);
@@ -437,6 +489,7 @@ export function commitContractTransaction(repository: GitRepository, plan: Trans
   if (initialEvidenceConflict !== null) return initialEvidenceConflict;
 
   let snapshot = initial;
+  let retries = 0;
   while (true) {
     const currentConflict = conflict(snapshot, expectedHeads);
     if (currentConflict.conflicts.length > 0) return currentConflict;
@@ -456,6 +509,7 @@ export function commitContractTransaction(repository: GitRepository, plan: Trans
         heads: attempt.heads,
       };
     } catch (error) {
+      if (transactionOutcomeIsUnknown(error)) return indeterminate();
       if (!transactionErrorIsRace(error)) throw error;
       const racedSnapshot = readCarrier(repository);
       const racedConflict = conflict(racedSnapshot, expectedHeads);
@@ -465,6 +519,8 @@ export function commitContractTransaction(repository: GitRepository, plan: Trans
       const racedRefConflict = watchedRefConflict(repository, racedSnapshot, watchedIds, operations);
       if (racedRefConflict !== null) return racedRefConflict;
       if (racedSnapshot.commit === snapshot.commit) throw error;
+      if (retries >= rebuildBudget) return contention();
+      retries += 1;
       snapshot = racedSnapshot;
     }
   }

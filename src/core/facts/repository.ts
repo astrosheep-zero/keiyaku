@@ -35,13 +35,27 @@ export class GitPlumbingError extends Error {
   readonly command: readonly string[];
   readonly stderr: string;
   readonly status: number | null;
+  readonly pid: number | null;
+  readonly signal: string | null;
+  readonly code: string | number | null;
 
-  constructor(command: readonly string[], stderr: string, status: number | null, message: string) {
+  constructor(
+    command: readonly string[],
+    stderr: string,
+    status: number | null,
+    message: string,
+    pid: number | null = null,
+    signal: string | null = null,
+    code: string | number | null = null,
+  ) {
     super(message);
     this.name = "GitPlumbingError";
     this.command = command;
     this.stderr = stderr;
     this.status = status;
+    this.pid = pid;
+    this.signal = signal;
+    this.code = code;
   }
 }
 
@@ -50,10 +64,25 @@ export function repositoryAt(cwd: string = process.cwd()): GitRepository {
 }
 
 function commandError(command: readonly string[], error: unknown): GitPlumbingError {
-  const candidate = error as { message?: string; stderr?: Buffer | string; status?: number };
+  const candidate = error as {
+    message?: string;
+    stderr?: Buffer | string;
+    status?: number | null;
+    pid?: number;
+    signal?: string | null;
+    code?: string | number | null;
+  };
   const stderr = candidate.stderr === undefined ? "" : Buffer.from(candidate.stderr).toString("utf8").trim();
   const detail = stderr.length === 0 ? candidate.message ?? "git command failed" : stderr;
-  return new GitPlumbingError(command, stderr, candidate.status ?? null, `${command.join(" ")}: ${detail}`);
+  return new GitPlumbingError(
+    command,
+    stderr,
+    candidate.status ?? null,
+    `${command.join(" ")}: ${detail}`,
+    candidate.pid ?? null,
+    candidate.signal ?? null,
+    candidate.code ?? null,
+  );
 }
 
 export function runGit(repository: GitRepository, args: readonly string[], input?: string | Uint8Array): Buffer {
