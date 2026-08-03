@@ -38,13 +38,6 @@ import {
 
 export type BlobInput = string | Uint8Array;
 
-/** Number of unrelated carrier rebuilds allowed after the initial publication attempt. */
-export const DEFAULT_CARRIER_REBUILD_BUDGET = 3;
-
-export type FactsMechanicsOptions = Readonly<{
-  readonly carrierRebuildBudget?: number;
-}>;
-
 export interface ContractJournalAppend {
   readonly contractId: ContractId;
   readonly expectedHead?: ContractHead | null;
@@ -63,72 +56,64 @@ export interface RefOperation {
   readonly expectedOid?: GitOid | null;
 }
 
-export interface TransactionPlan {
-  readonly contractAppends: readonly ContractJournalAppend[];
-  readonly evidenceWrites?: readonly EvidenceWrite[];
-  readonly refOperations?: readonly RefOperation[];
+export interface Offer {
+  readonly facts: readonly ContractJournalAppend[];
+  readonly evidence?: readonly EvidenceWrite[];
+  readonly refs?: readonly RefOperation[];
 }
 
-export interface CurrentContractHead {
+export interface ObservedContractHead {
   readonly contractId: ContractId;
   readonly path: string;
   readonly head: ContractHead | null;
 }
 
-export interface ContractHeadConflict extends CurrentContractHead {
+export interface MovedContractHead extends ObservedContractHead {
   readonly expectedHead: ContractHead | null;
 }
 
-export interface FactsSuccess {
+export interface Accepted {
   readonly ok: true;
-  readonly kind: "committed";
+  readonly kind: "accepted";
   readonly carrierCommit: CommitOid;
   readonly carrierTree: GitOid;
   readonly heads: Readonly<Record<string, ContractHead>>;
 }
 
-export interface FactsConflict {
+export interface HeadMoved {
   readonly ok: false;
-  readonly kind: "facts-conflict";
-  readonly reason: "watched-path-changed";
+  readonly kind: "head-moved";
   readonly carrierCommit: CommitOid | null;
-  readonly currentHeads: readonly CurrentContractHead[];
-  readonly conflicts: readonly ContractHeadConflict[];
-  readonly rebasable: false;
+  readonly heads: readonly ObservedContractHead[];
+  readonly moved: readonly MovedContractHead[];
 }
 
-export interface RefConflict {
+export interface RefMoved {
   readonly ok: false;
-  readonly kind: "ref-conflict";
+  readonly kind: "ref-moved";
   readonly ref: string;
   readonly expectedOid: GitOid | null;
   readonly currentOid: GitOid | null;
   readonly carrierCommit: CommitOid | null;
-  readonly currentHeads: readonly CurrentContractHead[];
+  readonly heads: readonly ObservedContractHead[];
 }
 
-export interface EvidenceConflict {
+export interface EvidenceOccupied {
   readonly ok: false;
-  readonly kind: "evidence-conflict";
+  readonly kind: "evidence-occupied";
   readonly path: string;
   readonly expectedOid: BlobOid;
   readonly currentOid: BlobOid;
   readonly carrierCommit: CommitOid;
-  readonly currentHeads: readonly CurrentContractHead[];
+  readonly heads: readonly ObservedContractHead[];
 }
 
-export type FactsContention = Readonly<{
+export type Unknown = Readonly<{
   readonly ok: false;
-  readonly kind: "contention";
-  readonly rebasable: true;
+  readonly kind: "unknown";
 }>;
 
-export type FactsIndeterminate = Readonly<{
-  readonly ok: false;
-  readonly kind: "indeterminate";
-}>;
-
-export type FactsResult = FactsSuccess | FactsConflict | EvidenceConflict | RefConflict | FactsContention | FactsIndeterminate;
+export type Admission = Accepted | HeadMoved | EvidenceOccupied | RefMoved | Unknown;
 
 function validatePath(path: string): void {
   if (
@@ -159,7 +144,7 @@ function asArray<T>(value: readonly T[] | undefined): readonly T[] {
   return value;
 }
 
-function currentHead(snapshot: CarrierSnapshot, id: ContractId): CurrentContractHead {
+function observedHead(snapshot: CarrierSnapshot, id: ContractId): ObservedContractHead {
   const path = contractJournalPath(id);
   const entry = snapshot.paths.get(path);
   if (entry !== undefined && entry.type !== "blob") throw new TypeError(`journal path is not a blob: ${path}`);
@@ -170,60 +155,50 @@ function currentHead(snapshot: CarrierSnapshot, id: ContractId): CurrentContract
   };
 }
 
-function currentHeads(snapshot: CarrierSnapshot, ids: readonly ContractId[]): readonly CurrentContractHead[] {
-  return ids.map((id) => currentHead(snapshot, id));
+function observedHeads(snapshot: CarrierSnapshot, ids: readonly ContractId[]): readonly ObservedContractHead[] {
+  return ids.map((id) => observedHead(snapshot, id));
 }
 
-function conflict(
+function headMoved(
   snapshot: CarrierSnapshot,
   expected: ReadonlyMap<ContractId, ContractHead | null>,
-): FactsConflict {
+): HeadMoved {
   const ids = [...expected.keys()];
-  const states = currentHeads(snapshot, ids);
-  const conflicts = states
+  const heads = observedHeads(snapshot, ids);
+  const moved = heads
     .filter((state) => state.head !== expected.get(state.contractId))
     .map((state) => ({ ...state, expectedHead: expected.get(state.contractId) ?? null }));
   return {
     ok: false,
-    kind: "facts-conflict",
-    reason: "watched-path-changed",
+    kind: "head-moved",
     carrierCommit: snapshot.commit === null ? null : commitOid(snapshot.commit),
-    currentHeads: states,
-    conflicts,
-    rebasable: false,
+    heads,
+    moved,
   };
 }
 
-function contention(): FactsContention {
+function unknown(): Unknown {
   return {
     ok: false,
-    kind: "contention",
-    rebasable: true,
+    kind: "unknown",
   };
 }
 
-function indeterminate(): FactsIndeterminate {
-  return {
-    ok: false,
-    kind: "indeterminate",
-  };
-}
-
-function refConflict(
+function refMoved(
   snapshot: CarrierSnapshot,
   ids: readonly ContractId[],
   operation: RefOperation,
   currentOid: GitOid | null,
-): RefConflict {
+): RefMoved {
   const expectedOid = operation.expectedOid === undefined ? null : operation.expectedOid;
   return {
     ok: false,
-    kind: "ref-conflict",
+    kind: "ref-moved",
     ref: operation.ref,
     expectedOid,
     currentOid,
     carrierCommit: snapshot.commit === null ? null : commitOid(snapshot.commit),
-    currentHeads: currentHeads(snapshot, ids),
+    heads: observedHeads(snapshot, ids),
   };
 }
 
@@ -252,7 +227,7 @@ function normalizeRefOperations(
 ): readonly RefOperation[] {
   const seen = new Set<string>();
   return operations.map((operation) => {
-    if (operation.ref === CARRIER_REF) throw new TypeError(`the carrier ref is owned by the transaction: ${CARRIER_REF}`);
+    if (operation.ref === CARRIER_REF) throw new TypeError(`the carrier ref is owned by admission: ${CARRIER_REF}`);
     if (seen.has(operation.ref)) throw new TypeError(`duplicate ref operation: ${operation.ref}`);
     seen.add(operation.ref);
     const expectedOid = operation.expectedOid === undefined ? readRef(repository, operation.ref) : operation.expectedOid;
@@ -266,7 +241,7 @@ function normalizeExpectedHeads(
 ): Map<ContractId, ContractHead | null> {
   const expected = new Map<ContractId, ContractHead | null>();
   for (const append of appends) {
-    const actual = currentHead(snapshot, append.contractId).head;
+    const actual = observedHead(snapshot, append.contractId).head;
     expected.set(
       append.contractId,
       append.expectedHead === undefined ? actual : append.expectedHead,
@@ -309,7 +284,7 @@ function normalizeEvidenceRef(ref: EvidenceRef): EvidenceRef {
   return { entry, seq, kind: ref.kind, oid };
 }
 
-function prepareEvidenceWrites(
+function prepareEvidence(
   snapshot: CarrierSnapshot,
   appends: readonly ContractJournalAppend[],
   writes: readonly EvidenceWrite[],
@@ -357,7 +332,7 @@ function prepareEvidenceWrites(
   return prepared;
 }
 
-function transactionErrorIsRace(error: unknown): boolean {
+function carrierRefRace(error: unknown): boolean {
   return error instanceof GitPlumbingError
     && error.command[0] === "update-ref"
     && error.status !== null
@@ -365,7 +340,7 @@ function transactionErrorIsRace(error: unknown): boolean {
     && (/is at .* but expected/i.test(error.message) || error.message.includes(`cannot lock ref '${CARRIER_REF}'`));
 }
 
-function transactionOutcomeIsUnknown(error: unknown): boolean {
+function publicationIsUnknown(error: unknown): boolean {
   return error instanceof GitPlumbingError
     && error.command[0] === "update-ref"
     && error.pid !== null
@@ -373,11 +348,11 @@ function transactionOutcomeIsUnknown(error: unknown): boolean {
     && error.status === null;
 }
 
-function evidenceConflict(
+function evidenceOccupied(
   snapshot: CarrierSnapshot,
   ids: readonly ContractId[],
   writes: readonly { readonly path: string; readonly ref: EvidenceRef }[],
-): EvidenceConflict | null {
+): EvidenceOccupied | null {
   for (const write of writes) {
     const current = snapshot.paths.get(write.path);
     if (current === undefined) continue;
@@ -385,35 +360,35 @@ function evidenceConflict(
     if (snapshot.commit === null) throw new TypeError("published evidence requires a carrier commit");
     return {
       ok: false,
-      kind: "evidence-conflict",
+      kind: "evidence-occupied",
       path: write.path,
       expectedOid: write.ref.oid,
       currentOid: blobOid(current.oid),
       carrierCommit: commitOid(snapshot.commit),
-      currentHeads: currentHeads(snapshot, ids),
+      heads: observedHeads(snapshot, ids),
     };
   }
   return null;
 }
 
-function watchedRefConflict(
+function watchedRefMoved(
   repository: GitRepository,
   snapshot: CarrierSnapshot,
   ids: readonly ContractId[],
   operations: readonly RefOperation[],
-): RefConflict | null {
+): RefMoved | null {
   for (const operation of operations) {
     const currentOid = readRef(repository, operation.ref);
-    if (currentOid !== operation.expectedOid) return refConflict(snapshot, ids, operation, currentOid);
+    if (currentOid !== operation.expectedOid) return refMoved(snapshot, ids, operation, currentOid);
   }
   return null;
 }
 
-function buildAttempt(
+function buildOffer(
   repository: GitRepository,
   snapshot: CarrierSnapshot,
   appends: readonly ContractJournalAppend[],
-  evidenceWrites: readonly (EvidenceWrite & { readonly path: string; readonly ref: EvidenceRef })[],
+  evidence: readonly (EvidenceWrite & { readonly path: string; readonly ref: EvidenceRef })[],
 ): { readonly changes: ReadonlyMap<string, TreeChange>; readonly heads: Readonly<Record<string, ContractHead>> } {
   const changes = new Map<string, TreeChange>();
   const heads: Record<string, ContractHead> = {};
@@ -426,7 +401,7 @@ function buildAttempt(
     let journal = readCanonicalJournal(repository, snapshot, append.contractId);
     for (const entry of append.entries) journal = appendEntry(journal, entry);
     if (append.entries.length === 0) {
-      const existing = currentHead(snapshot, append.contractId).head;
+      const existing = observedHead(snapshot, append.contractId).head;
       if (existing !== null) heads[append.contractId] = existing;
       continue;
     }
@@ -436,7 +411,7 @@ function buildAttempt(
     heads[append.contractId] = contractHead(blob);
   }
 
-  for (const write of evidenceWrites) {
+  for (const write of evidence) {
     const blob = blobOid(writeBlob(repository, bytesFor(write.bytes)));
     if (blob !== write.ref.oid) {
       throw new TypeError(`evidence blob OID does not match Journal EvidenceRef: ${write.path}`);
@@ -447,7 +422,7 @@ function buildAttempt(
   return { changes, heads };
 }
 
-function commitAttempt(
+function publishOffer(
   repository: GitRepository,
   snapshot: CarrierSnapshot,
   operations: readonly RefOperation[],
@@ -466,61 +441,55 @@ function commitAttempt(
   return { carrierCommit, carrierTree };
 }
 
-export function commitContractTransaction(
+export function admit(
   repository: GitRepository,
-  plan: TransactionPlan,
-  options: FactsMechanicsOptions = {},
-): FactsResult {
-  if (!plan || typeof plan !== "object") throw new TypeError("transaction plan must be an object");
-  if (!Array.isArray(plan.contractAppends)) throw new TypeError("contractAppends must be an array");
-  const rebuildBudget = options.carrierRebuildBudget ?? DEFAULT_CARRIER_REBUILD_BUDGET;
-  if (!Number.isSafeInteger(rebuildBudget) || rebuildBudget < 0) throw new TypeError("carrierRebuildBudget must be a nonnegative safe integer");
+  offer: Offer,
+): Admission {
+  if (!offer || typeof offer !== "object") throw new TypeError("offer must be an object");
+  if (!Array.isArray(offer.facts)) throw new TypeError("facts must be an array");
 
-  const appends = normalizeAppends(plan.contractAppends);
-  const evidenceWrites = asArray(plan.evidenceWrites);
-  const operations = normalizeRefOperations(repository, asArray(plan.refOperations));
+  const appends = normalizeAppends(offer.facts);
+  const evidence = asArray(offer.evidence);
+  const operations = normalizeRefOperations(repository, asArray(offer.refs));
   const watchedIds = appends.map((append) => append.contractId);
   const initial = readCarrier(repository);
   const expectedHeads = normalizeExpectedHeads(initial, appends);
-  const initialConflict = conflict(initial, expectedHeads);
-  if (initialConflict.conflicts.length > 0) return initialConflict;
-  const preparedEvidence = prepareEvidenceWrites(initial, appends, evidenceWrites);
-  const initialEvidenceConflict = evidenceConflict(initial, watchedIds, preparedEvidence);
-  if (initialEvidenceConflict !== null) return initialEvidenceConflict;
+  const initialHeadMovement = headMoved(initial, expectedHeads);
+  if (initialHeadMovement.moved.length > 0) return initialHeadMovement;
+  const preparedEvidence = prepareEvidence(initial, appends, evidence);
+  const initialEvidenceOccupation = evidenceOccupied(initial, watchedIds, preparedEvidence);
+  if (initialEvidenceOccupation !== null) return initialEvidenceOccupation;
 
   let snapshot = initial;
-  let retries = 0;
   while (true) {
-    const currentConflict = conflict(snapshot, expectedHeads);
-    if (currentConflict.conflicts.length > 0) return currentConflict;
-    const currentEvidenceConflict = evidenceConflict(snapshot, watchedIds, preparedEvidence);
-    if (currentEvidenceConflict !== null) return currentEvidenceConflict;
-    const refChanged = watchedRefConflict(repository, snapshot, watchedIds, operations);
-    if (refChanged !== null) return refChanged;
+    const currentHeadMovement = headMoved(snapshot, expectedHeads);
+    if (currentHeadMovement.moved.length > 0) return currentHeadMovement;
+    const currentEvidenceOccupation = evidenceOccupied(snapshot, watchedIds, preparedEvidence);
+    if (currentEvidenceOccupation !== null) return currentEvidenceOccupation;
+    const refMovement = watchedRefMoved(repository, snapshot, watchedIds, operations);
+    if (refMovement !== null) return refMovement;
 
-    const attempt = buildAttempt(repository, snapshot, appends, preparedEvidence);
+    const attempt = buildOffer(repository, snapshot, appends, preparedEvidence);
     try {
-      const committed = commitAttempt(repository, snapshot, operations, attempt.changes);
+      const accepted = publishOffer(repository, snapshot, operations, attempt.changes);
       return {
         ok: true,
-        kind: "committed",
-        carrierCommit: committed.carrierCommit,
-        carrierTree: committed.carrierTree,
+        kind: "accepted",
+        carrierCommit: accepted.carrierCommit,
+        carrierTree: accepted.carrierTree,
         heads: attempt.heads,
       };
     } catch (error) {
-      if (transactionOutcomeIsUnknown(error)) return indeterminate();
-      if (!transactionErrorIsRace(error)) throw error;
+      if (publicationIsUnknown(error)) return unknown();
+      if (!carrierRefRace(error)) throw error;
       const racedSnapshot = readCarrier(repository);
-      const racedConflict = conflict(racedSnapshot, expectedHeads);
-      if (racedConflict.conflicts.length > 0) return racedConflict;
-      const racedEvidenceConflict = evidenceConflict(racedSnapshot, watchedIds, preparedEvidence);
-      if (racedEvidenceConflict !== null) return racedEvidenceConflict;
-      const racedRefConflict = watchedRefConflict(repository, racedSnapshot, watchedIds, operations);
-      if (racedRefConflict !== null) return racedRefConflict;
+      const racedHeadMovement = headMoved(racedSnapshot, expectedHeads);
+      if (racedHeadMovement.moved.length > 0) return racedHeadMovement;
+      const racedEvidenceOccupation = evidenceOccupied(racedSnapshot, watchedIds, preparedEvidence);
+      if (racedEvidenceOccupation !== null) return racedEvidenceOccupation;
+      const racedRefMovement = watchedRefMoved(repository, racedSnapshot, watchedIds, operations);
+      if (racedRefMovement !== null) return racedRefMovement;
       if (racedSnapshot.commit === snapshot.commit) throw error;
-      if (retries >= rebuildBudget) return contention();
-      retries += 1;
       snapshot = racedSnapshot;
     }
   }
