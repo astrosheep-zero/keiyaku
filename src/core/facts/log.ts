@@ -23,6 +23,7 @@ import {
   blobOid,
   commitOid,
   contractHead,
+  contractJournalPath,
   contractId,
   entryUlid,
   evidencePath,
@@ -110,13 +111,6 @@ export interface EvidenceConflict {
 
 export type FactsResult = FactsSuccess | FactsConflict | RefConflict | EvidenceConflict;
 
-function carrierPath(id: ContractId): string {
-  if (id.length === 0 || id.includes("/") || id.includes("\0") || id === "." || id === "..") {
-    throw new TypeError(`invalid contract id: ${id}`);
-  }
-  return `contracts/${id}.jsonl`;
-}
-
 function validatePath(path: string): void {
   if (
     path.length === 0
@@ -132,7 +126,7 @@ function validatePath(path: string): void {
 function checkedContractId(value: ContractId): ContractId {
   if (typeof value !== "string") throw new TypeError("contract ID must be a string");
   const id = contractId(value);
-  carrierPath(id);
+  contractJournalPath(id);
   return id;
 }
 
@@ -147,7 +141,7 @@ function asArray<T>(value: readonly T[] | undefined): readonly T[] {
 }
 
 function currentHead(snapshot: CarrierSnapshot, id: ContractId): CurrentContractHead {
-  const path = carrierPath(id);
+  const path = contractJournalPath(id);
   const entry = snapshot.paths.get(path);
   if (entry !== undefined && entry.type !== "blob") throw new TypeError(`journal path is not a blob: ${path}`);
   return {
@@ -248,7 +242,7 @@ function normalizeExpectedHeads(
 }
 
 function readCanonicalJournal(repository: GitRepository, snapshot: CarrierSnapshot, id: ContractId): string {
-  const path = carrierPath(id);
+  const path = contractJournalPath(id);
   const entry = snapshot.paths.get(path);
   if (entry === undefined) return "";
   if (entry.type !== "blob") throw new TypeError(`journal path is not a blob: ${path}`);
@@ -287,7 +281,7 @@ function prepareEvidenceWrites(
   writes: readonly EvidenceWrite[],
 ): readonly (EvidenceWrite & { readonly path: string; readonly ref: EvidenceRef })[] {
   const seen = new Set<string>();
-  const journalPaths = new Set(appends.map((append) => carrierPath(append.contractId)));
+  const journalPaths = new Set(appends.map((append) => contractJournalPath(append.contractId)));
   const prepared = writes.map((write) => {
     const id = checkedContractId(write.contractId);
     const ref = normalizeEvidenceRef(write.ref);
@@ -392,7 +386,7 @@ function buildAttempt(
     }
     foldJournal(append.contractId, decodeJournal(journal));
     const blob = blobOid(writeBlob(repository, journal));
-    changes.set(carrierPath(append.contractId), { oid: blob, mode: "100644", type: "blob" });
+    changes.set(contractJournalPath(append.contractId), { oid: blob, mode: "100644", type: "blob" });
     heads[append.contractId] = contractHead(blob);
   }
 
@@ -463,13 +457,15 @@ export function commitContractTransaction(repository: GitRepository, plan: Trans
       };
     } catch (error) {
       if (!transactionErrorIsRace(error)) throw error;
-      snapshot = readCarrier(repository);
-      const racedConflict = conflict(snapshot, expectedHeads);
+      const racedSnapshot = readCarrier(repository);
+      const racedConflict = conflict(racedSnapshot, expectedHeads);
       if (racedConflict.conflicts.length > 0) return racedConflict;
-      const racedEvidenceConflict = evidenceConflict(snapshot, watchedIds, preparedEvidence);
+      const racedEvidenceConflict = evidenceConflict(racedSnapshot, watchedIds, preparedEvidence);
       if (racedEvidenceConflict !== null) return racedEvidenceConflict;
-      const racedRefConflict = watchedRefConflict(repository, snapshot, watchedIds, operations);
+      const racedRefConflict = watchedRefConflict(repository, racedSnapshot, watchedIds, operations);
       if (racedRefConflict !== null) return racedRefConflict;
+      if (racedSnapshot.commit === snapshot.commit) throw error;
+      snapshot = racedSnapshot;
     }
   }
 }

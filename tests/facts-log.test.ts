@@ -367,6 +367,34 @@ test("publishes the carrier and verb-owned ref in one successful ref transaction
   assert.equal(readRef(repo, "refs/heads/verb"), verbCommit);
 });
 
+test("a persistent ref lock failure terminates instead of retrying forever", async () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const parent = writeCommit(repo, writeTree(repo, []), null);
+  updateRefsAtomically(repo, [{ ref: "refs/heads/verb", newOid: parent, expectedOid: null }]);
+  const script = [
+    "import { commitContractTransaction } from './src/core/facts/log.ts';",
+    "import { repositoryAt } from './src/core/facts/repository.ts';",
+    "const id = 'lock-contract';",
+    "const entry = { v: 1, kind: 'bind', contract: id, entry: '01ARZ3NDEKTSV4RRFFQ69G5FAV', at: '2026-01-01T00:00:00Z', actor: 'child', data: { title: id, context: 'c', objective: 'o', design: 'd', region: [], criteria: [], verification: [], extensions: [] } };",
+    "try {",
+    "  commitContractTransaction(repositoryAt(process.argv[1]), { contractAppends: [{ contractId: id, expectedHead: null, entries: [entry] }], refOperations: [{ ref: 'refs/heads/verb/child', newOid: process.argv[2], expectedOid: null }] });",
+    "  process.stdout.write(JSON.stringify({ threw: false }));",
+    "} catch (error) {",
+    "  process.stdout.write(JSON.stringify({ threw: true, message: error instanceof Error ? error.message : String(error) }));",
+    "}",
+  ].join("\n");
+  const child = await execFileAsync(
+    process.execPath,
+    ["--import", "tsx", "-e", script, repository.path, parent],
+    { timeout: 2_000 },
+  );
+  const result = JSON.parse(child.stdout) as { threw: boolean; message?: string };
+  assert.equal(result.threw, true);
+  assert.match(result.message ?? "", /cannot lock ref/);
+  assert.equal(readRef(repo, CARRIER_REF), null);
+});
+
 test("unrelated carrier movement is rebased into the next transaction", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
@@ -395,13 +423,21 @@ test("concurrent appends to different contracts both survive carrier CAS", async
     "process.stdout.write(JSON.stringify(result));",
   ].join("\n");
   const args = (id: string, entry: string) => ["--import", "tsx", "-e", script, repository.path, id, entry];
-  const [left, right] = await Promise.all([
-    execFileAsync(process.execPath, args("contract-a", "01ARZ3NDEKTSV4RRFFQ69G5FAV")),
-    execFileAsync(process.execPath, args("contract-b", "01ARZ3NDEKTSV4RRFFQ69G5FAW")),
-  ]);
-  assert.equal(JSON.parse(left.stdout).ok, true);
-  assert.equal(JSON.parse(right.stdout).ok, true);
-  assert.match(repository.run(["show", `${CARRIER_REF}:contracts/contract-a.jsonl`]), /"kind":"bind"/);
-  assert.match(repository.run(["show", `${CARRIER_REF}:contracts/contract-b.jsonl`]), /"kind":"bind"/);
-  assert.equal(repository.run(["rev-list", "--count", CARRIER_REF]), "2\n");
+  const rounds = [
+    ["contract-a", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "contract-b", "01ARZ3NDEKTSV4RRFFQ69G5FAW"],
+    ["contract-c", "01ARZ3NDEKTSV4RRFFQ69G5FAX", "contract-d", "01ARZ3NDEKTSV4RRFFQ69G5FAY"],
+    ["contract-e", "01ARZ3NDEKTSV4RRFFQ69G5FAZ", "contract-f", "01ARZ3NDEKTSV4RRFFQ69G5FB0"],
+  ] as const;
+  for (const [leftId, leftEntry, rightId, rightEntry] of rounds) {
+    const [left, right] = await Promise.all([
+      execFileAsync(process.execPath, args(leftId, leftEntry)),
+      execFileAsync(process.execPath, args(rightId, rightEntry)),
+    ]);
+    assert.equal(JSON.parse(left.stdout).ok, true);
+    assert.equal(JSON.parse(right.stdout).ok, true);
+  }
+  for (const id of ["contract-a", "contract-b", "contract-c", "contract-d", "contract-e", "contract-f"]) {
+    assert.match(repository.run(["show", `${CARRIER_REF}:contracts/${id}.jsonl`]), /"kind":"bind"/);
+  }
+  assert.equal(repository.run(["rev-list", "--count", CARRIER_REF]), "6\n");
 });

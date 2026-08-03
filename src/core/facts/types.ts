@@ -83,6 +83,13 @@ export function evidencePath(
   return `contracts/${contract}/evidence/${ref.entry}/${ref.seq}-${evidenceKind(ref.kind)}`;
 }
 
+export function contractJournalPath(contract: ContractId): string {
+  if (contract.length === 0 || contract.includes("/") || contract.includes("\0") || contract === "." || contract === "..") {
+    throw new TypeError(`invalid contract id: ${contract}`);
+  }
+  return `contracts/${contract}.jsonl`;
+}
+
 export type VerificationExecutor = "bash" | "zsh" | "pwsh";
 export type VerificationDeclaration = Readonly<{
   executor: VerificationExecutor;
