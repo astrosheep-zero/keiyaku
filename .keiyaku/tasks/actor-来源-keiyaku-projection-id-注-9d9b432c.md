@@ -1,14 +1,15 @@
 ---
 id: actor-来源-keiyaku-projection-id-注-9d9b432c
 title: actor 来源：KEIYAKU_PROJECTION_ID 注入与 --actor fallback
-state: open
+state: in_progress
 pri: 1
 needs: []
 parent: null
 from: []
 createdAt: 2026-08-04T07:23:56.953Z
-updatedAt: 2026-08-04T07:23:56.953Z
+updatedAt: 2026-08-04T09:19:02.285Z
 creator: thekoc
+startedAt: 2026-08-04T09:19:02.285Z
 ---
 为 v4 建立唯一的 actor 输入边界，不依赖 Akuma dispatch receipt 或 task 推导：
 
