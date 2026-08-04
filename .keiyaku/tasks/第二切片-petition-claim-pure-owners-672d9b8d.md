@@ -12,8 +12,12 @@ notes:
     timestamp: 2026-08-04T04:31:49.516Z
     text: |
       验收方式修订（user 指示）：faye 不亲读 diff。root 在 square 报确切 diff 后，由 faye 派 akuma 对照 Delivery Laws 5–8 与 Nail 2 复核，复核结论经 square 裁决放行。上一条 d09b3da2 同规则。
+  - actor: thekoc
+    timestamp: 2026-08-04T08:36:31.098Z
+    text: |
+      Milestone implementation complete pending Square/Faye acceptance: petition pure owner split from shell-bound candidate preparation; claim owns sole target CAS and terminal petition-stale; candidate metadata follows Act 198 (actor exact name, fixed keiyaku@keiyaku.invalid email, author == committer, fixed parents/message); claim no longer imports admission; stale tests distinguish carrier commit from journal head. Verification: focused 12/12, full 100/100, source typecheck, build, and git diff --check pass. Square act #43 requests the task-prescribed Akuma review. CLI task now also needs actor-来源-keiyaku-projection-id-注-9d9b432c so architecture-correct MVP precedes dogfood.
 createdAt: 2026-08-04T04:26:32.728Z
-updatedAt: 2026-08-04T06:41:32.583Z
+updatedAt: 2026-08-04T08:36:31.098Z
 creator: thekoc
 startedAt: 2026-08-04T06:41:32.583Z
 ---
