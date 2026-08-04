@@ -6,8 +6,14 @@ pri: 1
 needs: []
 parent: null
 from: []
+notes:
+  - actor: thekoc
+    timestamp: 2026-08-04T06:59:47.699Z
+    text: |
+      验收通过（akuma worker-default/e0e2f762，commit 05dec88）：diff 仅五路径；transport 三态（repository.ts:11-14）+ stderr verbatim Buffer（:39-64）+ message 仅诊断（:80-86）；admission 无任何 stderr/文案分支（rg src/ 零命中，伪装文案仅测试 fixture :527）；观察归因 carrier-first（admission.ts:429-438/:486-496）；仅 update-ref --stdin --no-deref，无 batch-updates；四组新测试齐（:214/:229/:463/:523）；Act 193 同 commit 成文；38/38 tests + typecheck 绿。
+      非阻塞卫生项：worktree 出现 untracked .pnpm-store/v11/index.db，建议入 .gitignore。
 createdAt: 2026-08-04T06:03:38.409Z
-updatedAt: 2026-08-04T06:10:07.460Z
+updatedAt: 2026-08-04T06:59:47.699Z
 creator: thekoc
 contractId: transport-错误分类观察化-删-stderr-文本协议.01KZ5P9HZ40EWBBG0EZSSBX0AA
 ---
