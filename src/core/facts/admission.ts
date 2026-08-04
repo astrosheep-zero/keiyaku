@@ -52,14 +52,14 @@ export interface EvidenceWrite {
 
 export interface RefOperation {
   readonly ref: string;
-  readonly newOid: GitOid | null;
-  readonly expectedOid?: GitOid | null;
+  readonly newOid: GitOid;
+  readonly expectedOid: GitOid;
 }
 
 export interface Offer {
   readonly facts: readonly ContractJournalAppend[];
   readonly evidence?: readonly EvidenceWrite[];
-  readonly refs?: readonly RefOperation[];
+  readonly refs?: readonly [RefOperation];
 }
 
 export interface ObservedContractHead {
@@ -92,7 +92,7 @@ export interface RefMoved {
   readonly ok: false;
   readonly kind: "ref-moved";
   readonly ref: string;
-  readonly expectedOid: GitOid | null;
+  readonly expectedOid: GitOid;
   readonly currentOid: GitOid | null;
   readonly carrierCommit: CommitOid | null;
   readonly heads: readonly ObservedContractHead[];
@@ -190,12 +190,11 @@ function refMoved(
   operation: RefOperation,
   currentOid: GitOid | null,
 ): RefMoved {
-  const expectedOid = operation.expectedOid === undefined ? null : operation.expectedOid;
   return {
     ok: false,
     kind: "ref-moved",
     ref: operation.ref,
-    expectedOid,
+    expectedOid: operation.expectedOid,
     currentOid,
     carrierCommit: snapshot.commit === null ? null : commitOid(snapshot.commit),
     heads: observedHeads(snapshot, ids),
@@ -221,17 +220,19 @@ function normalizeAppends(
   });
 }
 
-function normalizeRefOperations(
-  repository: GitRepository,
-  operations: readonly RefOperation[],
-): readonly RefOperation[] {
-  const seen = new Set<string>();
+function normalizeRefOperations(operations: readonly RefOperation[]): readonly RefOperation[] {
+  if (operations.length !== 1) throw new TypeError("an offer accepts exactly one claim ref operation");
   return operations.map((operation) => {
+    if (!operation || typeof operation !== "object") throw new TypeError("invalid ref operation");
+    if (typeof operation.ref !== "string") throw new TypeError("ref operation ref must be a string");
     if (operation.ref === CARRIER_REF) throw new TypeError(`the carrier ref is owned by admission: ${CARRIER_REF}`);
-    if (seen.has(operation.ref)) throw new TypeError(`duplicate ref operation: ${operation.ref}`);
-    seen.add(operation.ref);
-    const expectedOid = operation.expectedOid === undefined ? readRef(repository, operation.ref) : operation.expectedOid;
-    return { ref: operation.ref, newOid: operation.newOid, expectedOid };
+    if (operation.expectedOid === null || operation.expectedOid === undefined) {
+      throw new TypeError("claim ref operation requires a non-null expected OID");
+    }
+    if (operation.newOid === null || operation.newOid === undefined) {
+      throw new TypeError("claim ref operation requires a non-null new OID");
+    }
+    return { ref: operation.ref, newOid: operation.newOid, expectedOid: operation.expectedOid };
   });
 }
 
@@ -435,7 +436,7 @@ function publishOffer(
     ...operations.map((operation) => ({
       ref: operation.ref,
       newOid: operation.newOid,
-      expectedOid: operation.expectedOid ?? null,
+      expectedOid: operation.expectedOid,
     })),
   ]);
   return { carrierCommit, carrierTree };
@@ -450,7 +451,7 @@ export function admit(
 
   const appends = normalizeAppends(offer.facts);
   const evidence = asArray(offer.evidence);
-  const operations = normalizeRefOperations(repository, asArray(offer.refs));
+  const operations = offer.refs === undefined ? [] : normalizeRefOperations(asArray(offer.refs));
   const watchedIds = appends.map((append) => append.contractId);
   const initial = readCarrier(repository);
   const expectedHeads = normalizeExpectedHeads(initial, appends);

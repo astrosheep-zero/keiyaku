@@ -307,7 +307,7 @@ test("stale Offer ref expectations return ref-moved without publication or retry
         kind: "offer",
         offer: {
           ...offer(id, input.observation.contracts.get(id)?.state?.head ?? null, input.attempt.entryUlids[0]!, true),
-          refs: [{ ref: "refs/heads/verb", newOid: null, expectedOid: stale }],
+          refs: [{ ref: "refs/heads/verb", newOid: "b".repeat(40), expectedOid: stale }],
         },
         handoff: null,
       };

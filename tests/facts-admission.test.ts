@@ -9,8 +9,6 @@ import {
   admit,
   type Offer,
 } from "../src/core/facts/admission.js";
-import { decodeJournal } from "../src/core/facts/codec.js";
-import { foldJournal } from "../src/core/facts/fold.js";
 import {
   CARRIER_FORMAT_PATH,
   CARRIER_REF,
@@ -35,7 +33,6 @@ import {
   type ContractHead,
   type ContractId,
   type EvidenceRef,
-  type JournalEntry,
   type ReviewEntry,
 } from "../src/core/facts/types.js";
 import { cloneGitRepository, makeGitRepository } from "./support/git.js";
@@ -152,66 +149,65 @@ test("initializes the current format and publishes journal plus evidence in one 
   assert.equal(clone.run(["show", `${CARRIER_REF}:meta/format.json`]), '{"version":1}\n');
 });
 
-test("terminal journal and evidence survive clone and GC after the candidate ref retires", () => {
-  const source = makeGitRepository();
-  const repository = repositoryAt(source.path);
-  const id = contractId("kei/terminal-contract");
-  const tree = writeTree(repository, []);
-  const predecessor = writeCommit(repository, tree, null);
-  const candidate = writeCommit(repository, tree, predecessor);
-  updateRefsAtomically(repository, [{ ref: "refs/heads/candidate", newOid: candidate, expectedOid: null }]);
+test("ordinary fact offers remain valid when refs are omitted", () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const id = contractId("kei/no-ref-offer");
+  const result = admit(repo, journalOffer(id, null, [bindEntry(id)]));
+  assert.equal(result.kind, "accepted");
+});
 
-  const petitionId = entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY");
-  const reviewId = entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX");
-  const bytes = "terminal review evidence";
-  const ref: EvidenceRef = {
-    entry: reviewId,
-    seq: 0,
-    kind: "review",
-    oid: blobOid(writeBlob(repository, bytes)),
-  };
-  const entries: JournalEntry[] = [
-    bindEntry(id),
-    { v: 1, kind: "open", contract: id, entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB0"), at: AT, actor: "test", data: { target: "refs/heads/main", base: commitOid(predecessor) } },
-    { v: 1, kind: "seal", contract: id, entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"), at: AT, actor: "test", data: {} },
-    {
-      v: 1,
-      kind: "petition",
-      contract: id,
-      entry: petitionId,
-      at: AT,
-      actor: "test",
-      data: {
-        expectedPredecessor: commitOid(predecessor),
-        deliveryHead: commitOid(predecessor),
-        candidate: commitOid(candidate),
-      },
-    },
-    reviewEntry(id, ref, reviewId, commitOid(predecessor)),
-    {
-      v: 1,
-      kind: "claim",
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAZ"),
-      at: AT,
-      actor: "test",
-      data: { petition: petitionId },
-    },
+test("admission rejects empty, multiple, and nullable claim ref operations", () => {
+  const repository = makeGitRepository();
+  const operation = { ref: "refs/heads/claim", expectedOid: "a".repeat(40), newOid: "b".repeat(40) };
+  const malformed: readonly unknown[] = [
+    [],
+    [operation, operation],
+    [{ ...operation, expectedOid: null }],
+    [{ ...operation, expectedOid: undefined }],
+    [{ ...operation, newOid: null }],
+    [{ ...operation, newOid: undefined }],
   ];
-  const result = admit(repository, {
-    facts: [{ contractId: id, expectedHead: null, entries }],
-    evidence: [{ contractId: id, ref, bytes }],
-    refs: [{ ref: "refs/heads/candidate", newOid: null, expectedOid: candidate }],
-  });
-  assert.equal(result.ok, true);
-  assert.equal(readRef(repository, "refs/heads/candidate"), null);
+  for (const refs of malformed) {
+    assert.throws(
+      () => admit(repositoryAt(repository.path), { facts: [], refs } as unknown as Offer),
+      TypeError,
+    );
+  }
+});
 
-  const clone = cloneGitRepository(source);
-  clone.run(["gc", "--prune=now"]);
-  const journal = clone.run(["show", `${CARRIER_REF}:${contractJournalPath(id)}`]);
-  assert.equal(foldJournal(id, decodeJournal(journal)).phase, "claimed");
-  assert.equal(clone.run(["show", `${CARRIER_REF}:${evidencePath(id, ref)}`]), bytes);
-  assert.throws(() => clone.run(["cat-file", "-e", candidate]));
+test("atomic refs allow the carrier and one non-null claim move only", () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const carrier = writeCommit(repo, writeTree(repo, []), null, "carrier");
+  const current = writeCommit(repo, writeTree(repo, []), null, "current");
+  const next = writeCommit(repo, writeTree(repo, []), null, "next");
+  const target = "refs/heads/claim";
+  repository.run(["update-ref", target, current]);
+
+  updateRefsAtomically(repo, [
+    { ref: CARRIER_REF, newOid: carrier, expectedOid: null },
+    { ref: target, newOid: next, expectedOid: current },
+  ]);
+  assert.equal(readRef(repo, CARRIER_REF), carrier);
+  assert.equal(readRef(repo, target), next);
+
+  const updates = [
+    { ref: CARRIER_REF, newOid: carrier, expectedOid: null },
+    { ref: target, newOid: next, expectedOid: current },
+    { ref: "refs/heads/extra", newOid: next, expectedOid: current },
+  ];
+  assert.throws(
+    () => updateRefsAtomically(repo, updates as unknown as Parameters<typeof updateRefsAtomically>[1]),
+    TypeError,
+  );
+  assert.throws(
+    () => updateRefsAtomically(repo, [
+      { ref: CARRIER_REF, newOid: carrier, expectedOid: carrier },
+      { ref: target, newOid: null, expectedOid: next },
+    ] as unknown as Parameters<typeof updateRefsAtomically>[1]),
+    TypeError,
+  );
 });
 
 test("appends typed entries to the canonical journal instead of replacing it", () => {
@@ -353,66 +349,90 @@ test("two concurrent appends to one contract have exactly one winner", async () 
   assert.equal(results.find((item) => !item.ok)?.kind, "head-moved");
 });
 
-test("reports a watched verb ref movement", () => {
+test("reports a watched claim ref movement", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const ref = writeCommit(repo, writeTree(repo, []), null);
-  updateRefsAtomically(repo, [{ ref: "refs/heads/verb", newOid: ref, expectedOid: null }]);
+  const current = writeCommit(repo, writeTree(repo, []), null, "current");
+  const expected = writeCommit(repo, writeTree(repo, []), null, "expected");
+  const next = writeCommit(repo, writeTree(repo, []), null, "next");
+  repository.run(["update-ref", "refs/heads/verb", current]);
   const id = contractId("kei/contract-a");
   const result = admit(repo, {
     facts: [{ contractId: id, expectedHead: null, entries: [bindEntry(id)] }],
-    refs: [{ ref: "refs/heads/verb", newOid: null, expectedOid: null }],
+    refs: [{ ref: "refs/heads/verb", newOid: next, expectedOid: expected }],
   });
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.equal(result.kind, "ref-moved");
   assert.equal(result.ref, "refs/heads/verb");
-  assert.equal(result.expectedOid, null);
-  assert.equal(result.currentOid, ref);
+  assert.equal(result.expectedOid, expected);
+  assert.equal(result.currentOid, current);
   assert.equal(readRef(repo, CARRIER_REF), null);
 });
 
-test("publishes the carrier and verb-owned ref in one successful ref transaction", () => {
+test("classifies a claim target CAS race during atomic publication", async () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const verbCommit = writeCommit(repo, writeTree(repo, []), null);
+  const target = "refs/heads/claim-race";
+  const expected = writeCommit(repo, writeTree(repo, []), null, "expected");
+  const moved = writeCommit(repo, writeTree(repo, []), null, "moved");
+  const next = writeCommit(repo, writeTree(repo, []), null, "next");
+  repository.run(["update-ref", target, expected]);
+
+  const shim = gitShim([
+    'if [ "$1" = "update-ref" ]; then',
+    '  "$KEIYAKU_REAL_GIT" update-ref "$KEIYAKU_TARGET" "$KEIYAKU_MOVED" "$KEIYAKU_EXPECTED" || exit $?',
+    'fi',
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n"));
+  const env = {
+    ...shim.env,
+    KEIYAKU_TARGET: target,
+    KEIYAKU_EXPECTED: expected,
+    KEIYAKU_MOVED: moved,
+  };
+  const script = [
+    "import { admit } from './src/core/facts/admission.ts';",
+    "import { repositoryAt } from './src/core/facts/repository.ts';",
+    "const id = 'kei/claim-race';",
+    "const entry = { v: 1, kind: 'bind', contract: id, entry: '01ARZ3NDEKTSV4RRFFQ69G5FAV', at: '2026-01-01T00:00:00Z', actor: 'child', data: { title: id, context: 'c', objective: 'o', design: 'd', region: [], criteria: [], verification: [], extensions: [] } };",
+    "const result = admit(repositoryAt(process.argv[1]), { facts: [{ contractId: id, expectedHead: null, entries: [entry] }], refs: [{ ref: process.argv[2], expectedOid: process.argv[3], newOid: process.argv[4] }] });",
+    "process.stdout.write(JSON.stringify(result));",
+  ].join("\n");
+  const child = await execFileAsync(
+    process.execPath,
+    ["--import", "tsx", "-e", script, repository.path, target, expected, next],
+    { env },
+  );
+  const result = JSON.parse(child.stdout) as {
+    readonly ok: boolean;
+    readonly kind: string;
+    readonly expectedOid?: string;
+    readonly currentOid?: string | null;
+  };
+  assert.equal(result.ok, false);
+  assert.equal(result.kind, "ref-moved");
+  assert.equal(result.expectedOid, expected);
+  assert.equal(result.currentOid, moved);
+  assert.equal(readRef(repo, CARRIER_REF), null);
+  assert.equal(readRef(repo, target), moved);
+});
+
+test("publishes the carrier and claim ref in one successful ref transaction", () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const verbBase = writeCommit(repo, writeTree(repo, []), null, "verb base");
+  const verbCommit = writeCommit(repo, writeTree(repo, []), null, "verb commit");
+  repository.run(["update-ref", "refs/heads/verb", verbBase]);
   const id = contractId("kei/contract-a");
   const result = admit(repo, {
     facts: [{ contractId: id, expectedHead: null, entries: [bindEntry(id)] }],
-    refs: [{ ref: "refs/heads/verb", newOid: verbCommit, expectedOid: null }],
+    refs: [{ ref: "refs/heads/verb", newOid: verbCommit, expectedOid: verbBase }],
   });
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(readRef(repo, CARRIER_REF), result.carrierCommit);
   assert.equal(readRef(repo, "refs/heads/verb"), verbCommit);
-});
-
-test("a persistent ref lock failure terminates instead of retrying forever", async () => {
-  const repository = makeGitRepository();
-  const repo = repositoryAt(repository.path);
-  const parent = writeCommit(repo, writeTree(repo, []), null);
-  updateRefsAtomically(repo, [{ ref: "refs/heads/verb", newOid: parent, expectedOid: null }]);
-  const script = [
-    "import { admit } from './src/core/facts/admission.ts';",
-    "import { repositoryAt } from './src/core/facts/repository.ts';",
-    "const id = 'kei/lock-contract';",
-    "const entry = { v: 1, kind: 'bind', contract: id, entry: '01ARZ3NDEKTSV4RRFFQ69G5FAV', at: '2026-01-01T00:00:00Z', actor: 'child', data: { title: id, context: 'c', objective: 'o', design: 'd', region: [], criteria: [], verification: [], extensions: [] } };",
-    "try {",
-    "  admit(repositoryAt(process.argv[1]), { facts: [{ contractId: id, expectedHead: null, entries: [entry] }], refs: [{ ref: 'refs/heads/verb/child', newOid: process.argv[2], expectedOid: null }] });",
-    "  process.stdout.write(JSON.stringify({ threw: false }));",
-    "} catch (error) {",
-    "  process.stdout.write(JSON.stringify({ threw: true, message: error instanceof Error ? error.message : String(error) }));",
-    "}",
-  ].join("\n");
-  const child = await execFileAsync(
-    process.execPath,
-    ["--import", "tsx", "-e", script, repository.path, parent],
-    { timeout: 2_000 },
-  );
-  const result = JSON.parse(child.stdout) as { threw: boolean; message?: string };
-  assert.equal(result.threw, true);
-  assert.match(result.message ?? "", /cannot lock ref/);
-  assert.equal(readRef(repo, CARRIER_REF), null);
 });
 
 test("a killed update-ref child returns unknown without probing the journal", async () => {

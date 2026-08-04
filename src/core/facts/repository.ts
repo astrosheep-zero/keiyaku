@@ -117,18 +117,6 @@ function runGitWithEnvironment(
   }
 }
 
-function objectFormat(repository: GitRepository): "sha1" | "sha256" {
-  const format = runGit(repository, ["rev-parse", "--show-object-format"]).toString("utf8").trim();
-  if (format !== "sha1" && format !== "sha256") {
-    throw new GitPlumbingError(["rev-parse", "--show-object-format"], format, null, `unsupported Git object format: ${format}`);
-  }
-  return format;
-}
-
-export function zeroOid(repository: GitRepository): GitOid {
-  return "0".repeat(objectFormat(repository) === "sha256" ? 64 : 40);
-}
-
 function validOid(oid: string): boolean {
   return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid);
 }
@@ -334,21 +322,30 @@ export function writeCommit(
 
 export function updateRefsAtomically(
   repository: GitRepository,
-  updates: readonly { readonly ref: string; readonly newOid: GitOid | null; readonly expectedOid: GitOid | null }[],
+  updates: readonly (
+    | { readonly ref: typeof CARRIER_REF; readonly newOid: GitOid; readonly expectedOid: GitOid | null }
+    | { readonly ref: string; readonly newOid: GitOid; readonly expectedOid: GitOid }
+  )[],
 ): void {
-  if (updates.length === 0) throw new TypeError("an atomic ref transaction needs at least one update");
-  const seen = new Set<string>();
-  const zero = zeroOid(repository);
+  if (updates.length === 0) throw new TypeError("an atomic ref transaction needs a carrier update");
+  if (updates.length > 2) throw new TypeError("an atomic ref transaction accepts at most one claim ref update");
+  const carrier = updates[0];
+  if (carrier === undefined || carrier.ref !== CARRIER_REF) {
+    throw new TypeError(`the first atomic update must be the carrier ref: ${CARRIER_REF}`);
+  }
   const lines = ["start"];
-  for (const update of updates) {
+  for (const [index, update] of updates.entries()) {
     assertRef(update.ref);
-    if (seen.has(update.ref)) throw new TypeError(`duplicate ref update: ${update.ref}`);
-    seen.add(update.ref);
-    if (update.newOid !== null) assertOid(update.newOid, `new oid for ${update.ref}`);
+    if (index > 0 && update.ref === CARRIER_REF) {
+      throw new TypeError(`duplicate ref update: ${update.ref}`);
+    }
+    if (index > 0 && (update.newOid === null || update.expectedOid === null)) {
+      throw new TypeError("claim ref updates require non-null OIDs");
+    }
+    assertOid(update.newOid, `new oid for ${update.ref}`);
     if (update.expectedOid !== null) assertOid(update.expectedOid, `expected oid for ${update.ref}`);
-    const newOid = update.newOid ?? zero;
-    const expectedOid = update.expectedOid ?? zero;
-    lines.push(`update ${update.ref} ${newOid} ${expectedOid}`);
+    const expectedOid = update.expectedOid ?? "0".repeat(update.newOid.length);
+    lines.push(`update ${update.ref} ${update.newOid} ${expectedOid}`);
   }
   lines.push("prepare", "commit", "");
   runGit(repository, ["update-ref", "--stdin", "--no-deref"], lines.join("\n"));
