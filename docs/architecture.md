@@ -84,14 +84,18 @@ no owner payload, and `forfeit` stores no final ref coordinate.
 
 An offer contains journal fact appends, evidence writes, expected contract
 heads, and a `RefOperation` only for `claim`; that operation has the petition
-fact's `expectedPredecessor` and `candidate` as its old and new values. The
-admission kernel owns raw Git object construction and one atomic `update-ref`
-operation. It performs one semantic attempt. It mechanically rebuilds only
-after a clean race confirms actual unrelated carrier movement. Rebuilds are
-progress-coupled and unbounded: every rebuild follows one carrier ref advance.
-Any watched contract, evidence path, or `claim` `RefOperation` change returns
-a typed outcome; a clean race without a carrier move rethrows its original
-error.
+fact's `expectedPredecessor` and `candidate` as its old and new values.
+Admission owns raw Git object construction; the repository transport owns its
+one atomic `update-ref --stdin --no-deref` operation; `--batch-updates` is
+forbidden. It reports exactly `published`, `non-published`, or `unknown`,
+carrying any Git diagnostic as opaque, verbatim bytes. Admission never parses
+Git diagnostics.
+On a completed non-publication it reads one fresh carrier snapshot and, for
+`claim`, the watched target ref. Carrier movement has priority and is the only
+reason to rebuild. With an unchanged carrier, target movement returns
+`ref-moved`; when neither moved, admission rethrows the original transport
+error. Rebuilds are progress-coupled and unbounded: every rebuild follows one
+carrier ref advance.
 
 Admissions are closed: accepted, head-moved, evidence-occupied, ref-moved, or
 unknown. Validation, codec, corruption, and

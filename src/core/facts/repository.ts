@@ -8,6 +8,11 @@ export const CARRIER_FORMAT_BYTES = `{"version":${CURRENT_FORMAT_VERSION}}\n`;
 
 export type GitOid = string;
 
+export type RefPublication =
+  | Readonly<{ readonly kind: "published" }>
+  | Readonly<{ readonly kind: "non-published"; readonly error: unknown }>
+  | Readonly<{ readonly kind: "unknown" }>;
+
 export interface GitRepository {
   readonly cwd: string;
 }
@@ -33,7 +38,7 @@ export interface TreeChange {
 
 export class GitPlumbingError extends Error {
   readonly command: readonly string[];
-  readonly stderr: string;
+  readonly stderr: Buffer;
   readonly status: number | null;
   readonly pid: number | null;
   readonly signal: string | null;
@@ -41,7 +46,7 @@ export class GitPlumbingError extends Error {
 
   constructor(
     command: readonly string[],
-    stderr: string,
+    stderr: string | Uint8Array,
     status: number | null,
     message: string,
     pid: number | null = null,
@@ -51,7 +56,7 @@ export class GitPlumbingError extends Error {
     super(message);
     this.name = "GitPlumbingError";
     this.command = command;
-    this.stderr = stderr;
+    this.stderr = Buffer.from(stderr);
     this.status = status;
     this.pid = pid;
     this.signal = signal;
@@ -72,8 +77,8 @@ function commandError(command: readonly string[], error: unknown): GitPlumbingEr
     signal?: string | null;
     code?: string | number | null;
   };
-  const stderr = candidate.stderr === undefined ? "" : Buffer.from(candidate.stderr).toString("utf8").trim();
-  const detail = stderr.length === 0 ? candidate.message ?? "git command failed" : stderr;
+  const stderr = candidate.stderr === undefined ? Buffer.alloc(0) : Buffer.from(candidate.stderr);
+  const detail = stderr.length === 0 ? candidate.message ?? "git command failed" : stderr.toString("utf8");
   return new GitPlumbingError(
     command,
     stderr,
@@ -326,7 +331,7 @@ export function updateRefsAtomically(
     | { readonly ref: typeof CARRIER_REF; readonly newOid: GitOid; readonly expectedOid: GitOid | null }
     | { readonly ref: string; readonly newOid: GitOid; readonly expectedOid: GitOid }
   )[],
-): void {
+): RefPublication {
   if (updates.length === 0) throw new TypeError("an atomic ref transaction needs a carrier update");
   if (updates.length > 2) throw new TypeError("an atomic ref transaction accepts at most one claim ref update");
   const carrier = updates[0];
@@ -348,5 +353,17 @@ export function updateRefsAtomically(
     lines.push(`update ${update.ref} ${update.newOid} ${expectedOid}`);
   }
   lines.push("prepare", "commit", "");
-  runGit(repository, ["update-ref", "--stdin", "--no-deref"], lines.join("\n"));
+  try {
+    runGit(repository, ["update-ref", "--stdin", "--no-deref"], lines.join("\n"));
+    return { kind: "published" };
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError)) throw error;
+    if (error.status !== null && error.status !== 0) {
+      return { kind: "non-published", error };
+    }
+    if (error.pid !== null && error.pid > 0 && error.status === null) {
+      return { kind: "unknown" };
+    }
+    throw error;
+  }
 }

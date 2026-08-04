@@ -185,10 +185,11 @@ test("atomic refs allow the carrier and one non-null claim move only", () => {
   const target = "refs/heads/claim";
   repository.run(["update-ref", target, current]);
 
-  updateRefsAtomically(repo, [
+  const published = updateRefsAtomically(repo, [
     { ref: CARRIER_REF, newOid: carrier, expectedOid: null },
     { ref: target, newOid: next, expectedOid: current },
   ]);
+  assert.deepEqual(published, { kind: "published" });
   assert.equal(readRef(repo, CARRIER_REF), carrier);
   assert.equal(readRef(repo, target), next);
 
@@ -208,6 +209,47 @@ test("atomic refs allow the carrier and one non-null claim move only", () => {
     ] as unknown as Parameters<typeof updateRefsAtomically>[1]),
     TypeError,
   );
+});
+
+test("atomic ref transport reports a completed failure as non-published", () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const first = writeCommit(repo, writeTree(repo, []), null, "first");
+  const replacement = writeCommit(repo, writeTree(repo, []), null, "replacement");
+  const stale = writeCommit(repo, writeTree(repo, []), null, "stale");
+  repository.run(["update-ref", CARRIER_REF, first]);
+
+  const result = updateRefsAtomically(repo, [{ ref: CARRIER_REF, newOid: replacement, expectedOid: stale }]);
+  assert.equal(result.kind, "non-published");
+  if (result.kind !== "non-published") return;
+  assert.ok(result.error instanceof Error);
+  assert.equal(readRef(repo, CARRIER_REF), first);
+});
+
+test("atomic ref transport preserves stderr bytes verbatim", async () => {
+  const repository = makeGitRepository();
+  const shim = gitShim([
+    'if [ "$1" = "update-ref" ]; then',
+    "  printf '\\377  transport diagnostic  \\n' >&2",
+    "  exit 1",
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n"));
+  const script = [
+    "import { CARRIER_REF, GitPlumbingError, repositoryAt, updateRefsAtomically } from './src/core/facts/repository.ts';",
+    "const result = updateRefsAtomically(repositoryAt(process.argv[1]), [{ ref: CARRIER_REF, newOid: 'a'.repeat(40), expectedOid: null }]);",
+    "if (result.kind !== 'non-published' || !(result.error instanceof GitPlumbingError)) throw new Error('expected non-published transport error');",
+    "process.stdout.write(JSON.stringify({ stderr: result.error.stderr.toString('hex'), message: result.error.message }));",
+  ].join("\n");
+  const child = await execFileAsync(
+    process.execPath,
+    ["--import", "tsx", "-e", script, repository.path],
+    { env: shim.env },
+  );
+  assert.deepEqual(JSON.parse(child.stdout), {
+    stderr: "ff20207472616e73706f727420646961676e6f7374696320200a",
+    message: "update-ref --stdin --no-deref: \ufffd  transport diagnostic  \n",
+  });
 });
 
 test("appends typed entries to the canonical journal instead of replacing it", () => {
@@ -416,6 +458,91 @@ test("classifies a claim target CAS race during atomic publication", async () =>
   assert.equal(result.currentOid, moved);
   assert.equal(readRef(repo, CARRIER_REF), null);
   assert.equal(readRef(repo, target), moved);
+});
+
+test("carrier movement takes precedence over a simultaneous claim target race", async () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const baseId = contractId("kei/carrier-race-base");
+  const base = admit(repo, journalOffer(baseId, null, [bindEntry(baseId)]));
+  assert.equal(base.ok, true);
+  if (!base.ok) return;
+
+  const target = "refs/heads/carrier-race-target";
+  const expected = writeCommit(repo, writeTree(repo, []), null, "expected");
+  const moved = writeCommit(repo, writeTree(repo, []), null, "moved");
+  const next = writeCommit(repo, writeTree(repo, []), null, "next");
+  repository.run(["update-ref", target, expected]);
+  const unrelatedCarrier = writeCommit(repo, base.carrierTree, base.carrierCommit, "unrelated carrier movement");
+  const attempts = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-carrier-target-race-")), "attempts");
+  writeFileSync(attempts, "");
+  const shim = gitShim([
+    'if [ "$1" = "update-ref" ]; then',
+    '  printf "1\\n" >> "$KEIYAKU_UPDATE_REF_ATTEMPTS"',
+    '  if [ ! -f "$KEIYAKU_RACE_APPLIED" ]; then',
+    '    : > "$KEIYAKU_RACE_APPLIED"',
+    '    "$KEIYAKU_REAL_GIT" update-ref "$KEIYAKU_TARGET" "$KEIYAKU_MOVED" "$KEIYAKU_EXPECTED" || exit $?',
+    '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$KEIYAKU_CARRIER_MOVED" "$KEIYAKU_CARRIER_EXPECTED" || exit $?',
+    "  fi",
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n"));
+  const marker = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-carrier-target-marker-")), "applied");
+  const env = {
+    ...shim.env,
+    KEIYAKU_UPDATE_REF_ATTEMPTS: attempts,
+    KEIYAKU_RACE_APPLIED: marker,
+    KEIYAKU_TARGET: target,
+    KEIYAKU_EXPECTED: expected,
+    KEIYAKU_MOVED: moved,
+    KEIYAKU_CARRIER_MOVED: unrelatedCarrier,
+    KEIYAKU_CARRIER_EXPECTED: base.carrierCommit,
+  };
+  const script = [
+    "import { admit } from './src/core/facts/admission.ts';",
+    "import { repositoryAt } from './src/core/facts/repository.ts';",
+    "const id = 'kei/carrier-target-race';",
+    "const entry = { v: 1, kind: 'bind', contract: id, entry: '01ARZ3NDEKTSV4RRFFQ69G5FAV', at: '2026-01-01T00:00:00Z', actor: 'child', data: { title: id, context: 'c', objective: 'o', design: 'd', region: [], criteria: [], verification: [], extensions: [] } };",
+    "const result = admit(repositoryAt(process.argv[1]), { facts: [{ contractId: id, expectedHead: null, entries: [entry] }], refs: [{ ref: process.argv[2], expectedOid: process.argv[3], newOid: process.argv[4] }] });",
+    "process.stdout.write(JSON.stringify(result));",
+  ].join("\n");
+  const child = await execFileAsync(
+    process.execPath,
+    ["--import", "tsx", "-e", script, repository.path, target, expected, next],
+    { env },
+  );
+  const result = JSON.parse(child.stdout) as { readonly ok: boolean; readonly kind: string; readonly currentOid?: string | null };
+  assert.equal(result.ok, false);
+  assert.equal(result.kind, "ref-moved");
+  assert.equal(result.currentOid, moved);
+  assert.equal(readFileSync(attempts, "utf8").split("\n").filter(Boolean).length, 2);
+  assert.equal(readRef(repo, CARRIER_REF), unrelatedCarrier);
+  assert.equal(readRef(repo, target), moved);
+});
+
+test("rethrows an unrelated non-CAS update-ref failure without diagnostic classification", async () => {
+  const repository = makeGitRepository();
+  const shim = gitShim([
+    'if [ "$1" = "update-ref" ]; then',
+    '  printf "%s\\n" "fatal: disk write is at sector 4 but expected sector 5" >&2',
+    "  exit 1",
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n"));
+  const script = [
+    "import { admit } from './src/core/facts/admission.ts';",
+    "import { repositoryAt } from './src/core/facts/repository.ts';",
+    "const id = 'kei/unrelated-failure';",
+    "const entry = { v: 1, kind: 'bind', contract: id, entry: '01ARZ3NDEKTSV4RRFFQ69G5FAV', at: '2026-01-01T00:00:00Z', actor: 'child', data: { title: id, context: 'c', objective: 'o', design: 'd', region: [], criteria: [], verification: [], extensions: [] } };",
+    "try { admit(repositoryAt(process.argv[1]), { facts: [{ contractId: id, expectedHead: null, entries: [entry] }] }); process.stdout.write(JSON.stringify({ returned: true })); } catch (error) { process.stdout.write(JSON.stringify({ returned: false, name: (error as Error).name })); }",
+  ].join("\n");
+  const child = await execFileAsync(
+    process.execPath,
+    ["--import", "tsx", "-e", script, repository.path],
+    { env: shim.env },
+  );
+  assert.deepEqual(JSON.parse(child.stdout), { returned: false, name: "GitPlumbingError" });
+  assert.equal(readRef(repositoryAt(repository.path), CARRIER_REF), null);
 });
 
 test("publishes the carrier and claim ref in one successful ref transaction", () => {

@@ -25,6 +25,7 @@ Reconcile aligns the external world to accepted facts; carrier commit/ref is Git
 5. Make every semantic judgment from one carrier snapshot. [Acts 150, 169]
 6. Treat canonical entry bytes as attempt identity; ULIDs are coordinates. [Acts 150, 169]
 7. Split retries: facts mechanically rebuild only when progress-coupled to observed carrier movement; protocol semantically redecides with fresh ULIDs. [Acts 146, 148, 150, 151, 152, 169]
+8. The `update-ref --stdin --no-deref` transport boundary reports exactly `published`, `non-published`, or `unknown`; `--batch-updates` is permanently forbidden. Process diagnostics are carried as opaque, verbatim bytes and never enter admission or protocol semantic branching. After `non-published`, admission attributes the outcome from one fresh carrier snapshot and its watched target ref, with carrier movement first: only observed carrier progress rebuilds, an unchanged carrier plus target movement is `ref-moved`, and neither movement rethrows the original error. [Act 193]
 
 ## Protocol Laws
 

@@ -10,9 +10,9 @@ import {
   type CarrierSnapshot,
   type GitOid,
   type GitRepository,
+  type RefPublication,
   type TreeChange,
   buildTree,
-  GitPlumbingError,
   readBlob,
   readCarrier,
   readRef,
@@ -333,22 +333,6 @@ function prepareEvidence(
   return prepared;
 }
 
-function carrierRefRace(error: unknown): boolean {
-  return error instanceof GitPlumbingError
-    && error.command[0] === "update-ref"
-    && error.status !== null
-    && error.signal === null
-    && (/is at .* but expected/i.test(error.message) || error.message.includes(`cannot lock ref '${CARRIER_REF}'`));
-}
-
-function publicationIsUnknown(error: unknown): boolean {
-  return error instanceof GitPlumbingError
-    && error.command[0] === "update-ref"
-    && error.pid !== null
-    && error.pid > 0
-    && error.status === null;
-}
-
 function evidenceOccupied(
   snapshot: CarrierSnapshot,
   ids: readonly ContractId[],
@@ -428,10 +412,10 @@ function publishOffer(
   snapshot: CarrierSnapshot,
   operations: readonly RefOperation[],
   changes: ReadonlyMap<string, TreeChange>,
-): { readonly carrierCommit: CommitOid; readonly carrierTree: GitOid } {
+): { readonly carrierCommit: CommitOid; readonly carrierTree: GitOid; readonly publication: RefPublication } {
   const carrierTree = buildTree(repository, snapshot.tree, changes);
   const carrierCommit = commitOid(writeCommit(repository, carrierTree, snapshot.commit));
-  updateRefsAtomically(repository, [
+  const publication = updateRefsAtomically(repository, [
     { ref: CARRIER_REF, newOid: carrierCommit, expectedOid: snapshot.commit },
     ...operations.map((operation) => ({
       ref: operation.ref,
@@ -439,7 +423,19 @@ function publishOffer(
       expectedOid: operation.expectedOid,
     })),
   ]);
-  return { carrierCommit, carrierTree };
+  return { carrierCommit, carrierTree, publication };
+}
+
+function observePublicationFailure(
+  repository: GitRepository,
+  operations: readonly RefOperation[],
+): { readonly snapshot: CarrierSnapshot; readonly targetOid: GitOid | null | undefined } {
+  const snapshot = readCarrier(repository);
+  const operation = operations[0];
+  return {
+    snapshot,
+    targetOid: operation === undefined ? undefined : readRef(repository, operation.ref),
+  };
 }
 
 export function admit(
@@ -462,36 +458,41 @@ export function admit(
   if (initialEvidenceOccupation !== null) return initialEvidenceOccupation;
 
   let snapshot = initial;
+  let rebuildAfterCarrierMovement = false;
   while (true) {
     const currentHeadMovement = headMoved(snapshot, expectedHeads);
     if (currentHeadMovement.moved.length > 0) return currentHeadMovement;
     const currentEvidenceOccupation = evidenceOccupied(snapshot, watchedIds, preparedEvidence);
     if (currentEvidenceOccupation !== null) return currentEvidenceOccupation;
-    const refMovement = watchedRefMoved(repository, snapshot, watchedIds, operations);
+    const refMovement = rebuildAfterCarrierMovement
+      ? null
+      : watchedRefMoved(repository, snapshot, watchedIds, operations);
+    rebuildAfterCarrierMovement = false;
     if (refMovement !== null) return refMovement;
 
     const attempt = buildOffer(repository, snapshot, appends, preparedEvidence);
-    try {
-      const accepted = publishOffer(repository, snapshot, operations, attempt.changes);
+    const publication = publishOffer(repository, snapshot, operations, attempt.changes);
+    if (publication.publication.kind === "published") {
       return {
         ok: true,
         kind: "accepted",
-        carrierCommit: accepted.carrierCommit,
-        carrierTree: accepted.carrierTree,
+        carrierCommit: publication.carrierCommit,
+        carrierTree: publication.carrierTree,
         heads: attempt.heads,
       };
-    } catch (error) {
-      if (publicationIsUnknown(error)) return unknown();
-      if (!carrierRefRace(error)) throw error;
-      const racedSnapshot = readCarrier(repository);
-      const racedHeadMovement = headMoved(racedSnapshot, expectedHeads);
-      if (racedHeadMovement.moved.length > 0) return racedHeadMovement;
-      const racedEvidenceOccupation = evidenceOccupied(racedSnapshot, watchedIds, preparedEvidence);
-      if (racedEvidenceOccupation !== null) return racedEvidenceOccupation;
-      const racedRefMovement = watchedRefMoved(repository, racedSnapshot, watchedIds, operations);
-      if (racedRefMovement !== null) return racedRefMovement;
-      if (racedSnapshot.commit === snapshot.commit) throw error;
-      snapshot = racedSnapshot;
     }
+    if (publication.publication.kind === "unknown") return unknown();
+
+    const observed = observePublicationFailure(repository, operations);
+    if (observed.snapshot.commit !== snapshot.commit) {
+      snapshot = observed.snapshot;
+      rebuildAfterCarrierMovement = true;
+      continue;
+    }
+    const operation = operations[0];
+    if (operation !== undefined && observed.targetOid !== operation.expectedOid) {
+      return refMoved(observed.snapshot, watchedIds, operation, observed.targetOid ?? null);
+    }
+    throw publication.publication.error;
   }
 }
