@@ -1,7 +1,7 @@
 ---
 id: 第二切片-petition-claim-pure-owners-672d9b8d
 title: 第二切片：petition/claim pure owners（Delivery Laws 5–8）
-state: open
+state: in_progress
 pri: 1
 needs:
   - 收窄-refoperation-至-claim-单次-ca-d09b3da2
@@ -13,8 +13,9 @@ notes:
     text: |
       验收方式修订（user 指示）：faye 不亲读 diff。root 在 square 报确切 diff 后，由 faye 派 akuma 对照 Delivery Laws 5–8 与 Nail 2 复核，复核结论经 square 裁决放行。上一条 d09b3da2 同规则。
 createdAt: 2026-08-04T04:26:32.728Z
-updatedAt: 2026-08-04T04:31:49.516Z
+updatedAt: 2026-08-04T06:41:32.583Z
 creator: thekoc
+startedAt: 2026-08-04T06:41:32.583Z
 ---
 恢复四个已暂停路径（src/core/verbs/petition.ts、claim.ts、tests/verbs-petition.test.ts、tests/verbs-claim.test.ts），按法典 Delivery Laws 5–8 落地：
 
