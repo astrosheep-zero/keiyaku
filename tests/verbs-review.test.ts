@@ -21,7 +21,9 @@ import {
 import { observeContract } from "../src/core/protocol/observe.js";
 import { runProtocol, type AttemptContext, type DecideInput } from "../src/core/protocol/run.js";
 import {
+  decideReviewApproved,
   decideReviewChangesRequested,
+  type ReviewApprovedInput,
   type ReviewChangesRequestedInput,
 } from "../src/core/verbs/review.js";
 import { makeGitRepository } from "./support/git.js";
@@ -49,6 +51,13 @@ function reviewInput(
   id: ContractId,
   data: ReviewChangesRequestedInput["data"] = { digest: "review-digest", summary: "Changes are needed" },
 ): ReviewChangesRequestedInput {
+  return { contractId: id, actor: "reviewer", at: AT, data };
+}
+
+function approvedReviewInput(
+  id: ContractId,
+  data: ReviewApprovedInput["data"] = { digest: "review-digest", summary: "Approved" },
+): ReviewApprovedInput {
   return { contractId: id, actor: "reviewer", at: AT, data };
 }
 
@@ -151,7 +160,7 @@ function seed(repository: ReturnType<typeof repositoryAt>, id: ContractId, entri
   assert.equal(result.kind, "accepted");
 }
 
-test("review changes requested has only type-only facts and protocol dependencies", () => {
+test("review owners have only type-only facts and protocol dependencies", () => {
   const path = fileURLToPath(new URL("../src/core/verbs/review.ts", import.meta.url));
   const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.ES2023, true);
   const imports = source.statements.filter(ts.isImportDeclaration);
@@ -161,6 +170,253 @@ test("review changes requested has only type-only facts and protocol dependencie
     ["\"../facts/types.js\"", "\"../protocol/run.js\""],
   );
   assert.ok(imports.every((declaration) => declaration.importClause?.isTypeOnly));
+});
+
+test("approved review records the current petition delivery head through the real protocol", () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const id = contractId("kei/review-approved");
+  const ulid = "01ARZ3NDEKTSV4RRFFQ69G5FBC";
+  seed(repo, id, [bind(id), open(id), seal(id), petition(id)]);
+
+  const result = runProtocol({
+    input: approvedReviewInput(id),
+    repository: repo,
+    contracts: [id],
+    attempts: [attempt(0, ulid)],
+    decide: decideReviewApproved,
+  });
+
+  assert.equal(result.kind, "handoff");
+  if (result.kind !== "handoff") return;
+  assert.equal(result.handoff.admission?.kind, "accepted");
+  assert.equal(result.handoff.handoff, null);
+  assert.deepEqual(result.handoff.acceptedEntries, [{
+    v: 1,
+    kind: "review",
+    contract: id,
+    entry: entryUlid(ulid),
+    at: AT,
+    actor: "reviewer",
+    data: {
+      verdict: "approved",
+      reviewedHead: commitOid("a".repeat(40)),
+      digest: "review-digest",
+      summary: "Approved",
+      evidence: [],
+    },
+  }]);
+  const observed = observeContract(repo, id);
+  assert.equal(observed.state?.phase, "awaiting-verdict");
+  assert.equal(observed.state?.petition?.entry, petition(id).entry);
+  assert.equal(observed.state?.approval?.entry, entryUlid(ulid));
+  assert.equal(observed.state?.approval?.data.verdict, "approved");
+  if (observed.state?.approval?.data.verdict !== "approved") return;
+  assert.equal(observed.state.approval.data.reviewedHead, commitOid("a".repeat(40)));
+});
+
+test("approved review refuses missing, non-awaiting, and stale petition delivery premises without publishing", () => {
+  const missingRepository = makeGitRepository();
+  const missingRepo = repositoryAt(missingRepository.path);
+  const missing = contractId("kei/review-approved-missing");
+  assert.deepEqual(runProtocol({
+    input: approvedReviewInput(missing),
+    repository: missingRepo,
+    contracts: [missing],
+    attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FBD")],
+    decide: decideReviewApproved,
+  }), {
+    kind: "refused",
+    refusal: { kind: "contract-missing", contractId: missing },
+  });
+  assert.equal(readRef(missingRepo, "refs/heads/keiyaku-state"), null);
+
+  for (const phase of ["active", "sealed", "claimed", "forfeited"] as const) {
+    const repository = makeGitRepository();
+    const repo = repositoryAt(repository.path);
+    const id = contractId(`kei/review-approved-${phase}`);
+    seed(repo, id, journalFor(id, phase));
+    const before = readRef(repo, "refs/heads/keiyaku-state");
+
+    assert.deepEqual(runProtocol({
+      input: approvedReviewInput(id),
+      repository: repo,
+      contracts: [id],
+      attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FBE")],
+      decide: decideReviewApproved,
+    }), {
+      kind: "refused",
+      refusal: { kind: "phase-not-awaiting-verdict", contractId: id, phase },
+    });
+    assert.equal(readRef(repo, "refs/heads/keiyaku-state"), before);
+  }
+
+  const id = contractId("kei/review-approved-stale-premise");
+  const staleState: ContractState = {
+    id,
+    head: contractHead("a".repeat(40)),
+    phase: "awaiting-verdict",
+    body: body(),
+    delivery: {
+      target: "refs/heads/main",
+      base: commitOid("a".repeat(40)),
+      head: commitOid("b".repeat(40)),
+    },
+    approval: null,
+    petition: petition(id),
+    evidence: [],
+    terminal: null,
+  };
+  assert.deepEqual(decideReviewApproved({
+    input: approvedReviewInput(id),
+    attempt: attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FBF"),
+    observation: { carrierCommit: null, contracts: new Map([[id, { id, entries: [], state: staleState }]]) },
+  }), {
+    kind: "refused",
+    refusal: {
+      kind: "petition-delivery-head-mismatch",
+      contractId: id,
+      petitionDeliveryHead: commitOid("a".repeat(40)),
+      deliveryHead: commitOid("b".repeat(40)),
+    },
+  });
+});
+
+test("approved review is deterministic, clones input data, has no ref operation, and requires one ULID", () => {
+  const id = contractId("kei/review-approved-pure");
+  const mutableData = { digest: "initial digest", summary: "Initial approval" };
+  const state: ContractState = {
+    id,
+    head: contractHead("a".repeat(40)),
+    phase: "awaiting-verdict",
+    body: body(),
+    delivery: {
+      target: "refs/heads/main",
+      base: commitOid("a".repeat(40)),
+      head: commitOid("a".repeat(40)),
+    },
+    approval: null,
+    petition: petition(id),
+    evidence: [],
+    terminal: null,
+  };
+  const decisionInput: DecideInput<ReviewApprovedInput> = {
+    input: approvedReviewInput(id, mutableData),
+    attempt: attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FBG"),
+    observation: { carrierCommit: null, contracts: new Map([[id, { id, entries: [], state }]]) },
+  };
+
+  const first = decideReviewApproved(decisionInput);
+  assert.deepEqual(first, decideReviewApproved(decisionInput));
+  assert.equal(first.kind, "offer");
+  if (first.kind !== "offer") return;
+  assert.deepEqual(first.offer.facts[0]?.entries[0], {
+    v: 1,
+    kind: "review",
+    contract: id,
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBG"),
+    at: AT,
+    actor: "reviewer",
+    data: {
+      verdict: "approved",
+      reviewedHead: commitOid("a".repeat(40)),
+      digest: "initial digest",
+      summary: "Initial approval",
+      evidence: [],
+    },
+  });
+  mutableData.digest = "changed digest";
+  mutableData.summary = "Changed approval";
+  const offered = first.offer.facts[0]?.entries[0];
+  assert.equal(offered?.kind, "review");
+  if (offered?.kind !== "review" || offered.data.verdict !== "approved") return;
+  assert.deepEqual(offered.data, {
+    verdict: "approved",
+    reviewedHead: commitOid("a".repeat(40)),
+    digest: "initial digest",
+    summary: "Initial approval",
+    evidence: [],
+  });
+  assert.equal(first.offer.evidence, undefined);
+  assert.equal(first.offer.refs, undefined);
+
+  for (const entryUlids of [
+    [],
+    [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBH"), entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBJ")],
+  ]) {
+    assert.throws(
+      () => decideReviewApproved({ ...decisionInput, attempt: { ordinal: 0, entryUlids } }),
+      /exactly one fresh entry ULID/,
+    );
+  }
+});
+
+test("a competing approved review redecides with a fresh ULID", () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const id = contractId("kei/review-approved-race");
+  seed(repo, id, journalFor(id, "awaiting-verdict"));
+  const attempts = [
+    attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FBK"),
+    attempt(1, "01ARZ3NDEKTSV4RRFFQ69G5FBM"),
+  ];
+  const seen: Array<{ ordinal: number; ulid: string }> = [];
+  const result = runProtocol({
+    input: approvedReviewInput(id),
+    repository: repo,
+    contracts: [id],
+    attempts,
+    decide: (input) => {
+      seen.push({ ordinal: input.attempt.ordinal, ulid: input.attempt.entryUlids[0]! });
+      const decision = decideReviewApproved(input);
+      if (input.attempt.ordinal !== 0 || decision.kind !== "offer") return decision;
+      const append = decision.offer.facts[0]!;
+      if (append.expectedHead === undefined || append.expectedHead === null) {
+        throw new Error("approved review offer must carry an observed journal head");
+      }
+      const competitor = admit(repo, {
+        facts: [{
+          contractId: id,
+          expectedHead: append.expectedHead,
+          entries: [{
+            v: 1,
+            kind: "review",
+            contract: id,
+            entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBN"),
+            at: AT,
+            actor: "competing-reviewer",
+            data: {
+              verdict: "approved",
+              reviewedHead: commitOid("a".repeat(40)),
+              digest: "competing-digest",
+              summary: "Competing approval",
+              evidence: [],
+            },
+          }],
+        }],
+      });
+      assert.equal(competitor.kind, "accepted");
+      return decision;
+    },
+  });
+
+  assert.deepEqual(seen, [
+    { ordinal: 0, ulid: attempts[0]!.entryUlids[0]! },
+    { ordinal: 1, ulid: attempts[1]!.entryUlids[0]! },
+  ]);
+  assert.equal(result.kind, "handoff");
+  if (result.kind !== "handoff") return;
+  assert.deepEqual(result.handoff.acceptedEntries.map((entry) => entry.entry), [attempts[1]!.entryUlids[0]!]);
+  const observed = observeContract(repo, id);
+  assert.equal(observed.state?.approval?.entry, attempts[1]!.entryUlids[0]!);
+  assert.deepEqual(observed.entries.map((entry) => entry.entry), [
+    entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+    entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB0"),
+    entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+    entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
+    entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBN"),
+    attempts[1]!.entryUlids[0]!,
+  ]);
 });
 
 test("review changes requested reopens a claim petition to active", () => {
