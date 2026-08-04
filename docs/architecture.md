@@ -93,3 +93,10 @@ Each verb owns one pure decision function.
 Workspace files, delivery refs, rendered contract documents, and task
 settlement are effects. One idempotent reconcile computes desired minus actual.
 Failure to reconcile cannot reverse an accepted journal admission.
+
+`bind` is declaration only: its body-only `BindEntry` establishes no base or
+target world premise, delivery coordinate, ref operation, or worktree, and
+`reconcileBind` has nothing to do. The first verb that installs delivery owns
+the delivery coordinate and stale-ref admission; its reconcile must align refs
+and worktree to the journaled delivery head and must never follow a newer
+target.
