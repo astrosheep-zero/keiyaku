@@ -61,7 +61,7 @@ test("bind has only type-only facts and protocol dependencies", () => {
 test("bind accepts an absent contract through the real protocol and folds it active", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("bind-accepted");
+  const id = contractId("kei/bind-accepted");
   const input = bindInput(id);
   const result = runProtocol({
     input,
@@ -83,7 +83,7 @@ test("bind accepts an absent contract through the real protocol and folds it act
 test("bind refuses an existing contract without publishing", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("bind-existing");
+  const id = contractId("kei/bind-existing");
   const existing = admit(repo, {
     facts: [{ contractId: id, expectedHead: null, entries: [competitorBind(id, "01ARZ3NDEKTSV4RRFFQ69G5FAW")] }],
   });
@@ -106,7 +106,7 @@ test("bind refuses an existing contract without publishing", () => {
 });
 
 test("bind decision is deterministic, isolates caller body containers, and requires one ULID", () => {
-  const id = contractId("bind-pure");
+  const id = contractId("kei/bind-pure");
   const mutableBody = {
     title: "Bind contract",
     context: "Context",
@@ -145,7 +145,7 @@ test("bind decision is deterministic, isolates caller body containers, and requi
 test("a competing bind causes the next protocol attempt to redecide and refuse", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("bind-race");
+  const id = contractId("kei/bind-race");
   const attempts = [
     attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB1"),
     attempt(1, "01ARZ3NDEKTSV4RRFFQ69G5FB2"),

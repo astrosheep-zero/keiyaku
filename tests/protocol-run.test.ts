@@ -19,6 +19,7 @@ import {
 import { runProtocol, type AttemptContext } from "../src/core/protocol/run.js";
 import {
   contractId,
+  contractJournalPath,
   entryUlid,
   type AmendEntry,
   type BindEntry,
@@ -54,7 +55,7 @@ function alternateCarrier(repository: ReturnType<typeof repositoryAt>, id: Contr
   const journal = writeBlob(repository, encodeEntry(entry));
   const tree = buildTree(repository, emptyTree, new Map([
     [CARRIER_FORMAT_PATH, { oid: format, mode: "100644", type: "blob" }],
-    [`contracts/${id}.jsonl`, { oid: journal, mode: "100644", type: "blob" }],
+    [contractJournalPath(id), { oid: journal, mode: "100644", type: "blob" }],
   ]));
   return writeCommit(repository, tree, null);
 }
@@ -86,7 +87,7 @@ function withGitShim<T>(body: string, variables: Readonly<Record<string, string>
 test("refusal publishes nothing", () => {
   const repository = makeGitRepository();
   const result = runProtocol({
-    input: undefined, repository: repositoryAt(repository.path), contracts: [contractId("refused")], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
+    input: undefined, repository: repositoryAt(repository.path), contracts: [contractId("kei/refused")], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
     decide: () => ({ kind: "refused", refusal: "no" }),
   });
   assert.deepEqual(result, { kind: "refused", refusal: "no" });
@@ -96,7 +97,7 @@ test("refusal publishes nothing", () => {
 test("accepted admission returns reconciliation data and no post-admission effect", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("accepted");
+  const id = contractId("kei/accepted");
   const result = runProtocol({
     input: { actor: "test", body: "body" }, repository: repo, contracts: [id], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
     decide: (input) => {
@@ -114,7 +115,7 @@ test("accepted admission returns reconciliation data and no post-admission effec
 test("moved heads are re-decided with the next fresh ULID", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("moved");
+  const id = contractId("kei/moved");
   const attempts = [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV"), context(1, "01ARZ3NDEKTSV4RRFFQ69G5FAW")];
   let decisions = 0;
   const result = runProtocol({
@@ -139,7 +140,7 @@ test("moved heads are re-decided with the next fresh ULID", () => {
 test("unknown exact canonical entries hand off with no admission", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("unknown-exact");
+  const id = contractId("kei/unknown-exact");
   const result = withGitShim([
     'if [ "$1" = "update-ref" ]; then',
     '  "$KEIYAKU_REAL_GIT" "$@"',
@@ -167,7 +168,7 @@ test("unknown exact canonical entries hand off with no admission", () => {
 test("unknown absent entries reuse the offer until a later admission succeeds", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("unknown-retry");
+  const id = contractId("kei/unknown-retry");
   const marker = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-marker-")), "first-update-ref");
   let decisions = 0;
   const result = withGitShim([
@@ -201,7 +202,7 @@ test("unknown absent entries reuse the offer until a later admission succeeds", 
 test("unknown moved heads redecide with a fresh attempt ULID", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("unknown-moved");
+  const id = contractId("kei/unknown-moved");
   const alternate = alternateCarrier(repo, id, bind(id, "01ARZ3NDEKTSV4RRFFQ69G5FAX"));
   const marker = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-marker-")), "first-update-ref");
   const attempts = [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV"), context(1, "01ARZ3NDEKTSV4RRFFQ69G5FAW")];
@@ -244,7 +245,7 @@ test("unknown moved heads redecide with a fresh attempt ULID", () => {
 test("unknown collisions are passed to the next decision", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("unknown-collision");
+  const id = contractId("kei/unknown-collision");
   const plannedUlid = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
   const alternate = alternateCarrier(repo, id, { ...bind(id, plannedUlid), actor: "collision" });
   const marker = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-marker-")), "first-update-ref");
@@ -292,7 +293,7 @@ test("unknown collisions are passed to the next decision", () => {
 test("stale Offer ref expectations return ref-moved without publication or retry", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("stale-ref");
+  const id = contractId("kei/stale-ref");
   const current = writeCommit(repo, writeTree(repo, []), null);
   repository.run(["update-ref", "refs/heads/verb", current]);
   const stale = "a".repeat(40);
@@ -326,7 +327,7 @@ test("stale Offer ref expectations return ref-moved without publication or retry
 test("attempt contexts bound repeated moved admissions", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("bounded");
+  const id = contractId("kei/bounded");
   let decisions = 0;
   const result = runProtocol({
     input: undefined, repository: repo, contracts: [id], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
@@ -345,7 +346,7 @@ test("attempt contexts bound repeated moved admissions", () => {
 test("attempt contexts are consecutive", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("validation");
+  const id = contractId("kei/validation");
   const decide = () => ({ kind: "refused" as const, refusal: null });
   assert.throws(() => runProtocol({
     input: undefined, repository: repo, contracts: [id], attempts: [], decide,

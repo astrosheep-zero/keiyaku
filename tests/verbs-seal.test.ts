@@ -143,7 +143,7 @@ test("seal has only type-only facts and protocol dependencies", () => {
 test("seal accepts an active contract through the real protocol", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("seal-active");
+  const id = contractId("kei/seal-active");
   seed(repo, id, "active");
 
   const result = runProtocol({
@@ -172,7 +172,7 @@ test("seal accepts an active contract through the real protocol", () => {
 test("seal refuses missing and every non-active phase without publishing", () => {
   const missingRepository = makeGitRepository();
   const missingRepo = repositoryAt(missingRepository.path);
-  const missing = contractId("seal-missing");
+  const missing = contractId("kei/seal-missing");
   const missingResult = runProtocol({
     input: sealInput(missing),
     repository: missingRepo,
@@ -186,7 +186,7 @@ test("seal refuses missing and every non-active phase without publishing", () =>
   for (const phase of ["sealed", "awaiting-verdict", "approved", "claimed", "forfeited"] as const) {
     const repository = makeGitRepository();
     const repo = repositoryAt(repository.path);
-    const id = contractId(`seal-${phase}`);
+    const id = contractId(`kei/seal-${phase}`);
     seed(repo, id, phase);
     const before = readRef(repo, "refs/heads/keiyaku-state");
 
@@ -207,7 +207,7 @@ test("seal refuses missing and every non-active phase without publishing", () =>
 });
 
 test("seal decision is deterministic and requires one ULID", () => {
-  const id = contractId("seal-pure");
+  const id = contractId("kei/seal-pure");
   const state: ContractState = {
     id,
     head: contractHead("a".repeat(40)),
@@ -236,7 +236,7 @@ test("seal decision is deterministic and requires one ULID", () => {
 test("a competing amend causes seal to redecide against the new journal head", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("seal-race");
+  const id = contractId("kei/seal-race");
   seed(repo, id, "active");
   const attempts = [
     attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB6"),

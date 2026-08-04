@@ -16,6 +16,7 @@ import {
   commitOid,
   contractHead,
   contractId,
+  contractJournalPath,
   evidencePath,
   entryUlid,
   type BindEntry,
@@ -23,7 +24,7 @@ import {
 } from "../src/core/facts/types.js";
 import { effectiveBody, foldEntry, foldJournal } from "../src/core/facts/fold.js";
 
-const contract = contractId("facts-contract");
+const contract = contractId("kei/facts-contract");
 const oid = (last = "a"): ReturnType<typeof blobOid> => blobOid(last.repeat(40));
 const commit = (last = "b"): ReturnType<typeof commitOid> => commitOid(last.repeat(40));
 const ulid = (last: string): ReturnType<typeof entryUlid> => entryUlid(`01J${"0".repeat(22)}${last.toUpperCase()}`);
@@ -193,9 +194,20 @@ test("strict canonical decoding rejects noncanonical journals and mismatched evi
 
 test("evidence paths are derived from identity and never stored", () => {
   const ref = evidence(ulid("N"), "review");
-  assert.equal(evidencePath(contract, ref), `contracts/${contract}/evidence/${ref.entry}/0-review`);
+  assert.equal(contractJournalPath(contract), "contracts/facts-contract.jsonl");
+  assert.equal(evidencePath(contract, ref), `contracts/facts-contract/evidence/${ref.entry}/0-review`);
   assert.equal(evidencePath({ contract, ref }), evidencePath(contract, ref));
   assert.equal(encodeEntry(bind).includes("path"), false);
+});
+
+test("contract identities require kei coordinates and carrier paths use their private payload", () => {
+  const id = contractId("kei/path-contract");
+  assert.equal(id, "kei/path-contract");
+  assert.equal(contractJournalPath(id), "contracts/path-contract.jsonl");
+
+  for (const invalid of ["path-contract", "kei/UPPER", "kei/with.dot", "kei/with_under", "kei/a/b", "kei/"]) {
+    assert.throws(() => contractId(invalid), /contract ID must be kei/);
+  }
 });
 
 test("forfeit note is optional and current payload has no final head", () => {

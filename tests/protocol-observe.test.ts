@@ -89,7 +89,7 @@ function installCarrier(
 
 test("observing a missing contract in a fresh repository returns no facts", () => {
   const repository = makeGitRepository();
-  const id = contractId("missing-contract");
+  const id = contractId("kei/missing-contract");
 
   assert.deepEqual(observeContract(repositoryAt(repository.path), id), {
     id,
@@ -101,7 +101,7 @@ test("observing a missing contract in a fresh repository returns no facts", () =
 test("observing a bound journal returns its exact head, entries, and folded state", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("observed-contract");
+  const id = contractId("kei/observed-contract");
   const entries: JournalEntry[] = [bindEntry(id)];
   const result = admit(repo, {
     facts: [{ contractId: id, expectedHead: null, entries }],
@@ -120,7 +120,7 @@ test("observing a bound journal returns its exact head, entries, and folded stat
 test("malformed journals and non-blob journal paths fail closed", () => {
   const malformedRepository = makeGitRepository();
   const malformedRepo = repositoryAt(malformedRepository.path);
-  const malformedId = contractId("malformed-contract");
+  const malformedId = contractId("kei/malformed-contract");
   installCarrier(malformedRepo, new Map([
     [contractJournalPath(malformedId), { oid: writeBlob(malformedRepo, "{\"v\":1}\n") }],
   ]));
@@ -128,7 +128,7 @@ test("malformed journals and non-blob journal paths fail closed", () => {
 
   const nonBlobRepository = makeGitRepository();
   const nonBlobRepo = repositoryAt(nonBlobRepository.path);
-  const nonBlobId = contractId("non-blob-contract");
+  const nonBlobId = contractId("kei/non-blob-contract");
   const commit = writeCommit(nonBlobRepo, writeTree(nonBlobRepo, []), null);
   installCarrier(nonBlobRepo, new Map([
     [contractJournalPath(nonBlobId), { oid: commit, mode: "160000", type: "commit" }],
@@ -139,7 +139,7 @@ test("malformed journals and non-blob journal paths fail closed", () => {
 test("observation keeps inline evidence entries without resolving evidence content", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("evidence-contract");
+  const id = contractId("kei/evidence-contract");
   const evidenceBlob = writeBlob(repo, "opaque evidence bytes");
   const review = reviewEntry(id);
   const evidenceRef = review.data.evidence[0];
@@ -164,7 +164,7 @@ test("observation keeps inline evidence entries without resolving evidence conte
 test("observation rejects a dangling journal evidence reference without reading payload bytes", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("dangling-evidence-contract");
+  const id = contractId("kei/dangling-evidence-contract");
   const entries: JournalEntry[] = [bindEntry(id), reviewEntry(id)];
   installCarrier(repo, new Map([
     [contractJournalPath(id), { oid: writeBlob(repo, entries.map((entry) => encodeEntry(entry)).join("")) }],
@@ -175,8 +175,8 @@ test("observation rejects a dangling journal evidence reference without reading 
 test("observing two contracts reads both journals from the captured carrier tree", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const first = contractId("first-contract");
-  const second = contractId("second-contract");
+  const first = contractId("kei/first-contract");
+  const second = contractId("kei/second-contract");
   const evidence = writeBlob(repo, "payload is never read by observation");
   const reviewed = reviewEntry(second);
   const reference = reviewed.data.evidence[0]!;

@@ -179,7 +179,7 @@ test("amend updates the effective body and returns permitted phases to active", 
   for (const phase of ["active", "awaiting-verdict", "approved"] as const) {
     const repository = makeGitRepository();
     const repo = repositoryAt(repository.path);
-    const id = contractId(`amend-${phase}`);
+    const id = contractId(`kei/amend-${phase}`);
     seed(repo, id, phase);
     assert.equal(observeContract(repo, id).state?.phase, phase);
 
@@ -204,7 +204,7 @@ test("amend updates the effective body and returns permitted phases to active", 
 test("amend refuses missing and non-amendable contracts without publishing", () => {
   const missingRepository = makeGitRepository();
   const missingRepo = repositoryAt(missingRepository.path);
-  const missing = contractId("amend-missing");
+  const missing = contractId("kei/amend-missing");
   const missingResult = runProtocol({
     input: amendInput(missing),
     repository: missingRepo,
@@ -218,7 +218,7 @@ test("amend refuses missing and non-amendable contracts without publishing", () 
   for (const phase of ["sealed", "claimed", "forfeited"] as const) {
     const repository = makeGitRepository();
     const repo = repositoryAt(repository.path);
-    const id = contractId(`amend-${phase}`);
+    const id = contractId(`kei/amend-${phase}`);
     seed(repo, id, phase);
     const before = readRef(repo, "refs/heads/keiyaku-state");
 
@@ -239,7 +239,7 @@ test("amend refuses missing and non-amendable contracts without publishing", () 
 });
 
 test("amend decision is deterministic, isolates caller data, and requires one ULID", () => {
-  const id = contractId("amend-pure");
+  const id = contractId("kei/amend-pure");
   const mutableData = {
     revisions: [{ target: { extension: "Notes" }, op: "append" as const, body: "Updated notes" }],
     region: ["src/changed"],
@@ -290,7 +290,7 @@ test("amend decision is deterministic, isolates caller data, and requires one UL
 test("a competing append causes amend to redecide against the new journal head", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("amend-race");
+  const id = contractId("kei/amend-race");
   seed(repo, id, "active");
   const attempts = [
     attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB6"),

@@ -48,7 +48,7 @@ function captured(contracts: readonly [ContractId, readonly JournalEntry[]][]): 
 }
 
 test("unknown classifier accepts exact canonical entries and reports byte collisions", () => {
-  const id = contractId("classification-contract");
+  const id = contractId("kei/classification-contract");
   const planned = bindEntry(id);
   const offer: Offer = { facts: [{ contractId: id, expectedHead: null, entries: [planned] }] };
   assert.deepEqual(classifyUnknownAttempt(captured([[id, [planned]]]), offer), { kind: "accepted" });
@@ -62,8 +62,8 @@ test("unknown classifier accepts exact canonical entries and reports byte collis
 });
 
 test("unknown classifier distinguishes unchanged and moved heads across contracts", () => {
-  const first = contractId("retry-contract");
-  const second = contractId("moved-contract");
+  const first = contractId("kei/retry-contract");
+  const second = contractId("kei/moved-contract");
   const firstEntry = bindEntry(first);
   const secondEntry = bindEntry(second, "01ARZ3NDEKTSV4RRFFQ69G5FAY");
   const offer: Offer = { facts: [
@@ -78,8 +78,8 @@ test("unknown classifier distinguishes unchanged and moved heads across contract
 });
 
 test("unknown classifier rejects incomplete, implicit, duplicate, and partial offers", () => {
-  const first = contractId("validation-first");
-  const second = contractId("validation-second");
+  const first = contractId("kei/validation-first");
+  const second = contractId("kei/validation-second");
   const entry = bindEntry(first);
   const observation = captured([[first, []], [second, []]]);
   assert.throws(() => classifyUnknownAttempt(observation, { facts: [] }), /nonempty/);

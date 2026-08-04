@@ -10,8 +10,8 @@ The durable graph is:
 refs/heads/keiyaku-state
   -> carrier commit
     -> tree
-      -> contracts/<contract-id>.jsonl
-      -> contracts/<contract-id>/evidence/<entry-ulid>/<seq>-<kind>
+      -> contracts/<machine-contract>.jsonl
+      -> contracts/<machine-contract>/evidence/<entry-ulid>/<seq>-<kind>
       -> admission/**
       -> meta/format.json
 ```
@@ -20,11 +20,46 @@ The carrier branch is a physical Merkle map, not a repository event log. A
 contract's `ContractHead` is its journal blob OID. Unrelated carrier movement
 does not change that contract.
 
+## Identity Coordinates
+
+Public identities use the closed registry below. Slash is the only type bit:
+parsing dispatches an exact registered prefix, never a payload shape or a
+pairwise-disjointness predicate.
+
+| Prefix | Public grammar |
+| --- | --- |
+| `aku/` | `aku/<human-profile>` or `aku/<human-profile>/<lower-hex8>` |
+| `kei/` | `kei/<machine-contract>` |
+| `task/` | `task/<human-ns>/<human-local-id>` |
+| `resp/` | `resp/<machine-artifact>` |
+
+A human-named segment and movable reference match
+`/^(?:[a-z0-9\-]|\p{RGI_Emoji})+$/v`: nonempty lowercase ASCII letters,
+digits, and hyphens mixed with Unicode RGI emoji sequences, with no
+whitespace. Their identity is exact bytes: there is no Unicode normalization
+or visual-confusable deduplication. Machine segments match
+`[a-z0-9][a-z0-9-]*`; a projection suffix is lower hex8; and a `resp` payload
+uses the machine-segment grammar. A task has exactly its two payload segments,
+human namespace and local ID; there is no hub form.
+
+`@` is input-only. After it is removed, a slash is a full registered identity
+and no slash is a context-resolved movable reference matching the human rule.
+Neither `@` nor a movable reference is persisted as a durable fact coordinate.
+
+Journal facts persist the full `kei/<machine-contract>` coordinate. Carrier
+paths privately strip `kei/`, yielding `contracts/<machine-contract>.jsonl`
+and `contracts/<machine-contract>/evidence/**`; no path is parsed back into a
+public identity. This is a clean format cut: unprefixed contract IDs are
+rejected, with no legacy reader, classifier, or migration. `repository.ts`
+writes the exact format stamp on first admission and checks it on every
+nonempty carrier read.
+
 ## Facts
 
 Lifecycle facts required by fold and admission are inline journal entries.
 Unbounded reports, transcripts, patches, and artifacts are evidence blobs.
-Journal decisions never resolve evidence blobs.
+Evidence blob bytes never enter fold input or lifecycle judgment; journaled
+evidence facts remain ordinary fold input.
 
 An evidence path is write-once. Its journal `EvidenceRef` names the entry,
 sequence, kind, and blob OID; the path is derived rather than persisted.

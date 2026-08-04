@@ -28,6 +28,7 @@ import {
   commitOid,
   contractId,
   contractJournalPath,
+  evidencePath,
   entryUlid,
   type AmendEntry,
   type BindEntry,
@@ -119,7 +120,7 @@ function gitShim(body: string): { readonly env: NodeJS.ProcessEnv } {
 test("initializes the current format and publishes journal plus evidence in one carrier commit", () => {
   const source = makeGitRepository();
   const repository = repositoryAt(source.path);
-  const id = contractId("contract-a");
+  const id = contractId("kei/contract-a");
   const bytes = "review evidence";
   const ref: EvidenceRef = {
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
@@ -148,7 +149,7 @@ test("initializes the current format and publishes journal plus evidence in one 
 test("terminal journal and evidence survive clone and GC after the candidate ref retires", () => {
   const source = makeGitRepository();
   const repository = repositoryAt(source.path);
-  const id = contractId("terminal-contract");
+  const id = contractId("kei/terminal-contract");
   const tree = writeTree(repository, []);
   const predecessor = writeCommit(repository, tree, null);
   const candidate = writeCommit(repository, tree, predecessor);
@@ -202,16 +203,16 @@ test("terminal journal and evidence survive clone and GC after the candidate ref
 
   const clone = cloneGitRepository(source);
   clone.run(["gc", "--prune=now"]);
-  const journal = clone.run(["show", `${CARRIER_REF}:contracts/${id}.jsonl`]);
+  const journal = clone.run(["show", `${CARRIER_REF}:${contractJournalPath(id)}`]);
   assert.equal(foldJournal(id, decodeJournal(journal)).phase, "claimed");
-  assert.equal(clone.run(["show", `${CARRIER_REF}:contracts/${id}/evidence/${reviewId}/0-review`]), bytes);
+  assert.equal(clone.run(["show", `${CARRIER_REF}:${evidencePath(id, ref)}`]), bytes);
   assert.throws(() => clone.run(["cat-file", "-e", candidate]));
 });
 
 test("appends typed entries to the canonical journal instead of replacing it", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("contract-a");
+  const id = contractId("kei/contract-a");
   const first = admit(repo, journalOffer(id, null, [bindEntry(id)]));
   assert.equal(first.ok, true);
   if (!first.ok) return;
@@ -226,7 +227,7 @@ test("appends typed entries to the canonical journal instead of replacing it", (
 test("rejects a syntactically valid append that makes the journal impossible to fold", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("contract-a");
+  const id = contractId("kei/contract-a");
   assert.throws(
     () => admit(repo, journalOffer(id, null, [amendEntry(id)])),
     /journal must begin with bind/,
@@ -237,7 +238,7 @@ test("rejects a syntactically valid append that makes the journal impossible to 
 test("rejects an evidence OID that does not match its Journal EvidenceRef", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("contract-a");
+  const id = contractId("kei/contract-a");
   const ref: EvidenceRef = {
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
     seq: 0,
@@ -258,7 +259,7 @@ test("rejects an evidence OID that does not match its Journal EvidenceRef", () =
 test("evidence paths are derived and write-once", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("contract-a");
+  const id = contractId("kei/contract-a");
   const bytes = "evidence";
   const ref: EvidenceRef = {
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
@@ -281,14 +282,14 @@ test("evidence paths are derived and write-once", () => {
   if (collision.ok) return;
   assert.equal(collision.kind, "evidence-occupied");
   if (collision.kind !== "evidence-occupied") return;
-  assert.equal(collision.path, `contracts/${id}/evidence/${ref.entry}/2-report`);
+  assert.equal(collision.path, evidencePath(id, ref));
   assert.equal(collision.currentOid, ref.oid);
 });
 
 test("rejects a journal EvidenceRef whose blob is absent", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("contract-a");
+  const id = contractId("kei/contract-a");
   const ref: EvidenceRef = {
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
     seq: 0,
@@ -311,7 +312,7 @@ test("rejects malformed and missing carrier format markers", () => {
     installCarrier(repo, format);
     assert.throws(
       () => admit(repo, {
-        facts: [{ contractId: contractId("contract-a"), entries: [bindEntry(contractId("contract-a"))] }],
+        facts: [{ contractId: contractId("kei/contract-a"), entries: [bindEntry(contractId("kei/contract-a"))] }],
       }),
       /carrier (?:is missing|format)/,
     );
@@ -321,7 +322,7 @@ test("rejects malformed and missing carrier format markers", () => {
 test("two concurrent appends to one contract have exactly one winner", async () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const id = contractId("contract-a");
+  const id = contractId("kei/contract-a");
   const first = admit(repo, journalOffer(id, null, [bindEntry(id)]));
   assert.equal(first.ok, true);
   if (!first.ok) return;
@@ -352,7 +353,7 @@ test("reports a watched verb ref movement", () => {
   const repo = repositoryAt(repository.path);
   const ref = writeCommit(repo, writeTree(repo, []), null);
   updateRefsAtomically(repo, [{ ref: "refs/heads/verb", newOid: ref, expectedOid: null }]);
-  const id = contractId("contract-a");
+  const id = contractId("kei/contract-a");
   const result = admit(repo, {
     facts: [{ contractId: id, expectedHead: null, entries: [bindEntry(id)] }],
     refs: [{ ref: "refs/heads/verb", newOid: null, expectedOid: null }],
@@ -370,7 +371,7 @@ test("publishes the carrier and verb-owned ref in one successful ref transaction
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
   const verbCommit = writeCommit(repo, writeTree(repo, []), null);
-  const id = contractId("contract-a");
+  const id = contractId("kei/contract-a");
   const result = admit(repo, {
     facts: [{ contractId: id, expectedHead: null, entries: [bindEntry(id)] }],
     refs: [{ ref: "refs/heads/verb", newOid: verbCommit, expectedOid: null }],
@@ -389,7 +390,7 @@ test("a persistent ref lock failure terminates instead of retrying forever", asy
   const script = [
     "import { admit } from './src/core/facts/admission.ts';",
     "import { repositoryAt } from './src/core/facts/repository.ts';",
-    "const id = 'lock-contract';",
+    "const id = 'kei/lock-contract';",
     "const entry = { v: 1, kind: 'bind', contract: id, entry: '01ARZ3NDEKTSV4RRFFQ69G5FAV', at: '2026-01-01T00:00:00Z', actor: 'child', data: { title: id, context: 'c', objective: 'o', design: 'd', region: [], criteria: [], verification: [], extensions: [] } };",
     "try {",
     "  admit(repositoryAt(process.argv[1]), { facts: [{ contractId: id, expectedHead: null, entries: [entry] }], refs: [{ ref: 'refs/heads/verb/child', newOid: process.argv[2], expectedOid: null }] });",
@@ -414,7 +415,7 @@ test("a killed update-ref child returns unknown without probing the journal", as
   const script = [
     "import { admit } from './src/core/facts/admission.ts';",
     "import { repositoryAt } from './src/core/facts/repository.ts';",
-    "const id = 'killed-contract';",
+    "const id = 'kei/killed-contract';",
     "const entry = { v: 1, kind: 'bind', contract: id, entry: '01ARZ3NDEKTSV4RRFFQ69G5FAV', at: '2026-01-01T00:00:00Z', actor: 'child', data: { title: id, context: 'c', objective: 'o', design: 'd', region: [], criteria: [], verification: [], extensions: [] } };",
     "process.stdout.write(JSON.stringify(admit(repositoryAt(process.argv[1]), { facts: [{ contractId: id, expectedHead: null, entries: [entry] }] })));",
   ].join("\n");
@@ -441,7 +442,7 @@ test("a killed update-ref child returns unknown without probing the journal", as
 test("unbounded carrier rebuilds are coupled to unrelated carrier movement", async () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const baseId = contractId("base-contract");
+  const baseId = contractId("kei/base-contract");
   const base = admit(repo, journalOffer(baseId, null, [bindEntry(baseId)]));
   assert.equal(base.ok, true);
   if (!base.ok) return;
@@ -489,7 +490,7 @@ test("unbounded carrier rebuilds are coupled to unrelated carrier movement", asy
   ].join("\n");
   const child = await execFileAsync(
     process.execPath,
-    ["--import", "tsx", "-e", childScript, repository.path, "rebuilt-contract"],
+    ["--import", "tsx", "-e", childScript, repository.path, "kei/rebuilt-contract"],
     { env },
   );
   const result = JSON.parse(child.stdout) as { ok: boolean; kind: string };
@@ -505,8 +506,8 @@ test("unbounded carrier rebuilds are coupled to unrelated carrier movement", asy
 test("unrelated carrier movement is rebased into the next transaction", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
-  const firstId = contractId("contract-a");
-  const unrelatedId = contractId("contract-b");
+  const firstId = contractId("kei/contract-a");
+  const unrelatedId = contractId("kei/contract-b");
   const first = admit(repo, journalOffer(firstId, null, [bindEntry(firstId)]));
   assert.equal(first.ok, true);
   if (!first.ok) return;
@@ -531,9 +532,9 @@ test("concurrent appends to different contracts both survive carrier CAS", async
   ].join("\n");
   const args = (id: string, entry: string) => ["--import", "tsx", "-e", script, repository.path, id, entry];
   const rounds = [
-    ["contract-a", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "contract-b", "01ARZ3NDEKTSV4RRFFQ69G5FAW"],
-    ["contract-c", "01ARZ3NDEKTSV4RRFFQ69G5FAX", "contract-d", "01ARZ3NDEKTSV4RRFFQ69G5FAY"],
-    ["contract-e", "01ARZ3NDEKTSV4RRFFQ69G5FAZ", "contract-f", "01ARZ3NDEKTSV4RRFFQ69G5FB0"],
+    ["kei/contract-a", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "kei/contract-b", "01ARZ3NDEKTSV4RRFFQ69G5FAW"],
+    ["kei/contract-c", "01ARZ3NDEKTSV4RRFFQ69G5FAX", "kei/contract-d", "01ARZ3NDEKTSV4RRFFQ69G5FAY"],
+    ["kei/contract-e", "01ARZ3NDEKTSV4RRFFQ69G5FAZ", "kei/contract-f", "01ARZ3NDEKTSV4RRFFQ69G5FB0"],
   ] as const;
   for (const [leftId, leftEntry, rightId, rightEntry] of rounds) {
     const [left, right] = await Promise.all([
@@ -543,8 +544,8 @@ test("concurrent appends to different contracts both survive carrier CAS", async
     assert.equal(JSON.parse(left.stdout).ok, true);
     assert.equal(JSON.parse(right.stdout).ok, true);
   }
-  for (const id of ["contract-a", "contract-b", "contract-c", "contract-d", "contract-e", "contract-f"]) {
-    assert.match(repository.run(["show", `${CARRIER_REF}:contracts/${id}.jsonl`]), /"kind":"bind"/);
+  for (const id of ["kei/contract-a", "kei/contract-b", "kei/contract-c", "kei/contract-d", "kei/contract-e", "kei/contract-f"]) {
+    assert.match(repository.run(["show", `${CARRIER_REF}:${contractJournalPath(contractId(id))}`]), /"kind":"bind"/);
   }
   assert.equal(repository.run(["rev-list", "--count", CARRIER_REF]), "6\n");
 });

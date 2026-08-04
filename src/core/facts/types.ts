@@ -12,6 +12,7 @@ export type CommitOid = string & { readonly [commitOidBrand]: "CommitOid" };
 
 const ULID = /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
 const OID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const CONTRACT_ID = /^kei\/([a-z0-9][a-z0-9-]*)$/;
 
 function requireText(value: string, label: string): string {
   if (value.length === 0 || /\s/.test(value)) throw new Error(`${label} must be nonempty and contain no whitespace`);
@@ -25,10 +26,16 @@ function requireOid(value: string, label: string): string {
 
 export function contractId(value: string): ContractId {
   requireText(value, "contract ID");
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) {
-    throw new Error("contract ID must be a path-safe name");
+  if (!CONTRACT_ID.test(value)) {
+    throw new Error("contract ID must be kei/<lowercase-machine-contract>");
   }
   return value as ContractId;
+}
+
+function contractPayload(contract: ContractId): string {
+  const match = CONTRACT_ID.exec(contract);
+  if (!match) throw new TypeError(`invalid contract ID: ${contract}`);
+  return match[1]!;
 }
 
 export function entryUlid(value: string): EntryUlid {
@@ -80,14 +87,11 @@ export function evidencePath(
   const ref = typeof contractOrInput === "string" ? maybeRef : contractOrInput.ref;
   if (!ref) throw new Error("evidence path requires an evidence reference");
   if (!Number.isSafeInteger(ref.seq) || ref.seq < 0) throw new Error("evidence sequence must be a nonnegative safe integer");
-  return `contracts/${contract}/evidence/${ref.entry}/${ref.seq}-${evidenceKind(ref.kind)}`;
+  return `contracts/${contractPayload(contract)}/evidence/${ref.entry}/${ref.seq}-${evidenceKind(ref.kind)}`;
 }
 
 export function contractJournalPath(contract: ContractId): string {
-  if (contract.length === 0 || contract.includes("/") || contract.includes("\0") || contract === "." || contract === "..") {
-    throw new TypeError(`invalid contract id: ${contract}`);
-  }
-  return `contracts/${contract}.jsonl`;
+  return `contracts/${contractPayload(contract)}.jsonl`;
 }
 
 export type VerificationExecutor = "bash" | "zsh" | "pwsh";
