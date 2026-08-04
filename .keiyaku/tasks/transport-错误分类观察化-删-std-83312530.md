@@ -7,8 +7,9 @@ needs: []
 parent: null
 from: []
 createdAt: 2026-08-04T06:03:38.409Z
-updatedAt: 2026-08-04T06:03:38.409Z
+updatedAt: 2026-08-04T06:10:07.460Z
 creator: thekoc
+contractId: transport-错误分类观察化-删-stderr-文本协议.01KZ5P9HZ40EWBBG0EZSSBX0AA
 ---
 裁定（square #96）：transport 只分类进程结局（published / non-published / unknown），语义归因只来自失败后观察，stderr 是不透明诊断字节，永不匹配、永不分支。
 
