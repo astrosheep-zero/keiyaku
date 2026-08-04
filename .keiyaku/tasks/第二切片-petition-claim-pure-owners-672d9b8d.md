@@ -1,7 +1,7 @@
 ---
 id: 第二切片-petition-claim-pure-owners-672d9b8d
 title: 第二切片：petition/claim pure owners（Delivery Laws 5–8）
-state: in_progress
+state: done
 pri: 1
 needs:
   - 收窄-refoperation-至-claim-单次-ca-d09b3da2
@@ -17,9 +17,8 @@ notes:
     text: |
       Milestone implementation complete pending Square/Faye acceptance: petition pure owner split from shell-bound candidate preparation; claim owns sole target CAS and terminal petition-stale; candidate metadata follows Act 198 (actor exact name, fixed keiyaku@keiyaku.invalid email, author == committer, fixed parents/message); claim no longer imports admission; stale tests distinguish carrier commit from journal head. Verification: focused 12/12, full 100/100, source typecheck, build, and git diff --check pass. Square act #43 requests the task-prescribed Akuma review. CLI task now also needs actor-来源-keiyaku-projection-id-注-9d9b432c so architecture-correct MVP precedes dogfood.
 createdAt: 2026-08-04T04:26:32.728Z
-updatedAt: 2026-08-04T08:36:31.098Z
+updatedAt: 2026-08-04T10:57:39.052Z
 creator: thekoc
-startedAt: 2026-08-04T06:41:32.583Z
 ---
 恢复四个已暂停路径（src/core/verbs/petition.ts、claim.ts、tests/verbs-petition.test.ts、tests/verbs-claim.test.ts），按法典 Delivery Laws 5–8 落地：
 
