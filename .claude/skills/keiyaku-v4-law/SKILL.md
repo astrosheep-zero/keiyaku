@@ -68,3 +68,5 @@ Do not add an effect journal/receipt protocol, replay gate, pre-admission second
 4. Prove dependency direction. [Acts 162, 169]
 
 Update this law in the same commit as every future settled ruling and its implementation. [Act 169]
+5. Resolve `actor` once at the process boundary: use the complete projection identity from `KEIYAKU_PROJECTION_ID` when present; otherwise require an explicit nonblank `--actor`. The explicit actor is opaque external identity text and need not match a registered public identity grammar. Missing identity is a typed input refusal with usage guidance. Do not derive actor from a task, receipt, Git configuration, or machine/process name. A conflicting flag is an input error, not a second authority.
+6. Journal `actor` is the exact resolved bytes: either the Akuma projection identity or the opaque external actor. Candidate construction consumes the same bytes; do not normalize them, add an actor registry/profile store, or persist dispatch provenance as a second identity.

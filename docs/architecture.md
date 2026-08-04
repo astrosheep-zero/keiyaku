@@ -46,6 +46,22 @@ human namespace and local ID; there is no hub form.
 and no slash is a context-resolved movable reference matching the human rule.
 Neither `@` nor a movable reference is persisted as a durable fact coordinate.
 
+Verb callers resolve the actor once at the CLI/process boundary. An Akuma
+launch supplies the complete projection coordinate in the
+`KEIYAKU_PROJECTION_ID` environment variable (for example,
+`aku/codex/1a2b3c4d`); this value is used as-is after identity validation. When
+that variable is absent, the caller must provide an explicit nonblank `--actor`.
+This fallback is opaque external identity text and need not match any registered
+public identity grammar. If neither source is present, the command refuses with
+usage guidance. The environment value is not a receipt, task
+lookup, or persisted fact of its own: the resolved actor alone flows into the
+verb input and journal entry. A conflicting `--actor` is an input error rather
+than a second authority.
+
+The journal actor and candidate author consume the exact resolved bytes, whether
+they came from an Akuma projection or an external caller. There is no actor
+registry, profile store, dispatch-provenance field, or second author coordinate.
+
 Journal facts persist the full `kei/<machine-contract>` coordinate. Carrier
 paths privately strip `kei/`, yielding `contracts/<machine-contract>.jsonl`
 and `contracts/<machine-contract>/evidence/**`; no path is parsed back into a
