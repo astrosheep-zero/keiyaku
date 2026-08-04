@@ -14,6 +14,8 @@ import type {
   ForfeitData,
   ForfeitEntry,
   JournalEntry,
+  OpenData,
+  OpenEntry,
   PetitionData,
   PetitionEntry,
   RenewData,
@@ -67,6 +69,7 @@ const VERSION_BY_KIND = {
   bind: 1,
   amend: 1,
   seal: 1,
+  open: 1,
   claim: 1,
   renew: 1,
   petition: 1,
@@ -274,6 +277,14 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
       requireKeys(object, [], path);
       return {} satisfies SealData;
     }
+    case "open": {
+      const object = requireRecord(value, path);
+      requireKeys(object, ["target", "base"], path);
+      return {
+        target: stringValue(object.target, `${path}.target`),
+        base: commitOid(oidValue(object.base, `${path}.base`, "commit")),
+      } satisfies OpenData;
+    }
     case "claim": {
       const object = requireRecord(value, path);
       requireKeys(object, ["petition"], path);
@@ -281,27 +292,21 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
     }
     case "renew": {
       const object = requireRecord(value, path);
-      requireKeys(object, ["oldHead", "newHead"], path);
-      return { oldHead: commitOid(oidValue(object.oldHead, `${path}.oldHead`, "commit")), newHead: commitOid(oidValue(object.newHead, `${path}.newHead`, "commit")) } satisfies RenewData;
+      requireKeys(object, ["newBase", "oldHead", "newHead"], path);
+      return {
+        newBase: commitOid(oidValue(object.newBase, `${path}.newBase`, "commit")),
+        oldHead: commitOid(oidValue(object.oldHead, `${path}.oldHead`, "commit")),
+        newHead: commitOid(oidValue(object.newHead, `${path}.newHead`, "commit")),
+      } satisfies RenewData;
     }
     case "petition": {
       const object = requireRecord(value, path);
-      const intent = stringValue(object.intent, `${path}.intent`);
-      if (intent === "claim") {
-        requireKeys(object, ["intent", "oath", "expectedPredecessor", "seat", "candidate"], path);
-        return {
-          intent,
-          oath: stringValue(object.oath, `${path}.oath`),
-          expectedPredecessor: commitOid(oidValue(object.expectedPredecessor, `${path}.expectedPredecessor`, "commit")),
-          seat: integerValue(object.seat, `${path}.seat`, true),
-          candidate: commitOid(oidValue(object.candidate, `${path}.candidate`, "commit")),
-        } satisfies Extract<PetitionData, { intent: "claim" }>;
-      }
-      if (intent === "forfeit") {
-        requireKeys(object, ["intent", "seat"], path);
-        return { intent, seat: integerValue(object.seat, `${path}.seat`, true) } satisfies Extract<PetitionData, { intent: "forfeit" }>;
-      }
-      fail(`${path}.intent`, "unknown petition intent");
+      requireKeys(object, ["expectedPredecessor", "deliveryHead", "candidate"], path);
+      return {
+        expectedPredecessor: commitOid(oidValue(object.expectedPredecessor, `${path}.expectedPredecessor`, "commit")),
+        deliveryHead: commitOid(oidValue(object.deliveryHead, `${path}.deliveryHead`, "commit")),
+        candidate: commitOid(oidValue(object.candidate, `${path}.candidate`, "commit")),
+      } satisfies PetitionData;
     }
     case "forfeit": {
       const object = requireRecord(value, path);
@@ -314,10 +319,27 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
     }
     case "review": {
       const object = requireRecord(value, path);
-      requireKeys(object, ["verdict", "digest", "summary", "evidence"], path);
       const verdict = stringValue(object.verdict, `${path}.verdict`);
-      if (verdict !== "approved" && verdict !== "changes-requested") fail(`${path}.verdict`, "unknown review verdict");
-      return { verdict, digest: stringValue(object.digest, `${path}.digest`), summary: stringValue(object.summary, `${path}.summary`), evidence: evidenceRefs(object.evidence, `${path}.evidence`) } satisfies ReviewData;
+      if (verdict === "approved") {
+        requireKeys(object, ["verdict", "reviewedHead", "digest", "summary", "evidence"], path);
+        return {
+          verdict,
+          reviewedHead: commitOid(oidValue(object.reviewedHead, `${path}.reviewedHead`, "commit")),
+          digest: stringValue(object.digest, `${path}.digest`),
+          summary: stringValue(object.summary, `${path}.summary`),
+          evidence: evidenceRefs(object.evidence, `${path}.evidence`),
+        } satisfies Extract<ReviewData, { verdict: "approved" }>;
+      }
+      if (verdict === "changes-requested") {
+        requireKeys(object, ["verdict", "digest", "summary", "evidence"], path);
+        return {
+          verdict,
+          digest: stringValue(object.digest, `${path}.digest`),
+          summary: stringValue(object.summary, `${path}.summary`),
+          evidence: evidenceRefs(object.evidence, `${path}.evidence`),
+        } satisfies Extract<ReviewData, { verdict: "changes-requested" }>;
+      }
+      fail(`${path}.verdict`, "unknown review verdict");
     }
     case "check": {
       const object = requireRecord(value, path);
@@ -427,6 +449,7 @@ export type {
   CheckEntry,
   ClaimEntry,
   ForfeitEntry,
+  OpenEntry,
   PetitionEntry,
   RenewEntry,
   ReviewEntry,

@@ -76,7 +76,12 @@ function amendEntry(id: ContractId, entry = entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA
   };
 }
 
-function reviewEntry(id: ContractId, ref: EvidenceRef, entry = entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX")): ReviewEntry {
+function reviewEntry(
+  id: ContractId,
+  ref: EvidenceRef,
+  entry = entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
+  reviewedHead = commitOid("a".repeat(40)),
+): ReviewEntry {
   return {
     v: 1,
     kind: "review",
@@ -86,6 +91,7 @@ function reviewEntry(id: ContractId, ref: EvidenceRef, entry = entryUlid("01ARZ3
     actor: "test",
     data: {
       verdict: "approved",
+      reviewedHead,
       digest: "digest",
       summary: "summary",
       evidence: [ref],
@@ -166,6 +172,7 @@ test("terminal journal and evidence survive clone and GC after the candidate ref
   };
   const entries: JournalEntry[] = [
     bindEntry(id),
+    { v: 1, kind: "open", contract: id, entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB0"), at: AT, actor: "test", data: { target: "refs/heads/main", base: commitOid(predecessor) } },
     { v: 1, kind: "seal", contract: id, entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"), at: AT, actor: "test", data: {} },
     {
       v: 1,
@@ -175,14 +182,12 @@ test("terminal journal and evidence survive clone and GC after the candidate ref
       at: AT,
       actor: "test",
       data: {
-        intent: "claim",
-        oath: "candidate is ready",
         expectedPredecessor: commitOid(predecessor),
-        seat: 1,
+        deliveryHead: commitOid(predecessor),
         candidate: commitOid(candidate),
       },
     },
-    reviewEntry(id, ref, reviewId),
+    reviewEntry(id, ref, reviewId, commitOid(predecessor)),
     {
       v: 1,
       kind: "claim",

@@ -75,8 +75,8 @@ function seal(id: ContractId, value: string): JournalEntry {
   return { v: 1, kind: "seal", contract: id, entry: entryUlid(value), at: AT, actor: "seed", data: {} };
 }
 
-function forfeitPetition(id: ContractId, value: string): JournalEntry {
-  return { v: 1, kind: "petition", contract: id, entry: entryUlid(value), at: AT, actor: "seed", data: { intent: "forfeit", seat: 1 } };
+function open(id: ContractId, value: string): JournalEntry {
+  return { v: 1, kind: "open", contract: id, entry: entryUlid(value), at: AT, actor: "seed", data: { target: "refs/heads/main", base: commitOid("a".repeat(40)) } };
 }
 
 function claimPetition(id: ContractId, value: string): JournalEntry {
@@ -88,10 +88,8 @@ function claimPetition(id: ContractId, value: string): JournalEntry {
     at: AT,
     actor: "seed",
     data: {
-      intent: "claim",
-      oath: "Ready to claim",
       expectedPredecessor: commitOid("a".repeat(40)),
-      seat: 1,
+      deliveryHead: commitOid("a".repeat(40)),
       candidate: commitOid("b".repeat(40)),
     },
   };
@@ -105,7 +103,7 @@ function approvedReview(id: ContractId, value: string): JournalEntry {
     entry: entryUlid(value),
     at: AT,
     actor: "reviewer",
-    data: { verdict: "approved", digest: "digest", summary: "approved", evidence: [] },
+    data: { verdict: "approved", reviewedHead: commitOid("a".repeat(40)), digest: "digest", summary: "approved", evidence: [] },
   };
 }
 
@@ -136,19 +134,26 @@ function forfeit(id: ContractId, value: string): JournalEntry {
 function journalFor(id: ContractId, phase: Phase): readonly JournalEntry[] {
   const bound = bind(id, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
   if (phase === "active") return [bound];
+  const opened = open(id, "01ARZ3NDEKTSV4RRFFQ69G5FB0");
   const sealed = seal(id, "01ARZ3NDEKTSV4RRFFQ69G5FAW");
-  if (phase === "sealed") return [bound, sealed];
+  if (phase === "sealed") return [bound, opened, sealed];
   if (phase === "forfeited") return [bound, forfeit(id, "01ARZ3NDEKTSV4RRFFQ69G5FAX")];
-  if (phase === "awaiting-verdict") return [bound, sealed, forfeitPetition(id, "01ARZ3NDEKTSV4RRFFQ69G5FAX")];
-  if (phase === "approved") {
-    return [bound, sealed, forfeitPetition(id, "01ARZ3NDEKTSV4RRFFQ69G5FAX"), approvedReview(id, "01ARZ3NDEKTSV4RRFFQ69G5FAY")];
-  }
+  if (phase === "awaiting-verdict") return [bound, opened, sealed, claimPetition(id, "01ARZ3NDEKTSV4RRFFQ69G5FAX")];
   const petition = "01ARZ3NDEKTSV4RRFFQ69G5FAX";
-  return [bound, sealed, claimPetition(id, petition), approvedReview(id, "01ARZ3NDEKTSV4RRFFQ69G5FAY"), claim(id, petition, "01ARZ3NDEKTSV4RRFFQ69G5FAZ")];
+  return [bound, opened, sealed, claimPetition(id, petition), approvedReview(id, "01ARZ3NDEKTSV4RRFFQ69G5FAY"), claim(id, petition, "01ARZ3NDEKTSV4RRFFQ69G5FAZ")];
 }
 
-function seed(repository: ReturnType<typeof repositoryAt>, id: ContractId, phase: Phase): void {
-  const result = admit(repository, { facts: [{ contractId: id, expectedHead: null, entries: journalFor(id, phase) }] });
+function seed(
+  repository: ReturnType<typeof repositoryAt>,
+  id: ContractId,
+  phase: Phase,
+  withApproval = false,
+): void {
+  const journal = journalFor(id, phase);
+  const entries = withApproval
+    ? [...journal, approvedReview(id, "01ARZ3NDEKTSV4RRFFQ69G5FAY")]
+    : journal;
+  const result = admit(repository, { facts: [{ contractId: id, expectedHead: null, entries }] });
   assert.equal(result.kind, "accepted");
 }
 
@@ -176,18 +181,24 @@ test("amend has only type-only facts and protocol dependencies", () => {
 });
 
 test("amend updates the effective body and returns permitted phases to active", () => {
-  for (const phase of ["active", "awaiting-verdict", "approved"] as const) {
+  for (const [phase, withApproval] of [
+    ["active", false],
+    ["awaiting-verdict", false],
+    ["awaiting-verdict", true],
+  ] as const) {
     const repository = makeGitRepository();
     const repo = repositoryAt(repository.path);
-    const id = contractId(`kei/amend-${phase}`);
-    seed(repo, id, phase);
-    assert.equal(observeContract(repo, id).state?.phase, phase);
+    const id = contractId(`kei/amend-${phase}${withApproval ? "-approved" : ""}`);
+    seed(repo, id, phase, withApproval);
+    const before = observeContract(repo, id).state;
+    assert.equal(before?.phase, phase);
+    assert.equal(before?.approval === null, !withApproval);
 
     const result = runProtocol({
       input: amendInput(id),
       repository: repo,
       contracts: [id],
-      attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB0")],
+      attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB1")],
       decide: decideAmend,
     });
 
@@ -196,6 +207,7 @@ test("amend updates the effective body and returns permitted phases to active", 
     assert.equal(result.handoff.admission?.kind, "accepted");
     const observed = observeContract(repo, id);
     assert.equal(observed.state?.phase, "active");
+    assert.equal(observed.state?.approval, null);
     assert.equal(observed.state?.petition, null);
     assert.deepEqual(observed.state?.body, amendedBody());
   }
@@ -252,6 +264,7 @@ test("amend decision is deterministic, isolates caller data, and requires one UL
     phase: "active",
     body: body(),
     delivery: null,
+    approval: null,
     petition: null,
     evidence: [],
     terminal: null,

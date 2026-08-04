@@ -63,7 +63,7 @@ function cloneAmendData(data: AmendData): AmendData {
 }
 
 function amendable(phase: Phase): boolean {
-  return phase === "active" || phase === "awaiting-verdict" || phase === "approved";
+  return phase === "active" || phase === "awaiting-verdict";
 }
 
 /** Decide one amend admission from one already-captured protocol observation. */

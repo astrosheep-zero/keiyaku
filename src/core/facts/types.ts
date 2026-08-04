@@ -59,7 +59,6 @@ export type Phase =
   | "active"
   | "sealed"
   | "awaiting-verdict"
-  | "approved"
   | "claimed"
   | "forfeited";
 
@@ -128,6 +127,7 @@ export type CriteriaDelta =
   | Readonly<{ replace: readonly string[] }>;
 
 export type DeliveryCoordinate = Readonly<{
+  target: string;
   base: CommitOid;
   head: CommitOid;
 }>;
@@ -141,39 +141,46 @@ export type AmendData = Readonly<{
 
 export type SealData = Readonly<Record<string, never>>;
 
+export type OpenData = Readonly<{
+  target: string;
+  base: CommitOid;
+}>;
+
 export type ClaimData = Readonly<{
   petition: EntryUlid;
 }>;
 
 export type RenewData = Readonly<{
+  newBase: CommitOid;
   oldHead: CommitOid;
   newHead: CommitOid;
 }>;
 
-export type PetitionData =
-  | Readonly<{
-    intent: "claim";
-    oath: string;
-    expectedPredecessor: CommitOid;
-    seat: number;
-    candidate: CommitOid;
-  }>
-  | Readonly<{
-    intent: "forfeit";
-    seat: number;
-  }>;
+export type PetitionData = Readonly<{
+  expectedPredecessor: CommitOid;
+  deliveryHead: CommitOid;
+  candidate: CommitOid;
+}>;
 
 export type ForfeitData = Readonly<{
   reason: "manual" | "bind-failed";
   note?: string;
 }>;
 
-export type ReviewData = Readonly<{
-  verdict: "approved" | "changes-requested";
-  digest: string;
-  summary: string;
-  evidence: readonly EvidenceRef[];
-}>;
+export type ReviewData =
+  | Readonly<{
+    verdict: "approved";
+    reviewedHead: CommitOid;
+    digest: string;
+    summary: string;
+    evidence: readonly EvidenceRef[];
+  }>
+  | Readonly<{
+    verdict: "changes-requested";
+    digest: string;
+    summary: string;
+    evidence: readonly EvidenceRef[];
+  }>;
 
 export type CheckData = Readonly<{
   result: "pass" | "fail";
@@ -200,6 +207,7 @@ export type JournalEnvelope<Kind extends string, Data> = Readonly<{
 export type BindEntry = JournalEnvelope<"bind", ContractBody>;
 export type AmendEntry = JournalEnvelope<"amend", AmendData>;
 export type SealEntry = JournalEnvelope<"seal", SealData>;
+export type OpenEntry = JournalEnvelope<"open", OpenData>;
 export type ClaimEntry = JournalEnvelope<"claim", ClaimData>;
 export type RenewEntry = JournalEnvelope<"renew", RenewData>;
 export type PetitionEntry = JournalEnvelope<"petition", PetitionData>;
@@ -212,6 +220,7 @@ export type JournalEntry =
   | BindEntry
   | AmendEntry
   | SealEntry
+  | OpenEntry
   | ClaimEntry
   | RenewEntry
   | PetitionEntry
@@ -228,6 +237,7 @@ export type ContractState = Readonly<{
   phase: Phase;
   body: ContractBody | null;
   delivery: DeliveryCoordinate | null;
+  approval: ReviewEntry | null;
   petition: PetitionEntry | null;
   evidence: readonly (ReviewEntry | CheckEntry | VerificationEntry)[];
   terminal: ClaimEntry | ForfeitEntry | null;

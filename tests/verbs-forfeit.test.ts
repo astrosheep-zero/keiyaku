@@ -14,7 +14,6 @@ import {
   type ContractId,
   type ForfeitData,
   type JournalEntry,
-  type Phase,
 } from "../src/core/facts/types.js";
 import { observeContract } from "../src/core/protocol/observe.js";
 import { runProtocol, type AttemptContext, type DecideInput } from "../src/core/protocol/run.js";
@@ -68,35 +67,35 @@ function seal(id: ContractId): JournalEntry {
   };
 }
 
-function petition(id: ContractId, intent: "claim" | "forfeit"): JournalEntry {
-  return intent === "forfeit"
-    ? {
-      v: 1,
-      kind: "petition",
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
-      at: AT,
-      actor: "seed",
-      data: { intent, seat: 1 },
-    }
-    : {
-      v: 1,
-      kind: "petition",
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
-      at: AT,
-      actor: "seed",
-      data: {
-        intent,
-        oath: "Ready to claim",
-        expectedPredecessor: commitOid("a".repeat(40)),
-        seat: 1,
-        candidate: commitOid("b".repeat(40)),
-      },
-    };
+function open(id: ContractId): JournalEntry {
+  return {
+    v: 1,
+    kind: "open",
+    contract: id,
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB0"),
+    at: AT,
+    actor: "seed",
+    data: { target: "refs/heads/main", base: commitOid("a".repeat(40)) },
+  };
 }
 
-function approvedReview(id: ContractId): JournalEntry {
+function claimPetition(id: ContractId): JournalEntry {
+  return {
+    v: 1,
+    kind: "petition",
+    contract: id,
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
+    at: AT,
+    actor: "seed",
+    data: {
+      expectedPredecessor: commitOid("a".repeat(40)),
+      deliveryHead: commitOid("a".repeat(40)),
+      candidate: commitOid("b".repeat(40)),
+    },
+  };
+}
+
+function approvalReview(id: ContractId): JournalEntry {
   return {
     v: 1,
     kind: "review",
@@ -104,7 +103,7 @@ function approvedReview(id: ContractId): JournalEntry {
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
     at: AT,
     actor: "reviewer",
-    data: { verdict: "approved", digest: "digest", summary: "approved", evidence: [] },
+    data: { verdict: "approved", reviewedHead: commitOid("a".repeat(40)), digest: "digest", summary: "approved", evidence: [] },
   };
 }
 
@@ -120,13 +119,25 @@ function claim(id: ContractId): JournalEntry {
   };
 }
 
-function journalFor(id: ContractId, phase: Phase): readonly JournalEntry[] {
+type ForfeitableFixture = "active" | "sealed" | "awaiting-verdict" | "awaiting-verdict-approved";
+
+function journalFor(id: ContractId, fixture: ForfeitableFixture): readonly JournalEntry[] {
   const bound = bind(id);
-  if (phase === "active") return [bound];
-  if (phase === "sealed") return [bound, seal(id)];
-  if (phase === "awaiting-verdict") return [bound, seal(id), petition(id, "forfeit")];
-  if (phase === "approved") return [bound, seal(id), petition(id, "forfeit"), approvedReview(id)];
-  if (phase === "claimed") return [bound, seal(id), petition(id, "claim"), approvedReview(id), claim(id)];
+  if (fixture === "active") return [bound];
+  const opened = open(id);
+  const sealed = seal(id);
+  if (fixture === "sealed") return [bound, opened, sealed];
+  const petition = claimPetition(id);
+  if (fixture === "awaiting-verdict") return [bound, opened, sealed, petition];
+  return [bound, opened, sealed, petition, approvalReview(id)];
+}
+
+function claimedJournal(id: ContractId): readonly JournalEntry[] {
+  return [...journalFor(id, "awaiting-verdict-approved"), claim(id)];
+}
+
+function forfeitedJournal(id: ContractId): readonly JournalEntry[] {
+  const bound = bind(id);
   return [bound, {
     v: 1,
     kind: "forfeit",
@@ -155,16 +166,17 @@ test("forfeit has only type-only facts and protocol dependencies", () => {
   assert.ok(imports.every((declaration) => declaration.importClause?.isTypeOnly));
 });
 
-test("forfeit publishes one terminal fact from every fold-legal phase", () => {
-  for (const [phase, ulid] of [
+test("forfeit publishes one terminal fact from every nonterminal state", () => {
+  for (const [fixture, ulid] of [
     ["active", "01ARZ3NDEKTSV4RRFFQ69G5FB0"],
     ["sealed", "01ARZ3NDEKTSV4RRFFQ69G5FB1"],
-    ["approved", "01ARZ3NDEKTSV4RRFFQ69G5FB2"],
+    ["awaiting-verdict", "01ARZ3NDEKTSV4RRFFQ69G5FB2"],
+    ["awaiting-verdict-approved", "01ARZ3NDEKTSV4RRFFQ69G5FB3"],
   ] as const) {
     const repository = makeGitRepository();
     const repo = repositoryAt(repository.path);
-    const id = contractId(`kei/forfeit-${phase}`);
-    seed(repo, id, journalFor(id, phase));
+    const id = contractId(`kei/forfeit-${fixture}`);
+    seed(repo, id, journalFor(id, fixture));
 
     const result = runProtocol({
       input: forfeitInput(id),
@@ -194,7 +206,7 @@ test("forfeit publishes one terminal fact from every fold-legal phase", () => {
   }
 });
 
-test("forfeit refuses missing, illegal, and claim-petition states without publishing", () => {
+test("forfeit refuses missing and terminal states without publishing", () => {
   const missingRepository = makeGitRepository();
   const missingRepo = repositoryAt(missingRepository.path);
   const missing = contractId("kei/forfeit-missing");
@@ -208,18 +220,21 @@ test("forfeit refuses missing, illegal, and claim-petition states without publis
   assert.deepEqual(missingResult, { kind: "refused", refusal: { kind: "contract-missing", contractId: missing } });
   assert.equal(readRef(missingRepo, "refs/heads/keiyaku-state"), null);
 
-  for (const phase of ["awaiting-verdict", "claimed", "forfeited"] as const) {
+  for (const [phase, entries] of [
+    ["claimed", claimedJournal],
+    ["forfeited", forfeitedJournal],
+  ] as const) {
     const repository = makeGitRepository();
     const repo = repositoryAt(repository.path);
     const id = contractId(`kei/forfeit-${phase}`);
-    seed(repo, id, journalFor(id, phase));
+    seed(repo, id, entries(id));
     const before = readRef(repo, "refs/heads/keiyaku-state");
 
     const result = runProtocol({
       input: forfeitInput(id),
       repository: repo,
       contracts: [id],
-      attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB4")],
+      attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB5")],
       decide: decideForfeit,
     });
     assert.deepEqual(result, {
@@ -228,27 +243,9 @@ test("forfeit refuses missing, illegal, and claim-petition states without publis
     });
     assert.equal(readRef(repo, "refs/heads/keiyaku-state"), before);
   }
-
-  const claimRepository = makeGitRepository();
-  const claimRepo = repositoryAt(claimRepository.path);
-  const claimId = contractId("kei/forfeit-claim-petition");
-  seed(claimRepo, claimId, [bind(claimId), seal(claimId), petition(claimId, "claim"), approvedReview(claimId)]);
-  const claimBefore = readRef(claimRepo, "refs/heads/keiyaku-state");
-  const claimResult = runProtocol({
-    input: forfeitInput(claimId),
-    repository: claimRepo,
-    contracts: [claimId],
-    attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB5")],
-    decide: decideForfeit,
-  });
-  assert.deepEqual(claimResult, {
-    kind: "refused",
-    refusal: { kind: "phase-not-forfeitable", contractId: claimId, phase: "approved" },
-  });
-  assert.equal(readRef(claimRepo, "refs/heads/keiyaku-state"), claimBefore);
 });
 
-test("forfeit decision is deterministic, clones input data, and requires one ULID", () => {
+test("forfeit decision is deterministic, clones input data, offers no ref operation, and requires one ULID", () => {
   const id = contractId("kei/forfeit-pure");
   const mutableData: { reason: "manual"; note: string } = { reason: "manual", note: "initial" };
   const decisionInput: DecideInput<ForfeitInput> = {
@@ -265,6 +262,7 @@ test("forfeit decision is deterministic, clones input data, and requires one ULI
           phase: "active",
           body: body(),
           delivery: null,
+          approval: null,
           petition: null,
           evidence: [],
           terminal: null,
@@ -286,6 +284,7 @@ test("forfeit decision is deterministic, clones input data, and requires one ULI
   assert.deepEqual(first.offer, {
     facts: [{ contractId: id, expectedHead: "a".repeat(40), entries: [offered] }],
   });
+  assert.equal(first.offer.refs, undefined);
   assert.throws(
     () => decideForfeit({
       ...decisionInput,
@@ -328,7 +327,7 @@ test("a competing seal causes forfeit to redecide with the next fresh ULID", () 
           facts: [{
             contractId: id,
             expectedHead: append.expectedHead,
-            entries: [seal(id)],
+            entries: [open(id), seal(id)],
           }],
         });
         assert.equal(competitor.kind, "accepted");
@@ -344,6 +343,6 @@ test("a competing seal causes forfeit to redecide with the next fresh ULID", () 
   assert.deepEqual(seen.map((item) => item.ulid), attempts.map((candidate) => candidate.entryUlids[0]!));
   assert.equal(seen[1]?.expectedHead, competingHead);
   const observed = observeContract(repo, id);
-  assert.deepEqual(observed.entries.map((entry) => entry.kind), ["bind", "seal", "forfeit"]);
+  assert.deepEqual(observed.entries.map((entry) => entry.kind), ["bind", "open", "seal", "forfeit"]);
   assert.equal(observed.state?.phase, "forfeited");
 });

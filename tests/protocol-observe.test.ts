@@ -20,6 +20,7 @@ import {
 } from "../src/core/protocol/observe.js";
 import {
   blobOid,
+  commitOid,
   contractId,
   contractJournalPath,
   evidencePath,
@@ -64,6 +65,7 @@ function reviewEntry(id: ContractId): ReviewEntry {
     actor: "reviewer",
     data: {
       verdict: "approved",
+      reviewedHead: commitOid("a".repeat(40)),
       digest: "review-digest",
       summary: "review summary",
       evidence: [{

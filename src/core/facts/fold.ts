@@ -60,6 +60,7 @@ function initialState(id: ContractState["id"], head: ContractState["head"] = nul
     phase: "active",
     body: null,
     delivery: null,
+    approval: null,
     petition: null,
     evidence: [],
     terminal: null,
@@ -91,48 +92,64 @@ export function foldEntry(state: ContractState, entry: JournalEntry): ContractSt
     case "bind":
       return { ...next, body: { ...entry.data, region: [...entry.data.region], criteria: [...entry.data.criteria], verification: [...entry.data.verification], extensions: [...entry.data.extensions] } };
     case "amend":
-      if (next.phase !== "active" && next.phase !== "awaiting-verdict" && next.phase !== "approved") refuse(next, entry);
-      return { ...next, body: applyAmend(requireBound(next), entry), phase: "active", petition: null };
+      if (next.phase !== "active" && next.phase !== "awaiting-verdict") refuse(next, entry);
+      return { ...next, body: applyAmend(requireBound(next), entry), phase: "active", approval: null, petition: null };
     case "seal":
       if (next.phase !== "active") refuse(next, entry);
+      if (next.delivery === null) foldError("seal requires an open delivery");
       return { ...next, phase: "sealed" };
+    case "open":
+      if (next.phase !== "active") refuse(next, entry);
+      if (next.delivery !== null) foldError("delivery may be opened only once");
+      return {
+        ...next,
+        delivery: {
+          target: entry.data.target,
+          base: entry.data.base,
+          head: entry.data.base,
+        },
+      };
     case "renew":
       if (next.phase !== "sealed") refuse(next, entry);
-      if (next.delivery !== null && entry.data.oldHead !== next.delivery.head) {
+      if (next.delivery === null) foldError("renew requires an open delivery");
+      if (entry.data.oldHead !== next.delivery.head) {
         foldError(`renew old head ${entry.data.oldHead} does not match current delivery head ${next.delivery.head}`);
       }
       return {
         ...next,
         phase: "active",
-        delivery: { base: entry.data.oldHead, head: entry.data.newHead },
+        approval: null,
+        delivery: {
+          target: next.delivery.target,
+          base: entry.data.newBase,
+          head: entry.data.newHead,
+        },
       };
     case "petition":
       if (next.phase !== "sealed") refuse(next, entry);
-      return { ...next, phase: "awaiting-verdict", petition: entry };
+      return { ...next, phase: "awaiting-verdict", approval: null, petition: entry };
     case "review":
       if (next.phase === "awaiting-verdict") {
         return entry.data.verdict === "approved"
-          ? { ...next, phase: "approved" }
-          : { ...next, phase: "active", petition: null };
+          ? { ...next, approval: entry }
+          : { ...next, phase: "active", approval: null, petition: null };
       }
       return next;
     case "check":
     case "verification":
       return next;
     case "claim":
-      if (next.phase !== "approved") refuse(next, entry);
-      if (next.petition?.data.intent !== "claim" || next.petition.entry !== entry.data.petition) {
+      if (next.phase !== "awaiting-verdict") refuse(next, entry);
+      if (next.petition === null || next.petition.entry !== entry.data.petition) {
         foldError("claim must name the current claim petition");
       }
-      return { ...next, phase: "claimed", petition: null, terminal: entry };
+      if (next.approval === null || next.approval.data.verdict !== "approved" || next.approval.data.reviewedHead !== next.petition.data.deliveryHead) {
+        foldError("claim requires an approval for the petition delivery head");
+      }
+      return { ...next, phase: "claimed", approval: null, petition: null, terminal: entry };
     case "forfeit":
-      if (next.phase === "active" || next.phase === "sealed") {
-        return { ...next, phase: "forfeited", petition: null, terminal: entry };
-      }
-      if (next.phase === "approved" && next.petition?.data.intent === "forfeit") {
-        return { ...next, phase: "forfeited", petition: null, terminal: entry };
-      }
-      refuse(next, entry);
+      if (next.phase === "claimed" || next.phase === "forfeited") refuse(next, entry);
+      return { ...next, phase: "forfeited", approval: null, petition: null, terminal: entry };
   }
 }
 

@@ -64,6 +64,10 @@ function seal(entryId: string) {
   return entry({ v: 1, kind: "seal", contract, entry: ulid(entryId), at, actor: "tester", data: {} });
 }
 
+function open(entryId: string) {
+  return entry({ v: 1, kind: "open", contract, entry: ulid(entryId), at, actor: "tester", data: { target: "refs/heads/main", base: commit("a") } });
+}
+
 function claimPetition(entryId: string, candidate = "1") {
   return entry({
     v: 1,
@@ -72,7 +76,7 @@ function claimPetition(entryId: string, candidate = "1") {
     entry: ulid(entryId),
     at,
     actor: "tester",
-    data: { intent: "claim", oath: "I accept", expectedPredecessor: commit("f"), seat: 1, candidate: commit(candidate) },
+    data: { expectedPredecessor: commit("f"), deliveryHead: commit("a"), candidate: commit(candidate) },
   });
 }
 
@@ -85,7 +89,9 @@ function review(entryId: string, verdict: "approved" | "changes-requested" = "ap
     entry: reviewId,
     at,
     actor: "reviewer",
-    data: { verdict, digest: "sha256:review", summary: "reviewed", evidence: [evidence(reviewId, "review")] },
+    data: verdict === "approved"
+      ? { verdict, reviewedHead: commit("a"), digest: "sha256:review", summary: "reviewed", evidence: [evidence(reviewId, "review")] }
+      : { verdict, digest: "sha256:review", summary: "reviewed", evidence: [evidence(reviewId, "review")] },
   });
 }
 
@@ -96,6 +102,7 @@ function claimedJournal(): JournalEntry[] {
       v: 1, kind: "amend", contract, entry: ulid("2"), at, actor: "tester",
       data: { revisions: [{ target: "objective", op: "append", body: "Second objective" }] },
     }),
+    open("G"),
     seal("3"),
     claimPetition("4"),
     review("5"),
@@ -113,20 +120,24 @@ test("all native v1 journal entries have exact canonical JSONL round trips", () 
     }),
     entry({ v: 1, kind: "seal", contract, entry: ulid("9"), at, actor: "tester", data: {} }),
     entry({
-      v: 1, kind: "renew", contract, entry: ulid("A"), at, actor: "tester",
-      data: { oldHead: commit("d"), newHead: commit("e") },
+      v: 1, kind: "open", contract, entry: ulid("A"), at, actor: "tester",
+      data: { target: "refs/heads/main", base: commit("c") },
     }),
     entry({
-      v: 1, kind: "petition", contract, entry: ulid("B"), at, actor: "tester",
-      data: { intent: "claim", oath: "I accept", expectedPredecessor: commit("f"), seat: 1, candidate: commit("1") },
+      v: 1, kind: "renew", contract, entry: ulid("B"), at, actor: "tester",
+      data: { newBase: commit("d"), oldHead: commit("e"), newHead: commit("f") },
     }),
     entry({
-      v: 1, kind: "forfeit", contract, entry: ulid("C"), at, actor: "tester",
+      v: 1, kind: "petition", contract, entry: ulid("C"), at, actor: "tester",
+      data: { expectedPredecessor: commit("f"), deliveryHead: commit("a"), candidate: commit("1") },
+    }),
+    entry({
+      v: 1, kind: "forfeit", contract, entry: ulid("G"), at, actor: "tester",
       data: { reason: "manual", note: "stopped by holder" },
     }),
     entry({
       v: 1, kind: "review", contract, entry: reviewEntry, at, actor: "tester",
-      data: { verdict: "approved", digest: "sha256:review", summary: "approved", evidence: [evidence(reviewEntry, "review")] },
+      data: { verdict: "approved", reviewedHead: commit("a"), digest: "sha256:review", summary: "approved", evidence: [evidence(reviewEntry, "review")] },
     }),
     entry({
       v: 1, kind: "check", contract, entry: ulid("D"), at, actor: "tester",
@@ -136,7 +147,7 @@ test("all native v1 journal entries have exact canonical JSONL round trips", () 
       v: 1, kind: "verification", contract, entry: ulid("E"), at, actor: "tester",
       data: { result: "pass", summary: "verified", evidence: [evidence(ulid("E"), "verification", "e")] },
     }),
-    entry({ v: 1, kind: "claim", contract, entry: ulid("F"), at, actor: "tester", data: { petition: ulid("B") } }),
+    entry({ v: 1, kind: "claim", contract, entry: ulid("F"), at, actor: "tester", data: { petition: ulid("C") } }),
   ];
 
   let journal = "";
@@ -174,6 +185,12 @@ test("unknown fields, kinds, versions, and unsafe identities fail closed", () =>
   })), /unknown field 'extra'/);
   assert.throws(() => decodeEntry(canonicalJson({ ...bind, kind: "evidence-lost", data: {} })), UnknownEntryError);
   assert.throws(() => decodeEntry(canonicalJson({ ...bind, kind: "seal", data: { sealedBy: "petition" } })), FactsCodecError);
+  assert.throws(() => decodeEntry(canonicalJson({ ...bind, kind: "open", entry: ulid("J"), data: { target: "refs/heads/main" } })), /missing field 'base'/);
+  assert.throws(() => decodeEntry(canonicalJson({ ...bind, kind: "renew", entry: ulid("K"), data: { oldHead: commit("a"), newHead: commit("b") } })), /missing field 'newBase'/);
+  assert.throws(() => decodeEntry(canonicalJson({ ...bind, kind: "petition", entry: ulid("N"), data: { expectedPredecessor: commit("a"), deliveryHead: commit("a"), candidate: commit("b"), intent: "claim" } })), /unknown field 'intent'/);
+  assert.throws(() => decodeEntry(canonicalJson({ ...bind, kind: "petition", entry: ulid("P"), data: { expectedPredecessor: commit("a"), candidate: commit("b") } })), /missing field 'deliveryHead'/);
+  assert.throws(() => decodeEntry(canonicalJson({ ...bind, kind: "review", entry: ulid("M"), data: { verdict: "approved", digest: "digest", summary: "approved", evidence: [] } })), /missing field 'reviewedHead'/);
+  assert.throws(() => decodeEntry(canonicalJson({ ...bind, kind: "review", entry: ulid("Q"), data: { verdict: "changes-requested", reviewedHead: commit("a"), digest: "digest", summary: "requested", evidence: [] } })), /unknown field 'reviewedHead'/);
 });
 
 test("strict canonical decoding rejects noncanonical journals and mismatched evidence identity", () => {
@@ -224,50 +241,86 @@ test("fold requires bind and keeps the exact flat state shape", () => {
 
   const state = foldJournal(contract, claimedJournal().slice(0, 2), contractHead("1".repeat(40)));
   assert.equal(state.head, contractHead("1".repeat(40)));
+  assert.equal(state.approval, null);
   assert.equal(effectiveBody(state).objective, "Objective\n\nSecond objective");
-  assert.deepEqual(Object.keys(state).sort(), ["body", "delivery", "evidence", "head", "id", "petition", "phase", "terminal"]);
+  assert.deepEqual(Object.keys(state).sort(), ["approval", "body", "delivery", "evidence", "head", "id", "petition", "phase", "terminal"]);
 });
 
-test("seal has no owner and renew/petition each consume a sealed phase", () => {
+test("open initializes delivery, seal requires it, and renew preserves its target", () => {
+  assert.throws(() => foldJournal(contract, [bind, seal("P")]), /seal requires an open delivery/);
+
+  const opened = foldJournal(contract, [
+    bind,
+    open("Q"),
+  ]);
+  assert.equal(opened.approval, null);
+  assert.deepEqual(opened.delivery, { target: "refs/heads/main", base: commit("a"), head: commit("a") });
+
   const renewed = foldJournal(contract, [
     bind,
-    seal("Q"),
-    entry({ v: 1, kind: "renew", contract, entry: ulid("R"), at, actor: "tester", data: { oldHead: commit("a"), newHead: commit("b") } }),
+    open("Q"),
+    seal("R"),
+    entry({ v: 1, kind: "renew", contract, entry: ulid("S"), at, actor: "tester", data: { newBase: commit("b"), oldHead: commit("a"), newHead: commit("c") } }),
   ]);
   assert.equal(renewed.phase, "active");
-  assert.deepEqual(renewed.delivery, { base: commit("a"), head: commit("b") });
+  assert.equal(renewed.approval, null);
+  assert.deepEqual(renewed.delivery, { target: "refs/heads/main", base: commit("b"), head: commit("c") });
 
-  const petitioned = foldJournal(contract, [bind, seal("S"), claimPetition("T")]);
+  const petitioned = foldJournal(contract, [bind, open("T"), seal("V"), claimPetition("W")]);
   assert.equal(petitioned.phase, "awaiting-verdict");
-  assert.equal(petitioned.petition?.entry, ulid("T"));
+  assert.equal(petitioned.approval, null);
+  assert.equal(petitioned.petition?.entry, ulid("W"));
 });
 
 test("renew requires the current delivery endpoint and refuses stale chains", () => {
-  const first = entry({ v: 1, kind: "renew", contract, entry: ulid("R"), at, actor: "tester", data: { oldHead: commit("a"), newHead: commit("b") } });
-  const stale = entry({ v: 1, kind: "renew", contract, entry: ulid("W"), at, actor: "tester", data: { oldHead: commit("a"), newHead: commit("c") } });
-  const second = entry({ v: 1, kind: "renew", contract, entry: ulid("X"), at, actor: "tester", data: { oldHead: commit("b"), newHead: commit("c") } });
-  const prefix = [bind, seal("V"), first];
+  const opened = open("R");
+  const first = entry({ v: 1, kind: "renew", contract, entry: ulid("S"), at, actor: "tester", data: { newBase: commit("b"), oldHead: commit("a"), newHead: commit("c") } });
+  const stale = entry({ v: 1, kind: "renew", contract, entry: ulid("W"), at, actor: "tester", data: { newBase: commit("d"), oldHead: commit("a"), newHead: commit("e") } });
+  const second = entry({ v: 1, kind: "renew", contract, entry: ulid("X"), at, actor: "tester", data: { newBase: commit("d"), oldHead: commit("c"), newHead: commit("e") } });
+  const prefix = [bind, opened, seal("V"), first];
   assert.throws(() => foldJournal(contract, [...prefix, seal("Y"), stale]), /does not match current delivery head/);
   const state = foldJournal(contract, [...prefix, seal("Z"), second]);
-  assert.deepEqual(state.delivery, { base: commit("b"), head: commit("c") });
+  assert.deepEqual(state.delivery, { target: "refs/heads/main", base: commit("d"), head: commit("e") });
 });
 
-test("fold accumulates evidence entry bodies, preserves approved petitions, and returns changes to active", () => {
+test("fold keeps approval as current evidence while awaiting a verdict and returns changes to active", () => {
   const petition = claimPetition("0");
-  const awaiting = foldJournal(contract, [bind, seal("A"), petition]);
-  const approved = foldEntry(awaiting, review("B"));
-  assert.equal(approved.phase, "approved");
+  const awaiting = foldJournal(contract, [bind, open("A"), seal("B"), petition]);
+  const approval = review("C");
+  const approved = foldEntry(awaiting, approval);
+  assert.equal(approved.phase, "awaiting-verdict");
   assert.equal(approved.petition?.entry, petition.entry);
+  assert.equal(approved.approval, approval);
   assert.equal(approved.evidence[0]?.kind, "review");
-  const requested = foldJournal(contract, [bind, seal("C"), claimPetition("D"), review("E", "changes-requested")]);
+  assert.deepEqual(approved.evidence[0], approval);
+  const amended = foldEntry(approved, entry({ v: 1, kind: "amend", contract, entry: ulid("D"), at, actor: "tester", data: { region: ["src/changed"] } }));
+  assert.equal(amended.approval, null);
+  const requested = foldJournal(contract, [bind, open("D"), seal("E"), claimPetition("F"), review("G", "changes-requested")]);
   assert.equal(requested.phase, "active");
+  assert.equal(requested.approval, null);
   assert.equal(requested.petition, null);
 });
 
-test("fold enforces claim identity, terminal immutability, and local ULID uniqueness", () => {
+test("fold enforces current matching approval for claim, terminal immutability, and local ULID uniqueness", () => {
+  const petition = claimPetition("H");
+  const awaiting = [bind, open("J"), seal("K"), petition];
+  const claim = entry({ v: 1, kind: "claim", contract, entry: ulid("M"), at, actor: "tester", data: { petition: petition.entry } });
+  assert.throws(() => foldJournal(contract, [...awaiting, claim]), /requires an approval/);
+  const mismatchedApproval = entry({
+    v: 1,
+    kind: "review",
+    contract,
+    entry: ulid("N"),
+    at,
+    actor: "reviewer",
+    data: { verdict: "approved", reviewedHead: commit("d"), digest: "sha256:review", summary: "reviewed", evidence: [] },
+  });
+  assert.throws(() => foldJournal(contract, [...awaiting, mismatchedApproval, claim]), /approval for the petition delivery head/);
+
   const history = claimedJournal();
   const claimed = foldJournal(contract, history);
   assert.equal(claimed.phase, "claimed");
+  assert.equal(claimed.approval, null);
   assert.equal(claimed.terminal?.kind, "claim");
   assert.throws(() => foldJournal(contract, [...history, entry({ v: 1, kind: "amend", contract, entry: ulid("1"), at, actor: "tester", data: { region: ["other"] } })]), /duplicate entry/);
   assert.throws(() => foldJournal(contract, [...history, entry({ v: 1, kind: "amend", contract, entry: ulid("Y"), at, actor: "tester", data: { region: ["other"] } })]), /claimed cannot accept amend/);
@@ -280,10 +333,15 @@ test("fold enforces claim identity, terminal immutability, and local ULID unique
   assert.equal(verified.evidence.at(-1)?.kind, "verification");
 });
 
-test("forfeit is legal from active, sealed, and an approved forfeit petition", () => {
+test("forfeit is legal from every nonterminal phase and clears current pointers", () => {
   assert.equal(foldJournal(contract, [bind, entry({ v: 1, kind: "forfeit", contract, entry: ulid("4"), at, actor: "tester", data: { reason: "bind-failed" } })]).phase, "forfeited");
-  assert.equal(foldJournal(contract, [bind, seal("5"), entry({ v: 1, kind: "forfeit", contract, entry: ulid("6"), at, actor: "tester", data: { reason: "manual" } })]).phase, "forfeited");
-  const petition = entry({ v: 1, kind: "petition", contract, entry: ulid("7"), at, actor: "tester", data: { intent: "forfeit", seat: 1 } });
-  const approved = foldJournal(contract, [bind, seal("8"), petition, review("9")]);
-  assert.equal(foldEntry(approved, entry({ v: 1, kind: "forfeit", contract, entry: ulid("A"), at, actor: "tester", data: { reason: "manual" } })).phase, "forfeited");
+  assert.equal(foldJournal(contract, [bind, open("5"), seal("6"), entry({ v: 1, kind: "forfeit", contract, entry: ulid("7"), at, actor: "tester", data: { reason: "manual" } })]).phase, "forfeited");
+  const petition = claimPetition("8");
+  const awaiting = foldJournal(contract, [bind, open("9"), seal("A"), petition]);
+  assert.equal(foldEntry(awaiting, entry({ v: 1, kind: "forfeit", contract, entry: ulid("B"), at, actor: "tester", data: { reason: "manual" } })).phase, "forfeited");
+  const reviewed = foldEntry(awaiting, review("C"));
+  const forfeited = foldEntry(reviewed, entry({ v: 1, kind: "forfeit", contract, entry: ulid("D"), at, actor: "tester", data: { reason: "manual" } }));
+  assert.equal(forfeited.phase, "forfeited");
+  assert.equal(forfeited.approval, null);
+  assert.equal(forfeited.petition, null);
 });

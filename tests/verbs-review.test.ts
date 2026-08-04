@@ -76,32 +76,32 @@ function seal(id: ContractId): JournalEntry {
   };
 }
 
-function petition(id: ContractId, intent: "claim" | "forfeit"): PetitionEntry {
-  return intent === "forfeit"
-    ? {
-      v: 1,
-      kind: "petition",
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
-      at: AT,
-      actor: "seed",
-      data: { intent, seat: 1 },
-    }
-    : {
-      v: 1,
-      kind: "petition",
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
-      at: AT,
-      actor: "seed",
-      data: {
-        intent,
-        oath: "Ready to claim",
-        expectedPredecessor: commitOid("a".repeat(40)),
-        seat: 1,
-        candidate: commitOid("b".repeat(40)),
-      },
-    };
+function open(id: ContractId): JournalEntry {
+  return {
+    v: 1,
+    kind: "open",
+    contract: id,
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB0"),
+    at: AT,
+    actor: "seed",
+    data: { target: "refs/heads/main", base: commitOid("a".repeat(40)) },
+  };
+}
+
+function petition(id: ContractId): PetitionEntry {
+  return {
+    v: 1,
+    kind: "petition",
+    contract: id,
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
+    at: AT,
+    actor: "seed",
+    data: {
+      expectedPredecessor: commitOid("a".repeat(40)),
+      deliveryHead: commitOid("a".repeat(40)),
+      candidate: commitOid("b".repeat(40)),
+    },
+  };
 }
 
 function approvedReview(id: ContractId): JournalEntry {
@@ -112,7 +112,7 @@ function approvedReview(id: ContractId): JournalEntry {
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
     at: AT,
     actor: "seed",
-    data: { verdict: "approved", digest: "digest", summary: "approved", evidence: [] },
+    data: { verdict: "approved", reviewedHead: commitOid("a".repeat(40)), digest: "digest", summary: "approved", evidence: [] },
   };
 }
 
@@ -131,10 +131,10 @@ function claim(id: ContractId): JournalEntry {
 function journalFor(id: ContractId, phase: Phase): readonly JournalEntry[] {
   const bound = bind(id);
   if (phase === "active") return [bound];
-  if (phase === "sealed") return [bound, seal(id)];
-  if (phase === "awaiting-verdict") return [bound, seal(id), petition(id, "forfeit")];
-  if (phase === "approved") return [bound, seal(id), petition(id, "forfeit"), approvedReview(id)];
-  if (phase === "claimed") return [bound, seal(id), petition(id, "claim"), approvedReview(id), claim(id)];
+  const opened = open(id);
+  if (phase === "sealed") return [bound, opened, seal(id)];
+  if (phase === "awaiting-verdict") return [bound, opened, seal(id), petition(id)];
+  if (phase === "claimed") return [bound, opened, seal(id), petition(id), approvedReview(id), claim(id)];
   return [bound, {
     v: 1,
     kind: "forfeit",
@@ -163,48 +163,44 @@ test("review changes requested has only type-only facts and protocol dependencie
   assert.ok(imports.every((declaration) => declaration.importClause?.isTypeOnly));
 });
 
-test("review changes requested reopens claim and forfeit petitions to active", () => {
-  for (const [intent, ulid] of [
-    ["claim", "01ARZ3NDEKTSV4RRFFQ69G5FB0"],
-    ["forfeit", "01ARZ3NDEKTSV4RRFFQ69G5FB1"],
-  ] as const) {
-    const repository = makeGitRepository();
-    const repo = repositoryAt(repository.path);
-    const id = contractId(`kei/review-${intent}`);
-    seed(repo, id, [bind(id), seal(id), petition(id, intent)]);
-    assert.equal(observeContract(repo, id).state?.phase, "awaiting-verdict");
+test("review changes requested reopens a claim petition to active", () => {
+  const repository = makeGitRepository();
+  const repo = repositoryAt(repository.path);
+  const id = contractId("kei/review-claim");
+  const ulid = "01ARZ3NDEKTSV4RRFFQ69G5FB2";
+  seed(repo, id, [bind(id), open(id), seal(id), petition(id)]);
+  assert.equal(observeContract(repo, id).state?.phase, "awaiting-verdict");
 
-    const result = runProtocol({
-      input: reviewInput(id),
-      repository: repo,
-      contracts: [id],
-      attempts: [attempt(0, ulid)],
-      decide: decideReviewChangesRequested,
-    });
+  const result = runProtocol({
+    input: reviewInput(id),
+    repository: repo,
+    contracts: [id],
+    attempts: [attempt(0, ulid)],
+    decide: decideReviewChangesRequested,
+  });
 
-    assert.equal(result.kind, "handoff");
-    if (result.kind !== "handoff") continue;
-    assert.equal(result.handoff.admission?.kind, "accepted");
-    assert.equal(result.handoff.handoff, null);
-    assert.deepEqual(result.handoff.acceptedEntries, [{
-      v: 1,
-      kind: "review",
-      contract: id,
-      entry: entryUlid(ulid),
-      at: AT,
-      actor: "reviewer",
-      data: {
-        verdict: "changes-requested",
-        digest: "review-digest",
-        summary: "Changes are needed",
-        evidence: [],
-      },
-    }]);
-    const observed = observeContract(repo, id);
-    assert.equal(observed.state?.phase, "active");
-    assert.equal(observed.state?.petition, null);
-    assert.equal(observed.state?.evidence.at(-1)?.kind, "review");
-  }
+  assert.equal(result.kind, "handoff");
+  if (result.kind !== "handoff") return;
+  assert.equal(result.handoff.admission?.kind, "accepted");
+  assert.equal(result.handoff.handoff, null);
+  assert.deepEqual(result.handoff.acceptedEntries, [{
+    v: 1,
+    kind: "review",
+    contract: id,
+    entry: entryUlid(ulid),
+    at: AT,
+    actor: "reviewer",
+    data: {
+      verdict: "changes-requested",
+      digest: "review-digest",
+      summary: "Changes are needed",
+      evidence: [],
+    },
+  }]);
+  const observed = observeContract(repo, id);
+  assert.equal(observed.state?.phase, "active");
+  assert.equal(observed.state?.petition, null);
+  assert.equal(observed.state?.evidence.at(-1)?.kind, "review");
 });
 
 test("review changes requested refuses missing and every non-awaiting phase without publishing", () => {
@@ -224,7 +220,7 @@ test("review changes requested refuses missing and every non-awaiting phase with
   });
   assert.equal(readRef(missingRepo, "refs/heads/keiyaku-state"), null);
 
-  for (const phase of ["active", "sealed", "approved", "claimed", "forfeited"] as const) {
+  for (const phase of ["active", "sealed", "claimed", "forfeited"] as const) {
     const repository = makeGitRepository();
     const repo = repositoryAt(repository.path);
     const id = contractId(`kei/review-${phase}`);
@@ -294,7 +290,8 @@ test("review changes requested is deterministic, clones input data, and offers o
     phase: "awaiting-verdict",
     body: body(),
     delivery: null,
-    petition: petition(id, "forfeit"),
+    approval: null,
+    petition: petition(id),
     evidence: [],
     terminal: null,
   };
@@ -422,6 +419,7 @@ test("a competing changes-requested review redecides with a fresh ULID", () => {
   assert.equal(observed.state?.head, competingHead);
   assert.deepEqual(observed.entries.map((entry) => entry.entry), [
     entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+    entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB0"),
     entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
     entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
     entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB9"),

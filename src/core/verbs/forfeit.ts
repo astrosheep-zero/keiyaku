@@ -3,7 +3,6 @@ import type {
   EntryUlid,
   ForfeitData,
   ForfeitEntry,
-  Phase,
 } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../protocol/run.js";
 
@@ -16,7 +15,7 @@ export type ForfeitInput = Readonly<{
 
 export type ForfeitRefusal =
   | Readonly<{ kind: "contract-missing"; contractId: ContractId }>
-  | Readonly<{ kind: "phase-not-forfeitable"; contractId: ContractId; phase: Phase }>;
+  | Readonly<{ kind: "phase-not-forfeitable"; contractId: ContractId; phase: "claimed" | "forfeited" }>;
 
 function requiredEntryUlid(input: DecideInput<ForfeitInput>): EntryUlid {
   if (!Array.isArray(input.attempt.entryUlids) || input.attempt.entryUlids.length !== 1) {
@@ -31,12 +30,6 @@ function cloneForfeitData(data: ForfeitData): ForfeitData {
     : { reason: data.reason, note: data.note };
 }
 
-function forfeitable(phase: Phase, petitionIntent: "claim" | "forfeit" | undefined): boolean {
-  return phase === "active"
-    || phase === "sealed"
-    || (phase === "approved" && petitionIntent === "forfeit");
-}
-
 /** Decide one forfeit admission from one already-captured protocol observation. */
 export function decideForfeit(input: DecideInput<ForfeitInput>): OfferDecision<null, ForfeitRefusal> {
   const entry = requiredEntryUlid(input);
@@ -47,11 +40,10 @@ export function decideForfeit(input: DecideInput<ForfeitInput>): OfferDecision<n
   if (observed.state === null) {
     return { kind: "refused", refusal: { kind: "contract-missing", contractId: input.input.contractId } };
   }
-  const { phase, petition } = observed.state;
-  if (!forfeitable(phase, petition?.data.intent)) {
+  if (observed.state.phase === "claimed" || observed.state.phase === "forfeited") {
     return {
       kind: "refused",
-      refusal: { kind: "phase-not-forfeitable", contractId: input.input.contractId, phase },
+      refusal: { kind: "phase-not-forfeitable", contractId: input.input.contractId, phase: observed.state.phase },
     };
   }
   if (observed.state.head === null) {

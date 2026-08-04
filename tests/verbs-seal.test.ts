@@ -22,6 +22,8 @@ import { readRef, repositoryAt } from "../src/core/facts/repository.js";
 import { makeGitRepository } from "./support/git.js";
 
 const AT = "2026-08-04T00:00:00Z";
+const TARGET = "refs/heads/main";
+const BASE = commitOid("a".repeat(40));
 
 function attempt(ordinal: number, value: string): AttemptContext {
   return { ordinal, entryUlids: [entryUlid(value)] };
@@ -54,13 +56,22 @@ function journalFor(id: ContractId, phase: Phase): readonly JournalEntry[] {
     actor: "seed",
     data: body(),
   };
-  if (phase === "active") return [bound];
+  const opened: JournalEntry = {
+    v: 1,
+    kind: "open",
+    contract: id,
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+    at: AT,
+    actor: "seed",
+    data: { target: TARGET, base: BASE },
+  };
+  if (phase === "active") return [bound, opened];
   if (phase === "forfeited") {
-    return [bound, {
+    return [bound, opened, {
       v: 1,
       kind: "forfeit",
       contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
       at: AT,
       actor: "seed",
       data: { reason: "manual" },
@@ -70,56 +81,43 @@ function journalFor(id: ContractId, phase: Phase): readonly JournalEntry[] {
     v: 1,
     kind: "seal",
     contract: id,
-    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
     at: AT,
     actor: "seed",
     data: {},
   };
-  if (phase === "sealed") return [bound, sealed];
-  const petition: JournalEntry = phase === "claimed"
-    ? {
-      v: 1,
-      kind: "petition",
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
-      at: AT,
-      actor: "seed",
-      data: {
-        intent: "claim",
-        oath: "Ready to claim",
-        expectedPredecessor: commitOid("a".repeat(40)),
-        seat: 1,
-        candidate: commitOid("b".repeat(40)),
-      },
-    }
-    : {
-      v: 1,
-      kind: "petition",
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
-      at: AT,
-      actor: "seed",
-      data: { intent: "forfeit", seat: 1 },
-    };
-  if (phase === "awaiting-verdict") return [bound, sealed, petition];
+  if (phase === "sealed") return [bound, opened, sealed];
+  const petition: JournalEntry = {
+    v: 1,
+    kind: "petition",
+    contract: id,
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+    at: AT,
+    actor: "seed",
+    data: {
+      expectedPredecessor: commitOid("a".repeat(40)),
+      deliveryHead: commitOid("a".repeat(40)),
+      candidate: commitOid("b".repeat(40)),
+    },
+  };
+  if (phase === "awaiting-verdict") return [bound, opened, sealed, petition];
   const review: JournalEntry = {
     v: 1,
     kind: "review",
     contract: id,
-    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAZ"),
     at: AT,
     actor: "reviewer",
-    data: { verdict: "approved", digest: "digest", summary: "approved", evidence: [] },
+    data: { verdict: "approved", reviewedHead: commitOid("a".repeat(40)), digest: "digest", summary: "approved", evidence: [] },
   };
-  if (phase === "approved") return [bound, sealed, petition, review];
-  return [bound, sealed, petition, review, {
+  return [bound, opened, sealed, petition, review, {
     v: 1,
     kind: "claim",
     contract: id,
-    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAZ"),
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB0"),
     at: AT,
     actor: "seed",
-    data: { petition: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX") },
+    data: { petition: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY") },
   }];
 }
 
@@ -140,7 +138,7 @@ test("seal has only type-only facts and protocol dependencies", () => {
   assert.ok(imports.every((declaration) => declaration.importClause?.isTypeOnly));
 });
 
-test("seal accepts an active contract through the real protocol", () => {
+test("seal accepts an active contract with delivery through the real protocol", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
   const id = contractId("kei/seal-active");
@@ -169,7 +167,7 @@ test("seal accepts an active contract through the real protocol", () => {
   assert.equal(observeContract(repo, id).state?.phase, "sealed");
 });
 
-test("seal refuses missing and every non-active phase without publishing", () => {
+test("seal refuses missing, active delivery-missing, and every non-active phase without publishing", () => {
   const missingRepository = makeGitRepository();
   const missingRepo = repositoryAt(missingRepository.path);
   const missing = contractId("kei/seal-missing");
@@ -183,7 +181,27 @@ test("seal refuses missing and every non-active phase without publishing", () =>
   assert.deepEqual(missingResult, { kind: "refused", refusal: { kind: "contract-missing", contractId: missing } });
   assert.equal(readRef(missingRepo, "refs/heads/keiyaku-state"), null);
 
-  for (const phase of ["sealed", "awaiting-verdict", "approved", "claimed", "forfeited"] as const) {
+  const unopenedRepository = makeGitRepository();
+  const unopenedRepo = repositoryAt(unopenedRepository.path);
+  const unopened = contractId("kei/seal-unopened");
+  const bound = journalFor(unopened, "active")[0]!;
+  const admitted = admit(unopenedRepo, { facts: [{ contractId: unopened, expectedHead: null, entries: [bound] }] });
+  assert.equal(admitted.kind, "accepted");
+  const unopenedHead = readRef(unopenedRepo, "refs/heads/keiyaku-state");
+
+  assert.deepEqual(
+    runProtocol({
+      input: sealInput(unopened),
+      repository: unopenedRepo,
+      contracts: [unopened],
+      attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB1")],
+      decide: decideSeal,
+    }),
+    { kind: "refused", refusal: { kind: "delivery-missing", contractId: unopened } },
+  );
+  assert.equal(readRef(unopenedRepo, "refs/heads/keiyaku-state"), unopenedHead);
+
+  for (const phase of ["sealed", "awaiting-verdict", "claimed", "forfeited"] as const) {
     const repository = makeGitRepository();
     const repo = repositoryAt(repository.path);
     const id = contractId(`kei/seal-${phase}`);
@@ -206,14 +224,15 @@ test("seal refuses missing and every non-active phase without publishing", () =>
   }
 });
 
-test("seal decision is deterministic and requires one ULID", () => {
+test("seal decision is deterministic, offers no ref operation, and requires one ULID", () => {
   const id = contractId("kei/seal-pure");
   const state: ContractState = {
     id,
     head: contractHead("a".repeat(40)),
     phase: "active",
     body: body(),
-    delivery: null,
+    delivery: { target: TARGET, base: BASE, head: BASE },
+    approval: null,
     petition: null,
     evidence: [],
     terminal: null,
@@ -227,6 +246,9 @@ test("seal decision is deterministic and requires one ULID", () => {
   const first = decideSeal(decisionInput);
   const second = decideSeal(decisionInput);
   assert.deepEqual(first, second);
+  assert.equal(first.kind, "offer");
+  if (first.kind !== "offer") return;
+  assert.equal(first.offer.refs, undefined);
   assert.throws(
     () => decideSeal({ ...decisionInput, attempt: { ordinal: 0, entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB4"), entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FB5")] } }),
     /exactly one fresh entry ULID/,
@@ -290,5 +312,5 @@ test("a competing amend causes seal to redecide against the new journal head", (
   const observed = observeContract(repo, id);
   assert.equal(observed.state?.phase, "sealed");
   assert.deepEqual(observed.state?.body?.criteria, ["criterion", "competing"]);
-  assert.deepEqual(observed.entries.map((entry) => entry.kind), ["bind", "amend", "seal"]);
+  assert.deepEqual(observed.entries.map((entry) => entry.kind), ["bind", "open", "amend", "seal"]);
 });
