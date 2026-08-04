@@ -3,8 +3,9 @@ import {
   type Accepted,
   type Admission,
   type Offer,
+  type RefMoved,
 } from "../facts/admission.js";
-import { CARRIER_REF, readRef, type GitOid, type GitRepository } from "../facts/repository.js";
+import type { GitRepository } from "../facts/repository.js";
 import {
   contractId,
   entryUlid,
@@ -20,16 +21,10 @@ export type AttemptContext = Readonly<{
   entryUlids: readonly EntryUlid[];
 }>;
 
-export type ObservedRef = Readonly<{
-  ref: string;
-  oid: GitOid | null;
-}>;
-
 export type DecideInput<Input> = Readonly<{
   input: Input;
   attempt: AttemptContext;
   observation: ContractsObservation;
-  watchedRefs: readonly ObservedRef[];
   collision?: Extract<UnknownAttemptClassification, { kind: "collision" }>;
 }>;
 
@@ -45,7 +40,8 @@ export type ReconcileHandoff<Handoff> = Readonly<{
 
 export type ProtocolTerminal =
   | Readonly<{ kind: "exhausted"; admission: Admission | null }>
-  | Readonly<{ kind: "collision"; collision: Extract<UnknownAttemptClassification, { kind: "collision" }> }>;
+  | Readonly<{ kind: "collision"; collision: Extract<UnknownAttemptClassification, { kind: "collision" }> }>
+  | RefMoved;
 
 export type ProtocolResult<Handoff, Refusal> =
   | Readonly<{ kind: "handoff"; handoff: ReconcileHandoff<Handoff> }>
@@ -56,7 +52,6 @@ export type RunProtocolInput<Input, Handoff, Refusal> = Readonly<{
   input: Input;
   repository: GitRepository;
   contracts: readonly ContractId[];
-  watchedRefs: readonly string[];
   attempts: readonly AttemptContext[];
   decide: (input: DecideInput<Input>) => OfferDecision<Handoff, Refusal>;
 }>;
@@ -99,22 +94,6 @@ function watchedContracts(contracts: readonly ContractId[]): readonly ContractId
   });
 }
 
-function watchedRefNames(refs: readonly string[]): readonly string[] {
-  if (!Array.isArray(refs)) throw new TypeError("watched refs must be an array");
-  const seen = new Set<string>();
-  return refs.map((ref) => {
-    if (typeof ref !== "string" || ref.length === 0) throw new TypeError("watched ref must be a nonempty string");
-    if (ref === CARRIER_REF) throw new TypeError(`the carrier ref is owned by admission: ${CARRIER_REF}`);
-    if (seen.has(ref)) throw new TypeError(`duplicate watched ref: ${ref}`);
-    seen.add(ref);
-    return ref;
-  });
-}
-
-function observedRefs(repository: GitRepository, refs: readonly string[]): readonly ObservedRef[] {
-  return refs.map((ref) => ({ ref, oid: readRef(repository, ref) }));
-}
-
 function offerEntries(offer: Offer): readonly JournalEntry[] {
   return offer.facts.flatMap((append) => append.entries);
 }
@@ -123,7 +102,6 @@ function validateOffer(
   offer: Offer,
   attempt: AttemptContext,
   contracts: ReadonlySet<ContractId>,
-  refs: readonly ObservedRef[],
   observation: ContractsObservation,
 ): void {
   if (!offer || typeof offer !== "object" || !Array.isArray(offer.facts) || offer.facts.length === 0) {
@@ -159,16 +137,6 @@ function validateOffer(
   if (actualEntries.size !== expectedEntries.size) {
     throw new TypeError(`offer entries must exactly match attempt ULIDs: ${attempt.ordinal}`);
   }
-
-  if (offer.refs !== undefined && !Array.isArray(offer.refs)) throw new TypeError("offer refs must be an array");
-  const watched = new Map(refs.map((ref) => [ref.ref, ref.oid]));
-  for (const operation of offer.refs ?? []) {
-    if (operation.expectedOid === undefined) throw new TypeError(`offer ref requires explicit expected OID: ${operation.ref}`);
-    if (!watched.has(operation.ref)) throw new TypeError(`offer ref is not watched: ${operation.ref}`);
-    if (watched.get(operation.ref) !== operation.expectedOid) {
-      throw new TypeError(`offer ref expected OID does not match watched ref: ${operation.ref}`);
-    }
-  }
 }
 
 function handoff<Handoff>(handoff: Handoff, offer: Offer, admission: Accepted | null): ProtocolResult<Handoff, never> {
@@ -186,7 +154,6 @@ function handoff<Handoff>(handoff: Handoff, offer: Offer, admission: Accepted | 
 export function runProtocol<Input, Handoff, Refusal>(input: RunProtocolInput<Input, Handoff, Refusal>): ProtocolResult<Handoff, Refusal> {
   const attempts = validatedAttempts(input.attempts);
   const contracts = watchedContracts(input.contracts);
-  const refs = watchedRefNames(input.watchedRefs);
   const contractSet = new Set(contracts);
   let lastAdmission: Admission | null = null;
   let collision: Extract<UnknownAttemptClassification, { kind: "collision" }> | undefined;
@@ -194,21 +161,21 @@ export function runProtocol<Input, Handoff, Refusal>(input: RunProtocolInput<Inp
   for (let index = 0; index < attempts.length; index += 1) {
     const attempt = attempts[index]!;
     const observation = observeContracts(input.repository, contracts);
-    const watchedRefs = observedRefs(input.repository, refs);
     const decisionInput: DecideInput<Input> = collision === undefined
-      ? { input: input.input, attempt, observation, watchedRefs }
-      : { input: input.input, attempt, observation, watchedRefs, collision };
+      ? { input: input.input, attempt, observation }
+      : { input: input.input, attempt, observation, collision };
     collision = undefined;
     const decision = input.decide(decisionInput);
     if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
 
-    validateOffer(decision.offer, attempt, contractSet, watchedRefs, observation);
+    validateOffer(decision.offer, attempt, contractSet, observation);
     let offer = decision.offer;
     let reusedUnknownOffer = false;
     while (true) {
       const admission = admit(input.repository, offer);
       lastAdmission = admission;
       if (admission.kind === "accepted") return handoff(decision.handoff, offer, admission);
+      if (admission.kind === "ref-moved") return admission;
       if (admission.kind !== "unknown") break;
 
       const recovered = observeContracts(input.repository, contracts);

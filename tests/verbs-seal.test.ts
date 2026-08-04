@@ -150,7 +150,6 @@ test("seal accepts an active contract through the real protocol", () => {
     input: sealInput(id),
     repository: repo,
     contracts: [id],
-    watchedRefs: [],
     attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB0")],
     decide: decideSeal,
   });
@@ -178,7 +177,6 @@ test("seal refuses missing and every non-active phase without publishing", () =>
     input: sealInput(missing),
     repository: missingRepo,
     contracts: [missing],
-    watchedRefs: [],
     attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB1")],
     decide: decideSeal,
   });
@@ -196,7 +194,6 @@ test("seal refuses missing and every non-active phase without publishing", () =>
       input: sealInput(id),
       repository: repo,
       contracts: [id],
-      watchedRefs: [],
       attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB2")],
       decide: decideSeal,
     });
@@ -225,7 +222,6 @@ test("seal decision is deterministic and requires one ULID", () => {
     input: sealInput(id),
     attempt: attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB3"),
     observation: { carrierCommit: null, contracts: new Map([[id, { id, entries: [], state }]]) },
-    watchedRefs: [],
   };
 
   const first = decideSeal(decisionInput);
@@ -252,7 +248,6 @@ test("a competing amend causes seal to redecide against the new journal head", (
     input: sealInput(id),
     repository: repo,
     contracts: [id],
-    watchedRefs: [],
     attempts,
     decide: (input) => {
       const decision = decideSeal(input);

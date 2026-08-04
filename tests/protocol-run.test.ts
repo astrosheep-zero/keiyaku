@@ -9,7 +9,6 @@ import { encodeEntry } from "../src/core/facts/codec.js";
 import {
   CARRIER_FORMAT_BYTES,
   CARRIER_FORMAT_PATH,
-  CARRIER_REF,
   buildTree,
   readRef,
   repositoryAt,
@@ -87,7 +86,7 @@ function withGitShim<T>(body: string, variables: Readonly<Record<string, string>
 test("refusal publishes nothing", () => {
   const repository = makeGitRepository();
   const result = runProtocol({
-    input: undefined, repository: repositoryAt(repository.path), contracts: [contractId("refused")], watchedRefs: [], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
+    input: undefined, repository: repositoryAt(repository.path), contracts: [contractId("refused")], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
     decide: () => ({ kind: "refused", refusal: "no" }),
   });
   assert.deepEqual(result, { kind: "refused", refusal: "no" });
@@ -99,7 +98,7 @@ test("accepted admission returns reconciliation data and no post-admission effec
   const repo = repositoryAt(repository.path);
   const id = contractId("accepted");
   const result = runProtocol({
-    input: { actor: "test", body: "body" }, repository: repo, contracts: [id], watchedRefs: [], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
+    input: { actor: "test", body: "body" }, repository: repo, contracts: [id], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
     decide: (input) => {
       assert.deepEqual(input.input, { actor: "test", body: "body" });
       return { kind: "offer", offer: offer(id, input.observation.contracts.get(id)?.state?.head ?? null, input.attempt.entryUlids[0]!, true), handoff: { target: "workspace" } };
@@ -119,7 +118,7 @@ test("moved heads are re-decided with the next fresh ULID", () => {
   const attempts = [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV"), context(1, "01ARZ3NDEKTSV4RRFFQ69G5FAW")];
   let decisions = 0;
   const result = runProtocol({
-    input: undefined, repository: repo, contracts: [id], watchedRefs: [], attempts,
+    input: undefined, repository: repo, contracts: [id], attempts,
     decide: (input) => {
       decisions += 1;
       const head = input.observation.contracts.get(id)?.state?.head ?? null;
@@ -151,7 +150,6 @@ test("unknown exact canonical entries hand off with no admission", () => {
     input: undefined,
     repository: repo,
     contracts: [id],
-    watchedRefs: [],
     attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
     decide: (input) => ({
       kind: "offer",
@@ -182,7 +180,6 @@ test("unknown absent entries reuse the offer until a later admission succeeds", 
     input: { actor: "retry", body: "body" },
     repository: repo,
     contracts: [id],
-    watchedRefs: [],
     attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
     decide: (input) => {
       decisions += 1;
@@ -222,7 +219,6 @@ test("unknown moved heads redecide with a fresh attempt ULID", () => {
     input: "moved-input",
     repository: repo,
     contracts: [id],
-    watchedRefs: [],
     attempts,
     decide: (input) => {
       decisions += 1;
@@ -267,7 +263,6 @@ test("unknown collisions are passed to the next decision", () => {
     input: { body: "body", actor: "actor", futureVerb: "future" },
     repository: repo,
     contracts: [id],
-    watchedRefs: [],
     attempts,
     decide: (input) => {
       decisions += 1;
@@ -294,18 +289,37 @@ test("unknown collisions are passed to the next decision", () => {
   assert.equal(result.handoff.admission?.kind, "accepted");
 });
 
-test("stale ref coordinates fail before publication", () => {
+test("stale Offer ref expectations return ref-moved without publication or retry", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
   const id = contractId("stale-ref");
-  assert.throws(() => runProtocol({
-    input: undefined, repository: repo, contracts: [id], watchedRefs: ["refs/heads/verb"], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
-    decide: (input) => ({
-      kind: "offer",
-      offer: { ...offer(id, input.observation.contracts.get(id)?.state?.head ?? null, input.attempt.entryUlids[0]!, true), refs: [{ ref: "refs/heads/verb", newOid: null, expectedOid: "a".repeat(40) }] },
-      handoff: null,
-    }),
-  }), /does not match watched ref/);
+  const current = writeCommit(repo, writeTree(repo, []), null);
+  repository.run(["update-ref", "refs/heads/verb", current]);
+  const stale = "a".repeat(40);
+  const attempts = [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV"), context(1, "01ARZ3NDEKTSV4RRFFQ69G5FAW")];
+  let decisions = 0;
+  const result = runProtocol({
+    input: undefined, repository: repo, contracts: [id], attempts,
+    decide: (input) => {
+      decisions += 1;
+      return {
+        kind: "offer",
+        offer: {
+          ...offer(id, input.observation.contracts.get(id)?.state?.head ?? null, input.attempt.entryUlids[0]!, true),
+          refs: [{ ref: "refs/heads/verb", newOid: null, expectedOid: stale }],
+        },
+        handoff: null,
+      };
+    },
+  });
+
+  assert.equal(decisions, 1);
+  assert.equal(result.kind, "ref-moved");
+  if (result.kind !== "ref-moved") return;
+  assert.equal(result.ref, "refs/heads/verb");
+  assert.equal(result.expectedOid, stale);
+  assert.equal(result.currentOid, current);
+  assert.equal(result.carrierCommit, null);
   assert.equal(readRef(repo, "refs/heads/keiyaku-state"), null);
 });
 
@@ -315,7 +329,7 @@ test("attempt contexts bound repeated moved admissions", () => {
   const id = contractId("bounded");
   let decisions = 0;
   const result = runProtocol({
-    input: undefined, repository: repo, contracts: [id], watchedRefs: [], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
+    input: undefined, repository: repo, contracts: [id], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
     decide: (input) => {
       decisions += 1;
       const moved = admit(repo, { facts: [{ contractId: id, expectedHead: null, entries: [bind(id, "01ARZ3NDEKTSV4RRFFQ69G5FAX")] }] });
@@ -328,18 +342,15 @@ test("attempt contexts bound repeated moved admissions", () => {
   assert.equal(result.kind === "exhausted" ? result.admission?.kind : null, "head-moved");
 });
 
-test("attempt contexts are consecutive and the carrier ref cannot be watched", () => {
+test("attempt contexts are consecutive", () => {
   const repository = makeGitRepository();
   const repo = repositoryAt(repository.path);
   const id = contractId("validation");
   const decide = () => ({ kind: "refused" as const, refusal: null });
   assert.throws(() => runProtocol({
-    input: undefined, repository: repo, contracts: [id], watchedRefs: [], attempts: [], decide,
+    input: undefined, repository: repo, contracts: [id], attempts: [], decide,
   }), /at least one attempt/);
   assert.throws(() => runProtocol({
-    input: undefined, repository: repo, contracts: [id], watchedRefs: [], attempts: [context(1, "01ARZ3NDEKTSV4RRFFQ69G5FAV")], decide,
+    input: undefined, repository: repo, contracts: [id], attempts: [context(1, "01ARZ3NDEKTSV4RRFFQ69G5FAV")], decide,
   }), /consecutive from zero/);
-  assert.throws(() => runProtocol({
-    input: undefined, repository: repo, contracts: [id], watchedRefs: [CARRIER_REF], attempts: [context(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")], decide,
-  }), /carrier ref is owned by admission/);
 });

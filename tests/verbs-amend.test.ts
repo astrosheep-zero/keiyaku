@@ -187,7 +187,6 @@ test("amend updates the effective body and returns permitted phases to active", 
       input: amendInput(id),
       repository: repo,
       contracts: [id],
-      watchedRefs: [],
       attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB0")],
       decide: decideAmend,
     });
@@ -210,7 +209,6 @@ test("amend refuses missing and non-amendable contracts without publishing", () 
     input: amendInput(missing),
     repository: missingRepo,
     contracts: [missing],
-    watchedRefs: [],
     attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB1")],
     decide: decideAmend,
   });
@@ -228,7 +226,6 @@ test("amend refuses missing and non-amendable contracts without publishing", () 
       input: amendInput(id),
       repository: repo,
       contracts: [id],
-      watchedRefs: [],
       attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB2")],
       decide: decideAmend,
     });
@@ -263,7 +260,6 @@ test("amend decision is deterministic, isolates caller data, and requires one UL
     input: amendInput(id, mutableData),
     attempt: attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FB3"),
     observation: { carrierCommit: null, contracts: new Map([[id, { id, entries: [], state }]]) },
-    watchedRefs: [],
   };
 
   const first = decideAmend(decisionInput);
@@ -306,7 +302,6 @@ test("a competing append causes amend to redecide against the new journal head",
     input: amendInput(id, { criteriaDelta: { add: ["requested"] } }),
     repository: repo,
     contracts: [id],
-    watchedRefs: [],
     attempts,
     decide: (input) => {
       const decision = decideAmend(input);

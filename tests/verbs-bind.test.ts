@@ -67,7 +67,6 @@ test("bind accepts an absent contract through the real protocol and folds it act
     input,
     repository: repo,
     contracts: [id],
-    watchedRefs: [],
     attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FAV")],
     decide: decideBind,
   });
@@ -95,7 +94,6 @@ test("bind refuses an existing contract without publishing", () => {
     input: bindInput(id),
     repository: repo,
     contracts: [id],
-    watchedRefs: [],
     attempts: [attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FAX")],
     decide: decideBind,
   });
@@ -124,7 +122,6 @@ test("bind decision is deterministic, isolates caller body containers, and requi
     input,
     attempt: attempt(0, "01ARZ3NDEKTSV4RRFFQ69G5FAY"),
     observation: { carrierCommit: null, contracts: new Map([[id, { id, entries: [], state: null }]]) },
-    watchedRefs: [],
   };
 
   const first = decideBind(decisionInput);
@@ -158,7 +155,6 @@ test("a competing bind causes the next protocol attempt to redecide and refuse",
     input: bindInput(id),
     repository: repo,
     contracts: [id],
-    watchedRefs: [],
     attempts,
     decide: (input) => {
       seenAttempts.push(input.attempt.entryUlids[0]!);

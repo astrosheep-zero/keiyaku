@@ -68,9 +68,12 @@ are coordinates, not a second authority. The planned entries are the attempt
 identity; an `Offer` has no separate attempt ID.
 
 `protocol/run.ts` owns semantic retry and never branches on verb kind.
-A definite moved or occupied outcome invalidates the old decision: the protocol
+A definite `head-moved` or `evidence-occupied` outcome invalidates the old decision: the protocol
 re-observes one snapshot, invokes the pure decision again, and uses fresh entry
 ULIDs.
+Contract-head movement retries inside the runner because contract state is
+observed there. Ref premises are prepared by a verb's impure shell, so
+`ref-moved` returns to that shell for re-observe, reprepare, and rerun.
 Unknown has one identity-reuse case: when all planned entries are absent
 and expected contract heads are unchanged, it resubmits the same offer. Otherwise
 accepted-attempt recognition follows durable facts:
