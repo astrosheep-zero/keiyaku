@@ -4,13 +4,11 @@ title: "v4 dogfood E2E: current intent surface"
 state: open
 pri: 1
 needs:
-  - v4-day1-cli-分层与-task-settlement
-  - v4-here-复用调用者-worktree
-  - v4-amend-five-h2-operations-and-diff-hint
+  - v4-architecture-correct-extensible-mvp
 parent: null
 from: []
 createdAt: 2026-08-05T08:47:41.496Z
-updatedAt: 2026-08-05T08:47:41.496Z
+updatedAt: 2026-08-05T08:48:49.466Z
 creator: thekoc
 ---
 Exercise the built `keiyaku-v4` binary through real shell processes using only the current command law.
