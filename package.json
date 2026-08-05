@@ -8,13 +8,17 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run test:architecture && npm run test:reachability && node --import tsx --test tests/**/*.test.ts",
+    "review:model-impact": "node --import tsx scripts/model-change-impact.ts",
+    "test": "npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx --test tests/**/*.test.ts tests/maintainability.test.js",
     "test:architecture": "node --import tsx scripts/check-architecture.ts",
+    "test:maintainability": "node scripts/check-maintainability.js",
     "test:reachability": "knip --include files,dependencies,unlisted,unresolved,duplicates",
     "test:typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",
+    "@typescript-eslint/parser": "^8.66.0",
+    "eslint": "^9.39.5",
     "knip": "^6.31.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"

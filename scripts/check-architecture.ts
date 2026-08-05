@@ -24,8 +24,7 @@ export function runArchitectureCheck(root: string): number {
   ];
   const result = checkArchitecture(inputs, KEIYAKU_ARCHITECTURE_POLICY);
   if (result.diagnostics.length === 0) {
-    const limits = KEIYAKU_ARCHITECTURE_POLICY.limits;
-    console.log(`architecture: ok (${result.files.length} files; ${limits.fileLines}/${limits.functionLines}/${limits.complexity}/${limits.nesting}/${limits.parameters})`);
+    console.log(`architecture: ok (${result.files.length} files)`);
     return 0;
   }
   console.error("architecture: failed");

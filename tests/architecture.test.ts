@@ -104,26 +104,6 @@ test("architecture policy rejects misplaced capabilities and unresolved imports"
   assert.ok(rules(diagnostics).includes("architecture/unresolved-import"));
 });
 
-test("architecture policy enforces source and function structure limits", () => {
-  const longBody = "  void 0;\n".repeat(80);
-  const branches = Array.from({ length: 20 }, (_, index) => `  if (value === ${index}) return ${index};`).join("\n");
-  const diagnostics = check({
-    "core/facts/large.ts": `export function large() {\n${longBody}}\n${"\n".repeat(520)}`,
-    "core/facts/complex.ts": `export function complex(value: number) {\n${branches}\n  return -1;\n}`,
-    "core/facts/nested.ts": "export function nested(a: boolean) { if (a) { while (a) { try { if (a) { for (;;) { break; } } } catch {} } } }",
-    "core/facts/parameters.ts": "export function many(a: 1, b: 2, c: 3, d: 4, e: 5, f: 6): void {}",
-    "core/facts/duplicate-a.ts": `export function first(value: number): number {\n${"  value += 1;\n".repeat(12)}  return value;\n}`,
-    "core/facts/duplicate-b.ts": `export function second(value: number): number {\n${"  value += 1;\n".repeat(12)}  return value;\n}`,
-  });
-  const found = new Set(rules(diagnostics));
-  assert.ok(found.has("maintainability/file-lines"));
-  assert.ok(found.has("maintainability/function-lines"));
-  assert.ok(found.has("maintainability/complexity"));
-  assert.ok(found.has("maintainability/nesting"));
-  assert.ok(found.has("maintainability/parameters"));
-  assert.ok(found.has("maintainability/duplicate-function"));
-});
-
 test("architecture policy rejects removed owners and malformed verb owners", () => {
   const diagnostics = check({
     "core/verbs/open.ts": "export async function decideAnything(): Promise<void> {}",

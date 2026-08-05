@@ -1,6 +1,5 @@
 import path from "node:path";
 import ts from "typescript";
-import { functionMetric, isFunctionNode, type FunctionMetric } from "./function-metrics.js";
 
 export type SourceInput = Readonly<{ path: string; source: string }>;
 
@@ -36,15 +35,6 @@ export type CapabilityRule = Readonly<{
 }>;
 
 export type ArchitecturePolicy = Readonly<{
-  limits: Readonly<{
-    fileLines: number;
-    functionLines: number;
-    complexity: number;
-    nesting: number;
-    parameters: number;
-    duplicateFunctionLines: number;
-    duplicateFunctionTokens: number;
-  }>;
   zones: readonly DependencyZone[];
   sensitiveImports: readonly SensitiveImportRule[];
   forbiddenModules: readonly string[];
@@ -104,11 +94,9 @@ type ParsedSource = Readonly<{
   path: string;
   sourceFile: ts.SourceFile;
   references: readonly ImportReference[];
-  functions: readonly FunctionMetric[];
   declarations: readonly Declaration[];
   runtimeReExports: readonly Readonly<{ line: number; column: number }>[];
   capabilities: readonly CapabilityUse[];
-  lines: number;
 }>;
 
 export type ArchitectureResult = Readonly<{
@@ -303,7 +291,6 @@ function parseSources(inputs: readonly SourceInput[]): readonly ParsedSource[] {
   return normalizedInputs.map((input) => {
     const sourceFile = ts.createSourceFile(input.path, input.source, ts.ScriptTarget.Latest, true);
     const references: ImportReference[] = [];
-    const functions: FunctionMetric[] = [];
     const declarations: Declaration[] = [];
     const runtimeReExports: Array<Readonly<{ line: number; column: number }>> = [];
     const capabilities: CapabilityUse[] = [];
@@ -322,7 +309,6 @@ function parseSources(inputs: readonly SourceInput[]): readonly ParsedSource[] {
           column: at.column,
         });
       }
-      if (isFunctionNode(node)) functions.push(functionMetric(input.path, sourceFile, node));
       const declaration = declarationOf(node, sourceFile);
       if (declaration) declarations.push(declaration);
       const reExport = runtimeReExport(node, sourceFile);
@@ -339,11 +325,9 @@ function parseSources(inputs: readonly SourceInput[]): readonly ParsedSource[] {
       path: input.path,
       sourceFile,
       references,
-      functions,
       declarations,
       runtimeReExports,
       capabilities,
-      lines: sourceFile.getLineAndCharacterOfPosition(sourceFile.end).line + 1,
     };
   });
 }
@@ -456,50 +440,6 @@ function stronglyConnected(units: readonly ParsedSource[]): readonly (readonly s
   return components.filter((component) => component.length > 1 || (graph.get(component[0]!)?.has(component[0]!) ?? false));
 }
 
-function metricDiagnostics(units: readonly ParsedSource[], policy: ArchitecturePolicy): Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  const originals = new Map<string, FunctionMetric>();
-  for (const unit of units) {
-    if (unit.lines > policy.limits.fileLines) diagnostics.push({
-      rule: "maintainability/file-lines",
-      file: unit.path,
-      line: 1,
-      column: 1,
-      detail: `${unit.lines} lines exceeds ${policy.limits.fileLines}`,
-    });
-    for (const metric of unit.functions) {
-      const checks: readonly Readonly<{ rule: string; actual: number; maximum: number; label: string }>[] = [
-        { rule: "maintainability/function-lines", actual: metric.lines, maximum: policy.limits.functionLines, label: "lines" },
-        { rule: "maintainability/complexity", actual: metric.complexity, maximum: policy.limits.complexity, label: "complexity" },
-        { rule: "maintainability/nesting", actual: metric.nesting, maximum: policy.limits.nesting, label: "nesting" },
-        { rule: "maintainability/parameters", actual: metric.parameters, maximum: policy.limits.parameters, label: "parameters" },
-      ];
-      for (const check of checks) if (check.actual > check.maximum) diagnostics.push({
-        rule: check.rule,
-        file: metric.file,
-        line: metric.line,
-        column: metric.column,
-        detail: `${metric.name} has ${check.actual} ${check.label}; maximum is ${check.maximum}`,
-      });
-      if (
-        metric.lines >= policy.limits.duplicateFunctionLines
-        && metric.tokens >= policy.limits.duplicateFunctionTokens
-      ) {
-        const original = originals.get(metric.fingerprint);
-        if (original) diagnostics.push({
-          rule: "maintainability/duplicate-function",
-          file: metric.file,
-          line: metric.line,
-          column: metric.column,
-          detail: `${metric.name} duplicates ${original.file}:${original.line}`,
-        });
-        else originals.set(metric.fingerprint, metric);
-      }
-    }
-  }
-  return diagnostics;
-}
-
 function verbOwnerDiagnostic(unit: ParsedSource, policy: ArchitecturePolicy): Diagnostic | null {
   if (!unit.path.startsWith(policy.verbDirectory) || !unit.path.endsWith(".ts")) return null;
   const name = path.posix.basename(unit.path, ".ts");
@@ -561,7 +501,6 @@ export function checkArchitecture(inputs: readonly SourceInput[], policy: Archit
   const units = parseSources(inputs);
   const diagnostics = [
     ...dependencyDiagnostics(units, policy),
-    ...metricDiagnostics(units, policy),
     ...structureDiagnostics(units, policy),
   ];
   for (const component of stronglyConnected(units)) diagnostics.push({

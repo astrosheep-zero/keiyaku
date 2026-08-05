@@ -4,15 +4,6 @@ const any = (target: string, symbols?: readonly string[]) => symbols ? { target,
 const types = (target: string) => ({ target, mode: "type-only" as const });
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
-  limits: {
-    fileLines: 600,
-    functionLines: 80,
-    complexity: 20,
-    nesting: 4,
-    parameters: 5,
-    duplicateFunctionLines: 12,
-    duplicateFunctionTokens: 50,
-  },
   zones: [
     { source: "core/facts/types.ts", allow: [] },
     { source: "core/facts/codec.ts", allow: [any("core/facts/types.ts")] },
@@ -79,19 +70,25 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "cli/parse.ts", allow: [] },
     { source: "scripts/architecture/**", allow: [any("scripts/architecture/**")] },
     { source: "scripts/check-architecture.ts", allow: [any("scripts/architecture/**")] },
+    { source: "scripts/model-impact/**", allow: [any("scripts/model-impact/**")] },
+    { source: "scripts/model-change-impact.ts", allow: [any("scripts/model-impact/**")] },
   ],
   sensitiveImports: [
     { module: "node:module", owners: [] },
     { module: "module", owners: [] },
     {
       module: "node:child_process",
-      owners: [{ source: "core/facts/repository.ts", symbols: ["execFileSync"] }],
+      owners: [
+        { source: "core/facts/repository.ts", symbols: ["execFileSync"] },
+        { source: "scripts/model-change-impact.ts", symbols: ["execFileSync"] },
+      ],
     },
     { module: "child_process", owners: [] },
     {
       module: "node:fs",
       owners: [
         { source: "scripts/check-architecture.ts", symbols: ["readFileSync", "readdirSync"] },
+        { source: "scripts/model-change-impact.ts", symbols: ["readFileSync", "readdirSync"] },
         { source: "cli/invoke.ts", symbols: ["readFileSync"] },
         { source: "core/reconcile.ts", symbols: ["existsSync", "mkdirSync", "realpathSync"] },
         { source: "task/store.ts", symbols: ["readFileSync", "renameSync", "rmSync", "writeFileSync"] },
@@ -123,10 +120,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "module-mutable-state", owners: [] },
     { capability: "date-now", owners: ["cli/invoke.ts"] },
     { capability: "new-date-current", owners: ["cli/invoke.ts"] },
-    { capability: "process-argv", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts"] },
-    { capability: "process-cwd", owners: ["core/facts/repository.ts", "scripts/check-architecture.ts"] },
+    { capability: "process-argv", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
+    { capability: "process-cwd", owners: ["core/facts/repository.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-environment", owners: ["cli/invoke.ts", "core/facts/repository.ts"] },
-    { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts"] },
+    { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-pid", owners: ["task/store.ts"] },
     { capability: "require", owners: [] },
   ],
