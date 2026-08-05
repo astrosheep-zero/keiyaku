@@ -1,7 +1,7 @@
 ---
 id: v4-verification-producer-and-cache
 title: v4 verification producer and cache
-state: in_progress
+state: done
 pri: 0
 needs:
   - v4-verification-fact-model
@@ -9,7 +9,6 @@ needs:
 parent: v4-verification-runtime-and-producer
 from: []
 createdAt: 2026-08-05T11:01:05.378Z
-updatedAt: 2026-08-05T11:15:45.705Z
+updatedAt: 2026-08-05T11:29:15.236Z
 creator: thekoc
-startedAt: 2026-08-05T11:15:45.705Z
 ---
