@@ -17,8 +17,12 @@ notes:
       Act 242 implementation cut ready to start after authority docs and confirmed tree revision.
 
       Schema and ownership now closed: ContractCoordinates + shared ContractBody in facts/types; bind = coordinates + body revision 0; amend = complete body replacement; after/pipeline/verification live in body; default required set [reviewed], declared verification adds verified; ReviewData and verification evidence fields are explicit; fulfilled carries only delivery ULID; deliver carries base; abandon intent carries reason/note and abandoned carries finalHead. File tree confirmed by Faye act_242: facts/gate.ts, read/{status,audit,wait}, five verb files only, cli split with invoke owner, task contract-blind. Delete old verb modules/fixtures/tests and all aliases. Worker must implement one atomic current-version cut and add focused tests.
+  - actor: thekoc
+    timestamp: 2026-08-05T01:22:16.330Z
+    text: |
+      Act 248 closes the verified writer gap. Deliver is the only verification writer; DeliverData has optional verification {result, summary?, evidence[]}; candidate is structurally the enclosing deliver candidate and is not repeated. verified gate reads current deliver verification.result === pass; no candidate OID recheck, no verification kind, no review mixing. Fail still lands deliver without fulfilled; rerun deliver may refresh. Docs now carry explicit ReviewData, verification record, and pipeline declaration tables. Worker may continue atomic cut.
 createdAt: 2026-08-04T15:31:53.304Z
-updatedAt: 2026-08-05T01:11:00.342Z
+updatedAt: 2026-08-05T01:22:16.330Z
 creator: thekoc
 startedAt: 2026-08-04T15:31:53.845Z
 ---
