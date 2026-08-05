@@ -1,13 +1,12 @@
 ---
 id: v4-day1-managed-shell-dogfood
 title: v4 day1 managed shell dogfood
-state: in_progress
+state: done
 pri: 0
 needs: []
 parent: v4-day1-dogfood-bin
 from: []
 createdAt: 2026-08-05T18:54:23.075Z
-updatedAt: 2026-08-05T18:54:44.103Z
+updatedAt: 2026-08-05T19:11:08.340Z
 creator: thekoc
-startedAt: 2026-08-05T18:54:44.103Z
 ---
