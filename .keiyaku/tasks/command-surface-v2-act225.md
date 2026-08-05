@@ -1,7 +1,7 @@
 ---
 id: command-surface-v2-act225
 title: command-surface-v2-act225
-state: in_progress
+state: drop
 pri: 0
 needs: []
 parent: null
@@ -22,7 +22,6 @@ notes:
     text: |
       Act 248 closes the verified writer gap. Deliver is the only verification writer; DeliverData has optional verification {result, summary?, evidence[]}; candidate is structurally the enclosing deliver candidate and is not repeated. verified gate reads current deliver verification.result === pass; no candidate OID recheck, no verification kind, no review mixing. Fail still lands deliver without fulfilled; rerun deliver may refresh. Docs now carry explicit ReviewData, verification record, and pipeline declaration tables. Worker may continue atomic cut.
 createdAt: 2026-08-04T15:31:53.304Z
-updatedAt: 2026-08-05T01:22:16.330Z
+updatedAt: 2026-08-05T08:48:15.899Z
 creator: thekoc
-startedAt: 2026-08-04T15:31:53.845Z
 ---
