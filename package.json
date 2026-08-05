@@ -8,11 +8,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --import tsx --test tests/**/*.test.ts",
+    "test": "npm run test:architecture && npm run test:reachability && node --import tsx --test tests/**/*.test.ts",
+    "test:architecture": "node --import tsx scripts/check-architecture.ts",
+    "test:reachability": "knip --include files,dependencies,unlisted,unresolved,duplicates",
     "test:typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",
+    "knip": "^6.31.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   }
