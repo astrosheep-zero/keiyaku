@@ -1,39 +1,29 @@
-import { createHash } from "node:crypto";
 import type {
+  AbandonData,
+  AbandonedData,
   AmendData,
-  AmendEntry,
-  BindEntry,
-  CheckData,
-  CheckEntry,
-  ClaimData,
-  ClaimEntry,
+  ArcData,
+  BindData,
+  BoundData,
   ContractBody,
+  ContractCoordinates,
+  ContractCriterion,
   ContractExtension,
-  CriteriaDelta,
-  EvidenceRef,
-  ForfeitData,
-  ForfeitEntry,
+  ContractId,
+  DeclarationKey,
+  DeliverData,
+  ClaimedData,
+  Gate,
   JournalEntry,
-  OpenData,
-  OpenEntry,
-  PetitionData,
-  PetitionEntry,
-  RenewData,
-  RenewEntry,
   ReviewData,
-  ReviewEntry,
-  SectionRevision,
-  SealData,
-  SealEntry,
   VerificationData,
-  VerificationEntry,
 } from "./types.js";
 import {
-  blobOid,
-  commitOid,
+  changeId,
   contractId,
-  evidenceKind,
+  declarationKey,
   entryUlid,
+  snapshotId,
 } from "./types.js";
 
 type RecordValue = Record<string, unknown>;
@@ -68,15 +58,14 @@ export class NonCanonicalEntryError extends FactsCodecError {
 const VERSION_BY_KIND = {
   bind: 1,
   amend: 1,
-  seal: 1,
-  open: 1,
-  claim: 1,
-  renew: 1,
-  petition: 1,
-  forfeit: 1,
+  bound: 1,
+  deliver: 1,
   review: 1,
-  check: 1,
   verification: 1,
+  claimed: 1,
+  arc: 1,
+  abandon: 1,
+  abandoned: 1,
 } as const;
 
 function isRecord(value: unknown): value is RecordValue {
@@ -116,19 +105,12 @@ function stringValue(value: unknown, path: string, nonblank = true): string {
   return value;
 }
 
-function integerValue(value: unknown, path: string, positive = false): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || (positive ? value < 1 : value < 0)) {
-    fail(path, positive ? "expected a positive safe integer" : "expected a nonnegative safe integer");
-  }
-  return value;
-}
-
-function oidValue(value: unknown, path: string, kind: "blob" | "commit"): string {
-  if (typeof value !== "string") fail(path, "expected an object ID");
+function opaqueIdValue(value: unknown, path: string, kind: "snapshot" | "change"): string {
+  if (typeof value !== "string") fail(path, "expected a nonblank string");
   try {
-    return kind === "blob" ? blobOid(value) : commitOid(value);
+    return kind === "snapshot" ? snapshotId(value) : changeId(value);
   } catch (error) {
-    fail(path, error instanceof Error ? error.message : "invalid object ID");
+    fail(path, error instanceof Error ? error.message : "invalid opaque ID");
   }
 }
 
@@ -141,13 +123,18 @@ function ulidValue(value: unknown, path: string): string {
   }
 }
 
+function declarationKeyValue(value: unknown, path: string): DeclarationKey {
+  if (typeof value !== "string") fail(path, "expected a declaration key");
+  try {
+    return declarationKey(value);
+  } catch (error) {
+    fail(path, error instanceof Error ? error.message : "invalid declaration key");
+  }
+}
+
 function arrayValue(value: unknown, path: string): readonly unknown[] {
   if (!Array.isArray(value)) fail(path, "expected an array");
   return value;
-}
-
-function optionalString(value: RecordValue, key: string, path: string): void {
-  if (key in value && value[key] !== undefined) stringValue(value[key], `${path}.${key}`);
 }
 
 function validateTimestamp(value: unknown, path: string): string {
@@ -163,24 +150,26 @@ function validateTimestamp(value: unknown, path: string): string {
   return text;
 }
 
-function validateContractBody(value: unknown, path: string): ContractBody {
-  const object = requireRecord(value, path);
-  requireKeys(object, ["title", "context", "objective", "design", "region", "criteria", "verification", "extensions"], path);
-  const body = {
-    title: stringValue(object.title, `${path}.title`),
-    context: stringValue(object.context, `${path}.context`),
-    objective: stringValue(object.objective, `${path}.objective`),
-    design: stringValue(object.design, `${path}.design`),
-    region: stringArray(object.region, `${path}.region`),
-    criteria: stringArray(object.criteria, `${path}.criteria`),
-    verification: verificationArray(object.verification, `${path}.verification`),
-    extensions: extensionArray(object.extensions, `${path}.extensions`),
-  } satisfies ContractBody;
-  return body;
-}
-
 function stringArray(value: unknown, path: string): readonly string[] {
   return arrayValue(value, path).map((item, index) => stringValue(item, `${path}[${index}]`));
+}
+
+function contractIdArray(value: unknown, path: string): readonly ContractId[] {
+  return arrayValue(value, path).map((item, index) => {
+    try {
+      return contractId(stringValue(item, `${path}[${index}]`));
+    } catch (error) {
+      fail(`${path}[${index}]`, error instanceof Error ? error.message : "invalid contract ID");
+    }
+  });
+}
+
+function gatesArray(value: unknown, path: string): readonly Gate[] {
+  return arrayValue(value, path).map((item, index) => {
+    const gate = stringValue(item, `${path}[${index}]`);
+    if (gate !== "reviewed" && gate !== "verified") fail(`${path}[${index}]`, "unknown gate");
+    return gate;
+  });
 }
 
 function verificationArray(value: unknown, path: string): readonly { executor: "bash" | "zsh" | "pwsh"; script: string }[] {
@@ -201,190 +190,183 @@ function extensionArray(value: unknown, path: string): readonly ContractExtensio
   });
 }
 
-function evidenceRef(value: unknown, path: string): EvidenceRef {
+function criteriaArray(value: unknown, path: string): readonly ContractCriterion[] {
+  return arrayValue(value, path).map((item, index) => {
+    const object = requireRecord(item, `${path}[${index}]`);
+    requireKeys(object, ["title", "body"], `${path}[${index}]`);
+    return {
+      title: stringValue(object.title, `${path}[${index}].title`),
+      body: stringValue(object.body, `${path}[${index}].body`),
+    };
+  });
+}
+
+function validateCoordinates(value: unknown, path: string): ContractCoordinates {
   const object = requireRecord(value, path);
-  requireKeys(object, ["entry", "seq", "kind", "oid"], path);
-  let kind: string;
-  try {
-    kind = evidenceKind(stringValue(object.kind, `${path}.kind`));
-  } catch (error) {
-    fail(`${path}.kind`, error instanceof Error ? error.message : "invalid evidence kind");
+  requireOptionalKeys(object, ["start", "target", "workspace"], path);
+  for (const key of ["start", "workspace"] as const) {
+    if (!(key in object)) fail(path, `missing field '${key}'`);
   }
+  const workspace = stringValue(object.workspace, `${path}.workspace`);
+  if (workspace !== "worktree" && workspace !== "here") fail(`${path}.workspace`, "unknown workspace");
   return {
-    entry: entryUlid(ulidValue(object.entry, `${path}.entry`)),
-    seq: integerValue(object.seq, `${path}.seq`),
-    kind,
-    oid: blobOid(oidValue(object.oid, `${path}.oid`, "blob")),
+    start: snapshotId(opaqueIdValue(object.start, `${path}.start`, "snapshot")),
+    workspace,
+    ...(object.target === undefined ? {} : { target: stringValue(object.target, `${path}.target`) }),
   };
 }
 
-function evidenceRefs(value: unknown, path: string): readonly EvidenceRef[] {
-  return arrayValue(value, path).map((item, index) => evidenceRef(item, `${path}[${index}]`));
-}
-
-function sectionRevision(value: unknown, path: string): SectionRevision {
+export function validateContractBody(value: unknown, path = "ContractBody"): ContractBody {
   const object = requireRecord(value, path);
-  requireKeys(object, ["target", "op", "body"], path);
-  const targetValue = object.target;
-  let target: SectionRevision["target"];
-  if (typeof targetValue === "string") {
-    if (targetValue !== "context" && targetValue !== "objective" && targetValue !== "design") fail(`${path}.target`, "unknown section target");
-    target = targetValue;
-  } else {
-    const extension = requireRecord(targetValue, `${path}.target`);
-    requireKeys(extension, ["extension"], `${path}.target`);
-    target = { extension: stringValue(extension.extension, `${path}.target.extension`) };
+  const required = ["title", "context", "objective", "design", "region", "criteria", "verification", "extensions"] as const;
+  requireOptionalKeys(object, [...required, "gates", "after"], path);
+  for (const key of required) {
+    if (!(key in object)) fail(path, `missing field '${key}'`);
   }
-  const op = stringValue(object.op, `${path}.op`);
-  if (op !== "replace" && op !== "append" && op !== "add") fail(`${path}.op`, "unknown revision operation");
-  if (op === "add" && typeof target === "string") fail(`${path}.target`, "add requires an extension target");
-  return { target, op, body: stringValue(object.body, `${path}.body`) };
+  return {
+    title: stringValue(object.title, `${path}.title`),
+    context: stringValue(object.context, `${path}.context`),
+    objective: stringValue(object.objective, `${path}.objective`),
+    design: stringValue(object.design, `${path}.design`),
+    region: stringArray(object.region, `${path}.region`),
+    criteria: criteriaArray(object.criteria, `${path}.criteria`),
+    verification: verificationArray(object.verification, `${path}.verification`),
+    extensions: extensionArray(object.extensions, `${path}.extensions`),
+    ...(object.gates === undefined ? {} : { gates: gatesArray(object.gates, `${path}.gates`) }),
+    ...(object.after === undefined ? {} : { after: contractIdArray(object.after, `${path}.after`) }),
+  };
 }
 
-function criteriaDelta(value: unknown, path: string): CriteriaDelta {
+function validateVerification(value: unknown, path: string): VerificationData {
   const object = requireRecord(value, path);
-  const keys = Object.keys(object);
-  if (keys.length !== 1 || (keys[0] !== "add" && keys[0] !== "replace")) fail(path, "expected exactly one criteria delta operation");
-  return keys[0] === "add"
-    ? { add: stringArray(object.add, `${path}.add`) }
-    : { replace: stringArray(object.replace, `${path}.replace`) };
+  requireOptionalKeys(object, ["candidate", "declarationKey", "result", "summary"], path);
+  for (const key of ["candidate", "declarationKey", "result"] as const) {
+    if (!(key in object)) fail(path, `missing field '${key}'`);
+  }
+  const result = stringValue(object.result, `${path}.result`);
+  if (result !== "pass" && result !== "fail") fail(`${path}.result`, "unknown verification result");
+  return {
+    candidate: snapshotId(opaqueIdValue(object.candidate, `${path}.candidate`, "snapshot")),
+    declarationKey: declarationKeyValue(object.declarationKey, `${path}.declarationKey`),
+    result,
+    ...(object.summary === undefined ? {} : { summary: stringValue(object.summary, `${path}.summary`) }),
+  };
+}
+
+function validateArc(value: unknown, path: string): ArcData {
+  const object = requireRecord(value, path);
+  requireKeys(object, ["seq", "title", "objective", "brief"], path);
+  const seq = object.seq;
+  if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1) {
+    fail(`${path}.seq`, "expected a positive safe integer");
+  }
+  return {
+    seq,
+    title: stringValue(object.title, `${path}.title`),
+    objective: stringValue(object.objective, `${path}.objective`),
+    brief: stringValue(object.brief, `${path}.brief`),
+  };
 }
 
 function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
   const path = `data.${kind}`;
   switch (kind) {
-    case "bind":
-      return validateContractBody(value, path);
-    case "amend": {
+    case "bind": {
       const object = requireRecord(value, path);
-      requireOptionalKeys(object, ["revisions", "region", "criteriaDelta", "verificationDelta"], path);
-      if (!("revisions" in object) && !("region" in object) && !("criteriaDelta" in object) && !("verificationDelta" in object)) fail(path, "amend requires at least one body change");
+      requireKeys(object, ["coordinates", "body"], path);
       return {
-        ...(object.revisions === undefined ? {} : { revisions: arrayValue(object.revisions, `${path}.revisions`).map((item, index) => sectionRevision(item, `${path}.revisions[${index}]`)) }),
-        ...(object.region === undefined ? {} : { region: stringArray(object.region, `${path}.region`) }),
-        ...(object.criteriaDelta === undefined ? {} : { criteriaDelta: criteriaDelta(object.criteriaDelta, `${path}.criteriaDelta`) }),
-        ...(object.verificationDelta === undefined ? {} : {
-          verificationDelta: (() => {
-            const delta = requireRecord(object.verificationDelta, `${path}.verificationDelta`);
-            requireKeys(delta, ["replace"], `${path}.verificationDelta`);
-            return { replace: verificationArray(delta.replace, `${path}.verificationDelta.replace`) };
-          })(),
-        }),
-      } satisfies AmendData;
+        coordinates: validateCoordinates(object.coordinates, `${path}.coordinates`),
+        body: validateContractBody(object.body, `${path}.body`),
+      } satisfies BindData;
     }
-    case "seal": {
+    case "amend":
+      return validateContractBody(value, path) satisfies AmendData;
+    case "bound": {
       const object = requireRecord(value, path);
       requireKeys(object, [], path);
-      return {} satisfies SealData;
+      return {} satisfies BoundData;
     }
-    case "open": {
+    case "deliver": {
       const object = requireRecord(value, path);
-      requireKeys(object, ["target", "base"], path);
+      requireKeys(object, ["expectedPredecessor", "candidate", "deliveryPatchId"], path);
       return {
-        target: stringValue(object.target, `${path}.target`),
-        base: commitOid(oidValue(object.base, `${path}.base`, "commit")),
-      } satisfies OpenData;
+        expectedPredecessor: snapshotId(opaqueIdValue(object.expectedPredecessor, `${path}.expectedPredecessor`, "snapshot")),
+        candidate: snapshotId(opaqueIdValue(object.candidate, `${path}.candidate`, "snapshot")),
+        deliveryPatchId: changeId(opaqueIdValue(object.deliveryPatchId, `${path}.deliveryPatchId`, "change")),
+      } satisfies DeliverData;
     }
-    case "claim": {
+    case "review": {
       const object = requireRecord(value, path);
-      requireKeys(object, ["petition"], path);
-      return { petition: entryUlid(ulidValue(object.petition, `${path}.petition`)) } satisfies ClaimData;
-    }
-    case "renew": {
-      const object = requireRecord(value, path);
-      requireKeys(object, ["newBase", "oldHead", "newHead"], path);
+      requireOptionalKeys(object, ["verdict", "reviewedPatchId", "reviewedHead", "summary"], path);
+      for (const key of ["verdict", "reviewedPatchId", "reviewedHead"] as const) {
+        if (!(key in object)) fail(path, `missing field '${key}'`);
+      }
+      const verdict = stringValue(object.verdict, `${path}.verdict`);
+      if (verdict !== "approved" && verdict !== "changes-requested") fail(`${path}.verdict`, "unknown review verdict");
       return {
-        newBase: commitOid(oidValue(object.newBase, `${path}.newBase`, "commit")),
-        oldHead: commitOid(oidValue(object.oldHead, `${path}.oldHead`, "commit")),
-        newHead: commitOid(oidValue(object.newHead, `${path}.newHead`, "commit")),
-      } satisfies RenewData;
+        verdict,
+        reviewedPatchId: changeId(opaqueIdValue(object.reviewedPatchId, `${path}.reviewedPatchId`, "change")),
+        reviewedHead: snapshotId(opaqueIdValue(object.reviewedHead, `${path}.reviewedHead`, "snapshot")),
+        ...(object.summary === undefined ? {} : { summary: stringValue(object.summary, `${path}.summary`) }),
+      } satisfies ReviewData;
     }
-    case "petition": {
+    case "verification":
+      return validateVerification(value, path) satisfies VerificationData;
+    case "claimed": {
       const object = requireRecord(value, path);
-      requireKeys(object, ["expectedPredecessor", "deliveryHead", "candidate"], path);
-      return {
-        expectedPredecessor: commitOid(oidValue(object.expectedPredecessor, `${path}.expectedPredecessor`, "commit")),
-        deliveryHead: commitOid(oidValue(object.deliveryHead, `${path}.deliveryHead`, "commit")),
-        candidate: commitOid(oidValue(object.candidate, `${path}.candidate`, "commit")),
-      } satisfies PetitionData;
+      requireKeys(object, ["delivery"], path);
+      return { delivery: entryUlid(ulidValue(object.delivery, `${path}.delivery`)) } satisfies ClaimedData;
     }
-    case "forfeit": {
+    case "arc":
+      return validateArc(value, path) satisfies ArcData;
+    case "abandon": {
       const object = requireRecord(value, path);
       requireOptionalKeys(object, ["reason", "note"], path);
       if (!("reason" in object)) fail(path, "missing field 'reason'");
       const reason = stringValue(object.reason, `${path}.reason`);
-      if (reason !== "manual" && reason !== "bind-failed") fail(`${path}.reason`, "unknown forfeit reason");
-      if ("note" in object) optionalString(object, "note", path);
-      return { reason, ...(object.note === undefined ? {} : { note: stringValue(object.note, `${path}.note`) }) } satisfies ForfeitData;
+      if (reason !== "manual" && reason !== "bind-failed") fail(`${path}.reason`, "unknown abandon reason");
+      return {
+        reason,
+        ...(object.note === undefined ? {} : { note: stringValue(object.note, `${path}.note`) }),
+      } satisfies AbandonData;
     }
-    case "review": {
+    case "abandoned": {
       const object = requireRecord(value, path);
-      const verdict = stringValue(object.verdict, `${path}.verdict`);
-      if (verdict === "approved") {
-        requireKeys(object, ["verdict", "reviewedHead", "digest", "summary", "evidence"], path);
-        return {
-          verdict,
-          reviewedHead: commitOid(oidValue(object.reviewedHead, `${path}.reviewedHead`, "commit")),
-          digest: stringValue(object.digest, `${path}.digest`),
-          summary: stringValue(object.summary, `${path}.summary`),
-          evidence: evidenceRefs(object.evidence, `${path}.evidence`),
-        } satisfies Extract<ReviewData, { verdict: "approved" }>;
-      }
-      if (verdict === "changes-requested") {
-        requireKeys(object, ["verdict", "digest", "summary", "evidence"], path);
-        return {
-          verdict,
-          digest: stringValue(object.digest, `${path}.digest`),
-          summary: stringValue(object.summary, `${path}.summary`),
-          evidence: evidenceRefs(object.evidence, `${path}.evidence`),
-        } satisfies Extract<ReviewData, { verdict: "changes-requested" }>;
-      }
-      fail(`${path}.verdict`, "unknown review verdict");
-    }
-    case "check": {
-      const object = requireRecord(value, path);
-      requireKeys(object, ["result", "summary", "evidence"], path);
-      const result = stringValue(object.result, `${path}.result`);
-      if (result !== "pass" && result !== "fail") fail(`${path}.result`, "unknown check result");
-      return { result, summary: stringValue(object.summary, `${path}.summary`), evidence: evidenceRefs(object.evidence, `${path}.evidence`) } satisfies CheckData;
-    }
-    case "verification": {
-      const object = requireRecord(value, path);
-      requireKeys(object, ["result", "summary", "evidence"], path);
-      const result = stringValue(object.result, `${path}.result`);
-      if (result !== "pass" && result !== "fail") fail(`${path}.result`, "unknown verification result");
-      return { result, summary: stringValue(object.summary, `${path}.summary`), evidence: evidenceRefs(object.evidence, `${path}.evidence`) } satisfies VerificationData;
+      requireKeys(object, ["finalHead"], path);
+      if (object.finalHead === null) return { finalHead: null } satisfies AbandonedData;
+      return { finalHead: snapshotId(opaqueIdValue(object.finalHead, `${path}.finalHead`, "snapshot")) } satisfies AbandonedData;
     }
   }
 }
 
 function validateEntry(value: unknown): JournalEntry {
   const object = requireRecord(value, "entry");
-  requireKeys(object, ["v", "kind", "contract", "entry", "at", "actor", "data"], "entry");
+  requireOptionalKeys(object, ["v", "kind", "contract", "entry", "at", "actor", "data"], "entry");
+  for (const key of ["v", "kind", "contract", "entry", "at", "data"] as const) {
+    if (!(key in object)) fail("entry", `missing field '${key}'`);
+  }
   const kind = object.kind;
   if (typeof kind !== "string" || !Object.hasOwn(VERSION_BY_KIND, kind)) throw new UnknownEntryError(kind);
   const expectedVersion = VERSION_BY_KIND[kind as keyof typeof VERSION_BY_KIND];
   if (object.v !== expectedVersion) fail("entry.v", `expected version ${expectedVersion} for ${kind}`);
-  let contract: string;
+  let contract: ContractId;
   try {
     contract = contractId(stringValue(object.contract, "entry.contract"));
   } catch (error) {
     fail("entry.contract", error instanceof Error ? error.message : "invalid contract ID");
   }
-  const validated = {
+  const entry = {
     v: object.v,
     kind,
     contract,
     entry: entryUlid(ulidValue(object.entry, "entry.entry")),
     at: validateTimestamp(object.at, "entry.at"),
-    actor: stringValue(object.actor, "entry.actor"),
+    ...(object.actor === undefined ? {} : { actor: stringValue(object.actor, "entry.actor") }),
     data: validateData(kind as JournalEntry["kind"], object.data),
-  };
-  const entry = validated as JournalEntry;
-  if (entry.kind === "review" || entry.kind === "check" || entry.kind === "verification") {
-    for (const ref of entry.data.evidence) {
-      if (ref.entry !== entry.entry) fail("entry.data.evidence", "evidence entry must match its journal entry");
-    }
+  } as JournalEntry;
+  const after = entry.kind === "bind" ? entry.data.body.after : entry.kind === "amend" ? entry.data.after : undefined;
+  if (after?.some((dependency) => dependency === entry.contract)) {
+    fail(`entry.data.${entry.kind}.after`, "after cannot reference its own contract");
   }
   return entry;
 }
@@ -438,21 +420,3 @@ export function appendEntry(journal: string, entry: JournalEntry): string {
   if (journal.length !== 0 && !journal.endsWith("\n")) throw new FactsCodecError("cannot append to a noncanonical journal prefix");
   return `${journal}${encodeEntry(entry)}`;
 }
-
-export function bodyDigest(body: ContractBody): string {
-  return createHash("sha256").update(canonicalJson(body), "utf8").digest("hex");
-}
-
-export type {
-  AmendEntry,
-  BindEntry,
-  CheckEntry,
-  ClaimEntry,
-  ForfeitEntry,
-  OpenEntry,
-  PetitionEntry,
-  RenewEntry,
-  ReviewEntry,
-  SealEntry,
-  VerificationEntry,
-};

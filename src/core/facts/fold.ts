@@ -1,155 +1,119 @@
 import type {
-  AmendEntry,
-  BindEntry,
+  ArcEntry,
   ContractBody,
+  ContractCoordinates,
   ContractState,
   JournalEntry,
-  SectionRevision,
 } from "./types.js";
+import { gatesSatisfied } from "./gate.js";
 
 function foldError(message: string): never {
   throw new Error(`invalid journal fold: ${message}`);
 }
 
-function appendText(current: string, addition: string): string {
-  return current.length === 0 ? addition : `${current}\n\n${addition}`;
+function samePrerequisites(left: readonly ContractState["id"][] | undefined, right: readonly ContractState["id"][] | undefined): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined || left.length !== right.length) return false;
+  return left.every((id, index) => id === right[index]);
 }
 
-function applyRevision(body: ContractBody, revision: SectionRevision): ContractBody {
-  if (typeof revision.target === "string") {
-    if (revision.op === "add") foldError(`cannot add built-in section '${revision.target}'`);
-    const value = revision.op === "replace"
-      ? revision.body
-      : appendText(body[revision.target], revision.body);
-    return { ...body, [revision.target]: value };
-  }
-
-  const title = revision.target.extension;
-  const index = body.extensions.findIndex((extension) => extension.title === title);
-  if (revision.op === "add") {
-    if (index !== -1) foldError(`extension '${title}' already exists`);
-    return { ...body, extensions: [...body.extensions, { title, content: revision.body }] };
-  }
-  if (index === -1) foldError(`extension '${title}' does not exist`);
-  const extensions = body.extensions.map((extension, extensionIndex) => extensionIndex === index
-    ? { ...extension, content: revision.op === "replace" ? revision.body : appendText(extension.content, revision.body) }
-    : extension);
-  return { ...body, extensions };
+function cloneBody(body: ContractBody): ContractBody {
+  return {
+    title: body.title,
+    context: body.context,
+    objective: body.objective,
+    design: body.design,
+    region: [...body.region],
+    criteria: body.criteria.map((criterion) => ({ ...criterion })),
+    verification: body.verification.map((declaration) => ({ ...declaration })),
+    extensions: body.extensions.map((extension) => ({ ...extension })),
+    ...(body.gates === undefined ? {} : { gates: [...body.gates] }),
+    ...(body.after === undefined ? {} : { after: [...body.after] }),
+  };
 }
 
-function applyAmend(body: ContractBody, entry: AmendEntry): ContractBody {
-  let next = body;
-  for (const revision of entry.data.revisions ?? []) next = applyRevision(next, revision);
-  if (entry.data.region !== undefined) next = { ...next, region: [...entry.data.region] };
-  if (entry.data.criteriaDelta && "add" in entry.data.criteriaDelta) {
-    next = { ...next, criteria: [...next.criteria, ...entry.data.criteriaDelta.add] };
-  }
-  if (entry.data.criteriaDelta && "replace" in entry.data.criteriaDelta) {
-    next = { ...next, criteria: [...entry.data.criteriaDelta.replace] };
-  }
-  if (entry.data.verificationDelta !== undefined) {
-    next = { ...next, verification: [...entry.data.verificationDelta.replace] };
-  }
-  return next;
+function cloneCoordinates(coordinates: ContractCoordinates): ContractCoordinates {
+  return { ...coordinates };
 }
 
 function initialState(id: ContractState["id"], head: ContractState["head"] = null): ContractState {
   return {
     id,
     head,
-    phase: "active",
+    coordinates: null,
     body: null,
+    bound: null,
     delivery: null,
-    approval: null,
-    petition: null,
-    evidence: [],
+    reviews: [],
+    verifications: [],
+    abandon: null,
     terminal: null,
   };
 }
 
-function requireBound(state: ContractState): ContractBody {
+function requireBody(state: ContractState): ContractBody {
   if (state.body === null) foldError("journal must begin with bind");
   return state.body;
 }
 
-function refuse(state: ContractState, entry: JournalEntry): never {
-  foldError(`${state.phase} cannot accept ${entry.kind}`);
+function requireActive(state: ContractState, entry: JournalEntry): void {
+  if (state.terminal !== null) foldError(`terminal contract cannot accept ${entry.kind}`);
 }
 
-function appendEvidence(state: ContractState, entry: JournalEntry): ContractState {
-  if (entry.kind !== "review" && entry.kind !== "check" && entry.kind !== "verification") return state;
-  return { ...state, evidence: [...state.evidence, entry] };
+function foldArc(state: ContractState, entry: ArcEntry): ContractState {
+  const expectedSequence = (state.currentArc?.data.seq ?? 0) + 1;
+  if (entry.data.seq !== expectedSequence) {
+    foldError(`arc sequence must be ${expectedSequence}`);
+  }
+  return { ...state, currentArc: entry };
 }
 
-/** Fold one accepted journal fact without resolving Git or evidence objects. */
+/** Fold one accepted journal fact. */
 export function foldEntry(state: ContractState, entry: JournalEntry): ContractState {
   if (entry.contract !== state.id) foldError(`entry belongs to ${entry.contract}, not ${state.id}`);
   if (state.body === null && entry.kind !== "bind") foldError("journal must begin with bind");
   if (state.body !== null && entry.kind === "bind") foldError("bind may appear only once");
+  requireActive(state, entry);
 
-  let next = appendEvidence(state, entry);
   switch (entry.kind) {
     case "bind":
-      return { ...next, body: { ...entry.data, region: [...entry.data.region], criteria: [...entry.data.criteria], verification: [...entry.data.verification], extensions: [...entry.data.extensions] } };
-    case "amend":
-      if (next.phase !== "active" && next.phase !== "awaiting-verdict") refuse(next, entry);
-      return { ...next, body: applyAmend(requireBound(next), entry), phase: "active", approval: null, petition: null };
-    case "seal":
-      if (next.phase !== "active") refuse(next, entry);
-      if (next.delivery === null) foldError("seal requires an open delivery");
-      return { ...next, phase: "sealed" };
-    case "open":
-      if (next.phase !== "active") refuse(next, entry);
-      if (next.delivery !== null) foldError("delivery may be opened only once");
       return {
-        ...next,
-        delivery: {
-          target: entry.data.target,
-          base: entry.data.base,
-          head: entry.data.base,
-        },
+        ...state,
+        coordinates: cloneCoordinates(entry.data.coordinates),
+        body: cloneBody(entry.data.body),
       };
-    case "renew":
-      if (next.phase !== "sealed") refuse(next, entry);
-      if (next.delivery === null) foldError("renew requires an open delivery");
-      if (entry.data.oldHead !== next.delivery.head) {
-        foldError(`renew old head ${entry.data.oldHead} does not match current delivery head ${next.delivery.head}`);
+    case "amend": {
+      const previous = requireBody(state);
+      if (state.bound !== null && !samePrerequisites(previous.after, entry.data.after)) {
+        foldError("cannot change after once prerequisites are consumed");
       }
-      return {
-        ...next,
-        phase: "active",
-        approval: null,
-        delivery: {
-          target: next.delivery.target,
-          base: entry.data.newBase,
-          head: entry.data.newHead,
-        },
-      };
-    case "petition":
-      if (next.phase !== "sealed") refuse(next, entry);
-      return { ...next, phase: "awaiting-verdict", approval: null, petition: entry };
+      return { ...state, body: cloneBody(entry.data) };
+    }
+    case "bound":
+      if (state.bound !== null) foldError("bound may appear only once");
+      return { ...state, bound: entry };
+    case "deliver":
+      if (state.bound === null) foldError("deliver requires bound");
+      return { ...state, delivery: entry };
     case "review":
-      if (next.phase === "awaiting-verdict") {
-        return entry.data.verdict === "approved"
-          ? { ...next, approval: entry }
-          : { ...next, phase: "active", approval: null, petition: null };
-      }
-      return next;
-    case "check":
+      if (state.delivery === null) foldError("review requires a deliver");
+      return { ...state, reviews: [...state.reviews, entry] };
     case "verification":
-      return next;
-    case "claim":
-      if (next.phase !== "awaiting-verdict") refuse(next, entry);
-      if (next.petition === null || next.petition.entry !== entry.data.petition) {
-        foldError("claim must name the current claim petition");
-      }
-      if (next.approval === null || next.approval.data.verdict !== "approved" || next.approval.data.reviewedHead !== next.petition.data.deliveryHead) {
-        foldError("claim requires an approval for the petition delivery head");
-      }
-      return { ...next, phase: "claimed", approval: null, petition: null, terminal: entry };
-    case "forfeit":
-      if (next.phase === "claimed" || next.phase === "forfeited") refuse(next, entry);
-      return { ...next, phase: "forfeited", approval: null, petition: null, terminal: entry };
+      if (state.delivery === null) foldError("verification requires a deliver");
+      return { ...state, verifications: [...state.verifications, entry] };
+    case "claimed":
+      if (state.delivery === null) foldError("claimed requires a deliver");
+      if (entry.data.delivery !== state.delivery.entry) foldError("claimed must name the current deliver");
+      if (!gatesSatisfied(state)) foldError("claimed gates are not satisfied");
+      return { ...state, terminal: entry };
+    case "arc":
+      return foldArc(state, entry);
+    case "abandon":
+      if (state.abandon !== null) foldError("abandon may appear only once");
+      return { ...state, abandon: entry };
+    case "abandoned":
+      if (state.abandon === null) foldError("abandoned requires abandon intent");
+      return { ...state, terminal: entry };
   }
 }
 
@@ -169,9 +133,9 @@ export function foldJournal(
   return state;
 }
 
-/** The bind body plus ordered amend facts is the canonical effective contract body. */
+/** The bind body plus ordered replacement amend facts is the canonical effective contract body. */
 export function effectiveBody(state: ContractState): ContractBody {
-  return requireBound(state);
+  return requireBody(state);
 }
 
 export function foldEffectiveBody(entries: readonly JournalEntry[]): ContractBody {

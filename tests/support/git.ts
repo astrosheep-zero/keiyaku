@@ -1,11 +1,35 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export interface TestGitRepository {
   readonly path: string;
   readonly run: (args: readonly string[], input?: string | Uint8Array) => string;
+}
+
+export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: () => T): T {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-git-shim-"));
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const shimPath = join(directory, "git");
+  writeFileSync(shimPath, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  chmodSync(shimPath, 0o755);
+  const updates = {
+    PATH: `${directory}:${process.env.PATH ?? ""}`,
+    KEIYAKU_REAL_GIT: realGit,
+    ...variables,
+  };
+  const previous = new Map(Object.keys(updates).map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(updates)) process.env[key] = value;
+  try {
+    return action();
+  } finally {
+    for (const key of Object.keys(updates)) {
+      const value = previous.get(key);
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 }
 
 export function makeGitRepository(): TestGitRepository {

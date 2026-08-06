@@ -1,29 +1,30 @@
 # Source Tree Draft
 
 **Status: rough draft aligned to the 2026-08-06 hard cut; non-authoritative
-planning evidence.** The owner documents remain [`architecture.md`](architecture.md) and
-[`cli.md`](cli.md). This file records the agreed ownership shape, measurements,
-and deletion map. It cannot add product behavior or persisted fields.
+planning evidence.** The owner documents are registered in
+[`README.md`](README.md). This file records the current ownership shape,
+measurements, and deletion map. It cannot add product behavior or persisted
+fields.
 
 ## Confirmed Tree
 
 ```text
 src/
 ├── index.ts                 # sole public ESM package root
-├── result.ts                # shared public Outcome/Receipt value types
 ├── library/
-│   └── keiyaku.ts           # mapping-only Keiyaku/Delivery public facade
+│   └── keiyaku.ts           # public values and mapping-only facade
 ├── body/                    # ContractBody Markdown grammar and amend transforms
 │   ├── grammar.ts
 │   ├── decode.ts
 │   ├── render.ts
 │   ├── amend.ts
 │   └── arc.ts
-├── format/
-│   └── diff.ts              # shared in-process unified-diff presentation adapter
 ├── runtime/
-│   └── proc/                # domain-free spawn, bounded capture, tree termination
-├── verification/           # synchronous Verification plan and producer
+│   └── proc/
+│       └── run.ts           # domain-free spawn, capture, tree termination
+├── verification/
+│   ├── plan.ts              # pure executor plan
+│   └── producer.ts          # synchronous Verification producer
 ├── markdown/               # generic source-aware Keiyaku Markdown dialect
 │   ├── types.ts
 │   ├── lex.ts
@@ -75,8 +76,8 @@ src/
 │   ├── settings.ts        # bind/amend gate snapshot acquisition
 │   ├── accepted.ts        # accepted-fact result/effect adapter
 │   ├── result.ts          # CLI invocation result data shapes
+│   ├── diff.ts            # pure unified-diff presentation adapter
 │   ├── commands/          # argv adapters only, one file per command
-│   │   ├── body.ts        # Markdown body edge decoding/amend convenience
 │   │   ├── bind.ts
 │   │   ├── amend.ts
 │   │   ├── deliver.ts
@@ -144,7 +145,7 @@ tests. Their rationale and porting evidence belong only in
 ## Measurements
 
 The measured pre-cut tree was `4,418 LOC` on 2026-08-04. The current working
-tree is `6,384 LOC` of `src/` and `3,407 LOC` of tests on 2026-08-06. These are
+tree is `6,701 LOC` of `src/` and `3,971 LOC` of tests on 2026-08-06. These are
 raw working-tree measurements, not a quota; generated `build/` output and
 dependencies are excluded. The confirmed tree is an ownership target, not a
 line-count quota. No target number licenses filler. A smaller implementation

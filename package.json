@@ -2,15 +2,30 @@
   "name": "@astrosheep/keiyaku-v4",
   "version": "0.0.0",
   "private": true,
+  "files": [
+    "build"
+  ],
+  "main": "./build/src/index.js",
+  "types": "./build/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/src/index.d.ts",
+      "import": "./build/src/index.js"
+    }
+  },
+  "bin": {
+    "keiyaku-v4": "build/src/cli/index.js"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.json",
     "review:model-impact": "node --import tsx scripts/model-change-impact.ts",
-    "test": "npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx --test tests/**/*.test.ts tests/maintainability.test.js",
+    "test": "npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx --test tests/**/*.test.ts tests/maintainability.test.js && npm run test:dogfood",
     "test:architecture": "node --import tsx scripts/check-architecture.ts",
+    "test:dogfood": "npm run build && node --import tsx --test tests/day1-shell-dogfood.dogfood.ts",
     "test:maintainability": "node scripts/check-maintainability.js",
     "test:reachability": "knip --include files,dependencies,unlisted,unresolved,duplicates",
     "test:typecheck": "tsc -p tsconfig.json --noEmit"
@@ -22,5 +37,17 @@
     "knip": "^6.31.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
-  }
+  },
+  "dependencies": {
+    "diff": "^8.0.4",
+    "yaml": "^2.9.0"
+  },
+  "description": "Keiyaku v4 is a clean implementation of an agent-facing contract workflow.",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }
