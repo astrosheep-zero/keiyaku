@@ -15,7 +15,7 @@ export type PlacementRefusal = Readonly<{
 }>;
 
 /** Decide the only journal/target pair that can place the current delivery. */
-export function decidePlacement({ input, attempt, observation }: DecideInput<PlacementInput>): OfferDecision<null, PlacementRefusal> {
+export function decidePlacement({ input, attempt, observation }: DecideInput<PlacementInput>): OfferDecision<PlacementRefusal> {
   const id = contractId(input.contractId);
   const current = observation.contracts.get(id);
   if (!current?.state) return { kind: "refused", refusal: { kind: "contract-missing", contractId: id } };
@@ -49,6 +49,5 @@ export function decidePlacement({ input, attempt, observation }: DecideInput<Pla
         },
       }),
     },
-    handoff: null,
   };
 }

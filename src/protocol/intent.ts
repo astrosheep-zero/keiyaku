@@ -3,7 +3,7 @@ import { observeCarrier, observeContract } from "../carrier/observe.js";
 import type { DeliveryPreparation } from "../carrier/delivery.js";
 import type { GitRepository } from "../carrier/repository.js";
 import { prepareStoredVerification } from "../carrier/verification.js";
-import type { DecideInput, OfferDecision } from "../core/decide.js";
+import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
 import { gateSatisfied } from "../core/facts/gate.js";
 import { placeEligibleBounds } from "../core/facts/eligibility.js";
 import { currentSubject } from "../core/subject.js";
@@ -14,7 +14,7 @@ import { decideAttestation, type AttestationInput, type AttestationRefusal } fro
 import type {
   ProduceVerificationInput, VerificationOutcome, VerificationSpawnErrorOutcome, VerificationTerminalOutcome, VerificationTimeoutOutcome, VerificationUnknownExitOutcome,
 } from "../verification/producer.js";
-import { runProtocol, type AttemptContext, type ProtocolResult } from "./run.js";
+import { runProtocol, type ProtocolResult } from "./run.js";
 
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const VERIFICATION_TIMEOUT_MS = 5 * 60 * 1_000;
@@ -47,9 +47,9 @@ function runIntent<Input, Refusal>(
   repository: GitRepository,
   contract: ContractId,
   input: Input,
-  decide: (input: DecideInput<Input>) => OfferDecision<null, Refusal>,
+  decide: (input: DecideInput<Input>) => OfferDecision<Refusal>,
   eligibility = false,
-): ProtocolResult<null, Refusal> {
+): ProtocolResult<Refusal> {
   const contracts = [contract];
   return runProtocol({
     input,
@@ -82,13 +82,13 @@ function runIntent<Input, Refusal>(
 
 type ContractIntent = Readonly<{ contractId: ContractId }>;
 
-type IntentDecision<Input, Refusal> = (input: DecideInput<Input>) => OfferDecision<null, Refusal>;
+type IntentDecision<Input, Refusal> = (input: DecideInput<Input>) => OfferDecision<Refusal>;
 
 export function admitBind<Input extends ContractIntent, Refusal>(
   repository: GitRepository,
   input: Input,
   decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<null, Refusal> {
+): ProtocolResult<Refusal> {
   return runIntent(repository, input.contractId, input, decide, true);
 }
 
@@ -96,7 +96,7 @@ export function admitAmend<Input extends ContractIntent, Refusal>(
   repository: GitRepository,
   input: Input,
   decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<null, Refusal> {
+): ProtocolResult<Refusal> {
   return runIntent(repository, input.contractId, input, decide, true);
 }
 
@@ -104,7 +104,7 @@ export function admitDeliver<Input extends ContractIntent, Refusal>(
   repository: GitRepository,
   input: Input,
   decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<null, Refusal> {
+): ProtocolResult<Refusal> {
   return runIntent(repository, input.contractId, input, decide);
 }
 
@@ -112,7 +112,7 @@ export function admitAbandon<Input extends ContractIntent, Refusal>(
   repository: GitRepository,
   input: Input,
   decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<null, Refusal> {
+): ProtocolResult<Refusal> {
   return runIntent(repository, input.contractId, input, decide);
 }
 
@@ -120,7 +120,7 @@ export function admitArc<Input extends ContractIntent, Refusal>(
   repository: GitRepository,
   input: Input,
   decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<null, Refusal> {
+): ProtocolResult<Refusal> {
   return runIntent(repository, input.contractId, input, decide);
 }
 
@@ -128,7 +128,7 @@ export function admitReview<Input extends ContractIntent, Refusal>(
   repository: GitRepository,
   input: Input,
   decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<null, Refusal> {
+): ProtocolResult<Refusal> {
   return runIntent(repository, input.contractId, input, decide);
 }
 
@@ -136,7 +136,7 @@ export function admitReview<Input extends ContractIntent, Refusal>(
 export function admitPlacement(
   repository: GitRepository,
   input: Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>,
-): ProtocolResult<null, PlacementRefusal> {
+): ProtocolResult<PlacementRefusal> {
   return runIntent(repository, input.contractId, input, decidePlacement, true);
 }
 
@@ -201,7 +201,7 @@ function verificationInput(
 /** Run the declarations pinned by an admitted delivery, then tender their fact. */
 export async function verifyPreparedDelivery(
   input: VerifyPreparedDeliveryInput,
-): Promise<ProtocolResult<null, AttestationRefusal> | null> {
+): Promise<ProtocolResult<AttestationRefusal> | null> {
   const current = observeContract(input.repository, input.contractId).state;
   if (
     !current
@@ -237,7 +237,7 @@ export async function verifyPreparedDelivery(
 /** Run Verification for the current stored delivery, then tender its fact. */
 export async function verifyStoredDelivery(
   input: VerifyStoredDeliveryInput,
-): Promise<ProtocolResult<null, AttestationRefusal> | VerificationAuditAttempt | null> {
+): Promise<ProtocolResult<AttestationRefusal> | VerificationAuditAttempt | null> {
   const state = input.state;
   if (
     state.terminal

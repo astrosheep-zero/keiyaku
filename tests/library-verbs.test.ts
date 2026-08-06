@@ -335,7 +335,7 @@ test("eligibility placement observes and binds every waiting dependent", async (
     at: "2026-08-06T00:00:00Z",
     data: { gate: "reviewed", subject: reviewSubject, verdict: "satisfied" },
   }, decideAttestation);
-  assert.equal(reviewed.kind, "handoff");
+  assert.equal(reviewed.kind, "accepted");
 
   const dependents: Keiyaku[] = [];
   for (let index = 0; index < 4; index += 1) {
@@ -354,7 +354,7 @@ test("eligibility placement observes and binds every waiting dependent", async (
     contractId: (await source.state()).id,
     at: "2026-08-06T00:00:01Z",
   });
-  assert.equal(placed.kind, "handoff");
+  assert.equal(placed.kind, "accepted");
   assert.equal((await source.state()).terminal?.kind, "claimed");
   for (const dependent of dependents) {
     assert.equal((await dependent.state()).bound?.kind, "bound");

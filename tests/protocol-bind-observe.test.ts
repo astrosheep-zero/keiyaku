@@ -186,7 +186,11 @@ test("contract-local intent ignores an unrelated malformed journal", async () =>
     data: { title: "Observation", objective: "Observe one journal", brief: "Keep the intent local." },
   }, decideArc);
 
-  assert.equal(result.kind, "handoff");
+  assert.equal(result.kind, "accepted");
+  if (result.kind !== "accepted") throw new Error("arc was not accepted");
+  assert.deepEqual(result.receipt.facts.map((entry) => entry.kind), ["arc"]);
+  assert.equal(result.receipt.prior?.id, id);
+  assert.equal(result.receipt.snapshot.id, id);
 });
 
 test("delivery preparation ignores an unrelated malformed journal", async () => {

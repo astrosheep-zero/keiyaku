@@ -14,7 +14,7 @@ export type ArcRefusal = Readonly<{
   contractId: ContractId;
 }>;
 
-export function decideArc({ input, attempt, observation }: DecideInput<ArcInput>): OfferDecision<null, ArcRefusal> {
+export function decideArc({ input, attempt, observation }: DecideInput<ArcInput>): OfferDecision<ArcRefusal> {
   const id = contractId(input.contractId);
   const current = observation.contracts.get(id);
   if (!current?.state) return { kind: "refused", refusal: { kind: "contract-missing", contractId: id } };
@@ -37,6 +37,5 @@ export function decideArc({ input, attempt, observation }: DecideInput<ArcInput>
   return {
     kind: "offer",
     offer: { facts: [{ contractId: id, expectedHead: current.state.head, entries: [arc] }] },
-    handoff: null,
   };
 }

@@ -15,7 +15,7 @@ export type AttestationRefusal =
   | Readonly<{ kind: "stale-subject"; contractId: ContractId; expected: AttestationData["subject"]; actual: AttestationData["subject"] }>;
 
 /** Admit captured testimony only for the subject that remains current. */
-export function decideAttestation({ input, attempt, observation }: DecideInput<AttestationInput>): OfferDecision<null, AttestationRefusal> {
+export function decideAttestation({ input, attempt, observation }: DecideInput<AttestationInput>): OfferDecision<AttestationRefusal> {
   const id = contractId(input.contractId);
   const current = observation.contracts.get(id);
   if (!current?.state) return { kind: "refused", refusal: { kind: "contract-missing", contractId: id } };
@@ -35,5 +35,5 @@ export function decideAttestation({ input, attempt, observation }: DecideInput<A
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     data: input.data,
   };
-  return { kind: "offer", offer: { facts: [{ contractId: id, expectedHead: current.state.head, entries: [attestation] }] }, handoff: null };
+  return { kind: "offer", offer: { facts: [{ contractId: id, expectedHead: current.state.head, entries: [attestation] }] } };
 }

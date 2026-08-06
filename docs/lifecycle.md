@@ -161,5 +161,5 @@ outcome.
 Accepted facts are recognized by canonical entry ULIDs and canonical bytes. On
 unknown-admission recovery, an accepted Receipt retains the pre-admission fold
 that supplied the winning offer as `prior`. Process recovery observes durable
-facts and decides again. The process-local handoff is an optimization only; no
-attempt or handoff ledger is durable authority.
+facts and decides again. The accepted protocol receipt is process-local return
+data only; no attempt or receipt ledger is durable authority.

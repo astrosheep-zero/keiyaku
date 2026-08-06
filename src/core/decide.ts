@@ -7,21 +7,12 @@ export type AttemptContext = Readonly<{
   entryUlids: readonly EntryUlid[];
 }>;
 
-export type AttemptCollision = Readonly<{
-  contractId: import("./facts/types.js").ContractId;
-  planned: import("./facts/types.js").JournalEntry;
-  observed: import("./facts/types.js").JournalEntry;
-  plannedBytes: string;
-  observedBytes: string;
-}>;
-
 export type DecideInput<Input> = Readonly<{
   input: Input;
   attempt: AttemptContext;
   observation: ContractsObservation;
-  collision?: AttemptCollision;
 }>;
 
-export type OfferDecision<Handoff, Refusal> =
-  | Readonly<{ kind: "offer"; offer: Offer; handoff: Handoff }>
+export type OfferDecision<Refusal> =
+  | Readonly<{ kind: "offer"; offer: Offer }>
   | Readonly<{ kind: "refused"; refusal: Refusal }>;

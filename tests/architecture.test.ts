@@ -138,12 +138,21 @@ test("architecture policy keeps verbs away from admission and repository", () =>
 test("architecture policy permits protocol to join pact with carrier", () => {
   const diagnostics = check({
     "core/facts/types.ts": "export type ContractId = string;",
+    "core/facts/fold.ts": "export function foldJournal(): void {}",
     "core/facts/observation.ts": 'import type { ContractId } from "./types.js"; export type Observation = ContractId;',
     "carrier/repository.ts": "export type GitRepository = {};",
     "carrier/observe.ts": 'import type { Observation } from "../core/facts/observation.js"; import type { GitRepository } from "./repository.js"; export function observe(repository: GitRepository): Observation { return repository as Observation; }',
-    "protocol/run.ts": 'import { observe } from "../carrier/observe.js"; import type { GitRepository } from "../carrier/repository.js"; export function run(repository: GitRepository): void { observe(repository); }',
+    "protocol/run.ts": 'import { observe } from "../carrier/observe.js"; import type { GitRepository } from "../carrier/repository.js"; import { foldJournal } from "../core/facts/fold.js"; export function run(repository: GitRepository): void { observe(repository); foldJournal(); }',
   });
   assert.deepEqual(diagnostics, []);
+});
+
+test("architecture policy keeps receipt folding out of operation orchestration", () => {
+  const diagnostics = check({
+    "core/facts/fold.ts": "export function foldJournal(): void {}",
+    "protocol/operations.ts": 'import { foldJournal } from "../core/facts/fold.js"; export function complete(): void { foldJournal(); }',
+  });
+  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
 
 test("architecture policy permits the aggregate status read path", () => {

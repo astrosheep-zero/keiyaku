@@ -60,9 +60,9 @@ It never turns Git prose into domain law.
 ## Reconciliation
 
 Reconciliation computes desired-minus-actual effects from accepted facts and
-fresh external observation. It is idempotent from a null handoff or a process
-restart. It writes no journal fact, never reverses admission, and is the only
-repair primitive for accepted-but-lagged effects.
+fresh external observation. It is idempotent without process-local receipt data
+and across a process restart. It writes no journal fact, never reverses
+admission, and is the only repair primitive for accepted-but-lagged effects.
 
 For a worktree contract, a `bound` fact creates or aligns the deterministic
 delivery ref and linked worktree. A terminal fact removes those Keiyaku-owned

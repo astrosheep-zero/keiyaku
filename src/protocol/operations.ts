@@ -4,7 +4,6 @@ import { observeBindCoordinates, observeCarrier, observeContract } from "../carr
 import { deliveryWorktreePath, reconcile, reconcileBatch, type ReconcileResult } from "../carrier/reconcile.js";
 import { readRef, repositoryAt, type GitRepository } from "../carrier/repository.js";
 import { readDeliveryDiff } from "../carrier/verification.js";
-import { foldJournal } from "../core/facts/fold.js";
 import { currentSubject } from "../core/subject.js";
 import type {
   ActorId, AmendData, ArcData, AttestationData, BindData, ChangeId, ContractBody, ContractId, ContractState, JournalEntry, SnapshotId,
@@ -30,7 +29,7 @@ import {
 } from "./intent.js";
 import { readAudit, type AuditReport } from "./read/audit.js";
 import { readStatus, type StatusReport } from "./read/status.js";
-import type { ProtocolResult, ProtocolTerminal } from "./run.js";
+import type { ProtocolReceipt, ProtocolResult, ProtocolTerminal } from "./run.js";
 
 export type { AuditReport, FactKind, TimelineEntry } from "./read/audit.js";
 export type { ContractStatus, StatusReport } from "./read/status.js";
@@ -45,7 +44,7 @@ export type IntentRefusal =
   | DeliveryPreparationRefusal | PlacementRefusal | AttestationRefusal;
 
 export type IntentRetry = ProtocolTerminal;
-export type IntentReceipt = Readonly<{ facts: readonly JournalEntry[]; prior: ContractState | null; snapshot: ContractState }>;
+export type IntentReceipt = ProtocolReceipt;
 export type IntentOutcome<Value, Refusal = IntentRefusal> =
   | Readonly<{ kind: "accepted"; receipt: IntentReceipt; value: Value }>
   | Readonly<{ kind: "refused"; refusal: Refusal }>
@@ -70,19 +69,13 @@ function accepted<Value, Refusal = IntentRefusal>(
 
 function complete<Value, Refusal>(
   id: ContractId,
-  result: ProtocolResult<null, Refusal>,
+  result: ProtocolResult<Refusal>,
   value: Value,
 ): IntentOutcome<Value, Refusal> {
   if (result.kind === "refused") return { kind: "refused", refusal: result.refusal };
-  if (result.kind !== "handoff") return { kind: "retry", reason: result };
-  const snapshot = result.handoff.snapshot;
-  return accepted<Value, Refusal>(
-    id,
-    result.handoff.acceptedEntries,
-    value,
-    result.handoff.prior,
-    foldJournal(snapshot.id, snapshot.entries, snapshot.head),
-  );
+  if (result.kind !== "accepted") return { kind: "retry", reason: result };
+  if (result.receipt.snapshot.id !== id) throw new TypeError(`accepted snapshot does not belong to ${id}`);
+  return { ...result, value };
 }
 
 export type ScopeOperationInput = Readonly<{ coordinate: string }>;
@@ -224,7 +217,7 @@ export async function deliverOperation(input: OperationInput): Promise<IntentOut
     environment: process.env,
     produce: produceVerification,
   });
-  if (verification?.kind === "handoff") {
+  if (verification?.kind === "accepted") {
     const acceptedVerification = complete(input.contractId, verification, undefined);
     if (acceptedVerification.kind === "accepted") {
       facts.push(...acceptedVerification.receipt.facts);

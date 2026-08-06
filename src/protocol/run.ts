@@ -1,12 +1,12 @@
 import {
   admit,
-  type Accepted,
   type Admission,
   type RefMoved,
 } from "../carrier/admission.js";
 import { observeContracts } from "../carrier/observe.js";
 import type { GitRepository } from "../carrier/repository.js";
-import type { AttemptCollision, AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
+import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
+import { foldJournal } from "../core/facts/fold.js";
 import type { ContractJournalAppend, Offer } from "../core/facts/offer.js";
 import type { ContractsObservation } from "../core/facts/observation.js";
 import {
@@ -18,40 +18,34 @@ import {
   type EntryUlid,
   type JournalEntry,
 } from "../core/facts/types.js";
-import { classifyUnknownAttempt } from "./attempt.js";
+import { classifyUnknownAttempt, type UnknownAttemptClassification } from "./attempt.js";
 
-export type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
-
-export type AcceptedSnapshot = Readonly<{
-  id: ContractId;
-  entries: readonly JournalEntry[];
-  head: ContractHead;
-}>;
-
-export type ReconcileHandoff<Handoff> = Readonly<{
-  handoff: Handoff;
-  acceptedEntries: readonly JournalEntry[];
-  admission: Accepted | null;
+export type ProtocolReceipt = Readonly<{
+  facts: readonly JournalEntry[];
   prior: ContractState | null;
-  snapshot: AcceptedSnapshot;
+  snapshot: ContractState;
 }>;
+
+type ProtocolAccepted = Readonly<{ kind: "accepted"; receipt: ProtocolReceipt }>;
+
+type ProtocolCollision = Extract<UnknownAttemptClassification, Readonly<{ kind: "collision" }>>;
 
 export type ProtocolTerminal =
   | Readonly<{ kind: "exhausted"; admission: Admission | null }>
-  | Readonly<{ kind: "collision"; collision: AttemptCollision }>
+  | ProtocolCollision
   | RefMoved;
 
-export type ProtocolResult<Handoff, Refusal> =
-  | Readonly<{ kind: "handoff"; handoff: ReconcileHandoff<Handoff> }>
+export type ProtocolResult<Refusal> =
+  | ProtocolAccepted
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | ProtocolTerminal;
 
-export type RunProtocolInput<Input, Handoff, Refusal> = Readonly<{
+type RunProtocolInput<Input, Refusal> = Readonly<{
   input: Input;
   repository: GitRepository;
   contracts: readonly ContractId[];
   attempts: readonly AttemptContext[];
-  decide: (input: DecideInput<Input>) => OfferDecision<Handoff, Refusal>;
+  decide: (input: DecideInput<Input>) => OfferDecision<Refusal>;
   /** Override the targeted observer only for intents that need a full snapshot. */
   observe?: (repository: GitRepository, contracts: readonly ContractId[]) => ContractsObservation;
   /** Mint just enough additional entries when an observation contains new contracts. */
@@ -173,11 +167,11 @@ function snapshotFor(
   attempt: AttemptContext,
   observation: ContractsObservation,
   head: ContractHead,
-): AcceptedSnapshot {
+): ContractState {
   const append = primaryAppend(offer, attempt);
   const observed = observation.contracts.get(append.contractId);
   if (observed === undefined) throw new TypeError("accepted offer contract is missing from its observation");
-  return { id: append.contractId, entries: [...observed.entries, ...append.entries], head };
+  return foldJournal(append.contractId, [...observed.entries, ...append.entries], head);
 }
 
 function extendedAttempt(
@@ -204,33 +198,28 @@ function extendedAttempt(
   return { ordinal: candidate.ordinal, entryUlids };
 }
 
-function handoff<Handoff>(
-  value: Handoff,
+function accepted(
   offer: Offer,
-  admission: Accepted | null,
   prior: ContractState | null,
-  snapshot: AcceptedSnapshot,
-): ProtocolResult<Handoff, never> {
+  snapshot: ContractState,
+): ProtocolAccepted {
   return {
-    kind: "handoff",
-    handoff: {
-      handoff: value,
-      acceptedEntries: offerEntries(offer),
-      admission,
+    kind: "accepted",
+    receipt: {
+      facts: offerEntries(offer),
       prior,
       snapshot,
     },
   };
 }
 
-/** Run bounded, verb-neutral admission retries and return only reconciliation data after acceptance. */
-export function runProtocol<Input, Handoff, Refusal>(input: RunProtocolInput<Input, Handoff, Refusal>): ProtocolResult<Handoff, Refusal> {
+/** Run bounded, verb-neutral admission retries and return receipt facts after acceptance. */
+export function runProtocol<Input, Refusal>(input: RunProtocolInput<Input, Refusal>): ProtocolResult<Refusal> {
   const attempts = validatedAttempts(input.attempts);
   const usedUlids = new Set(attempts.flatMap((attempt) => attempt.entryUlids));
   const contracts = watchedContracts(input.contracts);
   const observe = input.observe ?? observeContracts;
   let lastAdmission: Admission | null = null;
-  let collision: AttemptCollision | undefined;
 
   for (let index = 0; index < attempts.length; index += 1) {
     const baseAttempt = attempts[index]!;
@@ -238,11 +227,7 @@ export function runProtocol<Input, Handoff, Refusal>(input: RunProtocolInput<Inp
     const attempt = input.extendAttempt === undefined
       ? baseAttempt
       : extendedAttempt(baseAttempt, input.extendAttempt(baseAttempt, observation.contracts.size + 2), usedUlids);
-    const decisionInput: DecideInput<Input> = collision === undefined
-      ? { input: input.input, attempt, observation }
-      : { input: input.input, attempt, observation, collision };
-    collision = undefined;
-    const decision = input.decide(decisionInput);
+    const decision = input.decide({ input: input.input, attempt, observation });
     if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
 
     const offer = decision.offer;
@@ -255,7 +240,7 @@ export function runProtocol<Input, Handoff, Refusal>(input: RunProtocolInput<Inp
         const append = primaryAppend(offer, attempt);
         const head = admission.heads[append.contractId];
         if (head === undefined) throw new TypeError(`accepted offer is missing its new head: ${append.contractId}`);
-        return handoff(decision.handoff, offer, admission, priorFor(offer, attempt, observation), snapshotFor(offer, attempt, observation, head));
+        return accepted(offer, priorFor(offer, attempt, observation), snapshotFor(offer, attempt, observation, head));
       }
       if (admission.kind === "ref-moved") return admission;
       if (admission.kind !== "unknown") break;
@@ -266,11 +251,10 @@ export function runProtocol<Input, Handoff, Refusal>(input: RunProtocolInput<Inp
         const append = primaryAppend(offer, attempt);
         const head = admission.proposedHeads[append.contractId];
         if (head === undefined) throw new TypeError(`unknown offer is missing its proposed head: ${append.contractId}`);
-        return handoff(decision.handoff, offer, null, priorFor(offer, attempt, observation), snapshotFor(offer, attempt, observation, head));
+        return accepted(offer, priorFor(offer, attempt, observation), snapshotFor(offer, attempt, observation, head));
       }
       if (classification.kind === "collision") {
-        if (index + 1 === attempts.length) return { kind: "collision", collision: classification };
-        collision = classification;
+        if (index + 1 === attempts.length) return classification;
         break;
       }
       if (classification.kind === "redecide" || reusedUnknownOffer) break;
