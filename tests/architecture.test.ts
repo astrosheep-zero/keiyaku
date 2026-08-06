@@ -52,8 +52,8 @@ test("architecture policy rejects runtime orchestration and an unowned task pill
 test("architecture policy keeps invoke and contract commands off the private lifecycle path", () => {
   const diagnostics = check({
     "core/verbs/bind.ts": "export function decideBind(): void {}",
-    "protocol/intent.ts": "export function runIntent(): void {}",
-    "cli/invoke.ts": 'import { runIntent } from "../protocol/intent.js"; export const invoke = runIntent;',
+    "protocol/intent.ts": "export function admitBind(): void {}",
+    "cli/invoke.ts": 'import { admitBind } from "../protocol/intent.js"; export const invoke = admitBind;',
     "cli/commands/bind.ts": 'import { decideBind } from "../../core/verbs/bind.js"; export const bind = decideBind;',
   });
   assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/dependency-direction").length, 2);

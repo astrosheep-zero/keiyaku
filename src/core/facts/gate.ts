@@ -15,7 +15,7 @@ export function gateSatisfied(state: ContractState, gate: Gate): boolean {
   ))?.data.verdict === "satisfied";
 }
 
-export function unsatisfiedGates(state: ContractState): readonly Gate[] {
+function unsatisfiedGates(state: ContractState): readonly Gate[] {
   if (state.body === null) return [];
   return effectiveGates(state.body).filter((gate) => !gateSatisfied(state, gate));
 }

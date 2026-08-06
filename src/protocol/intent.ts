@@ -43,7 +43,7 @@ function attempts(entryCount: number): readonly AttemptContext[] {
 }
 
 /** Observe, decide, and atomically admit one intent with bounded carrier retries. */
-export function runIntent<Input, Refusal>(
+function runIntent<Input, Refusal>(
   repository: GitRepository,
   contract: ContractId,
   input: Input,

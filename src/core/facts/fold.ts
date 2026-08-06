@@ -63,7 +63,7 @@ function foldArc(state: ContractState, entry: ArcEntry): ContractState {
 }
 
 /** Fold one accepted journal fact. */
-export function foldEntry(state: ContractState, entry: JournalEntry): ContractState {
+function foldEntry(state: ContractState, entry: JournalEntry): ContractState {
   if (entry.contract !== state.id) foldError(`entry belongs to ${entry.contract}, not ${state.id}`);
   if (state.body === null && entry.kind !== "bind") foldError("journal must begin with bind");
   if (state.body !== null && entry.kind === "bind") foldError("bind may appear only once");

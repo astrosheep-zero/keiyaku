@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { ContractBody, Keiyaku, Repo, type ContractId } from "../src/index.js";
+import { ContractBody, Delivery, Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { makeGitRepository } from "./support/git.js";
 
 const root = resolve(import.meta.dirname, "..");
@@ -58,7 +58,7 @@ function repositoryWithInitialCommit() {
 test("package root exposes only the ruled library values and declarations", () => {
   const directory = externalConsumer();
   const source = [
-    'import { ContractBody, Delivery, Keiyaku, Repo, type AmendInput, type AuditReport, type BindInput, type ContractBody as Body, type ContractId, type FactKind, type Outcome, type Receipt, type TimelineEntry } from "@astrosheep/keiyaku-v4";',
+    'import { ContractBody, Delivery, Keiyaku, Repo, type AbandonInput, type ActorId, type AmendInput, type ArcChapter, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractBody as Body, type ContractBodyRenderInput, type ContractId, type ContractState, type ContractStatus, type DeliverInput, type Fact, type FactKind, type Gate, type KeiyakuOfInput, type Outcome, type Receipt, type ReconcileReport, type RepoAtInput, type RepoReconcileReport, type ReviewInput, type SnapshotId, type StatusReport, type TimelineEntry, type TypedRefusal, type TypedRetry } from "@astrosheep/keiyaku-v4";',
     'const id = "kei/consumer" as ContractId;',
     'const input: BindInput = { markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", repo: ".", after: [id] };',
     'const amendment: AmendInput = { markdown: "## Append: Context\\nMore\\n", after: [id] };',
@@ -74,6 +74,8 @@ test("package root exposes only the ruled library values and declarations", () =
     'Repo.at(".");',
     '// @ts-expect-error Delivery.review accepts one input object',
     'delivery.review("satisfied");',
+    '// @ts-expect-error Delivery has no public constructor',
+    'new Delivery();',
     '// @ts-expect-error Keiyaku.of requires a branded ContractId',
     'Keiyaku.of("kei/unbranded");',
     '// @ts-expect-error BindInput.after requires branded ContractId values',
@@ -88,7 +90,64 @@ test("package root exposes only the ruled library values and declarations", () =
     'const report = null as unknown as AuditReport;',
     'const timeline = null as unknown as TimelineEntry;',
     'const kind = null as unknown as FactKind;',
-    'void rendered; void existing; void delivery; void bound; void repo; void receipt; void report; void timeline; void kind; void amendment; void invalidBind; void invalidAmend;',
+    'const abandonInput = null as unknown as AbandonInput;',
+    'const actor = null as unknown as ActorId;',
+    'const chapter = null as unknown as ArcChapter;',
+    'const arcInput = null as unknown as ArcInput;',
+    'const auditInput = null as unknown as AuditInput;',
+    'const verdict = null as unknown as AttestationVerdict;',
+    'const bindResult = null as unknown as BindResult;',
+    'const change = null as unknown as ChangeId;',
+    'const renderInput = null as unknown as ContractBodyRenderInput;',
+    'const state = null as unknown as ContractState;',
+    'const statusContract = null as unknown as ContractStatus;',
+    'const deliverInput = null as unknown as DeliverInput;',
+    'const fact = null as unknown as Fact;',
+    'const gate = null as unknown as Gate;',
+    'const ofInput = null as unknown as KeiyakuOfInput;',
+    'const reconcile = null as unknown as ReconcileReport;',
+    'const atInput = null as unknown as RepoAtInput;',
+    'const repoReconcile = null as unknown as RepoReconcileReport;',
+    'const reviewInput = null as unknown as ReviewInput;',
+    'const snapshot = null as unknown as SnapshotId;',
+    'const status = null as unknown as StatusReport;',
+    'const refusal = null as unknown as TypedRefusal;',
+    'const retry = null as unknown as TypedRetry;',
+    '// @ts-expect-error internal journal data is not a package-root export',
+    'type InternalAbandonData = import("@astrosheep/keiyaku-v4").AbandonData;',
+    '// @ts-expect-error internal journal data is not a package-root export',
+    'type InternalAbandonedData = import("@astrosheep/keiyaku-v4").AbandonedData;',
+    '// @ts-expect-error internal journal data is not a package-root export',
+    'type InternalAttestationData = import("@astrosheep/keiyaku-v4").AttestationData;',
+    '// @ts-expect-error internal journal data is not a package-root export',
+    'type InternalAmendData = import("@astrosheep/keiyaku-v4").AmendData;',
+    '// @ts-expect-error internal journal data is not a package-root export',
+    'type InternalBindData = import("@astrosheep/keiyaku-v4").BindData;',
+    '// @ts-expect-error internal journal data is not a package-root export',
+    'type InternalBoundData = import("@astrosheep/keiyaku-v4").BoundData;',
+    '// @ts-expect-error internal journal data is not a package-root export',
+    'type InternalClaimedData = import("@astrosheep/keiyaku-v4").ClaimedData;',
+    '// @ts-expect-error internal journal coordinate is not a package-root export',
+    'type InternalCoordinates = import("@astrosheep/keiyaku-v4").ContractCoordinates;',
+    '// @ts-expect-error internal journal body part is not a package-root export',
+    'type InternalCriterion = import("@astrosheep/keiyaku-v4").ContractCriterion;',
+    '// @ts-expect-error internal journal body part is not a package-root export',
+    'type InternalExtension = import("@astrosheep/keiyaku-v4").ContractExtension;',
+    '// @ts-expect-error internal journal alias is not a package-root export',
+    'type InternalHead = import("@astrosheep/keiyaku-v4").ContractHead;',
+    '// @ts-expect-error internal journal data is not a package-root export',
+    'type InternalDeliverData = import("@astrosheep/keiyaku-v4").DeliverData;',
+    '// @ts-expect-error internal journal identity is not a package-root export',
+    'type InternalEntryUlid = import("@astrosheep/keiyaku-v4").EntryUlid;',
+    '// @ts-expect-error internal input helper is not a package-root export',
+    'type InternalActorOptions = import("@astrosheep/keiyaku-v4").ActorOptions;',
+    '// @ts-expect-error internal subject identity is not a package-root export',
+    'type InternalSubject = import("@astrosheep/keiyaku-v4").SubjectKey;',
+    '// @ts-expect-error internal verification data is not a package-root export',
+    'type InternalVerification = import("@astrosheep/keiyaku-v4").VerificationDeclaration;',
+    '// @ts-expect-error internal verification data is not a package-root export',
+    'type InternalExecutor = import("@astrosheep/keiyaku-v4").VerificationExecutor;',
+    'void rendered; void existing; void delivery; void bound; void repo; void receipt; void report; void timeline; void kind; void amendment; void invalidBind; void invalidAmend; void abandonInput; void actor; void chapter; void arcInput; void auditInput; void verdict; void bindResult; void change; void renderInput; void state; void statusContract; void deliverInput; void fact; void gate; void ofInput; void reconcile; void atInput; void repoReconcile; void reviewInput; void snapshot; void status; void refusal; void retry;',
   ].join("\n");
   writeFileSync(join(directory, "consumer.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer.ts"], { cwd: directory, stdio: "ignore" });
@@ -136,6 +195,7 @@ test("ContractBody exposes canonical rendering and no public decoders", async ()
 test("Keiyaku construction is Markdown-in and Repo has only world reads", async () => {
   const repository = repositoryWithInitialCommit();
   assert.deepEqual(Object.getOwnPropertyNames(Keiyaku).filter((name) => !["length", "name", "prototype"].includes(name)).sort(), ["bind", "of"]);
+  assert.deepEqual(Object.getOwnPropertyNames(Delivery).filter((name) => !["length", "name", "prototype"].includes(name)), []);
   assert.deepEqual(Object.getOwnPropertyNames(Repo).filter((name) => !["length", "name", "prototype"].includes(name)), ["at"]);
   assert.deepEqual(Object.getOwnPropertyNames(Repo.prototype).filter((name) => name !== "constructor").sort(), ["reconcile", "status"]);
 

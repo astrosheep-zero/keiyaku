@@ -5,9 +5,9 @@ import {
   type VerificationPlanStep,
 } from "./plan.js";
 
-export type VerificationVerdict = AttestationData["verdict"];
+type VerificationVerdict = AttestationData["verdict"];
 
-export type VerificationExecution = Readonly<{
+type VerificationExecution = Readonly<{
   readonly step: VerificationPlanStep;
   readonly outcome: ProcessOutcome;
 }>;

@@ -7,31 +7,16 @@ import { effectiveGates as resolveEffectiveGates } from "../core/facts/gate.js";
 import {
   contractId,
   actorId,
-  type AbandonData,
-  type AbandonedData,
-  type AmendData,
   type ActorId as CoreActorId,
   type ArcData,
-  type AttestationData,
-  type BindData,
-  type BoundData,
   type ChangeId,
-  type ClaimedData,
   type ContractBody as ContractBodyValue,
-  type ContractCoordinates,
-  type ContractCriterion,
-  type ContractExtension,
-  type ContractHead,
   type ContractId,
   type ContractState,
-  type DeliverData,
-  type EntryUlid,
   type Gate,
   type JournalEntry,
   type SnapshotId,
   type SubjectKey,
-  type VerificationDeclaration,
-  type VerificationExecutor,
 } from "../core/facts/types.js";
 import {
   abandonOperation,
@@ -51,6 +36,8 @@ import {
   statusOperation,
   worktreePathOperation,
   type AuditReport,
+  type ContractStatus,
+  type FactKind,
   type IntentOutcome,
   type IntentRefusal,
   type IntentRetry,
@@ -58,37 +45,27 @@ import {
   type ReconcileReport as ProtocolReconcileReport,
   type RepositoryScope,
   type StatusReport,
+  type TimelineEntry,
 } from "../protocol/operations.js";
 
 export type {
-  AbandonData,
-  AbandonedData,
-  AmendData,
-  AttestationData,
-  BindData,
-  BoundData,
+  AuditReport,
   ChangeId,
-  ClaimedData,
-  ContractCoordinates,
-  ContractCriterion,
-  ContractExtension,
-  ContractHead,
   ContractId,
   ContractState,
-  DeliverData,
-  EntryUlid,
+  ContractStatus,
+  FactKind,
   Gate,
+  RepoReconcileReport,
   SnapshotId,
-  SubjectKey,
-  VerificationDeclaration,
-  VerificationExecutor,
+  StatusReport,
+  TimelineEntry,
 };
-export type { AuditReport, FactKind, TimelineEntry } from "../protocol/operations.js";
 
 export type ContractBody = ContractBodyValue;
 export type Fact = JournalEntry;
 export type ActorId = string;
-export type AttestationVerdict = AttestationData["verdict"];
+export type AttestationVerdict = "satisfied" | "unsatisfied";
 export type ArcChapter = ArcData;
 export type TypedRefusal = IntentRefusal;
 export type TypedRetry = IntentRetry;
@@ -106,7 +83,6 @@ export type Outcome<A> =
 
 export type BindResult = Outcome<Keiyaku>;
 export type ReconcileReport = ProtocolReconcileReport;
-export type { RepoReconcileReport, StatusReport };
 
 export type BindInput = Readonly<{
   markdown: string;
@@ -130,7 +106,7 @@ export type ArcInput = Readonly<{
   actor?: ActorId;
 }>;
 
-export type ActorOptions = Readonly<{ actor?: ActorId }>;
+type ActorOptions = Readonly<{ actor?: ActorId }>;
 export type KeiyakuOfInput = Readonly<{ id: ContractId; repo?: string }>;
 export type RepoAtInput = Readonly<{ path?: string }>;
 export type ContractBodyRenderInput = Readonly<{ body: ContractBody; currentArc?: ArcChapter }>;
@@ -250,11 +226,11 @@ function resolvePinnedScope(path?: string): PinnedScope {
   return scopeOperation({ coordinate });
 }
 
-export class Delivery {
+class DeliveryHandle {
   readonly snapshotId: SnapshotId;
   readonly changeId: ChangeId;
 
-  private constructor(
+  constructor(
     snapshotId: SnapshotId,
     changeId: ChangeId,
     private readonly readDiff: () => Promise<string | null>,
@@ -282,6 +258,10 @@ export class Delivery {
   }
 }
 
+export type Delivery = DeliveryHandle;
+type DeliveryObject = Readonly<{ prototype: DeliveryHandle }>;
+export const Delivery: DeliveryObject = DeliveryHandle;
+
 export class Keiyaku {
   private constructor(
     private readonly id: ContractId,
@@ -306,7 +286,7 @@ export class Keiyaku {
         ...(target === undefined ? {} : { target }),
         ...actor,
       }),
-      ({ contractId: id }) => makeKeiyaku(id, scope),
+      ({ contractId: id }) => Keiyaku.#create(id, scope),
     );
   }
 
@@ -315,7 +295,7 @@ export class Keiyaku {
     if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
     const identity = contractId(values.id);
     const scope = resolvePinnedScope(optionalRepository(values?.repo));
-    return makeKeiyaku(identity, scope);
+    return Keiyaku.#create(identity, scope);
   }
 
   get worktreePath(): string | null {
@@ -399,17 +379,16 @@ export class Keiyaku {
     expectedPredecessor: SnapshotId,
     reviewSubject: SubjectKey,
   ): Delivery {
-    return new (Delivery as unknown as new (
-      snapshot: SnapshotId,
-      change: ChangeId,
-      diff: () => Promise<string | null>,
-      review: (input: ReviewInput) => Promise<Outcome<void>>,
-    ) => Delivery)(
+    return new DeliveryHandle(
       snapshotId,
       changeId,
       () => deliveryDiffOperation({ scope: this.scope, expectedPredecessor, snapshotId }),
       (input) => this.review(reviewSubject, input),
     );
+  }
+
+  static #create(id: ContractId, scope: PinnedScope): Keiyaku {
+    return new Keiyaku(id, scope);
   }
 
   private async review(subject: SubjectKey, input: ReviewInput): Promise<Outcome<void>> {
@@ -426,10 +405,6 @@ export class Keiyaku {
       ...actorOption(input.actor),
     }), () => undefined);
   }
-}
-
-function makeKeiyaku(id: ContractId, scope: PinnedScope): Keiyaku {
-  return new (Keiyaku as unknown as new (id: ContractId, scope: PinnedScope) => Keiyaku)(id, scope);
 }
 
 export class Repo {

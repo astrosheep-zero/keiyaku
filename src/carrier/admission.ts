@@ -36,13 +36,13 @@ import {
   mintSnapshotId,
 } from "./identity.js";
 
-export type ObservedContractHead = Readonly<{
+type ObservedContractHead = Readonly<{
   contractId: ContractId;
   path: string;
   head: ContractHead | null;
 }>;
 
-export type MovedContractHead = Readonly<ObservedContractHead & {
+type MovedContractHead = Readonly<ObservedContractHead & {
   expectedHead: ContractHead | null;
 }>;
 
@@ -51,7 +51,7 @@ export type Accepted = Readonly<{
   heads: Readonly<Record<string, ContractHead>>;
 }>;
 
-export type HeadMoved = Readonly<{
+type HeadMoved = Readonly<{
   kind: "head-moved";
   carrierCommit: SnapshotId | null;
   heads: readonly ObservedContractHead[];
@@ -67,7 +67,7 @@ export type RefMoved = Readonly<{
   heads: readonly ObservedContractHead[];
 }>;
 
-export type Unknown = Readonly<{
+type Unknown = Readonly<{
   kind: "unknown";
   proposedHeads: Readonly<Record<string, ContractHead>>;
 }>;

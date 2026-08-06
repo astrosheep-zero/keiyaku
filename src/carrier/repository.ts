@@ -4,7 +4,7 @@ import { gitObjectId } from "./identity.js";
 
 export const CARRIER_REF = "refs/heads/keiyaku-state";
 export const CARRIER_FORMAT_PATH = "meta/format.json";
-export const CURRENT_FORMAT_VERSION = 1;
+const CURRENT_FORMAT_VERSION = 1;
 export const CARRIER_FORMAT_BYTES = `{"version":${CURRENT_FORMAT_VERSION}}\n`;
 
 export type GitOid = string;
@@ -21,7 +21,7 @@ export interface GitRepository {
   readonly primaryWorktree: string;
 }
 
-export interface TreeEntry {
+interface TreeEntry {
   readonly path: string;
   readonly mode: string;
   readonly type: "blob" | "commit" | "tree" | string;
@@ -193,7 +193,7 @@ function readTreeForCommit(repository: GitRepository, commit: GitOid): GitOid {
   return tree;
 }
 
-export function readTreeEntries(repository: GitRepository, tree: GitOid): Map<string, TreeEntry> {
+function readTreeEntries(repository: GitRepository, tree: GitOid): Map<string, TreeEntry> {
   assertOid(tree, "tree");
   const output = runGit(repository, ["ls-tree", "-r", "-z", "--full-tree", tree]);
   const entries = new Map<string, TreeEntry>();
@@ -350,7 +350,7 @@ function buildTreeNode(repository: GitRepository, node: MutableTreeNode): GitOid
   return writeTree(repository, records);
 }
 
-export function writeTree(repository: GitRepository, records: readonly string[]): GitOid {
+function writeTree(repository: GitRepository, records: readonly string[]): GitOid {
   const tree = runGit(repository, ["mktree"], records.join(""));
   const oid = tree.toString("utf8").trim();
   assertOid(oid, "written tree");
