@@ -1,35 +1,33 @@
 # Verification
 
-This chapter owns Verification plan execution, runtime process control, and the
-fact-producing read of matching results. Its declaration grammar is owned by
-[document.md](document.md), its fact shape by [model.md](model.md), and its
-gate meaning by [lifecycle.md](lifecycle.md).
+This chapter owns the execution-side verification producer and shared process
+control. Verification is methodology, not a core fact vocabulary, core
+declaration type, or core-derived gate. The attestation fact shape is defined by
+[model.md](model.md), and generic gate meaning by [lifecycle.md](lifecycle.md).
+The producer's declaration shape, section syntax, and dependency law remain
+explicitly unfrozen and are owned outside core.
 
 ## Execution
 
-Verification is synchronous. `deliver` records its selected candidate, then
-uses the Verification producer for that candidate. `audit` uses the same
-producer when the `verified` gate lacks a matching satisfied attestation. A
-terminal producer result is admitted as an `attestation` fact for the
-`verified` gate. The producer is not an independent public lifecycle.
+Verification is synchronous. An owning library operation records its selected
+candidate, resolves a valid producer declaration, and runs that producer. A
+matching satisfied attestation for the producer's declared opaque gate and
+subject is reusable and starts no process. A matching unsatisfied attestation
+is durable history; a later testimony for the same gate and subject supersedes
+it. The producer or operation chooses the lawful dependency-key set, while core
+mints the keys and performs the generic currentness check.
 
-The declaration key is the one pure canonicalization primitive in
-`src/core/declaration-key.ts`. Subject construction consumes that primitive;
-no producer, plan, gate reader, or admission path defines another declaration
-key.
+Before execution, the producer captures its `AttestationData.subject`. Admission
+compares that captured set with the current set and refuses `stale-subject` when
+state changed during execution; it never silently retargets the result. The
+journal attestation is the only durable execution result and the only input to
+gate reading.
 
-Before starting a process, the producer reads the folded journal through the
-`verified` gate. A matching satisfied attestation already satisfies
-verification and starts no process. A matching unsatisfied attestation is
-durable history and an explicit `deliver` or `audit` may produce a later
-attestation that supersedes it. Core constructs the attestation subject from
-the current candidate and declaration key before execution. Admission compares
-that captured subject against the current subject and refuses `stale-subject`
-when state changed during execution; it never silently retargets the result.
-The journal fact is the only durable execution result and the only input to gate
-reading.
+If a declared gate requires this producer but no valid declaration exists, the
+owning outer boundary rejects the operation. The absence is not a journal
+deadlock or a new core fact.
 
-Verification resolves the declared executor and runs it against the selected
+The producer resolves its declared executor and runs it against the selected
 candidate tree. Audit uses a disposable detached worktree checked out at that
 candidate tree. A terminal process exit admits a satisfied or unsatisfied
 attestation with an optional bounded summary. `timeout`, `spawn-error`, and
@@ -43,7 +41,8 @@ output, report, artifact, or blob evidence.
 
 ## Runtime Contract
 
-`src/verification/` owns plan resolution and verdict production.
+`src/verification/` owns producer declaration resolution and verdict
+production. It does not define a core gate vocabulary or declaration type.
 `src/runtime/proc/` owns process spawn, normal stop, process-tree kill, bounded
 stdout/stderr capture, and elapsed duration. Its input is:
 
@@ -70,7 +69,7 @@ observed tree. A subprocess that escapes the tree, or remains after SIGKILL,
 harness loss, or a Node crash, lies outside that guarantee.
 
 The runtime result is transient. It is neither cache authority nor a state
-surface. Matching verified attestations in the journal supply the only reuse
+surface. Matching current attestations in the journal supply the only reuse
 rule.
 
 ## Ownership
@@ -84,9 +83,10 @@ src/verification/ -> src/runtime/proc/
 src/akuma/ -> src/runtime/proc/
 ```
 
-`facts/gate.ts` compares the core-constructed current subject with same-gate
-attestations for gate reads. It performs no IO or candidate recheck.
+`facts/gate.ts` performs the one generic currentness check over the declared
+gate and dependency-key set. It performs no IO, candidate recheck, or
+producer-specific declaration interpretation.
 `src/protocol/read/audit.ts` is the sole reader that derives audit rework and
-review counts, timeline entries, and elapsed milliseconds from raw facts. The
+attestation counts, timeline entries, and elapsed milliseconds from raw facts. The
 package root exports readonly reports; the CLI renders them without journal
 access or timestamp arithmetic.

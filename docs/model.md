@@ -2,7 +2,8 @@
 
 The journal is the sole lifecycle authority. Carrier storage, target refs,
 worktrees, runtime results, and folded state are derived from or effects of the
-journal; none is a second state store.
+journal; none is a second state store. v4 has no compatibility or migration
+layer.
 
 ## Dependency Direction
 
@@ -11,8 +12,8 @@ Each component answers one class of question and has one legal consumer:
 | Component | Question | Legal consumer |
 | --- | --- | --- |
 | `core` (pact) | facts to state; intent to decision | every layer, as pure functions and types |
-| `markdown` | text to AST | `body` |
-| `body` | document to `ContractBody` or arc value | `library` |
+| `markdown` | text to AST | `library` |
+| `body` | edge document methodology to private values | `library` |
 | `carrier` | fact observation, admission, persistence, and Git effects | `protocol` |
 | `runtime/proc` | process execution to typed outcome | `verification` |
 | `verification` | declarations to attempt and result | `protocol` |
@@ -25,14 +26,16 @@ Imports follow those edges without skipping a layer. `core` is readable as
 pure functions and types throughout the graph. Pact has no repository handle,
 Git execution, ref/worktree effect, process, clock, current directory, or
 physical object-format validator. Protocol is the only join between pure pact
-decisions and carrier observation/admission. Verification consumes the shared
-process runtime without making either part of pact.
+decisions and carrier observation/admission. Execution-side producers consume
+the shared process runtime without making either part of pact. Core knows no
+Markdown grammar, section name, or producer-specific declaration.
 
 `SnapshotId` names a work snapshot and `ChangeId` names patch content. Carrier
 mints both and is the sole physical Git object-ID validator; pact validates only
-their opaque nonblank values. Every tender has both identities. Verification
-pins the `SnapshotId`, review pins the `ChangeId`, and placement uses the
-snapshot. A carrier may make them equal and thereby choose stricter freshness.
+their opaque nonblank values. Every tender has both identities. A producer or
+operation may include either identity in its dependency-key set when its own law
+requires it. A carrier may make them equal and thereby choose stricter
+freshness.
 
 ## Identity Coordinates
 
@@ -79,17 +82,16 @@ type ContractCoordinates = Readonly<{
   workspace: "worktree" | "here"
 }>
 
-type ContractBody = Readonly<{
-  title: string
-  context: string
-  objective: string
-  design: string
-  region: readonly string[]
-  criteria: readonly ContractCriterion[]
-  verification: readonly VerificationDeclaration[]
-  extensions: readonly ContractExtension[]
-  gates?: readonly Gate[]
-  after?: readonly ContractId[]
+type DocumentKey = Opaque<"document-key">
+type DocumentSegmentKey = Opaque<"document-segment-key">
+type Gate = Opaque<"contract-gate">
+type DependencyKeySet = Opaque<"dependency-key-set">
+
+type ContractTerms = Readonly<{
+  document: DocumentKey
+  segments: readonly DocumentSegmentKey[]
+  gates: readonly Gate[]
+  after: readonly ContractId[]
 }>
 
 type JournalEnvelope<Kind extends string, Data> = Readonly<{
@@ -104,10 +106,11 @@ type JournalEnvelope<Kind extends string, Data> = Readonly<{
 ```
 
 `BindData` is immutable `ContractCoordinates` plus revision-zero
-`ContractBody`. `AmendData` is a complete replacement `ContractBody` and never
-changes coordinates. Revision identity is the journal-entry coordinate. The
-body's document fields are defined by [document.md](document.md); `gates` and
-`after` are structured values carried with the body.
+`ContractTerms`. `AmendData` is a complete replacement `ContractTerms` and
+never changes coordinates. Revision identity is the journal-entry coordinate.
+The edge library mints the opaque whole-document and ordered segment keys from
+its Markdown methodology. Core carries those keys and the machine terms
+`gates` and `after`; it knows none of the source document's sections or syntax.
 
 The fact vocabulary is closed:
 
@@ -127,7 +130,7 @@ type DeliverData = Readonly<{
 
 type AttestationData = Readonly<{
   gate: Gate
-  subject: SubjectKey
+  subject: DependencyKeySet
   verdict: "satisfied" | "unsatisfied"
   summary?: string
 }>
@@ -146,7 +149,7 @@ type AbandonedData = Readonly<{ finalHead: SnapshotId | null }>
 ```
 
 The journal stores lifecycle facts and bounded intent data only. It stores no
-raw review or verification logs, reports, patches, artifacts, or blob evidence.
+raw producer logs, reports, patches, artifacts, or blob evidence.
 Its `at` values are the contract timeline. Counts and elapsed intervals are
 read-time projections; no telemetry file, persisted counter, duration field,
 or additional fact kind is needed for a value derivable from journal facts, Git,
@@ -159,7 +162,7 @@ type ContractState = Readonly<{
   id: ContractId
   head: ContractHead | null
   coordinates: ContractCoordinates | null
-  body: ContractBody | null
+  terms: ContractTerms | null
   bound: BoundEntry | null
   delivery: DeliverEntry | null
   attestations: readonly AttestationEntry[]
@@ -170,9 +173,18 @@ type ContractState = Readonly<{
 ```
 
 `ContractState` is a fold snapshot, not stored authority. It holds the
-contract head, coordinates, effective body, binding placement, current tender,
-attestation history, current arc, abandonment intent, and terminal placement.
-Pending delivery is a read-model projection over this state.
+contract head, coordinates, effective opaque terms, binding placement, current
+tender, attestation history, current arc, abandonment intent, and terminal
+placement. Pending delivery is a read-model projection over this state.
+
+Gate names are opaque contract-declared tokens. Core has one generic
+currentness check over a declared gate and dependency-key set; it does not
+derive gates or keys from verification, section names, or any other producer
+methodology. An attestation subject is a set of core-minted dependency keys.
+The producer or operation owns which keys it may lawfully include. Admission
+refuses a stale captured subject as a typed `stale-subject` outcome. For the
+same gate and subject, the last unsatisfied testimony overrides an earlier
+satisfied testimony.
 
 The carrier checks `meta/format.json` on every nonempty carrier read. A
 contract's `ContractHead` is its journal blob identity, so unrelated carrier

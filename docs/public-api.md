@@ -6,7 +6,8 @@ Keiyaku.bind({ markdown, target: "main" });
 
 Keiyaku is the package-root contract library. It is ESM-only and the package
 root is its sole public import surface. The public objects are `Keiyaku`,
-`Repo`, `Delivery`, and the `ContractBody` type with its `render` function.
+`Repo`, `Delivery`, and the exported value types defined by their operations.
+There is no public structured `ContractBody` value or render operation.
 
 Every package-root domain operation that accepts input takes exactly one
 readonly object. Public operations have no positional value parameters and no
@@ -32,11 +33,11 @@ Keiyaku.bind(input: BindInput): Promise<BindResult>
 Keiyaku.of(input: { id: ContractId; repo?: string }): Keiyaku
 ```
 
-`markdown` is the complete contract document and is decoded at the
-construction boundary. `workspace` defaults to `"worktree"`. `target`,
-`workspace`, `actor`, `after`, and `gates` are structured construction inputs;
-their document and lifecycle rules live in [document.md](document.md) and
-[lifecycle.md](lifecycle.md).
+`markdown` is the complete contract document and is decoded at the library
+edge. `workspace` defaults to `"worktree"`. `target`, `workspace`, `actor`,
+`after`, and `gates` are structured construction inputs. The edge mints opaque
+document keys, while `gates` and `after` remain machine terms; their ownership
+is defined by [document.md](document.md) and [lifecycle.md](lifecycle.md).
 
 `actor` is caller-supplied testimony, not a registered identity. Package-root
 inputs accept nonblank string bytes; the library validates and brands them as
@@ -126,12 +127,17 @@ input grammars are owned by [document.md](document.md). `deliver`, `review`,
 [lifecycle.md](lifecycle.md). `reconcile` requests the transport operation
 defined in [transport.md](transport.md).
 
+`delivery.review` is a library-edge attestation producer. Its binding to a
+declared opaque gate and its lawful dependency-key selection are producer
+methodology, not built-in core gate law.
+
 `delivery()` freshly observes the journal and returns the most recent tender.
 It returns `null` only when the contract has never tendered. A returned
 Delivery is pinned to public `snapshotId` and `changeId`; `deliver()` and
-`delivery()` are its two birth paths. Each Delivery pins its reviewed subject
-at creation; `review()` records that captured subject. A terminal contract receives
-the verb's typed terminal refusal from the lifecycle decision.
+`delivery()` are its two birth paths. Each attestation-producing operation
+captures its lawful dependency-key subject before testimony; the library
+records that captured subject. A terminal contract receives the verb's typed
+terminal refusal from the lifecycle decision.
 
 ## Outcomes And Reports
 
@@ -141,19 +147,14 @@ type Outcome<A> =
   | { kind: "refused"; refusal: TypedRefusal }
   | { kind: "retry"; reason: TypedRetry }
 
-type Receipt = Readonly<{
-  facts: readonly Fact[]
-  prior: ContractState | null
-  snapshot: ContractState
-}>
+type Receipt = Opaque<"process-local-receipt">
 ```
 
-Accepted writing operations return the facts admitted by their winning
-decision, the folded predecessor that supplied that decision, and its
-post-admission fold. `prior` is process-local receipt data. It is neither
-persisted state nor an additional authority. A bind receipt has `prior: null`.
-Programmer value-shape errors throw; domain refusals and carrier races use the
-closed `Outcome` union.
+Accepted writing operations return one process-local receipt alongside the
+value. The journal remains the sole authority; the receipt is never persisted,
+replayed as a handoff, or used as a second state store. The composite receipt
+shape remains intentionally unspecified here. Programmer value-shape errors
+throw; domain refusals and carrier races use the closed `Outcome` union.
 
 ```ts
 type AuditReport = Readonly<{
@@ -172,18 +173,17 @@ type TimelineEntry = Readonly<{
 }>
 ```
 
-`reworks` counts `deliver` facts and `reviewed` counts reviewed attestations. Timeline
-entries are in journal order; `at` is copied from the fact and `sincePrior` is
+`reworks` counts `deliver` facts and `reviewed` counts attestations emitted by
+the review operation. Timeline entries are in journal order; `at` is copied from the fact and `sincePrior` is
 the integer millisecond difference from the immediately preceding value. The
 first, an unparseable pair, or a missing prior value yields `null`; a negative
 difference is preserved. Reports contain no journal entries, body snapshots,
 raw logs, artifacts, or evidence bytes.
 
-`audit()` always returns `Outcome<AuditReport>`. When it admits an attestation,
-that fact is in `receipt.facts`; a read-only audit, a timeout, a spawn
-failure, or another no-fact report is an accepted outcome with an empty receipt
-fact list. The report describes observation and the receipt describes
-admission. There is no second observation union or duplicate boolean flag.
+`audit()` always returns `Outcome<AuditReport>`. The report describes
+observation; any receipt describes only the same invocation's process-local
+return. A read-only audit, a timeout, a spawn failure, or another no-fact report
+does not create a second observation authority or duplicate boolean flag.
 
 ## Delivery Diff
 
@@ -202,22 +202,14 @@ availability remains transport custody. The CLI renders a `null` result for
 `{ reason: "transport-unavailable", snapshotId, changeId }`, without a raw Git
 diagnostic and with observation exit status `0`.
 
-## ContractBody And Boundary
-
-`ContractBody` is an exported readonly value type. Its only public operation
-is canonical rendering:
-
-```ts
-ContractBody.render(input: {
-  body: ContractBody
-  currentArc?: ArcChapter
-}): string
-```
+## Document Boundary
 
 Document decoding and amendment are internal library work. Public callers pass
-Markdown to the construction and amendment operations above. The package does
-not expose a carrier handle, direct journal writer, placement operation, or
-verification-run operation.
+Markdown to the construction and amendment operations above. The library owns
+the Keiyaku Markdown methodology at this edge and may expose only the opaque
+document keys needed by core. It does not expose a structured `ContractBody`, a
+render function, a carrier handle, direct journal writer, placement operation,
+or verification-run operation.
 
 Task products may retain a returned `ContractId` and observe terminal contract
 state through this API. Their association, persistence, failure policy, and

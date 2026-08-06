@@ -9,7 +9,7 @@ operating guidance; none can introduce product law.
 
 | Chapter | Owns |
 | --- | --- |
-| [public-api.md](public-api.md) | Package-root public library: `Keiyaku`, `Repo`, `Delivery`, `ContractBody.render`, exported value types, construction, and public result behavior. |
+| [public-api.md](public-api.md) | Package-root public library: `Keiyaku`, `Repo`, `Delivery`, exported value types, construction, and public result behavior. |
 | [document.md](document.md) | Contract Markdown, H2 amend-operation grammar, arc document grammar, and reserved-section handling. |
 | [model.md](model.md) | Journal authority, envelope and fact shapes, identity coordinates, folded state, and dependency direction. |
 | [lifecycle.md](lifecycle.md) | Verb decisions, eligibility, phases, terminals, gates, review, protocol, and admission. |

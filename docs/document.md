@@ -1,9 +1,10 @@
 # Contract Documents
 
-This chapter owns the grammar that turns Markdown into a contract body or an
-amend/arc input. It is a pure document boundary: it decides syntax and typed
-document values, never lifecycle legality, journal admission, or transport
-effects.
+This chapter owns the Keiyaku Markdown methodology at the library edge. It is
+a pure document boundary: it decides edge syntax and private document values,
+never lifecycle legality, journal admission, or transport effects. Core receives
+only an opaque whole-document key and ordered opaque segment keys; it knows no
+section name or Markdown grammar.
 
 ## Markdown Dialect
 
@@ -20,7 +21,7 @@ Logical BOM and line normalization do not change those coordinates.
 read those indexes and typed children instead of scanning children, rendering a
 section, or parsing it again. A section's content is read from its source span.
 
-## Contract Body
+## Contract Document
 
 A contract document has exactly one H1 title and these required H2 sections:
 
@@ -32,18 +33,20 @@ A contract document has exactly one H1 title and these required H2 sections:
 | `Region` | One closed fence with no info string and one or more nonblank path patterns. |
 | `Criteria` | One or more H3 criteria. Each title is unique after normalized comparison and each body is nonblank. |
 
-`Verification` is optional. When present, it contains one or more direct,
-closed fenced executor declarations. Each fence info string is exactly `bash`,
-`zsh`, or `pwsh`, and each script body is nonblank. It contains no prose, list
-declaration, or unlabelled fence.
+The library owns interpretation of these sections and any extensions. They are
+not structural core facts. In particular, `Region` and every other decoded
+document field remain library methodology, not journal-model vocabulary.
 
 The title has no content before the first H2. The document has no nonblank
 bytes outside its H1 and H2 sections, no duplicate top-level H2, and no
 frontmatter. An unrecognized H2 is an extension with its original title and
-content bytes; its content is nonblank. The typed `ContractBody` retains the
-validated title, prose, region patterns, criteria, verification declarations,
-and extensions. Its structured `gates` and `after` properties arrive through
-the public operation input and have no Markdown representation.
+content bytes; its content is nonblank. Decoding mints the whole-document key
+and ordered segment keys carried by core. `gates` and `after` are machine terms,
+not Markdown-derived core fields.
+
+Verification declaration syntax, its internal value shape, and its dependency
+law are intentionally unfrozen. They are owned by the verification producer at
+the outer library edge, never by core or this chapter's contract grammar.
 
 ## Reserved Sections
 
@@ -63,7 +66,6 @@ heading has exactly this grammar:
 ## Add: Criteria|<new-extension-title>
 ## Update: Criterion <existing-title>|<existing-extension-title>
 ## Remove: Criterion <existing-title>|<existing-extension-title>
-## Replace: Verification
 ```
 
 `Replace` supplies the target's complete canonical content. `Append` adds
@@ -74,10 +76,11 @@ removes that keyed criterion. Extension update and remove use the exact
 extension title in the H2 target. A target occurs at most once for an operation
 kind when duplicate application would be ambiguous.
 
-`Replace: Verification` uses the Verification fence grammar above. Every other
-operation body uses the grammar of its target section. The complete amended
-body is produced by applying the ordered operations to the current body; the
-persisted amendment is that complete body.
+Every operation body uses the grammar of its target section. The complete
+amended document is produced by applying the ordered operations at the edge;
+the library then mints replacement opaque document keys for core. Producer
+specific declaration updates are intentionally outside this generic amendment
+grammar.
 
 ## Arc Document
 
@@ -100,7 +103,7 @@ contract's current chapter and its sequence are lifecycle state, defined in
 
 ## Rendering Boundary
 
-Canonical rendering is the public `ContractBody.render` operation documented
-in [public-api.md](public-api.md). The decoder, amendment applier, and arc
-decoder are internal consumers of this grammar. A document is decoded once;
-no consumer obtains a body by rendering and reparsing it.
+The decoder, amendment applier, and arc decoder are internal library consumers
+of this methodology. A document is decoded once; no public structured
+`ContractBody` value or render operation exists. Edge formatting, when needed,
+does not create core facts or a second document authority.
