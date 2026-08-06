@@ -115,25 +115,28 @@ function publishMalformedUnrelatedJournal(repository: ReturnType<typeof reposito
   }]).kind, "published");
 }
 
-test("enumerates each carrier journal once per observation", async () => {
+test("batches full-carrier journal observation into one Git invocation", async () => {
   const repository = repositoryWithHead();
-  const bound = await Keiyaku.bind({ markdown: contractBody(), repo: repository.path, workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
+  for (let index = 0; index < 4; index += 1) {
+    const bound = await Keiyaku.bind({ markdown: contractBody(), repo: repository.path, workspace: "here" });
+    assert.equal(bound.kind, "accepted");
+  }
 
   const carrier = readCarrier(repositoryAt(repository.path));
-  const journal = [...carrier.paths.values()].find((entry) => entry.path.startsWith("contracts/") && entry.path.endsWith(".jsonl"));
-  assert.ok(journal);
+  const journals = [...carrier.paths.values()].filter((entry) => entry.path.startsWith("contracts/") && entry.path.endsWith(".jsonl"));
+  assert.equal(journals.length, 4);
   const log = join(repository.path, "cat-file.log");
   const observed = withGitShim(
-    "if [ \"$1\" = \"cat-file\" ] && [ \"$2\" = \"blob\" ]; then printf '%s\\n' \"$3\" >> \"$KEIYAKU_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_READ_LOG: log },
     () => observeCarrier(repositoryAt(repository.path)),
   );
 
   assert.equal(observed.carrierSnapshot, carrier.commit);
-  const reads = readFileSync(log, "utf8").trim().split("\n");
-  assert.equal(reads.filter((oid) => oid === journal.oid).length, 1);
+  assert.equal(observed.contracts.size, journals.length);
+  const invocations = readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
+  assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 1);
 });
 
 test("runProtocol observes only watched contracts", async () => {

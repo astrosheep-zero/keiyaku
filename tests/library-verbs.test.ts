@@ -89,6 +89,35 @@ test("Delivery.diff freshly reads its pinned candidate diff", async () => {
   assert.equal(readFileSync(log, "utf8").trim().split("\n").length, 2);
 });
 
+test("one public handle reuses its resolved repository scope", async () => {
+  const repository = repositoryWithMain();
+  const initial = await bind(repository);
+  const id = (await initial.state()).id;
+  commitCandidate(repository);
+  const log = resolve(repository.path, "scope-discovery.log");
+  writeFileSync(log, "");
+
+  const operations = withGitShim(
+    [
+      "if [ \"$1\" = \"worktree\" ] && [ \"$2\" = \"list\" ]; then",
+      "  printf 'discovery\\n' >> \"$KEIYAKU_SCOPE_DISCOVERY_LOG\"",
+      "fi",
+      "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    ].join("\n"),
+    { KEIYAKU_SCOPE_DISCOVERY_LOG: log },
+    () => {
+      const contract = Keiyaku.of({ id, repo: repository.path });
+      return [contract.state(), contract.deliver(), contract.reconcile()] as const;
+    },
+  );
+  const [state, delivered, reconciled] = await Promise.all(operations);
+
+  assert.equal(state.id, id);
+  assert.equal(delivered.kind, "accepted");
+  assert.equal(reconciled.worktreePath, null);
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["discovery"]);
+});
+
 test("public review, abandon, and Arc preserve their ruled testimony", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository);

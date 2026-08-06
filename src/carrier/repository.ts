@@ -235,6 +235,55 @@ export function readBlob(repository: GitRepository, oid: GitOid): Buffer {
   return runGit(repository, ["cat-file", "blob", oid]);
 }
 
+function malformedBatchOutput(detail: string): never {
+  throw new GitPlumbingError({
+    command: ["cat-file", "--batch"],
+    stderr: Buffer.alloc(0),
+    status: null,
+    message: `malformed cat-file --batch output: ${detail}`,
+  });
+}
+
+/** Read immutable Git objects through one structured, length-delimited batch. */
+export function readBlobs(repository: GitRepository, oids: readonly GitOid[]): ReadonlyMap<GitOid, Buffer> {
+  const unique = [...new Set(oids)];
+  for (const oid of unique) assertOid(oid, "blob");
+  if (unique.length === 0) return new Map();
+
+  const output = runGit(repository, ["cat-file", "--batch"], `${unique.join("\n")}\n`);
+  const blobs = new Map<GitOid, Buffer>();
+  let offset = 0;
+  for (const oid of unique) {
+    const headerEnd = output.indexOf(0x0a, offset);
+    if (headerEnd < 0) malformedBatchOutput(`missing header for ${oid}`);
+    const fields = output.subarray(offset, headerEnd).toString("ascii").split(" ");
+    offset = headerEnd + 1;
+    if (fields.length === 2 && fields[0] === oid && fields[1] === "missing") {
+      throw new GitPlumbingError({
+        command: ["cat-file", "blob", oid],
+        stderr: `missing Git object: ${oid}`,
+        status: 1,
+        message: `cat-file blob ${oid}: missing Git object`,
+      });
+    }
+    if (fields.length !== 3 || fields[0] !== oid || fields[1] !== "blob" || fields[2] === undefined) {
+      malformedBatchOutput(`unexpected header for ${oid}`);
+    }
+    if (!/^(0|[1-9][0-9]*)$/.test(fields[2])) malformedBatchOutput(`invalid size for ${oid}`);
+    const size = Number(fields[2]);
+    if (!Number.isSafeInteger(size) || size < 0 || size > output.length - offset) {
+      malformedBatchOutput(`invalid content length for ${oid}`);
+    }
+    const bytes = output.subarray(offset, offset + size);
+    offset += size;
+    if (output[offset] !== 0x0a) malformedBatchOutput(`missing content delimiter for ${oid}`);
+    offset += 1;
+    blobs.set(oid, bytes);
+  }
+  if (offset !== output.length) malformedBatchOutput("trailing bytes");
+  return blobs;
+}
+
 function validateCarrierFormat(repository: GitRepository, paths: ReadonlyMap<string, TreeEntry>): void {
   const format = paths.get(CARRIER_FORMAT_PATH);
   if (format === undefined) throw new TypeError(`carrier is missing ${CARRIER_FORMAT_PATH}`);

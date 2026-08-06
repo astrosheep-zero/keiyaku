@@ -7,7 +7,7 @@ import { mintSnapshotId } from "../src/carrier/identity.js";
 import { GitPlumbingError, repositoryAt } from "../src/carrier/repository.js";
 import { readDeliveryDiff } from "../src/carrier/verification.js";
 import { Keiyaku, type ContractId } from "../src/index.js";
-import { deliveryDiffOperation } from "../src/protocol/operations.js";
+import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function contractBody(): string {
@@ -72,7 +72,7 @@ test("delivery diff preserves an empty patch and treats a clean missing object a
 
   assert.equal(readDeliveryDiff(carrier, delivery.expectedPredecessor, delivery.candidate), "");
   assert.equal(await deliveryDiffOperation({
-    coordinate: repository.path,
+    scope: scopeOperation({ coordinate: repository.path }),
     expectedPredecessor: delivery.expectedPredecessor,
     snapshotId: delivery.candidate,
   }), "");

@@ -2,11 +2,11 @@ import { prepareDelivery } from "../carrier/delivery.js";
 import { mintContractId, mintSnapshotId } from "../carrier/identity.js";
 import { observeBindCoordinates, observeCarrier, observeContract } from "../carrier/observe.js";
 import { deliveryWorktreePath, reconcile, reconcileBatch, type ReconcileResult } from "../carrier/reconcile.js";
-import { readRef, repositoryAt } from "../carrier/repository.js";
+import { readRef, repositoryAt, type GitRepository } from "../carrier/repository.js";
 import { readDeliveryDiff } from "../carrier/verification.js";
 import { foldJournal } from "../core/facts/fold.js";
 import type {
-  AmendData, ArcData, BindData, ChangeId, ContractBody, ContractId, ContractState, JournalEntry, ReviewData, SnapshotId,
+  AmendData, ArcData, AttestationData, BindData, ChangeId, ContractBody, ContractId, ContractState, JournalEntry, SnapshotId,
 } from "../core/facts/types.js";
 import { decideAbandon, type AbandonRefusal } from "../core/verbs/abandon.js";
 import { decideAmend, type AmendRefusal } from "../core/verbs/amend.js";
@@ -51,7 +51,7 @@ export type IntentOutcome<Value, Refusal = IntentRefusal> =
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | Readonly<{ kind: "retry"; reason: IntentRetry }>;
 
-type OperationInput = Readonly<{ coordinate: string; contractId: ContractId; actor?: string }>;
+type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId; actor?: string }>;
 
 function timestamp(): string {
   return new Date().toISOString();
@@ -85,34 +85,25 @@ function complete<Value, Refusal>(
   );
 }
 
-function repository(input: Readonly<{ coordinate: string }>) {
-  return repositoryAt(input.coordinate);
-}
-
 export type ScopeOperationInput = Readonly<{ coordinate: string }>;
-
-export type RepositoryScope = Readonly<{
-  coordinate: string;
-  root: string;
-}>;
+export type RepositoryScope = GitRepository;
 
 /** Resolve the caller worktree and its shared repository scope once. */
 export function scopeOperation(input: ScopeOperationInput): RepositoryScope {
-  const carrier = repository(input);
-  return { coordinate: carrier.effectiveCwd, root: carrier.primaryWorktree };
+  return repositoryAt(input.coordinate);
 }
 
-export function statusOperation(input: ScopeOperationInput): StatusReport {
-  return readStatus(repository(input));
+export function statusOperation(input: Readonly<{ scope: RepositoryScope }>): StatusReport {
+  return readStatus(input.scope);
 }
 
 export type BindOperationInput = Readonly<{
-  coordinate: string; body: ContractBody; target?: string; workspace: "worktree" | "here"; actor?: string;
+  scope: RepositoryScope; body: ContractBody; target?: string; workspace: "worktree" | "here"; actor?: string;
 }>;
 
 export function bindOperation(input: BindOperationInput): IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal> {
   const id = mintContractId();
-  const carrier = repository(input);
+  const carrier = input.scope;
   const observed = observeBindCoordinates(carrier, input.target);
   const data: BindData = {
     coordinates: {
@@ -130,19 +121,19 @@ export function bindOperation(input: BindOperationInput): IntentOutcome<Readonly
 }
 
 export function stateOperation(input: OperationInput): ContractState {
-  const state = observeContract(repository(input), input.contractId).state;
+  const state = observeContract(input.scope, input.contractId).state;
   if (state === null) throw new Error(`contract does not exist: ${input.contractId}`);
   return state;
 }
 
 /** Read a contract state for facade preparation without turning absence into an exception. */
 export function readStateOperation(input: OperationInput): ContractState | null {
-  return observeContract(repository(input), input.contractId).state;
+  return observeContract(input.scope, input.contractId).state;
 }
 
 /** Read the deterministic managed worktree path without exposing carrier state. */
 export function worktreePathOperation(input: OperationInput): string | null {
-  const carrier = repository(input);
+  const carrier = input.scope;
   const state = observeContract(carrier, input.contractId).state;
   if (state?.coordinates?.workspace !== "worktree") return null;
   return deliveryWorktreePath(carrier, input.contractId);
@@ -151,7 +142,7 @@ export function worktreePathOperation(input: OperationInput): string | null {
 export function deliveryOperation(
   input: OperationInput,
 ): DeliveryOperationValue | null {
-  const state = observeContract(repository(input), input.contractId).state;
+  const state = observeContract(input.scope, input.contractId).state;
   if (state === null || state.delivery === null) return null;
   return {
     snapshotId: state.delivery.data.candidate,
@@ -161,13 +152,13 @@ export function deliveryOperation(
 }
 
 export type DeliveryDiffOperationInput = Readonly<{
-  coordinate: string;
+  scope: RepositoryScope;
   expectedPredecessor: SnapshotId;
   snapshotId: SnapshotId;
 }>;
 
 export async function deliveryDiffOperation(input: DeliveryDiffOperationInput): Promise<string | null> {
-  return readDeliveryDiff(repository(input), input.expectedPredecessor, input.snapshotId);
+  return readDeliveryDiff(input.scope, input.expectedPredecessor, input.snapshotId);
 }
 
 export function amendOperation(
@@ -175,7 +166,7 @@ export function amendOperation(
 ): IntentOutcome<void, AmendRefusal> {
   return complete(
     input.contractId,
-    admitAmend(repository(input), {
+    admitAmend(input.scope, {
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
@@ -192,7 +183,7 @@ export type DeliveryOperationValue = Readonly<{
 }>;
 
 export async function deliverOperation(input: OperationInput): Promise<IntentOutcome<DeliveryOperationValue>> {
-  const carrier = repository(input);
+  const carrier = input.scope;
   const prepared = prepareDelivery(carrier, input.contractId);
   if (prepared.kind === "refused") return { kind: "refused", refusal: prepared.refusal as DeliveryPreparationRefusal };
 
@@ -250,7 +241,7 @@ export async function deliverOperation(input: OperationInput): Promise<IntentOut
 export function abandonOperation(
   input: OperationInput & Readonly<{ note?: string }>,
 ): IntentOutcome<void, AbandonRefusal> {
-  const carrier = repository(input);
+  const carrier = input.scope;
   const state = observeContract(carrier, input.contractId).state;
   const target = state?.coordinates?.target;
   const finalHead = target === undefined ? null : readRef(carrier, target);
@@ -272,7 +263,7 @@ export function arcOperation(
 ): IntentOutcome<void, ArcRefusal> {
   return complete(
     input.contractId,
-    admitArc(repository(input), {
+    admitArc(input.scope, {
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
@@ -283,25 +274,21 @@ export function arcOperation(
 }
 
 export function reviewOperation(
-  input: OperationInput & Readonly<{ snapshotId: SnapshotId; changeId: ChangeId; verdict: ReviewData["verdict"]; summary?: string }>,
+  input: OperationInput & Readonly<{ verdict: AttestationData["verdict"]; summary?: string }>,
 ): IntentOutcome<void, ReviewRefusal | PlacementRefusal> {
-  const carrier = repository(input);
+  const carrier = input.scope;
   const review = complete(
     input.contractId,
     admitReview(carrier, {
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
-      data: {
-        verdict: input.verdict,
-        reviewedPatchId: input.changeId,
-        reviewedHead: input.snapshotId,
-        ...(input.summary === undefined ? {} : { summary: input.summary }),
-      },
+      verdict: input.verdict,
+      ...(input.summary === undefined ? {} : { summary: input.summary }),
     }, decideReview),
     undefined,
   );
-  if (review.kind !== "accepted" || input.verdict !== "approved") return review;
+  if (review.kind !== "accepted" || input.verdict !== "satisfied") return review;
 
   const placement = placeIfEligible(carrier, {
     contractId: input.contractId,
@@ -321,7 +308,7 @@ export function reviewOperation(
 }
 
 export async function auditOperation(input: OperationInput): Promise<IntentOutcome<AuditReport>> {
-  const carrier = repository(input);
+  const carrier = input.scope;
   const initial = readAudit(carrier, input.contractId);
   if (initial.state === null) return { kind: "refused", refusal: { kind: "contract-missing", contractId: input.contractId } };
 
@@ -354,7 +341,7 @@ export async function auditOperation(input: OperationInput): Promise<IntentOutco
 export type ReconcileReport = ReconcileResult;
 
 export function reconcileOperation(input: OperationInput): ReconcileReport {
-  const carrier = repository(input);
+  const carrier = input.scope;
   return reconcile({ repository: carrier, state: observeContract(carrier, input.contractId).state });
 }
 
@@ -371,8 +358,8 @@ function reconcileError(error: unknown): string {
 }
 
 /** Reconcile every contract from one immutable carrier observation. */
-export function reconcileAllOperation(input: ScopeOperationInput): RepoReconcileReport {
-  const carrier = repository(input);
+export function reconcileAllOperation(input: Readonly<{ scope: RepositoryScope }>): RepoReconcileReport {
+  const carrier = input.scope;
   const observation = observeCarrier(carrier);
   const contracts = reconcileBatch(carrier, observation.contracts.values()).map((item): RepoReconcileItem => (
     item.kind === "reconciled"

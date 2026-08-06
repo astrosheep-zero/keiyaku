@@ -36,7 +36,7 @@ function body(title: string): ContractBody {
 }
 
 function bind(repository: TestGitRepository, title: string, workspace: "worktree" | "here"): ContractId {
-  const result = bindOperation({ coordinate: repository.path, body: body(title), workspace });
+  const result = bindOperation({ scope: scopeOperation({ coordinate: repository.path }), body: body(title), workspace });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("bind did not succeed");
   return result.value.contractId;
@@ -51,21 +51,20 @@ test("scope and status operations return plain pinned data from one carrier snap
   const repository = repositoryWithMain();
   const first = bind(repository, "First status row", "here");
   const second = bind(repository, "Second status row", "worktree");
+  const scope = scopeOperation({ coordinate: repository.path });
   const log = resolve(repository.path, "status-blob-reads.log");
   writeFileSync(log, "");
 
   const report = withGitShim(
-    "if [ \"$1\" = \"cat-file\" ] && [ \"$2\" = \"blob\" ]; then printf '%s\\n' \"$3\" >> \"$KEIYAKU_STATUS_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_STATUS_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_STATUS_READ_LOG: log },
-    () => statusOperation({ coordinate: repository.path }),
+    () => statusOperation({ scope }),
   );
   const carrier = repositoryAt(repository.path);
 
   assert.equal(report.contracts.length, 2);
-  assert.deepEqual(scopeOperation({ coordinate: repository.path }), {
-    coordinate: resolve(repository.path),
-    root: carrier.primaryWorktree,
-  });
+  assert.equal(scope.effectiveCwd, resolve(repository.path));
+  assert.equal(scope.primaryWorktree, carrier.primaryWorktree);
   assert.equal(carrier.effectiveCwd, resolve(repository.path));
   assert.equal(report.scope, carrier.effectiveCwd);
   assert.deepEqual(report.contracts.find((contract) => contract.contractId === first), {
@@ -84,7 +83,9 @@ test("scope and status operations return plain pinned data from one carrier snap
     worktreePath: deliveryWorktreePath(carrier, second),
     target: null,
   });
-  assert.equal(readFileSync(log, "utf8").trim().split("\n").length, 3);
+  const invocations = readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
+  assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 1);
 });
 
 test("batch reconcile isolates a failed contract and retains successful reports", () => {
@@ -94,7 +95,7 @@ test("batch reconcile isolates a failed contract and retains successful reports"
   const carrier = repositoryAt(repository.path);
   mkdirSync(deliveryWorktreePath(carrier, blocked), { recursive: true });
 
-  const report = reconcileAllOperation({ coordinate: repository.path });
+  const report = reconcileAllOperation({ scope: scopeOperation({ coordinate: repository.path }) });
   assert.equal(report.contracts.length, 2);
 
   const failed = report.contracts.find((contract) => contract.contractId === blocked);

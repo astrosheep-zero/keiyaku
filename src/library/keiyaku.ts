@@ -9,6 +9,7 @@ import {
   type AbandonedData,
   type AmendData,
   type ArcData,
+  type AttestationData,
   type BindData,
   type BoundData,
   type ChangeId,
@@ -24,9 +25,8 @@ import {
   type EntryUlid,
   type Gate,
   type JournalEntry,
-  type ReviewData,
   type SnapshotId,
-  type VerificationData,
+  type SubjectKey,
   type VerificationDeclaration,
   type VerificationExecutor,
 } from "../core/facts/types.js";
@@ -53,6 +53,7 @@ import {
   type IntentRetry,
   type RepoReconcileReport,
   type ReconcileReport as ProtocolReconcileReport,
+  type RepositoryScope,
   type StatusReport,
 } from "../protocol/operations.js";
 
@@ -60,6 +61,7 @@ export type {
   AbandonData,
   AbandonedData,
   AmendData,
+  AttestationData,
   BindData,
   BoundData,
   ChangeId,
@@ -73,9 +75,8 @@ export type {
   DeliverData,
   EntryUlid,
   Gate,
-  ReviewData,
   SnapshotId,
-  VerificationData,
+  SubjectKey,
   VerificationDeclaration,
   VerificationExecutor,
 };
@@ -84,7 +85,7 @@ export type { AuditReport, FactKind, TimelineEntry } from "../protocol/operation
 export interface ContractBody extends ContractBodyValue {}
 export type Fact = JournalEntry;
 export type ActorId = string;
-export type ReviewVerdict = "approved" | "changes-requested";
+export type AttestationVerdict = AttestationData["verdict"];
 export type ArcChapter = ArcData;
 export type TypedRefusal = IntentRefusal;
 export type TypedRetry = IntentRetry;
@@ -130,7 +131,7 @@ export type ActorOptions = Readonly<{ actor?: ActorId }>;
 export type KeiyakuOfInput = Readonly<{ id: ContractId; repo?: string }>;
 export type RepoAtInput = Readonly<{ path?: string }>;
 export type ContractBodyRenderInput = Readonly<{ body: ContractBody; currentArc?: ArcChapter }>;
-export type ReviewInput = ActorOptions & Readonly<{ verdict: ReviewVerdict; summary?: string }>;
+export type ReviewInput = ActorOptions & Readonly<{ verdict: AttestationVerdict; summary?: string }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
 export type DeliverInput = ActorOptions;
 export type AuditInput = ActorOptions;
@@ -237,7 +238,7 @@ function mapOutcome<Value, PublicValue>(
   };
 }
 
-type PinnedScope = Readonly<{ coordinate: string; root: string }>;
+type PinnedScope = RepositoryScope;
 
 function resolvePinnedScope(path?: string): PinnedScope {
   const coordinate = path === undefined ? process.cwd() : path;
@@ -263,9 +264,9 @@ export class Delivery {
 
   review(input: ReviewInput): Promise<Outcome<void>> {
     const values = requireInput(input, "review input");
-    const verdict = values.verdict as ReviewVerdict;
-    if (verdict !== "approved" && verdict !== "changes-requested") {
-      throw new TypeError("verdict must be approved or changes-requested");
+    const verdict = values.verdict as AttestationVerdict;
+    if (verdict !== "satisfied" && verdict !== "unsatisfied") {
+      throw new TypeError("verdict must be satisfied or unsatisfied");
     }
     return this.reviewDelivery({
       verdict,
@@ -297,7 +298,7 @@ export class Keiyaku {
     const structured = structuredBody(body, values.gates as readonly Gate[] | undefined, values.after as readonly ContractId[] | undefined);
     return mapOutcome(
       bindOperation({
-        coordinate: scope.coordinate,
+        scope,
         body: validateContractBody(structured),
         workspace,
         ...(target === undefined ? {} : { target }),
@@ -316,15 +317,15 @@ export class Keiyaku {
   }
 
   get worktreePath(): string | null {
-    return worktreePathOperation({ coordinate: this.scope.coordinate, contractId: this.id });
+    return worktreePathOperation({ scope: this.scope, contractId: this.id });
   }
 
   async state(): Promise<ContractState> {
-    return stateOperation({ coordinate: this.scope.coordinate, contractId: this.id });
+    return stateOperation({ scope: this.scope, contractId: this.id });
   }
 
   async delivery(): Promise<Delivery | null> {
-    const delivery = deliveryOperation({ coordinate: this.scope.coordinate, contractId: this.id });
+    const delivery = deliveryOperation({ scope: this.scope, contractId: this.id });
     return delivery === null
       ? null
       : this.deliveryHandle(delivery.snapshotId, delivery.changeId, delivery.expectedPredecessor);
@@ -333,7 +334,7 @@ export class Keiyaku {
   async amend(input: AmendInput): Promise<Outcome<void>> {
     const values = requireInput(input, "amend input");
     const markdown = requireMarkdown(values.markdown);
-    const current = readStateOperation({ coordinate: this.scope.coordinate, contractId: this.id });
+    const current = readStateOperation({ scope: this.scope, contractId: this.id });
     if (current === null) return { kind: "refused", refusal: { kind: "contract-missing", contractId: this.id } };
     if (current.body === null) throw new Error(`contract body is absent: ${this.id}`);
     const body = applyAmendOperations(markdown, current.body);
@@ -341,7 +342,7 @@ export class Keiyaku {
     const after = values.after === undefined ? current.body.after : values.after as readonly ContractId[];
     const amended = structuredBody(body, gates, after);
     return mapOutcome(amendOperation({
-      coordinate: this.scope.coordinate,
+      scope: this.scope,
       contractId: this.id,
       ...actorOption(values.actor as ActorId | undefined),
       body: validateContractBody(amended),
@@ -351,7 +352,7 @@ export class Keiyaku {
   async deliver(input?: DeliverInput): Promise<Outcome<Delivery>> {
     const values = input === undefined ? undefined : requireInput(input, "deliver input");
     return mapOutcome(
-      await deliverOperation({ coordinate: this.scope.coordinate, contractId: this.id, ...actorOption(values?.actor as ActorId | undefined) }),
+      await deliverOperation({ scope: this.scope, contractId: this.id, ...actorOption(values?.actor as ActorId | undefined) }),
       (delivery) => this.deliveryHandle(delivery.snapshotId, delivery.changeId, delivery.expectedPredecessor),
     );
   }
@@ -360,7 +361,7 @@ export class Keiyaku {
     const values = input === undefined ? undefined : requireInput(input, "abandon input");
     const note = optionalNonblank(values?.note as string | undefined, "abandon note");
     return mapOutcome(abandonOperation({
-      coordinate: this.scope.coordinate,
+      scope: this.scope,
       contractId: this.id,
       ...actorOption(values?.actor as ActorId | undefined),
       ...(note === undefined ? {} : { note }),
@@ -371,7 +372,7 @@ export class Keiyaku {
     const values = requireInput(input, "arc input");
     const chapter = decodeArcDocument(requireMarkdown(values.markdown));
     return mapOutcome(arcOperation({
-      coordinate: this.scope.coordinate,
+      scope: this.scope,
       contractId: this.id,
       ...actorOption(values.actor as ActorId | undefined),
       chapter,
@@ -381,13 +382,13 @@ export class Keiyaku {
   async audit(input?: AuditInput): Promise<Outcome<AuditReport>> {
     const values = input === undefined ? undefined : requireInput(input, "audit input");
     return mapOutcome(
-      await auditOperation({ coordinate: this.scope.coordinate, contractId: this.id, ...actorOption(values?.actor as ActorId | undefined) }),
+      await auditOperation({ scope: this.scope, contractId: this.id, ...actorOption(values?.actor as ActorId | undefined) }),
       (report) => report,
     );
   }
 
   async reconcile(): Promise<ReconcileReport> {
-    return reconcileOperation({ coordinate: this.scope.coordinate, contractId: this.id });
+    return reconcileOperation({ scope: this.scope, contractId: this.id });
   }
 
   private deliveryHandle(snapshotId: SnapshotId, changeId: ChangeId, expectedPredecessor: SnapshotId): Delivery {
@@ -399,22 +400,16 @@ export class Keiyaku {
     ) => Delivery)(
       snapshotId,
       changeId,
-      () => deliveryDiffOperation({ coordinate: this.scope.coordinate, expectedPredecessor, snapshotId }),
-      (input) => this.review(snapshotId, changeId, input),
+      () => deliveryDiffOperation({ scope: this.scope, expectedPredecessor, snapshotId }),
+      (input) => this.review(input),
     );
   }
 
-  private async review(
-    snapshotId: SnapshotId,
-    changeId: ChangeId,
-    input: ReviewInput,
-  ): Promise<Outcome<void>> {
+  private async review(input: ReviewInput): Promise<Outcome<void>> {
     const summary = optionalNonblank(input.summary, "review summary");
     return mapOutcome(reviewOperation({
-      coordinate: this.scope.coordinate,
+      scope: this.scope,
       contractId: this.id,
-      snapshotId,
-      changeId,
       verdict: input.verdict,
       ...actorOption(input.actor),
       ...(summary === undefined ? {} : { summary }),
@@ -429,21 +424,21 @@ function makeKeiyaku(id: ContractId, scope: PinnedScope): Keiyaku {
 export class Repo {
   readonly root: string;
 
-  private constructor(private readonly coordinate: string, root: string) {
-    this.root = root;
+  private constructor(private readonly scope: PinnedScope) {
+    this.root = scope.primaryWorktree;
   }
 
   static at(input?: RepoAtInput): Repo {
     const values = input === undefined ? undefined : requireInput(input, "Repo.at input");
     const scope = resolvePinnedScope(optionalRepository(values?.path));
-    return new Repo(scope.coordinate, scope.root);
+    return new Repo(scope);
   }
 
   async status(): Promise<StatusReport> {
-    return statusOperation({ coordinate: this.coordinate });
+    return statusOperation({ scope: this.scope });
   }
 
   async reconcile(): Promise<RepoReconcileReport> {
-    return reconcileAllOperation({ coordinate: this.coordinate });
+    return reconcileAllOperation({ scope: this.scope });
   }
 }

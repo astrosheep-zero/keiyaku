@@ -6,7 +6,7 @@ import {
 } from "../core/facts/types.js";
 import type { ContractObservation, ContractsObservation } from "../core/facts/observation.js";
 import { contractJournalPath, mintContractHead, mintSnapshotId } from "./identity.js";
-import { readBlob, readCarrier, runGit, type CarrierSnapshot, type GitRepository } from "./repository.js";
+import { readBlob, readBlobs, readCarrier, runGit, type CarrierSnapshot, type GitRepository } from "./repository.js";
 
 export type { ContractObservation, ContractsObservation } from "../core/facts/observation.js";
 
@@ -87,12 +87,14 @@ function decodeCarrierJournal(
   path: string,
   carrier: CarrierSnapshot,
   expectedId?: ContractId,
+  blobs?: ReadonlyMap<string, Buffer>,
 ): DecodedJournal {
   const journal = carrier.paths.get(path);
   if (journal === undefined) throw new TypeError(`missing carrier journal: ${path}`);
   if (journal.type !== "blob") throw new TypeError(`journal path is not a blob: ${path}`);
 
-  const entries = decodeJournal(readBlob(repository, journal.oid).toString("utf8"));
+  const bytes = blobs?.get(journal.oid) ?? readBlob(repository, journal.oid);
+  const entries = decodeJournal(bytes.toString("utf8"));
   const first = entries[0];
   if (
     first === undefined
@@ -119,11 +121,16 @@ function observeDecodedJournal(id: ContractId, decoded: DecodedJournal): Contrac
   };
 }
 
-function observeFromCarrier(repository: GitRepository, carrier: CarrierSnapshot, id: ContractId): ContractObservation {
+function observeFromCarrier(
+  repository: GitRepository,
+  carrier: CarrierSnapshot,
+  id: ContractId,
+  blobs?: ReadonlyMap<string, Buffer>,
+): ContractObservation {
   const path = contractJournalPath(id);
   const journal = carrier.paths.get(path);
   if (journal === undefined) return { id, entries: [], state: null };
-  const decoded = decodeCarrierJournal(repository, path, carrier, id);
+  const decoded = decodeCarrierJournal(repository, path, carrier, id, blobs);
   if (decoded.id !== id) throw new TypeError(`journal content does not canonically identify ${id}: ${path}`);
   return observeDecodedJournal(id, decoded);
 }
@@ -131,12 +138,13 @@ function observeFromCarrier(repository: GitRepository, carrier: CarrierSnapshot,
 function enumerateContractObservations(
   repository: GitRepository,
   carrier: CarrierSnapshot,
+  blobs?: ReadonlyMap<string, Buffer>,
 ): ReadonlyMap<ContractId, ContractObservation> {
   const observations = new Map<ContractId, ContractObservation>();
   const seen = new Set<ContractId>();
   for (const [path] of carrier.paths) {
     if (!path.startsWith("contracts/") || !path.endsWith(".jsonl")) continue;
-    const decoded = decodeCarrierJournal(repository, path, carrier);
+    const decoded = decodeCarrierJournal(repository, path, carrier, undefined, blobs);
     const id = decoded.id;
     if (seen.has(id)) throw new TypeError(`duplicate contract journal identity: ${id}`);
     seen.add(id);
@@ -151,7 +159,10 @@ export function observeCarrier(
   requested: readonly ContractId[] = [],
 ): ContractsObservation {
   const carrier = readCarrier(repository);
-  const contracts = new Map(enumerateContractObservations(repository, carrier));
+  const blobs = readBlobs(repository, [...carrier.paths]
+    .filter(([path, entry]) => path.startsWith("contracts/") && path.endsWith(".jsonl") && entry.type === "blob")
+    .map(([, entry]) => entry.oid));
+  const contracts = new Map(enumerateContractObservations(repository, carrier, blobs));
   const seen = new Set(contracts.keys());
   const ids = [...seen];
   for (const id of requested) {
@@ -176,8 +187,13 @@ export function observeContracts(
 ): ContractsObservation {
   const carrier = readCarrier(repository);
   const contracts = new Map<ContractId, ContractObservation>();
+  const paths = ids.map((id) => contractJournalPath(id));
+  const blobs = readBlobs(repository, paths.flatMap((path) => {
+    const journal = carrier.paths.get(path);
+    return journal?.type === "blob" ? [journal.oid] : [];
+  }));
   for (const id of ids) {
-    if (!contracts.has(id)) contracts.set(id, observeFromCarrier(repository, carrier, id));
+    if (!contracts.has(id)) contracts.set(id, observeFromCarrier(repository, carrier, id, blobs));
   }
   return {
     carrierSnapshot: carrier.commit === null ? null : mintSnapshotId(carrier.commit),
