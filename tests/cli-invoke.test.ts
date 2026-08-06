@@ -313,7 +313,7 @@ test("audit --show-diff-body retains its Delivery across a terminal transition",
     return delivery.call(this);
   };
   Keiyaku.prototype.audit = async function(options) {
-    const reviewed = await pinned.review({ verdict: "approved", ...options });
+    const reviewed = await pinned.review({ verdict: "satisfied", ...options });
     assert.equal(reviewed.kind, "accepted");
     return audit.call(this, options);
   };
@@ -406,9 +406,9 @@ test("managed delivery reads and reconcile realigns its deterministic worktree",
   assert.equal(reconciled.effects.some((effect) => effect.kind === "worktree" && effect.action === "updated"), true);
   assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), candidate);
 
-  const approved = await fromManaged(["review", id, "--approve", "--actor", "external-test"]);
-  assert.equal(approved.kind, "accepted");
-  assert.equal("lag" in approved, false);
+  const satisfiedReview = await fromManaged(["review", id, "--satisfied", "--actor", "external-test"]);
+  assert.equal(satisfiedReview.kind, "accepted");
+  assert.equal("lag" in satisfiedReview, false);
   assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)), null);
   assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), null);
   assert.equal(existsSync(path), false);
@@ -499,12 +499,12 @@ test("--here delivers the caller worktree without owning it or its branch", asyn
   assert.equal(reconciled.effects.some((effect) => effect.kind === "worktree"), false);
 
   const changesRequested = await command(
-    ["review", id, "--changes-requested", "--actor", "external-test", "-"],
+    ["review", id, "--unsatisfied", "--actor", "external-test", "-"],
     "summary from stdin\r\n",
   );
   assert.equal(changesRequested.kind, "accepted");
   assert.equal(
-    observeContract(repositoryAt(repository.path), id).state?.reviews.at(-1)?.data.summary,
+    observeContract(repositoryAt(repository.path), id).state?.attestations.at(-1)?.data.summary,
     "summary from stdin\r\n",
   );
   const abandoned = await command(["abandon", id, "--actor", "external-test"]);

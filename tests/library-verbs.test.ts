@@ -7,7 +7,8 @@ import { contractJournalPath } from "../src/carrier/identity.js";
 import { repositoryAt } from "../src/carrier/repository.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { entryUlid, type JournalEntry } from "../src/core/facts/types.js";
-import { decideReview } from "../src/core/verbs/review.js";
+import { decideAttestation } from "../src/core/verbs/attestation.js";
+import { currentSubject } from "../src/core/subject.js";
 import { admitReview, placeIfEligible } from "../src/protocol/intent.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
@@ -144,11 +145,11 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   assert.equal(recovered?.snapshotId, delivered.value.snapshotId);
   assert.equal(recovered?.changeId, delivered.value.changeId);
 
-  const reviewed = await delivered.value.review({ verdict: "changes-requested",
+  const reviewed = await delivered.value.review({ verdict: "unsatisfied",
     summary: "The candidate still needs one correction.",
   });
   assert.equal(reviewed.kind, "accepted");
-  assert.equal((await contract.state()).reviews.at(-1)?.data.summary, "The candidate still needs one correction.");
+  assert.equal((await contract.state()).attestations.at(-1)?.data.summary, "The candidate still needs one correction.");
 
   await assert.rejects(
     // @ts-expect-error The deleted reason enum is not an abandon options object.
@@ -160,7 +161,7 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   assert.deepEqual((await contract.state()).abandon?.data, { note: "Return the task to planning." });
   const terminalDelivery = await contract.delivery();
   assert.equal(terminalDelivery?.snapshotId, delivered.value.snapshotId);
-  assert.deepEqual(await terminalDelivery?.review({ verdict: "approved" }), {
+  assert.deepEqual(await terminalDelivery?.review({ verdict: "satisfied" }), {
     kind: "refused",
     refusal: { kind: "terminal", contractId: (await contract.state()).id },
   });
@@ -189,10 +190,10 @@ test("public deliver keeps its Verification admission in the composite receipt",
   const delivered = await contract.deliver();
   assert.equal(delivered.kind, "accepted");
   if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
-  assert.deepEqual(delivered.receipt.facts.map((fact) => fact.kind), ["deliver", "verification"]);
+  assert.deepEqual(delivered.receipt.facts.map((fact) => fact.kind), ["deliver", "attestation"]);
   assert.equal(delivered.receipt.prior?.delivery, null);
   assert.equal(delivered.receipt.snapshot.delivery?.data.candidate, delivered.value.snapshotId);
-  assert.equal(delivered.receipt.snapshot.verifications.at(-1)?.data.result, "pass");
+  assert.equal(delivered.receipt.snapshot.attestations.at(-1)?.data.verdict, "satisfied");
 });
 
 test("public amend preserves its deciding prior after unknown recovery", async () => {
@@ -326,15 +327,14 @@ test("eligibility placement observes and binds every waiting dependent", async (
   assert.equal(delivered.kind, "accepted");
   if (delivered.kind !== "accepted") throw new Error("delivery was not accepted");
 
+  const sourceState = await source.state();
+  const reviewSubject = currentSubject(sourceState, "reviewed");
+  if (reviewSubject === null) throw new Error("review subject is absent");
   const reviewed = admitReview(repositoryAt(repository.path), {
     contractId: (await source.state()).id,
     at: "2026-08-06T00:00:00Z",
-    data: {
-      verdict: "approved",
-      reviewedPatchId: delivered.value.changeId,
-      reviewedHead: delivered.value.snapshotId,
-    },
-  }, decideReview);
+    data: { gate: "reviewed", subject: reviewSubject, verdict: "satisfied" },
+  }, decideAttestation);
   assert.equal(reviewed.kind, "handoff");
 
   const dependents: Keiyaku[] = [];
@@ -361,7 +361,7 @@ test("eligibility placement observes and binds every waiting dependent", async (
   }
 });
 
-test("public audit exposes admitted Verification facts through the receipt", async () => {
+test("public audit exposes admitted verified attestations through the receipt", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 1");
   commitCandidate(repository);
@@ -371,10 +371,10 @@ test("public audit exposes admitted Verification facts through the receipt", asy
   const audited = await contract.audit();
   assert.equal(audited.kind, "accepted");
   if (audited.kind !== "accepted") throw new Error("audit was not accepted");
-  assert.deepEqual(audited.receipt.facts.map((fact) => fact.kind), ["verification"]);
+  assert.deepEqual(audited.receipt.facts.map((fact) => fact.kind), ["attestation"]);
   assert.equal(audited.value.reworks, 1);
-  assert.equal(audited.value.reviews, 0);
-  assert.equal(audited.value.timeline.at(-1)?.kind, "verification");
+  assert.equal(audited.value.reviewed, 0);
+  assert.equal(audited.value.timeline.at(-1)?.kind, "attestation");
   assert.equal(audited.value.attempt, undefined);
 });
 
@@ -416,8 +416,29 @@ test("a Delivery handle refuses review after a replacement tender", async () => 
   const replacement = await contract.deliver();
   assert.equal(replacement.kind, "accepted");
 
-  assert.deepEqual(await first.value.review({ verdict: "approved" }), {
-    kind: "refused",
-    refusal: { kind: "stale-tender", contractId: (await contract.state()).id },
-  });
+  const refused = await first.value.review({ verdict: "satisfied" });
+  assert.equal(refused.kind, "refused");
+  if (refused.kind === "refused") assert.equal(refused.refusal.kind, "stale-subject");
+});
+
+test("a Delivery handle refuses review after an amendment and redelivery", async () => {
+  const repository = repositoryWithMain();
+  const contract = await bind(repository);
+  commitCandidate(repository);
+  const first = await contract.deliver();
+  assert.equal(first.kind, "accepted");
+  if (first.kind !== "accepted") throw new Error("first delivery was not accepted");
+
+  const amended = await contract.amend({ markdown: [
+    "## Replace: Objective",
+    "Require a current delivery subject.",
+    "",
+  ].join("\n") });
+  assert.equal(amended.kind, "accepted");
+  const redelivered = await contract.deliver();
+  assert.equal(redelivered.kind, "accepted");
+
+  const refused = await first.value.review({ verdict: "satisfied" });
+  assert.equal(refused.kind, "refused");
+  if (refused.kind === "refused") assert.equal(refused.refusal.kind, "stale-subject");
 });

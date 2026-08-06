@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { decodeEntry, encodeEntry, UnknownEntryError } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
-import { verificationDeclarationKey } from "../src/core/facts/gate.js";
+import { currentSubject } from "../src/core/subject.js";
 import { changeId, contractId, entryUlid, snapshotId, type ContractBody, type JournalEntry } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/carrier/identity.js";
 
@@ -98,11 +98,14 @@ test("current codec rejects the retired pipeline body field", () => {
   assert.throws(() => decodeEntry(malformed), /data\.bind\.body\.gates\[0\]: unknown gate/);
 });
 
-test("verified gate reads a matching verification fact", () => {
+test("verified gate reads a matching attestation fact", () => {
   const bind = entry("bind", { coordinates: { start: oid, target: "refs/heads/main", workspace: "worktree" }, body }, "AV");
   const bound = entry("bound", {}, "AW");
   const deliver = entry("deliver", { expectedPredecessor: oid, candidate, deliveryPatchId: changeId("c".repeat(40)) }, "AX");
-  const verification = entry("verification", { candidate, declarationKey: verificationDeclarationKey(body.verification), result: "pass" }, "AY");
+  const state = foldJournal(id, [bind, bound, deliver]);
+  const subject = currentSubject(state, "verified");
+  if (subject === null) throw new Error("verified subject is absent");
+  const verification = entry("attestation", { gate: "verified", subject, verdict: "satisfied" }, "AY");
   const claimed = entry("claimed", { delivery: deliver.entry }, "AZ");
   assert.equal(foldJournal(id, [bind, bound, deliver, verification, claimed]).terminal?.kind, "claimed");
 });

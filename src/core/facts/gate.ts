@@ -1,7 +1,5 @@
-import { verificationDeclarationKey } from "../declaration-key.js";
-import type { ContractBody, ContractState, Gate, VerificationEntry } from "./types.js";
-
-export { verificationDeclarationKey };
+import { currentSubject } from "../subject.js";
+import type { ContractBody, ContractState, Gate } from "./types.js";
 
 export function effectiveGates(body: ContractBody): readonly Gate[] {
   const declared: Gate[] = body.gates === undefined ? ["reviewed"] : [...body.gates];
@@ -9,24 +7,12 @@ export function effectiveGates(body: ContractBody): readonly Gate[] {
   return declared;
 }
 
-export function latestMatchingVerification(state: ContractState): VerificationEntry | null {
-  if (state.delivery === null || state.body === null) return null;
-  const currentKey = verificationDeclarationKey(state.body.verification);
-  return state.verifications.findLast((verification) => (
-    verification.data.candidate === state.delivery!.data.candidate
-    && verification.data.declarationKey === currentKey
-  )) ?? null;
-}
-
 export function gateSatisfied(state: ContractState, gate: Gate): boolean {
-  const deliver = state.delivery;
-  if (deliver === null) return false;
-  if (gate === "verified") {
-    return latestMatchingVerification(state)?.data.result === "pass";
-  }
-  return (state.reviews.findLast((review) => (
-    review.data.reviewedPatchId === deliver.data.deliveryPatchId
-  ))?.data.verdict ?? null) === "approved";
+  const subject = currentSubject(state, gate);
+  if (subject === null) return false;
+  return state.attestations.findLast((attestation) => (
+    attestation.data.gate === gate && attestation.data.subject === subject
+  ))?.data.verdict === "satisfied";
 }
 
 export function unsatisfiedGates(state: ContractState): readonly Gate[] {

@@ -1,7 +1,3 @@
-import { verificationDeclarationKey } from "../core/declaration-key.js";
-
-export { verificationDeclarationKey };
-
 export type VerificationExecutor = "bash" | "zsh" | "pwsh";
 
 export type VerificationDeclaration = Readonly<{

@@ -1,18 +1,16 @@
-export { declarationKey } from "../declaration-key.js";
-export type { DeclarationKey } from "../declaration-key.js";
-import type { DeclarationKey } from "../declaration-key.js";
-
 declare const contractIdBrand: unique symbol;
 declare const entryUlidBrand: unique symbol;
 declare const contractHeadBrand: unique symbol;
 declare const snapshotIdBrand: unique symbol;
 declare const changeIdBrand: unique symbol;
+declare const subjectKeyBrand: unique symbol;
 
 export type ContractId = string & { readonly [contractIdBrand]: "ContractId" };
 export type EntryUlid = string & { readonly [entryUlidBrand]: "EntryUlid" };
 export type ContractHead = string & { readonly [contractHeadBrand]: "ContractHead" };
 export type SnapshotId = string & { readonly [snapshotIdBrand]: "SnapshotId" };
 export type ChangeId = string & { readonly [changeIdBrand]: "ChangeId" };
+export type SubjectKey = string & { readonly [subjectKeyBrand]: "SubjectKey" };
 
 const ULID = /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
 const CONTRACT_ID = /^kei\/([a-z0-9][a-z0-9-]*)$/;
@@ -98,23 +96,16 @@ export type AmendData = ContractBody;
 
 export type BoundData = Readonly<Record<string, never>>;
 
-export type VerificationData = Readonly<{
-  candidate: SnapshotId;
-  declarationKey: DeclarationKey;
-  result: "pass" | "fail";
-  summary?: string;
-}>;
-
 export type DeliverData = Readonly<{
   expectedPredecessor: SnapshotId;
   candidate: SnapshotId;
   deliveryPatchId: ChangeId;
 }>;
 
-export type ReviewData = Readonly<{
-  verdict: "approved" | "changes-requested";
-  reviewedPatchId: ChangeId;
-  reviewedHead: SnapshotId;
+export type AttestationData = Readonly<{
+  gate: Gate;
+  subject: SubjectKey;
+  verdict: "satisfied" | "unsatisfied";
   summary?: string;
 }>;
 
@@ -151,8 +142,7 @@ export type BindEntry = JournalEnvelope<"bind", BindData>;
 export type AmendEntry = JournalEnvelope<"amend", AmendData>;
 export type BoundEntry = JournalEnvelope<"bound", BoundData>;
 export type DeliverEntry = JournalEnvelope<"deliver", DeliverData>;
-export type ReviewEntry = JournalEnvelope<"review", ReviewData>;
-export type VerificationEntry = JournalEnvelope<"verification", VerificationData>;
+export type AttestationEntry = JournalEnvelope<"attestation", AttestationData>;
 export type ClaimedEntry = JournalEnvelope<"claimed", ClaimedData>;
 export type ArcEntry = JournalEnvelope<"arc", ArcData>;
 export type AbandonEntry = JournalEnvelope<"abandon", AbandonData>;
@@ -163,8 +153,7 @@ export type JournalEntry =
   | AmendEntry
   | BoundEntry
   | DeliverEntry
-  | ReviewEntry
-  | VerificationEntry
+  | AttestationEntry
   | ClaimedEntry
   | ArcEntry
   | AbandonEntry
@@ -181,8 +170,7 @@ export type ContractState = Readonly<{
   body: ContractBody | null;
   bound: BoundEntry | null;
   delivery: DeliverEntry | null;
-  reviews: readonly ReviewEntry[];
-  verifications: readonly VerificationEntry[];
+  attestations: readonly AttestationEntry[];
   currentArc?: ArcEntry;
   abandon: AbandonEntry | null;
   terminal: ContractTerminal | null;

@@ -62,17 +62,17 @@ test("architecture policy keeps invoke and contract commands off the private lif
 test("architecture policy keeps the library facade on protocol-owned operations", () => {
   const diagnostics = check({
     "carrier/repository.ts": "export function repositoryAt(): void {}",
-    "core/verbs/review.ts": "export function decideReview(): void {}",
+    "core/verbs/attestation.ts": "export function decideAttestation(): void {}",
     "protocol/run.ts": "export function runProtocol(): void {}",
     "protocol/intent.ts": "export function admitReview(): void {}",
     "protocol/operations.ts": "export function reviewOperation(): void {}",
     "library/keiyaku.ts": [
       'import { repositoryAt } from "../carrier/repository.js";',
-      'import { decideReview } from "../core/verbs/review.js";',
+      'import { decideAttestation } from "../core/verbs/attestation.js";',
       'import { runProtocol } from "../protocol/run.js";',
       'import { admitReview } from "../protocol/intent.js";',
       'import { reviewOperation } from "../protocol/operations.js";',
-      "export function facade(): void { repositoryAt(); decideReview(); runProtocol(); admitReview(); reviewOperation(); }",
+      "export function facade(): void { repositoryAt(); decideAttestation(); runProtocol(); admitReview(); reviewOperation(); }",
     ].join("\n"),
   });
   assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/dependency-direction").length, 4);
@@ -218,7 +218,7 @@ test("architecture policy rejects removed owners and malformed verb owners", () 
   const diagnostics = check({
     "core/verbs/open.ts": "export async function decideAnything(): Promise<void> {}",
     "core/verbs/bind.ts": "export const decideBind = async (): Promise<void> => {};",
-    "core/verbs/review.ts": "export const helper = 1; export function decideReview(): void {}",
+    "core/verbs/attestation.ts": "export const helper = 1; export function decideAttestation(): void {}",
   });
   const found = new Set(rules(diagnostics));
   assert.ok(found.has("architecture/removed-owner"));

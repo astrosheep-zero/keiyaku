@@ -5,8 +5,8 @@ const types = (target: string) => ({ target, mode: "type-only" as const });
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
-    { source: "core/facts/types.ts", allow: [any("core/declaration-key.ts", ["declarationKey", "DeclarationKey"])] },
-    { source: "core/facts/codec.ts", allow: [any("core/facts/types.ts")] },
+    { source: "core/facts/types.ts", allow: [] },
+    { source: "core/facts/codec.ts", allow: [any("core/facts/types.ts"), any("core/subject.ts", ["parseSubjectKey"])] },
     {
       source: "core/facts/fold.ts",
       allow: [
@@ -15,8 +15,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/types.ts"),
       ],
     },
-    { source: "core/facts/gate.ts", allow: [any("core/declaration-key.ts"), any("core/facts/types.ts")] },
+    { source: "core/facts/gate.ts", allow: [any("core/subject.ts"), any("core/facts/types.ts")] },
     { source: "core/declaration-key.ts", allow: [] },
+    { source: "core/subject.ts", allow: [any("core/declaration-key.ts"), any("core/facts/types.ts")] },
     { source: "core/facts/eligibility.ts", allow: [any("core/facts/offer.ts"), any("core/facts/types.ts")] },
     { source: "core/facts/offer.ts", allow: [any("core/facts/types.ts")] },
     { source: "core/facts/observation.ts", allow: [any("core/facts/types.ts")] },
@@ -28,7 +29,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "core/verbs/**",
       allow: [
         types("core/decide.ts"),
-        any("core/declaration-key.ts", ["verificationDeclarationKey"]),
+        any("core/subject.ts", ["currentSubject"]),
         any("core/facts/eligibility.ts", ["samePrerequisites"]),
         any("core/facts/gate.ts"),
         any("core/facts/types.ts"),
@@ -105,13 +106,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("carrier/observe.ts"),
         any("carrier/verification.ts", ["prepareStoredVerification"]),
         types("carrier/repository.ts"),
-        any("core/declaration-key.ts"),
         types("core/decide.ts"),
         any("core/facts/gate.ts"),
         any("core/facts/eligibility.ts"),
         any("core/facts/types.ts"),
+        any("core/subject.ts", ["currentSubject"]),
         any("core/verbs/placement.ts"),
-        any("core/verbs/verification.ts"),
+        any("core/verbs/attestation.ts"),
         any("protocol/run.ts"),
         any("verification/producer.ts"),
       ],
@@ -127,14 +128,14 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("carrier/verification.ts", ["readDeliveryDiff"]),
         any("core/facts/fold.ts"),
         types("core/facts/types.ts"),
+        any("core/subject.ts", ["currentSubject"]),
         any("core/verbs/abandon.ts"),
         any("core/verbs/amend.ts"),
         any("core/verbs/arc.ts"),
         any("core/verbs/bind.ts"),
         any("core/verbs/deliver.ts"),
         types("core/verbs/placement.ts"),
-        any("core/verbs/review.ts"),
-        types("core/verbs/verification.ts"),
+        any("core/verbs/attestation.ts"),
         any("protocol/intent.ts"),
         any("protocol/read/audit.ts"),
         any("protocol/read/status.ts"),
@@ -157,14 +158,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("runtime/proc/**"),
         any("verification/**"),
-        any("core/declaration-key.ts", ["verificationDeclarationKey"]),
       ],
     },
     {
       source: "library/keiyaku.ts",
       allow: [
         any("body/**"),
-        any("core/declaration-key.ts"),
         any("core/facts/codec.ts"),
         any("core/facts/types.ts"),
         any("protocol/operations.ts"),

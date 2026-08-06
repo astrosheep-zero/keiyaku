@@ -12,7 +12,7 @@ export type TimelineEntry = Readonly<{
 
 export type AuditReport = Readonly<{
   reworks: number;
-  reviews: number;
+  reviewed: number;
   timeline: readonly TimelineEntry[];
   attempt?: Readonly<{
     failure: "timeout" | "spawn-error" | "unknown-exit";
@@ -33,10 +33,10 @@ function elapsedSince(prior: string | undefined, current: string): number | null
 
 export function auditReport(entries: readonly JournalEntry[], attempt?: AuditReport["attempt"]): AuditReport {
   let reworks = 0;
-  let reviews = 0;
+  let reviewed = 0;
   const timeline = entries.map((entry, index) => {
     if (entry.kind === "deliver") reworks += 1;
-    if (entry.kind === "review") reviews += 1;
+    if (entry.kind === "attestation" && entry.data.gate === "reviewed") reviewed += 1;
     return {
       kind: entry.kind,
       at: entry.at,
@@ -45,7 +45,7 @@ export function auditReport(entries: readonly JournalEntry[], attempt?: AuditRep
   });
   return {
     reworks,
-    reviews,
+    reviewed,
     timeline,
     ...(attempt === undefined ? {} : { attempt }),
   };

@@ -3,16 +3,14 @@ import { observeCarrier, observeContract } from "../carrier/observe.js";
 import type { DeliveryPreparation } from "../carrier/delivery.js";
 import type { GitRepository } from "../carrier/repository.js";
 import { prepareStoredVerification } from "../carrier/verification.js";
-import { declarationKey } from "../core/declaration-key.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
-import { gatesSatisfied, latestMatchingVerification } from "../core/facts/gate.js";
+import { gateSatisfied, gatesSatisfied } from "../core/facts/gate.js";
 import { placeEligibleBounds } from "../core/facts/eligibility.js";
-import type {
-  ContractId, ContractState, SnapshotId,
-} from "../core/facts/types.js";
+import { currentSubject } from "../core/subject.js";
+import type { ContractId, ContractState, SubjectKey } from "../core/facts/types.js";
 import { entryUlid } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
-import { decideVerification, type VerificationRefusal } from "../core/verbs/verification.js";
+import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
 import type {
   ProduceVerificationInput, VerificationOutcome, VerificationSpawnErrorOutcome, VerificationTerminalOutcome, VerificationTimeoutOutcome, VerificationUnknownExitOutcome,
 } from "../verification/producer.js";
@@ -186,16 +184,16 @@ function auditAttempt(
 function verificationInput(
   outcome: VerificationTerminalOutcome,
   input: VerificationAdmissionInput,
-  candidate: SnapshotId,
-) {
+  subject: SubjectKey,
+): AttestationInput {
   return {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: input.at,
     data: {
-      candidate,
-      declarationKey: declarationKey(outcome.declarationKey),
-      result: outcome.result,
+      gate: "verified" as const,
+      subject,
+      verdict: outcome.verdict,
       summary: outcome.summary,
     },
   };
@@ -204,7 +202,7 @@ function verificationInput(
 /** Run the declarations pinned by an admitted delivery, then tender their fact. */
 export async function verifyPreparedDelivery(
   input: VerifyPreparedDeliveryInput,
-): Promise<ProtocolResult<null, VerificationRefusal> | null> {
+): Promise<ProtocolResult<null, AttestationRefusal> | null> {
   const current = observeContract(input.repository, input.contractId).state;
   if (
     !current
@@ -214,7 +212,9 @@ export async function verifyPreparedDelivery(
     || current.body === null
     || current.body.verification.length === 0
   ) return null;
-  if (latestMatchingVerification(current)?.data.result === "pass") return null;
+  if (gateSatisfied(current, "verified")) return null;
+  const subject = currentSubject(current, "verified");
+  if (subject === null) throw new Error("verified subject requires a delivery and body");
 
   const prepared = prepareStoredVerification(input.repository, current);
   if (prepared === null) return null;
@@ -229,7 +229,7 @@ export async function verifyPreparedDelivery(
       env: input.environment,
     });
     if (outcome.kind !== "terminal") return null;
-    return runIntent(input.repository, input.contractId, verificationInput(outcome, input, prepared.candidate), decideVerification);
+    return runIntent(input.repository, input.contractId, verificationInput(outcome, input, subject), decideAttestation);
   } finally {
     prepared.dispose();
   }
@@ -238,15 +238,17 @@ export async function verifyPreparedDelivery(
 /** Run Verification for the current stored delivery, then tender its fact. */
 export async function verifyStoredDelivery(
   input: VerifyStoredDeliveryInput,
-): Promise<ProtocolResult<null, VerificationRefusal> | VerificationAuditAttempt | null> {
+): Promise<ProtocolResult<null, AttestationRefusal> | VerificationAuditAttempt | null> {
   const state = input.state;
   if (
     state.terminal
     || state.delivery === null
     || state.body === null
     || state.body.verification.length === 0
-    || latestMatchingVerification(state)?.data.result === "pass"
+    || gateSatisfied(state, "verified")
   ) return null;
+  const subject = currentSubject(state, "verified");
+  if (subject === null) throw new Error("verified subject requires a delivery and body");
 
   const prepared = prepareStoredVerification(input.repository, state);
   if (prepared === null) return null;
@@ -261,7 +263,7 @@ export async function verifyStoredDelivery(
       env: input.environment,
     });
     if (outcome.kind === "terminal") {
-      return runIntent(input.repository, input.contractId, verificationInput(outcome, input, prepared.candidate), decideVerification);
+      return runIntent(input.repository, input.contractId, verificationInput(outcome, input, subject), decideAttestation);
     }
     return auditAttempt(outcome);
   } finally {

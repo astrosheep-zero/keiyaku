@@ -71,7 +71,7 @@ test("deliver adapts a passing Verification through the package-root operation",
   const { raw, repository, id, candidate, result } = await bindAndDeliver("exit 0");
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "verification", "claimed"]);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
   assert.equal(observeContract(repository, id).state?.terminal?.kind, "claimed");
   assert.equal(raw.run(["rev-parse", "refs/heads/main"]).trim(), candidate);
 });
@@ -80,9 +80,9 @@ test("deliver adapts a failing Verification without a private producer injection
   const { repository, id, result } = await bindAndDeliver("exit 1");
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "verification"]);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation"]);
   assert.equal(observeContract(repository, id).state?.terminal, null);
-  assert.equal(observeContract(repository, id).state?.verifications.at(-1)?.data.result, "fail");
+  assert.equal(observeContract(repository, id).state?.attestations.at(-1)?.data.verdict, "unsatisfied");
 });
 
 test("deliver verifies the admitted candidate rather than dirty --here bytes and cleans up", async () => {
@@ -112,12 +112,12 @@ test("deliver verifies the admitted candidate rather than dirty --here bytes and
 
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "verification"]);
-  assert.equal(observeContract(setup.repository, bound.contract).state?.verifications.at(-1)?.data.result, "fail");
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation"]);
+  assert.equal(observeContract(setup.repository, bound.contract).state?.attestations.at(-1)?.data.verdict, "unsatisfied");
   assert.equal(setup.raw.run(["worktree", "list", "--porcelain"]), worktreesBefore);
 });
 
-test("audit classifies its public receipt as accepted when it admits a Verification fact", async () => {
+test("audit classifies its public receipt as accepted when it admits a verified attestation", async () => {
   const pending = await bindAndDeliver("exit 1");
   const audit = await invoke(parseArgv(["audit", pending.id, "--show-diff-body", "--actor", "audit-user"]), {
     cwd: pending.raw.path,
@@ -125,10 +125,10 @@ test("audit classifies its public receipt as accepted when it admits a Verificat
   });
   assert.equal(audit.kind, "accepted");
   if (audit.kind !== "accepted") return;
-  assert.deepEqual(audit.facts.map((fact) => fact.kind), ["verification"]);
+  assert.deepEqual(audit.facts.map((fact) => fact.kind), ["attestation"]);
   assert.equal(audit.report.attempt, undefined);
   assert.equal("diff" in audit, true);
-  assert.equal(observeContract(pending.repository, pending.id).state?.verifications.at(-1)?.actor, "audit-user");
+  assert.equal(observeContract(pending.repository, pending.id).state?.attestations.at(-1)?.actor, "audit-user");
 });
 
 test("audit renders a pure read as an observation with its public report and optional diff", async () => {

@@ -73,7 +73,7 @@ test("package root exposes only the ruled library values and declarations", () =
     '// @ts-expect-error Repo.at accepts one input object',
     'Repo.at(".");',
     '// @ts-expect-error Delivery.review accepts one input object',
-    'delivery.review("approved");',
+    'delivery.review("satisfied");',
     '// @ts-expect-error Keiyaku.of requires a branded ContractId',
     'Keiyaku.of("kei/unbranded");',
     '// @ts-expect-error BindInput.after requires branded ContractId values',

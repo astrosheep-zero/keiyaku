@@ -33,7 +33,7 @@ export type ParsedDeliver = Output & Actor & Readonly<{
 export type ParsedReview = Output & Actor & Readonly<{
   command: "review";
   contract?: string;
-  verdict: "approved" | "changes-requested";
+  verdict: "satisfied" | "unsatisfied";
   summary?: string;
   summaryFromStdin?: true;
 }>;
@@ -81,7 +81,7 @@ const FLAG_SPECS: Readonly<Record<Command, FlagSpecs>> = {
   bind: { actor: "value", target: "value", here: "boolean", after: "repeat-value", gates: "value", json: "boolean" },
   amend: { actor: "value", after: "repeat-value", "clear-after": "boolean", gates: "value", json: "boolean" },
   deliver: { actor: "value", json: "boolean" },
-  review: { actor: "value", approve: "boolean", "changes-requested": "boolean", summary: "value", json: "boolean" },
+  review: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
   arc: { actor: "value", json: "boolean" },
   abandon: { actor: "value", note: "value", json: "boolean" },
   status: { json: "boolean" },
@@ -229,7 +229,7 @@ function parseDeliver(parts: ParsedParts): ParsedDeliver {
 }
 
 function parseReview(parts: ParsedParts): ParsedReview {
-  if (Number(parts.flags.approve === true) + Number(parts.flags["changes-requested"] === true) !== 1) {
+  if (Number(parts.flags.satisfied === true) + Number(parts.flags.unsatisfied === true) !== 1) {
     throw new CliUsageError("review requires exactly one verdict flag");
   }
   const summary = optionalFlag(parts.flags, "summary");
@@ -238,7 +238,7 @@ function parseReview(parts: ParsedParts): ParsedReview {
   return {
     command: "review",
     ...(contract === undefined ? {} : { contract }),
-    verdict: parts.flags.approve === true ? "approved" : "changes-requested",
+    verdict: parts.flags.satisfied === true ? "satisfied" : "unsatisfied",
     ...(summary === undefined ? {} : { summary }),
     ...(parts.stdin ? { summaryFromStdin: true as const } : {}),
     ...(parts.actor === undefined ? {} : { actor: parts.actor }),

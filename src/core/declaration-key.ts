@@ -30,7 +30,7 @@ function rotateRight(value: number, amount: number): number {
   return (value >>> amount) | (value << (32 - amount));
 }
 
-function sha256(bytes: Uint8Array): string {
+export function sha256(bytes: Uint8Array): string {
   const bitLength = BigInt(bytes.length) * 8n;
   const padded = new Uint8Array(Math.ceil((bytes.length + 9) / 64) * 64);
   padded.set(bytes);

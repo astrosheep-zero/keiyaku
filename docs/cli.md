@@ -59,7 +59,7 @@ The command-specific syntax is:
 bind [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -
 amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -
 deliver [<contract>|@<contract>] [--actor <actor>] [--json]
-review [<contract>|@<contract>] (--approve | --changes-requested) [--summary <text>] [--actor <actor>] [--json] [-]
+review [<contract>|@<contract>] (--satisfied | --unsatisfied) [--summary <text>] [--actor <actor>] [--json] [-]
 abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
 status [<contract>|@<contract>] [--json]
@@ -104,7 +104,7 @@ when its flag is omitted. A malformed settings file or unknown name is a typed
 usage refusal.
 
 `deliver` accepts `--actor` and `--json`. `review` requires exactly one of
-`--approve` or `--changes-requested`, with optional `--summary`, `--actor`, and
+`--satisfied` or `--unsatisfied`, with optional `--summary`, `--actor`, and
 `--json`. `abandon` accepts optional `--note`, `--actor`, and `--json`; it has
 no reason flag or hidden reason classification. `arc` and `audit` accept
 `--actor` and `--json`; audit also accepts

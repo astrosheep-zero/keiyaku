@@ -33,6 +33,7 @@ src/
 ├── core/
 │   ├── decide.ts            # pure decision/result vocabulary
 │   ├── declaration-key.ts   # canonical Verification declaration-key primitive
+│   ├── subject.ts           # sole reviewed/verified subject constructor
 │   ├── facts/
 │   │   ├── types.ts       # ContractCoordinates, ContractBody, journal values
 │   │   ├── codec.ts       # canonical current-version journal codec
@@ -40,13 +41,12 @@ src/
 │   │   ├── observation.ts # pure observed journal shapes
 │   │   ├── offer.ts       # pure ordered append/ref offer
 │   │   ├── eligibility.ts  # explicit fact-kind eligibility projection
-│   │   └── gate.ts        # pure reviewed/verified key comparison
+│   │   └── gate.ts        # pure current-subject attestation read
 │   ├── verbs/
 │   │   ├── bind.ts
 │   │   ├── amend.ts
 │   │   ├── deliver.ts     # candidate declaration
-│   │   ├── verification.ts # verification fact admission only
-│   │   ├── review.ts      # review intent admission
+│   │   ├── attestation.ts # shared captured-subject admission
 │   │   ├── placement.ts   # one explicit deliver/review placement adjudicator
 │   │   ├── abandon.ts
 │   │   └── arc.ts
@@ -112,8 +112,8 @@ results. A future `akuma/` pillar may also import
 
 `core/verbs/deliver.ts` records the selected existing candidate. The IO-bearing
 `verification/` producer returns a terminal result to protocol orchestration,
-which invokes the pure `core/verbs/verification.ts` decision to record a
-separate matching journal fact. Explicit deliver/review requests share
+which invokes the pure `core/verbs/attestation.ts` decision to record a
+separate matching attestation. Explicit deliver/review requests share
 `core/verbs/placement.ts`; audit never calls it. Neither verb imports another
 verb.
 
@@ -134,7 +134,7 @@ binary; no unreachable task pillar is shipped for a future reader.
 | `verbs/petition-preparation.ts` | delete | `verbs/deliver.ts` |
 | `verbs/claim.ts` | delete; target CAS and claimed placement are admission concerns | `carrier/admission.ts` |
 | `verbs/forfeit.ts` | delete | `verbs/abandon.ts` |
-| `verbs/approval-preparation.ts` | delete; review placement shares claimed admission | `verbs/review.ts` |
+| `verbs/approval-preparation.ts` | delete; review placement shares claimed admission | `verbs/attestation.ts` |
 | `verbs/pipeline.ts` | delete | `facts/gate.ts` |
 | old verb suites | delete and replace; no aliases or old decoders | focused v4 suites |
 

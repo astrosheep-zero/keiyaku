@@ -5,6 +5,7 @@ import { deliveryWorktreePath, reconcile, reconcileBatch, type ReconcileResult }
 import { readRef, repositoryAt, type GitRepository } from "../carrier/repository.js";
 import { readDeliveryDiff } from "../carrier/verification.js";
 import { foldJournal } from "../core/facts/fold.js";
+import { currentSubject } from "../core/subject.js";
 import type {
   AmendData, ArcData, AttestationData, BindData, ChangeId, ContractBody, ContractId, ContractState, JournalEntry, SnapshotId,
 } from "../core/facts/types.js";
@@ -14,8 +15,7 @@ import { decideArc, type ArcRefusal } from "../core/verbs/arc.js";
 import { decideBind, type BindRefusal } from "../core/verbs/bind.js";
 import { decideDeliver, type DeliverRefusal } from "../core/verbs/deliver.js";
 import type { PlacementRefusal } from "../core/verbs/placement.js";
-import { decideReview, type ReviewRefusal } from "../core/verbs/review.js";
-import type { VerificationRefusal } from "../core/verbs/verification.js";
+import { decideAttestation, type AttestationRefusal } from "../core/verbs/attestation.js";
 import { produceVerification } from "../verification/producer.js";
 import {
   admitAbandon,
@@ -42,7 +42,7 @@ export type DeliveryPreparationRefusal = Readonly<{
 
 export type IntentRefusal =
   | AbandonRefusal | AmendRefusal | ArcRefusal | BindRefusal | DeliverRefusal
-  | DeliveryPreparationRefusal | PlacementRefusal | ReviewRefusal | VerificationRefusal;
+  | DeliveryPreparationRefusal | PlacementRefusal | AttestationRefusal;
 
 export type IntentRetry = ProtocolTerminal;
 export type IntentReceipt = Readonly<{ facts: readonly JournalEntry[]; prior: ContractState | null; snapshot: ContractState }>;
@@ -144,10 +144,13 @@ export function deliveryOperation(
 ): DeliveryOperationValue | null {
   const state = observeContract(input.scope, input.contractId).state;
   if (state === null || state.delivery === null) return null;
+  const reviewSubject = currentSubject(state, "reviewed");
+  if (reviewSubject === null) throw new Error(`delivery subject is absent: ${input.contractId}`);
   return {
     snapshotId: state.delivery.data.candidate,
     changeId: state.delivery.data.deliveryPatchId,
     expectedPredecessor: state.delivery.data.expectedPredecessor,
+    reviewSubject,
   };
 }
 
@@ -180,14 +183,17 @@ export type DeliveryOperationValue = Readonly<{
   snapshotId: SnapshotId;
   changeId: ChangeId;
   expectedPredecessor: SnapshotId;
+  reviewSubject: AttestationData["subject"];
 }>;
+
+type PreparedDeliveryValue = Omit<DeliveryOperationValue, "reviewSubject">;
 
 export async function deliverOperation(input: OperationInput): Promise<IntentOutcome<DeliveryOperationValue>> {
   const carrier = input.scope;
   const prepared = prepareDelivery(carrier, input.contractId);
   if (prepared.kind === "refused") return { kind: "refused", refusal: prepared.refusal as DeliveryPreparationRefusal };
 
-  const value = {
+  const preparedValue: PreparedDeliveryValue = {
     snapshotId: prepared.delivery.candidate,
     changeId: prepared.delivery.deliveryPatchId,
     expectedPredecessor: prepared.delivery.expectedPredecessor,
@@ -200,9 +206,12 @@ export async function deliverOperation(input: OperationInput): Promise<IntentOut
       at: timestamp(),
       data: prepared.delivery,
     }, decideDeliver),
-    value,
+    preparedValue,
   );
   if (first.kind !== "accepted") return first;
+  const reviewSubject = currentSubject(first.receipt.snapshot, "reviewed");
+  if (reviewSubject === null) throw new Error(`delivery subject is absent: ${input.contractId}`);
+  const value: DeliveryOperationValue = { ...preparedValue, reviewSubject };
 
   const facts = [...first.receipt.facts];
   let snapshot = first.receipt.snapshot;
@@ -274,8 +283,8 @@ export function arcOperation(
 }
 
 export function reviewOperation(
-  input: OperationInput & Readonly<{ verdict: AttestationData["verdict"]; summary?: string }>,
-): IntentOutcome<void, ReviewRefusal | PlacementRefusal> {
+  input: OperationInput & Readonly<{ data: AttestationData & Readonly<{ gate: "reviewed" }> }>,
+): IntentOutcome<void, AttestationRefusal | PlacementRefusal> {
   const carrier = input.scope;
   const review = complete(
     input.contractId,
@@ -283,12 +292,11 @@ export function reviewOperation(
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
-      verdict: input.verdict,
-      ...(input.summary === undefined ? {} : { summary: input.summary }),
-    }, decideReview),
+      data: input.data,
+    }, decideAttestation),
     undefined,
   );
-  if (review.kind !== "accepted" || input.verdict !== "satisfied") return review;
+  if (review.kind !== "accepted" || input.data.verdict !== "satisfied") return review;
 
   const placement = placeIfEligible(carrier, {
     contractId: input.contractId,
@@ -298,7 +306,7 @@ export function reviewOperation(
   if (placement?.kind !== "handoff") return review;
   const placed = complete(input.contractId, placement, undefined);
   if (placed.kind !== "accepted") return review;
-  return accepted<void, ReviewRefusal | PlacementRefusal>(
+  return accepted<void, AttestationRefusal | PlacementRefusal>(
     input.contractId,
     [...review.receipt.facts, ...placed.receipt.facts],
     undefined,

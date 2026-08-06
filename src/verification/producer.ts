@@ -1,12 +1,11 @@
 import { type ProcessExit, type ProcessOutcome, type ProcessSpawnError, type ProcessTimeout, runProcess } from "../runtime/proc/run.js";
-import { verificationDeclarationKey } from "../core/declaration-key.js";
 import {
   resolveVerificationPlan,
   type VerificationDeclaration,
   type VerificationPlanStep,
 } from "./plan.js";
 
-export type VerificationVerdict = "pass" | "fail";
+export type VerificationVerdict = "satisfied" | "unsatisfied";
 
 export type VerificationExecution = Readonly<{
   readonly step: VerificationPlanStep;
@@ -14,13 +13,12 @@ export type VerificationExecution = Readonly<{
 }>;
 
 type VerificationBase = Readonly<{
-  readonly declarationKey: string;
   readonly plan: readonly VerificationPlanStep[];
 }>;
 
 export type VerificationTerminalOutcome = VerificationBase & Readonly<{
   readonly kind: "terminal";
-  readonly result: VerificationVerdict;
+  readonly verdict: VerificationVerdict;
   readonly summary: string;
   readonly executions: readonly VerificationExecution[];
 }>;
@@ -57,16 +55,16 @@ export type ProduceVerificationInput = Readonly<{
   readonly signal?: AbortSignal;
 }>;
 
-function summary(result: VerificationVerdict): string {
-  return `verification ${result}`;
+function summary(verdict: VerificationVerdict): string {
+  return `verification ${verdict}`;
 }
 
 function terminal(
   base: VerificationBase,
-  result: VerificationVerdict,
+  verdict: VerificationVerdict,
   executions: readonly VerificationExecution[],
 ): VerificationTerminalOutcome {
-  return { ...base, kind: "terminal", result, summary: summary(result), executions };
+  return { ...base, kind: "terminal", verdict, summary: summary(verdict), executions };
 }
 
 function candidateTree(value: string): string {
@@ -79,12 +77,9 @@ function candidateTree(value: string): string {
 export async function produceVerification(input: ProduceVerificationInput): Promise<VerificationOutcome> {
   candidateTree(input.candidateTree);
   const plan = resolveVerificationPlan(input.declarations);
-  const base: VerificationBase = {
-    declarationKey: verificationDeclarationKey(input.declarations),
-    plan,
-  };
+  const base: VerificationBase = { plan };
   const executions: VerificationExecution[] = [];
-  let result: VerificationVerdict = "pass";
+  let verdict: VerificationVerdict = "satisfied";
   for (const step of plan) {
     const outcome = await runProcess({
       argv: step.argv,
@@ -100,7 +95,7 @@ export async function produceVerification(input: ProduceVerificationInput): Prom
     if (outcome.kind === "timeout") return { ...base, kind: "timeout", execution: execution as VerificationTimeoutOutcome["execution"] };
     if (outcome.kind === "spawn-error") return { ...base, kind: "spawn-error", execution: execution as VerificationSpawnErrorOutcome["execution"] };
     if (outcome.code === null) return { ...base, kind: "unknown-exit", execution: execution as VerificationUnknownExitOutcome["execution"] };
-    if (outcome.code !== 0) result = "fail";
+    if (outcome.code !== 0) verdict = "unsatisfied";
   }
-  return terminal(base, result, executions);
+  return terminal(base, verdict, executions);
 }

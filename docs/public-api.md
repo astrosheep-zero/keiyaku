@@ -104,7 +104,7 @@ keiyaku.audit(input?: { actor?: ActorId }): Promise<Outcome<AuditReport>>
 keiyaku.reconcile(): Promise<ReconcileReport>
 
 delivery.review(input: {
-  verdict: ReviewVerdict
+  verdict: AttestationVerdict
   actor?: ActorId
   summary?: string
 }): Promise<Outcome<void>>
@@ -125,9 +125,9 @@ defined in [transport.md](transport.md).
 `delivery()` freshly observes the journal and returns the most recent tender.
 It returns `null` only when the contract has never tendered. A returned
 Delivery is pinned to public `snapshotId` and `changeId`; `deliver()` and
-`delivery()` are its two birth paths. `review()` records judgment about that
-Delivery's patch identity. A terminal contract receives the verb's typed
-terminal refusal from the lifecycle decision.
+`delivery()` are its two birth paths. Each Delivery pins its reviewed subject
+at creation; `review()` records that captured subject. A terminal contract receives
+the verb's typed terminal refusal from the lifecycle decision.
 
 ## Outcomes And Reports
 
@@ -154,7 +154,7 @@ closed `Outcome` union.
 ```ts
 type AuditReport = Readonly<{
   reworks: number
-  reviews: number
+  reviewed: number
   timeline: readonly TimelineEntry[]
   attempt?: Readonly<{
     failure: "timeout" | "spawn-error" | "unknown-exit"
@@ -168,15 +168,15 @@ type TimelineEntry = Readonly<{
 }>
 ```
 
-`reworks` counts `deliver` facts and `reviews` counts `review` facts. Timeline
+`reworks` counts `deliver` facts and `reviewed` counts reviewed attestations. Timeline
 entries are in journal order; `at` is copied from the fact and `sincePrior` is
 the integer millisecond difference from the immediately preceding value. The
 first, an unparseable pair, or a missing prior value yields `null`; a negative
 difference is preserved. Reports contain no journal entries, body snapshots,
 raw logs, artifacts, or evidence bytes.
 
-`audit()` always returns `Outcome<AuditReport>`. When it admits a Verification
-fact, that fact is in `receipt.facts`; a read-only audit, a timeout, a spawn
+`audit()` always returns `Outcome<AuditReport>`. When it admits an attestation,
+that fact is in `receipt.facts`; a read-only audit, a timeout, a spawn
 failure, or another no-fact report is an accepted outcome with an empty receipt
 fact list. The report describes observation and the receipt describes
 admission. There is no second observation union or duplicate boolean flag.

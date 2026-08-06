@@ -112,7 +112,7 @@ body's document fields are defined by [document.md](document.md); `gates` and
 The fact vocabulary is closed:
 
 ```text
-bind / amend / deliver / review / verification / abandon
+bind / amend / deliver / attestation / abandon
 arc / bound / claimed / abandoned
 ```
 
@@ -125,17 +125,10 @@ type DeliverData = Readonly<{
   deliveryPatchId: ChangeId
 }>
 
-type ReviewData = Readonly<{
-  verdict: "approved" | "changes-requested"
-  reviewedPatchId: ChangeId
-  reviewedHead: SnapshotId
-  summary?: string
-}>
-
-type VerificationData = Readonly<{
-  candidate: SnapshotId
-  declarationKey: DeclarationKey
-  result: "pass" | "fail"
+type AttestationData = Readonly<{
+  gate: Gate
+  subject: SubjectKey
+  verdict: "satisfied" | "unsatisfied"
   summary?: string
 }>
 
@@ -169,8 +162,7 @@ type ContractState = Readonly<{
   body: ContractBody | null
   bound: BoundEntry | null
   delivery: DeliverEntry | null
-  reviews: readonly ReviewEntry[]
-  verifications: readonly VerificationEntry[]
+  attestations: readonly AttestationEntry[]
   currentArc?: ArcEntry
   abandon: AbandonEntry | null
   terminal: ClaimedEntry | AbandonedEntry | null
@@ -179,8 +171,8 @@ type ContractState = Readonly<{
 
 `ContractState` is a fold snapshot, not stored authority. It holds the
 contract head, coordinates, effective body, binding placement, current tender,
-review and verification history, current arc, abandonment intent, and terminal
-placement. Pending delivery is a read-model projection over this state.
+attestation history, current arc, abandonment intent, and terminal placement.
+Pending delivery is a read-model projection over this state.
 
 The carrier checks `meta/format.json` on every nonempty carrier read. A
 contract's `ContractHead` is its journal blob identity, so unrelated carrier

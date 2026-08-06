@@ -25,22 +25,22 @@ replaces the complete body and may change `after` only before a `bound` fact
 has consumed prerequisites; otherwise it receives the typed
 `prerequisites-already-consumed` refusal. Coordinates never change.
 
-An explicit placement request from `deliver`, or from an approved `review` that
+An explicit placement request from `deliver`, or from a satisfied `review` that
 satisfies the required gates, uses one placement adjudicator. The adjudicator
 admits `claimed` only when its current gate read is satisfied. A successful
 verification result by itself never invokes placement, and audit never invokes
 placement.
 
 `deliver` tenders the selected current snapshot. Its fact records the observed
-predecessor, candidate, and patch identity. Admission returns typed
-`stale-tender` when a later tender replaced the current one. The tender's
-transport preparation and target update rules live in
+predecessor, candidate, and patch identity. A later tender replaces the current
+delivery on the read model. The tender's transport preparation and target
+update rules live in
 [transport.md](transport.md).
 
-`review` records judgment about one Delivery's patch identity. An approved
-review may be the explicit placement request that completes the gates.
-`changes-requested` records judgment only. Optional `summary` is opaque
-testimony and does not participate in a gate.
+`review` produces a `reviewed` attestation. A satisfied review may be the
+explicit placement request that completes the gates. An unsatisfied review
+records judgment only. Optional `summary` is opaque testimony and does not
+participate in a gate.
 
 `abandon` records a legal terminal withdrawal. Optional `note` is opaque
 testimony and does not participate in a gate. No reason enum is stored: the
@@ -61,7 +61,7 @@ The first admitted arc has `seq = 1`; every later arc increments it exactly by
 one. The newest arc is `ContractState.currentArc`. Arc is legal before a
 terminal fact and otherwise receives a typed refusal.
 
-## Gates And Review Freshness
+## Gates And Attestations
 
 The gate vocabulary is `reviewed` and `verified`. The effective required set is:
 
@@ -76,24 +76,35 @@ The `gates` option supplies a frozen ordered snapshot to the complete body.
 Settings names and document grammar are not gate authority. A Verification
 declaration always requires `verified`.
 
-`ReviewData` has this exact shape:
+`AttestationData` has this exact shape:
 
 | Field | Shape | Rule |
 | --- | --- | --- |
-| `verdict` | `approved` or `changes-requested` | required judgment |
-| `reviewedPatchId` | `ChangeId` | copied from the current tender |
-| `reviewedHead` | `SnapshotId` | copied from the current tender candidate |
+| `gate` | `reviewed` or `verified` | required gate producer |
+| `subject` | `SubjectKey` | constructed only by core from current state and gate |
+| `verdict` | `satisfied` or `unsatisfied` | required judgment |
 | `summary` | nonblank string, optional | compact testimony |
 
-The latest review whose `reviewedPatchId` matches the current tender's
-`ChangeId` is authoritative for the `reviewed` gate. A later
-`changes-requested` verdict supersedes an earlier approval for the same patch.
+`src/core/subject.ts` is the one subject constructor. Its
+`currentSubject(state, gate)` returns no subject until the state has a current
+delivery and body. A `reviewed` subject uses the current delivery candidate,
+its `deliveryPatchId`, and the complete current-body key. A `verified` subject
+uses the current delivery candidate and current effective Verification
+declaration key. Thus an amendment to any body field invalidates a reviewed
+attestation, while an amendment unrelated to Verification does not invalidate
+a verified attestation.
 
-`verified` is satisfied only by a matching `VerificationData` fact with
-`result: "pass"` for both the current tender candidate and the current
-effective Verification declaration key. A changed candidate or declaration key
-therefore requires a fresh result. Verification production and its runtime
-behavior are defined in [verification.md](verification.md).
+Review and Verification producers capture their `AttestationData.subject`
+before testimony or execution. Admission compares that captured subject with
+`currentSubject(state, data.gate)`; a mismatch is the typed `stale-subject`
+refusal with `expected` and `actual` keys. Admission never replaces a captured
+subject with a newly computed one. The pure core attestation adjudicator is the
+only decision that admits either producer's testimony.
+
+For each gate, `gate.ts` derives the current subject and reads only the latest
+attestation with that same gate and subject. Its `satisfied` verdict satisfies
+the gate; a later `unsatisfied` verdict supersedes it. Verification production
+and its runtime behavior are defined in [verification.md](verification.md).
 
 ## Eligibility
 
@@ -101,7 +112,7 @@ Only an offer containing an eligibility-changing fact reevaluates observed
 contracts in the same snapshot. The eligibility-changing facts are `bind`,
 `amend`, and `claimed` from an explicit placement request. The offer appends
 every newly eligible `bound` fact before dependent facts, in one ordered atomic
-offer. A verification fact does not change eligibility.
+offer. A verified attestation does not change eligibility.
 
 The kernel neither sorts, queues, nor automatically reorders contracts.
 Eligibility observes the declared prerequisite identities and their terminal

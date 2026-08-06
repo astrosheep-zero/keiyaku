@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { produceVerification, type ProduceVerificationInput } from "../src/verification/producer.js";
-import { resolveVerificationPlan, verificationDeclarationKey, type VerificationDeclaration } from "../src/verification/plan.js";
+import { resolveVerificationPlan, type VerificationDeclaration } from "../src/verification/plan.js";
 
 const candidateTree = "a".repeat(40);
 
@@ -47,18 +47,18 @@ test("producer executes every invocation and returns a terminal summary", async 
     assert.equal(first.kind, "terminal");
     assert.equal(second.kind, "terminal");
     if (first.kind !== "terminal" || second.kind !== "terminal") return;
-    assert.equal(first.result, "pass");
-    assert.equal(first.summary, "verification pass");
-    assert.equal(second.summary, "verification pass");
+    assert.equal(first.verdict, "satisfied");
+    assert.equal(first.summary, "verification satisfied");
+    assert.equal(second.summary, "verification satisfied");
     assert.equal(readFileSync(counter, "utf8"), "xx");
   });
 });
 
-test("producer returns fail, timeout, unknown-exit, and spawn-error without persistence", async () => {
+test("producer returns an unsatisfied verdict, timeout, unknown-exit, and spawn-error without persistence", async () => {
   await inTemporaryDirectory(async (root) => {
     const failed = await produceVerification(input(root, [declaration("false")]));
     assert.equal(failed.kind, "terminal");
-    if (failed.kind === "terminal") assert.equal(failed.result, "fail");
+    if (failed.kind === "terminal") assert.equal(failed.verdict, "unsatisfied");
 
     const timeout = await produceVerification(input(root, [declaration("sleep 1")], { timeoutMs: 25 }));
     assert.equal(timeout.kind, "timeout");
@@ -71,12 +71,11 @@ test("producer returns fail, timeout, unknown-exit, and spawn-error without pers
   });
 });
 
-test("plan resolves executor argv and declaration key", () => {
+test("plan resolves executor argv", () => {
   const declarations = [declaration("printf ok"), declaration("Write-Output ok", "pwsh")];
   const plan = resolveVerificationPlan(declarations);
   assert.deepEqual(plan.map((step) => step.argv), [
     ["bash", "-c", "printf ok"],
     ["pwsh", "-Command", "Write-Output ok"],
   ]);
-  assert.equal(verificationDeclarationKey(declarations), "0f164950b5abbbbd325d577da6d2f1b36bf72ae6acb0b7339069fd8ccabf5336");
 });

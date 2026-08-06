@@ -12,7 +12,7 @@ let bin = "";
 type ShellResult = Readonly<{ status: number | null; stdout: string; stderr: string }>;
 type AuditObservation = Readonly<{
   reworks: number;
-  reviews: number;
+  reviewed: number;
   timeline: readonly unknown[];
   attempt?: Readonly<{ failure: "timeout" | "spawn-error" | "unknown-exit" }>;
   diff?: string;
@@ -262,16 +262,16 @@ test("installed binary dogfoods managed delivery, replacement review, and termin
   assert.equal(gitRef(repository, deliveryRef), firstCandidate);
   assert.equal(gitRef(repository, target), start);
 
-  const targetBeforeChangesRequested = gitRef(repository, target);
-  const managedHeadBeforeChangesRequested = git(managed, ["rev-parse", "HEAD"]).trim();
-  const deliveryRefBeforeChangesRequested = gitRef(repository, deliveryRef);
-  const candidatePinBeforeChangesRequested = gitRef(repository, candidatePin);
-  const changesRequested = invoke(repository, ["review", id, "--changes-requested", "--summary", "replace this candidate"]);
-  assert.deepEqual(acceptedFactKinds(changesRequested, id), ["review"]);
-  assert.equal(gitRef(repository, target), targetBeforeChangesRequested);
-  assert.equal(git(managed, ["rev-parse", "HEAD"]).trim(), managedHeadBeforeChangesRequested);
-  assert.equal(gitRef(repository, deliveryRef), deliveryRefBeforeChangesRequested);
-  assert.equal(gitRef(repository, candidatePin), candidatePinBeforeChangesRequested);
+  const targetBeforeUnsatisfiedReview = gitRef(repository, target);
+  const managedHeadBeforeUnsatisfiedReview = git(managed, ["rev-parse", "HEAD"]).trim();
+  const deliveryRefBeforeUnsatisfiedReview = gitRef(repository, deliveryRef);
+  const candidatePinBeforeUnsatisfiedReview = gitRef(repository, candidatePin);
+  const unsatisfiedReview = invoke(repository, ["review", id, "--unsatisfied", "--summary", "replace this candidate"]);
+  assert.deepEqual(acceptedFactKinds(unsatisfiedReview, id), ["attestation"]);
+  assert.equal(gitRef(repository, target), targetBeforeUnsatisfiedReview);
+  assert.equal(git(managed, ["rev-parse", "HEAD"]).trim(), managedHeadBeforeUnsatisfiedReview);
+  assert.equal(gitRef(repository, deliveryRef), deliveryRefBeforeUnsatisfiedReview);
+  assert.equal(gitRef(repository, candidatePin), candidatePinBeforeUnsatisfiedReview);
   assert.equal(git(managed, ["status", "--porcelain"]), "");
 
   const replacementCandidate = commit(managed, "candidate.txt", "replacement candidate\n", "replacement candidate");
@@ -281,10 +281,10 @@ test("installed binary dogfoods managed delivery, replacement review, and termin
   assert.equal(gitRef(repository, deliveryRef), replacementCandidate);
   assert.equal(gitRef(repository, target), start);
 
-  const approved = invoke(repository, ["review", id, "--approve"]);
-  assert.deepEqual(acceptedFactKinds(approved, id), ["review", "claimed"]);
+  const satisfiedReview = invoke(repository, ["review", id, "--satisfied"]);
+  assert.deepEqual(acceptedFactKinds(satisfiedReview, id), ["attestation", "claimed"]);
   assert.equal(gitRef(repository, target), replacementCandidate, "claimed CAS places the reviewed replacement");
-  assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "deliver", "review", "deliver", "review", "claimed"]);
+  assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "deliver", "attestation", "deliver", "attestation", "claimed"]);
   assert.equal(gitRef(repository, candidatePin), null);
   assert.equal(gitRef(repository, deliveryRef), null);
   assert.equal(existsSync(managed), false);
@@ -338,7 +338,7 @@ test("installed binary dogfoods here verification and gate-controlled placement"
   assert.deepEqual(worktreePaths(repository), originalWorktrees);
 
   const candidate = commit(here, "candidate.txt", "candidate\n", "candidate");
-  const refusal = invokeResult(here, ["review", id, "--approve"]);
+  const refusal = invokeResult(here, ["review", id, "--satisfied"]);
   assert.equal(refusal.status, 1);
   assert.equal(refusal.stderr, "");
   assert.equal(
@@ -347,12 +347,12 @@ test("installed binary dogfoods here verification and gate-controlled placement"
   );
 
   const delivered = succeeds(invokeResult(here, ["deliver", id]));
-  assert.deepEqual(acceptedFactKinds(delivered, id), ["deliver", "verification"]);
+  assert.deepEqual(acceptedFactKinds(delivered, id), ["deliver", "attestation"]);
   assert.equal(gitRef(repository, target), originalTarget, "failed Verification must not place the target");
 
   writeFileSync(marker, "pass\n");
   const audited = succeeds(invokeResult(here, ["audit", id, "--show-diff-body"]));
-  assert.deepEqual(acceptedFactKinds(audited, id), ["verification"]);
+  assert.deepEqual(acceptedFactKinds(audited, id), ["attestation"]);
   assert.match(audited, /diff --git a\/candidate\.txt b\/candidate\.txt/);
   assert.match(audited, /\+candidate/);
   assert.equal(gitRef(repository, target), originalTarget, "audit admission must not place the target");
@@ -361,17 +361,17 @@ test("installed binary dogfoods here verification and gate-controlled placement"
   const reused = auditObservation(succeeds(invokeResult(here, ["audit", id, "--show-diff-body"])));
   assert.match(reused.diff ?? "", /\+candidate/);
   assert.equal(reused.attempt, undefined);
-  assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "deliver", "verification", "verification"]);
+  assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "deliver", "attestation", "attestation"]);
 
-  const approved = succeeds(invokeResult(here, ["review", id, "--approve"]));
-  assert.deepEqual(acceptedFactKinds(approved, id), ["review", "claimed"]);
+  const satisfiedReview = succeeds(invokeResult(here, ["review", id, "--satisfied"]));
+  assert.deepEqual(acceptedFactKinds(satisfiedReview, id), ["attestation", "claimed"]);
   assert.equal(gitRef(repository, target), candidate, "review places only after the verified gate is satisfied");
 
   const terminal = auditObservation(succeeds(invokeResult(here, ["audit", id, "--show-diff-body"])));
   assert.equal(terminal.attempt, undefined);
   assert.deepEqual(
     journalKinds(repository, id),
-    ["bind", "bound", "deliver", "verification", "verification", "review", "claimed"],
+    ["bind", "bound", "deliver", "attestation", "attestation", "attestation", "claimed"],
   );
   assert.equal(git(here, ["branch", "--show-current"]).trim(), "caller");
   assert.equal(git(here, ["rev-parse", "HEAD"]).trim(), candidate);

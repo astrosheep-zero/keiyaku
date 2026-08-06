@@ -2,6 +2,7 @@ import type {
   AbandonData,
   AbandonedData,
   AmendData,
+  AttestationData,
   ArcData,
   BindData,
   BoundData,
@@ -10,18 +11,16 @@ import type {
   ContractCriterion,
   ContractExtension,
   ContractId,
-  DeclarationKey,
   DeliverData,
   ClaimedData,
   Gate,
   JournalEntry,
-  ReviewData,
-  VerificationData,
+  SubjectKey,
 } from "./types.js";
+import { parseSubjectKey } from "../subject.js";
 import {
   changeId,
   contractId,
-  declarationKey,
   entryUlid,
   snapshotId,
 } from "./types.js";
@@ -60,8 +59,7 @@ const VERSION_BY_KIND = {
   amend: 1,
   bound: 1,
   deliver: 1,
-  review: 1,
-  verification: 1,
+  attestation: 1,
   claimed: 1,
   arc: 1,
   abandon: 1,
@@ -114,21 +112,21 @@ function opaqueIdValue(value: unknown, path: string, kind: "snapshot" | "change"
   }
 }
 
+function subjectKeyValue(value: unknown, path: string): SubjectKey {
+  if (typeof value !== "string") fail(path, "expected a lowercase SHA-256 subject key");
+  try {
+    return parseSubjectKey(value);
+  } catch (error) {
+    fail(path, error instanceof Error ? error.message : "invalid subject key");
+  }
+}
+
 function ulidValue(value: unknown, path: string): string {
   if (typeof value !== "string") fail(path, "expected an entry ULID");
   try {
     return entryUlid(value);
   } catch (error) {
     fail(path, error instanceof Error ? error.message : "invalid entry ULID");
-  }
-}
-
-function declarationKeyValue(value: unknown, path: string): DeclarationKey {
-  if (typeof value !== "string") fail(path, "expected a declaration key");
-  try {
-    return declarationKey(value);
-  } catch (error) {
-    fail(path, error instanceof Error ? error.message : "invalid declaration key");
   }
 }
 
@@ -237,18 +235,20 @@ export function validateContractBody(value: unknown, path = "ContractBody"): Con
   };
 }
 
-function validateVerification(value: unknown, path: string): VerificationData {
+function validateAttestation(value: unknown, path: string): AttestationData {
   const object = requireRecord(value, path);
-  requireOptionalKeys(object, ["candidate", "declarationKey", "result", "summary"], path);
-  for (const key of ["candidate", "declarationKey", "result"] as const) {
+  requireOptionalKeys(object, ["gate", "subject", "verdict", "summary"], path);
+  for (const key of ["gate", "subject", "verdict"] as const) {
     if (!(key in object)) fail(path, `missing field '${key}'`);
   }
-  const result = stringValue(object.result, `${path}.result`);
-  if (result !== "pass" && result !== "fail") fail(`${path}.result`, "unknown verification result");
+  const gate = stringValue(object.gate, `${path}.gate`);
+  if (gate !== "reviewed" && gate !== "verified") fail(`${path}.gate`, "unknown gate");
+  const verdict = stringValue(object.verdict, `${path}.verdict`);
+  if (verdict !== "satisfied" && verdict !== "unsatisfied") fail(`${path}.verdict`, "unknown attestation verdict");
   return {
-    candidate: snapshotId(opaqueIdValue(object.candidate, `${path}.candidate`, "snapshot")),
-    declarationKey: declarationKeyValue(object.declarationKey, `${path}.declarationKey`),
-    result,
+    gate,
+    subject: subjectKeyValue(object.subject, `${path}.subject`),
+    verdict,
     ...(object.summary === undefined ? {} : { summary: stringValue(object.summary, `${path}.summary`) }),
   };
 }
@@ -295,23 +295,8 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
         deliveryPatchId: changeId(opaqueIdValue(object.deliveryPatchId, `${path}.deliveryPatchId`, "change")),
       } satisfies DeliverData;
     }
-    case "review": {
-      const object = requireRecord(value, path);
-      requireOptionalKeys(object, ["verdict", "reviewedPatchId", "reviewedHead", "summary"], path);
-      for (const key of ["verdict", "reviewedPatchId", "reviewedHead"] as const) {
-        if (!(key in object)) fail(path, `missing field '${key}'`);
-      }
-      const verdict = stringValue(object.verdict, `${path}.verdict`);
-      if (verdict !== "approved" && verdict !== "changes-requested") fail(`${path}.verdict`, "unknown review verdict");
-      return {
-        verdict,
-        reviewedPatchId: changeId(opaqueIdValue(object.reviewedPatchId, `${path}.reviewedPatchId`, "change")),
-        reviewedHead: snapshotId(opaqueIdValue(object.reviewedHead, `${path}.reviewedHead`, "snapshot")),
-        ...(object.summary === undefined ? {} : { summary: stringValue(object.summary, `${path}.summary`) }),
-      } satisfies ReviewData;
-    }
-    case "verification":
-      return validateVerification(value, path) satisfies VerificationData;
+    case "attestation":
+      return validateAttestation(value, path) satisfies AttestationData;
     case "claimed": {
       const object = requireRecord(value, path);
       requireKeys(object, ["delivery"], path);

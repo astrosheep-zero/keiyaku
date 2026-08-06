@@ -9,30 +9,36 @@ gate meaning by [lifecycle.md](lifecycle.md).
 
 Verification is synchronous. `deliver` records its selected candidate, then
 uses the Verification producer for that candidate. `audit` uses the same
-producer when its current candidate has no matching result. A terminal producer
-result is admitted as a separate `verification` fact. The producer is not an
-independent public lifecycle.
+producer when the `verified` gate lacks a matching satisfied attestation. A
+terminal producer result is admitted as an `attestation` fact for the
+`verified` gate. The producer is not an independent public lifecycle.
 
 The declaration key is the one pure canonicalization primitive in
-`src/core/declaration-key.ts`. Gate reading, verification admission, and plan
-resolution consume that primitive; none defines another declaration key.
+`src/core/declaration-key.ts`. Subject construction consumes that primitive;
+no producer, plan, gate reader, or admission path defines another declaration
+key.
 
-Before starting a process, the producer reads the folded journal for a fact
-matching the current candidate and declaration key. A matching `pass` already
-satisfies verification and starts no process. A matching `fail` is durable
-history and an explicit `deliver` or `audit` may produce a later result that
-supersedes it. The journal fact is the only durable execution result and the
-only input to gate reading.
+Before starting a process, the producer reads the folded journal through the
+`verified` gate. A matching satisfied attestation already satisfies
+verification and starts no process. A matching unsatisfied attestation is
+durable history and an explicit `deliver` or `audit` may produce a later
+attestation that supersedes it. Core constructs the attestation subject from
+the current candidate and declaration key before execution. Admission compares
+that captured subject against the current subject and refuses `stale-subject`
+when state changed during execution; it never silently retargets the result.
+The journal fact is the only durable execution result and the only input to gate
+reading.
 
 Verification resolves the declared executor and runs it against the selected
 candidate tree. Audit uses a disposable detached worktree checked out at that
-candidate tree. A terminal process exit admits `pass` or `fail` with an
-optional bounded summary. `timeout`, `spawn-error`, and `unknown-exit` admit no
-verification fact. A delivered candidate remains pending after such an outcome.
+candidate tree. A terminal process exit admits a satisfied or unsatisfied
+attestation with an optional bounded summary. `timeout`, `spawn-error`, and
+`unknown-exit` admit no attestation. A delivered candidate remains pending
+after such an outcome.
 
 Audit passes a producer's nonterminal outcome to its transient
 `AuditReport.attempt.failure` only when that invocation ran the producer and
-admitted no Verification fact. It never persists the process outcome, raw
+admitted no attestation. It never persists the process outcome, raw
 output, report, artifact, or blob evidence.
 
 ## Runtime Contract
@@ -64,22 +70,22 @@ observed tree. A subprocess that escapes the tree, or remains after SIGKILL,
 harness loss, or a Node crash, lies outside that guarantee.
 
 The runtime result is transient. It is neither cache authority nor a state
-surface. The journal's matching Verification facts supply the only reuse rule.
+surface. Matching verified attestations in the journal supply the only reuse
+rule.
 
 ## Ownership
 
 The relevant dependencies are one-way:
 
 ```text
-src/core/facts/gate.ts -> src/core/declaration-key.ts
-src/core/verbs/verification.ts -> src/core/declaration-key.ts
-src/verification/ -> src/core/declaration-key.ts
+src/core/facts/gate.ts -> src/core/subject.ts
+src/core/verbs/attestation.ts -> src/core/subject.ts
 src/verification/ -> src/runtime/proc/
 src/akuma/ -> src/runtime/proc/
 ```
 
-`facts/gate.ts` makes structural and key comparisons shared by gate reads,
-verification admission, and read views. It performs no IO or candidate recheck.
+`facts/gate.ts` compares the core-constructed current subject with same-gate
+attestations for gate reads. It performs no IO or candidate recheck.
 `src/protocol/read/audit.ts` is the sole reader that derives audit rework and
 review counts, timeline entries, and elapsed milliseconds from raw facts. The
 package root exports readonly reports; the CLI renders them without journal

@@ -328,7 +328,7 @@ export class Keiyaku {
     const delivery = deliveryOperation({ scope: this.scope, contractId: this.id });
     return delivery === null
       ? null
-      : this.deliveryHandle(delivery.snapshotId, delivery.changeId, delivery.expectedPredecessor);
+      : this.deliveryHandle(delivery.snapshotId, delivery.changeId, delivery.expectedPredecessor, delivery.reviewSubject);
   }
 
   async amend(input: AmendInput): Promise<Outcome<void>> {
@@ -353,7 +353,7 @@ export class Keiyaku {
     const values = input === undefined ? undefined : requireInput(input, "deliver input");
     return mapOutcome(
       await deliverOperation({ scope: this.scope, contractId: this.id, ...actorOption(values?.actor as ActorId | undefined) }),
-      (delivery) => this.deliveryHandle(delivery.snapshotId, delivery.changeId, delivery.expectedPredecessor),
+      (delivery) => this.deliveryHandle(delivery.snapshotId, delivery.changeId, delivery.expectedPredecessor, delivery.reviewSubject),
     );
   }
 
@@ -391,7 +391,12 @@ export class Keiyaku {
     return reconcileOperation({ scope: this.scope, contractId: this.id });
   }
 
-  private deliveryHandle(snapshotId: SnapshotId, changeId: ChangeId, expectedPredecessor: SnapshotId): Delivery {
+  private deliveryHandle(
+    snapshotId: SnapshotId,
+    changeId: ChangeId,
+    expectedPredecessor: SnapshotId,
+    reviewSubject: SubjectKey,
+  ): Delivery {
     return new (Delivery as unknown as new (
       snapshot: SnapshotId,
       change: ChangeId,
@@ -401,18 +406,22 @@ export class Keiyaku {
       snapshotId,
       changeId,
       () => deliveryDiffOperation({ scope: this.scope, expectedPredecessor, snapshotId }),
-      (input) => this.review(input),
+      (input) => this.review(reviewSubject, input),
     );
   }
 
-  private async review(input: ReviewInput): Promise<Outcome<void>> {
+  private async review(subject: SubjectKey, input: ReviewInput): Promise<Outcome<void>> {
     const summary = optionalNonblank(input.summary, "review summary");
     return mapOutcome(reviewOperation({
       scope: this.scope,
       contractId: this.id,
-      verdict: input.verdict,
+      data: {
+        gate: "reviewed",
+        subject,
+        verdict: input.verdict,
+        ...(summary === undefined ? {} : { summary }),
+      },
       ...actorOption(input.actor),
-      ...(summary === undefined ? {} : { summary }),
     }), () => undefined);
   }
 }

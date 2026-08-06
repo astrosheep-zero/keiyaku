@@ -39,8 +39,7 @@ function initialState(id: ContractState["id"], head: ContractState["head"] = nul
     body: null,
     bound: null,
     delivery: null,
-    reviews: [],
-    verifications: [],
+    attestations: [],
     abandon: null,
     terminal: null,
   };
@@ -90,12 +89,9 @@ export function foldEntry(state: ContractState, entry: JournalEntry): ContractSt
     case "deliver":
       if (state.bound === null) foldError("deliver requires bound");
       return { ...state, delivery: entry };
-    case "review":
-      if (state.delivery === null) foldError("review requires a deliver");
-      return { ...state, reviews: [...state.reviews, entry] };
-    case "verification":
-      if (state.delivery === null) foldError("verification requires a deliver");
-      return { ...state, verifications: [...state.verifications, entry] };
+    case "attestation":
+      if (state.delivery === null) foldError("attestation requires a deliver");
+      return { ...state, attestations: [...state.attestations, entry] };
     case "claimed":
       if (state.delivery === null) foldError("claimed requires a deliver");
       if (entry.data.delivery !== state.delivery.entry) foldError("claimed must name the current deliver");

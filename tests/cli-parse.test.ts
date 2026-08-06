@@ -71,17 +71,17 @@ test("existing selectors are optional and review stdin is a distinct summary sou
   assert.deepEqual(parseArgv(["deliver", "--actor", "external-test"]), {
     command: { command: "deliver", output: "text", actor: "external-test" },
   });
-  assert.deepEqual(parseArgv(["review", "@managed-worktree", "--approve", "-"]), {
+  assert.deepEqual(parseArgv(["review", "@managed-worktree", "--satisfied", "-"]), {
     command: {
       command: "review",
       contract: "@managed-worktree",
-      verdict: "approved",
+      verdict: "satisfied",
       summaryFromStdin: true,
       output: "text",
     },
   });
   assert.throws(
-    () => parseArgv(["review", "kei/example", "--approve", "--summary", "inline", "-"]),
+    () => parseArgv(["review", "kei/example", "--satisfied", "--summary", "inline", "-"]),
     /mutually exclusive/,
   );
 });
