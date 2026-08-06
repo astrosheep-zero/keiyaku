@@ -11,8 +11,11 @@ notes:
   - actor: thekoc
     timestamp: 2026-08-06T23:07:32.383Z
     text: "Remaining concrete precedence bug: Keiyaku.amend still read/decode/applies caller Markdown before amendOperation takes its immutable decision observation. A terminal contract with malformed amend input throws dialect error before the legally prior terminal refusal. Move amend dialect transformation into coordinate-only staging after the decision observation, pass a discriminated prepared/refused result into the one decide, and keep dialect refusal ownership outside core. Add one precise terminal-vs-malformed-amend test; do not restore a preflight."
+  - actor: thekoc
+    timestamp: 2026-08-06T23:08:02.187Z
+    text: "Correction after reading document.md: do not treat malformed caller amend Markdown as the same class as carrier mechanical preparation. The document chapter explicitly makes invalid-document a package-edge usage failure and says amendment application occurs at the edge before the stamped derivation crosses. Keep syntax validation there. The staged precedence audit should cover only carrier/declaration preparation that produces a typed operation refusal, not malformed public input."
 createdAt: 2026-08-06T21:41:47.998Z
-updatedAt: 2026-08-06T23:07:32.383Z
+updatedAt: 2026-08-06T23:08:02.187Z
 creator: thekoc
 startedAt: 2026-08-06T22:39:01.320Z
 ---
