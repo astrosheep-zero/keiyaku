@@ -3,7 +3,10 @@ declare const entryUlidBrand: unique symbol;
 declare const contractHeadBrand: unique symbol;
 declare const snapshotIdBrand: unique symbol;
 declare const changeIdBrand: unique symbol;
-declare const subjectKeyBrand: unique symbol;
+declare const documentKeyBrand: unique symbol;
+declare const documentSegmentKeyBrand: unique symbol;
+declare const gateBrand: unique symbol;
+declare const dependencyKeySetBrand: unique symbol;
 declare const actorIdBrand: unique symbol;
 
 export type ContractId = string & { readonly [contractIdBrand]: "ContractId" };
@@ -11,7 +14,10 @@ export type EntryUlid = string & { readonly [entryUlidBrand]: "EntryUlid" };
 export type ContractHead = string & { readonly [contractHeadBrand]: "ContractHead" };
 export type SnapshotId = string & { readonly [snapshotIdBrand]: "SnapshotId" };
 export type ChangeId = string & { readonly [changeIdBrand]: "ChangeId" };
-export type SubjectKey = string & { readonly [subjectKeyBrand]: "SubjectKey" };
+export type DocumentKey = string & { readonly [documentKeyBrand]: "DocumentKey" };
+export type DocumentSegmentKey = string & { readonly [documentSegmentKeyBrand]: "DocumentSegmentKey" };
+export type Gate = string & { readonly [gateBrand]: "Gate" };
+export type DependencyKeySet = string & { readonly [dependencyKeySetBrand]: "DependencyKeySet" };
 export type ActorId = string & { readonly [actorIdBrand]: "ActorId" };
 
 const ULID = /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
@@ -57,23 +63,17 @@ export function actorId(value: string): ActorId {
   return requireOpaqueId(value, "actor") as ActorId;
 }
 
-export type VerificationExecutor = "bash" | "zsh" | "pwsh";
-export type VerificationDeclaration = Readonly<{
-  executor: VerificationExecutor;
-  script: string;
-}>;
+export function documentKey(value: string): DocumentKey {
+  return requireOpaqueId(value, "document key") as DocumentKey;
+}
 
-export type ContractExtension = Readonly<{
-  title: string;
-  content: string;
-}>;
+export function documentSegmentKey(value: string): DocumentSegmentKey {
+  return requireOpaqueId(value, "document segment key") as DocumentSegmentKey;
+}
 
-export type ContractCriterion = Readonly<{
-  title: string;
-  body: string;
-}>;
-
-export type Gate = "reviewed" | "verified";
+export function gate(value: string): Gate {
+  return requireOpaqueId(value, "gate") as Gate;
+}
 
 export type ContractCoordinates = Readonly<{
   start: SnapshotId;
@@ -81,25 +81,19 @@ export type ContractCoordinates = Readonly<{
   workspace: "worktree" | "here";
 }>;
 
-export type ContractBody = Readonly<{
-  title: string;
-  context: string;
-  objective: string;
-  design: string;
-  region: readonly string[];
-  criteria: readonly ContractCriterion[];
-  verification: readonly VerificationDeclaration[];
-  extensions: readonly ContractExtension[];
-  gates?: readonly Gate[];
-  after?: readonly ContractId[];
+export type ContractTerms = Readonly<{
+  document: DocumentKey;
+  segments: readonly DocumentSegmentKey[];
+  gates: readonly Gate[];
+  after: readonly ContractId[];
 }>;
 
 export type BindData = Readonly<{
   coordinates: ContractCoordinates;
-  body: ContractBody;
+  terms: ContractTerms;
 }>;
 
-export type AmendData = ContractBody;
+export type AmendData = ContractTerms;
 
 export type BoundData = Readonly<Record<string, never>>;
 
@@ -111,7 +105,7 @@ export type DeliverData = Readonly<{
 
 export type AttestationData = Readonly<{
   gate: Gate;
-  subject: SubjectKey;
+  subject: DependencyKeySet;
   verdict: "satisfied" | "unsatisfied";
   summary?: string;
 }>;
@@ -174,7 +168,7 @@ export type ContractState = Readonly<{
   id: ContractId;
   head: ContractHead | null;
   coordinates: ContractCoordinates | null;
-  body: ContractBody | null;
+  terms: ContractTerms | null;
   bound: BoundEntry | null;
   delivery: DeliverEntry | null;
   attestations: readonly AttestationEntry[];

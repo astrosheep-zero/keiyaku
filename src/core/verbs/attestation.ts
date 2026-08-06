@@ -1,5 +1,5 @@
 import type { DecideInput, OfferDecision } from "../decide.js";
-import { currentSubject } from "../subject.js";
+import { subjectIsCurrent } from "../subject.js";
 import type { ActorId, AttestationData, ContractId, JournalEntry } from "../facts/types.js";
 import { contractId, entryUlid } from "../facts/types.js";
 
@@ -11,8 +11,8 @@ export type AttestationInput = Readonly<{
 }>;
 
 export type AttestationRefusal =
-  | Readonly<{ kind: "contract-missing" | "delivery-missing" | "terminal"; contractId: ContractId }>
-  | Readonly<{ kind: "stale-subject"; contractId: ContractId; expected: AttestationData["subject"]; actual: AttestationData["subject"] }>;
+  | Readonly<{ kind: "contract-missing" | "delivery-missing" | "terminal" | "gate-undeclared"; contractId: ContractId }>
+  | Readonly<{ kind: "stale-subject"; contractId: ContractId; subject: AttestationData["subject"] }>;
 
 /** Admit captured testimony only for the subject that remains current. */
 export function decideAttestation({ input, attempt, observation }: DecideInput<AttestationInput>): OfferDecision<AttestationRefusal> {
@@ -21,10 +21,11 @@ export function decideAttestation({ input, attempt, observation }: DecideInput<A
   if (!current?.state) return { kind: "refused", refusal: { kind: "contract-missing", contractId: id } };
   if (current.state.terminal) return { kind: "refused", refusal: { kind: "terminal", contractId: id } };
   if (!current.state.delivery) return { kind: "refused", refusal: { kind: "delivery-missing", contractId: id } };
-  const expected = currentSubject(current.state, input.data.gate);
-  if (expected === null) throw new Error("attestation subject requires a delivery and body");
-  if (input.data.subject !== expected) {
-    return { kind: "refused", refusal: { kind: "stale-subject", contractId: id, expected, actual: input.data.subject } };
+  if (current.state.terms === null || !current.state.terms.gates.includes(input.data.gate)) {
+    return { kind: "refused", refusal: { kind: "gate-undeclared", contractId: id } };
+  }
+  if (!subjectIsCurrent(current.state, input.data.subject)) {
+    return { kind: "refused", refusal: { kind: "stale-subject", contractId: id, subject: input.data.subject } };
   }
   const attestation: JournalEntry = {
     v: 1,

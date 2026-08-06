@@ -1,5 +1,5 @@
 import type { ContractJournalAppend, Offer } from "./offer.js";
-import type { ContractBody, ContractHead, ContractId, EntryUlid, JournalEntry } from "./types.js";
+import type { ContractHead, ContractId, EntryUlid, ContractTerms, JournalEntry } from "./types.js";
 
 type EligibilityObservation = Readonly<{
   contracts: ReadonlyMap<ContractId, Readonly<{
@@ -8,7 +8,7 @@ type EligibilityObservation = Readonly<{
       head: ContractHead | null;
       bound: JournalEntry | null;
       terminal: JournalEntry | null;
-      body: ContractBody | null;
+      terms: ContractTerms | null;
     }> | null;
   }>>;
 }>;
@@ -32,13 +32,13 @@ function canChangeEligibility(offer: Offer): boolean {
   return entries(offer).some((entry) => entry.kind === "bind" || entry.kind === "amend" || entry.kind === "claimed");
 }
 
-function offeredBody(offer: Offer, id: ContractId, fallback: ContractBody | null): ContractBody | null {
+function offeredTerms(offer: Offer, id: ContractId, fallback: ContractTerms | null): ContractTerms | null {
   const append = offer.facts.find((candidate) => candidate.contractId === id);
   if (append === undefined) return fallback;
   for (let index = append.entries.length - 1; index >= 0; index -= 1) {
     const entry = append.entries[index]!;
     if (entry.kind === "amend") return entry.data;
-    if (entry.kind === "bind") return entry.data.body;
+    if (entry.kind === "bind") return entry.data.terms;
   }
   return fallback;
 }
@@ -68,7 +68,7 @@ export function placeEligibleBounds(
     if (!state || state.bound || state.terminal) continue;
     const append = offer.facts.find((candidate) => candidate.contractId === id);
     if (append?.entries.some((entry) => entry.kind === "bound")) continue;
-    const prerequisites = offeredBody(offer, id, state.body)?.after ?? [];
+    const prerequisites = offeredTerms(offer, id, state.terms)?.after ?? [];
     const eligible = prerequisites.every((dependency) => {
       const dependencyState = observation.contracts.get(dependency)?.state;
       return dependencyState?.terminal?.kind === "claimed" || claimed.has(dependency);

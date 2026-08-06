@@ -1,6 +1,6 @@
 import type {
   ArcEntry,
-  ContractBody,
+  ContractTerms,
   ContractCoordinates,
   ContractState,
   JournalEntry,
@@ -12,18 +12,12 @@ function foldError(message: string): never {
   throw new Error(`invalid journal fold: ${message}`);
 }
 
-function cloneBody(body: ContractBody): ContractBody {
+function cloneTerms(terms: ContractTerms): ContractTerms {
   return {
-    title: body.title,
-    context: body.context,
-    objective: body.objective,
-    design: body.design,
-    region: [...body.region],
-    criteria: body.criteria.map((criterion) => ({ ...criterion })),
-    verification: body.verification.map((declaration) => ({ ...declaration })),
-    extensions: body.extensions.map((extension) => ({ ...extension })),
-    ...(body.gates === undefined ? {} : { gates: [...body.gates] }),
-    ...(body.after === undefined ? {} : { after: [...body.after] }),
+    document: terms.document,
+    segments: [...terms.segments],
+    gates: [...terms.gates],
+    after: [...terms.after],
   };
 }
 
@@ -36,7 +30,7 @@ function initialState(id: ContractState["id"], head: ContractState["head"] = nul
     id,
     head,
     coordinates: null,
-    body: null,
+    terms: null,
     bound: null,
     delivery: null,
     attestations: [],
@@ -45,9 +39,9 @@ function initialState(id: ContractState["id"], head: ContractState["head"] = nul
   };
 }
 
-function requireBody(state: ContractState): ContractBody {
-  if (state.body === null) foldError("journal must begin with bind");
-  return state.body;
+function requireTerms(state: ContractState): ContractTerms {
+  if (state.terms === null) foldError("journal must begin with bind");
+  return state.terms;
 }
 
 function requireActive(state: ContractState, entry: JournalEntry): void {
@@ -65,8 +59,8 @@ function foldArc(state: ContractState, entry: ArcEntry): ContractState {
 /** Fold one accepted journal fact. */
 function foldEntry(state: ContractState, entry: JournalEntry): ContractState {
   if (entry.contract !== state.id) foldError(`entry belongs to ${entry.contract}, not ${state.id}`);
-  if (state.body === null && entry.kind !== "bind") foldError("journal must begin with bind");
-  if (state.body !== null && entry.kind === "bind") foldError("bind may appear only once");
+  if (state.terms === null && entry.kind !== "bind") foldError("journal must begin with bind");
+  if (state.terms !== null && entry.kind === "bind") foldError("bind may appear only once");
   requireActive(state, entry);
 
   switch (entry.kind) {
@@ -74,14 +68,14 @@ function foldEntry(state: ContractState, entry: JournalEntry): ContractState {
       return {
         ...state,
         coordinates: cloneCoordinates(entry.data.coordinates),
-        body: cloneBody(entry.data.body),
+        terms: cloneTerms(entry.data.terms),
       };
     case "amend": {
-      const previous = requireBody(state);
+      const previous = requireTerms(state);
       if (state.bound !== null && !samePrerequisites(previous.after, entry.data.after)) {
         foldError("cannot change after once prerequisites are consumed");
       }
-      return { ...state, body: cloneBody(entry.data) };
+      return { ...state, terms: cloneTerms(entry.data) };
     }
     case "bound":
       if (state.bound !== null) foldError("bound may appear only once");
@@ -91,6 +85,7 @@ function foldEntry(state: ContractState, entry: JournalEntry): ContractState {
       return { ...state, delivery: entry };
     case "attestation":
       if (state.delivery === null) foldError("attestation requires a deliver");
+      if (state.terms === null || !state.terms.gates.includes(entry.data.gate)) foldError("attestation gate must be declared");
       return { ...state, attestations: [...state.attestations, entry] };
     case "claimed":
       if (state.delivery === null) foldError("claimed requires a deliver");

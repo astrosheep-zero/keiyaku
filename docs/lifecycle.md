@@ -75,10 +75,11 @@ one declared opaque token, and its `subject` is a set of core-minted dependency
 keys. The producer or operation owns which keys it may lawfully include. Core
 does not infer that set from the gate token, document text, or producer kind.
 
-Before producing testimony, an operation captures the current key set it is
-lawfully using. Admission compares that captured set with the current set for
-the same declared keys. A mismatch is the typed `stale-subject` refusal with
-the expected and actual keys; admission never retargets a captured subject.
+Before producing testimony, an operation captures the dependency-key set it is
+lawfully using. Admission checks that captured subject against the current
+world. A mismatch is the typed `stale-subject` refusal carrying that captured
+subject; admission never retargets it or accepts a second caller-supplied
+"current" subject.
 The pure core attestation adjudicator is the only decision that admits this
 testimony.
 

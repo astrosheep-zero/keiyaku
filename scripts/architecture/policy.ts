@@ -6,7 +6,7 @@ const types = (target: string) => ({ target, mode: "type-only" as const });
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
     { source: "core/facts/types.ts", allow: [] },
-    { source: "core/facts/codec.ts", allow: [any("core/facts/types.ts"), any("core/subject.ts", ["parseSubjectKey"])] },
+    { source: "core/facts/codec.ts", allow: [any("core/facts/types.ts"), any("core/subject.ts", ["parseDependencyKeySet"])] },
     {
       source: "core/facts/fold.ts",
       allow: [
@@ -16,8 +16,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     { source: "core/facts/gate.ts", allow: [any("core/subject.ts"), any("core/facts/types.ts")] },
-    { source: "core/declaration-key.ts", allow: [] },
-    { source: "core/subject.ts", allow: [any("core/declaration-key.ts"), any("core/facts/types.ts")] },
+    { source: "core/subject.ts", allow: [any("core/facts/types.ts")] },
     { source: "core/facts/eligibility.ts", allow: [any("core/facts/offer.ts"), any("core/facts/types.ts")] },
     { source: "core/facts/offer.ts", allow: [any("core/facts/types.ts")] },
     { source: "core/facts/observation.ts", allow: [any("core/facts/types.ts")] },
@@ -29,7 +28,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "core/verbs/**",
       allow: [
         types("core/decide.ts"),
-        any("core/subject.ts", ["currentSubject"]),
+        any("core/subject.ts", ["subjectIsCurrent"]),
         any("core/facts/eligibility.ts", ["samePrerequisites"]),
         any("core/facts/gate.ts"),
         any("core/facts/types.ts"),
@@ -111,7 +110,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/gate.ts"),
         any("core/facts/eligibility.ts"),
         any("core/facts/types.ts"),
-        any("core/subject.ts", ["currentSubject"]),
+        any("core/subject.ts", ["dependencyKeySet", "subjectIsCurrent"]),
         any("core/verbs/placement.ts"),
         any("core/verbs/attestation.ts"),
         any("protocol/run.ts"),
@@ -128,7 +127,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("carrier/repository.ts"),
         any("carrier/verification.ts", ["readDeliveryDiff"]),
         types("core/facts/types.ts"),
-        any("core/subject.ts", ["currentSubject"]),
+        any("core/subject.ts", ["dependencyKeySet", "subjectIsCurrent"]),
         any("core/verbs/abandon.ts"),
         any("core/verbs/amend.ts"),
         any("core/verbs/arc.ts"),
@@ -167,7 +166,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("body/**"),
         any("core/facts/codec.ts"),
-        any("core/facts/gate.ts", ["effectiveGates"]),
+        any("core/facts/gate.ts", ["gatesSatisfied", "gateSatisfied"]),
         any("core/facts/types.ts"),
         any("protocol/operations.ts"),
       ],
@@ -224,7 +223,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "carrier/verification.ts", symbols: ["randomBytes"] },
         { source: "carrier/identity.ts", symbols: ["randomBytes"] },
         { source: "protocol/intent.ts", symbols: ["randomBytes"] },
-        { source: "core/declaration-key.ts", symbols: ["createHash"] },
       ],
     },
     { module: "crypto", owners: [] },

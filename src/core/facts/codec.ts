@@ -6,23 +6,23 @@ import type {
   ArcData,
   BindData,
   BoundData,
-  ContractBody,
+  ContractTerms,
   ContractCoordinates,
-  ContractCriterion,
-  ContractExtension,
   ContractId,
   DeliverData,
   ClaimedData,
-  Gate,
   JournalEntry,
-  SubjectKey,
+  DependencyKeySet,
 } from "./types.js";
-import { parseSubjectKey } from "../subject.js";
+import { parseDependencyKeySet } from "../subject.js";
 import {
   changeId,
   actorId,
   contractId,
+  documentKey,
+  documentSegmentKey,
   entryUlid,
+  gate,
   snapshotId,
 } from "./types.js";
 
@@ -113,12 +113,28 @@ function opaqueIdValue(value: unknown, path: string, kind: "snapshot" | "change"
   }
 }
 
-function subjectKeyValue(value: unknown, path: string): SubjectKey {
-  if (typeof value !== "string") fail(path, "expected a lowercase SHA-256 subject key");
+function dependencyKeySetValue(value: unknown, path: string): DependencyKeySet {
+  if (typeof value !== "string") fail(path, "expected a canonical dependency key set");
   try {
-    return parseSubjectKey(value);
+    return parseDependencyKeySet(value);
   } catch (error) {
-    fail(path, error instanceof Error ? error.message : "invalid subject key");
+    fail(path, error instanceof Error ? error.message : "invalid dependency key set");
+  }
+}
+
+function documentKeyValue(value: unknown, path: string): ContractTerms["document"] {
+  try {
+    return documentKey(stringValue(value, path));
+  } catch (error) {
+    fail(path, error instanceof Error ? error.message : "invalid document key");
+  }
+}
+
+function documentSegmentKeyValue(value: unknown, path: string): ContractTerms["segments"][number] {
+  try {
+    return documentSegmentKey(stringValue(value, path));
+  } catch (error) {
+    fail(path, error instanceof Error ? error.message : "invalid document segment key");
   }
 }
 
@@ -149,10 +165,6 @@ function validateTimestamp(value: unknown, path: string): string {
   return text;
 }
 
-function stringArray(value: unknown, path: string): readonly string[] {
-  return arrayValue(value, path).map((item, index) => stringValue(item, `${path}[${index}]`));
-}
-
 function contractIdArray(value: unknown, path: string): readonly ContractId[] {
   return arrayValue(value, path).map((item, index) => {
     try {
@@ -163,40 +175,13 @@ function contractIdArray(value: unknown, path: string): readonly ContractId[] {
   });
 }
 
-function gatesArray(value: unknown, path: string): readonly Gate[] {
+function gatesArray(value: unknown, path: string): readonly ContractTerms["gates"][number][] {
   return arrayValue(value, path).map((item, index) => {
-    const gate = stringValue(item, `${path}[${index}]`);
-    if (gate !== "reviewed" && gate !== "verified") fail(`${path}[${index}]`, "unknown gate");
-    return gate;
-  });
-}
-
-function verificationArray(value: unknown, path: string): readonly { executor: "bash" | "zsh" | "pwsh"; script: string }[] {
-  return arrayValue(value, path).map((item, index) => {
-    const object = requireRecord(item, `${path}[${index}]`);
-    requireKeys(object, ["executor", "script"], `${path}[${index}]`);
-    const executor = stringValue(object.executor, `${path}[${index}].executor`);
-    if (executor !== "bash" && executor !== "zsh" && executor !== "pwsh") fail(`${path}[${index}].executor`, "unknown executor");
-    return { executor, script: stringValue(object.script, `${path}[${index}].script`) };
-  });
-}
-
-function extensionArray(value: unknown, path: string): readonly ContractExtension[] {
-  return arrayValue(value, path).map((item, index) => {
-    const object = requireRecord(item, `${path}[${index}]`);
-    requireKeys(object, ["title", "content"], `${path}[${index}]`);
-    return { title: stringValue(object.title, `${path}[${index}].title`), content: stringValue(object.content, `${path}[${index}].content`) };
-  });
-}
-
-function criteriaArray(value: unknown, path: string): readonly ContractCriterion[] {
-  return arrayValue(value, path).map((item, index) => {
-    const object = requireRecord(item, `${path}[${index}]`);
-    requireKeys(object, ["title", "body"], `${path}[${index}]`);
-    return {
-      title: stringValue(object.title, `${path}[${index}].title`),
-      body: stringValue(object.body, `${path}[${index}].body`),
-    };
+    try {
+      return gate(stringValue(item, `${path}[${index}]`));
+    } catch (error) {
+      fail(`${path}[${index}]`, error instanceof Error ? error.message : "invalid gate");
+    }
   });
 }
 
@@ -215,25 +200,24 @@ function validateCoordinates(value: unknown, path: string): ContractCoordinates 
   };
 }
 
-export function validateContractBody(value: unknown, path = "ContractBody"): ContractBody {
+export function validateContractTerms(value: unknown, path = "ContractTerms"): ContractTerms {
   const object = requireRecord(value, path);
-  const required = ["title", "context", "objective", "design", "region", "criteria", "verification", "extensions"] as const;
-  requireOptionalKeys(object, [...required, "gates", "after"], path);
-  for (const key of required) {
-    if (!(key in object)) fail(path, `missing field '${key}'`);
-  }
+  requireKeys(object, ["document", "segments", "gates", "after"], path);
   return {
-    title: stringValue(object.title, `${path}.title`),
-    context: stringValue(object.context, `${path}.context`),
-    objective: stringValue(object.objective, `${path}.objective`),
-    design: stringValue(object.design, `${path}.design`),
-    region: stringArray(object.region, `${path}.region`),
-    criteria: criteriaArray(object.criteria, `${path}.criteria`),
-    verification: verificationArray(object.verification, `${path}.verification`),
-    extensions: extensionArray(object.extensions, `${path}.extensions`),
-    ...(object.gates === undefined ? {} : { gates: gatesArray(object.gates, `${path}.gates`) }),
-    ...(object.after === undefined ? {} : { after: contractIdArray(object.after, `${path}.after`) }),
+    document: documentKeyValue(object.document, `${path}.document`),
+    segments: arrayValue(object.segments, `${path}.segments`).map((item, index) => documentSegmentKeyValue(item, `${path}.segments[${index}]`)),
+    gates: gatesArray(object.gates, `${path}.gates`),
+    after: contractIdArray(object.after, `${path}.after`),
   };
+}
+
+function validateTerms(value: unknown, path: string): ContractTerms {
+  try {
+    return validateContractTerms(value, path);
+  } catch (error) {
+    if (error instanceof FactsCodecError) throw error;
+    fail(path, error instanceof Error ? error.message : "invalid contract terms");
+  }
 }
 
 function validateAttestation(value: unknown, path: string): AttestationData {
@@ -242,13 +226,12 @@ function validateAttestation(value: unknown, path: string): AttestationData {
   for (const key of ["gate", "subject", "verdict"] as const) {
     if (!(key in object)) fail(path, `missing field '${key}'`);
   }
-  const gate = stringValue(object.gate, `${path}.gate`);
-  if (gate !== "reviewed" && gate !== "verified") fail(`${path}.gate`, "unknown gate");
+  const declaredGate = gate(stringValue(object.gate, `${path}.gate`));
   const verdict = stringValue(object.verdict, `${path}.verdict`);
   if (verdict !== "satisfied" && verdict !== "unsatisfied") fail(`${path}.verdict`, "unknown attestation verdict");
   return {
-    gate,
-    subject: subjectKeyValue(object.subject, `${path}.subject`),
+    gate: declaredGate,
+    subject: dependencyKeySetValue(object.subject, `${path}.subject`),
     verdict,
     ...(object.summary === undefined ? {} : { summary: stringValue(object.summary, `${path}.summary`) }),
   };
@@ -274,14 +257,14 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
   switch (kind) {
     case "bind": {
       const object = requireRecord(value, path);
-      requireKeys(object, ["coordinates", "body"], path);
+      requireKeys(object, ["coordinates", "terms"], path);
       return {
         coordinates: validateCoordinates(object.coordinates, `${path}.coordinates`),
-        body: validateContractBody(object.body, `${path}.body`),
+        terms: validateTerms(object.terms, `${path}.terms`),
       } satisfies BindData;
     }
     case "amend":
-      return validateContractBody(value, path) satisfies AmendData;
+      return validateTerms(value, path) satisfies AmendData;
     case "bound": {
       const object = requireRecord(value, path);
       requireKeys(object, [], path);
@@ -346,7 +329,7 @@ function validateEntry(value: unknown): JournalEntry {
     ...(object.actor === undefined ? {} : { actor: actorId(stringValue(object.actor, "entry.actor")) }),
     data: validateData(kind as JournalEntry["kind"], object.data),
   } as JournalEntry;
-  const after = entry.kind === "bind" ? entry.data.body.after : entry.kind === "amend" ? entry.data.after : undefined;
+  const after = entry.kind === "bind" ? entry.data.terms.after : entry.kind === "amend" ? entry.data.after : undefined;
   if (after?.some((dependency) => dependency === entry.contract)) {
     fail(`entry.data.${entry.kind}.after`, "after cannot reference its own contract");
   }

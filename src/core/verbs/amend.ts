@@ -11,8 +11,8 @@ export function decideAmend({ input, attempt, observation }: DecideInput<AmendIn
   const id = contractId(input.contractId); const current = observation.contracts.get(id);
   if (!current?.state) return { kind: "refused", refusal: { kind: "contract-missing", contractId: id } };
   if (current.state.terminal) return { kind: "refused", refusal: { kind: "terminal", contractId: id } };
-  if (input.data.after?.includes(id)) return { kind: "refused", refusal: { kind: "invalid-after", contractId: id } };
-  if (current.state.bound !== null && !samePrerequisites(current.state.body?.after, input.data.after)) {
+  if (input.data.after.includes(id)) return { kind: "refused", refusal: { kind: "invalid-after", contractId: id } };
+  if (current.state.bound !== null && !samePrerequisites(current.state.terms?.after, input.data.after)) {
     return { kind: "refused", refusal: { kind: "prerequisites-already-consumed", contractId: id } };
   }
   const entry: JournalEntry = { v: 1, kind: "amend", contract: id, entry: entryUlid(attempt.entryUlids[0]!), at: input.at, ...(input.actor === undefined ? {} : { actor: input.actor }), data: input.data };

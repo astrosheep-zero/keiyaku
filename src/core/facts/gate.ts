@@ -1,25 +1,18 @@
-import { currentSubject } from "../subject.js";
-import type { ContractBody, ContractState, Gate } from "./types.js";
+import { subjectIsCurrent } from "../subject.js";
+import type { ContractState, DependencyKeySet, Gate } from "./types.js";
 
-export function effectiveGates(body: ContractBody): readonly Gate[] {
-  const declared: Gate[] = body.gates === undefined ? ["reviewed"] : [...body.gates];
-  if (body.verification.length > 0 && !declared.includes("verified")) declared.push("verified");
-  return declared;
-}
-
+/** A gate passes when a current subject's latest testimony is satisfied. */
 export function gateSatisfied(state: ContractState, gate: Gate): boolean {
-  const subject = currentSubject(state, gate);
-  if (subject === null) return false;
-  return state.attestations.findLast((attestation) => (
-    attestation.data.gate === gate && attestation.data.subject === subject
-  ))?.data.verdict === "satisfied";
-}
-
-function unsatisfiedGates(state: ContractState): readonly Gate[] {
-  if (state.body === null) return [];
-  return effectiveGates(state.body).filter((gate) => !gateSatisfied(state, gate));
+  const seen = new Set<DependencyKeySet>();
+  for (let index = state.attestations.length - 1; index >= 0; index -= 1) {
+    const attestation = state.attestations[index]!;
+    if (attestation.data.gate !== gate || seen.has(attestation.data.subject)) continue;
+    seen.add(attestation.data.subject);
+    if (subjectIsCurrent(state, attestation.data.subject)) return attestation.data.verdict === "satisfied";
+  }
+  return false;
 }
 
 export function gatesSatisfied(state: ContractState): boolean {
-  return unsatisfiedGates(state).length === 0;
+  return state.terms !== null && state.terms.gates.every((gate) => gateSatisfied(state, gate));
 }

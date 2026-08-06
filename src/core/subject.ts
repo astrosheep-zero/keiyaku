@@ -1,41 +1,90 @@
-import { sha256, verificationDeclarationKey } from "./declaration-key.js";
-import type { ContractBody, ContractState, Gate, SubjectKey } from "./facts/types.js";
+import {
+  changeId,
+  documentKey,
+  documentSegmentKey,
+  snapshotId,
+  type ChangeId,
+  type ContractState,
+  type DependencyKeySet,
+  type DocumentKey,
+  type DocumentSegmentKey,
+  type SnapshotId,
+} from "./facts/types.js";
 
-/** Parse the persisted opaque subject representation used only by core facts. */
-export function parseSubjectKey(value: string): SubjectKey {
-  if (!/^[0-9a-f]{64}$/.test(value)) throw new Error("subject key must be lowercase SHA-256 hex");
-  return value as SubjectKey;
+export type DependencyKey = Readonly<
+  | { readonly kind: "document"; readonly value: DocumentKey }
+  | { readonly kind: "segment"; readonly value: DocumentSegmentKey }
+  | { readonly kind: "snapshot"; readonly value: SnapshotId }
+  | { readonly kind: "change"; readonly value: ChangeId }
+>;
+
+function encodeKey(key: DependencyKey): string {
+  return JSON.stringify([key.kind, key.value]);
 }
 
-function hash(value: unknown): SubjectKey {
-  return parseSubjectKey(sha256(new TextEncoder().encode(JSON.stringify(value))));
-}
-
-function completeBodyKey(body: ContractBody): SubjectKey {
-  return hash({
-    title: body.title,
-    context: body.context,
-    objective: body.objective,
-    design: body.design,
-    region: body.region,
-    criteria: body.criteria.map((criterion) => ({ title: criterion.title, body: criterion.body })),
-    verification: body.verification.map((declaration) => ({ executor: declaration.executor, script: declaration.script })),
-    extensions: body.extensions.map((extension) => ({ title: extension.title, content: extension.content })),
-    ...(body.gates === undefined ? {} : { gates: body.gates }),
-    ...(body.after === undefined ? {} : { after: body.after }),
-  });
-}
-
-/** Construct the only attestable subject for a gate in the current folded state. */
-export function currentSubject(state: ContractState, gate: Gate): SubjectKey | null {
-  if (state.delivery === null || state.body === null) return null;
-  if (gate === "reviewed") {
-    return hash([
-      "reviewed",
-      state.delivery.data.candidate,
-      state.delivery.data.deliveryPatchId,
-      completeBodyKey(state.body),
-    ]);
+function parseKey(value: unknown, index: number): DependencyKey {
+  if (!Array.isArray(value) || value.length !== 2 || typeof value[0] !== "string" || typeof value[1] !== "string") {
+    throw new TypeError(`dependency key [${index}] must be a [kind, value] pair`);
   }
-  return hash(["verified", state.delivery.data.candidate, verificationDeclarationKey(state.body.verification)]);
+  try {
+    switch (value[0]) {
+      case "document": return { kind: "document", value: documentKey(value[1]) };
+      case "segment": return { kind: "segment", value: documentSegmentKey(value[1]) };
+      case "snapshot": return { kind: "snapshot", value: snapshotId(value[1]) };
+      case "change": return { kind: "change", value: changeId(value[1]) };
+      default: throw new TypeError(`unknown dependency key kind '${value[0]}'`);
+    }
+  } catch (error) {
+    throw new TypeError(error instanceof Error ? error.message : `invalid dependency key [${index}]`);
+  }
+}
+
+function canonicalKeys(keys: readonly DependencyKey[]): string {
+  const values = keys.map(encodeKey).sort();
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index] === values[index - 1]) throw new TypeError("dependency key set cannot contain duplicates");
+  }
+  return JSON.stringify(values);
+}
+
+/** Mint the opaque persisted representation of an ordered producer-selected key set. */
+export function dependencyKeySet(keys: readonly DependencyKey[]): DependencyKeySet {
+  if (!Array.isArray(keys)) throw new TypeError("dependency key set must be an array");
+  return canonicalKeys(keys) as DependencyKeySet;
+}
+
+/** Parse and canonicalize the opaque dependency-key-set fact value. */
+export function parseDependencyKeySet(value: string): DependencyKeySet {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError("dependency key set must be nonblank");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new TypeError("dependency key set must be canonical JSON", { cause: error });
+  }
+  if (!Array.isArray(parsed)) throw new TypeError("dependency key set must be an array");
+  const keys = parsed.map(parseKey);
+  const canonical = canonicalKeys(keys);
+  if (canonical !== value) throw new TypeError("dependency key set must be canonical JSON");
+  return canonical as DependencyKeySet;
+}
+
+function currentKeys(state: ContractState): ReadonlySet<string> | null {
+  if (state.delivery === null || state.terms === null) return null;
+  return new Set([
+    encodeKey({ kind: "document", value: state.terms.document }),
+    ...state.terms.segments.map((value) => encodeKey({ kind: "segment", value })),
+    encodeKey({ kind: "snapshot", value: state.delivery.data.candidate }),
+    encodeKey({ kind: "change", value: state.delivery.data.deliveryPatchId }),
+  ]);
+}
+
+/** Return whether every producer-selected dependency key remains current. */
+export function subjectIsCurrent(state: ContractState, subject: DependencyKeySet): boolean {
+  const available = currentKeys(state);
+  if (available === null) return false;
+  const selected = JSON.parse(parseDependencyKeySet(subject)) as readonly [string, string][];
+  return selected.every((key) => available.has(JSON.stringify(key)));
 }
