@@ -1,14 +1,18 @@
 ---
 id: v4-dogfood-e2e-current-intent-surface
 title: "v4 dogfood E2E: current intent surface"
-state: open
+state: drop
 pri: 1
 needs:
   - v4-architecture-correct-extensible-mvp
 parent: null
 from: []
+notes:
+  - actor: thekoc
+    timestamp: 2026-08-06T04:53:58.007Z
+    text: Superseded by completed v4-day1-dogfood-bin and its packed installed-binary shell coverage.
 createdAt: 2026-08-05T08:47:41.496Z
-updatedAt: 2026-08-05T08:48:49.466Z
+updatedAt: 2026-08-06T04:53:58.007Z
 creator: thekoc
 ---
 Exercise the built `keiyaku-v4` binary through real shell processes using only the current command law.
