@@ -162,7 +162,10 @@ function effectRef(text: string, prefix: string): string {
   return match[1]!;
 }
 
-function journalKinds(repository: string, id: string): string[] {
+function journalEntries(repository: string, id: string): Array<Readonly<{
+  kind: string;
+  data?: Readonly<{ note?: string }>;
+}>> {
   const journal = git(repository, ["ls-tree", "-r", "--name-only", "refs/heads/keiyaku-state"])
     .split("\n")
     .find((path) => path.endsWith(`/${id.slice(4)}.jsonl`));
@@ -170,7 +173,11 @@ function journalKinds(repository: string, id: string): string[] {
   return git(repository, ["show", `refs/heads/keiyaku-state:${journal}`])
     .trimEnd()
     .split("\n")
-    .map((line) => (JSON.parse(line) as { kind: string }).kind);
+    .map((line) => JSON.parse(line) as { kind: string; data?: { note?: string } });
+}
+
+function journalKinds(repository: string, id: string): string[] {
+  return journalEntries(repository, id).map((entry) => entry.kind);
 }
 
 function auditObservation(text: string): AuditObservation {
@@ -292,11 +299,13 @@ test("installed binary abandonment preserves the target and user commit", () => 
   const deliveryRef = effectRef(bound, "refs/heads/keiyaku-delivery/");
 
   const userCommit = commit(repository, "user-owned.txt", "keep this user commit\n", "user commit after bind");
-  const abandoned = invoke(repository, ["abandon", id]);
+  const abandoned = invoke(repository, ["abandon", id, "--note", "scope changed"]);
   assert.deepEqual(acceptedFactKinds(abandoned, id), ["abandon", "abandoned"]);
   assert.equal(gitRef(repository, target), userCommit);
   assert.equal(git(repository, ["show", `${userCommit}:user-owned.txt`]), "keep this user commit\n");
   assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "abandon", "abandoned"]);
+  const abandon = journalEntries(repository, id).find((entry) => entry.kind === "abandon");
+  assert.equal(abandon?.data?.note, "scope changed");
   assert.equal(gitRef(repository, deliveryRef), null);
   assert.equal(existsSync(managed), false);
 });

@@ -44,6 +44,7 @@ export type ParsedArc = Output & Actor & Readonly<{
 export type ParsedAbandon = Output & Actor & Readonly<{
   command: "abandon";
   contract?: string;
+  note?: string;
 }>;
 export type ParsedStatus = Output & Readonly<{ command: "status"; contract?: string }>;
 export type ParsedAudit = Output & Readonly<{
@@ -82,7 +83,7 @@ const FLAG_SPECS: Readonly<Record<Command, FlagSpecs>> = {
   deliver: { actor: "value", json: "boolean" },
   review: { actor: "value", approve: "boolean", "changes-requested": "boolean", summary: "value", json: "boolean" },
   arc: { actor: "value", json: "boolean" },
-  abandon: { actor: "value", json: "boolean" },
+  abandon: { actor: "value", note: "value", json: "boolean" },
   status: { json: "boolean" },
   audit: { "show-diff-body": "boolean", actor: "value", json: "boolean" },
   reconcile: { json: "boolean" },
@@ -258,9 +259,11 @@ function parseArc(parts: ParsedParts): ParsedArc {
 
 function parseAbandon(parts: ParsedParts): ParsedAbandon {
   const contract = optionalContract("abandon", parts.positionals);
+  const note = optionalFlag(parts.flags, "note");
   return {
     command: "abandon",
     ...(contract === undefined ? {} : { contract }),
+    ...(note === undefined ? {} : { note }),
     ...(parts.actor === undefined ? {} : { actor: parts.actor }),
     output: parts.output,
   };

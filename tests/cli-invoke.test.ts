@@ -389,9 +389,12 @@ test("managed abandonment cleans terminal resources from its own worktree cwd", 
   assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)) !== null, true);
   assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)) !== null, true);
 
-  const abandoned = await fromManaged(["abandon", id, "--actor", "external-test"]);
+  const abandoned = await fromManaged([
+    "abandon", id, "--note", "scope changed", "--actor", "external-test",
+  ]);
   assert.equal(abandoned.kind, "accepted");
   assert.equal("lag" in abandoned, false);
+  assert.equal(observeContract(repositoryAt(repository.path), id).state?.abandon?.data.note, "scope changed");
   assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)), null);
   assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), null);
   assert.equal(existsSync(path), false);

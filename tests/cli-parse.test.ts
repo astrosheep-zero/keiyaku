@@ -122,12 +122,17 @@ test("bind and amend retain complete after snapshots and gate-set selectors", ()
   );
 });
 
-test("abandon accepts only the documented actor and output flags", () => {
-  assert.deepEqual(parseArgv(["abandon", "kei/example", "--actor", "operator"]), {
-    command: { command: "abandon", contract: "kei/example", actor: "operator", output: "text" },
+test("abandon accepts a note but no caller-selected reason", () => {
+  assert.deepEqual(parseArgv(["abandon", "kei/example", "--note", "scope changed", "--actor", "operator"]), {
+    command: {
+      command: "abandon",
+      contract: "kei/example",
+      note: "scope changed",
+      actor: "operator",
+      output: "text",
+    },
   });
   assert.throws(() => parseArgv(["abandon", "kei/example", "--reason", "manual"]), CliUsageError);
-  assert.throws(() => parseArgv(["abandon", "kei/example", "--note", "later"]), CliUsageError);
 });
 
 test("flag specs preserve value and boolean option behavior", () => {

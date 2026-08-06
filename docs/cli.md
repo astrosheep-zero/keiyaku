@@ -60,7 +60,7 @@ bind [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor
 amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -
 deliver [<contract>|@<contract>] [--actor <actor>] [--json]
 review [<contract>|@<contract>] (--approve | --changes-requested) [--summary <text>] [--actor <actor>] [--json] [-]
-abandon [<contract>|@<contract>] [--actor <actor>] [--json]
+abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
 status [<contract>|@<contract>] [--json]
 audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
@@ -105,8 +105,10 @@ usage refusal.
 
 `deliver` accepts `--actor` and `--json`. `review` requires exactly one of
 `--approve` or `--changes-requested`, with optional `--summary`, `--actor`, and
-`--json`. `abandon`, `arc`, and `audit` accept `--actor` and `--json`; audit
-also accepts `--show-diff-body`. `status` and `reconcile` accept `--json`.
+`--json`. `abandon` accepts optional `--note`, `--actor`, and `--json`; its
+reason is the command's fixed `manual` intent rather than a caller-selected
+flag. `arc` and `audit` accept `--actor` and `--json`; audit also accepts
+`--show-diff-body`. `status` and `reconcile` accept `--json`.
 `--json` is output-only.
 
 The adapter chooses actor testimony in this order: explicit nonblank `--actor`,
