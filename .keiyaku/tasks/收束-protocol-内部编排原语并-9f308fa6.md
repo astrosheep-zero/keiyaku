@@ -12,8 +12,11 @@ notes:
   - actor: thekoc
     timestamp: 2026-08-06T23:12:21.469Z
     text: "Audit finding: IntentAdmissionOptions.placeEligibleBounds is a single-caller boolean mode that silently changes a targeted intent into full-world observation, mints extra entries, and rewrites the offer. Only admitPlacement uses it. Remove this semantic switch from generic admitIntent; keep admitIntent as the narrow targeted observe/decide/admit primitive and make the explicitly full-world placement path own eligible-bound propagation. Do not create a generic lifecycle runner."
+  - actor: thekoc
+    timestamp: 2026-08-06T23:12:58.711Z
+    text: "Small clarity cut: boundedAttempts(entryCount) hides two quantities and implements the attempt budget as [0,1,2]. Keep the settled private budget of three, but name MAX_SEMANTIC_ATTEMPTS and mintAttempts({attemptCount, entryCount}) or an equivalent unambiguous helper. No public retry knob and no new product rule."
 createdAt: 2026-08-06T16:28:55.578Z
-updatedAt: 2026-08-06T23:12:21.469Z
+updatedAt: 2026-08-06T23:12:58.711Z
 creator: thekoc
 startedAt: 2026-08-06T16:29:35.434Z
 ---
