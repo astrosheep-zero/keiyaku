@@ -7,8 +7,12 @@ needs:
   - 收束-core-decision-observation-为唯-5ab4af33
 parent: null
 from: []
+notes:
+  - actor: thekoc
+    timestamp: 2026-08-06T23:07:32.383Z
+    text: "Remaining concrete precedence bug: Keiyaku.amend still read/decode/applies caller Markdown before amendOperation takes its immutable decision observation. A terminal contract with malformed amend input throws dialect error before the legally prior terminal refusal. Move amend dialect transformation into coordinate-only staging after the decision observation, pass a discriminated prepared/refused result into the one decide, and keep dialect refusal ownership outside core. Add one precise terminal-vs-malformed-amend test; do not restore a preflight."
 createdAt: 2026-08-06T21:41:47.998Z
-updatedAt: 2026-08-06T22:39:01.320Z
+updatedAt: 2026-08-06T23:07:32.383Z
 creator: thekoc
 startedAt: 2026-08-06T22:39:01.320Z
 ---
