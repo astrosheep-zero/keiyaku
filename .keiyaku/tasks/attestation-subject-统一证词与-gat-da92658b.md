@@ -1,15 +1,14 @@
 ---
 id: attestation-subject-统一证词与-gat-da92658b
 title: Attestation subject 统一证词与 gate 新鲜度
-state: in_progress
+state: done
 pri: 0
 needs: []
 parent: null
 from: []
 createdAt: 2026-08-06T05:42:02.035Z
-updatedAt: 2026-08-06T05:49:11.383Z
+updatedAt: 2026-08-06T08:14:53.834Z
 creator: thekoc
-startedAt: 2026-08-06T05:49:11.383Z
 ---
 落实 Square 裁决 #175。先把 attestation、subject 与 currentSubject 的现行法写入 model/lifecycle/verification owner docs，再硬切持久化模型与实现。
 
