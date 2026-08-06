@@ -1,7 +1,7 @@
 ---
 id: 收束-protocol-内部编排原语并-9f308fa6
 title: 收束 protocol 内部编排原语并恢复行数预算
-state: open
+state: in_progress
 pri: 0
 needs: []
 parent: null
@@ -9,8 +9,9 @@ from:
   - 拆除复合-admission-receipt-与-plac-5a098c75
   - 迁移-library-方言与-verification-aca216f8
 createdAt: 2026-08-06T16:28:55.578Z
-updatedAt: 2026-08-06T16:28:55.578Z
+updatedAt: 2026-08-06T16:29:35.434Z
 creator: thekoc
+startedAt: 2026-08-06T16:29:35.434Z
 ---
 按现行 docs/lifecycle.md、docs/verification.md、docs/public-api.md 做零产品语义变更的内部重塑：
 
