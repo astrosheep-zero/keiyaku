@@ -36,46 +36,40 @@ import {
   mintSnapshotId,
 } from "./identity.js";
 
-export interface ObservedContractHead {
-  readonly contractId: ContractId;
-  readonly path: string;
-  readonly head: ContractHead | null;
-}
+export type ObservedContractHead = Readonly<{
+  contractId: ContractId;
+  path: string;
+  head: ContractHead | null;
+}>;
 
-export interface MovedContractHead extends ObservedContractHead {
-  readonly expectedHead: ContractHead | null;
-}
+export type MovedContractHead = Readonly<ObservedContractHead & {
+  expectedHead: ContractHead | null;
+}>;
 
-export interface Accepted {
-  readonly ok: true;
-  readonly kind: "accepted";
-  readonly carrierCommit: SnapshotId;
-  readonly carrierTree: GitOid;
-  readonly heads: Readonly<Record<string, ContractHead>>;
-}
+export type Accepted = Readonly<{
+  kind: "accepted";
+  heads: Readonly<Record<string, ContractHead>>;
+}>;
 
-export interface HeadMoved {
-  readonly ok: false;
-  readonly kind: "head-moved";
-  readonly carrierCommit: SnapshotId | null;
-  readonly heads: readonly ObservedContractHead[];
-  readonly moved: readonly MovedContractHead[];
-}
+export type HeadMoved = Readonly<{
+  kind: "head-moved";
+  carrierCommit: SnapshotId | null;
+  heads: readonly ObservedContractHead[];
+  moved: readonly MovedContractHead[];
+}>;
 
-export interface RefMoved {
-  readonly ok: false;
-  readonly kind: "ref-moved";
-  readonly target: string;
-  readonly expectedOid: SnapshotId;
-  readonly currentOid: SnapshotId | null;
-  readonly carrierCommit: SnapshotId | null;
-  readonly heads: readonly ObservedContractHead[];
-}
+export type RefMoved = Readonly<{
+  kind: "ref-moved";
+  target: string;
+  expectedOid: SnapshotId;
+  currentOid: SnapshotId | null;
+  carrierCommit: SnapshotId | null;
+  heads: readonly ObservedContractHead[];
+}>;
 
 export type Unknown = Readonly<{
-  readonly ok: false;
-  readonly kind: "unknown";
-  readonly proposedHeads: Readonly<Record<string, ContractHead>>;
+  kind: "unknown";
+  proposedHeads: Readonly<Record<string, ContractHead>>;
 }>;
 
 export type Admission = Accepted | HeadMoved | RefMoved | Unknown;
@@ -112,7 +106,6 @@ function headMoved(
     .filter((state) => state.head !== expected.get(state.contractId))
     .map((state) => ({ ...state, expectedHead: expected.get(state.contractId) ?? null }));
   return {
-    ok: false,
     kind: "head-moved",
     carrierCommit: snapshot.commit === null ? null : mintSnapshotId(snapshot.commit),
     heads,
@@ -122,7 +115,6 @@ function headMoved(
 
 function unknown(proposedHeads: Readonly<Record<string, ContractHead>>): Unknown {
   return {
-    ok: false,
     kind: "unknown",
     proposedHeads,
   };
@@ -135,7 +127,6 @@ function refMoved(
   currentOid: GitOid | null,
 ): RefMoved {
   return {
-    ok: false,
     kind: "ref-moved",
     target: operation.target,
     expectedOid: operation.expectedOid,
@@ -158,9 +149,11 @@ function normalizeAppends(
     for (const entry of append.entries) {
       if (entry.contract !== id) throw new TypeError(`journal entry contract does not match append: ${id}`);
     }
-    return append.expectedHead === undefined
-      ? { contractId: id, entries: append.entries }
-      : { contractId: id, entries: append.entries, expectedHead: append.expectedHead === null ? null : contractHead(append.expectedHead) };
+    return {
+      contractId: id,
+      entries: append.entries,
+      expectedHead: append.expectedHead === null ? null : contractHead(append.expectedHead),
+    };
   });
 }
 
@@ -209,21 +202,6 @@ function validateRefOperationPairing(
   const operation = operations[0];
   if (operation === undefined) throw new TypeError("a claimed entry requires exactly one target ref operation");
   return { claim, operation };
-}
-
-function normalizeExpectedHeads(
-  snapshot: CarrierSnapshot,
-  appends: readonly ContractJournalAppend[],
-): Map<ContractId, ContractHead | null> {
-  const expected = new Map<ContractId, ContractHead | null>();
-  for (const append of appends) {
-    const actual = observedHead(snapshot, append.contractId).head;
-    expected.set(
-      append.contractId,
-      append.expectedHead === undefined ? actual : append.expectedHead,
-    );
-  }
-  return expected;
 }
 
 function readCanonicalJournal(repository: GitRepository, snapshot: CarrierSnapshot, id: ContractId): string {
@@ -309,10 +287,10 @@ function publishOffer(
   snapshot: CarrierSnapshot,
   operations: readonly RefOperation[],
   changes: ReadonlyMap<string, TreeChange>,
-): { readonly carrierCommit: SnapshotId; readonly carrierTree: GitOid; readonly publication: RefPublication } {
+): RefPublication {
   const carrierTree = buildTree(repository, snapshot.tree, changes);
   const carrierCommit = mintSnapshotId(writeCommit(repository, carrierTree, snapshot.commit));
-  const publication = updateRefsAtomically(repository, [
+  return updateRefsAtomically(repository, [
     { ref: CARRIER_REF, newOid: gitObjectIdForSnapshot(carrierCommit), expectedOid: snapshot.commit },
     ...operations.map((operation) => ({
       ref: operation.target,
@@ -320,7 +298,6 @@ function publishOffer(
       expectedOid: gitObjectIdForSnapshot(operation.expectedOid),
     })),
   ]);
-  return { carrierCommit, carrierTree, publication };
 }
 
 function observePublicationFailure(
@@ -347,7 +324,7 @@ export function admit(
   const claimTarget = validateRefOperationPairing(appends, operations);
   const watchedIds = appends.map((append) => append.contractId);
   const initial = readCarrier(repository);
-  const expectedHeads = normalizeExpectedHeads(initial, appends);
+  const expectedHeads = new Map(appends.map((append) => [append.contractId, append.expectedHead]));
   const initialHeadMovement = headMoved(initial, expectedHeads);
   if (initialHeadMovement.moved.length > 0) return initialHeadMovement;
   if (claimTarget !== null) validateClaimTarget(repository, initial, claimTarget);
@@ -364,16 +341,13 @@ export function admit(
 
     const attempt = buildOffer(repository, snapshot, appends);
     const publication = publishOffer(repository, snapshot, operations, attempt.changes);
-    if (publication.publication.kind === "published") {
+    if (publication.kind === "published") {
       return {
-        ok: true,
         kind: "accepted",
-        carrierCommit: publication.carrierCommit,
-        carrierTree: publication.carrierTree,
         heads: attempt.heads,
       };
     }
-    if (publication.publication.kind === "unknown") return unknown(attempt.heads);
+    if (publication.kind === "unknown") return unknown(attempt.heads);
 
     const observed = observePublicationFailure(repository, operations);
     if (observed.snapshot.commit !== snapshot.commit) {
@@ -385,6 +359,6 @@ export function admit(
     if (operation !== undefined && observed.targetOid !== operation.expectedOid) {
       return refMoved(observed.snapshot, watchedIds, operation, observed.targetOid ?? null);
     }
-    throw publication.publication.error;
+    throw publication.error;
   }
 }

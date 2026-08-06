@@ -2,7 +2,7 @@ import type { ContractHead, ContractId, JournalEntry, SnapshotId } from "./types
 
 export interface ContractJournalAppend {
   readonly contractId: ContractId;
-  readonly expectedHead?: ContractHead | null;
+  readonly expectedHead: ContractHead | null;
   readonly entries: readonly JournalEntry[];
 }
 
