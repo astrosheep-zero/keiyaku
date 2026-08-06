@@ -32,6 +32,7 @@ A contract document has exactly one H1 title and these required H2 sections:
 | `Design` | Nonblank prose. |
 | `Region` | One closed fence with no info string and one or more nonblank path patterns. |
 | `Criteria` | One or more H3 criteria. Each title is unique after normalized comparison and each body is nonblank. |
+| `Verification` | Optional ordered v3 executor declarations owned by the library edge. |
 
 The library owns interpretation of these sections and any extensions. They are
 not structural core facts. In particular, `Region` and every other decoded
@@ -44,9 +45,11 @@ content bytes; its content is nonblank. Decoding mints the whole-document key
 and ordered segment keys carried by core. `gates` and `after` are machine terms,
 not Markdown-derived core fields.
 
-Verification declaration syntax, its internal value shape, and its dependency
-law are intentionally unfrozen. They are owned by the verification producer at
-the outer library edge, never by core or this chapter's contract grammar.
+`Verification` retains the v3 edge grammar: one or more direct closed fences
+with an exact `bash`, `zsh`, or `pwsh` info string and a nonblank script body.
+The resulting declaration values are private library/verification values. Core
+receives only the opaque segment key and never sees executor, script, or section
+name.
 
 ## Reserved Sections
 
@@ -61,7 +64,7 @@ has no H1, frontmatter, or nonblank bytes outside those sections. Every H2
 heading has exactly this grammar:
 
 ```text
-## Replace: Context|Objective|Design|Region|Criteria|<extension>
+## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>
 ## Append: Context|Objective|Design|Criteria|<extension>
 ## Add: Criteria|<new-extension-title>
 ## Update: Criterion <existing-title>|<existing-extension-title>
@@ -76,11 +79,10 @@ removes that keyed criterion. Extension update and remove use the exact
 extension title in the H2 target. A target occurs at most once for an operation
 kind when duplicate application would be ambiguous.
 
-Every operation body uses the grammar of its target section. The complete
-amended document is produced by applying the ordered operations at the edge;
-the library then mints replacement opaque document keys for core. Producer
-specific declaration updates are intentionally outside this generic amendment
-grammar.
+Every operation body uses the grammar of its target section. `Replace:
+Verification` uses the v3 declaration grammar. The complete amended document is
+produced by applying the ordered operations at the edge; the library then mints
+replacement opaque document keys for core.
 
 ## Arc Document
 

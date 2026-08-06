@@ -142,11 +142,15 @@ type ArcData = Readonly<{
   objective: string
   brief: string
 }>
+// Provisional until the P0-3 terminal-shape ruling.
 type AbandonData = Readonly<{
   note?: string
 }>
 type AbandonedData = Readonly<{ finalHead: SnapshotId | null }>
 ```
+
+The exact `abandon`/`abandoned` terminal fact split is pending P0-3; the
+shapes above are the current source sketch, not an implementation instruction.
 
 The journal stores lifecycle facts and bounded intent data only. It stores no
 raw producer logs, reports, patches, artifacts, or blob evidence.

@@ -144,11 +144,12 @@ effects: [
 Text presents accepted facts, then effects, then flat lag. It does not replace
 observed data with a repair command.
 
-A successful amendment compares canonical rendering of `receipt.prior.body`
-with `receipt.snapshot.body`. The formatter produces a three-context-line
-unified diff using the pure-JavaScript `diff` package. An unchanged comparison
-omits the presentation diff. The pre-write read used to acquire amendment input
-never supplies the presentation predecessor.
+The amendment presentation diff is pending the P0-2 receipt/result ruling. It
+is an output hint only: the CLI must never dereference a structured body from a
+public receipt, persist diff bytes, or make diff availability a lifecycle
+decision. When settled, the library edge supplies the before/after document
+text to the pure-JavaScript `diff` renderer; the parser and core remain unaware
+of presentation formatting.
 
 Audit omits diff content unless `--show-diff-body` is present. It obtains the
 Delivery from the public handle and renders diff text when available. A `null`

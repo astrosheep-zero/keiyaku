@@ -150,11 +150,12 @@ type Outcome<A> =
 type Receipt = Opaque<"process-local-receipt">
 ```
 
-Accepted writing operations return one process-local receipt alongside the
-value. The journal remains the sole authority; the receipt is never persisted,
-replayed as a handoff, or used as a second state store. The composite receipt
-shape remains intentionally unspecified here. Programmer value-shape errors
-throw; domain refusals and carrier races use the closed `Outcome` union.
+The exact accepted receipt/result shape is pending the P0-2 multi-admission
+ruling. It must remain process-local and non-authoritative; the journal is the
+sole lifecycle authority. Until that ruling, no consumer may depend on a
+`prior`/`snapshot` body or treat a composite receipt as persisted state.
+Programmer value-shape errors throw; domain refusals and carrier races use the
+closed `Outcome` union.
 
 ```ts
 type AuditReport = Readonly<{
@@ -210,6 +211,9 @@ the Keiyaku Markdown methodology at this edge and may expose only the opaque
 document keys needed by core. It does not expose a structured `ContractBody`, a
 render function, a carrier handle, direct journal writer, placement operation,
 or verification-run operation.
+
+The exact public abandon/abandoned terminal result is pending P0-3; the current
+method remains a provisional source surface until that ruling.
 
 Task products may retain a returned `ContractId` and observe terminal contract
 state through this API. Their association, persistence, failure policy, and

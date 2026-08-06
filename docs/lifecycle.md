@@ -41,10 +41,10 @@ gate. A satisfied operation may be the explicit placement request that
 completes the declared gates. An unsatisfied operation records judgment only.
 Optional `summary` is opaque testimony and does not participate in a gate.
 
-`abandon` records a legal terminal withdrawal. Optional `note` is opaque
-testimony and does not participate in a gate. No reason enum is stored: the
-fact kind already states the withdrawal intent, and no lifecycle reader needs
-a second classification.
+The exact `abandon` terminal fact shape remains pending P0-3. The current source
+vocabulary is provisional until that ruling lands; this chapter does not yet
+authorize a one-fact or two-fact terminal model. Optional `note` remains opaque
+testimony rather than a gate input.
 
 An arc is a narrative chapter within one contract lifetime:
 
@@ -63,10 +63,12 @@ terminal fact and otherwise receives a typed refusal.
 
 ## Gates And Attestations
 
-Each `gates` term is an opaque, contract-declared token. There are no built-in
-gate names, defaults, or verification-derived gates in core. The declared order
-is retained as a contract term; gate satisfaction uses the same generic rule for
-each declared gate.
+Each `gates` term is an opaque, contract-declared token. Core has no built-in
+gate names, defaults, or verification-derived gates. The Keiyaku library edge
+may recognize its `reviewed` and `verified` producer vocabulary; those names
+remain tokens supplied to core, not core cases. The declared order is retained
+as a contract term; gate satisfaction uses the same generic rule for each
+declared gate.
 
 `AttestationData` has the shape defined in [model.md](model.md): its `gate` is
 one declared opaque token, and its `subject` is a set of core-minted dependency
@@ -88,7 +90,8 @@ the satisfied result. Gate-specific producer methodology is outside core;
 
 A gate whose producer has no valid declaration is rejected at that producer's
 owning outer boundary. It is not represented as a pending journal state or a
-journal deadlock.
+journal deadlock. The v4 `verified` producer uses the v3 Verification section;
+other gate producers are edge-owned extensions, not core vocabulary.
 
 ## Eligibility
 

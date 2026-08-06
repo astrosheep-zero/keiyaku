@@ -4,13 +4,16 @@ This chapter owns the execution-side verification producer and shared process
 control. Verification is methodology, not a core fact vocabulary, core
 declaration type, or core-derived gate. The attestation fact shape is defined by
 [model.md](model.md), and generic gate meaning by [lifecycle.md](lifecycle.md).
-The producer's declaration shape, section syntax, and dependency law remain
-explicitly unfrozen and are owned outside core.
+The v4 library retains the v3 `Verification` declaration grammar at this edge:
+ordered `bash`, `zsh`, or `pwsh` fenced scripts. The declaration value and its
+producer-specific dependency rule remain private to this chapter; they are not
+core fact or core gate vocabulary.
 
 ## Execution
 
 Verification is synchronous. An owning library operation records its selected
-candidate, resolves a valid producer declaration, and runs that producer. A
+candidate, resolves the v3 declaration for the edge's `verified` producer, and
+runs that producer. A
 matching satisfied attestation for the producer's declared opaque gate and
 subject is reusable and starts no process. A matching unsatisfied attestation
 is durable history; a later testimony for the same gate and subject supersedes
@@ -23,9 +26,10 @@ state changed during execution; it never silently retargets the result. The
 journal attestation is the only durable execution result and the only input to
 gate reading.
 
-If a declared gate requires this producer but no valid declaration exists, the
+If the edge's `verified` gate is declared without a valid v3 declaration, the
 owning outer boundary rejects the operation. The absence is not a journal
-deadlock or a new core fact.
+deadlock or a new core fact. Other opaque gate tokens belong to their own
+producers and are outside this chapter.
 
 The producer resolves its declared executor and runs it against the selected
 candidate tree. Audit uses a disposable detached worktree checked out at that
