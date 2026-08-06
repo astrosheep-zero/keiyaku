@@ -4,6 +4,7 @@ declare const contractHeadBrand: unique symbol;
 declare const snapshotIdBrand: unique symbol;
 declare const changeIdBrand: unique symbol;
 declare const subjectKeyBrand: unique symbol;
+declare const actorIdBrand: unique symbol;
 
 export type ContractId = string & { readonly [contractIdBrand]: "ContractId" };
 export type EntryUlid = string & { readonly [entryUlidBrand]: "EntryUlid" };
@@ -11,6 +12,7 @@ export type ContractHead = string & { readonly [contractHeadBrand]: "ContractHea
 export type SnapshotId = string & { readonly [snapshotIdBrand]: "SnapshotId" };
 export type ChangeId = string & { readonly [changeIdBrand]: "ChangeId" };
 export type SubjectKey = string & { readonly [subjectKeyBrand]: "SubjectKey" };
+export type ActorId = string & { readonly [actorIdBrand]: "ActorId" };
 
 const ULID = /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
 const CONTRACT_ID = /^kei\/([a-z0-9][a-z0-9-]*)$/;
@@ -48,6 +50,11 @@ export function snapshotId(value: string): SnapshotId {
 /** Validate an opaque persisted change value; only a carrier may mint one. */
 export function changeId(value: string): ChangeId {
   return requireOpaqueId(value, "change ID") as ChangeId;
+}
+
+/** Validate optional opaque testimony without imposing a registry. */
+export function actorId(value: string): ActorId {
+  return requireOpaqueId(value, "actor") as ActorId;
 }
 
 export type VerificationExecutor = "bash" | "zsh" | "pwsh";
@@ -134,7 +141,7 @@ export type JournalEnvelope<Kind extends string, Data> = Readonly<{
   contract: ContractId;
   entry: EntryUlid;
   at: string;
-  actor?: string;
+  actor?: ActorId;
   data: Data;
 }>;
 

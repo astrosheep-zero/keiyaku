@@ -4,10 +4,10 @@ import type { DeliveryPreparation } from "../carrier/delivery.js";
 import type { GitRepository } from "../carrier/repository.js";
 import { prepareStoredVerification } from "../carrier/verification.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
-import { gateSatisfied, gatesSatisfied } from "../core/facts/gate.js";
+import { gateSatisfied } from "../core/facts/gate.js";
 import { placeEligibleBounds } from "../core/facts/eligibility.js";
 import { currentSubject } from "../core/subject.js";
-import type { ContractId, ContractState, SubjectKey } from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState, SubjectKey } from "../core/facts/types.js";
 import { entryUlid } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
@@ -132,19 +132,18 @@ export function admitReview<Input extends ContractIntent, Refusal>(
   return runIntent(repository, input.contractId, input, decide);
 }
 
-export function placeIfEligible(
+/** Run the sole placement adjudicator; a gates-unsatisfied refusal is normal pending state. */
+export function admitPlacement(
   repository: GitRepository,
-  input: Readonly<{ contractId: ContractId; actor?: string; at: string }>,
-): ProtocolResult<null, PlacementRefusal> | null {
-  const state = observeContract(repository, input.contractId).state;
-  if (!state || state.terminal || !gatesSatisfied(state)) return null;
+  input: Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>,
+): ProtocolResult<null, PlacementRefusal> {
   return runIntent(repository, input.contractId, input, decidePlacement, true);
 }
 
 export type VerifyPreparedDeliveryInput = Readonly<{
   repository: GitRepository;
   contractId: ContractId;
-  actor?: string;
+  actor?: ActorId;
   at: string;
   prepared: Extract<DeliveryPreparation, { kind: "prepared" }>;
   environment: NodeJS.ProcessEnv;
@@ -154,7 +153,7 @@ export type VerifyPreparedDeliveryInput = Readonly<{
 export type VerifyStoredDeliveryInput = Readonly<{
   repository: GitRepository;
   contractId: ContractId;
-  actor?: string;
+  actor?: ActorId;
   at: string;
   state: ContractState;
   environment: NodeJS.ProcessEnv;
@@ -163,7 +162,7 @@ export type VerifyStoredDeliveryInput = Readonly<{
 
 type VerificationAdmissionInput = Readonly<{
   contractId: ContractId;
-  actor?: string;
+  actor?: ActorId;
   at: string;
 }>;
 

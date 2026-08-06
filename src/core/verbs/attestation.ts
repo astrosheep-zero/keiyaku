@@ -1,11 +1,11 @@
 import type { DecideInput, OfferDecision } from "../decide.js";
 import { currentSubject } from "../subject.js";
-import type { AttestationData, ContractId, JournalEntry } from "../facts/types.js";
+import type { ActorId, AttestationData, ContractId, JournalEntry } from "../facts/types.js";
 import { contractId, entryUlid } from "../facts/types.js";
 
 export type AttestationInput = Readonly<{
   contractId: ContractId;
-  actor?: string;
+  actor?: ActorId;
   at: string;
   data: AttestationData;
 }>;

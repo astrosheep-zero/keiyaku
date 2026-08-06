@@ -123,13 +123,3 @@ export function foldJournal(
   }
   return state;
 }
-
-/** The bind body plus ordered replacement amend facts is the canonical effective contract body. */
-export function effectiveBody(state: ContractState): ContractBody {
-  return requireBody(state);
-}
-
-export function foldEffectiveBody(entries: readonly JournalEntry[]): ContractBody {
-  if (entries.length === 0 || entries[0]?.kind !== "bind") foldError("journal must begin with bind");
-  return effectiveBody(foldJournal(entries[0].contract, entries));
-}

@@ -1,7 +1,7 @@
 import type { DecideInput, OfferDecision } from "../decide.js";
-import type { ContractId, DeliverData, JournalEntry } from "../facts/types.js";
+import type { ActorId, ContractId, DeliverData, JournalEntry } from "../facts/types.js";
 import { contractId, entryUlid } from "../facts/types.js";
-export type DeliverInput = Readonly<{ contractId: ContractId; actor?: string; at: string; data: DeliverData }>;
+export type DeliverInput = Readonly<{ contractId: ContractId; actor?: ActorId; at: string; data: DeliverData }>;
 export type DeliverRefusal = Readonly<{ kind: "contract-missing" | "not-bound" | "terminal"; contractId: ContractId }>;
 export function decideDeliver({ input, attempt, observation }: DecideInput<DeliverInput>): OfferDecision<null, DeliverRefusal> {
   const id = contractId(input.contractId); const current = observation.contracts.get(id);

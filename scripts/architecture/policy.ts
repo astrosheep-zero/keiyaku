@@ -153,11 +153,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     { source: "runtime/proc/**", allow: [] },
+    { source: "verification/plan.ts", allow: [types("core/facts/types.ts")] },
     {
-      source: "verification/**",
+      source: "verification/producer.ts",
       allow: [
-        any("runtime/proc/**"),
-        any("verification/**"),
+        types("core/facts/types.ts"),
+        any("runtime/proc/run.ts"),
+        any("verification/plan.ts"),
       ],
     },
     {
@@ -165,6 +167,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("body/**"),
         any("core/facts/codec.ts"),
+        any("core/facts/gate.ts", ["effectiveGates"]),
         any("core/facts/types.ts"),
         any("protocol/operations.ts"),
       ],
@@ -221,8 +224,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "carrier/verification.ts", symbols: ["randomBytes"] },
         { source: "carrier/identity.ts", symbols: ["randomBytes"] },
         { source: "protocol/intent.ts", symbols: ["randomBytes"] },
-        { source: "core/facts/codec.ts", symbols: ["createHash"] },
-        { source: "verification/plan.ts", symbols: ["createHash"] },
+        { source: "core/declaration-key.ts", symbols: ["createHash"] },
       ],
     },
     { module: "crypto", owners: [] },

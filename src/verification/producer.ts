@@ -1,11 +1,11 @@
 import { type ProcessExit, type ProcessOutcome, type ProcessSpawnError, type ProcessTimeout, runProcess } from "../runtime/proc/run.js";
+import type { AttestationData, VerificationDeclaration } from "../core/facts/types.js";
 import {
   resolveVerificationPlan,
-  type VerificationDeclaration,
   type VerificationPlanStep,
 } from "./plan.js";
 
-export type VerificationVerdict = "satisfied" | "unsatisfied";
+export type VerificationVerdict = AttestationData["verdict"];
 
 export type VerificationExecution = Readonly<{
   readonly step: VerificationPlanStep;

@@ -1,3 +1,5 @@
+import type { ActorId } from "../index.js";
+
 const PROJECTION_ID_ENV = "KEIYAKU_PROJECTION_ID";
 
 export type ActorResolutionInput = Readonly<{
@@ -6,7 +8,7 @@ export type ActorResolutionInput = Readonly<{
 }>;
 
 /** Resolve optional caller testimony from the current CLI edge vocabulary. */
-export function resolveActor(input: ActorResolutionInput = {}): string | undefined {
+export function resolveActor(input: ActorResolutionInput = {}): ActorId | undefined {
   if (input.actor !== undefined) {
     if (input.actor.trim().length === 0) throw new TypeError("actor must be a nonblank string");
     return input.actor;

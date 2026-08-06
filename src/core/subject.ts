@@ -1,8 +1,6 @@
 import { sha256, verificationDeclarationKey } from "./declaration-key.js";
 import type { ContractBody, ContractState, Gate, SubjectKey } from "./facts/types.js";
 
-export type { SubjectKey } from "./facts/types.js";
-
 /** Parse the persisted opaque subject representation used only by core facts. */
 export function parseSubjectKey(value: string): SubjectKey {
   if (!/^[0-9a-f]{64}$/.test(value)) throw new Error("subject key must be lowercase SHA-256 hex");

@@ -145,7 +145,7 @@ tests. Their rationale and porting evidence belong only in
 ## Measurements
 
 The measured pre-cut tree was `4,418 LOC` on 2026-08-04. The current working
-tree is `6,737 LOC` of `src/` and `4,064 LOC` of tests on 2026-08-06. These are
+tree is `6,665 LOC` of `src/` and `4,139 LOC` of tests on 2026-08-06. These are
 raw working-tree measurements, not a quota; generated `build/` output and
 dependencies are excluded. The confirmed tree is an ownership target, not a
 line-count quota. No target number licenses filler. A smaller implementation

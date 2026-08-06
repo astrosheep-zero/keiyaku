@@ -1,10 +1,10 @@
 import type { DecideInput, OfferDecision } from "../decide.js";
-import type { ArcData, ContractId, JournalEntry } from "../facts/types.js";
+import type { ActorId, ArcData, ContractId, JournalEntry } from "../facts/types.js";
 import { contractId, entryUlid } from "../facts/types.js";
 
 export type ArcInput = Readonly<{
   contractId: ContractId;
-  actor?: string;
+  actor?: ActorId;
   at: string;
   data: Readonly<Omit<ArcData, "seq">>;
 }>;

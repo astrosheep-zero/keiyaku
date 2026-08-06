@@ -7,7 +7,7 @@ import { readDeliveryDiff } from "../carrier/verification.js";
 import { foldJournal } from "../core/facts/fold.js";
 import { currentSubject } from "../core/subject.js";
 import type {
-  AmendData, ArcData, AttestationData, BindData, ChangeId, ContractBody, ContractId, ContractState, JournalEntry, SnapshotId,
+  ActorId, AmendData, ArcData, AttestationData, BindData, ChangeId, ContractBody, ContractId, ContractState, JournalEntry, SnapshotId,
 } from "../core/facts/types.js";
 import { decideAbandon, type AbandonRefusal } from "../core/verbs/abandon.js";
 import { decideAmend, type AmendRefusal } from "../core/verbs/amend.js";
@@ -24,7 +24,7 @@ import {
   admitBind,
   admitDeliver,
   admitReview,
-  placeIfEligible,
+  admitPlacement,
   verifyPreparedDelivery,
   verifyStoredDelivery,
 } from "./intent.js";
@@ -51,7 +51,7 @@ export type IntentOutcome<Value, Refusal = IntentRefusal> =
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | Readonly<{ kind: "retry"; reason: IntentRetry }>;
 
-type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId; actor?: string }>;
+type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId; actor?: ActorId }>;
 
 function timestamp(): string {
   return new Date().toISOString();
@@ -98,7 +98,7 @@ export function statusOperation(input: Readonly<{ scope: RepositoryScope }>): St
 }
 
 export type BindOperationInput = Readonly<{
-  scope: RepositoryScope; body: ContractBody; target?: string; workspace: "worktree" | "here"; actor?: string;
+  scope: RepositoryScope; body: ContractBody; target?: string; workspace: "worktree" | "here"; actor?: ActorId;
 }>;
 
 export function bindOperation(input: BindOperationInput): IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal> {
@@ -232,16 +232,18 @@ export async function deliverOperation(input: OperationInput): Promise<IntentOut
     }
   }
 
-  const placement = placeIfEligible(carrier, {
+  const placement = admitPlacement(carrier, {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
   });
-  if (placement?.kind === "handoff") {
+  if (!(placement.kind === "refused" && placement.refusal.kind === "gates-unsatisfied")) {
     const acceptedPlacement = complete(input.contractId, placement, undefined);
     if (acceptedPlacement.kind === "accepted") {
       facts.push(...acceptedPlacement.receipt.facts);
       snapshot = acceptedPlacement.receipt.snapshot;
+    } else {
+      return acceptedPlacement;
     }
   }
   return accepted(input.contractId, facts, value, first.receipt.prior, snapshot);
@@ -298,14 +300,14 @@ export function reviewOperation(
   );
   if (review.kind !== "accepted" || input.data.verdict !== "satisfied") return review;
 
-  const placement = placeIfEligible(carrier, {
+  const placement = admitPlacement(carrier, {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
   });
-  if (placement?.kind !== "handoff") return review;
+  if (placement.kind === "refused" && placement.refusal.kind === "gates-unsatisfied") return review;
   const placed = complete(input.contractId, placement, undefined);
-  if (placed.kind !== "accepted") return review;
+  if (placed.kind !== "accepted") return placed;
   return accepted<void, AttestationRefusal | PlacementRefusal>(
     input.contractId,
     [...review.receipt.facts, ...placed.receipt.facts],

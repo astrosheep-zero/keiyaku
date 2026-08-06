@@ -20,6 +20,7 @@ import type {
 import { parseSubjectKey } from "../subject.js";
 import {
   changeId,
+  actorId,
   contractId,
   entryUlid,
   snapshotId,
@@ -342,7 +343,7 @@ function validateEntry(value: unknown): JournalEntry {
     contract,
     entry: entryUlid(ulidValue(object.entry, "entry.entry")),
     at: validateTimestamp(object.at, "entry.at"),
-    ...(object.actor === undefined ? {} : { actor: stringValue(object.actor, "entry.actor") }),
+    ...(object.actor === undefined ? {} : { actor: actorId(stringValue(object.actor, "entry.actor")) }),
     data: validateData(kind as JournalEntry["kind"], object.data),
   } as JournalEntry;
   const after = entry.kind === "bind" ? entry.data.body.after : entry.kind === "amend" ? entry.data.after : undefined;

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { verificationDeclarationKey } from "../src/core/declaration-key.js";
 import { decodeEntry, encodeEntry, FactsCodecError } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
 import { gateSatisfied } from "../src/core/facts/gate.js";
@@ -59,6 +60,13 @@ function attestation(gate: Gate, verdict: AttestationData["verdict"], suffix: st
   return fact("attestation", captured(gate, verdict, entries), suffix);
 }
 
+test("verification declaration keys use the canonical ordered declaration bytes", () => {
+  assert.equal(
+    verificationDeclarationKey([{ executor: "bash", script: "true" }]),
+    "3a2fd16dad18d9cca417316432eb0c9f75ad2e1d95187be5494ca07e56a817d1",
+  );
+});
+
 test("codec accepts only the attestation fact vocabulary", () => {
   const verified = attestation("verified", "satisfied", "04");
   assert.deepEqual(decodeEntry(encodeEntry(verified)), verified);
@@ -70,6 +78,8 @@ test("codec accepts only the attestation fact vocabulary", () => {
     () => decodeEntry(JSON.stringify(malformedSubject)),
     (error: unknown) => error instanceof FactsCodecError && /data\.attestation\.subject/.test(error.message),
   );
+  const blankActor = { ...verified, actor: " " };
+  assert.throws(() => decodeEntry(JSON.stringify(blankActor)), /expected a nonblank string/);
 });
 
 test("verified attestation remains current after an unrelated Context amendment", () => {

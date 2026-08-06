@@ -1,8 +1,8 @@
 import type { DecideInput, OfferDecision } from "../decide.js";
-import type { BindData, BoundData, ContractBody, ContractId, JournalEntry } from "../facts/types.js";
+import type { ActorId, BindData, BoundData, ContractBody, ContractId, JournalEntry } from "../facts/types.js";
 import { contractId, entryUlid } from "../facts/types.js";
 
-export type BindInput = Readonly<{ contractId: ContractId; actor?: string; at: string; data: BindData }>;
+export type BindInput = Readonly<{ contractId: ContractId; actor?: ActorId; at: string; data: BindData }>;
 export type BindRefusal = Readonly<{ kind: "contract-exists" | "invalid-after"; contractId: ContractId }>;
 export function decideBind({ input, attempt, observation }: DecideInput<BindInput>): OfferDecision<null, BindRefusal> {
   const id = contractId(input.contractId);

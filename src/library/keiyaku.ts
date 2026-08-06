@@ -3,11 +3,14 @@ import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
 import { renderContractBody } from "../body/render.js";
 import { validateContractBody } from "../core/facts/codec.js";
+import { effectiveGates as resolveEffectiveGates } from "../core/facts/gate.js";
 import {
   contractId,
+  actorId,
   type AbandonData,
   type AbandonedData,
   type AmendData,
+  type ActorId as CoreActorId,
   type ArcData,
   type AttestationData,
   type BindData,
@@ -82,7 +85,7 @@ export type {
 };
 export type { AuditReport, FactKind, TimelineEntry } from "../protocol/operations.js";
 
-export interface ContractBody extends ContractBodyValue {}
+export type ContractBody = ContractBodyValue;
 export type Fact = JournalEntry;
 export type ActorId = string;
 export type AttestationVerdict = AttestationData["verdict"];
@@ -143,12 +146,12 @@ export const ContractBody = Object.freeze({
   },
 });
 
-function actorOption(actor: ActorId | undefined): Readonly<{ actor?: string }> {
+function actorOption(actor: ActorId | undefined): Readonly<{ actor?: CoreActorId }> {
   if (actor === undefined) return {};
   if (typeof actor !== "string" || actor.trim().length === 0) {
     throw new TypeError("actor must be a nonblank string");
   }
-  return { actor };
+  return { actor: actorId(actor) };
 }
 
 function requireMarkdown(value: unknown, label = "markdown"): string {
@@ -190,8 +193,8 @@ function normalizedAfter(values: readonly ContractId[] | undefined): readonly Co
   });
 }
 
-function normalizedGates(values: readonly Gate[] | undefined): readonly Gate[] {
-  if (values === undefined) return ["reviewed"];
+function normalizedGates(values: readonly Gate[] | undefined): readonly Gate[] | undefined {
+  if (values === undefined) return undefined;
   if (!Array.isArray(values)) throw new TypeError("gates must be an array");
   return values.map((value, index) => {
     if (value !== "reviewed" && value !== "verified") {
@@ -201,20 +204,19 @@ function normalizedGates(values: readonly Gate[] | undefined): readonly Gate[] {
   });
 }
 
-function effectiveGates(body: ContractBodyValue, requested: readonly Gate[] | undefined): readonly Gate[] {
-  const gates = [...normalizedGates(requested)];
-  if (body.verification.length > 0 && !gates.includes("verified")) gates.push("verified");
-  return gates;
-}
-
 function structuredBody(
   body: ContractBodyValue,
   gates: readonly Gate[] | undefined,
   after: readonly ContractId[] | undefined,
 ): ContractBodyValue {
-  return {
+  const declaredGates = normalizedGates(gates);
+  const declaredBody: ContractBodyValue = {
     ...body,
-    gates: effectiveGates(body, gates),
+    ...(declaredGates === undefined ? {} : { gates: declaredGates }),
+  };
+  return {
+    ...declaredBody,
+    gates: resolveEffectiveGates(declaredBody),
     after: after === undefined
       ? []
       : normalizedAfter(after),

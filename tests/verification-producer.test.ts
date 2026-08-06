@@ -3,8 +3,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
+import type { VerificationDeclaration } from "../src/core/facts/types.js";
 import { produceVerification, type ProduceVerificationInput } from "../src/verification/producer.js";
-import { resolveVerificationPlan, type VerificationDeclaration } from "../src/verification/plan.js";
+import { resolveVerificationPlan } from "../src/verification/plan.js";
 
 const candidateTree = "a".repeat(40);
 

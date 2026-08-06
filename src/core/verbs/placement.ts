@@ -1,11 +1,11 @@
 import { gatesSatisfied } from "../facts/gate.js";
-import type { ContractId, JournalEntry } from "../facts/types.js";
+import type { ActorId, ContractId, JournalEntry } from "../facts/types.js";
 import { contractId, entryUlid } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
 
 export type PlacementInput = Readonly<{
   contractId: ContractId;
-  actor?: string;
+  actor?: ActorId;
   at: string;
 }>;
 

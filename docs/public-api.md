@@ -38,6 +38,10 @@ construction boundary. `workspace` defaults to `"worktree"`. `target`,
 their document and lifecycle rules live in [document.md](document.md) and
 [lifecycle.md](lifecycle.md).
 
+`actor` is caller-supplied testimony, not a registered identity. Package-root
+inputs accept nonblank string bytes; the library validates and brands them as
+the core `ActorId` before a journal write.
+
 Each construction point resolves and pins its repository coordinate before it
 returns a contract handle. An omitted `repo` uses the caller's current working
 directory. The library has exactly one `process.cwd()` call, in the shared

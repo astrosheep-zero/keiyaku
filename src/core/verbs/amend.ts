@@ -1,8 +1,8 @@
 import type { DecideInput, OfferDecision } from "../decide.js";
 import { samePrerequisites } from "../facts/eligibility.js";
-import type { AmendData, ContractId, JournalEntry } from "../facts/types.js";
+import type { ActorId, AmendData, ContractId, JournalEntry } from "../facts/types.js";
 import { contractId, entryUlid } from "../facts/types.js";
-export type AmendInput = Readonly<{ contractId: ContractId; actor?: string; at: string; data: AmendData }>;
+export type AmendInput = Readonly<{ contractId: ContractId; actor?: ActorId; at: string; data: AmendData }>;
 export type AmendRefusal = Readonly<{
   kind: "contract-missing" | "terminal" | "invalid-after" | "prerequisites-already-consumed";
   contractId: ContractId;

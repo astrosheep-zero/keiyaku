@@ -9,7 +9,7 @@ import { encodeEntry } from "../src/core/facts/codec.js";
 import { entryUlid, type JournalEntry } from "../src/core/facts/types.js";
 import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { currentSubject } from "../src/core/subject.js";
-import { admitReview, placeIfEligible } from "../src/protocol/intent.js";
+import { admitReview, admitPlacement } from "../src/protocol/intent.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithMain(): TestGitRepository {
@@ -350,15 +350,53 @@ test("eligibility placement observes and binds every waiting dependent", async (
     dependents.push(bound.value);
   }
 
-  const placed = placeIfEligible(repositoryAt(repository.path), {
+  const placed = admitPlacement(repositoryAt(repository.path), {
     contractId: (await source.state()).id,
     at: "2026-08-06T00:00:01Z",
   });
-  assert.equal(placed?.kind, "handoff");
+  assert.equal(placed.kind, "handoff");
   assert.equal((await source.state()).terminal?.kind, "claimed");
   for (const dependent of dependents) {
     assert.equal((await dependent.state()).bound?.kind, "bound");
   }
+});
+
+test("review surfaces a placement retry after its attestation is admitted", async () => {
+  const repository = repositoryWithMain();
+  repository.run(["branch", "release"]);
+  const result = await Keiyaku.bind({
+    markdown: document(),
+    repo: repository.path,
+    target: "refs/heads/release",
+    workspace: "here",
+  });
+  assert.equal(result.kind, "accepted");
+  if (result.kind !== "accepted") throw new Error("bind was not accepted");
+  commitCandidate(repository);
+  const delivered = await result.value.deliver();
+  assert.equal(delivered.kind, "accepted");
+  if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
+
+  const shim = [
+    'if [ "$1" = "update-ref" ]; then',
+    '  input_file=$(mktemp)',
+    '  cat >"$input_file"',
+    '  if grep -q "refs/heads/release" "$input_file"; then',
+    '    candidate=$("$KEIYAKU_REAL_GIT" rev-parse HEAD)',
+    '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$candidate"',
+    '  fi',
+    '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
+    '  status=$?',
+    '  rm -f "$input_file"',
+    '  exit "$status"',
+    'fi',
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+  const reviewed = await withGitShim(shim, {}, () => delivered.value.review({ verdict: "satisfied" }));
+  assert.equal(reviewed.kind, "retry");
+  const state = await result.value.state();
+  assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");
+  assert.equal(state.terminal, null);
 });
 
 test("public audit exposes admitted verified attestations through the receipt", async () => {

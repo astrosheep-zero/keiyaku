@@ -1,7 +1,7 @@
 import type { DecideInput, OfferDecision } from "../decide.js";
-import type { AbandonData, ContractId, JournalEntry } from "../facts/types.js";
+import type { AbandonData, ActorId, ContractId, JournalEntry, SnapshotId } from "../facts/types.js";
 import { contractId, entryUlid } from "../facts/types.js";
-export type AbandonInput = Readonly<{ contractId: ContractId; actor?: string; at: string; data: AbandonData; finalHead: import("../facts/types.js").SnapshotId | null }>;
+export type AbandonInput = Readonly<{ contractId: ContractId; actor?: ActorId; at: string; data: AbandonData; finalHead: SnapshotId | null }>;
 export type AbandonRefusal = Readonly<{ kind: "contract-missing" | "terminal"; contractId: ContractId }>;
 export function decideAbandon({ input, attempt, observation }: DecideInput<AbandonInput>): OfferDecision<null, AbandonRefusal> {
   const id = contractId(input.contractId); const current = observation.contracts.get(id);

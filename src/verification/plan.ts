@@ -1,9 +1,4 @@
-export type VerificationExecutor = "bash" | "zsh" | "pwsh";
-
-export type VerificationDeclaration = Readonly<{
-  readonly executor: VerificationExecutor;
-  readonly script: string;
-}>;
+import type { VerificationDeclaration } from "../core/facts/types.js";
 
 export type VerificationPlanStep = Readonly<{
   readonly declaration: VerificationDeclaration;
