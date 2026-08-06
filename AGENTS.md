@@ -1,17 +1,25 @@
-# Keiyaku v4 Law
+# Keiyaku v4 Repository Guide
 
-Before any change or review in this repository, read the entire
-`.claude/skills/keiyaku-v4-law/SKILL.md`. It is the sole law authority.
+Before any change or review in this repository, read [`docs/README.md`](docs/README.md)
+and every owner chapter it names for the requested surface. Those documents are
+the sole product and architecture authority.
+
+| First | Then |
+| --- | --- |
+| [`docs/README.md`](docs/README.md) | The single owner chapter for each affected surface. |
+
+The index is the authority registry. It directs public API, document, model,
+lifecycle, verification, transport, and CLI questions to their one law home.
 
 Keiyaku v4 is a clean implementation; `../keiyaku` is read-only source
-evidence, not architecture authority. After reading the full skill and before
-changes, read `docs/architecture.md` and `docs/porting-policy.md`.
+evidence, not architecture authority. Skills are operating guides and never a
+second law source.
 
 Use ASCII unless a persisted fact requires otherwise. Keep coherent owner
 modules rather than directories of tiny wrappers.
 
-Update the law skill in the same commit as any newly settled law and its
-implementation.
+Update the owning root document in the same coherent change as any newly
+settled law and its implementation.
 
 ## Package Manager
 
