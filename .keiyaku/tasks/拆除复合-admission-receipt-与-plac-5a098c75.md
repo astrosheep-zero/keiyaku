@@ -7,8 +7,12 @@ needs:
   - attestation-subject-统一证词与-gat-da92658b
 parent: null
 from: []
+notes:
+  - actor: thekoc
+    timestamp: 2026-08-06T23:09:55.730Z
+    text: "Remaining blocker from independent review: audit manufactures ProtocolReceipt values with facts:[]/prior/snapshot/journal even when no admission occurred, then CLI resultFromOutcome treats that fake write receipt like every accepted mutation and invokes contract.reconcile(). Split internal read-observation acceptance from admission receipts; audit still maps publicly to accepted Outcome with zero facts and observed head, but never gains mutation/reconcile authority from a synthetic receipt."
 createdAt: 2026-08-06T05:42:38.723Z
-updatedAt: 2026-08-06T21:52:02.229Z
+updatedAt: 2026-08-06T23:09:55.730Z
 creator: thekoc
 startedAt: 2026-08-06T09:13:08.258Z
 ---
