@@ -86,9 +86,13 @@ type DocumentKey = Opaque<"document-key">
 type DocumentSegmentKey = Opaque<"document-segment-key">
 type Gate = Opaque<"contract-gate">
 type DependencyKeySet = Opaque<"dependency-key-set">
+type ContractDocument = Readonly<{
+  bytes: string
+  key: DocumentKey
+}>
 
 type ContractTerms = Readonly<{
-  document: DocumentKey
+  document: ContractDocument
   segments: readonly DocumentSegmentKey[]
   gates: readonly Gate[]
   after: readonly ContractId[]
@@ -108,9 +112,10 @@ type JournalEnvelope<Kind extends string, Data> = Readonly<{
 `BindData` is immutable `ContractCoordinates` plus revision-zero
 `ContractTerms`. `AmendData` is a complete replacement `ContractTerms` and
 never changes coordinates. Revision identity is the journal-entry coordinate.
-The edge library mints the opaque whole-document and ordered segment keys from
-its Markdown methodology. Core carries those keys and the machine terms
-`gates` and `after`; it knows none of the source document's sections or syntax.
+The edge library supplies the opaque whole-document bytes and mints the whole
+document and ordered segment keys from its Markdown methodology. Core stores
+those bytes and keys with the machine terms `gates` and `after`; it knows none
+of the source document's sections or syntax.
 
 The fact vocabulary is closed:
 

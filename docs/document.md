@@ -3,8 +3,8 @@
 This chapter owns the Keiyaku Markdown methodology at the library edge. It is
 a pure document boundary: it decides edge syntax and private document values,
 never lifecycle legality, journal admission, or transport effects. Core receives
-only an opaque whole-document key and ordered opaque segment keys; it knows no
-section name or Markdown grammar.
+opaque whole-document bytes, their key, and ordered opaque segment keys; it
+knows no section name or Markdown grammar.
 
 ## Markdown Dialect
 
@@ -41,9 +41,10 @@ document field remain library methodology, not journal-model vocabulary.
 The title has no content before the first H2. The document has no nonblank
 bytes outside its H1 and H2 sections, no duplicate top-level H2, and no
 frontmatter. An unrecognized H2 is an extension with its original title and
-content bytes; its content is nonblank. Decoding mints the whole-document key
-and ordered segment keys carried by core. `gates` and `after` are machine terms,
-not Markdown-derived core fields.
+content bytes; its content is nonblank. Decoding keeps the complete opaque
+document bytes, mints a whole-document key and ordered segment keys, and passes
+those values to core. Core stores the bytes without parsing them. `gates` and
+`after` are machine terms, not Markdown-derived core fields.
 
 `Verification` retains the v3 edge grammar: one or more direct closed fences
 with an exact `bash`, `zsh`, or `pwsh` info string and a nonblank script body.

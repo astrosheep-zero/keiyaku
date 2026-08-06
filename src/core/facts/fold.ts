@@ -14,7 +14,7 @@ function foldError(message: string): never {
 
 function cloneTerms(terms: ContractTerms): ContractTerms {
   return {
-    document: terms.document,
+    document: { ...terms.document },
     segments: [...terms.segments],
     gates: [...terms.gates],
     after: [...terms.after],

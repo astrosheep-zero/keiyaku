@@ -82,7 +82,10 @@ export type ContractCoordinates = Readonly<{
 }>;
 
 export type ContractTerms = Readonly<{
-  document: DocumentKey;
+  document: Readonly<{
+    bytes: string;
+    key: DocumentKey;
+  }>;
   segments: readonly DocumentSegmentKey[];
   gates: readonly Gate[];
   after: readonly ContractId[];

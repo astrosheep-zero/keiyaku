@@ -122,11 +122,16 @@ function dependencyKeySetValue(value: unknown, path: string): DependencyKeySet {
   }
 }
 
-function documentKeyValue(value: unknown, path: string): ContractTerms["document"] {
+function documentValue(value: unknown, path: string): ContractTerms["document"] {
+  const object = requireRecord(value, path);
+  requireKeys(object, ["bytes", "key"], path);
   try {
-    return documentKey(stringValue(value, path));
+    return {
+      bytes: stringValue(object.bytes, `${path}.bytes`),
+      key: documentKey(stringValue(object.key, `${path}.key`)),
+    };
   } catch (error) {
-    fail(path, error instanceof Error ? error.message : "invalid document key");
+    fail(path, error instanceof Error ? error.message : "invalid document");
   }
 }
 
@@ -204,7 +209,7 @@ export function validateContractTerms(value: unknown, path = "ContractTerms"): C
   const object = requireRecord(value, path);
   requireKeys(object, ["document", "segments", "gates", "after"], path);
   return {
-    document: documentKeyValue(object.document, `${path}.document`),
+    document: documentValue(object.document, `${path}.document`),
     segments: arrayValue(object.segments, `${path}.segments`).map((item, index) => documentSegmentKeyValue(item, `${path}.segments[${index}]`)),
     gates: gatesArray(object.gates, `${path}.gates`),
     after: contractIdArray(object.after, `${path}.after`),

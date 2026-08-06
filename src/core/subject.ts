@@ -18,8 +18,12 @@ export type DependencyKey = Readonly<
   | { readonly kind: "change"; readonly value: ChangeId }
 >;
 
+function keyTuple(key: DependencyKey): readonly [DependencyKey["kind"], string] {
+  return [key.kind, key.value];
+}
+
 function encodeKey(key: DependencyKey): string {
-  return JSON.stringify([key.kind, key.value]);
+  return JSON.stringify(keyTuple(key));
 }
 
 function parseKey(value: unknown, index: number): DependencyKey {
@@ -40,11 +44,11 @@ function parseKey(value: unknown, index: number): DependencyKey {
 }
 
 function canonicalKeys(keys: readonly DependencyKey[]): string {
-  const values = keys.map(encodeKey).sort();
-  for (let index = 1; index < values.length; index += 1) {
-    if (values[index] === values[index - 1]) throw new TypeError("dependency key set cannot contain duplicates");
+  const encoded = keys.map(encodeKey).sort();
+  for (let index = 1; index < encoded.length; index += 1) {
+    if (encoded[index] === encoded[index - 1]) throw new TypeError("dependency key set cannot contain duplicates");
   }
-  return JSON.stringify(values);
+  return `[${encoded.join(",")}]`;
 }
 
 /** Mint the opaque persisted representation of an ordered producer-selected key set. */
@@ -74,7 +78,7 @@ export function parseDependencyKeySet(value: string): DependencyKeySet {
 function currentKeys(state: ContractState): ReadonlySet<string> | null {
   if (state.delivery === null || state.terms === null) return null;
   return new Set([
-    encodeKey({ kind: "document", value: state.terms.document }),
+    encodeKey({ kind: "document", value: state.terms.document.key }),
     ...state.terms.segments.map((value) => encodeKey({ kind: "segment", value })),
     encodeKey({ kind: "snapshot", value: state.delivery.data.candidate }),
     encodeKey({ kind: "change", value: state.delivery.data.deliveryPatchId }),
