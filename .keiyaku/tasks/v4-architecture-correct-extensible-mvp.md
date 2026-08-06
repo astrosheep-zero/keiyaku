@@ -1,7 +1,7 @@
 ---
 id: v4-architecture-correct-extensible-mvp
 title: v4 architecture-correct extensible MVP
-state: in_progress
+state: done
 pri: 0
 needs:
   - v4-day1-cli-分层与-task-settlement
@@ -13,8 +13,7 @@ needs:
 parent: null
 from: []
 createdAt: 2026-08-05T08:48:29.937Z
-updatedAt: 2026-08-05T19:14:28.648Z
+updatedAt: 2026-08-06T04:53:11.445Z
 creator: thekoc
-startedAt: 2026-08-05T19:14:28.648Z
 ---
 Close the architecture-defined MVP before dogfooding. Verify the authority documents and source agree on the current intent surface, journal-only lifecycle authority, complete-body amend boundary, CLI/core/task dependency direction, repository and Git ownership, result rendering, restart/retry semantics, and deletion of superseded v3 mechanisms. Require focused tests and source-only typecheck; do not add compatibility aliases or speculative extension points.
