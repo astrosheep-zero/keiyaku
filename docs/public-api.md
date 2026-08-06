@@ -8,6 +8,11 @@ Keiyaku is the package-root contract library. It is ESM-only and the package
 root is its sole public import surface. The public objects are `Keiyaku`,
 `Repo`, `Delivery`, and the `ContractBody` type with its `render` function.
 
+Every package-root domain operation that accepts input takes exactly one
+readonly object. Public operations have no positional value parameters and no
+positional-value-plus-options overloads. A genuinely inputless operation keeps
+`()`; private pure value functions are outside this package-root law.
+
 ## Construction And Scope
 
 `Keiyaku` owns the two construction points:
@@ -24,7 +29,7 @@ type BindInput = Readonly<{
 }>
 
 Keiyaku.bind(input: BindInput): Promise<BindResult>
-Keiyaku.of(id: ContractId, options?: { repo?: string }): Keiyaku
+Keiyaku.of(input: { id: ContractId; repo?: string }): Keiyaku
 ```
 
 `markdown` is the complete contract document and is decoded at the
@@ -42,7 +47,7 @@ operations accept no repository coordinate.
 `Repo` is the pinned Git-world view. Its public surface is exactly:
 
 ```ts
-Repo.at(path?: string): Repo
+Repo.at(input?: { path?: string }): Repo
 repo.root: string
 repo.status(): Promise<StatusReport>
 repo.reconcile(): Promise<RepoReconcileReport>
@@ -89,16 +94,17 @@ keiyaku.amend(input: {
   after?: readonly ContractId[]
   gates?: readonly Gate[]
 }): Promise<Outcome<void>>
-keiyaku.deliver(options?: { actor?: ActorId }): Promise<Outcome<Delivery>>
-keiyaku.abandon(reason: AbandonReason, options?: {
+keiyaku.deliver(input?: { actor?: ActorId }): Promise<Outcome<Delivery>>
+keiyaku.abandon(input?: {
   actor?: ActorId
   note?: string
 }): Promise<Outcome<void>>
 keiyaku.arc(input: { markdown: string; actor?: ActorId }): Promise<Outcome<void>>
-keiyaku.audit(options?: { actor?: ActorId }): Promise<Outcome<AuditReport>>
+keiyaku.audit(input?: { actor?: ActorId }): Promise<Outcome<AuditReport>>
 keiyaku.reconcile(): Promise<ReconcileReport>
 
-delivery.review(verdict: ReviewVerdict, options?: {
+delivery.review(input: {
+  verdict: ReviewVerdict
   actor?: ActorId
   summary?: string
 }): Promise<Outcome<void>>
@@ -198,7 +204,8 @@ diagnostic and with observation exit status `0`.
 is canonical rendering:
 
 ```ts
-ContractBody.render(body: ContractBody, options?: {
+ContractBody.render(input: {
+  body: ContractBody
   currentArc?: ArcChapter
 }): string
 ```

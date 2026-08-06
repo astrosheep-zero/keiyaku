@@ -105,9 +105,9 @@ usage refusal.
 
 `deliver` accepts `--actor` and `--json`. `review` requires exactly one of
 `--approve` or `--changes-requested`, with optional `--summary`, `--actor`, and
-`--json`. `abandon` accepts optional `--note`, `--actor`, and `--json`; its
-reason is the command's fixed `manual` intent rather than a caller-selected
-flag. `arc` and `audit` accept `--actor` and `--json`; audit also accepts
+`--json`. `abandon` accepts optional `--note`, `--actor`, and `--json`; it has
+no reason flag or hidden reason classification. `arc` and `audit` accept
+`--actor` and `--json`; audit also accepts
 `--show-diff-body`. `status` and `reconcile` accept `--json`.
 `--json` is output-only.
 

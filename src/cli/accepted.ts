@@ -52,7 +52,7 @@ export async function resultFromOutcome<A>(
   const predecessor = accepted.prior?.body;
   const diff = predecessor === undefined || predecessor === null || replacement === null
     ? undefined
-    : unifiedDiff(ContractBody.render(predecessor), ContractBody.render(replacement));
+    : unifiedDiff(ContractBody.render({ body: predecessor }), ContractBody.render({ body: replacement }));
   return {
     kind: "accepted",
     verb,

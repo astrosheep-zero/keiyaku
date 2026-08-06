@@ -115,18 +115,23 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   assert.equal(recovered?.snapshotId, delivered.value.snapshotId);
   assert.equal(recovered?.changeId, delivered.value.changeId);
 
-  const reviewed = await delivered.value.review("changes-requested", {
+  const reviewed = await delivered.value.review({ verdict: "changes-requested",
     summary: "The candidate still needs one correction.",
   });
   assert.equal(reviewed.kind, "accepted");
   assert.equal((await contract.state()).reviews.at(-1)?.data.summary, "The candidate still needs one correction.");
 
-  const abandoned = await contract.abandon("manual", { note: "Return the task to planning." });
+  await assert.rejects(
+    // @ts-expect-error The deleted reason enum is not an abandon options object.
+    () => contract.abandon("manual"),
+    /abandon input must be an object/,
+  );
+  const abandoned = await contract.abandon({ note: "Return the task to planning." });
   assert.equal(abandoned.kind, "accepted");
-  assert.equal((await contract.state()).abandon?.data.note, "Return the task to planning.");
+  assert.deepEqual((await contract.state()).abandon?.data, { note: "Return the task to planning." });
   const terminalDelivery = await contract.delivery();
   assert.equal(terminalDelivery?.snapshotId, delivered.value.snapshotId);
-  assert.deepEqual(await terminalDelivery?.review("approved"), {
+  assert.deepEqual(await terminalDelivery?.review({ verdict: "approved" }), {
     kind: "refused",
     refusal: { kind: "terminal", contractId: (await contract.state()).id },
   });
@@ -360,7 +365,7 @@ test("public read-only audit returns an empty receipt without a second outcome k
 
 test("public audit refuses a missing contract without escaping Outcome", async () => {
   const repository = repositoryWithMain();
-  const contract = Keiyaku.of("kei/missing" as ContractId, { repo: repository.path });
+  const contract = Keiyaku.of({ id: "kei/missing" as ContractId, repo: repository.path });
 
   assert.deepEqual(await contract.audit(), {
     kind: "refused",
@@ -382,7 +387,7 @@ test("a Delivery handle refuses review after a replacement tender", async () => 
   const replacement = await contract.deliver();
   assert.equal(replacement.kind, "accepted");
 
-  assert.deepEqual(await first.value.review("approved"), {
+  assert.deepEqual(await first.value.review({ verdict: "approved" }), {
     kind: "refused",
     refusal: { kind: "stale-tender", contractId: (await contract.state()).id },
   });

@@ -42,9 +42,10 @@ review may be the explicit placement request that completes the gates.
 `changes-requested` records judgment only. Optional `summary` is opaque
 testimony and does not participate in a gate.
 
-`abandon` records a legal terminal withdrawal. Its `reason` is `manual` or
-`bind-failed`; optional `note` is opaque testimony and does not participate in
-a gate.
+`abandon` records a legal terminal withdrawal. Optional `note` is opaque
+testimony and does not participate in a gate. No reason enum is stored: the
+fact kind already states the withdrawal intent, and no lifecycle reader needs
+a second classification.
 
 An arc is a narrative chapter within one contract lifetime:
 

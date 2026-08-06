@@ -6,7 +6,7 @@ export function abandonFromCommand(
   contract: Keiyaku,
   actor?: string,
 ): Promise<Outcome<void>> {
-  return contract.abandon("manual", {
+  return contract.abandon({
     ...(actor === undefined ? {} : { actor: actor as ActorId }),
     ...(command.note === undefined ? {} : { note: command.note }),
   });

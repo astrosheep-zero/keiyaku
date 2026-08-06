@@ -11,7 +11,8 @@ export async function reviewFromCommand(
   if (delivery === null) {
     return { kind: "refused", refusal: { kind: "delivery-missing", contractId } };
   }
-  return delivery.review(command.verdict, {
+  return delivery.review({
+    verdict: command.verdict,
     ...(actor === undefined ? {} : { actor: actor as ActorId }),
     ...(command.summary === undefined ? {} : { summary: command.summary }),
   });

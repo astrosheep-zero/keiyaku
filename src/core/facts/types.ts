@@ -130,7 +130,6 @@ export type ArcData = Readonly<{
 }>;
 
 export type AbandonData = Readonly<{
-  reason: "manual" | "bind-failed";
   note?: string;
 }>;
 

@@ -321,12 +321,8 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
       return validateArc(value, path) satisfies ArcData;
     case "abandon": {
       const object = requireRecord(value, path);
-      requireOptionalKeys(object, ["reason", "note"], path);
-      if (!("reason" in object)) fail(path, "missing field 'reason'");
-      const reason = stringValue(object.reason, `${path}.reason`);
-      if (reason !== "manual" && reason !== "bind-failed") fail(`${path}.reason`, "unknown abandon reason");
+      requireOptionalKeys(object, ["note"], path);
       return {
-        reason,
         ...(object.note === undefined ? {} : { note: stringValue(object.note, `${path}.note`) }),
       } satisfies AbandonData;
     }

@@ -122,7 +122,7 @@ test("a terminal cleanup can leave a delivery diff unavailable after Git prunes 
   if (delivered.kind !== "accepted") throw new Error("deliver was refused");
   await bound.value.reconcile();
 
-  const reviewed = await delivered.value.review("approved");
+  const reviewed = await delivered.value.review({ verdict: "approved" });
   assert.equal(reviewed.kind, "accepted");
   assert.ok((await bound.value.state()).terminal);
   assert.equal((await bound.value.reconcile()).kind, "cleaned");

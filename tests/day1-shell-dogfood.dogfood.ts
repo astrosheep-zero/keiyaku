@@ -305,7 +305,7 @@ test("installed binary abandonment preserves the target and user commit", () => 
   assert.equal(git(repository, ["show", `${userCommit}:user-owned.txt`]), "keep this user commit\n");
   assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "abandon", "abandoned"]);
   const abandon = journalEntries(repository, id).find((entry) => entry.kind === "abandon");
-  assert.equal(abandon?.data?.note, "scope changed");
+  assert.deepEqual(abandon?.data, { note: "scope changed" });
   assert.equal(gitRef(repository, deliveryRef), null);
   assert.equal(existsSync(managed), false);
 });

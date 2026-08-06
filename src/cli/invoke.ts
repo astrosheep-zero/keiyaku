@@ -52,11 +52,11 @@ function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv
 }
 
 function repoAt(coordinate: string | undefined): Repo {
-  return coordinate === undefined ? Repo.at() : Repo.at(coordinate);
+  return coordinate === undefined ? Repo.at() : Repo.at({ path: coordinate });
 }
 
 function contractAt(id: ContractId, coordinate: string | undefined): KeiyakuContract {
-  return coordinate === undefined ? Keiyaku.of(id) : Keiyaku.of(id, { repo: coordinate });
+  return coordinate === undefined ? Keiyaku.of({ id }) : Keiyaku.of({ id, repo: coordinate });
 }
 
 async function statusAt(coordinate: string | undefined): Promise<Awaited<ReturnType<Repo["status"]>>> {

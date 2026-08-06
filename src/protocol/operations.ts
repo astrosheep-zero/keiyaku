@@ -6,7 +6,7 @@ import { readRef, repositoryAt } from "../carrier/repository.js";
 import { readDeliveryDiff } from "../carrier/verification.js";
 import { foldJournal } from "../core/facts/fold.js";
 import type {
-  AbandonData, AmendData, ArcData, BindData, ChangeId, ContractBody, ContractId, ContractState, JournalEntry, ReviewData, SnapshotId,
+  AmendData, ArcData, BindData, ChangeId, ContractBody, ContractId, ContractState, JournalEntry, ReviewData, SnapshotId,
 } from "../core/facts/types.js";
 import { decideAbandon, type AbandonRefusal } from "../core/verbs/abandon.js";
 import { decideAmend, type AmendRefusal } from "../core/verbs/amend.js";
@@ -248,7 +248,7 @@ export async function deliverOperation(input: OperationInput): Promise<IntentOut
 }
 
 export function abandonOperation(
-  input: OperationInput & Readonly<{ reason: AbandonData["reason"]; note?: string }>,
+  input: OperationInput & Readonly<{ note?: string }>,
 ): IntentOutcome<void, AbandonRefusal> {
   const carrier = repository(input);
   const state = observeContract(carrier, input.contractId).state;
@@ -261,7 +261,7 @@ export function abandonOperation(
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
       finalHead: finalHead === null ? null : mintSnapshotId(finalHead),
-      data: { reason: input.reason, ...(input.note === undefined ? {} : { note: input.note }) },
+      data: { ...(input.note === undefined ? {} : { note: input.note }) },
     }, decideAbandon),
     undefined,
   );

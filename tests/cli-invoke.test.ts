@@ -238,7 +238,7 @@ test("concurrent amend diff uses the accepted predecessor after a competing amen
     contractDocument("Concurrent original"),
   );
   const id = acceptedContract(bound);
-  const contract = Keiyaku.of(id, { repo: repository.path });
+  const contract = Keiyaku.of({ id, repo: repository.path });
   const amend = Keiyaku.prototype.amend;
   let injected = false;
 
@@ -301,7 +301,7 @@ test("audit --show-diff-body retains its Delivery across a terminal transition",
   const delivered = await invokeWithDocument(repository.path, ["deliver", id, "--actor", "external-test"], "");
   assert.equal(delivered.kind, "accepted");
 
-  const contract = Keiyaku.of(id, { repo: repository.path });
+  const contract = Keiyaku.of({ id, repo: repository.path });
   const pinned = await contract.delivery();
   if (pinned === null) throw new Error("delivery was not available before audit");
   const delivery = Keiyaku.prototype.delivery;
@@ -313,7 +313,7 @@ test("audit --show-diff-body retains its Delivery across a terminal transition",
     return delivery.call(this);
   };
   Keiyaku.prototype.audit = async function(options) {
-    const reviewed = await pinned.review("approved", options);
+    const reviewed = await pinned.review({ verdict: "approved", ...options });
     assert.equal(reviewed.kind, "accepted");
     return audit.call(this, options);
   };
@@ -347,7 +347,7 @@ test("audit renders an unavailable public delivery diff as an observation", asyn
   const delivered = await invokeWithDocument(repository.path, ["deliver", id, "--actor", "external-test"], "");
   assert.equal(delivered.kind, "accepted");
 
-  const contract = Keiyaku.of(id, { repo: repository.path });
+  const contract = Keiyaku.of({ id, repo: repository.path });
   const delivery = await contract.delivery();
   if (delivery === null) throw new Error("delivery was not available for audit");
   const diff = Delivery.prototype.diff;

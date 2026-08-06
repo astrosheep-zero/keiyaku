@@ -147,7 +147,6 @@ type ArcData = Readonly<{
   brief: string
 }>
 type AbandonData = Readonly<{
-  reason: "manual" | "bind-failed"
   note?: string
 }>
 type AbandonedData = Readonly<{ finalHead: SnapshotId | null }>
