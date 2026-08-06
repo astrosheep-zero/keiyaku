@@ -1,14 +1,15 @@
 ---
 id: 复用一次定格的-repository-scope
 title: 复用一次定格的 repository scope
-state: open
+state: in_progress
 pri: 1
 needs: []
 parent: null
 from: []
 createdAt: 2026-08-06T05:43:56.092Z
-updatedAt: 2026-08-06T05:43:56.092Z
+updatedAt: 2026-08-06T05:49:12.569Z
 creator: thekoc
+startedAt: 2026-08-06T05:49:12.569Z
 ---
 Repo/Keiyaku 已保存 PinnedScope 的 coordinate 与 root，但每个 public method 只把 coordinate 传给 protocol；protocol 随即 repositoryAt(coordinate) 并再次执行 git worktree list。一个常见 CLI 写操作会在 selector、handle construction、verb 与 accepted reconcile 路径重复发现同一 repository world。
 
