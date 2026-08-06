@@ -7,7 +7,6 @@ Keiyaku.bind({ markdown, target: "main" });
 Keiyaku is the package-root contract library. It is ESM-only and the package
 root is its sole public import surface. The public objects are `Keiyaku`,
 `Repo`, `Delivery`, and the exported value types defined by their operations.
-There is no public structured `ContractBody` value or render operation.
 
 Every package-root domain operation that accepts input takes exactly one
 readonly object. Public operations have no positional value parameters and no
@@ -98,8 +97,16 @@ keiyaku.amend(input: {
   actor?: ActorId
   after?: readonly ContractId[]
   gates?: readonly Gate[]
-}): Promise<Outcome<void>>
-keiyaku.deliver(input?: { actor?: ActorId }): Promise<Outcome<Delivery>>
+}): Promise<Outcome<void, RegionObservation>>
+keiyaku.deliver(input?: {
+  actor?: ActorId
+  message?: string
+}): Promise<Outcome<Delivery>>
+keiyaku.review(input: {
+  verdict: AttestationVerdict
+  actor?: ActorId
+  summary?: string
+}): Promise<Outcome<Review>>
 keiyaku.abandon(input?: {
   actor?: ActorId
   note?: string
@@ -108,11 +115,6 @@ keiyaku.arc(input: { markdown: string; actor?: ActorId }): Promise<Outcome<void>
 keiyaku.audit(input?: { actor?: ActorId }): Promise<Outcome<AuditReport>>
 keiyaku.reconcile(): Promise<ReconcileReport>
 
-delivery.review(input: {
-  verdict: AttestationVerdict
-  actor?: ActorId
-  summary?: string
-}): Promise<Outcome<void>>
 delivery.diff(): Promise<string | null>
 ```
 
@@ -127,40 +129,114 @@ input grammars are owned by [document.md](document.md). `deliver`, `review`,
 [lifecycle.md](lifecycle.md). `reconcile` requests the transport operation
 defined in [transport.md](transport.md).
 
-`delivery.review` is a library-edge attestation producer. Its binding to a
-declared opaque gate and its lawful dependency-key selection are producer
-methodology, not built-in core gate law.
+`review` is a contract operation. It does not require a Delivery handle or an
+existing delivery fact. It captures the current worktree patch identity against
+the contract start and the effective document key. It records the owned
+`reviewed` testimony even when that token is absent from `terms.gates`.
 
 `delivery()` freshly observes the journal and returns the most recent tender.
 It returns `null` only when the contract has never tendered. A returned
-Delivery is pinned to public `snapshotId` and `changeId`; `deliver()` and
-`delivery()` are its two birth paths. Each attestation-producing operation
-captures its lawful dependency-key subject before testimony; the library
-records that captured subject. A terminal contract receives the verb's typed
-terminal refusal from the lifecycle decision.
+Delivery is pinned to public `snapshotId`, `changeId`, and
+`expectedPredecessor`; `deliver()` and `delivery()` are its two birth paths. A
+Delivery has no review operation. `message` overrides only a mechanically
+materialized commit message; omitting it uses the transport template in
+[transport.md](transport.md).
 
 ## Outcomes And Reports
 
 ```ts
-type Outcome<A> =
-  | { kind: "accepted"; receipt: Receipt; value: A }
+type Outcome<A, Observation extends object = Record<never, never>> =
+  | ({ kind: "accepted"; receipt: Receipt; value: A } & Observation)
   | { kind: "refused"; refusal: TypedRefusal }
   | { kind: "retry"; reason: TypedRetry }
 
-type Receipt = Opaque<"process-local-receipt">
+export type RegionOverlap = Readonly<{
+  contract: ContractId
+  patterns: readonly Readonly<{ mine: string; theirs: string }>[]
+}>
+
+type RegionObservation = Readonly<
+  | { overlaps: readonly RegionOverlap[]; overlapFailure?: never }
+  | { overlapFailure: string; overlaps?: never }
+>
+
+type BindResult = Outcome<Keiyaku, RegionObservation>
+
+type Receipt = Readonly<{
+  facts: readonly Fact[]
+  prior: ContractState | null
+  snapshot: ContractState
+}>
+
+type StepStop<R> = Readonly<
+  | { refusal: R; retry?: never }
+  | { retry: TypedRetry; refusal?: never }
+>
+
+type AttestationRefusal = Readonly<{
+  kind: "contract-missing" | "terminal"
+  contractId: ContractId
+}>
+
+type PlacementRefusal = Readonly<{
+  kind: "contract-missing" | "delivery-missing" | "terminal" | "gates-unsatisfied"
+  contractId: ContractId
+}>
+
+type VerificationAttempt = Readonly<{
+  failure: "timeout" | "spawn-error" | "unknown-exit"
+}>
+
+type Delivery = Readonly<{
+  snapshotId: SnapshotId
+  changeId: ChangeId
+  expectedPredecessor: SnapshotId
+  verification?: StepStop<AttestationRefusal>
+  placement?: StepStop<PlacementRefusal>
+  attempt?: VerificationAttempt
+  diff(): Promise<string | null>
+}>
+
+type Review = Readonly<{
+  placement?: StepStop<PlacementRefusal>
+}>
 ```
 
-The exact accepted receipt/result shape is pending the P0-2 multi-admission
-ruling. It must remain process-local and non-authoritative; the journal is the
-sole lifecycle authority. Until that ruling, no consumer may depend on a
-`prior`/`snapshot` body or treat a composite receipt as persisted state.
+`RegionObservation` is structural notation for the accepted arms of `bind` and
+`amend`, not another package-root export. Exactly one property is present.
+`overlaps`, including `[]`, means the observation completed. `overlapFailure`
+means admission succeeded but the non-authoritative observation did not
+complete; it contains the verbatim diagnostic and does not change the accepted
+outcome. `RegionOverlap` is the only exported Region result type.
+
+After successful admission, the library obtains every nonterminal contract's
+opaque document from one internal protocol read and applies the body dialect to
+those bytes. It compares the already-decoded input against those peer documents
+and adds the observation at the public edge. The protocol read performs one
+immutable carrier observation; the library never loops over per-contract state
+reads or imports carrier. Region is not passed to protocol or core, cached, or
+persisted separately from the document that declared it.
+
+An accepted receipt contains every fact admitted by that invocation. Successful
+auto-verification and auto-placement therefore appear only in `receipt.facts`;
+their named value fields are absent.
+
+An unsuccessful incidental admission does not change the outer accepted
+outcome. Its `verification` or `placement` field contains exactly one mutually
+exclusive `refusal` or `retry` property. The wrapper has no `kind`
+discriminator and is private implementation vocabulary; only its instantiated
+Delivery and Review shapes are public. A runtime `timeout`, `spawn-error`, or
+`unknown-exit` admits no fact and appears only as transient `attempt`. When a
+step neither lands nor leaves a stop or attempt, its fields are absent. These
+values remain process-local and non-authoritative; the journal is the sole
+lifecycle authority.
 Programmer value-shape errors throw; domain refusals and carrier races use the
 closed `Outcome` union.
 
 ```ts
 type AuditReport = Readonly<{
   reworks: number
-  reviewed: number
+  reviews: number
   timeline: readonly TimelineEntry[]
   attempt?: Readonly<{
     failure: "timeout" | "spawn-error" | "unknown-exit"
@@ -174,7 +250,7 @@ type TimelineEntry = Readonly<{
 }>
 ```
 
-`reworks` counts `deliver` facts and `reviewed` counts attestations emitted by
+`reworks` counts `deliver` facts and `reviews` counts attestations emitted by
 the review operation. Timeline entries are in journal order; `at` is copied from the fact and `sincePrior` is
 the integer millisecond difference from the immediately preceding value. The
 first, an unparseable pair, or a missing prior value yields `null`; a negative
@@ -212,8 +288,8 @@ document keys needed by core. It does not expose a structured `ContractBody`, a
 render function, a carrier handle, direct journal writer, placement operation,
 or verification-run operation.
 
-The exact public abandon/abandoned terminal result is pending P0-3; the current
-method remains a provisional source surface until that ruling.
+The package root exports the operation value names `Delivery` and `Review`.
+`DeliverValue`, `ReviewValue`, and `ReviewResult` are not public aliases.
 
 Task products may retain a returned `ContractId` and observe terminal contract
 state through this API. Their association, persistence, failure policy, and

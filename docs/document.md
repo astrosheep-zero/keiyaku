@@ -38,6 +38,19 @@ The library owns interpretation of these sections and any extensions. They are
 not structural core facts. In particular, `Region` and every other decoded
 document field remain library methodology, not journal-model vocabulary.
 
+Each nonblank line in `Region` is one repository-relative positive path
+pattern. `/` separates segments. Within a segment, `*` matches any number of
+characters other than `/`, and `?` matches exactly one such character. `**`
+matches any depth and may appear only as a complete segment. A pattern may not
+contain `!`, `[`, `]`, `{`, or `}`, begin with `/`, contain `..` or an empty
+segment, or end with `/`; a directory tree is written as `dir/**`. Invalid
+patterns are typed document refusals.
+
+The dialect computes exact intersection between two patterns from this closed
+grammar. It does not use a conservative approximation. This interpretation is
+pure body methodology: core, protocol, and carrier receive only the complete
+opaque document bytes and their keys.
+
 The title has no content before the first H2. The document has no nonblank
 bytes outside its H1 and H2 sections, no duplicate top-level H2, and no
 frontmatter. An unrecognized H2 is an extension with its original title and
@@ -107,6 +120,7 @@ contract's current chapter and its sequence are lifecycle state, defined in
 ## Rendering Boundary
 
 The decoder, amendment applier, and arc decoder are internal library consumers
-of this methodology. A document is decoded once; no public structured
-`ContractBody` value or render operation exists. Edge formatting, when needed,
-does not create core facts or a second document authority.
+of this methodology. A document is decoded once and its structured edge value
+does not leave the library. Edge formatting, when needed, does not create core
+facts or a second document authority. The package-root boundary is owned by
+[public-api.md](public-api.md).

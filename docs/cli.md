@@ -35,7 +35,7 @@ The command vocabulary is:
 | `bind` | Calls `Keiyaku.bind` with Markdown and structured options. |
 | `amend` | Calls `keiyaku.amend` with the operation Markdown and structured options. |
 | `deliver` | Calls `keiyaku.deliver`. |
-| `review` | Recovers `keiyaku.delivery()` and calls `Delivery.review`. |
+| `review` | Calls `keiyaku.review` directly. |
 | `abandon` | Calls `keiyaku.abandon`. |
 | `arc` | Calls `keiyaku.arc` with arc Markdown. |
 | `status` | Calls `repo.status()` and optionally filters its returned board. |
@@ -58,7 +58,7 @@ The command-specific syntax is:
 ```text
 bind [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -
 amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -
-deliver [<contract>|@<contract>] [--actor <actor>] [--json]
+deliver [<contract>|@<contract>] [--message <text>] [--actor <actor>] [--json]
 review [<contract>|@<contract>] (--satisfied | --unsatisfied) [--summary <text>] [--actor <actor>] [--json] [-]
 abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
@@ -103,7 +103,8 @@ omitted, falling back to `[reviewed]`; amend retains its current public value
 when its flag is omitted. A malformed settings file or unknown name is a typed
 usage refusal.
 
-`deliver` accepts `--actor` and `--json`. `review` requires exactly one of
+`deliver` accepts an optional materialized-commit `--message`, `--actor`, and
+`--json`. `review` requires exactly one of
 `--satisfied` or `--unsatisfied`, with optional `--summary`, `--actor`, and
 `--json`. `abandon` accepts optional `--note`, `--actor`, and `--json`; it has
 no reason flag or hidden reason classification. `arc` and `audit` accept
@@ -141,15 +142,43 @@ effects: [
 ]
 ```
 
-Text presents accepted facts, then effects, then flat lag. It does not replace
-observed data with a repair command.
+Text presents all `receipt.facts`, then incidental step stops and attempts,
+then Region observation, effects, and flat lag. It does not replace observed
+data with a repair command. Each completed bind/amend overlap witness renders:
 
-The amendment presentation diff is pending the P0-2 receipt/result ruling. It
-is an output hint only: the CLI must never dereference a structured body from a
-public receipt, persist diff bytes, or make diff availability a lifecycle
-decision. When settled, the library edge supplies the before/after document
-text to the pure-JavaScript `diff` renderer; the parser and core remain unaware
-of presentation formatting.
+```text
+overlap <contract> <mine> ~ <theirs>
+```
+
+An incomplete Region observation renders exactly one line and leaves the
+accepted exit status unchanged:
+
+```text
+overlap unavailable <verbatim-diagnostic>
+```
+
+An empty completed observation renders no overlap line. JSON exposes the same
+public `overlaps` or `overlapFailure` property without a second output schema.
+The exact incidental lines are:
+
+```text
+step verification refused <json-refusal>
+step verification retry <json-retry>
+step placement refused <json-refusal>
+step placement retry <json-retry>
+attempt verification timeout|spawn-error|unknown-exit
+```
+
+The `step` prefix distinguishes an accepted verb's incidental stop from a
+top-level `refused <verb>` result. JSON serializes the public value unchanged.
+The renderer never mines facts from value fields or duplicates an accepted
+fact outside `receipt.facts`.
+
+The amendment presentation diff is an output hint only: the CLI must never
+dereference a structured body from a public receipt, persist diff bytes, or
+make diff availability a lifecycle decision. The library edge supplies the
+before/after document text to the pure-JavaScript `diff` renderer; the parser
+and core remain unaware of presentation formatting.
 
 Audit omits diff content unless `--show-diff-body` is present. It obtains the
 Delivery from the public handle and renders diff text when available. A `null`
@@ -183,3 +212,7 @@ external task product.
 The surface has no interactive mode, input envelope, independent JSON schema,
 per-command JSON payload, configurable attempt count, command alias, or
 additional top-level command.
+
+`scope` remains the repository-coordinate field on `StatusReport`. There is no
+`scope` or `region` command; cross-contract fact relationships and a world
+Region report are outside the day-one surface.

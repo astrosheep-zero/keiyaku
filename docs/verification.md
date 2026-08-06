@@ -13,18 +13,21 @@ core fact or core gate vocabulary.
 
 Verification is synchronous. An owning library operation records its selected
 candidate, resolves the v3 declaration for the edge's `verified` producer, and
-runs that producer. A
-matching satisfied attestation for the producer's declared opaque gate and
+runs that producer whenever a valid declaration exists. The presence of the
+`verified` token in `terms.gates` controls whether placement waits for the
+attestation; it does not control whether the producer runs or whether its
+attestation is recorded. A matching satisfied attestation for the producer's declared opaque gate and
 subject is reusable and starts no process. A matching unsatisfied attestation
 is durable history; a later testimony for the same gate and subject supersedes
-it. The producer or operation chooses the lawful dependency-key set, while core
-mints the keys and performs the generic currentness check.
+it. The `verified` producer's subject is exactly the candidate snapshot key and
+the decoded Verification segment key. Core only mints and compares those opaque
+keys; it does not know how the producer chose them.
 
-Before execution, the producer captures its `AttestationData.subject`. Admission
-compares that captured set with the current set and refuses `stale-subject` when
-state changed during execution; it never silently retargets the result. The
-journal attestation is the only durable execution result and the only input to
-gate reading.
+Before execution, the producer captures its `AttestationData.subject`.
+Admission records that captured set without a freshness check and never
+silently retargets the result. Placement applies the sole currentness law
+defined in [lifecycle.md](lifecycle.md). The journal attestation is the only
+durable execution result and the only input to gate reading.
 
 If the edge's `verified` gate is declared without a valid v3 declaration, the
 owning outer boundary rejects the operation. The absence is not a journal
@@ -53,10 +56,12 @@ stdout/stderr capture, and elapsed duration. Its input is:
 ```ts
 type ProcessInput = Readonly<{
   argv: readonly string[]
-  cwd: string
-  env: Readonly<Record<string, string>>
-  timeout: number
-  outputLimits: OutputLimits
+  cwd?: string
+  env?: NodeJS.ProcessEnv
+  timeoutMs: number
+  stdoutLimitBytes: number
+  stderrLimitBytes: number
+  signal?: AbortSignal
 }>
 ```
 
@@ -82,9 +87,7 @@ The relevant dependencies are one-way:
 
 ```text
 src/core/facts/gate.ts -> src/core/subject.ts
-src/core/verbs/attestation.ts -> src/core/subject.ts
 src/verification/ -> src/runtime/proc/
-src/akuma/ -> src/runtime/proc/
 ```
 
 `facts/gate.ts` performs the one generic currentness check over the declared

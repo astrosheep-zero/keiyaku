@@ -69,9 +69,9 @@ Actor is optional testimony, not lifecycle identity or gate input. `ActorId` is
 an opaque nonblank brand. A library write records it only when the caller
 supplies it; its absence is legal. The CLI selects an explicit nonblank
 `--actor`, then `KEIYAKU_PROJECTION_ID`, then no signature. Carrier uses a
-neutral Git author when testimony is absent. Facts retain full `kei/` values;
-carrier paths may privately strip the prefix but never reconstruct public
-identity from a path.
+neutral Git author when testimony is absent. Contract facts retain full `kei/`
+identities; carrier paths may privately strip that prefix but never reconstruct
+public identity from a path.
 
 ## Values And Facts
 
@@ -120,7 +120,7 @@ of the source document's sections or syntax.
 The fact vocabulary is closed:
 
 ```text
-bind / amend / deliver / attestation / abandon
+bind / amend / deliver / attestation
 arc / bound / claimed / abandoned
 ```
 
@@ -147,15 +147,15 @@ type ArcData = Readonly<{
   objective: string
   brief: string
 }>
-// Provisional until the P0-3 terminal-shape ruling.
-type AbandonData = Readonly<{
+type AbandonedData = Readonly<{
+  finalHead: SnapshotId | null
   note?: string
 }>
-type AbandonedData = Readonly<{ finalHead: SnapshotId | null }>
 ```
 
-The exact `abandon`/`abandoned` terminal fact split is pending P0-3; the
-shapes above are the current source sketch, not an implementation instruction.
+`abandoned` is the one abandonment terminal fact. It captures the target head
+when one was observed and optional opaque `note`; it has no reason category,
+intent precursor, or reopen fact.
 
 The journal stores lifecycle facts and bounded intent data only. It stores no
 raw producer logs, reports, patches, artifacts, or blob evidence.
@@ -176,24 +176,20 @@ type ContractState = Readonly<{
   delivery: DeliverEntry | null
   attestations: readonly AttestationEntry[]
   currentArc?: ArcEntry
-  abandon: AbandonEntry | null
   terminal: ClaimedEntry | AbandonedEntry | null
 }>
 ```
 
 `ContractState` is a fold snapshot, not stored authority. It holds the
 contract head, coordinates, effective opaque terms, binding placement, current
-tender, attestation history, current arc, abandonment intent, and terminal
-placement. Pending delivery is a read-model projection over this state.
+tender, attestation history, current arc, and terminal placement. Pending
+delivery is a read-model projection over this state.
 
-Gate names are opaque contract-declared tokens. Core has one generic
-currentness check over a declared gate and dependency-key set; it does not
-derive gates or keys from verification, section names, or any other producer
-methodology. An attestation subject is a set of core-minted dependency keys.
-The producer or operation owns which keys it may lawfully include. Admission
-refuses a stale captured subject as a typed `stale-subject` outcome. For the
-same gate and subject, the last unsatisfied testimony overrides an earlier
-satisfied testimony.
+Gate, subject, and document identities are opaque pact values. Their lifecycle
+meaning, producer ownership, and sole currentness adjudicator are defined once
+in [lifecycle.md](lifecycle.md); their producer-specific Verification use is
+defined in [verification.md](verification.md). Core derives none of those rules
+from Markdown section names or Git objects.
 
 The carrier checks `meta/format.json` on every nonempty carrier read. A
 contract's `ContractHead` is its journal blob identity, so unrelated carrier

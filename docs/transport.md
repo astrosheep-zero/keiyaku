@@ -40,12 +40,24 @@ ownership of that worktree or its branch.
 For a target contract, transport freshly observes the target head as the
 delivery predecessor. For a targetless contract, the recorded `start` is the
 predecessor used to derive patch identity and there is no target ref operation.
-The candidate is the selected workspace `HEAD`: the deterministic managed
-worktree in worktree mode or the pinned caller worktree in here mode.
+The candidate is the selected workspace content: the deterministic managed
+worktree in worktree mode or the pinned caller worktree in here mode. Clean
+content uses its existing `HEAD`. Dirty content, including untracked files, is
+captured through a private index and materialized as a deterministic candidate
+commit/tree without changing the caller's index or worktree. Its commit message
+defaults to `<contract-id>: <title>` followed by
+`Keiyaku-Contract: <contract-id>`. A caller-supplied `message` replaces the
+message bytes only; candidate tree, parent, identity rules, and lifecycle
+meaning do not change. Missing managed worktree is a typed preparation refusal.
 
-The Git carrier uses commit identity for `SnapshotId` and a stable patch
-identity for `ChangeId`. When a target is declared, the candidate must descend
-from the observed predecessor. Claimed admission atomically asserts
+The Git carrier uses commit identity for `SnapshotId` and one stable patch-ID
+method for `ChangeId`. Review captures that patch identity from current
+worktree content against the contract `start`; deliver records it against its
+observed delivery predecessor. Without target drift, those two computations
+produce the same patch identity. A pure rebase changes the delivery predecessor
+and candidate coordinates but preserves that identity; a conflict resolution
+that changes the patch does not. When a target is declared, the candidate must
+descend from the observed predecessor. Claimed admission atomically asserts
 `target == expectedPredecessor`, moves it to the candidate, and appends
 `claimed` in one repository transaction. Equality between predecessor and
 candidate is a valid assertion. Target drift requires preparation from the new
@@ -56,6 +68,20 @@ Carrier admission builds raw Git objects and uses one
 `update-ref --stdin --no-deref` transaction. It recognizes canonical admitted
 entry bytes and handles a typed unknown result by fresh transport observation.
 It never turns Git prose into domain law.
+
+## Opaque Document Observation
+
+The internal protocol document read performs exactly one immutable carrier
+observation, folds every contract, filters terminal contracts, and returns the
+minimal projection `{ contract, document: { bytes, key } }` for each remaining
+contract. `bytes` and `key` are the existing persisted `ContractDocument`
+values; this read creates no alternate encoding or cache.
+
+This is an internal authority projection used by the library edge. It is not a
+package-root method or CLI command. Protocol owns the batch and lifecycle
+filter, carrier owns the one Git observation, and neither interprets document
+contents. A caller must not replace the batch with per-contract observations or
+attach the peer world to an admission receipt.
 
 ## Reconciliation
 
