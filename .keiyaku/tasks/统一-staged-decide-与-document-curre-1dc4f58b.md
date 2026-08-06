@@ -8,7 +8,7 @@ needs:
 parent: null
 from: []
 createdAt: 2026-08-06T21:41:47.998Z
-updatedAt: 2026-08-06T21:41:47.998Z
+updatedAt: 2026-08-06T22:39:00.074Z
 creator: thekoc
 ---
 依据 docs/lifecycle.md 的 every attempt one legal decide 和 docs/document.md 的 key-stamped derivation law，删除 deliver/audit/review 的拼装裁决漂移：
@@ -20,3 +20,5 @@ creator: thekoc
 - 不创建 generic lifecycle runner，不让 core 认识 reviewed/verified producer 词汇，不改变 persisted facts 或 public behavior。
 
 精准测试证明 document-moved 优先级、review before deliver、audit/review 计数和唯一 production call graph。
+
+同一刀还要清除两个已证实的旁路：library `amend` 不得用 stale edge read 直接返回 contract-missing；Verification declaration validity 必须在 stamped document currency 与 terminal 判断之后由 owning completed decision 裁定。`abandonOperation` 的 target/finalHead mechanical capture 也必须从该 attempt 的 observation state 派生，不能先 observeContract 再让 admitIntent 另读一份世界。若 owner law 尚不足以给出无 preflight 的局部接口，停在精确 gap，不自由设计。
