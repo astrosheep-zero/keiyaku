@@ -1,15 +1,14 @@
 ---
 id: 收紧-carrier-admission-为单一-cas-4481edd6
 title: 收紧 carrier admission 为单一 CAS 结果模型
-state: in_progress
+state: done
 pri: 1
 needs: []
 parent: null
 from: []
 createdAt: 2026-08-06T05:43:12.202Z
-updatedAt: 2026-08-06T05:49:12.014Z
+updatedAt: 2026-08-06T07:34:00.798Z
 creator: thekoc
-startedAt: 2026-08-06T05:49:12.014Z
 ---
 ContractJournalAppend.expectedHead 在类型与 carrier 中可省略并回退到 carrier 当场观察值，但 protocol 明确拒绝省略，全部生产代码也总是提供它；这留下了一套无人使用的隐式 CAS 模式。Admission 结果同时保留无人读取的 ok 判别，以及 accepted 分支无人读取的 carrierCommit/carrierTree。封闭 union 又混用 interface 与 type。
 
