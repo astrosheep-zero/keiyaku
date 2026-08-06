@@ -7,6 +7,7 @@ needs: []
 parent: null
 from: []
 createdAt: 2026-08-06T17:12:41.659Z
-updatedAt: 2026-08-06T17:12:41.659Z
+updatedAt: 2026-08-06T17:12:52.265Z
 creator: thekoc
 ---
+Reduce synchronous Git process count without adding cache/state: resolve workspace HEAD and HEAD tree in one structured rev-parse call; reuse WorkspaceTree.tree as the candidate tree for stablePatchId instead of re-reading candidate^{tree}. Preserve dirty/private-index behavior and patch identity.
