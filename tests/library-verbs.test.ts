@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { Keiyaku } from "../src/index.js";
+import { Keiyaku, type ContractId } from "../src/index.js";
 import { contractJournalPath } from "../src/carrier/identity.js";
 import { repositoryAt } from "../src/carrier/repository.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
@@ -360,7 +360,7 @@ test("public read-only audit returns an empty receipt without a second outcome k
 
 test("public audit refuses a missing contract without escaping Outcome", async () => {
   const repository = repositoryWithMain();
-  const contract = Keiyaku.of("kei/missing", { repo: repository.path });
+  const contract = Keiyaku.of("kei/missing" as ContractId, { repo: repository.path });
 
   assert.deepEqual(await contract.audit(), {
     kind: "refused",

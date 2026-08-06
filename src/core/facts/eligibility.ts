@@ -15,6 +15,15 @@ type EligibilityObservation = Readonly<{
 
 type EligibilityAttempt = Readonly<{ entryUlids: readonly EntryUlid[] }>;
 
+export function samePrerequisites(
+  left: readonly ContractId[] | undefined,
+  right: readonly ContractId[] | undefined,
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined || left.length !== right.length) return false;
+  return left.every((id, index) => id === right[index]);
+}
+
 function entries(offer: Offer): readonly JournalEntry[] {
   return offer.facts.flatMap((append) => append.entries);
 }

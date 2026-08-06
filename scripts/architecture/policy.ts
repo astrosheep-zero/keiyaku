@@ -7,7 +7,14 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
     { source: "core/facts/types.ts", allow: [any("core/declaration-key.ts", ["declarationKey", "DeclarationKey"])] },
     { source: "core/facts/codec.ts", allow: [any("core/facts/types.ts")] },
-    { source: "core/facts/fold.ts", allow: [any("core/facts/gate.ts"), any("core/facts/types.ts")] },
+    {
+      source: "core/facts/fold.ts",
+      allow: [
+        any("core/facts/eligibility.ts", ["samePrerequisites"]),
+        any("core/facts/gate.ts"),
+        any("core/facts/types.ts"),
+      ],
+    },
     { source: "core/facts/gate.ts", allow: [any("core/declaration-key.ts"), any("core/facts/types.ts")] },
     { source: "core/declaration-key.ts", allow: [] },
     { source: "core/facts/eligibility.ts", allow: [any("core/facts/offer.ts"), any("core/facts/types.ts")] },
@@ -22,6 +29,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         types("core/decide.ts"),
         any("core/declaration-key.ts", ["verificationDeclarationKey"]),
+        any("core/facts/eligibility.ts", ["samePrerequisites"]),
         any("core/facts/gate.ts"),
         any("core/facts/types.ts"),
       ],

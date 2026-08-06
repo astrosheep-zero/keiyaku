@@ -111,14 +111,14 @@ export type BindInput = Readonly<{
   target?: string;
   workspace?: "worktree" | "here";
   actor?: ActorId;
-  after?: readonly string[];
+  after?: readonly ContractId[];
   gates?: readonly Gate[];
 }>;
 
 export type AmendInput = Readonly<{
   markdown: string;
   actor?: ActorId;
-  after?: readonly string[];
+  after?: readonly ContractId[];
   gates?: readonly Gate[];
 }>;
 
@@ -171,7 +171,7 @@ function optionalRepository(value: unknown): string | undefined {
   return value;
 }
 
-function normalizedAfter(values: readonly string[] | undefined): readonly ContractId[] {
+function normalizedAfter(values: readonly ContractId[] | undefined): readonly ContractId[] {
   if (values === undefined) return [];
   if (!Array.isArray(values)) throw new TypeError("after must be an array");
   return values.map((value, index) => {
@@ -204,7 +204,7 @@ function effectiveGates(body: ContractBodyValue, requested: readonly Gate[] | un
 function structuredBody(
   body: ContractBodyValue,
   gates: readonly Gate[] | undefined,
-  after: readonly string[] | undefined,
+  after: readonly ContractId[] | undefined,
 ): ContractBodyValue {
   return {
     ...body,
@@ -283,7 +283,7 @@ export class Keiyaku {
     if (workspace !== "worktree" && workspace !== "here") throw new TypeError("workspace must be worktree or here");
     const target = optionalNonblank(values.target as string | undefined, "target");
     const actor = actorOption(values.actor as ActorId | undefined);
-    const structured = structuredBody(body, values.gates as readonly Gate[] | undefined, values.after as readonly string[] | undefined);
+    const structured = structuredBody(body, values.gates as readonly Gate[] | undefined, values.after as readonly ContractId[] | undefined);
     return mapOutcome(
       bindOperation({
         coordinate: scope.coordinate,
@@ -296,7 +296,7 @@ export class Keiyaku {
     );
   }
 
-  static of(id: string, options?: Readonly<{ repo?: string }>): Keiyaku {
+  static of(id: ContractId, options?: Readonly<{ repo?: string }>): Keiyaku {
     if (typeof id !== "string") throw new TypeError("contract ID must be a string");
     const identity = contractId(id);
     const values = options === undefined ? undefined : requireInput(options, "Keiyaku.of options");
@@ -327,7 +327,7 @@ export class Keiyaku {
     if (current.body === null) throw new Error(`contract body is absent: ${this.id}`);
     const body = applyAmendOperations(markdown, current.body);
     const gates = values.gates === undefined ? current.body.gates : values.gates as readonly Gate[];
-    const after = values.after === undefined ? current.body.after : values.after as readonly string[];
+    const after = values.after === undefined ? current.body.after : values.after as readonly ContractId[];
     const amended = structuredBody(body, gates, after);
     return mapOutcome(amendOperation({
       coordinate: this.scope.coordinate,

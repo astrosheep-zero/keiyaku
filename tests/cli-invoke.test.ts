@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { readRef, repositoryAt } from "../src/carrier/repository.js";
+import { CARRIER_REF, readRef, repositoryAt } from "../src/carrier/repository.js";
 import { Delivery, Keiyaku, type ContractId } from "../src/index.js";
 import { observeContract } from "../src/carrier/observe.js";
 import { candidatePinRefFor, deliveryRefFor, deliveryWorktreePath, reconcile } from "../src/carrier/reconcile.js";
@@ -84,6 +84,13 @@ test("journal-writing commands preserve optional actor testimony", async () => {
   const persisted = observeContract(repositoryAt(repository.path), acceptedContract(explicit)).entries[0]?.actor;
   assert.equal(persisted, explicitActor);
   assert.deepEqual(Buffer.from(persisted ?? "", "utf8"), Buffer.from(explicitActor, "utf8"));
+
+  const beforeBlank = readRef(repositoryAt(repository.path), CARRIER_REF);
+  await assert.rejects(
+    () => command(["bind", "--actor", " \t", "-"], { KEIYAKU_PROJECTION_ID: "aku/environment" }),
+    (error: unknown) => error instanceof CliUsageError && /actor must be a nonblank string/.test(error.message),
+  );
+  assert.equal(readRef(repositoryAt(repository.path), CARRIER_REF), beforeBlank);
 });
 
 test("bind decodes Markdown and records a targetless current snapshot", async () => {
@@ -183,6 +190,44 @@ test("amend applies H2 operations into a complete Markdown replacement", async (
     ),
     /amend operations contain bytes outside H2 sections/,
   );
+});
+
+test("amend refuses changed prerequisites after bound without appending", async () => {
+  const repository = repositoryWithMain();
+  const bound = await invokeWithDocument(
+    repository.path,
+    ["bind", "--actor", "external-test", "-"],
+    contractDocument("Consumed prerequisites"),
+  );
+  const id = acceptedContract(bound);
+  const before = readRef(repositoryAt(repository.path), CARRIER_REF);
+
+  const amended = await invokeWithDocument(
+    repository.path,
+    ["amend", id, "--after", "kei/unclaimed", "--actor", "external-test", "-"],
+    "## Append: Context\nMust refuse.\n",
+  );
+
+  assert.deepEqual(amended, {
+    kind: "refused",
+    verb: "amend",
+    contract: id,
+    refusal: { kind: "prerequisites-already-consumed", contractId: id },
+  });
+  assert.equal(readRef(repositoryAt(repository.path), CARRIER_REF), before);
+
+  const selfDependent = await invokeWithDocument(
+    repository.path,
+    ["amend", id, "--after", id, "--actor", "external-test", "-"],
+    "## Append: Context\nMust also refuse.\n",
+  );
+  assert.deepEqual(selfDependent, {
+    kind: "refused",
+    verb: "amend",
+    contract: id,
+    refusal: { kind: "invalid-after", contractId: id },
+  });
+  assert.equal(readRef(repositoryAt(repository.path), CARRIER_REF), before);
 });
 
 test("concurrent amend diff uses the accepted predecessor after a competing amend", async () => {

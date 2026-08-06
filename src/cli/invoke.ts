@@ -42,7 +42,12 @@ function inputValue<T>(read: () => T): T {
 }
 
 function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
-  const resolved = resolveActor({ env: environment, ...(actor === undefined ? {} : { actor }) });
+  let resolved: string | undefined;
+  try {
+    resolved = resolveActor({ env: environment, ...(actor === undefined ? {} : { actor }) });
+  } catch (error) {
+    throw new CliUsageError(error instanceof Error ? error.message : String(error));
+  }
   return resolved === undefined ? undefined : resolved as ActorId;
 }
 

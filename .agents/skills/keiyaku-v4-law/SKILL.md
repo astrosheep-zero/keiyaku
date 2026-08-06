@@ -15,15 +15,18 @@ not a copy of those decisions.
 2. Read every owner document named there for the requested surface.
 3. Read neighboring code and focused tests only after the owner is known.
 
-The current owners are:
+The registry currently routes readers to:
 
-- [`docs/architecture.md`](../../../docs/architecture.md) for core identity,
-  facts, protocol, admission, delivery, lifecycle, reconcile, persistence,
-  operating limits, and dependency direction.
-- [`docs/cli.md`](../../../docs/cli.md) for the contract CLI boundary,
-  grammar, edge flow, result shapes, status, and task settlement.
-- [`docs/porting-policy.md`](../../../docs/porting-policy.md) for v3 evidence
-  and current-version-only porting rules.
+- [`docs/public-api.md`](../../../docs/public-api.md)
+- [`docs/document.md`](../../../docs/document.md)
+- [`docs/model.md`](../../../docs/model.md)
+- [`docs/lifecycle.md`](../../../docs/lifecycle.md)
+- [`docs/verification.md`](../../../docs/verification.md)
+- [`docs/transport.md`](../../../docs/transport.md)
+- [`docs/cli.md`](../../../docs/cli.md)
+
+The registry, not this list, decides ownership when the chapters change.
+Porting documents are planning evidence and never an owner chapter.
 
 ## Change Discipline
 

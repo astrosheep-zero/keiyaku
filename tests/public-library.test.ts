@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { ContractBody, Keiyaku, Repo } from "../src/index.js";
+import { ContractBody, Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { makeGitRepository } from "./support/git.js";
 
 const root = resolve(import.meta.dirname, "..");
@@ -58,18 +58,26 @@ function repositoryWithInitialCommit() {
 test("package root exposes only the ruled library values and declarations", () => {
   const directory = externalConsumer();
   const source = [
-    'import { ContractBody, Keiyaku, Repo, type AuditReport, type BindInput, type ContractBody as Body, type ContractId, type FactKind, type Outcome, type Receipt, type TimelineEntry } from "@astrosheep/keiyaku-v4";',
-    'const input: BindInput = { markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", repo: "." };',
+    'import { ContractBody, Keiyaku, Repo, type AmendInput, type AuditReport, type BindInput, type ContractBody as Body, type ContractId, type FactKind, type Outcome, type Receipt, type TimelineEntry } from "@astrosheep/keiyaku-v4";',
+    'const id = "kei/consumer" as ContractId;',
+    'const input: BindInput = { markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", repo: ".", after: [id] };',
+    'const amendment: AmendInput = { markdown: "## Append: Context\\nMore\\n", after: [id] };',
     'const body = null as unknown as Body;',
     'const rendered = ContractBody.render(body);',
-    'const existing = Keiyaku.of("kei/consumer" as ContractId, { repo: "." });',
+    'const existing = Keiyaku.of(id, { repo: "." });',
+    '// @ts-expect-error Keiyaku.of requires a branded ContractId',
+    'Keiyaku.of("kei/unbranded");',
+    '// @ts-expect-error BindInput.after requires branded ContractId values',
+    'const invalidBind: BindInput = { ...input, after: ["kei/unbranded"] };',
+    '// @ts-expect-error AmendInput.after requires branded ContractId values',
+    'const invalidAmend: AmendInput = { ...amendment, after: ["kei/unbranded"] };',
     'const bound: Promise<Outcome<Keiyaku>> = Keiyaku.bind(input);',
     'const repo = Repo.at(".");',
     'const receipt = null as unknown as Receipt;',
     'const report = null as unknown as AuditReport;',
     'const timeline = null as unknown as TimelineEntry;',
     'const kind = null as unknown as FactKind;',
-    'void rendered; void existing; void bound; void repo; void receipt; void report; void timeline; void kind;',
+    'void rendered; void existing; void bound; void repo; void receipt; void report; void timeline; void kind; void amendment; void invalidBind; void invalidAmend;',
   ].join("\n");
   writeFileSync(join(directory, "consumer.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer.ts"], { cwd: directory, stdio: "ignore" });
@@ -137,7 +145,7 @@ test("Keiyaku construction is Markdown-in and Repo has only world reads", async 
   assert.equal(repo.root, resolve(repo.root));
   assert.equal((await repo.status()).contracts.some((contract) => contract.contractId === state.id), true);
   assert.equal(Keiyaku.of(state.id, { repo: repository.path }).worktreePath, null);
-  assert.deepEqual(await Keiyaku.of("kei/missing", { repo: repository.path }).amend({
+  assert.deepEqual(await Keiyaku.of("kei/missing" as ContractId, { repo: repository.path }).amend({
     markdown: "## Append: Context\nmissing\n",
   }), {
     kind: "refused",

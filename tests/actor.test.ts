@@ -21,7 +21,14 @@ test("uses environment testimony when explicit actor is absent", () => {
   assert.equal(resolveActor({ env: { [ENV]: "aku/codex" } }), "aku/codex");
 });
 
-test("returns unsigned when neither source supplies nonblank testimony", () => {
+test("returns unsigned when environment testimony is absent or blank", () => {
   assert.equal(resolveActor({ env: {} }), undefined);
-  assert.equal(resolveActor({ env: { [ENV]: "" }, actor: " \t" }), undefined);
+  assert.equal(resolveActor({ env: { [ENV]: "" } }), undefined);
+});
+
+test("rejects a blank explicit actor instead of falling through to the environment", () => {
+  assert.throws(
+    () => resolveActor({ env: { [ENV]: "aku/environment" }, actor: " \t" }),
+    /actor must be a nonblank string/,
+  );
 });

@@ -5,16 +5,11 @@ import type {
   ContractState,
   JournalEntry,
 } from "./types.js";
+import { samePrerequisites } from "./eligibility.js";
 import { gatesSatisfied } from "./gate.js";
 
 function foldError(message: string): never {
   throw new Error(`invalid journal fold: ${message}`);
-}
-
-function samePrerequisites(left: readonly ContractState["id"][] | undefined, right: readonly ContractState["id"][] | undefined): boolean {
-  if (left === right) return true;
-  if (left === undefined || right === undefined || left.length !== right.length) return false;
-  return left.every((id, index) => id === right[index]);
 }
 
 function cloneBody(body: ContractBody): ContractBody {
