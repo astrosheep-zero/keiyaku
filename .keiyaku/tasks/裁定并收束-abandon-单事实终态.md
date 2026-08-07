@@ -1,6 +1,6 @@
 ---
 id: 裁定并收束-abandon-单事实终态
-title: 裁定并收束 abandon 单事实终态
+title: 删除 abandon 双事实终态与跨快照 finalHead
 state: open
 pri: 1
 needs:
@@ -8,9 +8,18 @@ needs:
 parent: null
 from: []
 createdAt: 2026-08-06T05:42:56.344Z
-updatedAt: 2026-08-06T05:42:56.344Z
+updatedAt: 2026-08-07T04:59:33.980Z
 creator: thekoc
 ---
-当前 abandon 与 abandoned 永远在同一 Offer 原子共生，不存在可观察中间态；finalHead 只有 writer/codec，没有 lifecycle、gate、status、audit 或 reconcile 读者，还为 journal-only 终止额外增加一次 target ref 读取。lifecycle 文档同时把 abandon 描述为合法终态，模型出现双重表示。
+依据 docs/model.md 与 docs/lifecycle.md，把 abandon 收束为一个事实和一个终态判断。
 
-这是 persisted model 删除，实施前按 v4 规则让 Faye 对单事实终态成果提出反对。若确认，令 abandon fact 自身成为 terminal，保留 note，删除 abandoned/finalHead/ContractState.abandon/第二 ULID 与对应 codec/fold/test 分支；public phase 仍可投影为 abandoned。零兼容、零迁移。
+当前可构造问题：abandon 与 abandoned 永远在同一 Offer 原子共生；finalHead 没有 lifecycle、gate、status、audit 或 reconcile 读者。abandonOperation 还先观察 target/finalHead，再由 admitIntent 观察第二份世界，可能把旧快照的 finalHead 写进新快照决定的事实。
+
+实施前按 v4 的重大 persisted-model 删除规则，把最终单事实形状交给 Faye 作一次里程碑反对；裁定写回 owner docs 后再改代码。
+
+完成条件：
+
+- abandon fact 自身成为 terminal，保留 note；删除 abandoned fact、finalHead、ContractState.abandon、第二个 EntryUlid 及对应 codec/fold 分支。
+- public phase 仍投影为 abandoned；journal、status、audit 与 reconcile 不新增补偿字段或兼容分支。
+- abandon 不再读取 target ref，也不存在 admission 之前的独立 contract observation；一个 attempt 只使用自己的 observation。
+- current-version-only 更新 persisted codec、fixtures 和精准测试；零迁移、零兼容 decoder。
