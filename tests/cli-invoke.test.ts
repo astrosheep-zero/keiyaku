@@ -9,6 +9,7 @@ import { observeContract } from "../src/carrier/observe.js";
 import { deliveryWorktreePath, reconcile } from "../src/carrier/reconcile.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import { Tasks } from "../src/task/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithMain() {
@@ -92,20 +93,26 @@ test("one CLI invocation reuses its Repo for selector, settings, and contract lo
   }
 });
 
-test("an explicit status selector reads only its contract journal", async () => {
+test("an explicit status selector projects one Kanshi report without changing section shape", async () => {
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Targeted status"));
   const id = acceptedContract(bound);
+  const tasks = Tasks.at({ path: repository.path });
+  const associated = await tasks.add({ title: "Associated", contractId: id });
+  const unrelated = await tasks.add({ title: "Unrelated" });
+  assert.equal(associated.kind, "accepted");
+  assert.equal(unrelated.kind, "accepted");
 
-  const result = await withGitShim(
-    'case "$*" in *"ls-tree -r "*) exit 88 ;; esac\nexec "$KEIYAKU_REAL_GIT" "$@"',
-    {},
-    () => invokeWithDocument(repository.path, ["status", id], ""),
-  );
+  const result = await invokeWithDocument(repository.path, ["status", id], "");
 
-  assert.equal(result.kind, "observation");
-  if (result.kind !== "observation") return;
-  assert.deepEqual((result.contracts as readonly Readonly<{ contractId: ContractId }>[])?.map((row) => row.contractId), [id]);
+  assert.equal(result.kind, "status");
+  if (result.kind !== "status") return;
+  assert.equal(result.report.contracts.kind, "present");
+  assert.equal(result.report.tasks.kind, "present");
+  assert.deepEqual(result.report.akuma, { kind: "absent" });
+  if (result.report.contracts.kind !== "present" || result.report.tasks.kind !== "present") return;
+  assert.deepEqual(result.report.contracts.value.rows.map((row) => row.id), [id]);
+  assert.deepEqual(result.report.tasks.value.rows.map((row) => row.contract?.id), [id]);
 });
 
 test("addressed retry renders the selected contract coordinate", async () => {

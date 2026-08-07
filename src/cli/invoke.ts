@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { Repo, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Outcome, type SnapshotId } from "../index.js";
+import { Keiyaku, Repo, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Outcome, type SnapshotId } from "../index.js";
+import { kanshi, selectKanshi } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromOutcome } from "./accepted.js";
 import { amendFromCommand } from "./commands/amend.js";
@@ -7,7 +8,7 @@ import { bindFromCommand } from "./commands/bind.js";
 import { invokeTask, type TaskInvocationResult } from "./commands/task.js";
 import { CliUsageError, type ParsedInvocation } from "./parse.js";
 import type { AcceptedResult, DiffUnavailable, InvocationResult } from "./result.js";
-import { contractFromInput, resolveContextualContract, type SelectedContract } from "./selectors.js";
+import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
 import { selectedGates } from "./settings.js";
 
 export type { AcceptedFact, DiffUnavailable, InvocationResult, Lag } from "./result.js";
@@ -39,9 +40,9 @@ function repoAt(coordinate: string | undefined): Repo {
   return coordinate === undefined ? Repo.at() : Repo.at({ path: coordinate });
 }
 
-async function selectContract(repo: Repo, selector: string | undefined): Promise<SelectedContract> {
+async function selectContract(repo: Repo, selector: string | undefined, scope: string): Promise<SelectedContract> {
   if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector);
-  const id = resolveContextualContract(await repo.status(), selector);
+  const id = resolveContextualContract(await Keiyaku.list({ repo }), selector, scope);
   return contractFromInput(repo, id);
 }
 
@@ -130,8 +131,8 @@ async function invokeAudit(
   return result.kind === "accepted" && renderedDiff !== undefined ? { ...result, diff: renderedDiff } : result;
 }
 
-async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: InvocationEdge): Promise<InvocationResult> {
-  const { id, contract } = await selectContract(repo, parsed.contract);
+async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: InvocationEdge, scope: string): Promise<InvocationResult> {
+  const { id, contract } = await selectContract(repo, parsed.contract, scope);
   const actor = actorFromEdge(parsed.actor, edge.environment);
   const seat: ExistingSeat = { contract, id, ...(actor === undefined ? {} : { actor }) };
 
@@ -178,37 +179,26 @@ export async function invoke(invocation: ParsedInvocation, runtime: InvokeRuntim
     try { return await invokeTask(parsed, { ...(coordinate === undefined ? {} : { path: coordinate }), readStdin: edge.readStdin }); }
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
   }
+  if (parsed.command === "status") {
+    const report = await kanshi(coordinate === undefined ? {} : { path: coordinate });
+    if (parsed.contract === undefined) return { kind: "status", report };
+    const contract = resolveKanshiContract(report, parsed.contract);
+    return { kind: "status", report: selectKanshi({ report, contract }) };
+  }
   const repo = repoAt(coordinate);
+  const scope = coordinate ?? repo.root;
 
   switch (parsed.command) {
-    case "status": {
-      if (parsed.contract !== undefined && !parsed.contract.startsWith("@")) {
-        const contract = contractFromInput(repo, parsed.contract).id;
-        return { kind: "observation", command: "status", ...await repo.status({ contract }) };
-      }
-      const status = await repo.status();
-      const contract = parsed.contract === undefined
-        ? undefined
-        : resolveContextualContract(status, parsed.contract);
-      return {
-        kind: "observation",
-        command: "status",
-        scope: status.scope,
-        contracts: contract === undefined
-          ? status.contracts
-          : status.contracts.filter((item) => item.contractId === contract),
-      };
-    }
     case "reconcile": {
       if (parsed.contract === undefined) {
         return { kind: "observation", command: "reconcile", ...await repo.reconcile() };
       }
-      const { contract } = await selectContract(repo, parsed.contract);
+      const { contract } = await selectContract(repo, parsed.contract, scope);
       return { kind: "observation", command: "reconcile", ...await contract.reconcile() };
     }
     case "bind":
       return invokeBind(parsed, repo, edge);
     default:
-      return invokeExisting(parsed, repo, edge);
+      return invokeExisting(parsed, repo, edge, scope);
   }
 }

@@ -15,6 +15,10 @@
     "./task": {
       "types": "./build/src/task/index.d.ts",
       "import": "./build/src/task/index.js"
+    },
+    "./kanshi": {
+      "types": "./build/src/kanshi/index.d.ts",
+      "import": "./build/src/kanshi/index.js"
     }
   },
   "bin": {

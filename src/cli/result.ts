@@ -9,6 +9,7 @@ import type {
   SnapshotId,
   VerificationStop,
 } from "../index.js";
+import type { KanshiReport } from "../kanshi/index.js";
 
 export type Effect = ReconcileReport["effects"][number];
 
@@ -63,4 +64,6 @@ export type ObservationResult = Readonly<{
   [key: string]: unknown;
 }>;
 
-export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | ObservationResult;
+export type StatusResult = Readonly<{ kind: "status"; report: KanshiReport }>;
+
+export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | ObservationResult | StatusResult;

@@ -18,7 +18,7 @@ to the one `Repo.at` construction point used by this invocation and is never
 persisted. An omitted `-C` lets `Repo.at` apply its working-directory default.
 The adapter constructs exactly one `Repo` per invocation. It derives selector
 reads, the settings coordinate, contract handles and verbs, and reconciliation
-from that value: `repo.status()`, `repo.root`, `Keiyaku.of({ repo, id })`,
+from that value: `Keiyaku.list({ repo })`, `repo.root`, `Keiyaku.of({ repo, id })`,
 `Keiyaku.bind({ repo, ... })`, and the selected public reconcile method. It
 uses only public `Repo`, `Keiyaku`, and `Delivery` values. Neither Keiyaku
 construction call resolves a path or reads the working directory again.
@@ -46,7 +46,7 @@ The command vocabulary is:
 | `review` | Calls `keiyaku.review` directly. |
 | `abandon` | Calls `keiyaku.abandon`. |
 | `arc` | Calls `keiyaku.arc` with arc Markdown. |
-| `status` | Calls `repo.status()` and optionally filters its returned board. |
+| `status` | Calls the public Kanshi read and optionally projects one Contract and its associated rows. |
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
 | `task ...` | Calls the separate `./task` public surface described below. |
@@ -55,9 +55,9 @@ The command vocabulary is:
 accept a full `kei/<contract-segment>` identity or an active short
 `@<contract-segment>` reference. The short reference is the deterministic
 managed-worktree name when that worktree exists. It resolves as a pure function
-over `StatusReport` rows and is never stored.
+over `ContractBoard` rows and is never stored.
 
-An omitted contract selector is valid only when `StatusReport.scope` matches
+An omitted contract selector is valid only when the invocation coordinate matches
 the reported `worktreePath` of exactly one active worktree contract. A here
 workspace never supplies omitted-selector inference. The adapter issues a
 typed usage refusal when this test has no unique match.
@@ -284,12 +284,13 @@ writes its diagnostic and admitted diffs to stderr, and exits `1`. JSON writes
 the unchanged result object to stdout. Task refusal exits `1`, retry exits `2`,
 and corruption or infrastructure failure exits `3`.
 
-The status board renders one public `StatusReport`. An explicit contract ID is
-passed to `repo.status({ contract })` and reads only that journal. An
-`@<worktree>` selector still needs the world report to resolve the worktree
-coordinate, then filters that same report. The board exposes the public row
-fields, including current Verification verdict and bounded summary, and remains
-a rendering surface rather than another observation path.
+The status board renders one public `KanshiReport`. Default and selected status
+have the same report shape. An explicit Contract selector projects the already
+assembled report to that Contract and its associated source rows; it does not
+switch to another observation result. The Contract section is supplied by
+`Keiyaku.list({ repo })` and exposes lifecycle, candidate, and every declared
+gate's current report. Kanshi and the renderer copy those discriminants and do
+not evaluate gate currency, infer claimability, or derive terminality.
 
 ## Product Boundary
 
@@ -306,6 +307,6 @@ The surface has no interactive mode, input envelope, independent JSON schema,
 per-command JSON payload, configurable attempt count, command alias, or
 additional top-level command.
 
-`scope` remains the repository-coordinate field on `StatusReport`. There is no
+The report `root` remains the invocation world coordinate. There is no
 `scope` or `region` command; cross-contract fact relationships and a world
 Region report are outside the day-one surface.

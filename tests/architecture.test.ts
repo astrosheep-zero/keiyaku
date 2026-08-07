@@ -165,21 +165,21 @@ test("architecture policy keeps receipt folding out of operation orchestration",
 
 test("architecture policy permits the aggregate status read path", () => {
   const diagnostics = check({
-    "core/facts/types.ts": "export type ContractStatus = {}; export type StatusReport = {}; export function gate(): string { return ''; }",
-    "core/facts/gate.ts": "export function latestCurrentAttestations(): void {} export function gatesSatisfied(): void {}",
+    "core/facts/types.ts": "export type ContractId = string; export type ContractState = {}; export type SnapshotId = string;",
+    "core/facts/gate.ts": "export function gateReports(): void {} export function gatesSatisfied(): void {}",
     "carrier/reconcile.ts": "export function deliveryWorktreePath(): string { return \"\"; }",
     "protocol/read/status.ts": [
       'import { deliveryWorktreePath } from "../../carrier/reconcile.js";',
-      'import { latestCurrentAttestations } from "../../core/facts/gate.js";',
-      'import { gate } from "../../core/facts/types.js";',
-      'import type { ContractStatus, StatusReport } from "../../core/facts/types.js";',
-      "export function readStatus(): StatusReport { void deliveryWorktreePath; void latestCurrentAttestations; void gate; return {} as StatusReport; }",
-      "export type { ContractStatus };",
+      'import { gateReports } from "../../core/facts/gate.js";',
+      'import type { ContractId, ContractState, SnapshotId } from "../../core/facts/types.js";',
+      "export type ContractRow = { id: ContractId; candidate: SnapshotId | null };",
+      "export type ContractBoard = { rows: readonly ContractRow[] };",
+      "export function readContractBoard(state: ContractState): ContractBoard { void deliveryWorktreePath; gateReports(); void state; return { rows: [] }; }",
     ].join("\n"),
     "protocol/operations.ts": [
-      'import { readStatus, type ContractStatus, type StatusReport } from "./read/status.js";',
-      "export function status(): StatusReport { void (readStatus as () => StatusReport); return {} as StatusReport; }",
-      "export type { ContractStatus };",
+      'import { readContractBoard, type ContractBoard, type ContractRow } from "./read/status.js";',
+      "export function contracts(): ContractBoard { return readContractBoard({}); }",
+      "export type { ContractRow };",
     ].join("\n"),
   });
   assert.deepEqual(diagnostics, []);

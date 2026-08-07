@@ -1,5 +1,7 @@
 import { resolve } from "node:path";
-import { Keiyaku, type ContractId, type Repo, type StatusReport } from "../index.js";
+import { identitySegments } from "../identity/coordinates.js";
+import { Keiyaku, type ContractBoard, type ContractId, type ContractRow, type Repo } from "../index.js";
+import type { KanshiReport } from "../kanshi/index.js";
 import { CliUsageError } from "./parse.js";
 
 type SelectorCandidate = Readonly<{
@@ -11,10 +13,10 @@ function selectorError(message: string): never {
   throw new CliUsageError(message);
 }
 
-function activeManagedCandidates(status: StatusReport): readonly SelectorCandidate[] {
-  return status.contracts.flatMap((contract) => {
-    if (contract.phase === "claimed" || contract.phase === "abandoned" || contract.workspace !== "worktree" || contract.worktreePath === null) return [];
-    return [{ id: contract.contractId, worktreePath: contract.worktreePath }];
+function activeManagedCandidates(rows: readonly ContractRow[]): readonly SelectorCandidate[] {
+  return rows.flatMap((contract) => {
+    if (contract.disposition !== "active" || contract.workspace !== "worktree" || contract.worktreePath === null) return [];
+    return [{ id: contract.id, worktreePath: contract.worktreePath }];
   });
 }
 
@@ -29,19 +31,19 @@ export function contractFromInput(repo: Repo, value: string): SelectedContract {
   }
 }
 
-function resolveShortContract(status: StatusReport, selector: string): ContractId {
+function resolveShortContract(rows: readonly ContractRow[], selector: string): ContractId {
   if (selector.startsWith("@kei/")) selectorError(`redundant short contract selector: ${selector}`);
   const short = selector.slice(1);
-  const candidates = activeManagedCandidates(status)
+  const candidates = activeManagedCandidates(rows)
     .filter((candidate) => candidate.id.slice("kei/".length) === short);
   if (candidates.length === 0) selectorError(`unknown contract selector: ${selector}`);
   if (candidates.length !== 1) selectorError(`ambiguous contract selector: ${selector}`);
   return candidates[0]!.id;
 }
 
-function resolveOmittedContract(status: StatusReport): ContractId {
-  const candidates = activeManagedCandidates(status)
-    .filter((candidate) => resolve(status.scope) === resolve(candidate.worktreePath));
+function resolveOmittedContract(board: ContractBoard, scope: string): ContractId {
+  const candidates = activeManagedCandidates(board.rows)
+    .filter((candidate) => resolve(scope) === resolve(candidate.worktreePath));
   if (candidates.length === 0) {
     selectorError("an explicit full or @ contract selector is required outside a managed worktree");
   }
@@ -49,8 +51,21 @@ function resolveOmittedContract(status: StatusReport): ContractId {
   return candidates[0]!.id;
 }
 
-export function resolveContextualContract(status: StatusReport, selector: string | undefined): ContractId {
-  if (selector === undefined) return resolveOmittedContract(status);
-  if (selector.startsWith("@")) return resolveShortContract(status, selector);
+export function resolveContextualContract(board: ContractBoard, selector: string | undefined, scope: string): ContractId {
+  if (selector === undefined) return resolveOmittedContract(board, scope);
+  if (selector.startsWith("@")) return resolveShortContract(board.rows, selector);
   return selectorError(`contract selector must be kei/<contract-segment> or @<contract-segment>: ${selector}`);
+}
+
+export function resolveKanshiContract(report: KanshiReport, selector: string): string {
+  if (report.contracts.kind !== "present") {
+    return selectorError(`cannot select a contract while the Contract world is ${report.contracts.kind}`);
+  }
+  if (selector.startsWith("@")) return resolveShortContract(report.contracts.value.rows, selector);
+  try {
+    identitySegments({ family: "kei", value: selector });
+  } catch {
+    return selectorError(`contract selector must use kei/: ${selector}`);
+  }
+  return selector;
 }
