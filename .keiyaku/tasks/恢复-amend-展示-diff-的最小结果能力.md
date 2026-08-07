@@ -1,14 +1,15 @@
 ---
 id: 恢复-amend-展示-diff-的最小结果能力
 title: 恢复-amend-展示-diff-的最小结果能力
-state: open
+state: in_progress
 pri: 0
 needs: []
 parent: null
 from: []
 createdAt: 2026-08-06T22:26:10.439Z
-updatedAt: 2026-08-06T22:52:24.904Z
+updatedAt: 2026-08-07T00:47:03.286Z
 creator: thekoc
+startedAt: 2026-08-07T00:47:03.286Z
 ---
 Owner: docs/cli.md and docs/public-api.md after act_362 integration.
 
