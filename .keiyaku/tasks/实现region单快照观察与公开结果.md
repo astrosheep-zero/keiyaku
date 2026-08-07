@@ -1,7 +1,7 @@
 ---
 id: 实现region单快照观察与公开结果
 title: 实现Region单快照观察与公开结果
-state: in_progress
+state: done
 pri: 0
 needs: []
 parent: null
@@ -16,7 +16,6 @@ notes:
     timestamp: 2026-08-06T23:17:57.951Z
     text: "Correction from Square act 349/#186: retain protocol/read/documents.ts. It is the ruled internal primitive: one observeCarrier snapshot, fold/filter nonterminal contracts, return only {contract, documentBytes}; library removes self and decodes Region, never imports carrier. The previous note proposing removal was based on stale owner-doc wording. Docs/public-api.md and transport.md have now been corrected to the later ruling."
 createdAt: 2026-08-06T15:50:42.395Z
-updatedAt: 2026-08-06T23:17:57.951Z
+updatedAt: 2026-08-07T04:48:13.751Z
 creator: thekoc
-startedAt: 2026-08-06T15:53:02.702Z
 ---
