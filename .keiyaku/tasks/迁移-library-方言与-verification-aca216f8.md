@@ -1,7 +1,7 @@
 ---
 id: 迁移-library-方言与-verification-aca216f8
 title: 让 document 方言唯一裁定 Verification declaration
-state: in_progress
+state: done
 pri: 0
 needs:
   - 硬切-core-document-terms-与-key-set-d85bf6bb
@@ -12,9 +12,8 @@ notes:
     timestamp: 2026-08-06T23:05:50.290Z
     text: "Audit correction after staged-decide: do not restore a library preflight, but protocol must also not reimplement dialect law as declarationFailure(terms.gates.includes(verified) && verification === null). The dialect/document owner should produce a typed prepared/refused derivation once; the completed core decision receives that staged result so lifecycle/document precedence remains singular. Remove the hard-coded gate/declaration legality formula from protocol."
 createdAt: 2026-08-06T10:46:37.377Z
-updatedAt: 2026-08-07T05:05:20.323Z
+updatedAt: 2026-08-07T05:43:28.730Z
 creator: thekoc
-startedAt: 2026-08-07T05:05:20.323Z
 ---
 依据 docs/document.md、docs/verification.md 与 docs/lifecycle.md，删除 protocol 对 Verification declaration 合法性的第二裁判。
 
