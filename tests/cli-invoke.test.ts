@@ -563,6 +563,44 @@ test("managed abandonment cleans terminal resources from its own worktree cwd", 
   assert.equal(existsSync(path), false);
 });
 
+test("a terminal worktree removal failure remains accepted cleanup lag", async () => {
+  const repository = repositoryWithMain();
+  const bound = await invokeWithDocument(
+    repository.path,
+    ["bind", "--actor", "external-test", "-"],
+    contractDocument("Retained Cleanup"),
+  );
+  const id = acceptedContract(bound);
+  const path = deliveryWorktreePath(repositoryAt(repository.path), id);
+  repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "retained candidate"]);
+  const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
+  const delivered = await invoke(parseArgv(["-C", path, "deliver", id, "--actor", "external-test"]), {
+    environment: {},
+  });
+  assert.equal(delivered.kind, "accepted");
+
+  const abandoned = await withGitShim(
+    [
+      'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then',
+      '  printf "worktree became busy\\n" >&2',
+      "  exit 1",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    () => invoke(parseArgv(["-C", path, "abandon", id, "--actor", "external-test"]), {
+      environment: {},
+    }),
+  );
+
+  assert.equal(abandoned.kind, "accepted");
+  if (abandoned.kind !== "accepted") return;
+  assert.deepEqual(abandoned.lag, [{ kind: "worktree-retained", path }]);
+  assert.equal(existsSync(path), true);
+  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)), candidate);
+  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), candidate);
+});
+
 test("reconcile world command adapts the public repository report", async () => {
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Reconcile world"));

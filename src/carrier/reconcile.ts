@@ -103,7 +103,11 @@ function removeWorktree(
   if (!canRemoveWorktree(repository, path, expected)) {
     return { effect: { kind: "worktree", path, action: "unchanged" }, retained: true };
   }
-  runGit(repository, ["worktree", "remove", path]);
+  try {
+    runGit(repository, ["worktree", "remove", path]);
+  } catch {
+    return { effect: { kind: "worktree", path, action: "unchanged" }, retained: true };
+  }
   topology.paths.delete(path);
   return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
 }
