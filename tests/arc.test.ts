@@ -148,7 +148,7 @@ test("Arc decision refuses terminal contracts", () => {
   assert.deepEqual(result, { kind: "refused", refusal: { kind: "terminal", contractId: id } });
 });
 
-test("Arc CLI admits explicit chapters, exposes them in status, and renders them only when present", async () => {
+test("Arc CLI admits explicit chapters without changing the status result shape", async () => {
   assert.deepEqual(parseArgv(["arc", "@chapter", "--json", "-"]), {
     command: { command: "arc", contract: "@chapter", output: "json" },
   });
@@ -185,7 +185,10 @@ test("Arc CLI admits explicit chapters, exposes them in status, and renders them
   assert.equal(secondState?.currentArc?.data.title, "CLI Chapter Two");
 
   const after = await command(["status", contract]);
-  assert.equal(after.kind, "observation");
+  assert.equal(after.kind, "status");
+  if (after.kind === "status" && after.report.contracts.kind === "present") {
+    assert.deepEqual(after.report.contracts.value.rows.map((row) => row.id), [contract]);
+  }
   assert.match(JSON.stringify(after), new RegExp(contract));
   assert.doesNotMatch(renderContractBody(body), /\n## Arc\n/);
   assert.match(renderContractBody(body, secondState?.currentArc?.data), /## Arc\n\n### Sequence\n\n2/);

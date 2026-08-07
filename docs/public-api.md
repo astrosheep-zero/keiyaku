@@ -45,10 +45,11 @@ type BindInput = Readonly<{
 
 Repo.at(input?: { path?: string }): Repo
 repo.root: string
-repo.status(input?: { contract?: ContractId }): Promise<StatusReport>
 repo.reconcile(): Promise<RepoReconcileReport>
 Keiyaku.of(input: { repo: Repo; id: ContractId }): Keiyaku
 Keiyaku.bind(input: BindInput): Promise<BindResult>
+Keiyaku.list(input: { repo: Repo }): Promise<ContractBoard>
+Keiyaku.observe(input: { repo: Repo; id: ContractId }): Promise<ContractObservation>
 ```
 
 `markdown` is the complete contract document and is decoded at the library
@@ -61,8 +62,10 @@ is defined by [document.md](document.md) and [lifecycle.md](lifecycle.md).
 inputs accept nonblank string bytes; the library validates and brands them as
 the core `ActorId` before a journal write.
 
-`Gate` is the closed package-root union `"reviewed" | "verified"`; it has no
-public mint or opaque brand. At the JavaScript boundary, `bind` and `amend`
+Core facts treat gate names as opaque values. The current package-root `Gate`
+input is nevertheless the closed union `"reviewed" | "verified"`, because
+those are the only names with public attestation producers. It has no public
+mint or opaque brand. At the JavaScript boundary, `bind` and `amend`
 validate every `gates` element and throw a programmer `TypeError` for an
 unknown or duplicate token. Widening this union requires the same change to add a
 satisfiable attestation producer path on this package-root surface; a token is
@@ -87,20 +90,18 @@ capability; they accept neither a path nor an ambient repository default. No
 raw scope, token, registry, or orchestrator is public. Instance operations
 accept no repository coordinate.
 
-`Repo` is the pinned Git-world view. It owns world-level observation and
-reconciliation, not contract construction. `Keiyaku` is the sole branded
-contract-construction surface. There is no `repo.bind` or `repo.contract`
-convenience path.
+`Repo` is the pinned Git-world capability. It owns reconciliation and the
+coordinate needed by Contract operations, not Contract reads or construction.
+`Keiyaku` is the sole branded Contract front door. There is no `repo.bind`,
+`repo.status`, or `repo.contract` convenience path.
 
 `Repo.at` resolves the enclosing Git world immediately and throws for a path
 outside a repository. `root` is the resolved primary-worktree absolute path.
 Different worktrees in the same Git world therefore address the same journal
 while retaining the construction coordinate needed by `workspace: "here"`.
-Status without input is a world aggregation: it enumerates contract identities
-and projects each contract state with its computed worktree path. A supplied
-`contract` performs one targeted journal observation and returns zero or one
-row in the same `StatusReport`; it does not enumerate the world first. The
-return contract and behavior of `reconcile` are defined by
+`Keiyaku.list` enumerates the Contract world; `Keiyaku.observe` performs one
+targeted journal observation without enumerating it. Both project the same row
+shape. The return contract and behavior of `reconcile` are defined by
 [transport.md](transport.md).
 
 `Keiyaku` has a private constructor. It is born only through `Keiyaku.of` or a
@@ -111,24 +112,42 @@ authority, or second orchestrator. There is no alternate package-root contract
 construction point.
 
 ```ts
-type ContractStatus = Readonly<{
-  contractId: ContractId
+type ContractGateCurrent =
+  | Readonly<{ kind: "attested"; verdict: "satisfied" | "unsatisfied"; summary?: string }>
+  | Readonly<{ kind: "stale"; priorVerdict: "satisfied" | "unsatisfied" }>
+  | Readonly<{ kind: "missing" }>
+
+type ContractGateReport = Readonly<{ gate: string; current: ContractGateCurrent }>
+
+type ContractRow = Readonly<{
+  id: ContractId
   phase: "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned"
+  disposition: "active" | "terminal"
   workspace: "worktree" | "here"
   worktreePath: string | null
   target: string | null
-  verification: null | Readonly<{
-    verdict: "satisfied" | "unsatisfied"
-    summary?: string
+  candidate: SnapshotId | null
+  gates: Readonly<{
+    reports: readonly ContractGateReport[]
+    satisfied: boolean
   }>
 }>
 
-type StatusReport = Readonly<{
-  scope: string
-  contracts: readonly ContractStatus[]
+type ContractBoard = Readonly<{
+  root: string
+  rows: readonly ContractRow[]
 }>
 
+type ContractObservation =
+  | Readonly<{ kind: "missing"; id: ContractId }>
+  | Readonly<{ kind: "present"; row: ContractRow }>
 ```
+
+Lifecycle phase, disposition, candidate currency, every gate report, and the
+aggregate `gates.satisfied` are interpreted only by the Contract read surface.
+The aggregate calls the same core judgment as claimed admission. A stale prior
+attestation and a never-attested gate remain distinct. Downstream boards and
+renderers may present these discriminants but never re-evaluate them.
 
 ## Contract Operations
 

@@ -1,30 +1,40 @@
 import { observeCarrier, observeContract } from "../../carrier/observe.js";
 import { deliveryWorktreePath } from "../../carrier/reconcile.js";
 import type { GitRepository } from "../../carrier/repository.js";
-import { latestCurrentAttestations } from "../../core/facts/gate.js";
-import { gate, type ContractId, type ContractState, type Gate } from "../../core/facts/types.js";
+import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
+import type { ContractId, ContractState, SnapshotId } from "../../core/facts/types.js";
 
-const VERIFIED = gate("verified");
-const VERIFIED_GATE: ReadonlySet<Gate> = new Set([VERIFIED]);
+export type ContractPhase = "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned";
+export type ContractDisposition = "active" | "terminal";
 
-export type ContractStatus = Readonly<{
-  contractId: ContractId;
-  phase: "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned";
+export type ContractGateCurrent = GateCurrent;
+
+export type ContractGateReport = Readonly<{ gate: string; current: ContractGateCurrent }>;
+
+export type ContractRow = Readonly<{
+  id: ContractId;
+  phase: ContractPhase;
+  disposition: ContractDisposition;
   workspace: "worktree" | "here";
   worktreePath: string | null;
   target: string | null;
-  verification: Readonly<{
-    verdict: "satisfied" | "unsatisfied";
-    summary?: string;
-  }> | null;
+  candidate: SnapshotId | null;
+  gates: Readonly<{
+    reports: readonly ContractGateReport[];
+    satisfied: boolean;
+  }>;
 }>;
 
-export type StatusReport = Readonly<{
-  scope: string;
-  contracts: readonly ContractStatus[];
+export type ContractBoard = Readonly<{
+  root: string;
+  rows: readonly ContractRow[];
 }>;
 
-function phaseFor(state: ContractState): ContractStatus["phase"] {
+export type ContractObservation =
+  | Readonly<{ kind: "missing"; id: ContractId }>
+  | Readonly<{ kind: "present"; row: ContractRow }>;
+
+function phaseFor(state: ContractState): ContractPhase {
   if (state.terminal?.kind === "claimed") return "claimed";
   if (state.terminal?.kind === "abandoned") return "abandoned";
   if (state.delivery !== null) return "pending-delivery";
@@ -32,36 +42,37 @@ function phaseFor(state: ContractState): ContractStatus["phase"] {
   return "waiting";
 }
 
-function statusFor(repository: GitRepository, state: ContractState): ContractStatus {
+function rowFor(repository: GitRepository, state: ContractState): ContractRow {
   const workspace = state.coordinates.workspace;
-  const verification = latestCurrentAttestations(state, VERIFIED_GATE).get(VERIFIED);
+  const gates = gateReports(state);
   return {
-    contractId: state.id,
+    id: state.id,
     phase: phaseFor(state),
+    disposition: state.terminal === null ? "active" : "terminal",
     workspace,
     worktreePath: workspace === "worktree" ? deliveryWorktreePath(repository, state.id) : null,
     target: state.coordinates.target ?? null,
-    verification: verification === undefined ? null : {
-      verdict: verification.data.verdict,
-      ...(verification.data.summary === undefined ? {} : { summary: verification.data.summary }),
+    candidate: state.delivery?.data.candidate ?? null,
+    gates: {
+      reports: gates.reports.map((report) => ({ gate: report.gate, current: report.current })),
+      satisfied: gates.satisfied,
     },
   };
 }
 
-/** Build a status board from one immutable carrier observation. */
-export function readStatus(repository: GitRepository, contract?: ContractId): StatusReport {
-  if (contract !== undefined) {
-    const state = observeContract(repository, contract).state;
-    return {
-      scope: repository.effectiveCwd,
-      contracts: state === null ? [] : [statusFor(repository, state)],
-    };
-  }
+/** Build the Contract board from one immutable carrier observation. */
+export function readContractBoard(repository: GitRepository): ContractBoard {
   const observed = observeCarrier(repository);
-  const contracts: ContractStatus[] = [];
+  const rows: ContractRow[] = [];
   for (const value of observed.contracts.values()) {
     if (value.state === null) continue;
-    contracts.push(statusFor(repository, value.state));
+    rows.push(rowFor(repository, value.state));
   }
-  return { scope: repository.effectiveCwd, contracts };
+  return { root: repository.primaryWorktree, rows };
+}
+
+/** Observe one Contract without enumerating the Contract world. */
+export function readContractObservation(repository: GitRepository, id: ContractId): ContractObservation {
+  const state = observeContract(repository, id).state;
+  return state === null ? { kind: "missing", id } : { kind: "present", row: rowFor(repository, state) };
 }

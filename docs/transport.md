@@ -163,6 +163,9 @@ accepted outcome.
 type ReconcileResult = Readonly<{
   effects: readonly Effect[]
   lag: readonly ReconcileLag[]
+  namespaceContext?:
+    | Readonly<{ kind: "installed" | "kept" }>
+    | Readonly<{ kind: "failed"; diagnostic: string }>
 }>
 
 type ReconcileLag = Readonly<{
@@ -200,6 +203,13 @@ type RepoReconcileReport = Readonly<{
 
 It contains one typed item for every observed contract. A failed item does not
 discard successful reports or become an aggregate exception.
+
+For an active managed worktree, reconciliation installs or repairs the local
+Task namespace context from the admitted ContractId contract segment after the
+worktree exists. It rewrites only an absent or malformed marker and preserves a
+valid override. A context failure is reported by `namespaceContext` and never
+reverses or gates journal admission. Reconcile is the idempotent repair path.
+Here workspaces have no transport-owned context duty.
 
 Effects and lag are transparent data. `changed` is derivable from effect
 actions, resource coordinates are already in each effect, and lifecycle state

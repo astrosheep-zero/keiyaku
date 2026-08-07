@@ -208,9 +208,9 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
   if (dependent.kind !== "accepted") throw new Error("dependent bind was not accepted");
   assert.equal((await dependent.value.state()).bound, null);
   assert.equal((await dependent.value.abandon()).kind, "accepted");
-  const status = await Repo.at({ path: repository.path }).status();
+  const status = await Keiyaku.list({ repo: Repo.at({ path: repository.path }) });
   const dependentId = (await dependent.value.state()).id;
-  const path = status.contracts.find((contract) => contract.contractId === dependentId)?.worktreePath;
+  const path = status.rows.find((contract) => contract.id === dependentId)?.worktreePath;
   assert.ok(path);
   assert.equal(existsSync(path), false);
 
@@ -332,7 +332,16 @@ test("status and audit expose only current Verification testimony", async () => 
     verdict: "satisfied" as const,
     summary: "[1 bash exit 0]\nstdout:\nchecked\nstderr:\nwarning",
   };
-  assert.deepEqual((await repo.status({ contract: state.id })).contracts[0]?.verification, expected);
+  const observed = await Keiyaku.observe({ repo, id: state.id });
+  assert.equal(observed.kind, "present");
+  if (observed.kind !== "present") throw new Error("contract was not observed");
+  assert.deepEqual(observed.row.gates, {
+    reports: [
+      { gate: "reviewed", current: { kind: "missing" } },
+      { gate: "verified", current: { kind: "attested", ...expected } },
+    ],
+    satisfied: false,
+  });
 
   const audited = await bound.value.audit();
   assert.equal(audited.kind, "accepted");
@@ -346,7 +355,16 @@ test("status and audit expose only current Verification testimony", async () => 
     markdown: "## Replace: Verification\n~~~bash\nprintf changed\n~~~\n",
   });
   assert.equal(amended.kind, "accepted");
-  assert.equal((await repo.status({ contract: state.id })).contracts[0]?.verification, null);
+  const after = await Keiyaku.observe({ repo, id: state.id });
+  assert.equal(after.kind, "present");
+  if (after.kind !== "present") throw new Error("contract was not observed");
+  assert.deepEqual(after.row.gates, {
+    reports: [
+      { gate: "reviewed", current: { kind: "missing" } },
+      { gate: "verified", current: { kind: "stale", priorVerdict: "satisfied" } },
+    ],
+    satisfied: false,
+  });
 });
 
 test("amend preserves untouched Verification bytes and currentness", async () => {

@@ -1,4 +1,4 @@
-export { AuthorityCorruptionError, Delivery, Keiyaku, Repo } from "./library/keiyaku.js";
+export { AuthorityCorruptionError, Delivery, Keiyaku, NoGitWorldError, Repo } from "./library/keiyaku.js";
 
 export type {
   AttestationVerdict,
@@ -13,7 +13,15 @@ export type {
   ChangeId,
   ContractId,
   ContractState,
-  ContractStatus,
+  ContractBoard,
+  ContractDisposition,
+  ContractGateCurrent,
+  ContractGateReport,
+  ContractListInput,
+  ContractObservation,
+  ContractObservationInput,
+  ContractPhase,
+  ContractRow,
   DeliverInput,
   Fact,
   FactKind,
@@ -29,8 +37,6 @@ export type {
   RepoAtInput,
   AuditInput,
   SnapshotId,
-  StatusReport,
-  StatusInput,
   TimelineEntry,
   TypedRefusal,
   TypedRetry,

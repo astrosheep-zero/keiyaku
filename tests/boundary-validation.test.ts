@@ -10,7 +10,7 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = Repo.at({ path: repository.path });
-  const before = (await repo.status()).contracts;
+  const before = (await Keiyaku.list({ repo })).rows;
 
   assert.throws(
     () => withGitShim("exit 99", {}, () => Reflect.apply(Repo.at, Repo, [null])),
@@ -21,11 +21,11 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
     TypeError,
   );
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => Reflect.apply(repo.status, repo, [null])),
+    () => withGitShim("exit 99", {}, () => Reflect.apply(Keiyaku.list, Keiyaku, [null])),
     TypeError,
   );
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => Reflect.apply(repo.status, repo, [{ contract: "bad" }])),
+    () => withGitShim("exit 99", {}, () => Reflect.apply(Keiyaku.observe, Keiyaku, [{ repo, id: "bad" }])),
     (error: unknown) => error instanceof TypeError
       && error.message === "contract ID must be kei/<contract-segment>",
   );
@@ -34,7 +34,7 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
     TypeError,
   );
 
-  assert.deepEqual((await repo.status()).contracts, before);
+  assert.deepEqual((await Keiyaku.list({ repo })).rows, before);
 });
 
 test("amend validates programmer input before observing a missing contract", async () => {
@@ -45,14 +45,14 @@ test("amend validates programmer input before observing a missing contract", asy
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = Repo.at({ path: repository.path });
   const contract = Keiyaku.of({ repo, id: "kei/missing" as never });
-  const before = (await repo.status()).contracts;
+  const before = (await Keiyaku.list({ repo })).rows;
 
   await assert.rejects(
     () => withGitShim("exit 99", {}, () => Reflect.apply(contract.amend, contract, [{ markdown: "## Append: Context\ntext\n", gates: ["invalid"] }])),
     (error: unknown) => error instanceof TypeError
       && error.message === "gates[0] must be reviewed or verified",
   );
-  assert.deepEqual((await repo.status()).contracts, before);
+  assert.deepEqual((await Keiyaku.list({ repo })).rows, before);
 });
 
 test("boundary validation precedes Git and unrepresentable targets stay typed", async () => {

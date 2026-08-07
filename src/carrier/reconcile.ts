@@ -9,8 +9,9 @@ import {
   type GitOid,
   type GitRepository,
 } from "./repository.js";
-import { contractId, type ContractId, type ContractState, type SnapshotId } from "../core/facts/types.js";
+import { contractId, contractSegment, type ContractId, type ContractState, type SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot } from "./identity.js";
+import { repairNamespaceContext } from "../namespace-context.js";
 
 const WORKTREE_DIRECTORY = [".keiyaku-v4", "worktrees"] as const;
 export type Effect =
@@ -34,7 +35,11 @@ export type ReconcileLag = Readonly<{
 export type ReconcileResult = Readonly<{
   effects: readonly Effect[];
   lag: readonly ReconcileLag[];
+  namespaceContext?: NamespaceContextResult;
 }>;
+export type NamespaceContextResult =
+  | Readonly<{ kind: "installed" | "kept" }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
 type ReconcileBatchContract = Readonly<{ id: ContractId; state: ContractState | null }>;
 type ReconcileBatchItem =
   | Readonly<{ kind: "reconciled"; contract: ContractId; result: ReconcileResult }>
@@ -63,6 +68,10 @@ function acquireWorktreeTopology(repository: GitRepository): WorktreeTopology {
 }
 function fromPrimaryWorktree(repository: GitRepository): GitRepository {
   return { ...repository, effectiveCwd: repository.primaryWorktree };
+}
+function reconcileNamespaceContext(path: string, contract: ContractId): NamespaceContextResult {
+  try { return { kind: repairNamespaceContext(path, [contractSegment(contract)]) }; }
+  catch (error) { return { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) }; }
 }
 
 function worktree(repository: GitRepository, topology: WorktreeTopology, path: string, desired: SnapshotId): Effect {
@@ -147,7 +156,7 @@ function reconcileWithTopology({ repository, state }: ReconcileInput, topology: 
   const desired = state.delivery?.data.candidate ?? state.coordinates.start;
   const effects = [updateRef(repository, ref, desired), worktree(repository, topology, path, desired)];
   if (state.delivery) effects.push(updateRef(repository, pin, state.delivery.data.candidate)); else effects.push(removeRef(repository, pin));
-  return { effects, lag: [] };
+  return { effects, lag: [], namespaceContext: reconcileNamespaceContext(path, state.id) };
 }
 
 function needsWorktreeTopology(state: ContractState | null): boolean {

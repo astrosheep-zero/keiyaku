@@ -12,7 +12,7 @@ import {
   type CarrierDecisionObservation,
 } from "../carrier/observe.js";
 import { reconcile, reconcileBatch, type ReconcileResult } from "../carrier/reconcile.js";
-import { repositoryAt, type GitRepository } from "../carrier/repository.js";
+import { NoGitWorldError, repositoryAt, type GitRepository } from "../carrier/repository.js";
 import { readDeliveryDiff } from "../carrier/verification.js";
 import type { WorktreeLeak } from "../carrier/verification.js";
 import { dependencyKeySet } from "../core/subject.js";
@@ -30,7 +30,17 @@ import type { VerificationDeclarationPreparation, VerificationDeclarationRefusal
 import { admitIntent, admitPlacement, mintAttempts, verifyDelivery, type VerificationRuntimeStop } from "./intent.js";
 import { auditReport, readAudit, type AuditReport as AuditReadReport } from "./read/audit.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
-import { readStatus, type StatusReport } from "./read/status.js";
+import {
+  readContractBoard,
+  readContractObservation,
+  type ContractBoard,
+  type ContractDisposition,
+  type ContractGateCurrent,
+  type ContractGateReport,
+  type ContractObservation,
+  type ContractPhase,
+  type ContractRow,
+} from "./read/status.js";
 import { admitDecidedOffer, type AcceptedAdmission, type DecidedOfferResult } from "./attempt.js";
 export { bindOperation } from "./bind.js";
 import type { BindRefusal, TargetInputRefusal } from "./bind.js";
@@ -38,7 +48,6 @@ import { accepted, admitted, complete, type IntentOutcome as ProtocolIntentOutco
 import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 
 export type { FactKind, TimelineEntry } from "./read/audit.js";
-export type { ContractStatus, StatusReport } from "./read/status.js";
 export type { ContractDocumentProjection } from "./read/documents.js";
 type DeliveryFailure = DeliveryPreparationRefusal | VerificationDeclarationRefusal | DeliverRefusal;
 
@@ -78,12 +87,16 @@ function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> |
 
 type ScopeOperationInput = Readonly<{ coordinate: string }>;
 export type RepositoryScope = GitRepository;
-
+export { NoGitWorldError };
 export function scopeOperation(input: ScopeOperationInput): RepositoryScope { return repositoryAt(input.coordinate); }
 
-export function statusOperation(input: Readonly<{ scope: RepositoryScope; contractId?: ContractId }>): StatusReport {
-  return readStatus(input.scope, input.contractId);
+export function contractsOperation(input: Readonly<{ scope: RepositoryScope }>): ContractBoard { return readContractBoard(input.scope); }
+
+export function contractObservationOperation(input: OperationInput): ContractObservation {
+  return readContractObservation(input.scope, input.contractId);
 }
+
+export type { ContractBoard, ContractDisposition, ContractGateCurrent, ContractGateReport, ContractObservation, ContractPhase, ContractRow };
 
 export function documentsOperation(input: Readonly<{ scope: RepositoryScope }>): readonly ContractDocumentProjection[] { return readDocuments(input.scope); }
 

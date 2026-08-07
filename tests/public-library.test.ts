@@ -59,7 +59,7 @@ function repositoryWithInitialCommit() {
 test("package root exposes only the ruled library values and declarations", () => {
   const directory = externalConsumer();
   const source = [
-    'import { AuthorityCorruptionError, Delivery, Keiyaku, Repo, type AbandonInput, type ActorId, type AmendInput, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractId, type ContractState, type ContractStatus, type DeliverInput, type Fact, type FactKind, type Gate, type Outcome, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type SnapshotId, type StatusInput, type StatusReport, type TimelineEntry, type TypedRefusal, type TypedRetry } from "@astrosheep/keiyaku-v4";',
+    'import { AuthorityCorruptionError, Delivery, Keiyaku, Repo, type AbandonInput, type ActorId, type AmendInput, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractBoard, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type DeliverInput, type Fact, type FactKind, type Gate, type Outcome, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type SnapshotId, type TimelineEntry, type TypedRefusal, type TypedRetry } from "@astrosheep/keiyaku-v4";',
     'const repo = Repo.at({ path: "." });',
     'const id = "kei/consumer" as ContractId;',
     'const input: BindInput = { repo, markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", after: [id], gates: ["reviewed"] };',
@@ -80,8 +80,8 @@ test("package root exposes only the ruled library values and declarations", () =
     'const invalidBind: BindInput = { ...input, after: ["kei/unbranded"] };',
     '// @ts-expect-error AmendInput.after requires branded ContractId values',
     'const invalidAmend: AmendInput = { ...amendment, after: ["kei/unbranded"] };',
-    '// @ts-expect-error Gate is a closed public vocabulary',
-    'const invalidGate: Gate = "edge-owned";',
+    '// @ts-expect-error Gate is limited to names with a public producer',
+    'const customGate: Gate = "edge-owned";',
     '// @ts-expect-error abandon accepts options, not a reason enum',
     'existing.abandon("manual");',
     'const bound: Promise<Outcome<Keiyaku>> = Keiyaku.bind(input);',
@@ -100,13 +100,15 @@ test("package root exposes only the ruled library values and declarations", () =
     'const bindResult = null as unknown as BindResult;',
     'const change = null as unknown as ChangeId;',
     'const state = null as unknown as ContractState;',
-    'const statusContract = null as unknown as ContractStatus;',
-    'const statusInput: StatusInput = { contract: id };',
-    'const statusRow: ContractStatus = { contractId: id, phase: "bound", workspace: "here", worktreePath: null, target: null, verification: null };',
-    '// @ts-expect-error terminal is derived from phase and is not a status row field',
-    'const statusRowWithTerminal: ContractStatus = { contractId: id, phase: "bound", terminal: null, workspace: "here", worktreePath: null, target: null, verification: null };',
-    '// @ts-expect-error workspace is a total construction coordinate',
-    'const statusRowWithNullWorkspace: ContractStatus = { contractId: id, phase: "bound", workspace: null, worktreePath: null, target: null, verification: null };',
+    'const contractListInput: ContractListInput = { repo };',
+    'const contractObservationInput: ContractObservationInput = { repo, id };',
+    'const contractPhase: ContractPhase = "bound";',
+    'const contractDisposition: ContractDisposition = "active";',
+    'const contractGateCurrent: ContractGateCurrent = { kind: "missing" };',
+    'const contractGateReport: ContractGateReport = { gate: "custom", current: contractGateCurrent };',
+    'const statusRow: ContractRow = { id, phase: contractPhase, disposition: contractDisposition, workspace: "here", worktreePath: null, target: null, candidate: null, gates: { reports: [contractGateReport], satisfied: false } };',
+    'const statusBoard: ContractBoard = { root: ".", rows: [statusRow] };',
+    'const statusObservation: ContractObservation = { kind: "present", row: statusRow };',
     'const deliverInput = null as unknown as DeliverInput;',
     'const fact = null as unknown as Fact;',
     'const gate = null as unknown as Gate;',
@@ -117,7 +119,6 @@ test("package root exposes only the ruled library values and declarations", () =
     'const review = null as unknown as Review;',
     'const regionOverlap = null as unknown as RegionOverlap;',
     'const snapshot = null as unknown as SnapshotId;',
-    'const status = null as unknown as StatusReport;',
     'const refusal = null as unknown as TypedRefusal;',
     'const retry = null as unknown as TypedRetry;',
     '// @ts-expect-error internal journal data is not a package-root export',
@@ -162,12 +163,12 @@ test("package root exposes only the ruled library values and declarations", () =
     'type InternalReviewValue = import("@astrosheep/keiyaku-v4").ReviewValue;',
     '// @ts-expect-error legacy DeliverValue alias is not a package-root export',
     'type InternalDeliverValue = import("@astrosheep/keiyaku-v4").DeliverValue;',
-    'void new AuthorityCorruptionError("corrupt"); void existing; void delivery; void bound; void repo; void report; void timeline; void kind; void amendment; void invalidBind; void invalidAmend; void invalidGate; void abandonInput; void actor; void arcInput; void auditInput; void verdict; void bindResult; void change; void state; void statusContract; void statusInput; void statusRow; void statusRowWithTerminal; void statusRowWithNullWorkspace; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void reviewInput; void review; void regionOverlap; void snapshot; void status; void refusal; void retry;',
+    'void new AuthorityCorruptionError("corrupt"); void existing; void delivery; void bound; void repo; void report; void timeline; void kind; void amendment; void invalidBind; void invalidAmend; void customGate; void contractListInput; void contractObservationInput; void contractPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry;',
   ].join("\n");
   writeFileSync(join(directory, "consumer.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer.ts"], { cwd: directory, stdio: "ignore" });
   const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku-v4"); console.log(Object.keys(m).sort().join(","));'], { cwd: directory, encoding: "utf8" });
-  assert.equal(output.trim(), "AuthorityCorruptionError,Delivery,Keiyaku,Repo");
+  assert.equal(output.trim(), "AuthorityCorruptionError,Delivery,Keiyaku,NoGitWorldError,Repo");
 });
 
 test("package exports reject deep internal imports", () => {
@@ -212,23 +213,19 @@ test("built CLI bin keeps its shebang and executes through an installed-style sy
   chmodSync(bin, 0o755);
   symlinkSync(bin, link);
   const output = execFileSync(link, ["status", "--json"], { cwd: repository.path, encoding: "utf8" });
-  assert.equal(JSON.parse(output).kind, "observation");
+  assert.equal(JSON.parse(output).contracts.kind, "present");
 });
 
 test("Keiyaku owns contract construction over one pinned Repo capability", async () => {
   const repository = repositoryWithInitialCommit();
   const repo = Repo.at({ path: repository.path });
-  assert.deepEqual(Object.getOwnPropertyNames(Keiyaku).filter((name) => !["length", "name", "prototype"].includes(name)).sort(), ["bind", "of"]);
+  assert.deepEqual(Object.getOwnPropertyNames(Keiyaku).filter((name) => !["length", "name", "prototype"].includes(name)).sort(), ["bind", "list", "observe", "of"]);
   assert.deepEqual(Object.getOwnPropertyNames(Delivery).filter((name) => !["length", "name", "prototype"].includes(name)), []);
   assert.deepEqual(Object.getOwnPropertyNames(Repo).filter((name) => !["length", "name", "prototype"].includes(name)), ["at"]);
-  assert.deepEqual(Object.getOwnPropertyNames(Repo.prototype).filter((name) => name !== "constructor").sort(), ["reconcile", "status"]);
+  assert.deepEqual(Object.getOwnPropertyNames(Repo.prototype).filter((name) => name !== "constructor").sort(), ["reconcile"]);
   await assert.rejects(
-    Keiyaku.bind({ repo,
-      markdown: markdown("Invalid gate"),
-      workspace: "here",
-      gates: ["reviewed", "edge-owned"] as never,
-    }),
-    (error: unknown) => error instanceof TypeError && error.message === "gates[1] must be reviewed or verified",
+    Keiyaku.bind({ repo, markdown: markdown("Invalid gate"), workspace: "here", gates: ["edge-owned"] as never }),
+    (error: unknown) => error instanceof TypeError && error.message === "gates[0] must be reviewed or verified",
   );
   await assert.rejects(
     Keiyaku.bind({ repo,
@@ -257,7 +254,7 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   assert.match((await sameTitle.value.state()).id, /^kei\/markdown-input-[0-9a-hjkmnp-tv-z]{8}$/);
 
   assert.equal(repo.root, resolve(repo.root));
-  assert.equal((await repo.status()).contracts.some((contract) => contract.contractId === state.id), true);
+  assert.equal((await Keiyaku.list({ repo })).rows.some((contract) => contract.id === state.id), true);
   assert.deepEqual(await Keiyaku.of({ repo, id: "kei/missing" as ContractId }).amend({
     markdown: "## Append: Context\nmissing\n",
   }), {
@@ -339,10 +336,7 @@ test("amend applies Markdown once and preserves structured values unless replace
   if (bound.kind !== "accepted") throw new Error("bind did not return a contract");
 
   await assert.rejects(
-    bound.value.amend({
-      markdown: "## Append: Context\ninvalid gate\n",
-      gates: ["edge-owned"] as never,
-    }),
+    bound.value.amend({ markdown: "## Append: Context\ninvalid gate\n", gates: ["edge-owned"] as never }),
     (error: unknown) => error instanceof TypeError && error.message === "gates[0] must be reviewed or verified",
   );
 
@@ -393,9 +387,9 @@ test("arc decodes its Markdown input and worktree paths are computed", async () 
   const managed = await Keiyaku.bind({ repo, markdown: markdown("Managed"), workspace: "worktree" });
   assert.equal(managed.kind, "accepted");
   if (managed.kind !== "accepted") throw new Error("bind did not return a contract");
-  const status = await repo.status();
+  const status = await Keiyaku.list({ repo });
   const managedState = await managed.value.state();
-  assert.equal(typeof status.contracts.find((contract) => contract.contractId === managedState.id)?.worktreePath, "string");
+  assert.equal(typeof status.rows.find((contract) => contract.id === managedState.id)?.worktreePath, "string");
 });
 
 test("Delivery.diff remains a nullable Promise-backed transport read", async () => {

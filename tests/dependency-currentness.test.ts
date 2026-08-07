@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dependencyKeySet } from "../src/core/subject.js";
-import { gatesSatisfied } from "../src/core/facts/gate.js";
+import { gateReports, gatesSatisfied } from "../src/core/facts/gate.js";
 import {
   changeId,
   contractId,
@@ -180,4 +180,30 @@ test("gates skip later testimony for stale subjects", () => {
 
   assert.equal(oneGateSatisfied(stale, gate("verified")), true);
   assert.equal(gatesSatisfied(stale), true);
+});
+
+test("one currency projection distinguishes current refusal, stale testimony, and missing testimony", () => {
+  const current = state("candidate-b");
+  const latestReview = current.attestations[0]!;
+  const projected = gateReports({
+    ...current,
+    terms: { ...current.terms, gates: [...current.terms.gates, gate("manual")] },
+    attestations: [
+      ...current.attestations,
+      {
+        ...latestReview,
+        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAE"),
+        data: { ...latestReview.data, verdict: "unsatisfied" },
+      },
+    ],
+  });
+
+  assert.deepEqual(projected, {
+    reports: [
+      { gate: "reviewed", current: { kind: "attested", verdict: "unsatisfied" } },
+      { gate: "verified", current: { kind: "stale", priorVerdict: "satisfied" } },
+      { gate: "manual", current: { kind: "missing" } },
+    ],
+    satisfied: false,
+  });
 });

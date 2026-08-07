@@ -113,6 +113,14 @@ methodology is outside core;
 The current key set always contains the current document and ordered segment
 keys; candidate snapshot and patch keys join it only while a delivery exists.
 
+Gate currency has one implementation in `core/facts/gate.ts`. Claimed
+admission and the public Contract status projection both call that
+implementation. The projection reports, in declaration order, whether each
+gate has a current attestation, only stale prior testimony, or no testimony;
+it also returns the same aggregate satisfaction judgment used by placement.
+No protocol adapter, Kanshi join, or renderer reorders attestations, compares
+subjects, derives staleness, or infers terminality from phase names.
+
 A declared gate whose producer has no valid declaration is rejected by that
 producer's owning outer decision. It is not a preflight readiness check, a
 pending journal state, or a journal deadlock. A valid producer declaration may

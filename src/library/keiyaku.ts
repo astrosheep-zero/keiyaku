@@ -1,9 +1,9 @@
-import { createTwoFilesPatch } from "diff";
+import { documentDiff } from "../markdown/diff.js";
 import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument, verificationDefinition } from "../body/decode.js";
-import { regionsOverlap } from "../body/region.js";
 import type { DecodedContractDocument } from "../body/types.js";
+import { observeRegion, type RegionObservation, type RegionOverlap } from "./region.js";
 import {
   prepareVerificationDeclaration,
   type VerificationDeclarationPreparation,
@@ -28,7 +28,9 @@ import {
   arcOperation,
   auditOperation,
   bindOperation,
-  documentsOperation,
+  NoGitWorldError,
+  contractObservationOperation,
+  contractsOperation,
   deliveryDiffOperation,
   deliverOperation,
   deliveryOperation,
@@ -38,9 +40,14 @@ import {
   reviewOperation,
   scopeOperation,
   stateOperation,
-  statusOperation,
   type AuditReport,
-  type ContractStatus,
+  type ContractBoard,
+  type ContractDisposition,
+  type ContractGateCurrent,
+  type ContractGateReport,
+  type ContractObservation,
+  type ContractPhase,
+  type ContractRow,
   type DeliverValue,
   type DocumentDerivation,
   type FactKind,
@@ -52,37 +59,35 @@ import {
   type ReconcileReport as ProtocolReconcileReport,
   type RepositoryScope,
   type ReviewValue,
-  type StatusReport,
   type TimelineEntry,
   type VerificationStop,
 } from "../protocol/operations.js";
+export { NoGitWorldError };
 
 export type {
   AuditReport,
   ChangeId,
   ContractId,
   ContractState,
-  ContractStatus,
+  ContractBoard,
+  ContractDisposition,
+  ContractGateCurrent,
+  ContractGateReport,
+  ContractObservation,
+  ContractPhase,
+  ContractRow,
   FactKind,
   RepoReconcileReport,
   SnapshotId,
-  StatusReport,
   TimelineEntry,
 };
+export type { RegionOverlap };
 
 export type Fact = JournalEntry;
 export type ActorId = string;
 export type AttestationVerdict = "satisfied" | "unsatisfied";
 export type Gate = "reviewed" | "verified";
 export type Review = ReviewValue;
-export type RegionOverlap = Readonly<{
-  contract: ContractId;
-  patterns: readonly Readonly<{ mine: string; theirs: string }>[];
-}>;
-type RegionObservation = Readonly<
-  | { overlaps: readonly RegionOverlap[]; overlapFailure?: never }
-  | { overlapFailure: string; overlaps?: never }
->;
 export type TypedRefusal = IntentRefusal;
 export type TypedRetry = IntentRetry;
 export type { PlacementStop, VerificationStop };
@@ -119,7 +124,8 @@ export type ArcInput = Readonly<{
 
 type ActorOptions = Readonly<{ actor?: ActorId }>;
 export type RepoAtInput = Readonly<{ path?: string }>;
-export type StatusInput = Readonly<{ contract?: ContractId }>;
+export type ContractListInput = Readonly<{ repo: Repo }>;
+export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type KeiyakuOfInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type ReviewInput = ActorOptions & Readonly<{ verdict: AttestationVerdict; summary?: string }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
@@ -177,9 +183,7 @@ function normalizedGates(values: unknown): readonly CoreGate[] {
   if (values === undefined) return [];
   if (!Array.isArray(values)) throw new TypeError("gates must be an array");
   const normalized = values.map((value, index) => {
-    if (value !== "reviewed" && value !== "verified") {
-      throw new TypeError(`gates[${index}] must be reviewed or verified`);
-    }
+    if (value !== "reviewed" && value !== "verified") throw new TypeError(`gates[${index}] must be reviewed or verified`);
     return gate(value);
   });
   if (new Set(normalized).size !== normalized.length) throw new TypeError("gates must not contain duplicates");
@@ -221,38 +225,6 @@ function mapOutcome<Value, PublicValue>(
 ): Outcome<PublicValue> {
   if (result.kind !== "accepted") return result;
   return { ...result, value: value(result.value) };
-}
-
-function diagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function observeRegion(
-  scope: RepositoryScope,
-  self: ContractId,
-  mine: readonly string[],
-): RegionObservation {
-  try {
-    const peers = documentsOperation({ scope });
-    const overlaps: RegionOverlap[] = [];
-    for (const peer of peers) {
-      if (peer.contract === self) continue;
-      try {
-        const theirs = decodeContractDocument(peer.documentBytes).region;
-        const pairs = regionsOverlap(mine, theirs);
-        if (pairs.length === 0) continue;
-        overlaps.push({
-          contract: peer.contract,
-          patterns: pairs.map(([minePattern, theirsPattern]) => ({ mine: minePattern, theirs: theirsPattern })),
-        });
-      } catch (error) {
-        return { overlapFailure: `${peer.contract}: ${diagnostic(error)}` };
-      }
-    }
-    return { overlaps };
-  } catch (error) {
-    return { overlapFailure: diagnostic(error) };
-  }
 }
 
 function resolvePinnedScope(path?: string): RepositoryScope {
@@ -348,10 +320,7 @@ class KeiyakuHandle {
     }
     const before = current.terms.document.bytes;
     const after = document.document.bytes;
-    const documentDiff = before === after
-      ? ""
-      : createTwoFilesPatch("before", "after", before, after, "", "", { context: 3 });
-    return { ...outcome, documentDiff, ...observeRegion(this.scope, this.id, document.region) };
+    return { ...outcome, documentDiff: documentDiff("before", "after", before, after), ...observeRegion(this.scope, this.id, document.region) };
   }
 
   async deliver(input?: DeliverInput): Promise<Outcome<Delivery>> {
@@ -468,22 +437,6 @@ export class Repo {
     return new Repo(scope);
   }
 
-  async status(input?: StatusInput): Promise<StatusReport> {
-    const scope = scopeForRepo(this);
-    if (input === undefined) return statusOperation({ scope });
-    const values = requireInput(input, "repo.status input");
-    const value = values.contract;
-    if (value === undefined) return statusOperation({ scope });
-    if (typeof value !== "string") throw new TypeError("contract ID must be a string");
-    let contract: ContractId;
-    try {
-      contract = contractId(value);
-    } catch (error) {
-      throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
-    }
-    return statusOperation({ scope, contractId: contract });
-  }
-
   async reconcile(): Promise<RepoReconcileReport> {
     return reconcileAllOperation({ scope: scopeForRepo(this) });
   }
@@ -501,6 +454,26 @@ function keiyakuOf(input: KeiyakuOfInput): Keiyaku {
   const scope = scopeForRepo(values.repo);
   if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
   return new KeiyakuHandle(contractId(values.id), scope);
+}
+
+async function listKeiyaku(input: ContractListInput): Promise<ContractBoard> {
+  const values = requireInput(input, "Keiyaku.list input");
+  for (const key of Object.keys(values)) if (key !== "repo") throw new TypeError(`Keiyaku.list input has unknown field: ${key}`);
+  return contractsOperation({ scope: scopeForRepo(values.repo) });
+}
+
+async function observeKeiyaku(input: ContractObservationInput): Promise<ContractObservation> {
+  const values = requireInput(input, "Keiyaku.observe input");
+  for (const key of Object.keys(values)) if (key !== "repo" && key !== "id") throw new TypeError(`Keiyaku.observe input has unknown field: ${key}`);
+  const scope = scopeForRepo(values.repo);
+  if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
+  let id: ContractId;
+  try {
+    id = contractId(values.id);
+  } catch (error) {
+    throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
+  }
+  return contractObservationOperation({ scope, contractId: id });
 }
 
 async function bindKeiyaku(input: BindInput): Promise<BindResult> {
@@ -539,5 +512,7 @@ async function bindKeiyaku(input: BindInput): Promise<BindResult> {
 export const Keiyaku = Object.freeze({
   ...handleType(KeiyakuHandle.prototype, (value) => value instanceof KeiyakuHandle),
   bind: bindKeiyaku,
+  list: listKeiyaku,
+  observe: observeKeiyaku,
   of: keiyakuOf,
 });

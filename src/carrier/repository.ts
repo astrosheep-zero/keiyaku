@@ -64,6 +64,16 @@ export type CarrierSnapshot = Readonly<{
   readonly paths: ReadonlyMap<string, TreeEntry>;
 }>;
 
+export class NoGitWorldError extends Error {
+  readonly path: string;
+
+  constructor(path: string) {
+    super(`no Git world at: ${path}`);
+    this.name = "NoGitWorldError";
+    this.path = path;
+  }
+}
+
 class GitPlumbingError extends Error {
   readonly stderr: Buffer;
   readonly status: number | null;
@@ -120,7 +130,15 @@ export function repositoryAt(cwd: string): GitRepository {
   }
   const effectiveCwd = resolve(cwd);
   const provisional = { effectiveCwd, primaryWorktree: effectiveCwd } satisfies GitRepository;
-  const primaryWorktree = registeredWorktreePaths(provisional)[0]!;
+  let primaryWorktree: string;
+  try {
+    primaryWorktree = registeredWorktreePaths(provisional)[0]!;
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 128) {
+      throw new NoGitWorldError(effectiveCwd);
+    }
+    throw error;
+  }
   return { effectiveCwd, primaryWorktree };
 }
 

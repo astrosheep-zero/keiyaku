@@ -3,14 +3,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { deliveryWorktreePath } from "../src/carrier/reconcile.js";
-import { contractJournalPath } from "../src/carrier/identity.js";
 import { repositoryAt } from "../src/carrier/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import {
   bindOperation,
+  contractObservationOperation,
+  contractsOperation,
   reconcileAllOperation,
   scopeOperation,
-  statusOperation,
 } from "../src/protocol/operations.js";
 import type { ContractId } from "../src/core/facts/types.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
@@ -68,7 +68,7 @@ test("carrier repository resolution rejects omitted and empty coordinates", () =
   assert.throws(() => repositoryAt(""), /repository path must be a nonempty string/);
 });
 
-test("scope and status operations return plain pinned data from one carrier snapshot", () => {
+test("Contract reads return plain pinned data from one carrier snapshot", () => {
   const repository = repositoryWithMain();
   const first = bind(repository, "First status row", "here");
   const second = bind(repository, "Second status row", "worktree");
@@ -79,45 +79,43 @@ test("scope and status operations return plain pinned data from one carrier snap
   const report = withGitShim(
     "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_STATUS_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_STATUS_READ_LOG: log },
-    () => statusOperation({ scope }),
+    () => contractsOperation({ scope }),
   );
   const carrier = repositoryAt(repository.path);
 
-  assert.equal(report.contracts.length, 2);
+  assert.equal(report.rows.length, 2);
   assert.equal(scope.effectiveCwd, resolve(repository.path));
   assert.equal(scope.primaryWorktree, carrier.primaryWorktree);
   assert.equal(carrier.effectiveCwd, resolve(repository.path));
-  assert.equal(report.scope, carrier.effectiveCwd);
-  assert.deepEqual(report.contracts.find((contract) => contract.contractId === first), {
-    contractId: first,
+  assert.equal(report.root, carrier.primaryWorktree);
+  assert.deepEqual(report.rows.find((contract) => contract.id === first), {
+    id: first,
     phase: "bound",
+    disposition: "active",
     workspace: "here",
     worktreePath: null,
     target: null,
-    verification: null,
+    candidate: null,
+    gates: { reports: [], satisfied: true },
   });
-  assert.deepEqual(report.contracts.find((contract) => contract.contractId === second), {
-    contractId: second,
+  assert.deepEqual(report.rows.find((contract) => contract.id === second), {
+    id: second,
     phase: "bound",
+    disposition: "active",
     workspace: "worktree",
     worktreePath: deliveryWorktreePath(carrier, second),
     target: null,
-    verification: null,
+    candidate: null,
+    gates: { reports: [], satisfied: true },
   });
   const invocations = readFileSync(log, "utf8").trim().split("\n");
   assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
   assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 1);
 
-  writeFileSync(log, "");
-  const targeted = withGitShim(
-    "printf '%s\\n' \"$*\" >> \"$KEIYAKU_STATUS_READ_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
-    { KEIYAKU_STATUS_READ_LOG: log },
-    () => statusOperation({ scope, contractId: first }),
-  );
-  assert.deepEqual(targeted.contracts.map((contract) => contract.contractId), [first]);
-  const targetedInvocations = readFileSync(log, "utf8").trim().split("\n");
-  assert.equal(targetedInvocations.some((command) => command.includes("ls-tree -r")), false);
-  assert.equal(targetedInvocations.some((command) => command.includes(contractJournalPath(first))), true);
+  assert.deepEqual(contractObservationOperation({ scope, contractId: first }), {
+    kind: "present",
+    row: report.rows.find((contract) => contract.id === first),
+  });
 });
 
 test("batch reconcile isolates a failed contract and retains successful reports", () => {
