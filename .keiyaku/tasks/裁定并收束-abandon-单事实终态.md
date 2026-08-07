@@ -1,15 +1,16 @@
 ---
 id: 裁定并收束-abandon-单事实终态
 title: 删除 abandon 双事实终态与跨快照 finalHead
-state: open
+state: in_progress
 pri: 1
 needs:
   - attestation-subject-统一证词与-gat-da92658b
 parent: null
 from: []
 createdAt: 2026-08-06T05:42:56.344Z
-updatedAt: 2026-08-07T05:09:32.423Z
+updatedAt: 2026-08-07T05:09:46.124Z
 creator: thekoc
+startedAt: 2026-08-07T05:09:46.124Z
 ---
 依据 docs/model.md 与 docs/lifecycle.md，把 abandon 收束为一个事实和一个终态判断。
 
