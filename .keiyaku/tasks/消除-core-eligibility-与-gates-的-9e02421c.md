@@ -1,15 +1,14 @@
 ---
 id: 消除-core-eligibility-与-gates-的-9e02421c
 title: 消除 core eligibility 与 gates 的二次扫描
-state: in_progress
+state: done
 pri: 0
 needs: []
 parent: null
 from: []
 createdAt: 2026-08-06T16:55:02.443Z
-updatedAt: 2026-08-06T16:55:15.995Z
+updatedAt: 2026-08-07T04:47:50.329Z
 creator: thekoc
-startedAt: 2026-08-06T16:55:15.995Z
 ---
 保持 docs/lifecycle.md 的 eligibility 和 gate 语义不变，清除随合同/证词数量平方增长的实现：
 
