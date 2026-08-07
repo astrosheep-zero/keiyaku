@@ -348,7 +348,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "math-random", owners: [] },
     { capability: "module-mutable-state", owners: [] },
     { capability: "date-now", owners: ["protocol/intent.ts"] },
-    { capability: "new-date-current", owners: ["protocol/bind.ts", "protocol/operations.ts"] },
+    { capability: "new-date-current", owners: ["protocol/bind.ts", "protocol/operations.ts", "task/compose.ts", "task/operations.ts"] },
     { capability: "process-argv", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-cwd", owners: ["carrier/repository.ts", "library/keiyaku.ts", "task/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-environment", owners: ["cli/invoke.ts", "carrier/repository.ts", "protocol/operations.ts"] },

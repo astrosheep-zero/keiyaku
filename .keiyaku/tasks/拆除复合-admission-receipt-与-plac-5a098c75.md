@@ -8,6 +8,9 @@ needs:
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-07T04:47:49.230Z
+updatedAt: 2026-08-07T11:29:07.454Z
 contractId: null
 ---
 依据 docs/lifecycle.md、docs/verification.md、docs/public-api.md、docs/cli.md 与 Square act_360 的最终勘误，重塑 composed operation 公开结果：

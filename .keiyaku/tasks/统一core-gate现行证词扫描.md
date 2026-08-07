@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-07T04:49:01.709Z
+updatedAt: 2026-08-07T11:29:07.461Z
 contractId: null
 ---
 gateSatisfied and gatesSatisfied must share one newest-first current-subject adjudication implementation while gatesSatisfied stays O(attestations + gates), not every(gateSatisfied). Preserve latest same-subject override, stale-subject skipping, opaque gates, and fold/placement semantics.

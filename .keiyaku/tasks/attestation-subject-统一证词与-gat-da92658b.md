@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-06T08:14:53.905Z
+updatedAt: 2026-08-07T11:29:07.421Z
 contractId: null
 ---
 落实 Square 裁决 #175。先把 attestation、subject 与 currentSubject 的现行法写入 model/lifecycle/verification owner docs，再硬切持久化模型与实现。

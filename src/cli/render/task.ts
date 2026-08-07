@@ -40,7 +40,10 @@ function renderRows(result: TaskList | BlockedTaskList): string {
 }
 function renderShow(result: TaskDetail | TaskMutationResult): string {
   if ("kind" in result) return result.kind === "accepted" ? row(result.value) : failure(result);
-  const task = result.task, lines = [row(task), `namespace: ${task.namespace.join("/") || "root"}`];
+  const task = result.task, lines = [
+    row(task), `namespace: ${task.namespace.join("/") || "root"}`,
+    `createdAt: ${task.createdAt}`, `updatedAt: ${task.updatedAt}`, `note: ${task.note}`,
+  ];
   for (const [label, values] of [
     ["needs", task.needs], ["blockers", result.blockers.map((item) => item.id)], ["blocks", result.blocks.map((item) => item.id)],
     ["children", result.children.map((item) => item.id)], ["supersedes", task.supersedes],

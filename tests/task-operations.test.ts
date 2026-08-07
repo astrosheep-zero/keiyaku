@@ -19,6 +19,50 @@ function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Tasks.at>["add"
   return result.value.id;
 }
 
+test("note is replaceable authority and product timestamps advance only on change", async () => {
+  const { tasks } = world();
+  const added = await tasks.add({ title: "Timestamped", note: "first" });
+  assert.equal(added.kind, "accepted");
+  if (added.kind !== "accepted") return;
+  assert.equal(added.value.note, "first");
+  assert.equal(added.value.createdAt, added.value.updatedAt);
+  assert.equal(new Date(added.value.createdAt).toISOString(), added.value.createdAt);
+
+  const replaced = await tasks.task({ id: added.value.id }).update({ note: "second" });
+  assert.equal(replaced.kind, "accepted");
+  if (replaced.kind !== "accepted") return;
+  assert.equal(replaced.value.task.note, "second");
+  assert.equal(replaced.value.task.createdAt, added.value.createdAt);
+  assert.ok(replaced.value.task.updatedAt > added.value.updatedAt);
+  assert.match(replaced.value.documentDiff, /-note: first/u);
+  assert.match(replaced.value.documentDiff, /\+note: second/u);
+
+  const unchanged = await tasks.task({ id: added.value.id }).update({ note: "second" });
+  assert.equal(unchanged.kind, "accepted");
+  if (unchanged.kind !== "accepted") return;
+  assert.equal(unchanged.value.documentDiff, "");
+  assert.equal(unchanged.value.task.updatedAt, replaced.value.task.updatedAt);
+});
+
+test("drop and batch drop replace note while preserving creation time", async () => {
+  const { tasks } = world();
+  const one = acceptedId(await tasks.add({ title: "One", note: "old" }));
+  const before = await tasks.task({ id: one }).read();
+  const dropped = await tasks.task({ id: one }).drop({ note: "obsolete" });
+  assert.equal(dropped.kind, "accepted");
+  if (dropped.kind === "accepted") {
+    assert.equal(dropped.value.state, "drop");
+    assert.equal(dropped.value.note, "obsolete");
+    assert.equal(dropped.value.createdAt, before?.task.createdAt);
+    assert.ok(dropped.value.updatedAt > (before?.task.updatedAt ?? ""));
+  }
+
+  const two = acceptedId(await tasks.add({ title: "Two" })), three = acceptedId(await tasks.add({ title: "Three" }));
+  const batch = await tasks.batch({ verb: "drop", ids: [two, three], note: "cancelled" });
+  assert.ok(batch.items.every((item) => item.outcome.kind === "accepted" && item.outcome.value.note === "cancelled"));
+  assert.throws(() => tasks.batch({ verb: "done", ids: [two], note: "invalid" }), /valid only for drop/u);
+});
+
 test("Tasks creates root and nested authority and preserves opaque contractId", async () => {
   const { tasks } = world();
   const rootId = acceptedId(await tasks.add({ title: "Root task", contractId: "external #42" }));

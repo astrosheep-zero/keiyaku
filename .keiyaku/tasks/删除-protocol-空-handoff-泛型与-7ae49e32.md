@@ -8,6 +8,9 @@ needs:
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-06T05:43:30.575Z
+updatedAt: 2026-08-07T11:29:07.445Z
 contractId: null
 ---
 所有 pact verb 的 OfferDecision handoff 均恒为 null；ReconcileHandoff.handoff 与 admission 没有任何生产语义或读者，operations 只读取 acceptedEntries/prior/snapshot。当前命名把 protocol acceptance 错称为 reconcile handoff，并为不存在的未来值传播泛型。

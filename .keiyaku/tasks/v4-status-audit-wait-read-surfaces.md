@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-05T19:14:11.805Z
+updatedAt: 2026-08-07T11:29:07.440Z
 contractId: null
 ---
 Complete the settled read surfaces in src/core/read and CLI adapters: status is one folded read-only board with optional contract filtering and no caller-selected --fast mode; audit is journal history plus retained context and optional body diff, and when Verification has no current matching pass it executes and admits a separate verification fact through the normal writer path. Do not implement wait in v4 day1: its event source and predicate model are not settled; Akuma waiting remains in the outer keiyaku control plane. Keep read projections free of journal/ref/worktree mutations except the explicit audit Verification admission path, and add small exact tests for the settled behavior. Do not invent default-branch lag or Akuma projection observation.

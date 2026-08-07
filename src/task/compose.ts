@@ -90,7 +90,9 @@ function applyAssignments(document: TaskDocument, assignments: readonly Assignme
   return body === undefined ? next : { ...next, body };
 }
 
-function plan(sketch: Sketch, board: TaskBoard, defaultNamespace: readonly string[]): readonly Planned[] | TaskRefusal {
+function currentTimestamp(): string { return new Date().toISOString(); }
+function advancedTimestamp(previous: string, current: string): string { return current > previous ? current : new Date(Date.parse(previous) + 1).toISOString(); }
+function plan(sketch: Sketch, board: TaskBoard, defaultNamespace: readonly string[], at: string): readonly Planned[] | TaskRefusal {
   try {
     const namespace = sketch.namespace ?? defaultNamespace; const occupied = new Set([...board.tasks.values()].flatMap((task) => {
       const coordinate = parseTaskId(task.id);
@@ -99,7 +101,7 @@ function plan(sketch: Sketch, board: TaskBoard, defaultNamespace: readonly strin
     const allocations = new Map<number, TaskDocument>();
     for (const node of sketch.nodes) if (node.kind === "new") {
       const localId = allocateLocalId(deriveLocalStem(node.title!), occupied); occupied.add(localId); const coordinate = { namespace, localId };
-      allocations.set(node.index, { id: formatTaskId(coordinate), title: node.title!, state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], contractId: null, body: "" });
+      allocations.set(node.index, { id: formatTaskId(coordinate), title: node.title!, state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], note: "", createdAt: at, updatedAt: at, contractId: null, body: "" });
     }
     const all = new Map(board.tasks); for (const allocated of allocations.values()) all.set(allocated.id, allocated);
     const byDepth: TaskId[] = [], addressed = new Set<TaskId>(); const planned: Planned[] = [];
@@ -114,7 +116,9 @@ function plan(sketch: Sketch, board: TaskBoard, defaultNamespace: readonly strin
         if (node.assignments.some((item) => item.field === "parent")) throw new TypeError("indented node cannot also assign parent");
         current = { ...current, parent };
       }
-      current = applyAssignments(current, node.assignments, node.body); byDepth[node.depth] = current.id; byDepth.length = node.depth + 1;
+      current = applyAssignments(current, node.assignments, node.body);
+      if (before !== null && !Buffer.from(serializeTaskDocument(current)).equals(Buffer.from(serializeTaskDocument(before)))) current = { ...current, updatedAt: advancedTimestamp(before.updatedAt, at) };
+      byDepth[node.depth] = current.id; byDepth.length = node.depth + 1;
       all.set(current.id, current); planned.push({ node, before, after: current });
     }
     for (const item of planned) {
@@ -142,14 +146,15 @@ function draft(namespace: readonly string[], remaining: readonly Planned[]): str
 
 export async function composeTasks(world: TaskWorld, markdown: string, signal?: AbortSignal): Promise<TaskCompositionResult> {
   const sketch = parseSketch(markdown); if ("kind" in sketch) return { kind: "refused", refusal: sketch };
+  const at = currentTimestamp();
   const context = sketch.namespace ?? readNamespaceContext(world.root);
   if (context === "malformed") return { kind: "refused", refusal: { kind: "invalid-namespace-context", path: `${world.root}/.keiyaku/namespace/current` } };
   const namespace = context === "absent" ? [] : context;
-  const initial = readBoard(world); const planned = plan(sketch, initial.board, namespace); if ("kind" in planned) return { kind: "refused", refusal: planned };
+  const initial = readBoard(world); const planned = plan(sketch, initial.board, namespace, at); if ("kind" in planned) return { kind: "refused", refusal: planned };
   const ordered = [...planned].sort((a, b) => Buffer.compare(Buffer.from(a.after.id), Buffer.from(b.after.id)));
   const allocation = sketch.nodes.some((node) => node.kind === "new");
   const result = await withTaskLocks({ world, allocation, ids: ordered.map((item) => item.after.id), ...(signal === undefined ? {} : { signal }) }, async (): Promise<TaskCompositionResult> => {
-    const fresh = readBoard(world); const replanned = plan(sketch, fresh.board, namespace); if ("kind" in replanned) return { kind: "refused", refusal: replanned };
+    const fresh = readBoard(world); const replanned = plan(sketch, fresh.board, namespace, at); if ("kind" in replanned) return { kind: "refused", refusal: replanned };
     const queue = [...replanned].sort((a, b) => Buffer.compare(Buffer.from(a.after.id), Buffer.from(b.after.id))), changes: TaskDocumentChange[] = [];
     for (let index = 0; index < queue.length; index += 1) {
       signal?.throwIfAborted(); const item = queue[index]!, path = authorityPath(world, item.after.id);

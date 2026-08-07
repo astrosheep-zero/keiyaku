@@ -18,7 +18,7 @@ import {
 type TaskAction = "add" | "show" | "ls" | "ready" | "blocked" | "tree" | "doctor" | "update"
   | "start" | "stop" | "hold" | "resume" | "done" | "drop" | "namespace" | "compose";
 type TaskFlagValue = string | true | readonly string[];
-type TaskStdin = "document" | "body" | "append" | "compose";
+type TaskStdin = "document" | "body" | "append" | "note" | "compose";
 
 export type ParsedTaskCommand = Readonly<{
   command: "task";
@@ -37,17 +37,17 @@ type TaskCommandSpec = Readonly<{
 
 const COMMON = { json: "boolean" } as const;
 const SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
-  add: { arity: [0, 1], stdin: "document", flags: { ...COMMON, namespace: "value", state: "value", priority: "value", needs: "repeat", parent: "value", supersedes: "repeat", relates: "repeat", contract: "value", body: "value" } },
+  add: { arity: [0, 1], stdin: "document", flags: { ...COMMON, namespace: "value", state: "value", priority: "value", needs: "repeat", parent: "value", supersedes: "repeat", relates: "repeat", contract: "value", body: "value", note: "value" } },
   show: { arity: [1, 1], flags: COMMON },
   ls: { arity: [0, 0], flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean" } },
   ready: { arity: [0, 0], flags: { ...COMMON, world: "boolean" } },
   blocked: { arity: [0, 0], flags: { ...COMMON, world: "boolean" } },
   tree: { arity: [1, 1], flags: { ...COMMON, full: "boolean" } },
   doctor: { arity: [0, 0], flags: COMMON },
-  update: { arity: [1, 1], flags: { ...COMMON, title: "value", body: "value", append: "value", priority: "value", needs: "repeat", "drop-needs": "repeat", parent: "value", "no-parent": "boolean", supersedes: "repeat", "drop-supersedes": "repeat", relates: "repeat", "drop-relates": "repeat", contract: "value", "no-contract": "boolean" } },
+  update: { arity: [1, 1], flags: { ...COMMON, title: "value", body: "value", append: "value", note: "value", priority: "value", needs: "repeat", "drop-needs": "repeat", parent: "value", "no-parent": "boolean", supersedes: "repeat", "drop-supersedes": "repeat", relates: "repeat", "drop-relates": "repeat", contract: "value", "no-contract": "boolean" } },
   start: { arity: [1, 1], flags: COMMON }, stop: { arity: [1, 1], flags: COMMON },
   hold: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON }, resume: { arity: [1, 1], flags: COMMON },
-  done: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON }, drop: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON },
+  done: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON }, drop: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" } },
   namespace: { arity: [0, 1], flags: COMMON },
   compose: { arity: [0, 0], stdin: "compose", flags: COMMON },
 };
@@ -76,8 +76,8 @@ function scanTaskOption(input: Readonly<{
   const token = input.argv[input.index]!, name = token.slice(2), kind = input.spec.flags[name];
   if (kind === undefined) fail(`option ${token} is not valid for task ${input.action}`);
   const next = kind === "boolean" ? undefined : input.argv[input.index + 1];
-  if (next === "-" && input.action === "update" && (name === "body" || name === "append")) {
-    if (input.index + 1 !== input.argv.length - 1 || input.stdin !== undefined) fail("stdin body marker '-' must be final");
+  if (next === "-" && input.action === "update" && (name === "body" || name === "append" || name === "note")) {
+    if (input.index + 1 !== input.argv.length - 1 || input.stdin !== undefined) fail("stdin update marker '-' must be final");
     input.flags[name] = ""; return { index: input.index + 1, stdin: name };
   }
   if (kind !== "boolean" && (next === undefined || next.startsWith("--") || next === "-")) fail(`--${name} requires a value`);
@@ -150,12 +150,12 @@ type TaskInput = Readonly<{ path?: string; readStdin(): string }>;
 function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => string): Promise<TaskMutationResult> {
   const selectedNamespace = namespace(value(command, "namespace"));
   if (command.stdin === "document") return tasks.addDocument({ markdown: readStdin(), ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }) });
-  const body = value(command, "body"), initialState = state(value(command, "state")), selectedPriority = priority(value(command, "priority"));
+  const body = value(command, "body"), note = value(command, "note"), initialState = state(value(command, "state")), selectedPriority = priority(value(command, "priority"));
   const needs = ids(values(command, "needs")), parent = value(command, "parent");
   const supersedes = ids(values(command, "supersedes")), relates = ids(values(command, "relates")), contractId = value(command, "contract");
   return tasks.add({
     title: command.positionals[0]!, ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }),
-    ...(body === undefined ? {} : { body }), ...(initialState === undefined ? {} : { state: initialState }), ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
+    ...(body === undefined ? {} : { body }), ...(note === undefined ? {} : { note }), ...(initialState === undefined ? {} : { state: initialState }), ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
     ...(needs === undefined ? {} : { needs }), ...(parent === undefined ? {} : { parent: parent as TaskId }),
     ...(supersedes === undefined ? {} : { supersedes }), ...(relates === undefined ? {} : { relates }),
     ...(contractId === undefined ? {} : { contractId }),
@@ -164,13 +164,14 @@ function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: ()
 
 function invokeUpdate(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => string): Promise<TaskUpdateResult> {
   const body = command.stdin === "body" ? readStdin() : value(command, "body"), appendBody = command.stdin === "append" ? readStdin() : value(command, "append");
+  const note = command.stdin === "note" ? readStdin() : value(command, "note");
   const title = value(command, "title"), selectedPriority = priority(value(command, "priority"));
   const addNeeds = ids(values(command, "needs")), dropNeeds = ids(values(command, "drop-needs"));
   const parent = value(command, "parent"), addSupersedes = ids(values(command, "supersedes"));
   const dropSupersedes = ids(values(command, "drop-supersedes")), addRelates = ids(values(command, "relates"));
   const dropRelates = ids(values(command, "drop-relates")), contractId = value(command, "contract");
   return tasks.task({ id: command.positionals[0]! }).update({
-    ...(title === undefined ? {} : { title }), ...(body === undefined ? {} : { body }), ...(appendBody === undefined ? {} : { appendBody }),
+    ...(title === undefined ? {} : { title }), ...(body === undefined ? {} : { body }), ...(appendBody === undefined ? {} : { appendBody }), ...(note === undefined ? {} : { note }),
     ...(selectedPriority === undefined ? {} : { priority: selectedPriority }), ...(addNeeds === undefined ? {} : { addNeeds }),
     ...(dropNeeds === undefined ? {} : { dropNeeds }), ...(command.flags["no-parent"] === true ? { parent: null } : parent === undefined ? {} : { parent: parent as TaskId }),
     ...(addSupersedes === undefined ? {} : { addSupersedes }), ...(dropSupersedes === undefined ? {} : { dropSupersedes }),
@@ -207,7 +208,10 @@ export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): 
     case "resume": return tasks.task({ id }).resume();
     case "hold": return tasks.batch({ verb: "hold", ids: command.positionals });
     case "done": return tasks.batch({ verb: "done", ids: command.positionals });
-    case "drop": return tasks.batch({ verb: "drop", ids: command.positionals });
+    case "drop": {
+      const note = value(command, "note");
+      return tasks.batch({ verb: "drop", ids: command.positionals, ...(note === undefined ? {} : { note }) });
+    }
     case "namespace": {
       const selected = namespace(command.positionals[0]);
       if (selected !== undefined) await tasks.setNamespace({ namespace: selected });

@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-06T08:15:23.502Z
+updatedAt: 2026-08-07T11:29:07.454Z
 contractId: null
 ---
 observeCarrier 先读 carrier tree，再为每份 contract journal 单独执行一次 git cat-file。status、world reconcile 与 eligibility-changing protocol 因此产生 O(N) 个 Git 子进程；重试会重复该放大。当前没有 N²，但 process topology 会随契约数线性恶化。

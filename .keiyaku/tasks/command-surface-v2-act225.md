@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-05T08:48:16.561Z
+updatedAt: 2026-08-07T11:29:07.422Z
 contractId: null
 ---
 Act 225/229/230 authority cut. Docs now target bind/amend/deliver/review/abandon + status/audit/wait/reconcile, facts bind->bound->deliver->fulfilled | abandon->abandoned, task drop remains task-domain, and results expose facts/effects/lag including worktree/ref movement. Source migration remains intentionally untouched pending Faye's exact payload/CAS/required-set/amend-invalidation/wait/audit ruling. Atomic implementation surface: facts types+codec+fold+admission+repository; protocol run; reconcile; replace old open/seal/renew/petition/claim/forfeit owners/tests with bind/amend/deliver/review/abandon; rewrite CLI and task settlement; add focused codec/fold/admission/reconcile/CLI/dogfood tests. No aliases and no partial schema.

@@ -8,6 +8,9 @@ needs:
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-07T05:00:24.638Z
+updatedAt: 2026-08-07T11:29:07.461Z
 contractId: null
 ---
 依据 docs/lifecycle.md 的 every attempt one legal decide 和 docs/document.md 的 key-stamped derivation law，删除 deliver/audit/review 的拼装裁决漂移：

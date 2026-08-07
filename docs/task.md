@@ -51,15 +51,20 @@ The sole Task authority is canonical Markdown at:
 
 The path owns identity. Closed front matter repeats the full `id` as an
 integrity witness and contains `title`, `state`, `priority`, `needs`, `parent`,
-`supersedes`, `relates`, and optional `contractId`; prose is the body. The ID
-must equal the path-derived coordinate. Unknown keys and malformed documents
-are authority corruption. Manual editing is authoritative; a manual move that
-breaks the witness is corruption.
+`supersedes`, `relates`, `note`, `createdAt`, `updatedAt`, and optional
+`contractId`; prose is the body. The ID must equal the path-derived coordinate.
+Unknown keys and malformed documents are authority corruption. Manual editing
+is authoritative; a manual move that breaks the witness is corruption.
 
 `priority` is `0 | 1 | 2 | 3` and defaults to `2`. Relation arrays are ordered,
-duplicate-free full TaskIds. `parent` and `contractId` are nullable. V1 has no
-timestamps, notes, cached readiness, counters, task log, NDJSON trace, private
-history ref, or `history <TaskId>`.
+duplicate-free full TaskIds. `note` is a string and defaults to empty.
+`createdAt` and `updatedAt` are canonical UTC ISO
+timestamps. Product creation sets both to one captured time. A product mutation
+that changes Task authority preserves `createdAt` and advances `updatedAt` once;
+a no-op update preserves both. Manual writers own the truth of both timestamps
+when they edit authority. `parent` and `contractId` are nullable. V1 has no
+cached readiness, counters, task log, NDJSON trace, private history ref, or
+`history <TaskId>`.
 
 ## Lifecycle And Graph
 
@@ -112,7 +117,7 @@ tasks.list(input?: { selection?: "active" | "closed" | "all"; scope?: "namespace
 tasks.ready(input?: { scope?: "namespace" | "world" }): Promise<TaskList>
 tasks.blocked(input?: { scope?: "namespace" | "world" }): Promise<BlockedTaskList>
 tasks.doctor(): Promise<TaskDoctorReport>
-tasks.batch(input: { verb: "done" | "drop" | "hold"; ids: readonly string[]; signal?: AbortSignal }): Promise<TaskBatchResult>
+tasks.batch(input: { verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }): Promise<TaskBatchResult>
 tasks.compose(input: { markdown: string; signal?: AbortSignal }): Promise<TaskCompositionResult>
 
 task.read(): Promise<TaskDetail | null>
@@ -123,17 +128,18 @@ task.stop(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 task.hold(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 task.resume(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 task.done(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
-task.drop(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
+task.drop(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult>
 ```
 
-`add` accepts structured title, namespace, body, priority, relations, optional
-contract, optional initial state, and signal. `addDocument` accepts
+`add` accepts structured title, namespace, body, note, priority, relations,
+optional contract, optional initial state, and signal. `addDocument` accepts
 creation-document Markdown plus an optional namespace and signal. The creation
-document cannot set identity but may set any persisted state; omitted state
-defaults to `open`. After creation, product state changes use lifecycle methods.
-`update` is a field-preserving patch: title, mutually exclusive body or
-append-body, priority, relation replace/add/drop, nullable parent, and nullable
-contract.
+document cannot set identity or timestamps but may set note and any persisted
+state; omitted note is empty and omitted state defaults to `open`.
+After creation, product state changes use lifecycle methods. `update` is a
+field-preserving patch: title, mutually exclusive body or append-body, priority,
+relation replace/add/drop, nullable parent, nullable contract, and note
+replacement.
 
 Shape errors throw `TypeError` before world observation. Malformed persisted
 authority throws `TaskAuthorityCorruptionError`. Infrastructure failures stay
@@ -152,8 +158,9 @@ malformed marker as `invalid-namespace-context`, not a programmer `TypeError`.
 self relation, or strongly connected cycle component. An empty issue array is
 healthy. Doctor observes authority and never repairs it.
 
-Add and lifecycle acceptance return `TaskView`. Only accepted `update` returns
-the exact predecessor-to-successor whole-document diff. Batch applies IDs in
+Add and lifecycle acceptance return `TaskView`. Only accepted `update`, including
+a note-only replacement, returns the exact predecessor-to-successor
+whole-document diff. Batch applies IDs in
 input order, continues after failures, preserves accepted items, and returns
 every item. Cancellation stops before the next item and never interrupts an
 atomic replacement.

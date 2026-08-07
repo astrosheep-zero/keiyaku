@@ -59,12 +59,12 @@ function contract(value: unknown): string | null | undefined {
 
 function addInput(input: unknown): AddTaskInput {
   const v = record(input, "add input");
-  closed(v, ["title", "namespace", "body", "state", "priority", "needs", "parent", "supersedes", "relates", "contractId", "signal"], "add input");
+  closed(v, ["title", "namespace", "body", "note", "state", "priority", "needs", "parent", "supersedes", "relates", "contractId", "signal"], "add input");
   const title = text(v.title, "title"); if (title === undefined || title.trim() === "") throw new TypeError("title is required");
-  const ns = namespace(v.namespace), body = text(v.body, "body"), initialState = state(v.state), pri = priority(v.priority);
+  const ns = namespace(v.namespace), body = text(v.body, "body"), note = text(v.note, "note"), initialState = state(v.state), pri = priority(v.priority);
   const needs = taskIds(v.needs, "needs"), parent = nullableId(v.parent), supersedes = taskIds(v.supersedes, "supersedes"), relates = taskIds(v.relates, "relates");
   const contractId = contract(v.contractId), abort = signal(v.signal);
-  return { title, ...(ns === undefined ? {} : { namespace: ns }), ...(body === undefined ? {} : { body }),
+  return { title, ...(ns === undefined ? {} : { namespace: ns }), ...(body === undefined ? {} : { body }), ...(note === undefined ? {} : { note }),
     ...(initialState === undefined ? {} : { state: initialState }), ...(pri === undefined ? {} : { priority: pri }),
     ...(needs === undefined ? {} : { needs }), ...(parent === undefined ? {} : { parent }),
     ...(supersedes === undefined ? {} : { supersedes }), ...(relates === undefined ? {} : { relates }),
@@ -72,12 +72,13 @@ function addInput(input: unknown): AddTaskInput {
 }
 function updateInput(input: unknown): UpdateTaskInput {
   const v = record(input, "update input");
-  closed(v, ["title", "body", "appendBody", "priority", "needs", "addNeeds", "dropNeeds", "parent", "supersedes", "addSupersedes", "dropSupersedes", "relates", "addRelates", "dropRelates", "contractId", "signal"], "update input");
+  closed(v, ["title", "body", "appendBody", "note", "priority", "needs", "addNeeds", "dropNeeds", "parent", "supersedes", "addSupersedes", "dropSupersedes", "relates", "addRelates", "dropRelates", "contractId", "signal"], "update input");
   if (v.body !== undefined && v.appendBody !== undefined) throw new TypeError("body and appendBody are mutually exclusive");
   const result: Record<string, unknown> = {};
   const title = text(v.title, "title"); if (title !== undefined) { if (title.trim().length === 0) throw new TypeError("title must be nonblank"); result.title = title; }
   const body = text(v.body, "body"); if (body !== undefined) result.body = body;
   const appendBody = text(v.appendBody, "appendBody"); if (appendBody !== undefined) result.appendBody = appendBody;
+  const note = text(v.note, "note"); if (note !== undefined) result.note = note;
   const pri = priority(v.priority); if (pri !== undefined) result.priority = pri;
   for (const [key, value] of [["needs", taskIds(v.needs, "needs")], ["addNeeds", taskIds(v.addNeeds, "addNeeds")], ["dropNeeds", taskIds(v.dropNeeds, "dropNeeds")], ["supersedes", taskIds(v.supersedes, "supersedes")], ["addSupersedes", taskIds(v.addSupersedes, "addSupersedes")], ["dropSupersedes", taskIds(v.dropSupersedes, "dropSupersedes")], ["relates", taskIds(v.relates, "relates")], ["addRelates", taskIds(v.addRelates, "addRelates")], ["dropRelates", taskIds(v.dropRelates, "dropRelates")]] as const) if (value !== undefined) result[key] = value;
   const parent = nullableId(v.parent); if (parent !== undefined) result.parent = parent;
@@ -101,15 +102,16 @@ class TaskHandle {
   }
   update(input: UpdateTaskInput): Promise<TaskUpdateResult> { return updateTask(this.world, this.id, updateInput(input)); }
   private lifecycle(verb: "start" | "stop" | "hold" | "resume" | "done" | "drop", input: unknown): Promise<TaskMutationResult> {
-    const value = record(input ?? {}, `${verb} input`); closed(value, ["signal"], `${verb} input`);
-    return lifecycleTask(this.world, this.id, verb, signal(value.signal));
+    const value = record(input ?? {}, `${verb} input`); closed(value, verb === "drop" ? ["note", "signal"] : ["signal"], `${verb} input`);
+    const note = verb === "drop" ? text(value.note, "note") : undefined;
+    return lifecycleTask(this.world, this.id, verb, signal(value.signal), note);
   }
   start(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("start", input); }
   stop(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("stop", input); }
   hold(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("hold", input); }
   resume(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("resume", input); }
   done(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("done", input); }
-  drop(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("drop", input); }
+  drop(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult> { return this.lifecycle("drop", input); }
 }
 export type Task = TaskHandle;
 
@@ -128,7 +130,7 @@ class TasksHandle {
   async ready(input: Readonly<{ scope?: "namespace" | "world" }> = {}): Promise<TaskList> { const v = record(input, "ready input"); closed(v, ["scope"], "ready input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return readyTasks(this.world, v.scope as "namespace" | "world" | undefined); }
   async blocked(input: Readonly<{ scope?: "namespace" | "world" }> = {}): Promise<BlockedTaskList> { const v = record(input, "blocked input"); closed(v, ["scope"], "blocked input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return blockedTasks(this.world, v.scope as "namespace" | "world" | undefined); }
   async doctor(): Promise<TaskDoctorReport> { return { issues: diagnoseBoard(readBoard(this.world).board) }; }
-  batch(input: Readonly<{ verb: "done" | "drop" | "hold"; ids: readonly string[]; signal?: AbortSignal }>): Promise<TaskBatchResult> { const v = record(input, "batch input"); closed(v, ["verb", "ids", "signal"], "batch input"); const verb = v.verb; if (verb !== "done" && verb !== "drop" && verb !== "hold") throw new TypeError("batch verb is invalid"); return batchTasks(this.world, verb, taskIds(v.ids, "ids") ?? [], signal(v.signal)); }
+  batch(input: Readonly<{ verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }>): Promise<TaskBatchResult> { const v = record(input, "batch input"); closed(v, ["verb", "ids", "note", "signal"], "batch input"); const verb = v.verb; if (verb !== "done" && verb !== "drop" && verb !== "hold") throw new TypeError("batch verb is invalid"); const note = text(v.note, "note"); if (note !== undefined && verb !== "drop") throw new TypeError("batch note is valid only for drop"); return batchTasks(this.world, verb, taskIds(v.ids, "ids") ?? [], signal(v.signal), note); }
   compose(input: Readonly<{ markdown: string; signal?: AbortSignal }>): Promise<TaskCompositionResult> { const v = record(input, "compose input"); closed(v, ["markdown", "signal"], "compose input"); const markdown = text(v.markdown, "markdown"); if (markdown === undefined) throw new TypeError("markdown is required"); return composeTasks(this.world, markdown, signal(v.signal)); }
 }
 export type Tasks = TasksHandle;

@@ -8,6 +8,9 @@ needs:
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-06T10:47:07.407Z
+updatedAt: 2026-08-07T11:29:07.452Z
 contractId: null
 ---
 当前输入允许 gates 包含 verified 而 Verification 声明为空；producer 因无声明永不运行，契约会进入永久不可满足状态。该问题已在 Square #175 明确列为独立输入侧缺口，但解决方式尚未落 owner law。

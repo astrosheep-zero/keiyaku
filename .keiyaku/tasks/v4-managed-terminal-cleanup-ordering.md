@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-05T11:18:09.767Z
+updatedAt: 2026-08-07T11:29:07.436Z
 contractId: null
 ---
 Fix managed terminal reconcile so it removes Keiyaku-owned delivery worktrees and refs in an order that remains usable from any invocation cwd, including the managed worktree itself. Preserve here ownership: never mutate the caller worktree or branch. Add a real-shell regression that asserts fulfilled and abandoned terminal cleanup leaves no managed delivery/candidate resources and reports typed lag only for genuine failure.

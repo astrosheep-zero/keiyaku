@@ -233,6 +233,7 @@ decisions remain in the native Task surface.
 ```text
 task add <TITLE> [--namespace <ns>] [--priority 0..3]
   [--state open|in_progress|on_hold|done|drop]
+  [--note <text>]
   [--needs <TaskId>]... [--parent <TaskId>]
   [--supersedes <TaskId>]... [--relates <TaskId>]...
   [--contract <ContractId>] [--body <text>] [--json]
@@ -244,22 +245,29 @@ task blocked [--world] [--json]
 task tree <TaskId> [--full] [--json]
 task doctor [--json]
 task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
+  [--note <text>|-]
   [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
   [--parent <TaskId> | --no-parent]
   [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
   [--relates <TaskId>]... [--drop-relates <TaskId>]...
   [--contract <ContractId> | --no-contract] [--json]
 task start|stop|hold|resume <TaskId> [--json]
-task done|drop|hold <TaskId>... [--json]
+task done|hold <TaskId>... [--json]
+task drop <TaskId>... [--note <text>] [--json]
 task namespace [<namespace>] [--json]
 task compose [--json] -
 ```
 
-Literal `-` selects creation-document input for add, body input only after
-`--body` or `--append` for update, and composition input for compose. Unselected
-piped stdin is not consumed. Add document input rejects creation-owned identity,
-may declare its initial state, and cannot be combined with structured creation
-flags other than `--namespace`. Update requires at least one explicit patch.
+Literal `-` selects creation-document input for add, body or note input only
+after `--body`, `--append`, or `--note` for update, and composition input for
+compose. Unselected piped stdin is not consumed. Add document input rejects
+creation-owned identity, may declare its initial state, and cannot be combined
+with structured creation flags other than `--namespace`. Update requires at
+least one explicit patch.
+
+Add `--note` sets the initial note. Update `--note` replaces the note and
+returns the native document diff. Drop `--note` replaces the note for each
+addressed Task in that Task's independent atomic drop mutation.
 
 `ls`, `ready`, and `blocked` use current namespace unless `--world` is present.
 `show`, `tree`, update, and lifecycle use complete IDs and never infer

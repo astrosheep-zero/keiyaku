@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-07T08:02:19.384Z
+updatedAt: 2026-08-07T11:29:07.459Z
 contractId: null
 ---
 Owner: docs/transport.md after act_362 integration.

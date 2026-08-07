@@ -13,6 +13,9 @@ needs:
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-06T04:53:11.516Z
+updatedAt: 2026-08-07T11:29:07.430Z
 contractId: null
 ---
 Close the architecture-defined MVP before dogfooding. Verify the authority documents and source agree on the current intent surface, journal-only lifecycle authority, complete-body amend boundary, CLI/core/task dependency direction, repository and Git ownership, result rendering, restart/retry semantics, and deletion of superseded v3 mechanisms. Require focused tests and source-only typecheck; do not add compatibility aliases or speculative extension points.

@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-07T04:47:50.431Z
+updatedAt: 2026-08-07T11:29:07.459Z
 contractId: null
 ---
 保持 docs/lifecycle.md 的 eligibility 和 gate 语义不变，清除随合同/证词数量平方增长的实现：

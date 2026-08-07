@@ -12,18 +12,21 @@ export type TaskDocument = Readonly<{
   parent: TaskId | null;
   supersedes: readonly TaskId[];
   relates: readonly TaskId[];
+  note: string;
+  createdAt: string;
+  updatedAt: string;
   contractId: string | null;
   body: string;
 }>;
-export type TaskCreationDocument = Omit<TaskDocument, "id">;
+export type TaskCreationDocument = Omit<TaskDocument, "id" | "createdAt" | "updatedAt">;
 
 export class TaskAuthorityCorruptionError extends Error {
   constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "TaskAuthorityCorruptionError"; }
 }
 
 const STATES = new Set<TaskState>(["open", "in_progress", "on_hold", "done", "drop"]);
-const STORED_KEYS = ["id", "title", "state", "priority", "needs", "parent", "supersedes", "relates", "contractId"] as const;
-const CREATION_KEYS = ["title", "state", "priority", "needs", "parent", "supersedes", "relates", "contractId"] as const;
+const STORED_KEYS = ["id", "title", "state", "priority", "needs", "parent", "supersedes", "relates", "note", "createdAt", "updatedAt", "contractId"] as const;
+const CREATION_KEYS = ["title", "state", "priority", "needs", "parent", "supersedes", "relates", "note", "contractId"] as const;
 
 function frontMatter(markdown: string, fail: (message: string, cause?: unknown) => never): Readonly<{ value: Record<string, unknown>; body: string }> {
   if (!markdown.startsWith("---\n")) fail("task document must begin with YAML front matter");
@@ -55,6 +58,11 @@ function state(value: unknown, fail: (message: string) => never): TaskState {
   if (typeof value !== "string" || !STATES.has(value as TaskState)) fail("task state is invalid");
   return value as TaskState;
 }
+function timestamp(value: unknown, field: string, fail: (message: string) => never): string {
+  const milliseconds = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  if (typeof value !== "string" || !Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) fail(`${field} must be a canonical UTC ISO timestamp`);
+  return value;
+}
 function taskId(value: unknown, field: string, fail: (message: string) => never): TaskId {
   if (typeof value !== "string") fail(`${field} must be a TaskId`);
   try { parseTaskId(value); return value as TaskId; } catch { return fail(`${field} must be a canonical TaskId`); }
@@ -82,6 +90,7 @@ function fields(value: Record<string, unknown>, body: string, fail: (message: st
     parent: nullableTaskId(value.parent, "parent", fail),
     supersedes: taskIds(value.supersedes, "supersedes", fail),
     relates: taskIds(value.relates, "relates", fail),
+    note: typeof value.note === "string" ? value.note : fail("note must be a string"),
     contractId: contractId(value.contractId, fail),
     body,
   };
@@ -93,7 +102,9 @@ export function parseTaskDocument(bytes: Uint8Array, expected: TaskCoordinate): 
   closed(value, STORED_KEYS, STORED_KEYS, fail);
   const id = taskId(value.id, "id", fail);
   if (id !== formatTaskId(expected)) fail(`task document ID ${id} does not match its authority path`);
-  return { id, state: state(value.state, fail), ...fields(value, body, fail) };
+  const createdAt = timestamp(value.createdAt, "createdAt", fail), updatedAt = timestamp(value.updatedAt, "updatedAt", fail);
+  if (Date.parse(updatedAt) < Date.parse(createdAt)) fail("updatedAt must not precede createdAt");
+  return { id, state: state(value.state, fail), createdAt, updatedAt, ...fields(value, body, fail) };
 }
 
 export function parseTaskCreationDocument(markdown: string): TaskCreationDocument {
@@ -101,7 +112,7 @@ export function parseTaskCreationDocument(markdown: string): TaskCreationDocumen
   const { value, body } = frontMatter(markdown, fail);
   closed(value, CREATION_KEYS, ["title"], fail);
   const complete = {
-    state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], contractId: null,
+    state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], note: "", contractId: null,
     ...value,
   };
   return { state: state(complete.state, fail), ...fields(complete, body, fail) };
@@ -111,7 +122,8 @@ export function serializeTaskDocument(document: TaskDocument): Uint8Array {
   const value = {
     id: document.id, title: document.title, state: document.state, priority: document.priority,
     needs: [...document.needs], parent: document.parent, supersedes: [...document.supersedes],
-    relates: [...document.relates], contractId: document.contractId,
+    relates: [...document.relates], note: document.note, createdAt: document.createdAt,
+    updatedAt: document.updatedAt, contractId: document.contractId,
   };
   return Buffer.from(`---\n${stringify(value, { lineWidth: 0 })}---\n${document.body}`);
 }

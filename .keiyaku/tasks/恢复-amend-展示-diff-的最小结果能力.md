@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-07T04:48:15.658Z
+updatedAt: 2026-08-07T11:29:07.453Z
 contractId: null
 ---
 Owner: docs/cli.md and docs/public-api.md after act_362 integration.

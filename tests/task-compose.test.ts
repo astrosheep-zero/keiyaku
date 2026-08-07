@@ -22,16 +22,23 @@ test("compose allocates nested tasks, resolves parents, and returns native diffs
   const child = await product.task({ id: "task/feature/inside/child" }).read();
   assert.equal(child?.task.parent, "task/feature/inside/parent");
   assert.equal(child?.task.body, "+ literal body");
+  assert.equal(child?.task.note, "");
+  assert.equal(child?.task.createdAt, child?.task.updatedAt);
 });
 
 test("compose updates existing tasks and accepts an empty change set", async () => {
   const product = tasks(), added = await product.add({ title: "Existing" });
   assert.equal(added.kind, "accepted");
+  const before = await product.task({ id: "task/existing" }).read();
   const result = await product.compose({ markdown: "@task/existing pri=0\nNew body\n" });
   assert.equal(result.kind, "accepted");
   if (result.kind === "accepted") assert.equal(result.documentChanges.length, 1);
+  const changed = await product.task({ id: "task/existing" }).read();
+  assert.equal(changed?.task.createdAt, before?.task.createdAt);
+  assert.ok((changed?.task.updatedAt ?? "") > (before?.task.updatedAt ?? ""));
   const noChange = await product.compose({ markdown: "@task/existing pri=0\nNew body\n" });
   assert.deepEqual(noChange, { kind: "accepted", documentChanges: [] });
+  assert.equal((await product.task({ id: "task/existing" }).read())?.task.updatedAt, changed?.task.updatedAt);
 });
 
 test("compose planning refusals write nothing", async () => {

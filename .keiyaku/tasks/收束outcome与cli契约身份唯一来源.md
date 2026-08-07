@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-06T18:18:31.605Z
+updatedAt: 2026-08-07T11:29:07.456Z
 contractId: null
 ---
 按 docs/public-api.md Outcomes And Reports 与 docs/cli.md：retry 无契约身份；调用者指定动词用输入坐标；bind retry 不渲染 contract 段，删除 outcome 挖取/throw。

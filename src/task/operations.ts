@@ -1,7 +1,7 @@
 import { documentDiff } from "../markdown/diff.js";
 import { installNamespaceContext, readNamespaceContext } from "../namespace-context.js";
 import { relationProblem, projectBlocked, projectReady, projectRows, type BlockedTaskRow, type TaskBoard, type TaskRow } from "./board.js";
-import { parseTaskCreationDocument, serializeTaskDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
+import { parseTaskCreationDocument, serializeTaskDocument, type TaskCreationDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import {
   authorityPath, readBoard, replaceAuthority, withTaskLocks, type TaskWorld,
@@ -22,12 +22,12 @@ export type TaskUpdateResult = TaskOutcome<Readonly<{ task: TaskView; documentDi
 export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | "drop";
 export type TaskBatchResult = Readonly<{ items: readonly Readonly<{ id: TaskId; outcome: TaskMutationResult }>[] }>;
 export type AddTaskInput = Readonly<{
-  title: string; namespace?: readonly string[]; body?: string; state?: TaskState; priority?: TaskPriority; needs?: readonly TaskId[];
+  title: string; namespace?: readonly string[]; body?: string; note?: string; state?: TaskState; priority?: TaskPriority; needs?: readonly TaskId[];
   parent?: TaskId | null; supersedes?: readonly TaskId[]; relates?: readonly TaskId[]; contractId?: string | null; signal?: AbortSignal;
 }>;
 export type AddTaskDocumentInput = Readonly<{ markdown: string; namespace?: readonly string[]; signal?: AbortSignal }>;
 export type UpdateTaskInput = Readonly<{
-  title?: string; body?: string; appendBody?: string; priority?: TaskPriority;
+  title?: string; body?: string; appendBody?: string; note?: string; priority?: TaskPriority;
   needs?: readonly TaskId[]; addNeeds?: readonly TaskId[]; dropNeeds?: readonly TaskId[];
   parent?: TaskId | null; supersedes?: readonly TaskId[]; addSupersedes?: readonly TaskId[]; dropSupersedes?: readonly TaskId[];
   relates?: readonly TaskId[]; addRelates?: readonly TaskId[]; dropRelates?: readonly TaskId[];
@@ -51,16 +51,20 @@ function occupied(board: TaskBoard, namespace: readonly string[]): Set<string> {
     return sameNamespace(coordinate.namespace, namespace) ? [coordinate.localId] : [];
   }));
 }
-function addDocument(base: Omit<TaskDocument, "id">, namespace: readonly string[], board: TaskBoard): TaskDocument {
+function currentTimestamp(): string { return new Date().toISOString(); }
+function advancedTimestamp(previous: string): string {
+  const current = currentTimestamp(); return current > previous ? current : new Date(Date.parse(previous) + 1).toISOString();
+}
+function addDocument(base: TaskCreationDocument, namespace: readonly string[], board: TaskBoard, at: string): TaskDocument {
   const localId = allocateLocalId(deriveLocalStem(base.title), occupied(board, namespace));
-  return { ...base, id: formatTaskId({ namespace, localId }) };
+  return { ...base, id: formatTaskId({ namespace, localId }), createdAt: at, updatedAt: at };
 }
 function boardWith(board: TaskBoard, document: TaskDocument): TaskBoard {
   const tasks = new Map(board.tasks); tasks.set(document.id, document); return { tasks };
 }
-async function create(world: TaskWorld, base: Omit<TaskDocument, "id">, namespace: readonly string[], signal?: AbortSignal): Promise<TaskMutationResult> {
+async function create(world: TaskWorld, base: TaskCreationDocument, namespace: readonly string[], signal?: AbortSignal): Promise<TaskMutationResult> {
   const result = await withTaskLocks({ world, allocation: true, ids: [], ...(signal === undefined ? {} : { signal }) }, async () => {
-    const snapshot = readBoard(world); const next = addDocument(base, namespace, snapshot.board); const problem = relationProblem(boardWith(snapshot.board, next), null, next);
+    const snapshot = readBoard(world), next = addDocument(base, namespace, snapshot.board, currentTimestamp()); const problem = relationProblem(boardWith(snapshot.board, next), null, next);
     if (problem !== null) return refused({ kind: "invalid-graph", diagnostic: problem });
     const replaced = replaceAuthority({ path: authorityPath(world, next.id), expected: null, next: serializeTaskDocument(next) });
     return replaced === "replaced" ? { kind: "accepted", value: taskView(next) } as const : retry("concurrent-modification");
@@ -71,7 +75,7 @@ async function create(world: TaskWorld, base: Omit<TaskDocument, "id">, namespac
 export async function addTask(world: TaskWorld, input: AddTaskInput): Promise<TaskMutationResult> {
   const namespace = context(world, input.namespace); if (!Array.isArray(namespace)) return refused(namespace as TaskRefusal);
   return create(world, {
-    title: input.title, body: input.body ?? "", state: input.state ?? "open", priority: input.priority ?? 2, needs: input.needs ?? [], parent: input.parent ?? null,
+    title: input.title, body: input.body ?? "", note: input.note ?? "", state: input.state ?? "open", priority: input.priority ?? 2, needs: input.needs ?? [], parent: input.parent ?? null,
     supersedes: input.supersedes ?? [], relates: input.relates ?? [], contractId: input.contractId ?? null,
   }, namespace, input.signal);
 }
@@ -97,6 +101,7 @@ function updateDocument(board: TaskBoard, current: TaskDocument, input: UpdateTa
     ...current,
     ...(input.title === undefined ? {} : { title: input.title }),
     body: input.body ?? (input.appendBody === undefined ? current.body : current.body + input.appendBody),
+    ...(input.note === undefined ? {} : { note: input.note }),
     ...(input.priority === undefined ? {} : { priority: input.priority }),
     needs: listChange(current.needs, input.needs, input.addNeeds, input.dropNeeds),
     ...(input.parent === undefined ? {} : { parent: input.parent }),
@@ -110,11 +115,14 @@ export async function updateTask(world: TaskWorld, id: TaskId, input: UpdateTask
   const result = await withTaskLocks({ world, allocation: false, ids: [id], ...(input.signal === undefined ? {} : { signal: input.signal }) }, async (): Promise<TaskUpdateResult> => {
     const snapshot = readBoard(world), current = snapshot.board.tasks.get(id);
     if (current === undefined) return { kind: "refused", refusal: { kind: "task-missing", taskId: id } };
-    const next = updateDocument(snapshot.board, current, input);
-    if ("kind" in next) return { kind: "refused", refusal: next };
-    const problem = relationProblem(boardWith(snapshot.board, next), current, next); if (problem !== null) return { kind: "refused", refusal: { kind: "invalid-graph", diagnostic: problem } };
-    const before = Buffer.from(snapshot.bytes.get(id)!).toString("utf8"), afterBytes = serializeTaskDocument(next), after = Buffer.from(afterBytes).toString("utf8");
-    if (before !== after && replaceAuthority({ path: authorityPath(world, id), expected: snapshot.bytes.get(id)!, next: afterBytes }) !== "replaced") return { kind: "retry", reason: "concurrent-modification" };
+    const candidate = updateDocument(snapshot.board, current, input);
+    if ("kind" in candidate) return { kind: "refused", refusal: candidate };
+    const problem = relationProblem(boardWith(snapshot.board, candidate), current, candidate); if (problem !== null) return { kind: "refused", refusal: { kind: "invalid-graph", diagnostic: problem } };
+    const predecessor = snapshot.bytes.get(id)!, before = Buffer.from(predecessor).toString("utf8");
+    const changed = !Buffer.from(serializeTaskDocument(candidate)).equals(Buffer.from(predecessor));
+    const next = changed ? { ...candidate, updatedAt: advancedTimestamp(current.updatedAt) } : candidate;
+    const afterBytes = serializeTaskDocument(next), after = Buffer.from(afterBytes).toString("utf8");
+    if (before !== after && replaceAuthority({ path: authorityPath(world, id), expected: predecessor, next: afterBytes }) !== "replaced") return { kind: "retry", reason: "concurrent-modification" };
     const label = `${id}.md`;
     return { kind: "accepted", value: { task: taskView(next), documentDiff: documentDiff(label, label, before, after) } };
   });
@@ -126,20 +134,20 @@ const TRANSITIONS: Readonly<Record<TaskLifecycleVerb, Readonly<Partial<Record<Ta
   resume: { on_hold: "open" }, done: { open: "done", in_progress: "done", on_hold: "done" },
   drop: { open: "drop", in_progress: "drop", on_hold: "drop" },
 };
-export async function lifecycleTask(world: TaskWorld, id: TaskId, verb: TaskLifecycleVerb, signal?: AbortSignal): Promise<TaskMutationResult> {
+export async function lifecycleTask(world: TaskWorld, id: TaskId, verb: TaskLifecycleVerb, signal?: AbortSignal, note?: string): Promise<TaskMutationResult> {
   const result = await withTaskLocks({ world, allocation: false, ids: [id], ...(signal === undefined ? {} : { signal }) }, async (): Promise<TaskMutationResult> => {
     const snapshot = readBoard(world), current = snapshot.board.tasks.get(id);
     if (current === undefined) return refused({ kind: "task-missing", taskId: id });
     const state = TRANSITIONS[verb][current.state]; if (state === undefined) return refused({ kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb });
-    const next = { ...current, state }; const bytes = serializeTaskDocument(next);
+    const next = { ...current, state, ...(note === undefined ? {} : { note }), updatedAt: advancedTimestamp(current.updatedAt) }; const bytes = serializeTaskDocument(next);
     return replaceAuthority({ path: authorityPath(world, id), expected: snapshot.bytes.get(id)!, next: bytes }) === "replaced"
       ? { kind: "accepted", value: taskView(next) } : retry("concurrent-modification");
   });
   return result === "busy" ? retry("busy") : result;
 }
-export async function batchTasks(world: TaskWorld, verb: "done" | "drop" | "hold", ids: readonly TaskId[], signal?: AbortSignal): Promise<TaskBatchResult> {
+export async function batchTasks(world: TaskWorld, verb: "done" | "drop" | "hold", ids: readonly TaskId[], signal?: AbortSignal, note?: string): Promise<TaskBatchResult> {
   const items = [];
-  for (const id of ids) { signal?.throwIfAborted(); items.push({ id, outcome: await lifecycleTask(world, id, verb, signal) }); }
+  for (const id of ids) { signal?.throwIfAborted(); items.push({ id, outcome: await lifecycleTask(world, id, verb, signal, note) }); }
   return { items };
 }
 

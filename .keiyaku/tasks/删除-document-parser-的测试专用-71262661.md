@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-07T04:48:30.931Z
+updatedAt: 2026-08-07T11:29:07.445Z
 contractId: null
 ---
 ContractDocumentError.code 与 ArcDocumentError.code/类身份没有生产 reader，只有 tests deep-import；package/CLI 只承诺 TypeError 诊断。删除测试专用 code 与无读者 subclass，保留现有精确 message；VerificationDocumentError 因 decode/amend 有生产 catch 必须保留。

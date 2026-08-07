@@ -8,6 +8,9 @@ needs:
 parent: task/v4-verification-runtime-and-producer
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-05T11:00:36.047Z
+updatedAt: 2026-08-07T11:29:07.422Z
 contractId: null
 ---
 Superseded by separate core fact and runtime producer slices.

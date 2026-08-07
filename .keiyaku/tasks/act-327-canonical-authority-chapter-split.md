@@ -7,6 +7,9 @@ needs: []
 parent: task/v4-architecture-correct-extensible-mvp
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-06T02:35:35.605Z
+updatedAt: 2026-08-07T11:29:07.419Z
 contractId: null
 ---
 Rewrite the v4 authority registry and product law into README.md plus public-api.md, document.md, model.md, lifecycle.md, verification.md, transport.md, and cli.md exactly as Faye Acts 325-327 settle. Delete docs/architecture.md, leave the three planning-evidence documents separate, update AGENTS.md discovery, and retain only current law with one owner per rule.

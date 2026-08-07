@@ -18,6 +18,9 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
   assert.deepEqual(parseArgv(["task", "update", "task/a", "--append", "-"]), {
     command: { command: "task", action: "update", output: "text", positionals: ["task/a"], flags: { append: "" }, stdin: "append" },
   });
+  assert.deepEqual(parseArgv(["task", "update", "task/a", "--note", "-"]), {
+    command: { command: "task", action: "update", output: "text", positionals: ["task/a"], flags: { note: "" }, stdin: "note" },
+  });
   assert.equal(parseArgv(["task", "compose", "-"]).command.command, "task");
   assert.throws(() => parseArgv(["task", "add", "Title", "-"]), CliUsageError);
   assert.throws(() => parseArgv(["task", "add", "--state", "done", "-"]), CliUsageError);
@@ -26,7 +29,7 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
 });
 test("task invocation works outside Git and consumes stdin only when selected", async () => {
   const root = world(); let reads = 0;
-  const add = await invoke(parseArgv(["-C", root, "task", "add", "Native CLI", "--state", "on_hold", "--contract", "external #7"]), { readStdin: () => { reads += 1; return "unused"; } }) as TaskInvocationResult;
+  const add = await invoke(parseArgv(["-C", root, "task", "add", "Native CLI", "--state", "on_hold", "--note", "initial", "--contract", "external #7"]), { readStdin: () => { reads += 1; return "unused"; } }) as TaskInvocationResult;
   assert.equal((add as { kind: string }).kind, "accepted"); assert.equal(reads, 0);
   const update = await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--body", "-"]), { readStdin: () => { reads += 1; return "body from stdin\n"; } }) as TaskInvocationResult;
   assert.equal((update as { kind: string }).kind, "accepted"); assert.equal(reads, 1);
@@ -34,12 +37,33 @@ test("task invocation works outside Git and consumes stdin only when selected", 
   assert.equal((shown as { task: { body: string; contractId: string } }).task.body, "body from stdin\n");
   assert.equal((shown as { task: { body: string; contractId: string } }).task.contractId, "external #7");
   assert.equal((shown as { task: { state: string } }).task.state, "on_hold");
+  assert.equal((shown as { task: { note: string } }).task.note, "initial");
+
+  const noteUpdate = await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--note", "-"]), { readStdin: () => { reads += 1; return "replacement"; } }) as TaskInvocationResult;
+  assert.equal((noteUpdate as { kind: string }).kind, "accepted"); assert.equal(reads, 2);
+  const noteShown = await invoke(parseArgv(["-C", root, "task", "show", "task/native-cli"])) as TaskInvocationResult;
+  assert.equal((noteShown as { task: { note: string } }).task.note, "replacement");
+  const showCommand = parseArgv(["task", "show", "task/native-cli"]).command;
+  if (showCommand.command !== "task") throw new Error("not a task command");
+  assert.match(renderTaskText(showCommand, noteShown), /createdAt: .*\nupdatedAt: .*\nnote: replacement/u);
 
   const document = "---\ntitle: From document\nstate: done\n---\ncreated closed\n";
   const documentAdd = await invoke(parseArgv(["-C", root, "task", "add", "-"]), { readStdin: () => document }) as TaskInvocationResult;
   assert.equal((documentAdd as { kind: string }).kind, "accepted");
   const documentShown = await invoke(parseArgv(["-C", root, "task", "show", "task/from-document"])) as TaskInvocationResult;
   assert.equal((documentShown as { task: { state: string } }).task.state, "done");
+});
+
+test("task drop note is passed to each independent lifecycle mutation", async () => {
+  const root = world();
+  await invoke(parseArgv(["-C", root, "task", "add", "First"]));
+  await invoke(parseArgv(["-C", root, "task", "add", "Second"]));
+  const result = await invoke(parseArgv(["-C", root, "task", "drop", "task/first", "task/second", "--note", "cancelled"])) as TaskInvocationResult;
+  assert.equal(taskExitCode(result), 0);
+  for (const id of ["task/first", "task/second"]) {
+    const shown = await invoke(parseArgv(["-C", root, "task", "show", id])) as TaskInvocationResult;
+    assert.equal((shown as { task: { note: string } }).task.note, "cancelled");
+  }
 });
 
 test("task compose and views flow through native results", async () => {

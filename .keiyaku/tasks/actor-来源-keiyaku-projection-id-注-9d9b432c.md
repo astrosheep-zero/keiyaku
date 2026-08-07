@@ -7,6 +7,9 @@ needs: []
 parent: null
 supersedes: []
 relates: []
+note: ""
+createdAt: 2026-08-04T09:45:52.920Z
+updatedAt: 2026-08-07T11:29:07.420Z
 contractId: null
 ---
 为 v4 建立唯一的 actor 输入边界，不依赖 Akuma dispatch receipt 或 task 推导：
