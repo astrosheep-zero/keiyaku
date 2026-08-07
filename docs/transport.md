@@ -29,6 +29,11 @@ the resolved target head; without a target it is the caller worktree's current
 point for a `here` workspace. It does not constrain which branch that workspace
 has checked out.
 
+An explicit target must exist at bind observation. Absence is returned to the
+library as `target-missing` before any journal or ref publication. Transport
+never creates the target branch and never substitutes another ref or the
+caller's current `HEAD` for it.
+
 A target is an optional Git ref because a claimed placement may move it. The
 target and a workspace branch are independent. `workspace: "worktree"` gives
 transport ownership of one deterministic delivery ref and linked worktree.

@@ -51,7 +51,9 @@ const REVIEWED = gate("reviewed");
 export type IntentRefusal = AbandonRefusal | AmendRefusal | ArcRefusal | BindRefusal | DeliverRefusal
   | DeliveryPreparationRefusal | PlacementRefusal | ReviewRefusal | TargetInputRefusal | VerificationDeclarationRefusal;
 
-export type TargetInputRefusal = Readonly<{ kind: "invalid-target" }>;
+export type TargetInputRefusal =
+  | Readonly<{ kind: "invalid-target" }>
+  | Readonly<{ kind: "target-missing" }>;
 
 export type IntentRetry = ProtocolTerminal;
 export type IntentOutcome<Value, Refusal = IntentRefusal> =
@@ -134,8 +136,9 @@ export function bindOperation(
     if (normalized === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
     target = normalized;
   }
-  const id = mintContractId();
   const observed = observeBindCoordinates(carrier, target);
+  if (observed === null) return { kind: "refused", refusal: { kind: "target-missing" } };
+  const id = mintContractId();
   const data: BindData = {
     coordinates: {
       start: observed.start,

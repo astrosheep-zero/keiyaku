@@ -255,6 +255,13 @@ test("bind canonicalizes branch targets and refuses invalid names before birth",
     });
     assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), carrierBefore);
   }
+
+  assert.deepEqual(await repo.bind({ markdown: markdown("Missing target"), target: "missing", workspace: "here" }), {
+    kind: "refused",
+    refusal: { kind: "target-missing" },
+  });
+  assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), carrierBefore);
+  assert.equal(repository.run(["for-each-ref", "--format=%(refname)", "refs/heads/missing"]), "");
 });
 
 test("public amend rejects a transitive prerequisite cycle without moving its head", async () => {

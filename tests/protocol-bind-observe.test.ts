@@ -69,13 +69,10 @@ test("observes a targetless detached bind snapshot", () => {
   assert.deepEqual(observeBindCoordinates(repositoryAt(repository.path)), { start });
 });
 
-test("refuses a missing explicit bind target with a typed error", () => {
+test("observes a missing explicit bind target without inventing coordinates", () => {
   const repository = repositoryWithHead();
 
-  assert.throws(
-    () => observeBindCoordinates(repositoryAt(repository.path), "refs/heads/missing"),
-    /bind target does not exist: refs\/heads\/missing/,
-  );
+  assert.equal(observeBindCoordinates(repositoryAt(repository.path), "refs/heads/missing"), null);
 });
 
 test("refuses targets that name Keiyaku-owned refs", () => {

@@ -64,7 +64,7 @@ function structuredFields(output: Buffer, fieldCount: number): readonly string[]
 export function observeBindCoordinates(
   repository: GitRepository,
   requestedTarget?: string,
-): BindCoordinatesObservation {
+): BindCoordinatesObservation | null {
   if (requestedTarget === undefined) {
     try {
       return { start: mintSnapshotId(runGit(repository, ["rev-parse", "--verify", "HEAD"]).toString("utf8").trim()) };
@@ -83,9 +83,7 @@ export function observeBindCoordinates(
     "--",
     requestedTarget,
   ]);
-  if (output.length === 0) {
-    throw new Error(`bind target does not exist: ${requestedTarget}`);
-  }
+  if (output.length === 0) return null;
   const [target, start] = structuredFields(output, 2);
   if (target !== requestedTarget || start === undefined) malformedBindCoordinatesOutput();
   try {

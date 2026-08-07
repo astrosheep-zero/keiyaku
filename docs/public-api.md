@@ -71,9 +71,12 @@ never admitted on the promise of a future producer.
 branch-name rules and then canonicalized to `refs/heads/<input>`. A full input
 must be a valid `refs/heads/...` name. A Keiyaku-owned namespace is invalid in
 either spelling. Invalid input returns the typed `invalid-target` refusal;
-there is no DWIM resolution or coupling to the current branch. The canonical
-full ref is the only target value persisted in contract coordinates; its
-transport meaning is defined in [transport.md](transport.md).
+there is no DWIM resolution or coupling to the current branch. A valid target
+must already exist when `bind` observes it. An absent branch returns the typed
+`target-missing` refusal; Keiyaku never creates it or substitutes the caller's
+current `HEAD`. The canonical full ref is the only target value persisted in
+contract coordinates; its transport meaning is defined in
+[transport.md](transport.md).
 
 `Repo.at` resolves and pins its repository coordinate before it returns. An
 omitted `path` uses the caller's current working directory. The library has
@@ -261,9 +264,9 @@ type DocumentMovedRefusal = Readonly<{
   contractId: ContractId
 }>
 
-type TargetInputRefusal = Readonly<{
-  kind: "invalid-target"
-}>
+type TargetInputRefusal =
+  | Readonly<{ kind: "invalid-target" }>
+  | Readonly<{ kind: "target-missing" }>
 
 type VerificationStop =
   | StepStop<AttestationRefusal>
@@ -317,8 +320,8 @@ refusal ends the invocation; it does not trigger a reread, auto-retry, or
 adoption of a new document revision.
 
 `TargetInputRefusal` is the `TypedRefusal` member for `repo.bind` target
-validation. It has no contract coordinate because an invalid target establishes
-no contract identity.
+validation and existence. It has no contract coordinate because a rejected
+target establishes no contract identity.
 
 Every accepted `AmendResult` includes its nonoptional `documentDiff`. The
 library computes it exactly once with the JavaScript `diff` package from the
