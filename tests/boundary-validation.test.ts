@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Repo } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
 test("package boundary rejects malformed runtime inputs before journal mutation", async () => {
@@ -17,7 +17,7 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
     TypeError,
   );
   assert.throws(
-    () => withGitShim("exit 99", {}, () => Reflect.apply(repo.contract, repo, [{ id: null }])),
+    () => withGitShim("exit 99", {}, () => Reflect.apply(Keiyaku.of, Keiyaku, [{ repo, id: null }])),
     TypeError,
   );
   await assert.rejects(
@@ -30,7 +30,7 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
       && error.message === "contract ID must be kei/<contract-segment>",
   );
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => Reflect.apply(repo.bind, repo, [{ markdown: null, workspace: "here" }])),
+    () => withGitShim("exit 99", {}, () => Reflect.apply(Keiyaku.bind, Keiyaku, [{ repo, markdown: null, workspace: "here" }])),
     TypeError,
   );
 
@@ -44,7 +44,7 @@ test("amend validates programmer input before observing a missing contract", asy
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = Repo.at({ path: repository.path });
-  const contract = repo.contract({ id: "kei/missing" as never });
+  const contract = Keiyaku.of({ repo, id: "kei/missing" as never });
   const before = (await repo.status()).contracts;
 
   await assert.rejects(
@@ -62,14 +62,14 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = Repo.at({ path: repository.path });
-  const invalidTarget = await repo.bind({
+  const invalidTarget = await Keiyaku.bind({ repo,
     markdown: ["# T", "", "## Context", "C", "", "## Objective", "O", "", "## Design", "D", "", "## Region", "~~~", "src/**", "~~~", "", "## Criteria", "### C", "C", ""].join("\n"),
     target: "bad\0target",
     workspace: "here",
   });
   assert.deepEqual(invalidTarget, { kind: "refused", refusal: { kind: "invalid-target" } });
 
-  const bound = await repo.bind({
+  const bound = await Keiyaku.bind({ repo,
     markdown: ["# T", "", "## Context", "C", "", "## Objective", "O", "", "## Design", "D", "", "## Region", "~~~", "src/**", "~~~", "", "## Criteria", "### C", "C", ""].join("\n"),
     workspace: "here",
   });

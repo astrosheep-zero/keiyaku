@@ -1,7 +1,7 @@
 # Public API
 
 ```ts
-Repo.at().bind({ markdown, target: "main" });
+Keiyaku.bind({ repo: Repo.at(), markdown, target: "main" });
 ```
 
 Keiyaku is the package-root contract library. It is ESM-only and the package
@@ -34,6 +34,7 @@ surface is exactly:
 
 ```ts
 type BindInput = Readonly<{
+  repo: Repo
   markdown: string
   target?: string
   workspace?: "worktree" | "here"
@@ -44,10 +45,10 @@ type BindInput = Readonly<{
 
 Repo.at(input?: { path?: string }): Repo
 repo.root: string
-repo.contract(input: { id: ContractId }): Keiyaku
-repo.bind(input: BindInput): Promise<BindResult>
 repo.status(input?: { contract?: ContractId }): Promise<StatusReport>
 repo.reconcile(): Promise<RepoReconcileReport>
+Keiyaku.of(input: { repo: Repo; id: ContractId }): Keiyaku
+Keiyaku.bind(input: BindInput): Promise<BindResult>
 ```
 
 `markdown` is the complete contract document and is decoded at the library
@@ -81,12 +82,15 @@ contract coordinates; its transport meaning is defined in
 `Repo.at` resolves and pins its repository coordinate before it returns. An
 omitted `path` uses the caller's current working directory. The library has
 exactly one `process.cwd()` call, in the private scope resolver used by
-`Repo.at`. `repo.contract` and `repo.bind` reuse that one private
-`PinnedScope`; no raw scope, token, registry, or orchestrator is public.
-Instance operations accept no repository coordinate.
+`Repo.at`. `Keiyaku.of` and `Keiyaku.bind` require that already-pinned `Repo`
+capability; they accept neither a path nor an ambient repository default. No
+raw scope, token, registry, or orchestrator is public. Instance operations
+accept no repository coordinate.
 
-`Repo` is the pinned Git-world view. Its contract-birth operations are
-`repo.contract` and `repo.bind`; the complete public surface is listed above.
+`Repo` is the pinned Git-world view. It owns world-level observation and
+reconciliation, not contract construction. `Keiyaku` is the sole branded
+contract-construction surface. There is no `repo.bind` or `repo.contract`
+convenience path.
 
 `Repo.at` resolves the enclosing Git world immediately and throws for a path
 outside a repository. `root` is the resolved primary-worktree absolute path.
@@ -99,11 +103,12 @@ row in the same `StatusReport`; it does not enumerate the world first. The
 return contract and behavior of `reconcile` are defined by
 [transport.md](transport.md).
 
-`Keiyaku` has a private constructor. It is born only through
-`repo.contract` or a successful `repo.bind`, and is a stateless handle
-containing its contract identity and pinned coordinate. It is not a repository
-registry, stored authority, or second orchestrator. There is no alternate
-package-root construction point.
+`Keiyaku` has a private constructor. It is born only through `Keiyaku.of` or a
+successful `Keiyaku.bind`, and is a stateless handle containing its contract
+identity and the supplied Repo's pinned coordinate. These static operations do
+not acquire repository scope. `Keiyaku` is not a repository registry, stored
+authority, or second orchestrator. There is no alternate package-root contract
+construction point.
 
 ```ts
 type ContractStatus = Readonly<{
@@ -319,7 +324,7 @@ the subject actually reviewed. `TypedRefusal` therefore includes
 refusal ends the invocation; it does not trigger a reread, auto-retry, or
 adoption of a new document revision.
 
-`TargetInputRefusal` is the `TypedRefusal` member for `repo.bind` target
+`TargetInputRefusal` is the `TypedRefusal` member for `Keiyaku.bind` target
 validation and existence. It has no contract coordinate because a rejected
 target establishes no contract identity.
 

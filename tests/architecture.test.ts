@@ -29,12 +29,12 @@ test("production TypeScript has a hard 7500-line architecture budget", () => {
 
 test("architecture policy accepts public command adapters", () => {
   const diagnostics = check({
-    "index.ts": "export class Repo { bind(): void {} }",
+    "index.ts": "export class Repo {}; export const Keiyaku = { bind(): undefined { return undefined; } };",
     "cli/parse.ts": "export type ParsedBind = { contract: string };",
     "cli/commands/bind.ts": [
-      'import { Repo } from "../../index.js";',
+      'import { Keiyaku, Repo } from "../../index.js";',
       'import type { ParsedBind } from "../parse.js";',
-      "export function adapt(value: ParsedBind, repo: Repo): void { void value; repo.bind(); }",
+      "export function adapt(value: ParsedBind, repo: Repo): void { void value; Keiyaku.bind(); void repo; }",
     ].join("\n"),
   });
   assert.deepEqual(diagnostics, []);

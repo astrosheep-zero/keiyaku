@@ -60,11 +60,11 @@ test("package root exposes only the ruled library values and declarations", () =
   const directory = externalConsumer();
   const source = [
     'import { AuthorityCorruptionError, Delivery, Keiyaku, Repo, type AbandonInput, type ActorId, type AmendInput, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractId, type ContractState, type ContractStatus, type DeliverInput, type Fact, type FactKind, type Gate, type Outcome, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type SnapshotId, type StatusInput, type StatusReport, type TimelineEntry, type TypedRefusal, type TypedRetry } from "@astrosheep/keiyaku-v4";',
-    'const id = "kei/consumer" as ContractId;',
-    'const input: BindInput = { markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", after: [id], gates: ["reviewed"] };',
-    'const amendment: AmendInput = { markdown: "## Append: Context\\nMore\\n", after: [id] };',
     'const repo = Repo.at({ path: "." });',
-    'const existing = repo.contract({ id });',
+    'const id = "kei/consumer" as ContractId;',
+    'const input: BindInput = { repo, markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", after: [id], gates: ["reviewed"] };',
+    'const amendment: AmendInput = { markdown: "## Append: Context\\nMore\\n", after: [id] };',
+    'const existing = Keiyaku.of({ repo, id });',
     'const delivery = null as unknown as Delivery;',
     '// @ts-expect-error Keiyaku has a private constructor',
     'new Keiyaku();',
@@ -74,8 +74,8 @@ test("package root exposes only the ruled library values and declarations", () =
     'delivery.review("satisfied");',
     '// @ts-expect-error Delivery has no public constructor',
     'new Delivery();',
-    '// @ts-expect-error repo.contract requires a branded ContractId',
-    'repo.contract({ id: "kei/unbranded" });',
+    '// @ts-expect-error Keiyaku.of requires a branded ContractId',
+    'Keiyaku.of({ repo, id: "kei/unbranded" });',
     '// @ts-expect-error BindInput.after requires branded ContractId values',
     'const invalidBind: BindInput = { ...input, after: ["kei/unbranded"] };',
     '// @ts-expect-error AmendInput.after requires branded ContractId values',
@@ -84,7 +84,9 @@ test("package root exposes only the ruled library values and declarations", () =
     'const invalidGate: Gate = "edge-owned";',
     '// @ts-expect-error abandon accepts options, not a reason enum',
     'existing.abandon("manual");',
-    'const bound: Promise<Outcome<Keiyaku>> = repo.bind(input);',
+    'const bound: Promise<Outcome<Keiyaku>> = Keiyaku.bind(input);',
+    '// @ts-expect-error Repo is not a second contract-construction surface',
+    'repo.bind(input);',
     '// @ts-expect-error Receipt was removed from the package-root surface',
     'type Receipt = import("@astrosheep/keiyaku-v4").Receipt;',
     'const report = null as unknown as AuditReport;',
@@ -191,15 +193,15 @@ test("built CLI bin keeps its shebang and executes through an installed-style sy
   assert.equal(JSON.parse(output).kind, "observation");
 });
 
-test("Repo owns contract construction and binding", async () => {
+test("Keiyaku owns contract construction over one pinned Repo capability", async () => {
   const repository = repositoryWithInitialCommit();
   const repo = Repo.at({ path: repository.path });
-  assert.deepEqual(Object.getOwnPropertyNames(Keiyaku).filter((name) => !["length", "name", "prototype"].includes(name)).sort(), []);
+  assert.deepEqual(Object.getOwnPropertyNames(Keiyaku).filter((name) => !["length", "name", "prototype"].includes(name)).sort(), ["bind", "of"]);
   assert.deepEqual(Object.getOwnPropertyNames(Delivery).filter((name) => !["length", "name", "prototype"].includes(name)), []);
   assert.deepEqual(Object.getOwnPropertyNames(Repo).filter((name) => !["length", "name", "prototype"].includes(name)), ["at"]);
-  assert.deepEqual(Object.getOwnPropertyNames(Repo.prototype).filter((name) => name !== "constructor").sort(), ["bind", "contract", "reconcile", "status"]);
+  assert.deepEqual(Object.getOwnPropertyNames(Repo.prototype).filter((name) => name !== "constructor").sort(), ["reconcile", "status"]);
   await assert.rejects(
-    repo.bind({
+    Keiyaku.bind({ repo,
       markdown: markdown("Invalid gate"),
       workspace: "here",
       gates: ["reviewed", "edge-owned"] as never,
@@ -207,7 +209,7 @@ test("Repo owns contract construction and binding", async () => {
     (error: unknown) => error instanceof TypeError && error.message === "gates[1] must be reviewed or verified",
   );
   await assert.rejects(
-    repo.bind({
+    Keiyaku.bind({ repo,
       markdown: markdown("Duplicate gate"),
       workspace: "here",
       gates: ["reviewed", "reviewed"],
@@ -215,7 +217,7 @@ test("Repo owns contract construction and binding", async () => {
     (error: unknown) => error instanceof TypeError && error.message === "gates must not contain duplicates",
   );
 
-  const bound = await repo.bind({
+  const bound = await Keiyaku.bind({ repo,
     markdown: markdown("Markdown input"),
     workspace: "here",
   });
@@ -227,14 +229,14 @@ test("Repo owns contract construction and binding", async () => {
   assert.deepEqual(state.terms.after, []);
   assert.deepEqual(state.terms.gates, []);
 
-  const sameTitle = await repo.bind({ markdown: markdown("Markdown input"), workspace: "here" });
+  const sameTitle = await Keiyaku.bind({ repo, markdown: markdown("Markdown input"), workspace: "here" });
   assert.equal(sameTitle.kind, "accepted");
   if (sameTitle.kind !== "accepted") throw new Error("colliding bind did not return a contract");
   assert.match((await sameTitle.value.state()).id, /^kei\/markdown-input-[0-9a-hjkmnp-tv-z]{8}$/);
 
   assert.equal(repo.root, resolve(repo.root));
   assert.equal((await repo.status()).contracts.some((contract) => contract.contractId === state.id), true);
-  assert.deepEqual(await repo.contract({ id: "kei/missing" as ContractId }).amend({
+  assert.deepEqual(await Keiyaku.of({ repo, id: "kei/missing" as ContractId }).amend({
     markdown: "## Append: Context\nmissing\n",
   }), {
     kind: "refused",
@@ -250,21 +252,21 @@ test("public handle values are type tokens, not alternate constructors", () => {
 test("bind canonicalizes branch targets and refuses invalid names before birth", async () => {
   const repository = repositoryWithInitialCommit();
   const repo = Repo.at({ path: repository.path });
-  const bound = await repo.bind({ markdown: markdown("Short target"), target: "main", workspace: "here" });
+  const bound = await Keiyaku.bind({ repo, markdown: markdown("Short target"), target: "main", workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("short target was not accepted");
   assert.equal((await bound.value.state()).coordinates.target, "refs/heads/main");
 
   const carrierBefore = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
   for (const target of ["bad..name", "keiyaku-state", "refs/tags/main"]) {
-    assert.deepEqual(await repo.bind({ markdown: markdown("Invalid target"), target, workspace: "here" }), {
+    assert.deepEqual(await Keiyaku.bind({ repo, markdown: markdown("Invalid target"), target, workspace: "here" }), {
       kind: "refused",
       refusal: { kind: "invalid-target" },
     });
     assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), carrierBefore);
   }
 
-  assert.deepEqual(await repo.bind({ markdown: markdown("Missing target"), target: "missing", workspace: "here" }), {
+  assert.deepEqual(await Keiyaku.bind({ repo, markdown: markdown("Missing target"), target: "missing", workspace: "here" }), {
     kind: "refused",
     refusal: { kind: "target-missing" },
   });
@@ -274,12 +276,12 @@ test("bind canonicalizes branch targets and refuses invalid names before birth",
 
 test("public amend rejects a transitive prerequisite cycle without moving its head", async () => {
   const repo = Repo.at({ path: repositoryWithInitialCommit().path });
-  const prerequisite = await repo.bind({ markdown: markdown("Prerequisite"), workspace: "here" });
+  const prerequisite = await Keiyaku.bind({ repo, markdown: markdown("Prerequisite"), workspace: "here" });
   assert.equal(prerequisite.kind, "accepted");
   if (prerequisite.kind !== "accepted") throw new Error("prerequisite bind was not accepted");
   const prerequisiteId = (await prerequisite.value.state()).id;
 
-  const amended = await repo.bind({
+  const amended = await Keiyaku.bind({ repo,
     markdown: markdown("Amended"),
     workspace: "here",
     after: [prerequisiteId],
@@ -288,7 +290,7 @@ test("public amend rejects a transitive prerequisite cycle without moving its he
   if (amended.kind !== "accepted") throw new Error("amended contract bind was not accepted");
   const amendedId = (await amended.value.state()).id;
 
-  const dependent = await repo.bind({
+  const dependent = await Keiyaku.bind({ repo,
     markdown: markdown("Dependent"),
     workspace: "here",
     after: [amendedId],
@@ -310,7 +312,7 @@ test("public amend rejects a transitive prerequisite cycle without moving its he
 
 test("amend applies Markdown once and preserves structured values unless replaced", async () => {
   const repository = repositoryWithInitialCommit();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: markdown("Amend input"), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: markdown("Amend input"), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind did not return a contract");
 
@@ -357,7 +359,7 @@ test("amend applies Markdown once and preserves structured values unless replace
 test("arc decodes its Markdown input and worktree paths are computed", async () => {
   const repository = repositoryWithInitialCommit();
   const repo = Repo.at({ path: repository.path });
-  const here = await repo.bind({ markdown: markdown("Arc input"), workspace: "here" });
+  const here = await Keiyaku.bind({ repo, markdown: markdown("Arc input"), workspace: "here" });
   assert.equal(here.kind, "accepted");
   if (here.kind !== "accepted") throw new Error("bind did not return a contract");
   const arc = await here.value.arc({
@@ -366,7 +368,7 @@ test("arc decodes its Markdown input and worktree paths are computed", async () 
   assert.equal(arc.kind, "accepted");
   assert.equal((await here.value.state()).currentArc?.data.seq, 1);
 
-  const managed = await repo.bind({ markdown: markdown("Managed"), workspace: "worktree" });
+  const managed = await Keiyaku.bind({ repo, markdown: markdown("Managed"), workspace: "worktree" });
   assert.equal(managed.kind, "accepted");
   if (managed.kind !== "accepted") throw new Error("bind did not return a contract");
   const status = await repo.status();
@@ -376,7 +378,7 @@ test("arc decodes its Markdown input and worktree paths are computed", async () 
 
 test("Delivery.diff remains a nullable Promise-backed transport read", async () => {
   const repository = repositoryWithInitialCommit();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: markdown("Diff input"), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: markdown("Diff input"), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind did not return a contract");
   writeFileSync(join(repository.path, "candidate.txt"), "candidate\n");

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { Repo, type ContractId, type Keiyaku } from "../src/index.js";
+import { Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { contractJournalPath } from "../src/carrier/identity.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
@@ -51,7 +51,7 @@ function document(verification?: string): string {
 }
 
 async function bind(repository: TestGitRepository, verification?: string) {
-  const result = await Repo.at({ path: repository.path }).bind({
+  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: document(verification),
     workspace: "here",
     gates: verification === undefined ? ["reviewed"] : ["verified"],
@@ -119,7 +119,7 @@ test("one public handle reuses its resolved repository scope", async () => {
     ].join("\n"),
     { KEIYAKU_SCOPE_DISCOVERY_LOG: log },
     () => {
-      const contract = Repo.at({ path: repository.path }).contract({ id });
+      const contract = Keiyaku.of({ repo: Repo.at({ path: repository.path }), id });
       return [contract.state(), contract.deliver(), contract.reconcile()] as const;
     },
   );
@@ -198,7 +198,7 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
   const repository = repositoryWithMain();
   const prerequisite = await bind(repository);
   const prerequisiteId = (await prerequisite.state()).id;
-  const dependent = await Repo.at({ path: repository.path }).bind({
+  const dependent = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: document(),
     workspace: "worktree",
     gates: ["reviewed"],
@@ -222,7 +222,7 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
 
 test("review records before delivery and the same patch can be placed", async () => {
   const repository = repositoryWithMain();
-  const result = await Repo.at({ path: repository.path }).bind({ markdown: document(), workspace: "here", gates: ["reviewed"] });
+  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
@@ -244,7 +244,7 @@ test("review records before delivery and the same patch can be placed", async ()
 
 test("a changed worktree patch leaves the reviewed placement pending", async () => {
   const repository = repositoryWithMain();
-  const result = await Repo.at({ path: repository.path }).bind({ markdown: document(), workspace: "here", gates: ["reviewed"] });
+  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "first\n");
@@ -262,7 +262,7 @@ test("a changed worktree patch leaves the reviewed placement pending", async () 
 
 test("a changed document leaves an otherwise unchanged reviewed patch pending", async () => {
   const repository = repositoryWithMain();
-  const result = await Repo.at({ path: repository.path }).bind({ markdown: document(), workspace: "here", gates: ["reviewed"] });
+  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
@@ -284,7 +284,7 @@ test("a changed document leaves an otherwise unchanged reviewed patch pending", 
 
 test("review testimony is recorded when reviewed is not a placement gate", async () => {
   const repository = repositoryWithMain();
-  const result = await Repo.at({ path: repository.path }).bind({ markdown: document(), workspace: "here", gates: [] });
+  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: [] });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
@@ -316,7 +316,7 @@ test("public deliver keeps its Verification admission in accepted facts", async 
 test("status and audit expose only current Verification testimony", async () => {
   const repository = repositoryWithMain();
   const repo = Repo.at({ path: repository.path });
-  const bound = await repo.bind({
+  const bound = await Keiyaku.bind({ repo,
     markdown: document('printf "checked"; printf "warning" >&2'),
     workspace: "here",
     gates: ["reviewed", "verified"],
@@ -351,7 +351,7 @@ test("status and audit expose only current Verification testimony", async () => 
 
 test("amend preserves untouched Verification bytes and currentness", async () => {
   const repository = repositoryWithMain();
-  const bound = await Repo.at({ path: repository.path }).bind({
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: document("exit 0"),
     workspace: "here",
     gates: ["reviewed", "verified"],
@@ -377,7 +377,7 @@ test("amend preserves untouched Verification bytes and currentness", async () =>
 
 test("Verification timeout never suppresses placement", async () => {
   const openRepository = repositoryWithMain();
-  const open = await Repo.at({ path: openRepository.path }).bind({
+  const open = await Keiyaku.bind({ repo: Repo.at({ path: openRepository.path }),
     markdown: document("exit 0"),
     workspace: "here",
     gates: [],
@@ -394,7 +394,7 @@ test("Verification timeout never suppresses placement", async () => {
   assert.equal((await open.value.state()).terminal?.kind, "claimed");
 
   const gatedRepository = repositoryWithMain();
-  const gated = await Repo.at({ path: gatedRepository.path }).bind({
+  const gated = await Keiyaku.bind({ repo: Repo.at({ path: gatedRepository.path }),
     markdown: document("exit 0"),
     workspace: "here",
     gates: ["verified"],
@@ -512,7 +512,7 @@ test("a concurrent amend redecides and returns terms-moved without replaying old
     [
       "if [ \"$1\" = \"update-ref\" ] && [ ! -e \"$KEIYAKU_AMEND_RACE_MARKER\" ]; then",
       "  touch \"$KEIYAKU_AMEND_RACE_MARKER\"",
-      "  node --import \"$KEIYAKU_AMEND_RACE_LOADER\" --input-type=module -e 'const { Repo } = await import(process.env.KEIYAKU_AMEND_RACE_MODULE); const result = await Repo.at({ path: process.env.KEIYAKU_AMEND_RACE_REPO }).contract({ id: process.env.KEIYAKU_AMEND_RACE_ID }).amend({ markdown: process.env.KEIYAKU_AMEND_RACE_MARKDOWN }); if (result.kind !== \"accepted\") process.exit(1);' || exit $?",
+      "  node --import \"$KEIYAKU_AMEND_RACE_LOADER\" --input-type=module -e 'const { Keiyaku, Repo } = await import(process.env.KEIYAKU_AMEND_RACE_MODULE); const result = await Keiyaku.of({ repo: Repo.at({ path: process.env.KEIYAKU_AMEND_RACE_REPO }), id: process.env.KEIYAKU_AMEND_RACE_ID }).amend({ markdown: process.env.KEIYAKU_AMEND_RACE_MARKDOWN }); if (result.kind !== \"accepted\") process.exit(1);' || exit $?",
       "fi",
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
@@ -622,7 +622,7 @@ test("accepted head excludes an append made after admission", async () => {
 
 test("eligibility placement observes and binds every waiting dependent", async () => {
   const repository = repositoryWithMain();
-  const sourceResult = await Repo.at({ path: repository.path }).bind({
+  const sourceResult = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: document(),
     workspace: "here",
     gates: ["reviewed"],
@@ -637,7 +637,7 @@ test("eligibility placement observes and binds every waiting dependent", async (
 
   const dependents: Keiyaku[] = [];
   for (let index = 0; index < 4; index += 1) {
-    const bound = await Repo.at({ path: repository.path }).bind({
+    const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
       markdown: document(),
       workspace: "here",
       after: [(await source.state()).id],
@@ -658,7 +658,7 @@ test("eligibility placement observes and binds every waiting dependent", async (
 test("review exhausts placement after its target premise moves", async () => {
   const repository = repositoryWithMain();
   repository.run(["branch", "release"]);
-  const result = await Repo.at({ path: repository.path }).bind({
+  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: document(),
     target: "refs/heads/release",
     workspace: "here",
@@ -728,7 +728,7 @@ test("public audit exposes admitted verified attestations through facts", async 
 
 test("audit keeps its leading observation when the delivery candidate is unavailable", async () => {
   const repository = repositoryWithMain();
-  const bound = await Repo.at({ path: repository.path }).bind({
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: document("exit 0"),
     workspace: "here",
     gates: ["reviewed"],
@@ -772,7 +772,7 @@ test("public read-only audit returns empty facts without a second outcome kind",
 
 test("public audit refuses a missing contract without escaping Outcome", async () => {
   const repository = repositoryWithMain();
-  const contract = Repo.at({ path: repository.path }).contract({ id: "kei/missing" as ContractId });
+  const contract = Keiyaku.of({ repo: Repo.at({ path: repository.path }), id: "kei/missing" as ContractId });
 
   assert.deepEqual(await contract.audit(), {
     kind: "refused",

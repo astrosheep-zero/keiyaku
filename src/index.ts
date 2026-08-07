@@ -18,6 +18,7 @@ export type {
   Fact,
   FactKind,
   Gate,
+  KeiyakuOfInput,
   Outcome,
   PlacementStop,
   RegionOverlap,

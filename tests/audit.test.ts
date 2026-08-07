@@ -60,7 +60,7 @@ async function failedStoredVerification(): Promise<Readonly<{
   state: Awaited<ReturnType<Keiyaku["state"]>>;
 }>> {
   const repository = repositoryWithMain();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: verificationBody(), workspace: "here", gates: ["verified"] });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(), workspace: "here", gates: ["verified"] });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
@@ -76,7 +76,7 @@ async function failedStoredVerification(): Promise<Readonly<{
 
 test("a verified placement gate without a Verification declaration is refused at bind", async () => {
   const repository = repositoryWithMain();
-  assert.deepEqual(await Repo.at({ path: repository.path }).bind({
+  assert.deepEqual(await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
     workspace: "here",
     gates: ["verified"],
@@ -88,7 +88,7 @@ test("a verified placement gate without a Verification declaration is refused at
 
 test("an active amend cannot admit verified terms without a Verification declaration", async () => {
   const repository = repositoryWithMain();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: verificationBody(null), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   const before = await bound.value.state();
@@ -108,7 +108,7 @@ test("an active amend cannot admit verified terms without a Verification declara
 
 test("terminal amend refusal outranks a missing Verification declaration", async () => {
   const repository = repositoryWithMain();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: verificationBody(null), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   const id = (await bound.value.state()).id;
@@ -125,7 +125,7 @@ test("terminal amend refusal outranks a missing Verification declaration", async
 
 test("amend between document derivation and attempt returns document-moved", async () => {
   const repository = repositoryWithMain();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: verificationBody(null), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   const state = await bound.value.state();
@@ -150,7 +150,7 @@ test("amend between document derivation and attempt returns document-moved", asy
 
 test("read-only audit returns its initial observation when verification is skipped", async () => {
   const repository = repositoryWithMain();
-  const bound = await Repo.at({ path: repository.path }).bind({
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
     workspace: "here",
   });

@@ -96,6 +96,7 @@ export type AmendResult = Outcome<void, RegionObservation & Readonly<{ documentD
 export type ReconcileReport = ProtocolReconcileReport;
 
 export type BindInput = Readonly<{
+  repo: Repo;
   markdown: string;
   target?: string;
   workspace?: "worktree" | "here";
@@ -119,7 +120,7 @@ export type ArcInput = Readonly<{
 type ActorOptions = Readonly<{ actor?: ActorId }>;
 export type RepoAtInput = Readonly<{ path?: string }>;
 export type StatusInput = Readonly<{ contract?: ContractId }>;
-type ContractInput = Readonly<{ id: ContractId }>;
+export type KeiyakuOfInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type ReviewInput = ActorOptions & Readonly<{ verdict: AttestationVerdict; summary?: string }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
 export type DeliverInput = ActorOptions & Readonly<{ message?: string }>;
@@ -450,13 +451,15 @@ class KeiyakuHandle {
 }
 
 export type Keiyaku = KeiyakuHandle;
-export const Keiyaku = handleType(KeiyakuHandle.prototype, (value) => value instanceof KeiyakuHandle);
+
+const REPO_SCOPES = new WeakMap<object, RepositoryScope>();
 
 export class Repo {
   readonly root: string;
 
-  private constructor(private readonly scope: RepositoryScope) {
+  private constructor(scope: RepositoryScope) {
     this.root = scope.primaryWorktree;
+    REPO_SCOPES.set(this, scope);
   }
 
   static at(input?: RepoAtInput): Repo {
@@ -465,49 +468,12 @@ export class Repo {
     return new Repo(scope);
   }
 
-  contract(input: ContractInput): Keiyaku {
-    const values = requireInput(input, "repo.contract input");
-    if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
-    return new KeiyakuHandle(contractId(values.id), this.scope);
-  }
-
-  async bind(input: BindInput): Promise<BindResult> {
-    const values = requireInput(input, "repo.bind input");
-    const markdown = requireMarkdown(values.markdown);
-    const document = decodeContractDocument(markdown);
-    const workspace = values.workspace === undefined ? "worktree" : values.workspace;
-    if (workspace !== "worktree" && workspace !== "here") throw new TypeError("workspace must be worktree or here");
-    const target = values.target;
-    if (target !== undefined && typeof target !== "string") throw new TypeError("target must be a string");
-    const actor = actorOption(values.actor);
-    const terms = contractTerms(
-      document,
-      normalizedGates(values.gates),
-      normalizedList(values.after, "after", contractId),
-    );
-    const admitted = bindOperation({
-      scope: this.scope,
-      title: document.title,
-      terms,
-      verification: prepareVerificationDeclaration({
-        gates: terms.gates,
-        definition: verificationDefinition(document),
-      }),
-      workspace,
-      ...(target === undefined ? {} : { target }),
-      ...actor,
-    });
-    const outcome = mapOutcome(admitted, ({ contractId: id }) => this.contract({ id }));
-    if (outcome.kind !== "accepted") return outcome;
-    if (admitted.kind !== "accepted") throw new Error("accepted bind is missing its contract identity");
-    return { ...outcome, ...observeRegion(this.scope, admitted.value.contractId, document.region) };
-  }
-
   async status(input?: StatusInput): Promise<StatusReport> {
-    if (input === undefined) return statusOperation({ scope: this.scope });
+    const scope = scopeForRepo(this);
+    if (input === undefined) return statusOperation({ scope });
     const values = requireInput(input, "repo.status input");
     const value = values.contract;
-    if (value === undefined) return statusOperation({ scope: this.scope });
+    if (value === undefined) return statusOperation({ scope });
     if (typeof value !== "string") throw new TypeError("contract ID must be a string");
     let contract: ContractId;
     try {
@@ -515,10 +481,63 @@ export class Repo {
     } catch (error) {
       throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
     }
-    return statusOperation({ scope: this.scope, contractId: contract });
+    return statusOperation({ scope, contractId: contract });
   }
 
   async reconcile(): Promise<RepoReconcileReport> {
-    return reconcileAllOperation({ scope: this.scope });
+    return reconcileAllOperation({ scope: scopeForRepo(this) });
   }
 }
+
+function scopeForRepo(value: unknown): RepositoryScope {
+  if (!(value instanceof Repo)) throw new TypeError("repo must be a Repo");
+  const scope = REPO_SCOPES.get(value);
+  if (scope === undefined) throw new TypeError("repo must be a Repo");
+  return scope;
+}
+
+function keiyakuOf(input: KeiyakuOfInput): Keiyaku {
+  const values = requireInput(input, "Keiyaku.of input");
+  const scope = scopeForRepo(values.repo);
+  if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
+  return new KeiyakuHandle(contractId(values.id), scope);
+}
+
+async function bindKeiyaku(input: BindInput): Promise<BindResult> {
+  const values = requireInput(input, "Keiyaku.bind input");
+  const scope = scopeForRepo(values.repo);
+  const markdown = requireMarkdown(values.markdown);
+  const document = decodeContractDocument(markdown);
+  const workspace = values.workspace === undefined ? "worktree" : values.workspace;
+  if (workspace !== "worktree" && workspace !== "here") throw new TypeError("workspace must be worktree or here");
+  const target = values.target;
+  if (target !== undefined && typeof target !== "string") throw new TypeError("target must be a string");
+  const actor = actorOption(values.actor);
+  const terms = contractTerms(
+    document,
+    normalizedGates(values.gates),
+    normalizedList(values.after, "after", contractId),
+  );
+  const admitted = bindOperation({
+    scope,
+    title: document.title,
+    terms,
+    verification: prepareVerificationDeclaration({
+      gates: terms.gates,
+      definition: verificationDefinition(document),
+    }),
+    workspace,
+    ...(target === undefined ? {} : { target }),
+    ...actor,
+  });
+  const outcome = mapOutcome(admitted, ({ contractId: id }) => new KeiyakuHandle(id, scope));
+  if (outcome.kind !== "accepted") return outcome;
+  if (admitted.kind !== "accepted") throw new Error("accepted bind is missing its contract identity");
+  return { ...outcome, ...observeRegion(scope, admitted.value.contractId, document.region) };
+}
+
+export const Keiyaku = Object.freeze({
+  ...handleType(KeiyakuHandle.prototype, (value) => value instanceof KeiyakuHandle),
+  bind: bindKeiyaku,
+  of: keiyakuOf,
+});

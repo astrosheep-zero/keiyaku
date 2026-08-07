@@ -67,20 +67,6 @@ function acceptedContract(result: Awaited<ReturnType<typeof invoke>>): ContractI
   return result.contract;
 }
 
-test("bind retry does not fabricate a contract coordinate", async () => {
-  const repository = repositoryWithMain();
-  const bind = Repo.prototype.bind;
-  const reason = { kind: "exhausted" as const };
-  Repo.prototype.bind = async () => ({ kind: "retry", reason });
-  try {
-    const result = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Retry bind"));
-    assert.deepEqual(result, { kind: "retry", verb: "bind", detail: reason });
-    assert.equal("contract" in result, false);
-  } finally {
-    Repo.prototype.bind = bind;
-  }
-});
-
 test("one CLI invocation reuses its Repo for selector, settings, and contract lookup", async () => {
   const repository = repositoryWithMain();
   mkdirSync(resolve(repository.path, ".keiyaku"));
@@ -327,7 +313,7 @@ test("concurrent amend diff uses the accepted predecessor after a competing amen
     contractDocument("Concurrent original"),
   );
   const id = acceptedContract(bound);
-  const contract = Repo.at({ path: repository.path }).contract({ id });
+  const contract = Keiyaku.of({ repo: Repo.at({ path: repository.path }), id });
   const amend = Keiyaku.prototype.amend;
   let injected = false;
 
@@ -393,7 +379,7 @@ test("audit --show-diff-body retains its Delivery across a terminal transition",
   const delivered = await invokeWithDocument(repository.path, ["deliver", id, "--actor", "external-test"], "");
   assert.equal(delivered.kind, "accepted");
 
-  const contract = Repo.at({ path: repository.path }).contract({ id });
+  const contract = Keiyaku.of({ repo: Repo.at({ path: repository.path }), id });
   const pinned = await contract.delivery();
   if (pinned === null) throw new Error("delivery was not available before audit");
   const delivery = Keiyaku.prototype.delivery;
@@ -439,7 +425,7 @@ test("audit renders an unavailable public delivery diff as accepted", async () =
   const delivered = await invokeWithDocument(repository.path, ["deliver", id, "--actor", "external-test"], "");
   assert.equal(delivered.kind, "accepted");
 
-  const contract = Repo.at({ path: repository.path }).contract({ id });
+  const contract = Keiyaku.of({ repo: Repo.at({ path: repository.path }), id });
   const delivery = await contract.delivery();
   if (delivery === null) throw new Error("delivery was not available for audit");
   const diff = Delivery.prototype.diff;

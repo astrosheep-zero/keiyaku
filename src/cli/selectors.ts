@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { type ContractId, type Keiyaku, type Repo, type StatusReport } from "../index.js";
+import { Keiyaku, type ContractId, type Repo, type StatusReport } from "../index.js";
 import { CliUsageError } from "./parse.js";
 
 type SelectorCandidate = Readonly<{
@@ -23,7 +23,7 @@ export type SelectedContract = Readonly<{ id: ContractId; contract: Keiyaku }>;
 export function contractFromInput(repo: Repo, value: string): SelectedContract {
   try {
     const id = value as ContractId;
-    return { id, contract: repo.contract({ id }) };
+    return { id, contract: Keiyaku.of({ repo, id }) };
   } catch (error) {
     selectorError(error instanceof Error ? error.message : String(error));
   }

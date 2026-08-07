@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Repo } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithHead(): TestGitRepository {
@@ -37,7 +37,7 @@ function document(title: string, region: readonly string[]): string {
 }
 
 async function bind(repository: TestGitRepository, title: string, region: readonly string[]) {
-  const result = await Repo.at({ path: repository.path }).bind({
+  const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: document(title, region),
     workspace: "here",
   });
@@ -103,7 +103,7 @@ test("post-admission document observation failure stays in the accepted Region a
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_REGION_MARKER: marker },
-    () => Repo.at({ path: repository.path }).bind({
+    () => Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
       markdown: document("Observed failure", ["docs/**"]),
       workspace: "here",
     }),

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { AuthorityCorruptionError, Repo } from "../src/index.js";
+import { AuthorityCorruptionError, Keiyaku, Repo } from "../src/index.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { prepareDelivery } from "../src/carrier/delivery.js";
 import { admit } from "../src/carrier/admission.js";
@@ -181,7 +181,7 @@ function publishMalformedUnrelatedJournal(repository: ReturnType<typeof reposito
 test("batches full-carrier journal observation into one Git invocation", async () => {
   const repository = repositoryWithHead();
   for (let index = 0; index < 4; index += 1) {
-    const bound = await Repo.at({ path: repository.path }).bind({ markdown: contractBody(), workspace: "here" });
+    const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
     assert.equal(bound.kind, "accepted");
   }
 
@@ -213,7 +213,7 @@ function gitProcessCounts(invocations: readonly string[]): Record<string, number
 
 test("contract-local admission scopes ancestor discovery to its journal path", async () => {
   const repository = repositoryWithHead();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   const id = (await bound.value.state()).id;
@@ -249,7 +249,7 @@ test("contract-local admission scopes ancestor discovery to its journal path", a
 
 test("known publication failure is returned without a post-result ref read", async () => {
   const repository = repositoryWithHead();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   const id = (await bound.value.state()).id;
@@ -368,7 +368,7 @@ test("single-contract amend object I/O stays fixed as the carrier grows", () => 
 
 test("runProtocol observes only watched contracts", async () => {
   const repository = repositoryWithHead();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   const id = (await bound.value.state()).id;
@@ -400,7 +400,7 @@ test("runProtocol observes only watched contracts", async () => {
 
 test("contract-local intent ignores an unrelated malformed journal", async () => {
   const repository = repositoryWithHead();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   const id = (await bound.value.state()).id;
@@ -481,7 +481,7 @@ test("admission reuses frozen journal bytes for a multi-contract placement offer
 
 test("admission observation retains canonical journal validation", async () => {
   const repository = repositoryWithHead();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind did not succeed");
   const id = (await bound.value.state()).id;
@@ -768,7 +768,7 @@ test("placement redecides after a world advance and binds a new dependent", asyn
 
 test("delivery preparation ignores an unrelated malformed journal", async () => {
   const repository = repositoryWithHead();
-  const bound = await Repo.at({ path: repository.path }).bind({ markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   const id = (await bound.value.state()).id;

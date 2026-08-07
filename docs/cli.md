@@ -18,9 +18,10 @@ to the one `Repo.at` construction point used by this invocation and is never
 persisted. An omitted `-C` lets `Repo.at` apply its working-directory default.
 The adapter constructs exactly one `Repo` per invocation. It derives selector
 reads, the settings coordinate, contract handles and verbs, and reconciliation
-from that value: `repo.status()`, `repo.root`, `repo.contract({ id })`,
-`repo.bind(...)`, and the selected public reconcile method. It uses only public
-`Repo`, `Keiyaku`, and `Delivery` values.
+from that value: `repo.status()`, `repo.root`, `Keiyaku.of({ repo, id })`,
+`Keiyaku.bind({ repo, ... })`, and the selected public reconcile method. It
+uses only public `Repo`, `Keiyaku`, and `Delivery` values. Neither Keiyaku
+construction call resolves a path or reads the working directory again.
 
 The parser performs argv lexing and syntax only. It recognizes command words,
 the global prefix, an optional contract positional, flags, and a final `-`; it
@@ -39,7 +40,7 @@ The command vocabulary is:
 
 | Command | Public adaptation |
 | --- | --- |
-| `bind` | Calls `repo.bind` with Markdown and structured options. |
+| `bind` | Calls `Keiyaku.bind` with the pinned Repo, Markdown, and structured options. |
 | `amend` | Calls `keiyaku.amend` with the operation Markdown and structured options. |
 | `deliver` | Calls `keiyaku.deliver`. |
 | `review` | Calls `keiyaku.review` directly. |
@@ -88,7 +89,7 @@ uses exit `3`; it is not converted into a usage error. A genuine
 `CliUsageError` raised by syntax or edge validation remains a usage refusal.
 
 `bind` maps `--target`, `--here`, repeated `--after`, `--gates`, and `--actor`
-to `repo.bind`. `--target` remains literal input for the public target boundary;
+to `Keiyaku.bind`. `--target` remains literal input for the public target boundary;
 the parser does not DWIM-resolve it or inspect the current branch. `--here`
 maps to `workspace: "here"`; the omitted form maps to its public default.
 `amend` maps Markdown, `--actor`, repeated `--after`,
