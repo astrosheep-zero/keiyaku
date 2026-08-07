@@ -1,14 +1,13 @@
 ---
-id: actor-来源-keiyaku-projection-id-注-9d9b432c
+id: task/actor-来源-keiyaku-projection-id-注-9d9b432c
 title: actor 来源：KEIYAKU_PROJECTION_ID 注入与 --actor fallback
 state: done
-pri: 1
+priority: 1
 needs: []
 parent: null
-from: []
-createdAt: 2026-08-04T07:23:56.953Z
-updatedAt: 2026-08-04T09:45:52.876Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---
 为 v4 建立唯一的 actor 输入边界，不依赖 Akuma dispatch receipt 或 task 推导：
 

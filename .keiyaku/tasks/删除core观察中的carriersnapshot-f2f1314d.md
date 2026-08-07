@@ -1,12 +1,11 @@
 ---
-id: 删除core观察中的carriersnapshot-f2f1314d
+id: task/删除core观察中的carriersnapshot-f2f1314d
 title: 删除core观察中的carrierSnapshot幽灵字段
 state: done
-pri: 0
+priority: 0
 needs: []
 parent: null
-from: []
-createdAt: 2026-08-06T17:44:56.737Z
-updatedAt: 2026-08-06T18:02:35.443Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---

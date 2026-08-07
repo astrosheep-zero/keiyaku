@@ -1,14 +1,13 @@
 ---
-id: 将显式空-cli-值统一归为-usage
+id: task/将显式空-cli-值统一归为-usage
 title: 将显式空 CLI 值统一归为 usage
 state: open
-pri: 1
+priority: 1
 needs: []
 parent: null
-from: []
-createdAt: 2026-08-06T21:45:30.596Z
-updatedAt: 2026-08-06T21:45:30.596Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---
 依据 docs/cli.md 的 adapter syntax/usage ownership，显式 --target ""、--message ""、--note ""、--summary "" 以及空白 review stdin 必须在 CLI adaptation 边界成为 typed usage exit 1；不得漏到 package-root TypeError exit 3。library 直调仍保留 programmer value validation。
 

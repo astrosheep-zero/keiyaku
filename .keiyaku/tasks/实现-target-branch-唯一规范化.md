@@ -1,14 +1,13 @@
 ---
-id: 实现-target-branch-唯一规范化
+id: task/实现-target-branch-唯一规范化
 title: 封闭 target canonicalization 行为矩阵
 state: done
-pri: 0
+priority: 0
 needs: []
 parent: null
-from: []
-createdAt: 2026-08-06T22:52:04.101Z
-updatedAt: 2026-08-07T05:23:48.157Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---
 依据 docs/public-api.md 与 docs/transport.md，证明 library 输入、persisted coordinate 与 target CAS 使用同一个 canonical refs/heads/* 坐标。
 

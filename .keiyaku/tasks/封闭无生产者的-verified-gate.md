@@ -1,15 +1,14 @@
 ---
-id: 封闭无生产者的-verified-gate
+id: task/封闭无生产者的-verified-gate
 title: 封闭无生产者的 verified gate
 state: drop
-pri: 0
+priority: 0
 needs:
-  - attestation-subject-统一证词与-gat-da92658b
+  - task/attestation-subject-统一证词与-gat-da92658b
 parent: null
-from: []
-createdAt: 2026-08-06T05:42:19.442Z
-updatedAt: 2026-08-06T10:47:07.319Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---
 当前输入允许 gates 包含 verified 而 Verification 声明为空；producer 因无声明永不运行，契约会进入永久不可满足状态。该问题已在 Square #175 明确列为独立输入侧缺口，但解决方式尚未落 owner law。
 

@@ -1,12 +1,11 @@
 ---
-id: source-tree-draft-loc-evidence
+id: task/source-tree-draft-loc-evidence
 title: source-tree-draft-loc-evidence
 state: done
-pri: 1
+priority: 1
 needs: []
 parent: null
-from: []
-createdAt: 2026-08-04T15:18:12.108Z
-updatedAt: 2026-08-04T15:22:33.536Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---

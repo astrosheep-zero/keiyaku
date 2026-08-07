@@ -1,14 +1,13 @@
 ---
-id: 统一-amend-保留-h2-的方言拒绝
+id: task/统一-amend-保留-h2-的方言拒绝
 title: 统一 amend 保留 H2 的方言拒绝
 state: done
-pri: 1
+priority: 1
 needs: []
 parent: null
-from: []
-createdAt: 2026-08-06T21:41:47.601Z
-updatedAt: 2026-08-06T21:54:12.907Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---
 依据 docs/document.md Reserved Sections law，收束 complete-document decoder 与 amendment Add 的保留标题判定。可构造缺陷是 Add: Gates|Pipeline|After 被 amend 当 extension 创建，随后 final decoder 才拒绝；合法 ContractBody 不可能已有这些 extension，因此 Update/Remove/Replace/Append 的 unknown-extension 拒绝不是第二可接受路径，不加幽灵门。
 

@@ -11,6 +11,10 @@
     ".": {
       "types": "./build/src/index.d.ts",
       "import": "./build/src/index.js"
+    },
+    "./task": {
+      "types": "./build/src/task/index.d.ts",
+      "import": "./build/src/task/index.js"
     }
   },
   "bin": {

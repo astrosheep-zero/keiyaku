@@ -1,24 +1,14 @@
 ---
-id: 第二切片-petition-claim-pure-owners-672d9b8d
+id: task/第二切片-petition-claim-pure-owners-672d9b8d
 title: 第二切片：petition/claim pure owners（Delivery Laws 5–8）
 state: done
-pri: 1
+priority: 1
 needs:
-  - 收窄-refoperation-至-claim-单次-ca-d09b3da2
+  - task/收窄-refoperation-至-claim-单次-ca-d09b3da2
 parent: null
-from: []
-notes:
-  - actor: thekoc
-    timestamp: 2026-08-04T04:31:49.516Z
-    text: |
-      验收方式修订（user 指示）：faye 不亲读 diff。root 在 square 报确切 diff 后，由 faye 派 akuma 对照 Delivery Laws 5–8 与 Nail 2 复核，复核结论经 square 裁决放行。上一条 d09b3da2 同规则。
-  - actor: thekoc
-    timestamp: 2026-08-04T08:36:31.098Z
-    text: |
-      Milestone implementation complete pending Square/Faye acceptance: petition pure owner split from shell-bound candidate preparation; claim owns sole target CAS and terminal petition-stale; candidate metadata follows Act 198 (actor exact name, fixed keiyaku@keiyaku.invalid email, author == committer, fixed parents/message); claim no longer imports admission; stale tests distinguish carrier commit from journal head. Verification: focused 12/12, full 100/100, source typecheck, build, and git diff --check pass. Square act #43 requests the task-prescribed Akuma review. CLI task now also needs actor-来源-keiyaku-projection-id-注-9d9b432c so architecture-correct MVP precedes dogfood.
-createdAt: 2026-08-04T04:26:32.728Z
-updatedAt: 2026-08-04T10:57:39.052Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---
 恢复四个已暂停路径（src/core/verbs/petition.ts、claim.ts、tests/verbs-petition.test.ts、tests/verbs-claim.test.ts），按法典 Delivery Laws 5–8 落地：
 
@@ -27,3 +17,7 @@ creator: thekoc
 - Nail 2 端到端。拒绝表（Delivery Refusals）不越线。
 
 验收：faye 亲验 diff。
+
+验收方式修订（user 指示）：faye 不亲读 diff。root 在 square 报确切 diff 后，由 faye 派 akuma 对照 Delivery Laws 5–8 与 Nail 2 复核，复核结论经 square 裁决放行。上一条 d09b3da2 同规则。
+
+Milestone implementation complete pending Square/Faye acceptance: petition pure owner split from shell-bound candidate preparation; claim owns sole target CAS and terminal petition-stale; candidate metadata follows Act 198 (actor exact name, fixed keiyaku@keiyaku.invalid email, author == committer, fixed parents/message); claim no longer imports admission; stale tests distinguish carrier commit from journal head. Verification: focused 12/12, full 100/100, source typecheck, build, and git diff --check pass. Square act #43 requests the task-prescribed Akuma review. CLI task now also needs actor-来源-keiyaku-projection-id-注-9d9b432c so architecture-correct MVP precedes dogfood.

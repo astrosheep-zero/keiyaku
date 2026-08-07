@@ -1,13 +1,12 @@
 ---
-id: act-327-canonical-authority-chapter-split
+id: task/act-327-canonical-authority-chapter-split
 title: Act 327 canonical authority chapter split
 state: done
-pri: 0
+priority: 0
 needs: []
-parent: v4-architecture-correct-extensible-mvp
-from: []
-createdAt: 2026-08-06T02:11:53.622Z
-updatedAt: 2026-08-06T02:35:35.527Z
-creator: thekoc
+parent: task/v4-architecture-correct-extensible-mvp
+supersedes: []
+relates: []
+contractId: null
 ---
 Rewrite the v4 authority registry and product law into README.md plus public-api.md, document.md, model.md, lifecycle.md, verification.md, transport.md, and cli.md exactly as Faye Acts 325-327 settle. Delete docs/architecture.md, leave the three planning-evidence documents separate, update AGENTS.md discovery, and retain only current law with one owner per rule.

@@ -1,3 +1,5 @@
+import { parseTaskCommand, type ParsedTaskCommand } from "./commands/task.js";
+
 type FlagKind = "boolean" | "value" | "repeat-value";
 type CommandSpec = Readonly<{
   positional: "none" | "optional";
@@ -121,7 +123,8 @@ export type ParsedCommand =
   | ParsedAbandon
   | ParsedStatus
   | ParsedAudit
-  | ParsedReconcile;
+  | ParsedReconcile
+  | ParsedTaskCommand;
 
 export type ParsedInvocation = Readonly<{
   cwd?: string;
@@ -352,8 +355,11 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
 
 export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const invocation = invocationPrefix(argv);
+  const task = invocation.commandArgv[0] === "task"
+    ? parseTaskCommand(invocation.commandArgv.slice(1), (message) => { throw new CliUsageError(message); })
+    : undefined;
   return {
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
-    command: parseCommand(scanArgv(invocation.commandArgv)),
+    command: task ?? parseCommand(scanArgv(invocation.commandArgv)),
   };
 }

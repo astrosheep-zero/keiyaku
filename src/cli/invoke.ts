@@ -4,6 +4,7 @@ import { resolveActor } from "./actor.js";
 import { resultFromOutcome } from "./accepted.js";
 import { amendFromCommand } from "./commands/amend.js";
 import { bindFromCommand } from "./commands/bind.js";
+import { invokeTask, type TaskInvocationResult } from "./commands/task.js";
 import { CliUsageError, type ParsedInvocation } from "./parse.js";
 import type { AcceptedResult, DiffUnavailable, InvocationResult } from "./result.js";
 import { contractFromInput, resolveContextualContract, type SelectedContract } from "./selectors.js";
@@ -18,7 +19,7 @@ type InvokeRuntime = Readonly<{
 }>;
 
 type ParsedCommand = ParsedInvocation["command"];
-type ExistingCommand = Exclude<ParsedCommand, { command: "bind" | "status" | "reconcile" }>;
+type ExistingCommand = Exclude<ParsedCommand, { command: "bind" | "status" | "reconcile" | "task" }>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin: () => string;
@@ -166,13 +167,17 @@ async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: Invocat
   }
 }
 
-export async function invoke(invocation: ParsedInvocation, runtime: InvokeRuntime = {}): Promise<InvocationResult> {
+export async function invoke(invocation: ParsedInvocation, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult> {
   const coordinate = invocation.cwd ?? runtime.cwd;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
     readStdin: runtime.readStdin ?? (() => readFileSync(0, "utf8")),
   };
   const parsed = invocation.command;
+  if (parsed.command === "task") {
+    try { return await invokeTask(parsed, { ...(coordinate === undefined ? {} : { path: coordinate }), readStdin: edge.readStdin }); }
+    catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
+  }
   const repo = repoAt(coordinate);
 
   switch (parsed.command) {

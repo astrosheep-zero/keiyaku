@@ -1,14 +1,13 @@
 ---
-id: 成文-lifecycle-phase-lattice-law-in-c-9d891508
+id: task/成文-lifecycle-phase-lattice-law-in-c-9d891508
 title: 成文 lifecycle phase lattice（law-in-code 收编）
 state: drop
-pri: 1
+priority: 1
 needs: []
 parent: null
-from: []
-createdAt: 2026-08-04T04:26:18.650Z
-updatedAt: 2026-08-05T08:47:24.933Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---
 fold.ts:87–161 与各 verb decide 的整套 phase 门无 act 覆盖：bind first/once；amend 仅 active/awaiting-verdict；seal 仅 active + 非空 delivery；open 仅 active；renew 仅 sealed；petition 仅 sealed + 当前 delivery head；changes-requested 仅 awaiting-verdict。
 

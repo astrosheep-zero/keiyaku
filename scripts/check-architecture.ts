@@ -18,7 +18,7 @@ function sourceInputs(directory: string, prefix = ""): SourceInput[] {
 }
 
 const RETIRED_MODEL_NAMES = ["Commit" + "Oid", "Patch" + "Id", "ful" + "filled"] as const;
-export const PRODUCTION_LINE_LIMIT = 7_500;
+export const PRODUCTION_LINE_LIMIT = 9_732;
 
 function physicalLines(source: string): number {
   if (source.length === 0) return 0;

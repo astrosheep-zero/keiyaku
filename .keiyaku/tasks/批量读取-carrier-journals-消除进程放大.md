@@ -1,14 +1,13 @@
 ---
-id: 批量读取-carrier-journals-消除进程放大
+id: task/批量读取-carrier-journals-消除进程放大
 title: 批量读取 carrier journals 消除进程放大
 state: done
-pri: 1
+priority: 1
 needs: []
 parent: null
-from: []
-createdAt: 2026-08-06T05:44:21.940Z
-updatedAt: 2026-08-06T08:15:23.432Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---
 observeCarrier 先读 carrier tree，再为每份 contract journal 单独执行一次 git cat-file。status、world reconcile 与 eligibility-changing protocol 因此产生 O(N) 个 Git 子进程；重试会重复该放大。当前没有 N²，但 process topology 会随契约数线性恶化。
 

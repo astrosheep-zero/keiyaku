@@ -1,12 +1,11 @@
 ---
-id: 保留-verification-事实诊断并投-43aa37e7
+id: task/保留-verification-事实诊断并投-43aa37e7
 title: 保留-verification-事实诊断并投影到读面
 state: done
-pri: 0
+priority: 0
 needs: []
 parent: null
-from: []
-createdAt: 2026-08-07T03:31:50.966Z
-updatedAt: 2026-08-07T04:24:52.103Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---

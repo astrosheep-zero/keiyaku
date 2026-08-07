@@ -1,7 +1,7 @@
 # CLI
 
-`keiyaku-v4` is the contract command-line adapter. It turns argv and acquired
-input into package-root calls, then renders their public results. It owns neither
+`keiyaku-v4` turns argv and acquired input into public package calls, then
+renders their public results. It owns neither
 document decoding, lifecycle decisions, carrier discovery, delivery preparation,
 Verification execution, or reconciliation semantics.
 
@@ -49,6 +49,7 @@ The command vocabulary is:
 | `status` | Calls `repo.status()` and optionally filters its returned board. |
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
+| `task ...` | Calls the separate `./task` public surface described below. |
 
 `bind` accepts no contract positional. Commands addressing an existing contract
 accept a full `kei/<contract-segment>` identity or an active short
@@ -221,6 +222,53 @@ This is an observation with exit `0`, contains no raw Git error, and is not
 added to the audit report. Audit renders its public report, head, and facts; it does
 not inspect journal entries, delivery coordinates, raw process output, or
 timestamps.
+
+## Task Commands
+
+`keiyaku-v4 task` constructs one `Tasks.at` value from the global `-C`
+coordinate. Its parser owns argv shape, stdin selection, mutual exclusion, and
+output selection only. Task Markdown, graph, lifecycle, diff, and compose
+decisions remain in the native Task surface.
+
+```text
+task add <TITLE> [--namespace <ns>] [--priority 0..3]
+  [--needs <TaskId>]... [--parent <TaskId>]
+  [--supersedes <TaskId>]... [--relates <TaskId>]...
+  [--contract <ContractId>] [--body <text>] [--json]
+task add [--namespace <ns>] [--json] -
+task show <TaskId> [--json]
+task ls [--closed | --all] [--world] [--json]
+task ready [--world] [--json]
+task blocked [--world] [--json]
+task tree <TaskId> [--full] [--json]
+task cycles [--json]
+task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
+  [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
+  [--parent <TaskId> | --no-parent]
+  [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
+  [--relates <TaskId>]... [--drop-relates <TaskId>]...
+  [--contract <ContractId> | --no-contract] [--json]
+task start|stop|hold|resume <TaskId> [--json]
+task done|drop|hold <TaskId>... [--json]
+task namespace [<namespace>] [--json]
+task compose [--json] -
+```
+
+Literal `-` selects creation-document input for add, body input only after
+`--body` or `--append` for update, and composition input for compose. Unselected
+piped stdin is not consumed. Add document input rejects creation-owned identity
+and state. Update requires at least one explicit patch.
+
+`ls`, `ready`, and `blocked` use current namespace unless `--world` is present.
+`show`, `tree`, update, lifecycle, and cycles use complete IDs and never infer
+from namespace. Text rows are `TaskId - P<n> - <disposition> - title`, with an
+associated ContractId appended when present.
+
+Accepted update and compose render native whole-document diffs; the CLI never
+computes them. An incomplete compose writes only its reusable draft to stdout,
+writes its diagnostic and admitted diffs to stderr, and exits `1`. JSON writes
+the unchanged result object to stdout. Task refusal exits `1`, retry exits `2`,
+and corruption or infrastructure failure exits `3`.
 
 The status board renders one public `StatusReport`. An explicit contract ID is
 passed to `repo.status({ contract })` and reads only that journal. An

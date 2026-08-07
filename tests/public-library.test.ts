@@ -181,6 +181,26 @@ test("package exports reject deep internal imports", () => {
   );
 });
 
+test("task package export exposes only the Tasks-first native surface", () => {
+  const directory = externalConsumer();
+  const source = [
+    'import { Tasks, type Task, type TaskId, type TaskMutationResult } from "@astrosheep/keiyaku-v4/task";',
+    'const tasks = Tasks.at({ path: "." });',
+    'const task: Task = tasks.task({ id: "task/example" });',
+    'const id: TaskId = task.id;',
+    'const result: Promise<TaskMutationResult> = tasks.add({ title: "Example" });',
+    '// @ts-expect-error Task has no static construction surface',
+    'Task.at({ path: "." });',
+    '// @ts-expect-error callers do not choose IDs during creation',
+    'tasks.add({ id: "task/chosen", title: "Chosen" });',
+    'void tasks; void task; void id; void result;',
+  ].join("\n");
+  writeFileSync(join(directory, "consumer-task.ts"), source);
+  execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer-task.ts"], { cwd: directory, stdio: "ignore" });
+  const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku-v4/task"); console.log(Object.keys(m).sort().join(","));'], { cwd: directory, encoding: "utf8" });
+  assert.equal(output.trim(), "TaskAuthorityCorruptionError,Tasks");
+});
+
 test("built CLI bin keeps its shebang and executes through an installed-style symlink", () => {
   const repository = repositoryWithInitialCommit();
   const bin = join(root, "build", "src", "cli", "index.js");

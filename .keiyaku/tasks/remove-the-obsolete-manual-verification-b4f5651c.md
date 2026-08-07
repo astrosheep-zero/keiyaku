@@ -1,12 +1,11 @@
 ---
-id: remove-the-obsolete-manual-verification-b4f5651c
+id: task/remove-the-obsolete-manual-verification-b4f5651c
 title: Remove the obsolete manual --verification-result and --verification-summary parser/types/tests and update focused CLI grammar tests. Add --no-cache only where the settled docs require it. Do not implement Verification execution or alter core facts.
 state: done
-pri: 1
+priority: 1
 needs: []
-parent: v4-verification-runtime-and-producer
-from: []
-createdAt: 2026-08-05T10:25:11.687Z
-updatedAt: 2026-08-05T11:03:16.681Z
-creator: thekoc
+parent: task/v4-verification-runtime-and-producer
+supersedes: []
+relates: []
+contractId: null
 ---

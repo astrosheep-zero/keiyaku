@@ -442,7 +442,8 @@ or verification-run operation.
 The package root exports the operation value names `Delivery` and `Review`.
 `DeliverValue`, `ReviewValue`, and `ReviewResult` are not public aliases.
 
-Task products may retain a returned `ContractId` and observe terminal contract
-state through this API. Their association, persistence, failure policy, and
-mutations are their own authority; the contract library has no task coordinate
-or settlement effect.
+Task products may retain returned identity bytes as an opaque association.
+Their association, persistence, failure policy, and mutations are their own
+authority; the contract library has no task coordinate or settlement effect.
+The separate task subpath shipped in this package neither imports package-root
+values nor observes, validates, writes, or folds Contract facts.

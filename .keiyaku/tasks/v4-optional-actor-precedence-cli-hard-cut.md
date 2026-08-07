@@ -1,12 +1,11 @@
 ---
-id: v4-optional-actor-precedence-cli-hard-cut
+id: task/v4-optional-actor-precedence-cli-hard-cut
 title: v4 optional actor precedence CLI hard cut
 state: done
-pri: 0
+priority: 0
 needs: []
 parent: null
-from: []
-createdAt: 2026-08-05T17:14:15.367Z
-updatedAt: 2026-08-05T17:24:06.320Z
-creator: thekoc
+supersedes: []
+relates: []
+contractId: null
 ---
