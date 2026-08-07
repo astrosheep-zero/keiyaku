@@ -1,12 +1,13 @@
 ---
 id: 建立-readable-id-原语与可读-contract-id
 title: 建立-readable-id-原语与可读-contract-id
-state: open
+state: in_progress
 pri: 0
 needs: []
 parent: null
 from: []
 createdAt: 2026-08-07T07:18:39.884Z
-updatedAt: 2026-08-07T07:18:39.884Z
+updatedAt: 2026-08-07T07:19:28.689Z
 creator: thekoc
+startedAt: 2026-08-07T07:19:28.689Z
 ---
