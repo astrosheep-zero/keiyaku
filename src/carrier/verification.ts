@@ -1,55 +1,65 @@
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ContractState, SnapshotId } from "../core/facts/types.js";
-import { gitObjectIdForSnapshot, gitObjectId, type GitObjectId } from "./identity.js";
-import { GitPlumbingError, runGit, type GitRepository } from "./repository.js";
+import type { SnapshotId } from "../core/facts/types.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import { gitObjectIdForSnapshot } from "./identity.js";
+import { runGit, type GitRepository } from "./repository.js";
 
-export type StoredVerificationPreparation = Readonly<{
-  candidate: SnapshotId;
-  candidateTree: GitObjectId;
+type MaterializedVerificationCandidate = Readonly<{
   cwd: string;
-  dispose: () => void;
+  dispose: () => WorktreeLeak | null;
+}>;
+
+export type WorktreeLeak = Readonly<{
+  path: string;
+  diagnostic: string;
 }>;
 
 /** Materialize a temporary candidate worktree for verification and own its cleanup. */
-export function prepareStoredVerification(repository: GitRepository, state: ContractState): StoredVerificationPreparation | null {
-  if (state.terminal || state.delivery === null || state.body === null || state.body.verification.length === 0) return null;
-  const candidate = state.delivery.data.candidate;
-  const candidateTree = gitObjectId(runGit(repository, ["rev-parse", `${candidate}^{tree}`]).toString("utf8").trim(), "candidate tree");
+export function materializeVerificationCandidate(
+  repository: GitRepository,
+  candidate: SnapshotId,
+): MaterializedVerificationCandidate {
   const cwd = join(tmpdir(), `keiyaku-v4-verify-${randomBytes(12).toString("hex")}`);
   runGit(repository, ["worktree", "add", "--detach", cwd, gitObjectIdForSnapshot(candidate)]);
-  return { candidate, candidateTree, cwd, dispose: () => { runGit(repository, ["worktree", "remove", "--force", cwd]); } };
+  return {
+    cwd,
+    dispose: () => {
+      try {
+        runGit(repository, ["worktree", "remove", "--force", cwd]);
+        return null;
+      } catch (error) {
+        return {
+          path: cwd,
+          diagnostic: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  };
 }
 
-function deliverySnapshotAvailability(repository: GitRepository, snapshot: SnapshotId): "available" | "unavailable" {
-  const object = gitObjectIdForSnapshot(snapshot);
-  if (deliverySnapshotUnavailable(repository, object)) return "unavailable";
-  let type: string;
-  try {
-    type = runGit(repository, ["cat-file", "-t", object]).toString("utf8").trim();
-  } catch (error) {
-    if (deliverySnapshotUnavailable(repository, object)) return "unavailable";
-    throw error;
+/** Resolve both pinned delivery objects through one structured Git batch. */
+function deliverySnapshotAvailability(
+  repository: GitRepository,
+  predecessor: SnapshotId,
+  candidate: SnapshotId,
+): "available" | "unavailable" {
+  const objects = [gitObjectIdForSnapshot(predecessor), gitObjectIdForSnapshot(candidate)] as const;
+  const types = runGit(
+    repository,
+    ["cat-file", "--batch-check=%(objectname) %(objecttype)"],
+    `${objects.join("\n")}\n`,
+  ).toString("ascii").trimEnd().split("\n").map((record) => record.split(" ")[1]);
+  if (types.includes("missing")) return "unavailable";
+  if (types.some((type) => type !== "commit")) {
+    throw new AuthorityCorruptionError("recorded delivery snapshot is not a Git commit");
   }
-  if (type !== "commit") throw new TypeError("recorded delivery snapshot is not a Git commit");
   return "available";
 }
 
-/** `cat-file -e <oid>` reserves exit status 1 for a physically absent object. */
-function deliverySnapshotUnavailable(repository: GitRepository, object: GitObjectId): boolean {
-  try {
-    runGit(repository, ["cat-file", "-e", object]);
-    return false;
-  } catch (error) {
-    if (error instanceof GitPlumbingError && error.status === 1) return true;
-    throw error;
-  }
-}
-
 export function readDeliveryDiff(repository: GitRepository, predecessor: SnapshotId, candidate: SnapshotId): string | null {
-  if (deliverySnapshotAvailability(repository, predecessor) === "unavailable") return null;
-  if (deliverySnapshotAvailability(repository, candidate) === "unavailable") return null;
+  if (deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
   try {
     return runGit(repository, [
       "diff",
@@ -60,8 +70,7 @@ export function readDeliveryDiff(repository: GitRepository, predecessor: Snapsho
     ]).toString("utf8");
   } catch (error) {
     // A pruning race after the probes is still transport absence, not a Git error for callers.
-    if (deliverySnapshotAvailability(repository, predecessor) === "unavailable") return null;
-    if (deliverySnapshotAvailability(repository, candidate) === "unavailable") return null;
+    if (deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
     throw error;
   }
 }

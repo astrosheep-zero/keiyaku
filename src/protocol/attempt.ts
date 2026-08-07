@@ -1,17 +1,21 @@
 import { encodeEntry } from "../core/facts/codec.js";
-import type { Offer } from "../core/facts/offer.js";
+import { admit, type PublicationFailed } from "../carrier/admission.js";
+import { observeContracts, type CarrierDecisionObservation } from "../carrier/observe.js";
+import { CARRIER_REF, readRef, type GitRepository } from "../carrier/repository.js";
+import type { AttemptContext } from "../core/decide.js";
+import { foldJournal } from "../core/facts/fold.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import type { ContractJournalAppend, Offer } from "../core/facts/offer.js";
 import {
-  contractHead,
-  contractId,
   type ContractHead,
   type ContractId,
+  type ContractState,
+  type EntryUlid,
   type JournalEntry,
 } from "../core/facts/types.js";
-import type { ContractsObservation } from "../core/facts/observation.js";
 
 export type UnknownAttemptClassification =
   | Readonly<{ kind: "accepted" }>
-  | Readonly<{ kind: "retry-offer" }>
   | Readonly<{ kind: "redecide" }>
   | Readonly<{
     kind: "collision";
@@ -22,73 +26,143 @@ export type UnknownAttemptClassification =
     observedBytes: string;
   }>;
 
-type PlannedEntry = Readonly<{
-  entry: JournalEntry;
-  bytes: string;
+export type AcceptedAdmission = Readonly<{
+  kind: "accepted";
+  facts: readonly JournalEntry[];
+  state: ContractState;
+  journal: readonly JournalEntry[];
 }>;
 
-type PlannedFactGroup = Readonly<{
-  contractId: ContractId;
-  expectedHead: ContractHead | null;
-  entries: readonly PlannedEntry[];
-}>;
+export type AttemptTerminal = Readonly<{ kind: "collision" }> | PublicationFailed;
+export type DecidedOfferResult = AcceptedAdmission | AttemptTerminal | Readonly<{ kind: "redecide" }>;
 
-function validatedFacts(offer: Offer): readonly PlannedFactGroup[] {
-  if (!offer || typeof offer !== "object" || !Array.isArray(offer.facts) || offer.facts.length === 0) {
-    throw new TypeError("unknown attempt requires nonempty facts");
-  }
-  const contracts = new Set<ContractId>();
-  const entries = new Set<string>();
-  return offer.facts.map((append) => {
-    if (!append || typeof append !== "object") throw new TypeError("invalid contract append");
-    const id = contractId(append.contractId);
-    if (contracts.has(id)) throw new TypeError(`duplicate contract append: ${id}`);
-    contracts.add(id);
-    if (append.expectedHead === undefined) throw new TypeError(`unknown attempt requires explicit expected head: ${id}`);
-    const expectedHead = append.expectedHead === null ? null : contractHead(append.expectedHead);
-    if (!Array.isArray(append.entries) || append.entries.length === 0) {
-      throw new TypeError(`unknown attempt requires planned entries: ${id}`);
+function offerEntries(offer: Offer): readonly JournalEntry[] {
+  return offer.facts.flatMap((append) => append.entries);
+}
+
+function primaryAppend(offer: Offer, primary: ContractId): ContractJournalAppend {
+  const append = offer.facts.find((candidate) => candidate.contractId === primary);
+  if (append === undefined) throw new Error(`offer is missing its primary contract: ${primary}`);
+  return append;
+}
+
+function validateOffer(offer: Offer, attempt: AttemptContext): void {
+  const expectedEntries = new Set(attempt.entryUlids);
+  const actualEntries = new Set<EntryUlid>();
+  for (const append of offer.facts) {
+    for (const entry of append.entries) {
+      if (!expectedEntries.has(entry.entry) || actualEntries.has(entry.entry)) {
+        throw new Error("offer entries must use distinct ULIDs from the current attempt");
+      }
+      actualEntries.add(entry.entry);
     }
-    const planned = append.entries.map((entry: JournalEntry) => {
-      const bytes = encodeEntry(entry);
-      if (entry.contract !== id) throw new TypeError(`journal entry contract does not match append: ${id}`);
-      if (entries.has(entry.entry)) throw new TypeError(`duplicate planned entry ULID: ${entry.entry}`);
-      entries.add(entry.entry);
-      return { entry, bytes };
-    });
-    return { contractId: id, expectedHead, entries: planned };
-  });
+  }
+  if (actualEntries.size === 0) throw new Error("offer requires at least one current-attempt ULID");
+}
+
+function snapshotFor(
+  append: ContractJournalAppend,
+  journals: CarrierDecisionObservation["journals"],
+  head: ContractHead,
+): ContractState {
+  const record = journals.get(append.contractId);
+  if (record === undefined) throw new Error("accepted offer contract is missing from its observation");
+  return foldJournal(append.contractId, [...record.entries, ...append.entries], head);
+}
+
+function journalFor(
+  append: ContractJournalAppend,
+  journals: CarrierDecisionObservation["journals"],
+): readonly JournalEntry[] {
+  const record = journals.get(append.contractId);
+  if (record === undefined) throw new Error("accepted offer contract is missing from its observation");
+  return [...record.entries, ...append.entries];
+}
+
+function recoveredAcceptance(
+  observation: ReturnType<typeof observeContracts>,
+  offer: Offer,
+  primaryContract: ContractId,
+): AcceptedAdmission {
+  const record = observation.contracts.get(primaryContract);
+  if (record?.state === null || record?.state === undefined) {
+    throw new Error(`recovered offer is missing its primary contract: ${primaryContract}`);
+  }
+  return {
+    kind: "accepted",
+    facts: offerEntries(offer),
+    state: record.state,
+    journal: record.entries,
+  };
+}
+
+function publicationPremiseMoved(
+  repository: GitRepository,
+  observation: CarrierDecisionObservation,
+  offer: Offer,
+): boolean {
+  if (readRef(repository, CARRIER_REF) !== observation.admission.snapshot.commit) return true;
+  return offer.target !== undefined
+    && readRef(repository, offer.target.target) !== offer.target.expectedOid;
+}
+
+/** Admit one decided offer without making another legal decision. */
+export function admitDecidedOffer(
+  repository: GitRepository,
+  decisionObservation: CarrierDecisionObservation,
+  attempt: AttemptContext,
+  offer: Offer,
+  primaryContract: ContractId,
+): DecidedOfferResult {
+  validateOffer(offer, attempt);
+  const primary = primaryAppend(offer, primaryContract);
+  const admission = admit(repository, offer, decisionObservation.admission);
+  if (admission.kind === "accepted") {
+    return {
+      kind: "accepted",
+      facts: offerEntries(offer),
+      state: snapshotFor(primary, decisionObservation.journals, admission.heads[primary.contractId]!),
+      journal: journalFor(primary, decisionObservation.journals),
+    };
+  }
+  if (admission.kind === "publication-failed") {
+    return publicationPremiseMoved(repository, decisionObservation, offer)
+      ? { kind: "redecide" }
+      : admission;
+  }
+  const recovered = observeContracts(repository, offer.facts.map((append) => append.contractId));
+  const classification = classifyUnknownAttempt(recovered, offer);
+  if (classification.kind === "accepted") return recoveredAcceptance(recovered, offer, primaryContract);
+  return classification.kind === "collision" ? { kind: "collision" } : { kind: "redecide" };
 }
 
 /** Classify an unknown atomic-publication outcome using only a captured carrier observation. */
 export function classifyUnknownAttempt(
-  observation: ContractsObservation,
+  observation: Readonly<{ contracts: CarrierDecisionObservation["journals"] }>,
   offer: Offer,
 ): UnknownAttemptClassification {
-  const appends = validatedFacts(offer);
   let exact = 0;
   let missing = 0;
-  let headsUnchanged = true;
 
-  for (const append of appends) {
-    const contract = observation.contracts.get(append.contractId);
-    if (contract === undefined) throw new TypeError(`missing contract observation: ${append.contractId}`);
-    if ((contract.state?.head ?? null) !== append.expectedHead) headsUnchanged = false;
-    const entries = new Map(contract.entries.map((entry) => [entry.entry, entry]));
+  for (const append of offer.facts) {
+    const record = observation.contracts.get(append.contractId);
+    if (record === undefined) throw new Error(`missing contract observation: ${append.contractId}`);
+    const entries = new Map(record.entries.map((entry) => [entry.entry, entry]));
     for (const planned of append.entries) {
-      const observed = entries.get(planned.entry.entry);
+      const plannedBytes = encodeEntry(planned);
+      const observed = entries.get(planned.entry);
       if (observed === undefined) {
         missing += 1;
         continue;
       }
       const observedBytes = encodeEntry(observed);
-      if (planned.bytes !== observedBytes) {
+      if (plannedBytes !== observedBytes) {
         return {
           kind: "collision",
           contractId: append.contractId,
-          planned: planned.entry,
+          planned,
           observed,
-          plannedBytes: planned.bytes,
+          plannedBytes,
           observedBytes,
         };
       }
@@ -97,6 +171,6 @@ export function classifyUnknownAttempt(
   }
 
   if (missing === 0) return { kind: "accepted" };
-  if (exact !== 0) throw new TypeError("partial unknown attempt match is corrupted authority");
-  return headsUnchanged ? { kind: "retry-offer" } : { kind: "redecide" };
+  if (exact !== 0) throw new AuthorityCorruptionError("partial unknown attempt match is corrupted authority");
+  return { kind: "redecide" };
 }

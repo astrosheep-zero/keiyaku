@@ -13,7 +13,7 @@ operating guidance; none can introduce product law.
 | [document.md](document.md) | Contract Markdown, H2 amend-operation grammar, arc document grammar, and reserved-section handling. |
 | [model.md](model.md) | Journal authority, envelope and fact shapes, identity coordinates, folded state, and dependency direction. |
 | [lifecycle.md](lifecycle.md) | Verb decisions, eligibility, phases, terminals, gates, review, protocol, and admission. |
-| [verification.md](verification.md) | Verification planning, execution, attestation reuse, result admission, and shared process runtime. |
+| [verification.md](verification.md) | Verification declarations, execution, result admission, and shared process runtime. |
 | [transport.md](transport.md) | Git world, worktrees, refs, pins, delivery-byte custody, and reconciliation. |
 | [cli.md](cli.md) | `keiyaku-v4` argv, edge adaptation, selectors, rendering, exit codes, status board, and audit presentation. |
 
@@ -26,6 +26,11 @@ law must be integrated into the owner chapter instead of copied as a chronology.
 v4 is current-version-only. A persisted-format change updates the current
 codec, facts, fixtures, and tests in one cut. It carries no compatibility
 decoder, migration path, legacy alias, or dormant format branch.
+
+Production TypeScript under `src/` has a hard 7,000-line budget enforced by
+the architecture check. Crossing it is an architecture failure, not a request
+for an exemption; new behavior must first remove equivalent or obsolete
+machinery.
 
 Port behavior only when v4 still has a named reader and one clear owner. Rewrite
 anything that depends on a repository-wide ledger, detached evidence storage,

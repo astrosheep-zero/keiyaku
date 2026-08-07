@@ -1,24 +1,26 @@
 import { randomBytes } from "node:crypto";
-import { observeCarrier, observeContract } from "../carrier/observe.js";
-import type { DeliveryPreparation } from "../carrier/delivery.js";
+import { observeCarrierForAdmission, type CarrierDecisionObservation } from "../carrier/observe.js";
 import type { GitRepository } from "../carrier/repository.js";
-import { prepareStoredVerification } from "../carrier/verification.js";
+import { materializeVerificationCandidate } from "../carrier/verification.js";
+import type { WorktreeLeak } from "../carrier/verification.js";
 import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
-import { gateSatisfied } from "../core/facts/gate.js";
-import { placeEligibleBounds } from "../core/facts/eligibility.js";
-import { currentSubject } from "../core/subject.js";
-import type { ActorId, ContractId, ContractState, SubjectKey } from "../core/facts/types.js";
-import { entryUlid } from "../core/facts/types.js";
+import { dependencyKeySet } from "../core/subject.js";
+import type { ActorId, ContractId, ContractState, DependencyKeySet } from "../core/facts/types.js";
+import { entryUlid, gate } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
-import type {
-  ProduceVerificationInput, VerificationOutcome, VerificationSpawnErrorOutcome, VerificationTerminalOutcome, VerificationTimeoutOutcome, VerificationUnknownExitOutcome,
+import {
+  type ProduceVerificationInput,
+  type VerificationNonterminalOutcome,
+  type VerificationOutcome,
+  type VerificationTerminalOutcome,
 } from "../verification/producer.js";
+import type { VerificationDefinition } from "../verification/types.js";
 import { runProtocol, type ProtocolResult } from "./run.js";
 
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const VERIFICATION_TIMEOUT_MS = 5 * 60 * 1_000;
-const VERIFICATION_OUTPUT_LIMIT_BYTES = 64 * 1024;
+export const VERIFIED = gate("verified");
 
 function nextEntryUlid(): ReturnType<typeof entryUlid> {
   let value = "";
@@ -35,122 +37,64 @@ function nextEntryUlid(): ReturnType<typeof entryUlid> {
   return entryUlid(value);
 }
 
-function attempts(entryCount: number): readonly AttemptContext[] {
-  return [0, 1, 2].map((ordinal) => ({
-    ordinal,
-    entryUlids: Array.from({ length: entryCount }, nextEntryUlid),
+const MAX_SEMANTIC_ATTEMPTS = 3;
+
+export function mintAttempts(input: Readonly<{ entryCount: number }>): readonly AttemptContext[] {
+  return Array.from({ length: MAX_SEMANTIC_ATTEMPTS }, () => ({
+    entryUlids: Array.from({ length: input.entryCount }, nextEntryUlid),
   }));
 }
 
+type IntentAdmissionOptions = Readonly<{
+  observedContracts?: readonly ContractId[];
+  observe?: (repository: GitRepository, contracts: readonly ContractId[]) => CarrierDecisionObservation;
+}>;
+
 /** Observe, decide, and atomically admit one intent with bounded carrier retries. */
-function runIntent<Input, Refusal>(
+export function admitIntent<Input extends Readonly<{ contractId: ContractId }>, Refusal>(
   repository: GitRepository,
-  contract: ContractId,
   input: Input,
   decide: (input: DecideInput<Input>) => OfferDecision<Refusal>,
-  eligibility = false,
+  options: IntentAdmissionOptions = {},
 ): ProtocolResult<Refusal> {
-  const contracts = [contract];
+  const contracts = options.observedContracts ?? [input.contractId];
   return runProtocol({
     input,
     repository,
     contracts,
-    attempts: attempts(contracts.length + 2),
-    ...(eligibility ? {
-      observe: observeCarrier,
-      extendAttempt: (attempt: AttemptContext, requiredEntries: number): AttemptContext => {
-        if (attempt.entryUlids.length >= requiredEntries) return attempt;
-        return {
-          ...attempt,
-          entryUlids: [
-            ...attempt.entryUlids,
-            ...Array.from({ length: requiredEntries - attempt.entryUlids.length }, nextEntryUlid),
-          ],
-        };
-      },
-    } : {}),
-    decide: eligibility
-      ? (decisionInput) => {
-        const decision = decide(decisionInput);
-        return decision.kind === "offer"
-          ? { ...decision, offer: placeEligibleBounds(decision.offer, decisionInput.observation, decisionInput.attempt) }
-          : decision;
-      }
-      : decide,
+    attempts: mintAttempts({ entryCount: 2 }),
+    decide,
+    ...(options.observe === undefined ? {} : { observe: options.observe }),
   });
 }
 
-type ContractIntent = Readonly<{ contractId: ContractId }>;
-
-type IntentDecision<Input, Refusal> = (input: DecideInput<Input>) => OfferDecision<Refusal>;
-
-export function admitBind<Input extends ContractIntent, Refusal>(
-  repository: GitRepository,
-  input: Input,
-  decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<Refusal> {
-  return runIntent(repository, input.contractId, input, decide, true);
-}
-
-export function admitAmend<Input extends ContractIntent, Refusal>(
-  repository: GitRepository,
-  input: Input,
-  decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<Refusal> {
-  return runIntent(repository, input.contractId, input, decide, true);
-}
-
-export function admitDeliver<Input extends ContractIntent, Refusal>(
-  repository: GitRepository,
-  input: Input,
-  decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<Refusal> {
-  return runIntent(repository, input.contractId, input, decide);
-}
-
-export function admitAbandon<Input extends ContractIntent, Refusal>(
-  repository: GitRepository,
-  input: Input,
-  decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<Refusal> {
-  return runIntent(repository, input.contractId, input, decide);
-}
-
-export function admitArc<Input extends ContractIntent, Refusal>(
-  repository: GitRepository,
-  input: Input,
-  decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<Refusal> {
-  return runIntent(repository, input.contractId, input, decide);
-}
-
-export function admitReview<Input extends ContractIntent, Refusal>(
-  repository: GitRepository,
-  input: Input,
-  decide: IntentDecision<Input, Refusal>,
-): ProtocolResult<Refusal> {
-  return runIntent(repository, input.contractId, input, decide);
-}
 
 /** Run the sole placement adjudicator; a gates-unsatisfied refusal is normal pending state. */
 export function admitPlacement(
   repository: GitRepository,
   input: Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>,
 ): ProtocolResult<PlacementRefusal> {
-  return runIntent(repository, input.contractId, input, decidePlacement, true);
+  return runProtocol({
+    input,
+    repository,
+    contracts: [input.contractId],
+    attempts: mintAttempts({ entryCount: 2 }),
+    observe: observeCarrierForAdmission,
+    extendAttempt: (attempt, observedContractCount) => ({
+      ...attempt,
+      entryUlids: [
+        ...attempt.entryUlids,
+        ...Array.from(
+          { length: Math.max(0, observedContractCount - attempt.entryUlids.length) },
+          nextEntryUlid,
+        ),
+      ],
+    }),
+    decide: decidePlacement,
+  });
 }
 
-export type VerifyPreparedDeliveryInput = Readonly<{
-  repository: GitRepository;
-  contractId: ContractId;
-  actor?: ActorId;
-  at: string;
-  prepared: Extract<DeliveryPreparation, { kind: "prepared" }>;
-  environment: NodeJS.ProcessEnv;
-  produce: (input: ProduceVerificationInput) => Promise<VerificationOutcome>;
-}>;
-
-export type VerifyStoredDeliveryInput = Readonly<{
+type VerifyDeliveryInput = Readonly<{
   repository: GitRepository;
   contractId: ContractId;
   actor?: ActorId;
@@ -158,114 +102,97 @@ export type VerifyStoredDeliveryInput = Readonly<{
   state: ContractState;
   environment: NodeJS.ProcessEnv;
   produce: (input: ProduceVerificationInput) => Promise<VerificationOutcome>;
+  verification?: VerificationDefinition;
 }>;
 
-type VerificationAdmissionInput = Readonly<{
-  contractId: ContractId;
-  actor?: ActorId;
-  at: string;
+export type VerificationRuntimeStop = Readonly<{
+  failure: "timeout" | "unknown-exit";
+}> | Readonly<{
+  failure: "candidate-unavailable" | "spawn-error";
+  diagnostic: string;
 }>;
 
-type VerificationAuditAttempt = Readonly<{
-  failure: "timeout" | "spawn-error" | "unknown-exit";
+export type VerificationStep = ProtocolResult<AttestationRefusal> | VerificationRuntimeStop;
+export type VerificationResult = Readonly<{
+  step: VerificationStep;
+  leak?: WorktreeLeak;
 }>;
 
-function auditAttempt(
-  outcome: VerificationTimeoutOutcome | VerificationSpawnErrorOutcome | VerificationUnknownExitOutcome,
-): VerificationAuditAttempt {
-  switch (outcome.kind) {
-    case "timeout": return { failure: "timeout" };
-    case "spawn-error": return { failure: "spawn-error" };
-    case "unknown-exit": return { failure: "unknown-exit" };
-  }
+function runtimeStop(outcome: VerificationNonterminalOutcome): VerificationRuntimeStop {
+  return outcome.kind === "spawn-error"
+    ? { failure: outcome.kind, diagnostic: outcome.diagnostic }
+    : { failure: outcome.kind };
 }
 
 function verificationInput(
   outcome: VerificationTerminalOutcome,
-  input: VerificationAdmissionInput,
-  subject: SubjectKey,
+  input: Pick<VerifyDeliveryInput, "contractId" | "actor" | "at">,
+  subject: DependencyKeySet,
 ): AttestationInput {
   return {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: input.at,
-    data: {
-      gate: "verified" as const,
-      subject,
-      verdict: outcome.verdict,
-      summary: outcome.summary,
+    preparation: {
+      kind: "prepared",
+      data: {
+        gate: VERIFIED,
+        subject,
+        verdict: outcome.verdict,
+        ...(outcome.summary === undefined ? {} : { summary: outcome.summary }),
+      },
     },
   };
 }
 
-/** Run the declarations pinned by an admitted delivery, then tender their fact. */
-export async function verifyPreparedDelivery(
-  input: VerifyPreparedDeliveryInput,
-): Promise<ProtocolResult<AttestationRefusal> | null> {
-  const current = observeContract(input.repository, input.contractId).state;
-  if (
-    !current
-    || current.terminal
-    || current.delivery === null
-    || current.delivery.data.candidate !== input.prepared.delivery.candidate
-    || current.body === null
-    || current.body.verification.length === 0
-  ) return null;
-  if (gateSatisfied(current, "verified")) return null;
-  const subject = currentSubject(current, "verified");
-  if (subject === null) throw new Error("verified subject requires a delivery and body");
-
-  const prepared = prepareStoredVerification(input.repository, current);
-  if (prepared === null) return null;
-  try {
-    const outcome = await input.produce({
-      candidateTree: prepared.candidateTree,
-      declarations: current.body.verification,
-      cwd: prepared.cwd,
-      timeoutMs: VERIFICATION_TIMEOUT_MS,
-      stdoutLimitBytes: VERIFICATION_OUTPUT_LIMIT_BYTES,
-      stderrLimitBytes: VERIFICATION_OUTPUT_LIMIT_BYTES,
-      env: input.environment,
-    });
-    if (outcome.kind !== "terminal") return null;
-    return runIntent(input.repository, input.contractId, verificationInput(outcome, input, subject), decideAttestation);
-  } finally {
-    prepared.dispose();
-  }
-}
-
-/** Run Verification for the current stored delivery, then tender its fact. */
-export async function verifyStoredDelivery(
-  input: VerifyStoredDeliveryInput,
-): Promise<ProtocolResult<AttestationRefusal> | VerificationAuditAttempt | null> {
+/** Run Verification for an observed delivery, then tender its fact. */
+export async function verifyDelivery(
+  input: VerifyDeliveryInput,
+): Promise<VerificationResult | null> {
   const state = input.state;
   if (
-    state.terminal
-    || state.delivery === null
-    || state.body === null
-    || state.body.verification.length === 0
-    || gateSatisfied(state, "verified")
+    state.delivery === null
+    || input.verification === undefined
   ) return null;
-  const subject = currentSubject(state, "verified");
-  if (subject === null) throw new Error("verified subject requires a delivery and body");
+  const subject = dependencyKeySet([
+    { kind: "snapshot", value: state.delivery.data.candidate },
+    { kind: "segment", value: input.verification.segment },
+  ]);
 
-  const prepared = prepareStoredVerification(input.repository, state);
-  if (prepared === null) return null;
+  let prepared: ReturnType<typeof materializeVerificationCandidate>;
+  try {
+    prepared = materializeVerificationCandidate(input.repository, state.delivery.data.candidate);
+  } catch (error) {
+    return {
+      step: {
+        failure: "candidate-unavailable",
+        diagnostic: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+  let step: VerificationStep;
+  let leak: WorktreeLeak | null = null;
   try {
     const outcome = await input.produce({
-      candidateTree: prepared.candidateTree,
-      declarations: state.body.verification,
+      declarations: input.verification.declarations,
       cwd: prepared.cwd,
       timeoutMs: VERIFICATION_TIMEOUT_MS,
-      stdoutLimitBytes: VERIFICATION_OUTPUT_LIMIT_BYTES,
-      stderrLimitBytes: VERIFICATION_OUTPUT_LIMIT_BYTES,
       env: input.environment,
     });
     if (outcome.kind === "terminal") {
-      return runIntent(input.repository, input.contractId, verificationInput(outcome, input, subject), decideAttestation);
+      step = admitIntent(
+        input.repository,
+        verificationInput(outcome, input, subject),
+        decideAttestation,
+      );
+    } else {
+      step = runtimeStop(outcome);
     }
-    return auditAttempt(outcome);
   } finally {
-    prepared.dispose();
+    leak = prepared.dispose();
   }
+  return {
+    step,
+    ...(leak === null ? {} : { leak }),
+  };
 }

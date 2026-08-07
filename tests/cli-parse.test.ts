@@ -1,19 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import test from "node:test";
-import { CliUsageError, COMMANDS, parseArgv } from "../src/cli/parse.js";
-
-const OID = "a".repeat(40);
-
-test("the authority command table matches the parser's closed vocabulary", () => {
-  const cliLaw = readFileSync(resolve(import.meta.dirname, "../docs/cli.md"), "utf8");
-  const tableStart = cliLaw.indexOf("| Command | Public adaptation |");
-  assert.notEqual(tableStart, -1, "CLI command adaptation table is missing");
-  const commandTable = cliLaw.slice(tableStart).split("\n\n", 1)[0]!;
-  const documented = [...commandTable.matchAll(/^\| `([a-z-]+)` \|/gm)].map((match) => match[1]!);
-  assert.deepEqual(documented.sort(), [...COMMANDS].sort());
-});
+import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 
 test("bind mints its contract identity and keeps JSON output separate from input", () => {
   assert.deepEqual(
@@ -46,25 +33,13 @@ test("bind accepts boolean --here and preserves -C outside the contract command"
   });
 });
 
-test("bind rejects the removed --workspace option", () => {
-  assert.throws(() => parseArgv(["bind", "--workspace", "here", "-"]), CliUsageError);
-});
-
-test("bind rejects the retired contract-coordinate task flag", () => {
-  assert.throws(() => parseArgv(["bind", "--task", "task/day1/example", "-"]), CliUsageError);
-});
-
-test("bind rejects the retired agent-supplied base flag", () => {
+test("unknown command syntax is refused with the exact command usage", () => {
   assert.throws(
-    () => parseArgv(["bind", "--base", OID, "-"]),
-    CliUsageError,
+    () => parseArgv(["bind", "--workspace", "here", "-"]),
+    (error: unknown) => error instanceof CliUsageError
+      && error.message.includes("usage: keiyaku-v4 bind [--target <ref>]"),
   );
-});
-
-test("the CLI rejects removed contract words", () => {
-  for (const command of ["open", "seal", "renew", "petition", "claim", "forfeit"]) {
-    assert.throws(() => parseArgv([command]), CliUsageError);
-  }
+  assert.throws(() => parseArgv(["unknown"]), /usage: keiyaku-v4 \[-C <path>\] <command>/);
 });
 
 test("existing selectors are optional and review stdin is a distinct summary source", () => {

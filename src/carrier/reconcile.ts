@@ -1,25 +1,50 @@
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { readRef, registeredWorktreePaths, runGit, type GitOid, type GitRepository } from "./repository.js";
+import {
+  CANDIDATE_PIN_REF_NAMESPACE,
+  DELIVERY_REF_NAMESPACE,
+  readRef,
+  registeredWorktreePaths,
+  runGit,
+  type GitOid,
+  type GitRepository,
+} from "./repository.js";
 import { contractId, type ContractId, type ContractState, type SnapshotId } from "../core/facts/types.js";
-import { gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
+import { gitObjectIdForSnapshot } from "./identity.js";
 
-const DELIVERY_REF_PREFIX = "refs/heads/keiyaku-delivery/";
-const CANDIDATE_PIN_REF_PREFIX = "refs/heads/keiyaku-candidate/";
 const WORKTREE_DIRECTORY = [".keiyaku-v4", "worktrees"] as const;
-export type Effect = Readonly<{ kind: "worktree" | "ref"; path?: string; name?: string; action: "created" | "updated" | "removed" | "unchanged"; before?: GitOid | null; after?: GitOid | null }>;
-export type ReconcileInput = Readonly<{ repository: GitRepository; state: ContractState | null }>;
-export type ReconcileResult = Readonly<{ kind: "aligned" | "cleaned" | "noop"; deliveryRef: string | null; worktreePath: string | null; changed: boolean; effects: readonly Effect[] }>;
-export type ReconcileBatchContract = Readonly<{ id: ContractId; state: ContractState | null }>;
-export type ReconcileBatchItem =
+export type Effect =
+  | Readonly<{
+      kind: "worktree";
+      path: string;
+      action: "created" | "removed" | "unchanged";
+    }>
+  | Readonly<{
+      kind: "ref";
+      name: string;
+      before: GitOid | null;
+      after: GitOid | null;
+      action: "created" | "updated" | "removed" | "unchanged";
+    }>;
+type ReconcileInput = Readonly<{ repository: GitRepository; state: ContractState | null }>;
+export type ReconcileLag = Readonly<{
+  kind: "worktree-retained";
+  path: string;
+}>;
+export type ReconcileResult = Readonly<{
+  effects: readonly Effect[];
+  lag: readonly ReconcileLag[];
+}>;
+type ReconcileBatchContract = Readonly<{ id: ContractId; state: ContractState | null }>;
+type ReconcileBatchItem =
   | Readonly<{ kind: "reconciled"; contract: ContractId; result: ReconcileResult }>
   | Readonly<{ kind: "failed"; contract: ContractId; error: unknown }>;
 
 type WorktreeTopology = Readonly<{ paths: Set<string> }>;
 
 function payload(contract: ContractId): string { return contractId(contract).slice(4); }
-export function deliveryRefFor(contract: ContractId): string { return `${DELIVERY_REF_PREFIX}${payload(contract)}`; }
-export function candidatePinRefFor(contract: ContractId): string { return `${CANDIDATE_PIN_REF_PREFIX}${payload(contract)}`; }
+function deliveryRefFor(contract: ContractId): string { return `${DELIVERY_REF_NAMESPACE}/${payload(contract)}`; }
+function candidatePinRefFor(contract: ContractId): string { return `${CANDIDATE_PIN_REF_NAMESPACE}/${payload(contract)}`; }
 export function deliveryWorktreePath(repository: GitRepository, contract: ContractId): string { return resolve(realpathSync(repository.primaryWorktree), ...WORKTREE_DIRECTORY, payload(contract)); }
 function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Effect {
   const before = readRef(repository, ref);
@@ -36,53 +61,93 @@ function removeRef(repository: GitRepository, ref: string): Effect {
 function acquireWorktreeTopology(repository: GitRepository): WorktreeTopology {
   return { paths: new Set(registeredWorktreePaths(repository)) };
 }
+function fromPrimaryWorktree(repository: GitRepository): GitRepository {
+  return { ...repository, effectiveCwd: repository.primaryWorktree };
+}
 
 function worktree(repository: GitRepository, topology: WorktreeTopology, path: string, desired: SnapshotId): Effect {
   const registered = topology.paths.has(path);
+  if (registered && existsSync(path)) return { kind: "worktree", path, action: "unchanged" };
   if (registered) {
-    const actual = mintSnapshotId(runGit(repository, ["-C", path, "rev-parse", "HEAD"]).toString("utf8").trim());
-    if (actual === desired) return { kind: "worktree", path, action: "unchanged" };
-    runGit(repository, ["-C", path, "reset", "--hard", gitObjectIdForSnapshot(desired)]);
-    return { kind: "worktree", path, action: "updated" };
+    runGit(repository, ["worktree", "remove", path]);
+    topology.paths.delete(path);
   }
   if (existsSync(path)) throw new Error(`delivery worktree path is occupied: ${path}`);
   mkdirSync(dirname(path), { recursive: true }); runGit(repository, ["worktree", "add", "--detach", path, gitObjectIdForSnapshot(desired)]);
   topology.paths.add(path);
   return { kind: "worktree", path, action: "created" };
 }
-function removeWorktree(repository: GitRepository, topology: WorktreeTopology, path: string): Effect {
+function canRemoveWorktree(repository: GitRepository, path: string, expected: readonly SnapshotId[]): boolean {
+  if (runGit(repository, ["-C", path, "status", "--porcelain", "--untracked-files=all"]).length !== 0) return false;
+  const [head, headTree] = runGit(repository, ["-C", path, "rev-parse", "HEAD", "HEAD^{tree}"])
+    .toString("utf8").trim().split("\n");
+  const matched = expected.find((snapshot) => head === gitObjectIdForSnapshot(snapshot));
+  if (matched === undefined) return false;
+  const expectedTree = runGit(repository, ["-C", path, "rev-parse", `${gitObjectIdForSnapshot(matched)}^{tree}`])
+    .toString("utf8").trim();
+  return headTree === expectedTree;
+}
+function removeWorktree(
+  repository: GitRepository,
+  topology: WorktreeTopology,
+  path: string,
+  expected: readonly SnapshotId[],
+): Readonly<{ effect: Effect; retained: boolean }> {
   const registered = topology.paths.has(path);
-  if (!registered) return { kind: "worktree", path, action: "unchanged" };
-  runGit(repository, ["worktree", "remove", "--force", path]);
+  if (!registered) return { effect: { kind: "worktree", path, action: "unchanged" }, retained: false };
+  if (!existsSync(path)) {
+    runGit(repository, ["worktree", "remove", path]);
+    topology.paths.delete(path);
+    return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
+  }
+  if (!canRemoveWorktree(repository, path, expected)) {
+    return { effect: { kind: "worktree", path, action: "unchanged" }, retained: true };
+  }
+  runGit(repository, ["worktree", "remove", path]);
   topology.paths.delete(path);
-  return { kind: "worktree", path, action: "removed" };
+  return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
 }
 
 function reconcileWithTopology({ repository, state }: ReconcileInput, topology: WorktreeTopology): ReconcileResult {
-  if (!state || !state.coordinates) return { kind: "noop", deliveryRef: null, worktreePath: null, changed: false, effects: [] };
+  if (!state) return { effects: [], lag: [] };
   const ref = deliveryRefFor(state.id), pin = candidatePinRefFor(state.id), path = deliveryWorktreePath(repository, state.id);
   if (state.coordinates.workspace === "here") {
     if (state.terminal) {
       const effects = [removeRef(repository, pin)];
-      return { kind: "cleaned", deliveryRef: null, worktreePath: null, changed: effects.some((effect) => effect.action !== "unchanged"), effects };
+      return { effects, lag: [] };
     }
-    if (!state.bound) return { kind: "noop", deliveryRef: null, worktreePath: null, changed: false, effects: [] };
+    if (!state.bound) return { effects: [], lag: [] };
     const effects = [state.delivery === null ? removeRef(repository, pin) : updateRef(repository, pin, state.delivery.data.candidate)];
-    return { kind: "aligned", deliveryRef: null, worktreePath: null, changed: effects.some((effect) => effect.action !== "unchanged"), effects };
+    return { effects, lag: [] };
   }
   if (state.terminal) {
-    const effects = [removeRef(repository, ref), removeRef(repository, pin), removeWorktree(repository, topology, path)];
-    return { kind: "cleaned", deliveryRef: ref, worktreePath: path, changed: effects.some((effect) => effect.action !== "unchanged"), effects };
+    const expected = state.delivery === null
+      ? [state.coordinates.start]
+      : [state.delivery.data.candidate, state.coordinates.start];
+    const primary = fromPrimaryWorktree(repository);
+    const removal = removeWorktree(primary, topology, path, expected);
+    if (removal.retained) {
+      return {
+        effects: [
+          updateRef(primary, ref, state.delivery?.data.candidate ?? state.coordinates.start),
+          state.delivery === null ? removeRef(primary, pin) : updateRef(primary, pin, state.delivery.data.candidate),
+          removal.effect,
+        ],
+        lag: [{ kind: "worktree-retained", path }],
+      };
+    }
+    const effects = [removal.effect, removeRef(primary, ref), removeRef(primary, pin)];
+    return { effects, lag: [] };
   }
-  if (!state.bound) return { kind: "noop", deliveryRef: ref, worktreePath: path, changed: false, effects: [] };
+  if (!state.bound) return { effects: [], lag: [] };
   const desired = state.delivery?.data.candidate ?? state.coordinates.start;
   const effects = [updateRef(repository, ref, desired), worktree(repository, topology, path, desired)];
   if (state.delivery) effects.push(updateRef(repository, pin, state.delivery.data.candidate)); else effects.push(removeRef(repository, pin));
-  return { kind: "aligned", deliveryRef: ref, worktreePath: path, changed: effects.some((effect) => effect.action !== "unchanged"), effects };
+  return { effects, lag: [] };
 }
 
 function needsWorktreeTopology(state: ContractState | null): boolean {
-  return state?.coordinates?.workspace === "worktree" && (state.terminal !== null || state.bound !== null);
+  return state !== null && state.coordinates.workspace === "worktree" && (state.terminal !== null || state.bound !== null);
 }
 
 export function reconcile(input: ReconcileInput): ReconcileResult {

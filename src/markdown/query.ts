@@ -7,9 +7,9 @@ import type {
   SourceSpan,
 } from "./types.js";
 
-export type HeadingLike = SectionNode | HeadingNode;
+type HeadingLike = SectionNode | HeadingNode;
 
-export type DocumentIndex = Readonly<{
+type DocumentIndex = Readonly<{
   byLevel: ReadonlyMap<number, readonly HeadingLike[]>;
   byTitle: ReadonlyMap<string, readonly HeadingLike[]>;
 }>;

@@ -1,102 +1,93 @@
 import type { ContractJournalAppend, Offer } from "./offer.js";
-import type { ContractHead, ContractId, EntryUlid, ContractTerms, JournalEntry } from "./types.js";
+import { contractState, type ContractsObservation } from "./observation.js";
+import type { ContractId, EntryUlid } from "./types.js";
 
-type EligibilityObservation = Readonly<{
-  contracts: ReadonlyMap<ContractId, Readonly<{
-    id: ContractId;
-    state: Readonly<{
-      head: ContractHead | null;
-      bound: JournalEntry | null;
-      terminal: JournalEntry | null;
-      terms: ContractTerms | null;
-    }> | null;
-  }>>;
-}>;
+type EligibilityObservation = ContractsObservation;
 
 type EligibilityAttempt = Readonly<{ entryUlids: readonly EntryUlid[] }>;
 
+type PrerequisiteStatus = "unknown" | "pending" | "claimed";
+
+/** Resolve prerequisite existence and eligibility from one decision snapshot. */
+export function prerequisiteStatus(
+  prerequisites: readonly ContractId[],
+  observation: EligibilityObservation,
+  offeredClaims?: ReadonlySet<ContractId>,
+): PrerequisiteStatus {
+  let pending = false;
+  for (const dependency of prerequisites) {
+    const state = contractState(observation, dependency);
+    if (state === null) return "unknown";
+    if (state.terminal?.kind !== "claimed" && offeredClaims?.has(dependency) !== true) pending = true;
+  }
+  return pending ? "pending" : "claimed";
+}
+
+/** Decide whether resulting prerequisites reach the amended contract. */
+export function prerequisitesReach(
+  contract: ContractId,
+  prerequisites: readonly ContractId[],
+  observation: EligibilityObservation,
+): boolean {
+  const pending = [...prerequisites];
+  const visited = new Set<ContractId>();
+  while (pending.length > 0) {
+    const dependency = pending.pop()!;
+    if (dependency === contract) return true;
+    if (visited.has(dependency)) continue;
+    visited.add(dependency);
+    const state = contractState(observation, dependency);
+    if (state === null) throw new Error(`absent contract in prerequisite closure: ${dependency}`);
+    pending.push(...state.terms.after);
+  }
+  return false;
+}
+
 export function samePrerequisites(
-  left: readonly ContractId[] | undefined,
-  right: readonly ContractId[] | undefined,
+  left: readonly ContractId[],
+  right: readonly ContractId[],
 ): boolean {
   if (left === right) return true;
-  if (left === undefined || right === undefined || left.length !== right.length) return false;
+  if (left.length !== right.length) return false;
   return left.every((id, index) => id === right[index]);
 }
 
-function entries(offer: Offer): readonly JournalEntry[] {
-  return offer.facts.flatMap((append) => append.entries);
-}
-
-function canChangeEligibility(offer: Offer): boolean {
-  return entries(offer).some((entry) => entry.kind === "bind" || entry.kind === "amend" || entry.kind === "claimed");
-}
-
-function offeredTerms(offer: Offer, id: ContractId, fallback: ContractTerms | null): ContractTerms | null {
-  const append = offer.facts.find((candidate) => candidate.contractId === id);
-  if (append === undefined) return fallback;
-  for (let index = append.entries.length - 1; index >= 0; index -= 1) {
-    const entry = append.entries[index]!;
-    if (entry.kind === "amend") return entry.data;
-    if (entry.kind === "bind") return entry.data.terms;
-  }
-  return fallback;
-}
-
-/**
- * Append newly eligible bound facts for an explicitly eligibility-changing
- * offer. The protocol runner never calls this implicitly.
- */
+/** Append bounds made eligible by a claimed offer from its full snapshot. */
 export function placeEligibleBounds(
   offer: Offer,
   observation: EligibilityObservation,
   attempt: EligibilityAttempt,
 ): Offer {
-  if (!canChangeEligibility(offer)) return offer;
-
-  const offeredEntries = entries(offer);
-  const claimed = new Set(offeredEntries.filter((entry) => entry.kind === "claimed").map((entry) => entry.contract));
-  const envelope = offeredEntries[0];
-  if (!envelope) return offer;
-  const used = new Set(offeredEntries.map((entry) => entry.entry));
-  const available = attempt.entryUlids.filter((entry) => !used.has(entry));
-  const additions: ContractJournalAppend[] = [];
-  const replacements = new Map<ContractId, ContractJournalAppend>();
-
-  for (const [id, observed] of observation.contracts) {
-    const state = observed.state;
-    if (!state || state.bound || state.terminal) continue;
-    const append = offer.facts.find((candidate) => candidate.contractId === id);
-    if (append?.entries.some((entry) => entry.kind === "bound")) continue;
-    const prerequisites = offeredTerms(offer, id, state.terms)?.after ?? [];
-    const eligible = prerequisites.every((dependency) => {
-      const dependencyState = observation.contracts.get(dependency)?.state;
-      return dependencyState?.terminal?.kind === "claimed" || claimed.has(dependency);
-    });
-    if (!eligible) continue;
-    const entry = available.shift();
-    if (!entry) throw new TypeError("attempt context needs an entry ULID for every eligible bound placement");
-    const bound: JournalEntry = {
-      v: 1,
-      kind: "bound",
-      contract: id,
-      entry,
-      at: envelope.at,
-      ...(envelope.actor === undefined ? {} : { actor: envelope.actor }),
-      data: {},
-    };
-    if (append === undefined) {
-      additions.push({ contractId: id, expectedHead: state.head, entries: [bound] });
-    } else {
-      replacements.set(id, { ...append, entries: [...append.entries, bound] });
-    }
+  const claimedEntry = offer.facts[0]?.entries[0];
+  if (offer.facts.length !== 1 || offer.facts[0]?.entries.length !== 1 || claimedEntry?.kind !== "claimed") {
+    throw new Error("eligible-bound placement requires exactly one claimed fact");
   }
-  if (additions.length === 0 && replacements.size === 0) return offer;
-  return {
-    ...offer,
-    facts: [
-      ...additions,
-      ...offer.facts.map((append) => replacements.get(append.contractId) ?? append),
-    ],
-  };
+  const claimed = new Set([claimedEntry.contract]);
+  const used = new Set([claimedEntry.entry]);
+  const available = attempt.entryUlids.filter((entry) => !used.has(entry));
+  let availableIndex = 0;
+  const additions: ContractJournalAppend[] = [];
+
+  for (const id of observation.keys()) {
+    const state = contractState(observation, id);
+    if (!state || state.bound || state.terminal) continue;
+    if (prerequisiteStatus(state.terms.after, observation, claimed) !== "claimed") continue;
+    const entry = available[availableIndex];
+    if (entry === undefined) throw new Error("placement attempt lacks an entry ULID for an eligible contract");
+    availableIndex += 1;
+    additions.push({
+      contractId: id,
+      expectedHead: state.head,
+      entries: [{
+        v: 1,
+        kind: "bound",
+        contract: id,
+        entry,
+        at: claimedEntry.at,
+        ...(claimedEntry.actor === undefined ? {} : { actor: claimedEntry.actor }),
+        data: {},
+      }],
+    });
+  }
+  return additions.length === 0 ? offer : { ...offer, facts: [...additions, ...offer.facts] };
 }

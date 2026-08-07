@@ -1,19 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ArcDocumentError, decodeArcDocument } from "../src/body/arc.js";
+import { decodeArcDocument } from "../src/body/arc.js";
 import { renderContractBody } from "../src/body/render.js";
 import { observeContract } from "../src/carrier/observe.js";
 import { repositoryAt } from "../src/carrier/repository.js";
-import { decodeEntry, encodeEntry } from "../src/core/facts/codec.js";
+import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
 import {
   contractId,
   entryUlid,
   snapshotId,
-  type ContractBody,
   type ContractId,
   type JournalEntry,
 } from "../src/core/facts/types.js";
+import type { ContractBody } from "../src/body/types.js";
+import { decodeContractDocument } from "../src/body/decode.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
@@ -48,7 +49,8 @@ function entry<K extends JournalEntry["kind"]>(
 }
 
 function bind(suffix = "AA") {
-  return entry("bind", { coordinates: { start: initial, workspace: "here" }, body }, suffix);
+  const document = decodeContractDocument(contractDocument(body.title));
+  return entry("bind", { coordinates: { start: initial, workspace: "here" }, terms: { document: document.document, segments: document.segments, gates: [], after: [] } }, suffix);
 }
 
 function arc(seq: number, suffix: string) {
@@ -109,18 +111,18 @@ test("Arc Markdown accepts only a title, Objective, and Brief", () => {
   assert.equal(decoded.brief.trim(), "Dispatch the next bounded implementation.");
   assert.throws(
     () => decodeArcDocument(`---\nkind: arc\n---\n${arcDocument()}`),
-    (error: unknown) => error instanceof ArcDocumentError && error.code === "FRONTMATTER_FORBIDDEN",
+    (error: unknown) => error instanceof TypeError && error.message.includes("arc document may not contain frontmatter"),
   );
   assert.throws(
     () => decodeArcDocument(`${arcDocument()}## Delivery\nnot allowed\n`),
-    (error: unknown) => error instanceof ArcDocumentError && error.code === "UNEXPECTED_SECTION",
+    (error: unknown) => error instanceof TypeError && error.message.includes("arc document does not allow ## Delivery"),
   );
 });
 
 test("Arc facts round trip canonically and fold only exact sequences", () => {
   const first = arc(1, "AB");
-  assert.deepEqual(decodeEntry(encodeEntry(first)), first);
-  assert.throws(() => decodeEntry(encodeEntry(first).replace('"seq":1', '"seq":0')), /data\.arc\.seq/);
+  assert.deepEqual(decodeJournal(encodeEntry(first)), [first]);
+  assert.throws(() => decodeJournal(encodeEntry(first).replace('"seq":1', '"seq":0')), /data\.arc\.seq/);
 
   const before = foldJournal(id, [bind()]);
   assert.equal(before.currentArc, undefined);
@@ -131,9 +133,8 @@ test("Arc facts round trip canonically and fold only exact sequences", () => {
 });
 
 test("Arc decision refuses terminal contracts", () => {
-  const abandon = entry("abandon", {}, "AF");
   const abandoned = entry("abandoned", { finalHead: null }, "AG");
-  const entries = [bind(), abandon, abandoned];
+  const entries = [bind(), abandoned];
   const terminal = foldJournal(id, entries);
   const result = decideArc({
     input: {
@@ -141,13 +142,8 @@ test("Arc decision refuses terminal contracts", () => {
       at: "2026-08-06T00:00:00Z",
       data: { title: "No Chapter", objective: "No objective", brief: "No brief" },
     },
-    attempt: { ordinal: 0, entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAH")] },
-    observation: {
-      carrierSnapshot: null,
-      contracts: new Map<ContractId, { id: ContractId; entries: readonly JournalEntry[]; state: typeof terminal }>([
-        [id, { id, entries, state: terminal }],
-      ]),
-    },
+    attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAH")] },
+    observation: new Map<ContractId, typeof terminal | null>([[id, terminal]]),
   });
   assert.deepEqual(result, { kind: "refused", refusal: { kind: "terminal", contractId: id } });
 });

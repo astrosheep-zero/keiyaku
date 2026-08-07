@@ -13,7 +13,7 @@ import {
   type TextNode,
 } from "./types.js";
 
-type ParserOptions = Readonly<{ allowSections: boolean }>;
+type ParserOptions = Readonly<{ mode: "document" | "item" }>;
 
 function spanFrom(first: SourceSpan, last: SourceSpan): SourceSpan {
   return { start: first.start, end: last.end };
@@ -61,10 +61,10 @@ class Parser {
     while (!this.done() && !stop()) {
       const token = this.peek();
       if (token === undefined) break;
-      if (this.options.allowSections && isSection(token)) blocks.push(this.parseSection());
+      if (this.options.mode === "document" && isSection(token)) blocks.push(this.parseSection());
       else if (token.type === "fence") blocks.push(this.parseCodeBlock());
       else if (token.type === "header") blocks.push(this.parseHeading());
-      else if (token.type === "list_marker" && (!this.options.allowSections || token.indent <= 3)) blocks.push(this.parseList(token.indent, token.ordered));
+      else if (token.type === "list_marker" && (this.options.mode === "item" || token.indent <= 3)) blocks.push(this.parseList(token.indent, token.ordered));
       else if (token.type === "blockquote") blocks.push(this.parseBlockquote());
       else if (token.type === "frontmatter") this.consume();
       else blocks.push(this.parseText(stop));
@@ -75,7 +75,7 @@ class Parser {
   private parseSection(): SectionNode {
     const header = this.consume();
     if (!isSection(header)) throw new MarkdownParseError("invalid parser state: expected section");
-    const children = this.parseBlocks(() => this.options.allowSections && isSection(this.peek()));
+    const children = this.parseBlocks(() => this.options.mode === "document" && isSection(this.peek()));
     return {
       type: "section",
       level: header.level,
@@ -171,7 +171,7 @@ class Parser {
     while (!this.done()) {
       const token = this.peek();
       if (token === undefined) break;
-      if (this.options.allowSections && isSection(token)) break;
+      if (this.options.mode === "document" && isSection(token)) break;
       if (token.type === "header" && token.leadingSpaces <= indent) break;
       if (token.type === "fence" && token.leadingSpaces <= indent) break;
       if (token.type === "list_marker" && token.indent <= indent) break;
@@ -180,7 +180,7 @@ class Parser {
       end = token.span.end;
     }
     const childSpan = { start: itemTokens[0]!.span.start, end: itemTokens.at(-1)!.span.end };
-    const children = new Parser(itemTokens, { allowSections: false })
+    const children = new Parser(itemTokens, { mode: "item" })
       .parseDocument("", childSpan, 0).children;
     return { type: "list_item", span: { start: marker.span.start, end }, marker: marker.marker, indent, children };
   }
@@ -190,7 +190,7 @@ class Parser {
     while (!this.done() && !stop()) {
       const token = this.peek();
       if (token === undefined || token.type === "fence" || token.type === "header" || token.type === "blockquote" || token.type === "frontmatter") break;
-      if (token.type === "list_marker" && (!this.options.allowSections || token.indent <= 3)) break;
+      if (token.type === "list_marker" && (this.options.mode === "item" || token.indent <= 3)) break;
       tokens.push(token);
       this.consume();
     }
@@ -225,6 +225,6 @@ class Parser {
 
 export function parseToAST(source: string): DocumentNode {
   const bomLength: 0 | 1 = source.startsWith("\uFEFF") ? 1 : 0;
-  return new Parser(lexMarkdown(source), { allowSections: true })
+  return new Parser(lexMarkdown(source), { mode: "document" })
     .parseDocument(source, { start: 0, end: source.length }, bomLength);
 }

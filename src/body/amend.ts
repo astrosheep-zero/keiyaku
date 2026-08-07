@@ -1,14 +1,30 @@
-import { validateContractBody } from "../core/facts/codec.js";
-import type { ContractBody, ContractCriterion, ContractExtension, VerificationDeclaration } from "../core/facts/types.js";
+import type { ContractBody, ContractCriterion, ContractExtension, DecodedContractDocument } from "./types.js";
+import type { VerificationDeclaration } from "../verification/types.js";
+import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
 import { parseToAST } from "../markdown/parse.js";
 import { directChildren, indexDocument, indexedHeadings, normalizeTitle, rawSlice, sectionContent } from "../markdown/query.js";
 import type { DocumentNode, MarkdownBlockNode, SectionNode } from "../markdown/types.js";
-import { ContractDocumentError } from "./grammar.js";
+import { decodeRegion, RegionDocumentError } from "./region.js";
+import { contractSectionName, RESERVED_SECTIONS } from "./shape.js";
+import { renderAmendedContractBody } from "./render.js";
 
 type Operation = Readonly<{ kind: "Add" | "Update" | "Replace" | "Append" | "Remove"; target: string; section: SectionNode }>;
 
+type MutableBody = {
+  title: string;
+  context: string;
+  objective: string;
+  design: string;
+  region: readonly string[];
+  criteria: Array<ContractCriterion | undefined>;
+  verification: readonly VerificationDeclaration[];
+  extensions: Array<ContractExtension | undefined>;
+  criterionIndexes: Map<string, number>;
+  extensionIndexes: Map<string, number>;
+};
+
 function refusal(message: string): never {
-  throw new ContractDocumentError("INVALID_AMEND_OPERATIONS", message);
+  throw new TypeError(message);
 }
 
 function nonblank(document: DocumentNode, node: MarkdownBlockNode): boolean {
@@ -40,15 +56,12 @@ function prose(document: DocumentNode, section: SectionNode, label: string): str
 }
 
 function region(document: DocumentNode, section: SectionNode): readonly string[] {
-  const blocks = directChildren(section, "code_block");
-  if (blocks.length !== 1 || !blocks[0]!.closed || blocks[0]!.info.length > 0) {
-    refusal("Region operation must contain one closed fence without an info string");
+  try {
+    return decodeRegion(document, section);
+  } catch (error) {
+    if (error instanceof RegionDocumentError) refusal(error.message);
+    throw error;
   }
-  const other = section.children.filter((node) => node !== blocks[0] && nonblank(document, node));
-  if (other.length > 0) refusal("Region operation may contain only its fenced declaration");
-  const patterns = blocks[0]!.lines.slice(1, -1).map((line) => line.trim()).filter((line) => line.length > 0);
-  if (patterns.length === 0) refusal("Region operation must declare at least one path pattern");
-  return patterns;
 }
 
 function criteria(document: DocumentNode, section: SectionNode): readonly ContractCriterion[] {
@@ -69,47 +82,62 @@ function criteria(document: DocumentNode, section: SectionNode): readonly Contra
 }
 
 function verification(document: DocumentNode, section: SectionNode): readonly VerificationDeclaration[] {
-  const blocks = directChildren(section, "code_block");
-  if (blocks.length === 0) refusal("Verification operation must contain one or more fenced executor declarations");
-  const other = section.children.filter((node) => node.type !== "code_block" && nonblank(document, node));
-  if (other.length > 0) refusal("Verification operation may contain only fenced executor declarations");
-  return blocks.map((block) => {
-    const executor = block.info.trim();
-    if (!block.closed || !["bash", "zsh", "pwsh"].includes(executor)) {
-      refusal("Verification fences must be closed and use bash, zsh, or pwsh");
-    }
-    const script = block.lines.slice(1, -1).join("\n");
-    if (script.trim().length === 0) refusal("Verification scripts must be nonblank");
-    return { executor: executor as VerificationDeclaration["executor"], script };
-  });
+  try {
+    return decodeVerificationDeclarations(document, section);
+  } catch (error) {
+    if (error instanceof VerificationDocumentError) refusal(error.message);
+    throw error;
+  }
 }
 
-function cloneBody(body: ContractBody): ContractBody {
+function cloneBody(body: ContractBody): MutableBody {
+  const criteria = body.criteria.map((criterion) => ({ ...criterion }));
+  const extensions = body.extensions.map((extension) => ({ ...extension }));
+  const criterionIndexes = new Map<string, number>();
+  criteria.forEach((criterion, index) => {
+    const key = normalizeTitle(criterion.title);
+    if (!criterionIndexes.has(key)) criterionIndexes.set(key, index);
+  });
+  const extensionIndexes = new Map<string, number>();
+  extensions.forEach((extension, index) => {
+    const key = normalizeTitle(extension.title);
+    if (!extensionIndexes.has(key)) extensionIndexes.set(key, index);
+  });
   return {
     title: body.title,
     context: body.context,
     objective: body.objective,
     design: body.design,
     region: [...body.region],
-    criteria: body.criteria.map((criterion) => ({ ...criterion })),
+    criteria,
     verification: body.verification.map((declaration) => ({ ...declaration })),
-    extensions: body.extensions.map((extension) => ({ ...extension })),
-    ...(body.gates === undefined ? {} : { gates: [...body.gates] }),
-    ...(body.after === undefined ? {} : { after: [...body.after] }),
+    extensions,
+    criterionIndexes,
+    extensionIndexes,
   };
 }
 
-function targetCore(target: string): string | null {
-  return ["Context", "Objective", "Design", "Region", "Criteria", "Verification"].includes(target) ? target : null;
+function completeBody(body: MutableBody): ContractBody {
+  return {
+    title: body.title,
+    context: body.context,
+    objective: body.objective,
+    design: body.design,
+    region: body.region,
+    criteria: body.criteria.filter((criterion): criterion is ContractCriterion => criterion !== undefined),
+    verification: body.verification,
+    extensions: body.extensions.filter((extension): extension is ContractExtension => extension !== undefined),
+  };
 }
 
-function extensionIndex(extensions: readonly ContractExtension[], target: string): number {
-  return extensions.findIndex((extension) => extension.title === target);
+function extensionIndex(body: MutableBody, target: string): number {
+  const index = body.extensionIndexes.get(normalizeTitle(target));
+  return index !== undefined && body.extensions[index]?.title === target ? index : -1;
 }
 
-function criterionIndex(criteriaList: readonly ContractCriterion[], target: string): number {
+function criterionIndex(body: MutableBody, target: string): number {
   const key = normalizeTitle(target);
-  return criteriaList.findIndex((criterion) => normalizeTitle(criterion.title) === key);
+  return body.criterionIndexes.get(key) ?? -1;
 }
 
 function appendText(current: string, addition: string): string {
@@ -120,82 +148,119 @@ function requireEmpty(document: DocumentNode, section: SectionNode): void {
   if (sectionContent(document, section).trim().length > 0) refusal("Remove operation must not have a body");
 }
 
-function alteredText(body: ContractBody, target: "Context" | "Objective" | "Design", value: string): ContractBody {
-  return { ...body, [target.toLowerCase()]: value };
+function alteredText(body: MutableBody, target: "context" | "objective" | "design", value: string): void {
+  body[target] = value;
 }
 
-function applyRemove(body: ContractBody, operation: Operation, document: DocumentNode): ContractBody {
+function applyRemove(body: MutableBody, operation: Operation, document: DocumentNode): void {
   requireEmpty(document, operation.section);
   if (operation.target.startsWith("Criterion ")) {
     const title = operation.target.slice("Criterion ".length);
-    const index = criterionIndex(body.criteria, title);
+    const index = criterionIndex(body, title);
     if (index < 0) refusal(`unknown criterion '${title}'`);
-    return { ...body, criteria: body.criteria.filter((_, candidate) => candidate !== index) };
+    body.criteria[index] = undefined;
+    body.criterionIndexes.delete(normalizeTitle(title));
+    return;
   }
-  const index = extensionIndex(body.extensions, operation.target);
+  const index = extensionIndex(body, operation.target);
   if (index < 0) refusal(`unknown extension '${operation.target}'`);
-  return { ...body, extensions: body.extensions.filter((_, candidate) => candidate !== index) };
+  body.extensions[index] = undefined;
+  body.extensionIndexes.delete(normalizeTitle(operation.target));
 }
 
-function applyUpdate(body: ContractBody, operation: Operation, document: DocumentNode): ContractBody {
+function applyUpdate(body: MutableBody, operation: Operation, document: DocumentNode): void {
   if (operation.target.startsWith("Criterion ")) {
     const title = operation.target.slice("Criterion ".length);
-    const index = criterionIndex(body.criteria, title);
+    const index = criterionIndex(body, title);
     if (index < 0) refusal(`unknown criterion '${title}'`);
-    return { ...body, criteria: body.criteria.map((criterion, candidate) => candidate === index ? { ...criterion, body: prose(document, operation.section, "criterion") } : criterion) };
+    const criterion = body.criteria[index]!;
+    body.criteria[index] = { ...criterion, body: prose(document, operation.section, "criterion") };
+    return;
   }
-  const index = extensionIndex(body.extensions, operation.target);
+  const index = extensionIndex(body, operation.target);
   if (index < 0) refusal(`unknown extension '${operation.target}'`);
-  return { ...body, extensions: body.extensions.map((extension, candidate) => candidate === index ? { ...extension, content: prose(document, operation.section, "extension") } : extension) };
+  const extension = body.extensions[index]!;
+  body.extensions[index] = { ...extension, content: prose(document, operation.section, "extension") };
 }
 
-function addedCriteria(body: ContractBody, operation: Operation, document: DocumentNode): ContractBody {
+function addedCriteria(body: MutableBody, operation: Operation, document: DocumentNode): void {
   const added = criteria(document, operation.section);
-  if (added.some((candidate) => criterionIndex(body.criteria, candidate.title) >= 0)) {
+  if (added.some((candidate) => criterionIndex(body, candidate.title) >= 0)) {
     refusal(`${operation.kind} Criteria targets an existing criterion`);
   }
-  return { ...body, criteria: [...body.criteria, ...added] };
-}
-
-function applyAdd(body: ContractBody, operation: Operation, document: DocumentNode): ContractBody {
-  if (operation.target === "Criteria") return addedCriteria(body, operation, document);
-  if (targetCore(operation.target) !== null) refusal(`Add does not support ${operation.target}`);
-  if (extensionIndex(body.extensions, operation.target) >= 0) refusal(`extension already exists '${operation.target}'`);
-  return { ...body, extensions: [...body.extensions, { title: operation.target, content: prose(document, operation.section, "extension") }] };
-}
-
-function applyAppend(body: ContractBody, operation: Operation, document: DocumentNode): ContractBody {
-  if (operation.target === "Criteria") return addedCriteria(body, operation, document);
-  if (operation.target === "Context" || operation.target === "Objective" || operation.target === "Design") {
-    const target = operation.target;
-    return alteredText(body, target, appendText(body[target.toLowerCase() as "context" | "objective" | "design"], prose(document, operation.section, target)));
+  for (const criterion of added) {
+    const index = body.criteria.length;
+    body.criteria.push(criterion);
+    body.criterionIndexes.set(normalizeTitle(criterion.title), index);
   }
-  if (targetCore(operation.target) !== null) refusal(`Append does not support ${operation.target}`);
-  const index = extensionIndex(body.extensions, operation.target);
-  if (index < 0) refusal(`unknown extension '${operation.target}'`);
-  return { ...body, extensions: body.extensions.map((extension, candidate) => candidate === index ? { ...extension, content: appendText(extension.content, prose(document, operation.section, "extension")) } : extension) };
 }
 
-function applyReplace(body: ContractBody, operation: Operation, document: DocumentNode): ContractBody {
-  if (operation.target === "Verification") return { ...body, verification: verification(document, operation.section) };
-  if (operation.target === "Context" || operation.target === "Objective" || operation.target === "Design") {
-    return alteredText(body, operation.target, prose(document, operation.section, operation.target));
+function applyAdd(body: MutableBody, operation: Operation, document: DocumentNode): void {
+  const target = contractSectionName(operation.target);
+  if (target === "criteria") {
+    addedCriteria(body, operation, document);
+    return;
   }
-  if (operation.target === "Region") return { ...body, region: region(document, operation.section) };
-  if (operation.target === "Criteria") return { ...body, criteria: criteria(document, operation.section) };
-  if (targetCore(operation.target) !== null) refusal(`Replace does not support ${operation.target}`);
-  const index = extensionIndex(body.extensions, operation.target);
-  if (index < 0) refusal(`unknown extension '${operation.target}'`);
-  return { ...body, extensions: body.extensions.map((extension, candidate) => candidate === index ? { ...extension, content: prose(document, operation.section, "extension") } : extension) };
+  if (target !== null) refusal(`Add does not support ${operation.target}`);
+  const normalized = normalizeTitle(operation.target);
+  if (RESERVED_SECTIONS.has(normalized)) refusal(`${normalized} is not a contract Markdown section`);
+  if (body.extensionIndexes.has(normalized)) refusal(`extension already exists '${operation.target}'`);
+  const index = body.extensions.length;
+  body.extensions.push({ title: operation.target, content: prose(document, operation.section, "extension") });
+  body.extensionIndexes.set(normalized, index);
 }
 
-function applyOperation(body: ContractBody, operation: Operation, document: DocumentNode): ContractBody {
+function applyAppend(body: MutableBody, operation: Operation, document: DocumentNode): void {
+  const target = contractSectionName(operation.target);
+  if (target === "criteria") {
+    addedCriteria(body, operation, document);
+    return;
+  }
+  if (target === "context" || target === "objective" || target === "design") {
+    alteredText(body, target, appendText(body[target], prose(document, operation.section, operation.target)));
+    return;
+  }
+  if (target !== null) refusal(`Append does not support ${operation.target}`);
+  const index = extensionIndex(body, operation.target);
+  if (index < 0) refusal(`unknown extension '${operation.target}'`);
+  const extension = body.extensions[index]!;
+  body.extensions[index] = { ...extension, content: appendText(extension.content, prose(document, operation.section, "extension")) };
+}
+
+function applyReplace(body: MutableBody, operation: Operation, document: DocumentNode): void {
+  const target = contractSectionName(operation.target);
+  if (target === "verification") {
+    body.verification = verification(document, operation.section);
+    return;
+  }
+  if (target === "context" || target === "objective" || target === "design") {
+    alteredText(body, target, prose(document, operation.section, operation.target));
+    return;
+  }
+  if (target === "region") {
+    body.region = region(document, operation.section);
+    return;
+  }
+  if (target === "criteria") {
+    const replacement = criteria(document, operation.section);
+    body.criteria = [...replacement];
+    body.criterionIndexes = new Map(replacement.map((criterion, index) => [normalizeTitle(criterion.title), index]));
+    return;
+  }
+  if (target !== null) refusal(`Replace does not support ${operation.target}`);
+  const index = extensionIndex(body, operation.target);
+  if (index < 0) refusal(`unknown extension '${operation.target}'`);
+  const extension = body.extensions[index]!;
+  body.extensions[index] = { ...extension, content: prose(document, operation.section, "extension") };
+}
+
+function applyOperation(body: MutableBody, operation: Operation, document: DocumentNode): void {
   switch (operation.kind) {
-    case "Add": return applyAdd(body, operation, document);
-    case "Update": return applyUpdate(body, operation, document);
-    case "Replace": return applyReplace(body, operation, document);
-    case "Append": return applyAppend(body, operation, document);
-    case "Remove": return applyRemove(body, operation, document);
+    case "Add": applyAdd(body, operation, document); return;
+    case "Update": applyUpdate(body, operation, document); return;
+    case "Replace": applyReplace(body, operation, document); return;
+    case "Append": applyAppend(body, operation, document); return;
+    case "Remove": applyRemove(body, operation, document); return;
   }
 }
 
@@ -206,17 +271,24 @@ function operationKey(operation: Operation): string {
   return `${operation.kind}:${target}`;
 }
 
-export function applyAmendOperations(source: string, current: ContractBody): ContractBody {
+function apply(source: string, current: ContractBody): Readonly<{ body: ContractBody; changed: ReadonlySet<string> }> {
   const document = parseToAST(source);
   const operations = operationSections(document);
   if (operations.length === 0) refusal("amend requires at least one H2 operation");
   const seen = new Set<string>();
-  let body = cloneBody(current);
+  const changed = new Set<string>();
+  const body = cloneBody(current);
   for (const operation of operations) {
     const key = operationKey(operation);
     if (seen.has(key)) refusal(`duplicate amend operation '${key}'`);
     seen.add(key);
-    body = applyOperation(body, operation, document);
+    changed.add(normalizeTitle(operation.target.startsWith("Criterion ") ? "Criteria" : operation.target));
+    applyOperation(body, operation, document);
   }
-  return validateContractBody(body);
+  return { body: completeBody(body), changed };
+}
+
+export function applyAmendDocument(source: string, current: DecodedContractDocument): string {
+  const result = apply(source, current);
+  return renderAmendedContractBody(current.document.bytes, result.body, result.changed);
 }

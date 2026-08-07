@@ -1,19 +1,16 @@
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import test from "node:test";
-import { Keiyaku } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
+import { decodeContractDocument, verificationDefinition } from "../src/body/decode.js";
 import { repositoryAt } from "../src/carrier/repository.js";
-import type { JournalEntry } from "../src/core/facts/types.js";
-import { verifyStoredDelivery } from "../src/protocol/intent.js";
-import { auditReport, type AuditReport } from "../src/protocol/read/audit.js";
+import { entryUlid, gate } from "../src/core/facts/types.js";
+import { dependencyKeySet } from "../src/core/subject.js";
+import { verifyDelivery } from "../src/protocol/intent.js";
+import { auditOperation, deliverOperation, scopeOperation, type AuditReport } from "../src/protocol/operations.js";
+import { readAudit } from "../src/protocol/read/audit.js";
 import { produceVerification, type VerificationOutcome } from "../src/verification/producer.js";
 import { makeGitRepository, type TestGitRepository } from "./support/git.js";
-
-function journalEntry(kind: JournalEntry["kind"], at: string): JournalEntry {
-  return kind === "attestation"
-    ? { kind, at, data: { gate: "reviewed" } } as JournalEntry
-    : { kind, at } as JournalEntry;
-}
 
 function repositoryWithMain(): TestGitRepository {
   const repository = makeGitRepository();
@@ -24,7 +21,7 @@ function repositoryWithMain(): TestGitRepository {
   return repository;
 }
 
-function verificationBody(): string {
+function verificationBody(script: string | null = "exit 1"): string {
   return [
     "# Audit",
     "",
@@ -45,26 +42,15 @@ function verificationBody(): string {
     "## Criteria",
     "### Audit",
     "The report follows the journal.",
-    "",
-    "## Verification",
-    "~~~bash",
-    "exit 1",
-    "~~~",
+    ...(script === null ? [] : ["", "## Verification", "~~~bash", script, "~~~"]),
     "",
   ].join("\n");
 }
 
 function failureOutcome(failure: NonNullable<AuditReport["attempt"]>["failure"]): VerificationOutcome {
-  const step = { declaration: { executor: "bash" as const, script: "exit 1" }, argv: ["bash", "-c", "exit 1"] };
-  const output = { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), stdoutTruncated: false, stderrTruncated: false, durationMs: 0 };
-  switch (failure) {
-    case "timeout":
-      return { plan: [step], kind: "timeout", execution: { step, outcome: { kind: "timeout", reason: "timeout", ...output } } };
-    case "spawn-error":
-      return { plan: [step], kind: "spawn-error", execution: { step, outcome: { kind: "spawn-error", error: new Error("unavailable"), ...output } } };
-    case "unknown-exit":
-      return { plan: [step], kind: "unknown-exit", execution: { step, outcome: { kind: "exit", code: null, signal: "SIGTERM", ...output } } };
-  }
+  return failure === "spawn-error"
+    ? { kind: failure, diagnostic: "spawn failed" }
+    : { kind: failure };
 }
 
 async function failedStoredVerification(): Promise<Readonly<{
@@ -73,7 +59,7 @@ async function failedStoredVerification(): Promise<Readonly<{
   state: Awaited<ReturnType<Keiyaku["state"]>>;
 }>> {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ markdown: verificationBody(), repo: repository.path, workspace: "here" });
+  const bound = await Repo.at({ path: repository.path }).bind({ markdown: verificationBody(), workspace: "here", gates: ["verified"] });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
@@ -83,69 +69,217 @@ async function failedStoredVerification(): Promise<Readonly<{
   assert.equal(delivered.kind, "accepted");
   const state = await bound.value.state();
   assert.equal(state.attestations.at(-1)?.data.verdict, "unsatisfied");
+  assert.equal(state.attestations.at(-1)?.data.summary, "[1 bash exit 1]");
   return { repository, contract: bound.value, state };
 }
 
-test("audit report counts every entry and preserves exact valid, invalid, and negative timeline intervals", () => {
-  const report = auditReport([
-    journalEntry("bind", "2026-08-06T00:00:10.000Z"),
-    journalEntry("deliver", "2026-08-06T00:00:09.000Z"),
-    journalEntry("attestation", "not-a-time"),
-    journalEntry("arc", "2026-08-06T00:00:20.000Z"),
-    journalEntry("deliver", "2026-08-06T00:00:21.250Z"),
-    journalEntry("attestation", "2026-08-06T00:00:21.250Z"),
-  ]);
-
-  assert.deepEqual(report, {
-    reworks: 2,
-      reviewed: 2,
-    timeline: [
-      { kind: "bind", at: "2026-08-06T00:00:10.000Z", sincePrior: null },
-      { kind: "deliver", at: "2026-08-06T00:00:09.000Z", sincePrior: -1_000 },
-      { kind: "attestation", at: "not-a-time", sincePrior: null },
-      { kind: "arc", at: "2026-08-06T00:00:20.000Z", sincePrior: null },
-      { kind: "deliver", at: "2026-08-06T00:00:21.250Z", sincePrior: 1_250 },
-      { kind: "attestation", at: "2026-08-06T00:00:21.250Z", sincePrior: 0 },
-    ],
+test("a verified placement gate without a Verification declaration is refused at bind", async () => {
+  const repository = repositoryWithMain();
+  assert.deepEqual(await Repo.at({ path: repository.path }).bind({
+    markdown: verificationBody(null),
+    workspace: "here",
+    gates: ["verified"],
+  }), {
+    kind: "refused",
+    refusal: { kind: "verification-declaration-invalid" },
   });
 });
 
-test("audit report carries each non-persisted Verification failure value only as an attempt", () => {
-  for (const failure of ["timeout", "spawn-error", "unknown-exit"] as const) {
-    assert.deepEqual(auditReport([], { failure }), {
-      reworks: 0,
-      reviewed: 0,
-      timeline: [],
-      attempt: { failure },
+test("terminal amend refusal outranks a missing Verification declaration", async () => {
+  const repository = repositoryWithMain();
+  const bound = await Repo.at({ path: repository.path }).bind({ markdown: verificationBody(null), workspace: "here" });
+  assert.equal(bound.kind, "accepted");
+  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
+  const id = (await bound.value.state()).id;
+  assert.equal((await bound.value.abandon()).kind, "accepted");
+
+  assert.deepEqual(await bound.value.amend({
+    markdown: "## Replace: Objective\nNo longer actionable.\n\n",
+    gates: ["verified"],
+  }), {
+    kind: "refused",
+    refusal: { kind: "terminal", contractId: id },
+  });
+});
+
+test("amend between document derivation and attempt returns document-moved", async () => {
+  const repository = repositoryWithMain();
+  const bound = await Repo.at({ path: repository.path }).bind({ markdown: verificationBody(null), workspace: "here" });
+  assert.equal(bound.kind, "accepted");
+  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
+  const state = await bound.value.state();
+  const decoded = decodeContractDocument(state.terms.document.bytes);
+  const derivation = {
+    document: decoded.document.key,
+    title: decoded.title,
+    verification: verificationDefinition(decoded),
+  };
+  const amended = await bound.value.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
+  assert.equal(amended.kind, "accepted");
+  const scope = scopeOperation({ coordinate: repository.path });
+  const refusal = { kind: "document-moved", contractId: state.id };
+
+  assert.deepEqual(await deliverOperation({ scope, contractId: state.id, derivation }), { kind: "refused", refusal });
+  assert.deepEqual(await auditOperation({ scope, contractId: state.id, derivation }), { kind: "refused", refusal });
+});
+
+test("read-only audit returns its initial observation when verification is skipped", async () => {
+  const repository = repositoryWithMain();
+  const bound = await Repo.at({ path: repository.path }).bind({
+    markdown: verificationBody(null),
+    workspace: "here",
+  });
+  assert.equal(bound.kind, "accepted");
+  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
+
+  const scope = scopeOperation({ coordinate: repository.path });
+  const contractId = (await bound.value.state()).id;
+  const initial = readAudit(scope, contractId, gate("reviewed"));
+  const decoded = decodeContractDocument(initial.state!.terms.document.bytes);
+  const pending = auditOperation({
+    scope,
+    contractId,
+    derivation: {
+      document: decoded.document.key,
+      title: decoded.title,
+      verification: verificationDefinition(decoded),
+    },
+  });
+  const amendment = new Promise<void>((resolve, reject) => {
+    process.nextTick(() => {
+      void bound.value.amend({ markdown: [
+        "## Replace: Objective",
+        "Keep the original audit observation.",
+        "",
+      ].join("\n") }).then((result) => {
+        try {
+          assert.equal(result.kind, "accepted");
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      }, reject);
     });
-  }
+  });
+
+  const result = await pending;
+  await amendment;
+  assert.equal(result.kind, "accepted");
+  if (result.kind !== "accepted") throw new Error("audit was not accepted");
+  assert.deepEqual(result.value, initial.report);
+  assert.deepEqual(result.facts, []);
+  assert.equal(result.head, initial.state.head);
+  assert.notDeepEqual(readAudit(scope, contractId, gate("reviewed")).report, initial.report);
 });
 
 test("stored Verification maps every nonterminal producer outcome to an audit attempt without admission", async () => {
   for (const failure of ["timeout", "spawn-error", "unknown-exit"] as const) {
     const { repository, contract, state } = await failedStoredVerification();
     const before = state.attestations.length;
-    const result = await verifyStoredDelivery({
+    const result = await verifyDelivery({
       repository: repositoryAt(repository.path),
       contractId: state.id,
       at: "2026-08-06T00:00:00.000Z",
       state,
+      verification: verificationDefinition(decodeContractDocument(state.terms.document.bytes))!,
       environment: {},
       produce: async () => failureOutcome(failure),
     });
-    assert.deepEqual(result, { failure });
+    const step = failure === "spawn-error"
+      ? { failure, diagnostic: "spawn failed" }
+      : { failure };
+    assert.deepEqual(result, { step });
     assert.equal((await contract.state()).attestations.length, before);
   }
 });
 
-test("stored Verification refuses a result captured before its declaration changes", async () => {
+test("audit accepts an attestation refusal as a typed attempt without facts", async () => {
+  const { contract } = await failedStoredVerification();
+  const amended = await contract.amend({ markdown: [
+    "## Replace: Verification",
+    "~~~bash",
+    "sleep 0.2",
+    "~~~",
+    "",
+  ].join("\n") });
+  assert.equal(amended.kind, "accepted");
+
+  const pending = contract.audit();
+  const abandoned = new Promise<void>((resolve, reject) => {
+    setTimeout(() => {
+      void contract.abandon().then((result) => {
+        try {
+          assert.equal(result.kind, "accepted");
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      }, reject);
+    }, 20);
+  });
+  const result = await pending;
+  await abandoned;
+  assert.equal(result.kind, "accepted");
+  if (result.kind !== "accepted") throw new Error("audit was not accepted");
+  assert.deepEqual(result.facts, []);
+  assert.deepEqual(result.value.attempt, {
+    refusal: { kind: "terminal", contractId: (await contract.state()).id },
+  });
+});
+
+test("audit admits Verification testimony for its captured old subject", async () => {
+  const { contract } = await failedStoredVerification();
+  const delayed = await contract.amend({ markdown: [
+    "## Replace: Verification",
+    "~~~bash",
+    "sleep 0.2",
+    "~~~",
+    "",
+  ].join("\n") });
+  assert.equal(delayed.kind, "accepted");
+  const state = await contract.state();
+  const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes));
+  if (state.delivery === null || definition === null) throw new Error("audit inputs are absent");
+
+  const pending = contract.audit();
+  const amended = new Promise<void>((resolve, reject) => {
+    setTimeout(() => {
+      void contract.amend({ markdown: [
+        "## Replace: Verification",
+        "~~~bash",
+        "exit 0",
+        "~~~",
+        "",
+      ].join("\n") }).then((result) => {
+        try {
+          assert.equal(result.kind, "accepted");
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      }, reject);
+    }, 20);
+  });
+  const audited = await pending;
+  await amended;
+  assert.equal(audited.kind, "accepted");
+  if (audited.kind !== "accepted") throw new Error("audit was not accepted");
+  assert.deepEqual(audited.facts.map((fact) => fact.kind), ["attestation"]);
+  assert.equal((await contract.state()).attestations.at(-1)?.data.subject, dependencyKeySet([
+    { kind: "snapshot", value: state.delivery.data.candidate },
+    { kind: "segment", value: definition.segment },
+  ]));
+});
+
+test("stored Verification records a result captured before its declaration changes", async () => {
   const { repository, contract, state } = await failedStoredVerification();
   const before = state.attestations.length;
-  const result = await verifyStoredDelivery({
+  const result = await verifyDelivery({
     repository: repositoryAt(repository.path),
     contractId: state.id,
     at: "2026-08-06T00:00:00.000Z",
     state,
+    verification: verificationDefinition(decodeContractDocument(state.terms.document.bytes))!,
     environment: {},
     produce: async (input) => {
       const amended = await contract.amend({ markdown: [
@@ -159,7 +293,65 @@ test("stored Verification refuses a result captured before its declaration chang
       return produceVerification(input);
     },
   });
-  assert.equal(result?.kind, "refused");
-  if (result?.kind === "refused") assert.equal(result.refusal.kind, "stale-subject");
-  assert.equal((await contract.state()).attestations.length, before);
+  assert.equal(result?.step.kind, "accepted");
+  assert.equal((await contract.state()).attestations.length, before + 1);
+});
+
+test("Verification runs a valid declaration even after prior testimony", async () => {
+  const { repository, contract, state } = await failedStoredVerification();
+  const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes))!;
+  const before = state.attestations.length;
+  let executions = 0;
+  const produce = async () => {
+    executions += 1;
+    return { kind: "terminal", verdict: "satisfied" } as const;
+  };
+
+  const result = await verifyDelivery({
+    repository: repositoryAt(repository.path),
+    contractId: state.id,
+    at: "2026-08-06T00:00:00.000Z",
+    state,
+    environment: {},
+    produce,
+    verification: definition,
+  });
+  assert.equal(executions, 1);
+  assert.equal(result?.step.kind, "accepted");
+  assert.equal((await contract.state()).attestations.length, before + 1);
+  assert.equal((await contract.state()).attestations.at(-1)?.data.subject, dependencyKeySet([
+    { kind: "snapshot", value: state.delivery!.data.candidate },
+    { kind: "segment", value: definition.segment },
+  ]));
+});
+
+test("Verification reuse requires its exact producer subject", async () => {
+  const { repository, state } = await failedStoredVerification();
+  const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes))!;
+  const unrelated = {
+    ...state.attestations.at(-1)!,
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAE"),
+    data: {
+      gate: gate("verified"),
+      subject: dependencyKeySet([{ kind: "document", value: state.terms.document.key }]),
+      verdict: "satisfied" as const,
+    },
+  };
+  let executions = 0;
+
+  const result = await verifyDelivery({
+    repository: repositoryAt(repository.path),
+    contractId: state.id,
+    at: "2026-08-06T00:00:03.000Z",
+    state: { ...state, attestations: [...state.attestations, unrelated] },
+    verification: definition,
+    environment: {},
+    produce: async () => {
+      executions += 1;
+      return { kind: "timeout" };
+    },
+  });
+
+  assert.equal(executions, 1);
+  assert.deepEqual(result, { step: { failure: "timeout" } });
 });

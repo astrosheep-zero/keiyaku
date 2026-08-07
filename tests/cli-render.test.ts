@@ -44,6 +44,94 @@ test("typed refusal text preserves the refusal object", () => {
   );
 });
 
+test("bind retry text has no contract segment", () => {
+  const result: InvocationResult = {
+    kind: "retry",
+    verb: "bind",
+    detail: { kind: "exhausted" },
+  };
+
+  assert.equal(renderText(result), 'retry bind {"kind":"exhausted"}');
+  assert.equal("contract" in result, false);
+});
+
+test("addressed retry text retains its caller coordinate", () => {
+  const contract = contractId("kei/render-retry");
+  const result: InvocationResult = {
+    kind: "retry",
+    verb: "amend",
+    contract,
+    detail: { kind: "exhausted" },
+  };
+
+  assert.equal(renderText(result), 'retry amend kei/render-retry {"kind":"exhausted"}');
+});
+
+test("accepted text preserves named obligation stops after facts", () => {
+  const contract = contractId("kei/render-steps");
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "deliver",
+    contract,
+    head: null,
+    facts: [{ contract, entry: "01J00000000000000000000000", kind: "deliver" }],
+    verification: { refusal: { kind: "terminal", contractId: contract } },
+    placement: { retry: { kind: "exhausted" } },
+    leak: { path: "/tmp/keiyaku-v4-verify-leak", diagnostic: "worktree remove failed" },
+    effects: [{ kind: "ref", name: "refs/heads/main", action: "unchanged", before: null, after: null }],
+  };
+
+  assert.equal(renderText(result), [
+    `accepted deliver ${contract} head=null`,
+    `fact ${contract} 01J00000000000000000000000 deliver`,
+    `stop verification {"refusal":{"kind":"terminal","contractId":"kei/render-steps"}}`,
+    `stop placement {"retry":{"kind":"exhausted"}}`,
+    "leak worktree /tmp/keiyaku-v4-verify-leak worktree remove failed",
+    "effect ref unchanged refs/heads/main null -> null",
+  ].join("\n"));
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+});
+
+test("accepted text renders Region witnesses and unavailable observations", () => {
+  const contract = contractId("kei/render-region");
+  const witnesses: InvocationResult = {
+    kind: "accepted",
+    verb: "bind",
+    contract,
+    head: null,
+    facts: [],
+    effects: [],
+    overlaps: [{
+      contract: contractId("kei/peer"),
+      patterns: [
+        { mine: "src/**", theirs: "src/api/**" },
+        { mine: "docs/**", theirs: "docs/**" },
+      ],
+    }],
+  };
+  assert.equal(renderText(witnesses), [
+    `accepted bind ${contract} head=null`,
+    "overlap kei/peer src/** ~ src/api/**",
+    "overlap kei/peer docs/** ~ docs/**",
+  ].join("\n"));
+  assert.deepEqual(JSON.parse(JSON.stringify(witnesses)), witnesses);
+
+  const unavailable: InvocationResult = {
+    kind: "accepted",
+    verb: "amend",
+    contract,
+    head: null,
+    facts: [],
+    effects: [],
+    overlapFailure: "kei/peer: malformed document",
+  };
+  assert.equal(renderText(unavailable), [
+    `accepted amend ${contract} head=null`,
+    "overlap unavailable kei/peer: malformed document",
+  ].join("\n"));
+  assert.deepEqual(JSON.parse(JSON.stringify(unavailable)), unavailable);
+});
+
 test("observation text keeps the command and view data together", () => {
   const result: InvocationResult = { kind: "observation", command: "status", contracts: [] };
   assert.equal(renderText(result), 'observation status\n{\n  "contracts": []\n}');

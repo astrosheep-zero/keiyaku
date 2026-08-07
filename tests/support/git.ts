@@ -8,7 +8,13 @@ export interface TestGitRepository {
   readonly run: (args: readonly string[], input?: string | Uint8Array) => string;
 }
 
-export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: () => T): T {
+export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: () => Promise<T>): Promise<T>;
+export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: () => T): T;
+export function withGitShim<T>(
+  body: string,
+  variables: Readonly<Record<string, string>>,
+  action: () => T | Promise<T>,
+): T | Promise<T> {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-git-shim-"));
   const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
   const shimPath = join(directory, "git");
@@ -21,14 +27,21 @@ export function withGitShim<T>(body: string, variables: Readonly<Record<string, 
   };
   const previous = new Map(Object.keys(updates).map((key) => [key, process.env[key]]));
   for (const [key, value] of Object.entries(updates)) process.env[key] = value;
-  try {
-    return action();
-  } finally {
+  const restore = (): void => {
     for (const key of Object.keys(updates)) {
       const value = previous.get(key);
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+  };
+  try {
+    const result = action();
+    if (result instanceof Promise) return result.finally(restore);
+    restore();
+    return result;
+  } catch (error) {
+    restore();
+    throw error;
   }
 }
 

@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { ContractId, StatusReport } from "../index.js";
+import { type ContractId, type Keiyaku, type Repo, type StatusReport } from "../index.js";
 import { CliUsageError } from "./parse.js";
 
 type SelectorCandidate = Readonly<{
@@ -7,22 +7,26 @@ type SelectorCandidate = Readonly<{
   worktreePath: string;
 }>;
 
-const CONTRACT_ID = /^kei\/[a-z0-9][a-z0-9-]*$/;
-
 function selectorError(message: string): never {
   throw new CliUsageError(message);
 }
 
 function activeManagedCandidates(status: StatusReport): readonly SelectorCandidate[] {
   return status.contracts.flatMap((contract) => {
-    if (contract.terminal !== null || contract.workspace !== "worktree" || contract.worktreePath === null) return [];
+    if (contract.phase === "claimed" || contract.phase === "abandoned" || contract.workspace !== "worktree" || contract.worktreePath === null) return [];
     return [{ id: contract.contractId, worktreePath: contract.worktreePath }];
   });
 }
 
-export function contractIdentity(value: string): ContractId {
-  if (!CONTRACT_ID.test(value)) selectorError("contract ID must be kei/<lowercase-machine-contract>");
-  return value as ContractId;
+export type SelectedContract = Readonly<{ id: ContractId; contract: Keiyaku }>;
+
+export function contractFromInput(repo: Repo, value: string): SelectedContract {
+  try {
+    const id = value as ContractId;
+    return { id, contract: repo.contract({ id }) };
+  } catch (error) {
+    selectorError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 function resolveShortContract(status: StatusReport, selector: string): ContractId {
@@ -46,13 +50,8 @@ function resolveOmittedContract(status: StatusReport): ContractId {
   return candidates[0]!.id;
 }
 
-export function resolveExistingContract(status: StatusReport, selector: string | undefined): ContractId {
+export function resolveContextualContract(status: StatusReport, selector: string | undefined): ContractId {
   if (selector === undefined) return resolveOmittedContract(status);
-  if (selector.startsWith("kei/")) return contractIdentity(selector);
   if (selector.startsWith("@")) return resolveShortContract(status, selector);
   return selectorError(`contract selector must be kei/<machine-contract> or @<machine-contract>: ${selector}`);
-}
-
-export function resolveOptionalContract(status: StatusReport, selector: string | undefined): ContractId | undefined {
-  return selector === undefined ? undefined : resolveExistingContract(status, selector);
 }

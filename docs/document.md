@@ -2,9 +2,24 @@
 
 This chapter owns the Keiyaku Markdown methodology at the library edge. It is
 a pure document boundary: it decides edge syntax and private document values,
-never lifecycle legality, journal admission, or transport effects. Core receives
-opaque whole-document bytes, their key, and ordered opaque segment keys; it
-knows no section name or Markdown grammar.
+never lifecycle legality, journal admission, or transport effects. A decoded
+document remains library-private. Core retains only the opaque whole-document
+bytes, their key, and ordered opaque segment keys defined by [model.md](model.md);
+it knows no section name or Markdown grammar.
+
+The sole cross-layer output of a decoded document is the key-stamped scalar
+derivation `{ document, title, verification }`. `document` is the `DocumentKey`
+stamp; `title` and `verification` are derived from exactly that decoded
+document. The derivation carries neither a `ContractBody`, section tree, raw
+body callback, nor a protocol body reader. It is attempt-local and is never a
+persisted fact, cache, or replacement document authority. Its currency is
+decided against the attempt observation by the one legal `decide` in
+[lifecycle.md](lifecycle.md), not by the document boundary.
+
+Amend, deliver, and audit are the consumers of that decoded-document
+derivation. Review consumes no decoded value. Its testimony subject names the
+document and patch identities actually reviewed, so later document movement is
+handled by generic gate currentness rather than by another document projection.
 
 ## Markdown Dialect
 
@@ -48,16 +63,17 @@ patterns are typed document refusals.
 
 The dialect computes exact intersection between two patterns from this closed
 grammar. It does not use a conservative approximation. This interpretation is
-pure body methodology: core, protocol, and carrier receive only the complete
-opaque document bytes and their keys.
+pure body methodology: only the opaque source document terms may persist below
+the library edge; core, protocol, and carrier never receive the decoded body.
 
 The title has no content before the first H2. The document has no nonblank
 bytes outside its H1 and H2 sections, no duplicate top-level H2, and no
 frontmatter. An unrecognized H2 is an extension with its original title and
 content bytes; its content is nonblank. Decoding keeps the complete opaque
-document bytes, mints a whole-document key and ordered segment keys, and passes
-those values to core. Core stores the bytes without parsing them. `gates` and
-`after` are machine terms, not Markdown-derived core fields.
+document bytes, mints a whole-document key and ordered segment keys, and
+supplies those opaque terms for persistence. It never supplies the decoded
+body. Core stores the bytes without parsing them. `gates` and `after` are
+machine terms, not Markdown-derived core fields.
 
 `Verification` retains the v3 edge grammar: one or more direct closed fences
 with an exact `bash`, `zsh`, or `pwsh` info string and a nonblank script body.
@@ -68,8 +84,8 @@ name.
 ## Reserved Sections
 
 The normalized H2 titles `Gates`, `Pipeline`, and `After` are refused with
-`REMOVED_SECTION`. They are not extensions and they do not encode structured
-operation inputs.
+the ordinary invalid-document `TypeError`. They are not extensions and they do
+not encode structured operation inputs.
 
 ## Amend Operations
 
@@ -96,7 +112,15 @@ kind when duplicate application would be ambiguous.
 Every operation body uses the grammar of its target section. `Replace:
 Verification` uses the v3 declaration grammar. The complete amended document is
 produced by applying the ordered operations at the edge; the library then mints
-replacement opaque document keys for core.
+replacement opaque document keys for core. A derivation selected from an older
+document is never silently retargeted to those replacement keys; the receiving
+attempt's one legal decision determines whether its stamp is current.
+
+Amend rendering preserves the exact source bytes of the H1 and every H2 section
+that no operation addresses. Only an addressed or newly added section is
+rendered from its admitted operation value; removal omits that section. This
+keeps untouched segment identities stable without making formatting or segment
+meaning part of core.
 
 ## Arc Document
 
@@ -121,6 +145,8 @@ contract's current chapter and its sequence are lifecycle state, defined in
 
 The decoder, amendment applier, and arc decoder are internal library consumers
 of this methodology. A document is decoded once and its structured edge value
-does not leave the library. Edge formatting, when needed, does not create core
-facts or a second document authority. The package-root boundary is owned by
-[public-api.md](public-api.md).
+does not leave the library. Only its key-stamped `{ document, title,
+verification }` derivation may cross to a verb attempt, where the lifecycle
+decision judges its currency. Edge formatting, when needed, does not create
+core facts, persisted derivations, or a second document authority. The
+package-root boundary is owned by [public-api.md](public-api.md).

@@ -1,13 +1,69 @@
-export type Command =
-  | "bind"
-  | "amend"
-  | "deliver"
-  | "review"
-  | "arc"
-  | "abandon"
-  | "status"
-  | "audit"
-  | "reconcile";
+type FlagKind = "boolean" | "value" | "repeat-value";
+type CommandSpec = Readonly<{
+  positional: "none" | "optional";
+  stdin: "none" | "optional" | "required";
+  flags: Readonly<Record<string, FlagKind>>;
+  usage: string;
+}>;
+
+const COMMAND_SPECS = {
+  bind: {
+    positional: "none",
+    stdin: "required",
+    flags: { actor: "value", target: "value", here: "boolean", after: "repeat-value", gates: "value", json: "boolean" },
+    usage: "keiyaku-v4 bind [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -",
+  },
+  amend: {
+    positional: "optional",
+    stdin: "required",
+    flags: { actor: "value", after: "repeat-value", "clear-after": "boolean", gates: "value", json: "boolean" },
+    usage: "keiyaku-v4 amend [<contract>|@<worktree>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -",
+  },
+  deliver: {
+    positional: "optional",
+    stdin: "none",
+    flags: { actor: "value", message: "value", json: "boolean" },
+    usage: "keiyaku-v4 deliver [<contract>|@<worktree>] [--message <text>] [--actor <actor>] [--json]",
+  },
+  review: {
+    positional: "optional",
+    stdin: "optional",
+    flags: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
+    usage: "keiyaku-v4 review [<contract>|@<worktree>] (--satisfied | --unsatisfied) [--summary <text>] [--actor <actor>] [--json] [-]",
+  },
+  arc: {
+    positional: "optional",
+    stdin: "required",
+    flags: { actor: "value", json: "boolean" },
+    usage: "keiyaku-v4 arc [<contract>|@<worktree>] [--actor <actor>] [--json] -",
+  },
+  abandon: {
+    positional: "optional",
+    stdin: "none",
+    flags: { actor: "value", note: "value", json: "boolean" },
+    usage: "keiyaku-v4 abandon [<contract>|@<worktree>] [--note <text>] [--actor <actor>] [--json]",
+  },
+  status: {
+    positional: "optional",
+    stdin: "none",
+    flags: { json: "boolean" },
+    usage: "keiyaku-v4 status [<contract>|@<worktree>] [--json]",
+  },
+  audit: {
+    positional: "optional",
+    stdin: "none",
+    flags: { "show-diff-body": "boolean", actor: "value", json: "boolean" },
+    usage: "keiyaku-v4 audit [<contract>|@<worktree>] [--show-diff-body] [--actor <actor>] [--json]",
+  },
+  reconcile: {
+    positional: "optional",
+    stdin: "none",
+    flags: { json: "boolean" },
+    usage: "keiyaku-v4 reconcile [<contract>|@<worktree>] [--json]",
+  },
+} as const satisfies Readonly<Record<string, CommandSpec>>;
+
+export type Command = keyof typeof COMMAND_SPECS;
 
 type Output = Readonly<{ output: "text" | "json" }>;
 type Actor = Readonly<{ actor?: string }>;
@@ -29,6 +85,7 @@ export type ParsedAmend = Output & Actor & Readonly<{
 export type ParsedDeliver = Output & Actor & Readonly<{
   command: "deliver";
   contract?: string;
+  message?: string;
 }>;
 export type ParsedReview = Output & Actor & Readonly<{
   command: "review";
@@ -46,14 +103,14 @@ export type ParsedAbandon = Output & Actor & Readonly<{
   contract?: string;
   note?: string;
 }>;
-export type ParsedStatus = Output & Readonly<{ command: "status"; contract?: string }>;
+type ParsedStatus = Output & Readonly<{ command: "status"; contract?: string }>;
 export type ParsedAudit = Output & Readonly<{
   command: "audit";
   contract?: string;
   showDiffBody: boolean;
   actor?: string;
 }>;
-export type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string }>;
+type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string }>;
 
 export type ParsedCommand =
   | ParsedBind
@@ -71,27 +128,12 @@ export type ParsedInvocation = Readonly<{
   command: ParsedCommand;
 }>;
 
-export const COMMANDS: ReadonlySet<Command> = new Set([
-  "bind", "amend", "deliver", "review", "arc", "abandon", "status", "audit", "reconcile",
-]);
-type FlagKind = "boolean" | "value" | "repeat-value";
-type FlagSpecs = Readonly<Record<string, FlagKind>>;
-
-const FLAG_SPECS: Readonly<Record<Command, FlagSpecs>> = {
-  bind: { actor: "value", target: "value", here: "boolean", after: "repeat-value", gates: "value", json: "boolean" },
-  amend: { actor: "value", after: "repeat-value", "clear-after": "boolean", gates: "value", json: "boolean" },
-  deliver: { actor: "value", json: "boolean" },
-  review: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
-  arc: { actor: "value", json: "boolean" },
-  abandon: { actor: "value", note: "value", json: "boolean" },
-  status: { json: "boolean" },
-  audit: { "show-diff-body": "boolean", actor: "value", json: "boolean" },
-  reconcile: { json: "boolean" },
-};
-
 export class CliUsageError extends Error {
-  constructor(message: string) {
-    super(`${message}\nusage: keiyaku-v4 <command> [<contract>] [--flag ...] [-]`);
+  constructor(message: string, command?: Command) {
+    const usage = command === undefined
+      ? "keiyaku-v4 [-C <path>] <command> [<contract>|@<worktree>] [--flag ...] [-]"
+      : COMMAND_SPECS[command].usage;
+    super(`${message}\nusage: ${usage}`);
     this.name = "CliUsageError";
   }
 }
@@ -99,19 +141,6 @@ export class CliUsageError extends Error {
 function optionalFlag(flags: Readonly<Record<string, string | true | readonly string[]>>, name: string): string | undefined {
   const value = flags[name];
   return typeof value === "string" ? value : undefined;
-}
-
-function noContract(command: Command, positionals: readonly string[]): void {
-  if (positionals.length !== 0) throw new CliUsageError(`${command} accepts no contract`);
-}
-
-function optionalContract(command: Command, positionals: readonly string[]): string | undefined {
-  if (positionals.length > 1) throw new CliUsageError(`${command} accepts at most one contract`);
-  return positionals[0];
-}
-
-function acceptsStdin(command: Command): boolean {
-  return command === "bind" || command === "amend" || command === "review" || command === "arc";
 }
 
 type ParsedParts = Readonly<{
@@ -130,24 +159,25 @@ type ScanState = {
 };
 
 function scanStdin(command: Command, state: ScanState, index: number, length: number): void {
-  if (state.stdin || index !== length - 1 || !acceptsStdin(command)) {
-    throw new CliUsageError("stdin marker '-' is legal only as the final bind/amend/arc/review argument");
-  }
+  if (state.stdin) throw new CliUsageError("stdin marker '-' may appear only once", command);
+  if (index !== length - 1) throw new CliUsageError("stdin marker '-' must be the final argument", command);
+  if (COMMAND_SPECS[command].stdin === "none") throw new CliUsageError(`${command} reads no stdin`, command);
   state.stdin = true;
 }
 
 function scanOption(command: Command, argv: readonly string[], state: ScanState, index: number): number {
   const token = argv[index]!;
   const name = token.slice(2);
-  const kind = FLAG_SPECS[command][name];
-  if (kind === undefined) throw new CliUsageError(`option ${token} is not valid for ${command}`);
-  if (state.flags[name] !== undefined && kind !== "repeat-value") throw new CliUsageError(`duplicate option: ${token}`);
+  const spec: CommandSpec = COMMAND_SPECS[command];
+  const kind = spec.flags[name];
+  if (kind === undefined) throw new CliUsageError(`option ${token} is not valid for ${command}`, command);
+  if (state.flags[name] !== undefined && kind !== "repeat-value") throw new CliUsageError(`duplicate option: ${token}`, command);
   if (kind === "boolean") {
     state.flags[name] = true;
     return index;
   }
   const value = argv[index + 1];
-  if (value === undefined || value === "-" || value.startsWith("--")) throw new CliUsageError(`${token} requires a value`);
+  if (value === undefined || value === "-" || value.startsWith("--")) throw new CliUsageError(`${token} requires a value`, command);
   if (kind === "repeat-value") {
     const values = state.flags[name];
     state.flags[name] = [...(Array.isArray(values) ? values : values === undefined ? [] : [values]), value];
@@ -159,15 +189,16 @@ function scanOption(command: Command, argv: readonly string[], state: ScanState,
 
 function scanArgv(argv: readonly string[]): ParsedParts {
   const candidate = argv[0];
-  if (!candidate || !COMMANDS.has(candidate as Command)) {
+  if (!candidate || !Object.prototype.hasOwnProperty.call(COMMAND_SPECS, candidate)) {
     throw new CliUsageError(`unknown command: ${candidate ?? ""}`);
   }
   const command = candidate as Command;
+  const spec: CommandSpec = COMMAND_SPECS[command];
   const state: ScanState = { flags: {}, positionals: [], stdin: false };
 
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index]!;
-    if (token === "-C") throw new CliUsageError("-C is legal only as a global invocation prefix");
+    if (token === "-C") throw new CliUsageError("-C is legal only as a global invocation prefix", command);
     if (token === "-") {
       scanStdin(command, state, index, argv.length);
       continue;
@@ -179,14 +210,22 @@ function scanArgv(argv: readonly string[]): ParsedParts {
     state.positionals.push(token);
   }
 
+  if (spec.positional === "none" && state.positionals.length > 0) {
+    throw new CliUsageError(`${command} accepts no contract`, command);
+  }
+  if (spec.positional === "optional" && state.positionals.length > 1) {
+    throw new CliUsageError(`${command} accepts at most one contract`, command);
+  }
+  if (spec.stdin === "required" && !state.stdin) {
+    throw new CliUsageError(`${command} requires stdin`, command);
+  }
+
   const output = state.flags.json === true ? "json" as const : "text" as const;
   const actor = optionalFlag(state.flags, "actor");
   return { command, ...state, output, ...(actor === undefined ? {} : { actor }) };
 }
 
 function parseBind(parts: ParsedParts): ParsedBind {
-  if (!parts.stdin) throw new CliUsageError("bind requires ContractBody stdin");
-  noContract("bind", parts.positionals);
   const target = optionalFlag(parts.flags, "target");
   const after = parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
   const gates = optionalFlag(parts.flags, "gates");
@@ -202,10 +241,9 @@ function parseBind(parts: ParsedParts): ParsedBind {
 }
 
 function parseAmend(parts: ParsedParts): ParsedAmend {
-  if (!parts.stdin) throw new CliUsageError("amend requires ContractBody stdin");
-  const contract = optionalContract("amend", parts.positionals);
+  const contract = parts.positionals[0];
   const after = parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
-  if (parts.flags["clear-after"] === true && after.length > 0) throw new CliUsageError("--clear-after and --after are mutually exclusive");
+  if (parts.flags["clear-after"] === true && after.length > 0) throw new CliUsageError("--clear-after and --after are mutually exclusive", "amend");
   const gates = optionalFlag(parts.flags, "gates");
   return {
     command: "amend",
@@ -219,22 +257,24 @@ function parseAmend(parts: ParsedParts): ParsedAmend {
 }
 
 function parseDeliver(parts: ParsedParts): ParsedDeliver {
-  const contract = optionalContract("deliver", parts.positionals);
+  const contract = parts.positionals[0];
+  const message = optionalFlag(parts.flags, "message");
   return {
     command: "deliver",
     ...(contract === undefined ? {} : { contract }),
     ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+    ...(message === undefined ? {} : { message }),
     output: parts.output,
   };
 }
 
 function parseReview(parts: ParsedParts): ParsedReview {
   if (Number(parts.flags.satisfied === true) + Number(parts.flags.unsatisfied === true) !== 1) {
-    throw new CliUsageError("review requires exactly one verdict flag");
+    throw new CliUsageError("review requires exactly one verdict flag", "review");
   }
   const summary = optionalFlag(parts.flags, "summary");
-  if (parts.stdin && summary !== undefined) throw new CliUsageError("review stdin '-' and --summary are mutually exclusive");
-  const contract = optionalContract("review", parts.positionals);
+  if (parts.stdin && summary !== undefined) throw new CliUsageError("review stdin '-' and --summary are mutually exclusive", "review");
+  const contract = parts.positionals[0];
   return {
     command: "review",
     ...(contract === undefined ? {} : { contract }),
@@ -247,8 +287,7 @@ function parseReview(parts: ParsedParts): ParsedReview {
 }
 
 function parseArc(parts: ParsedParts): ParsedArc {
-  if (!parts.stdin) throw new CliUsageError("arc requires Arc stdin");
-  const contract = optionalContract("arc", parts.positionals);
+  const contract = parts.positionals[0];
   return {
     command: "arc",
     ...(contract === undefined ? {} : { contract }),
@@ -258,7 +297,7 @@ function parseArc(parts: ParsedParts): ParsedArc {
 }
 
 function parseAbandon(parts: ParsedParts): ParsedAbandon {
-  const contract = optionalContract("abandon", parts.positionals);
+  const contract = parts.positionals[0];
   const note = optionalFlag(parts.flags, "note");
   return {
     command: "abandon",
@@ -270,7 +309,7 @@ function parseAbandon(parts: ParsedParts): ParsedAbandon {
 }
 
 function parseStatus(parts: ParsedParts): ParsedStatus {
-  const contract = optionalContract("status", parts.positionals);
+  const contract = parts.positionals[0];
   return {
     command: "status",
     ...(contract === undefined ? {} : { contract }),
@@ -295,7 +334,7 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
     case "abandon": return parseAbandon(parts);
     case "status": return parseStatus(parts);
     case "audit": {
-      const contract = optionalContract("audit", parts.positionals);
+      const contract = parts.positionals[0];
       return {
         command: "audit",
         ...(contract === undefined ? {} : { contract }),
@@ -305,7 +344,7 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
       };
     }
     case "reconcile": {
-      const contract = optionalContract("reconcile", parts.positionals);
+      const contract = parts.positionals[0];
       return { command: "reconcile", ...(contract === undefined ? {} : { contract }), output: parts.output };
     }
   }

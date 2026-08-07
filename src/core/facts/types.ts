@@ -124,15 +124,12 @@ export type ArcData = Readonly<{
   brief: string;
 }>;
 
-export type AbandonData = Readonly<{
+export type AbandonedData = Readonly<{
+  finalHead: SnapshotId | null;
   note?: string;
 }>;
 
-export type AbandonedData = Readonly<{
-  finalHead: SnapshotId | null;
-}>;
-
-export type JournalEnvelope<Kind extends string, Data> = Readonly<{
+type JournalEnvelope<Kind extends string, Data> = Readonly<{
   v: 1;
   kind: Kind;
   contract: ContractId;
@@ -143,14 +140,13 @@ export type JournalEnvelope<Kind extends string, Data> = Readonly<{
 }>;
 
 export type BindEntry = JournalEnvelope<"bind", BindData>;
-export type AmendEntry = JournalEnvelope<"amend", AmendData>;
-export type BoundEntry = JournalEnvelope<"bound", BoundData>;
-export type DeliverEntry = JournalEnvelope<"deliver", DeliverData>;
+type AmendEntry = JournalEnvelope<"amend", AmendData>;
+type BoundEntry = JournalEnvelope<"bound", BoundData>;
+type DeliverEntry = JournalEnvelope<"deliver", DeliverData>;
 export type AttestationEntry = JournalEnvelope<"attestation", AttestationData>;
-export type ClaimedEntry = JournalEnvelope<"claimed", ClaimedData>;
+type ClaimedEntry = JournalEnvelope<"claimed", ClaimedData>;
 export type ArcEntry = JournalEnvelope<"arc", ArcData>;
-export type AbandonEntry = JournalEnvelope<"abandon", AbandonData>;
-export type AbandonedEntry = JournalEnvelope<"abandoned", AbandonedData>;
+type AbandonedEntry = JournalEnvelope<"abandoned", AbandonedData>;
 
 export type JournalEntry =
   | BindEntry
@@ -160,22 +156,20 @@ export type JournalEntry =
   | AttestationEntry
   | ClaimedEntry
   | ArcEntry
-  | AbandonEntry
   | AbandonedEntry;
 
 export type FactKind = JournalEntry["kind"];
 
-export type ContractTerminal = ClaimedEntry | AbandonedEntry;
+type ContractTerminal = ClaimedEntry | AbandonedEntry;
 
 export type ContractState = Readonly<{
   id: ContractId;
   head: ContractHead | null;
-  coordinates: ContractCoordinates | null;
-  terms: ContractTerms | null;
+  coordinates: ContractCoordinates;
+  terms: ContractTerms;
   bound: BoundEntry | null;
   delivery: DeliverEntry | null;
   attestations: readonly AttestationEntry[];
   currentArc?: ArcEntry;
-  abandon: AbandonEntry | null;
   terminal: ContractTerminal | null;
 }>;

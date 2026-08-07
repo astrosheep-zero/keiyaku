@@ -1,24 +1,17 @@
 import { readFileSync } from "node:fs";
-import { Keiyaku, Repo, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Outcome, type SnapshotId } from "../index.js";
+import { Repo, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Outcome, type SnapshotId } from "../index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromOutcome } from "./accepted.js";
-import { abandonFromCommand } from "./commands/abandon.js";
 import { amendFromCommand } from "./commands/amend.js";
-import { arcFromCommand } from "./commands/arc.js";
-import { auditFromCommand } from "./commands/audit.js";
 import { bindFromCommand } from "./commands/bind.js";
-import { deliverFromCommand } from "./commands/deliver.js";
-import { reconcileAllFromCommand, reconcileFromCommand } from "./commands/reconcile.js";
-import { reviewFromCommand } from "./commands/review.js";
-import { statusFromCommand } from "./commands/status.js";
 import { CliUsageError, type ParsedInvocation } from "./parse.js";
-import type { DiffUnavailable, InvocationResult } from "./result.js";
-import { contractIdentity, resolveExistingContract, resolveOptionalContract } from "./selectors.js";
+import type { AcceptedResult, DiffUnavailable, InvocationResult } from "./result.js";
+import { contractFromInput, resolveContextualContract, type SelectedContract } from "./selectors.js";
 import { selectedGates } from "./settings.js";
 
 export type { AcceptedFact, DiffUnavailable, InvocationResult, Lag } from "./result.js";
 
-export type InvokeRuntime = Readonly<{
+type InvokeRuntime = Readonly<{
   cwd?: string;
   environment?: NodeJS.ProcessEnv;
   readStdin?: () => string;
@@ -27,19 +20,9 @@ export type InvokeRuntime = Readonly<{
 type ParsedCommand = ParsedInvocation["command"];
 type ExistingCommand = Exclude<ParsedCommand, { command: "bind" | "status" | "reconcile" }>;
 type InvocationEdge = Readonly<{
-  coordinate?: string;
   environment: NodeJS.ProcessEnv;
   readStdin: () => string;
 }>;
-
-function inputValue<T>(read: () => T): T {
-  try {
-    return read();
-  } catch (error) {
-    if (error instanceof CliUsageError) throw error;
-    throw new CliUsageError(error instanceof Error ? error.message : String(error));
-  }
-}
 
 function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
   let resolved: ActorId | undefined;
@@ -55,19 +38,10 @@ function repoAt(coordinate: string | undefined): Repo {
   return coordinate === undefined ? Repo.at() : Repo.at({ path: coordinate });
 }
 
-function contractAt(id: ContractId, coordinate: string | undefined): KeiyakuContract {
-  return coordinate === undefined ? Keiyaku.of({ id }) : Keiyaku.of({ id, repo: coordinate });
-}
-
-async function statusAt(coordinate: string | undefined): Promise<Awaited<ReturnType<Repo["status"]>>> {
-  const repo = repoAt(coordinate);
-  return repo.status();
-}
-
-async function selectContract(selector: string | undefined, coordinate: string | undefined): Promise<ContractId> {
-  if (selector !== undefined && selector.startsWith("kei/")) return contractIdentity(selector);
-  const status = await statusAt(coordinate);
-  return resolveExistingContract(status, selector);
+async function selectContract(repo: Repo, selector: string | undefined): Promise<SelectedContract> {
+  if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector);
+  const id = resolveContextualContract(await repo.status(), selector);
+  return contractFromInput(repo, id);
 }
 
 async function resultForExisting<A>(
@@ -75,16 +49,20 @@ async function resultForExisting<A>(
   outcome: Outcome<A>,
   contract: KeiyakuContract,
   id: ContractId,
+  obligations: Pick<AcceptedResult, "verification" | "placement" | "leak"> = {},
 ): Promise<InvocationResult> {
-  return resultFromOutcome(verb, outcome, contract, id);
+  return resultFromOutcome(verb, outcome, { coordinate: id, reconcile: contract, obligations });
 }
 
-async function invokeBind(parsed: Extract<ParsedCommand, { command: "bind" }>, edge: InvocationEdge): Promise<InvocationResult> {
-  const markdown = inputValue(edge.readStdin);
-  const repo = repoAt(edge.coordinate);
+async function invokeBind(
+  parsed: Extract<ParsedCommand, { command: "bind" }>,
+  repo: Repo,
+  edge: InvocationEdge,
+): Promise<InvocationResult> {
+  const markdown = edge.readStdin();
   const gates = selectedGates(repo.root, parsed.gates);
-  const outcome = await bindFromCommand(parsed, markdown, edge.coordinate, gates, actorFromEdge(parsed.actor, edge.environment));
-  return resultFromOutcome("bind", outcome, outcome.kind === "accepted" ? outcome.value : null);
+  const outcome = await bindFromCommand(parsed, repo, markdown, gates, actorFromEdge(parsed.actor, edge.environment));
+  return resultFromOutcome("bind", outcome, outcome.kind === "accepted" ? { reconcile: outcome.value } : {});
 }
 
 function unavailableDiff(delivery: { snapshotId: SnapshotId; changeId: ChangeId }): DiffUnavailable {
@@ -95,87 +73,137 @@ function unavailableDiff(delivery: { snapshotId: SnapshotId; changeId: ChangeId 
   };
 }
 
-async function invokeExisting(parsed: ExistingCommand, edge: InvocationEdge): Promise<InvocationResult> {
-  const id = await selectContract(parsed.contract, edge.coordinate);
-  const contract = contractAt(id, edge.coordinate);
+type ExistingSeat = Readonly<{
+  contract: KeiyakuContract;
+  id: ContractId;
+  actor?: ActorId;
+}>;
+
+async function invokeDeliver(
+  parsed: Extract<ExistingCommand, { command: "deliver" }>,
+  seat: ExistingSeat,
+): Promise<InvocationResult> {
+  const outcome = await seat.contract.deliver({
+    ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+    ...(parsed.message === undefined ? {} : { message: parsed.message }),
+  });
+  const obligations = outcome.kind !== "accepted" ? {} : {
+    ...(outcome.value.verification === undefined ? {} : { verification: outcome.value.verification }),
+    ...(outcome.value.placement === undefined ? {} : { placement: outcome.value.placement }),
+    ...(outcome.value.leak === undefined ? {} : { leak: outcome.value.leak }),
+  };
+  return resultForExisting("deliver", outcome, seat.contract, seat.id, obligations);
+}
+
+async function invokeReview(
+  parsed: Extract<ExistingCommand, { command: "review" }>,
+  seat: ExistingSeat,
+  readStdin: () => string,
+): Promise<InvocationResult> {
+  const summary = parsed.summaryFromStdin === true ? readStdin() : parsed.summary;
+  const outcome = await seat.contract.review({
+    verdict: parsed.verdict,
+    ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+    ...(summary === undefined ? {} : { summary }),
+  });
+  const obligations = outcome.kind !== "accepted" || outcome.value.placement === undefined
+    ? {}
+    : { placement: outcome.value.placement };
+  return resultForExisting("review", outcome, seat.contract, seat.id, obligations);
+}
+
+async function invokeAudit(
+  parsed: Extract<ExistingCommand, { command: "audit" }>,
+  seat: ExistingSeat,
+): Promise<InvocationResult> {
+  const delivery = parsed.showDiffBody ? await seat.contract.delivery() : null;
+  const outcome = await seat.contract.audit(seat.actor === undefined ? {} : { actor: seat.actor });
+  let renderedDiff: string | DiffUnavailable | undefined;
+  if (parsed.showDiffBody && delivery !== null && outcome.kind === "accepted") {
+    const diff = await delivery.diff();
+    renderedDiff = diff === null ? unavailableDiff(delivery) : diff;
+  }
+  const result = outcome.kind === "accepted"
+    ? await resultFromOutcome("audit", outcome, { coordinate: seat.id, report: outcome.value })
+    : await resultFromOutcome("audit", outcome, { coordinate: seat.id });
+  return result.kind === "accepted" && renderedDiff !== undefined ? { ...result, diff: renderedDiff } : result;
+}
+
+async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: InvocationEdge): Promise<InvocationResult> {
+  const { id, contract } = await selectContract(repo, parsed.contract);
   const actor = actorFromEdge(parsed.actor, edge.environment);
+  const seat: ExistingSeat = { contract, id, ...(actor === undefined ? {} : { actor }) };
 
   switch (parsed.command) {
     case "amend": {
-      const markdown = inputValue(edge.readStdin);
+      const markdown = edge.readStdin();
       const gates = parsed.gates === undefined
         ? undefined
-        : selectedGates(repoAt(edge.coordinate).root, parsed.gates);
-      const outcome = await amendFromCommand(parsed, contract, markdown, gates, actor);
-      return resultFromOutcome("amend", outcome, contract, id);
+        : selectedGates(repo.root, parsed.gates);
+      const outcome = await amendFromCommand({ command: parsed, repo, contract, markdown, gates, ...(actor === undefined ? {} : { actor }) });
+      return resultFromOutcome("amend", outcome, { coordinate: id, reconcile: contract });
     }
     case "deliver":
-      return resultForExisting("deliver", await deliverFromCommand(parsed, contract, actor), contract, id);
-    case "review": {
-      const review = parsed.summaryFromStdin === true
-        ? { ...parsed, summary: inputValue(edge.readStdin) }
-        : parsed;
-      return resultForExisting("review", await reviewFromCommand(review, id, contract, actor), contract, id);
-    }
+      return invokeDeliver(parsed, seat);
+    case "review":
+      return invokeReview(parsed, seat, edge.readStdin);
     case "arc": {
-      const markdown = inputValue(edge.readStdin);
-      return resultForExisting("arc", await arcFromCommand(parsed, contract, markdown, actor), contract, id);
+      const markdown = edge.readStdin();
+      return resultForExisting("arc", await contract.arc({
+        markdown,
+        ...(actor === undefined ? {} : { actor }),
+      }), contract, id);
     }
     case "abandon":
-      return resultForExisting("abandon", await abandonFromCommand(parsed, contract, actor), contract, id);
-    case "audit": {
-      const delivery = parsed.showDiffBody ? await contract.delivery() : null;
-      const outcome = await auditFromCommand(parsed, contract, actor);
-      const diff = parsed.showDiffBody && delivery !== null && outcome.kind === "accepted"
-        ? await delivery.diff()
-        : undefined;
-      let renderedDiff: string | DiffUnavailable | undefined;
-      if (diff === null) {
-        if (delivery === null) throw new Error("delivery diff was returned without a delivery");
-        renderedDiff = unavailableDiff(delivery);
-      } else {
-        renderedDiff = diff;
-      }
-      if (outcome.kind === "accepted" && outcome.receipt.facts.length === 0) {
-        return {
-          kind: "observation",
-          command: "audit",
-          ...outcome.value,
-          ...(renderedDiff === undefined ? {} : { diff: renderedDiff }),
-        };
-      }
-      const result = outcome.kind === "accepted"
-        ? await resultFromOutcome("audit", outcome, contract, id, outcome.value)
-        : await resultForExisting("audit", outcome, contract, id);
-      return result.kind === "accepted" && renderedDiff !== undefined ? { ...result, diff: renderedDiff } : result;
-    }
+      return resultForExisting("abandon", await contract.abandon({
+        ...(actor === undefined ? {} : { actor }),
+        ...(parsed.note === undefined ? {} : { note: parsed.note }),
+      }), contract, id);
+    case "audit":
+      return invokeAudit(parsed, seat);
     default:
-      throw new TypeError("unhandled command");
+      return parsed satisfies never;
   }
 }
 
 export async function invoke(invocation: ParsedInvocation, runtime: InvokeRuntime = {}): Promise<InvocationResult> {
   const coordinate = invocation.cwd ?? runtime.cwd;
   const edge: InvocationEdge = {
-    ...(coordinate === undefined ? {} : { coordinate }),
     environment: runtime.environment ?? process.env,
     readStdin: runtime.readStdin ?? (() => readFileSync(0, "utf8")),
   };
   const parsed = invocation.command;
+  const repo = repoAt(coordinate);
 
   switch (parsed.command) {
     case "status": {
-      const status = await statusAt(edge.coordinate);
-      return statusFromCommand(status, parsed, resolveOptionalContract(status, parsed.contract));
+      if (parsed.contract !== undefined && !parsed.contract.startsWith("@")) {
+        const contract = contractFromInput(repo, parsed.contract).id;
+        return { kind: "observation", command: "status", ...await repo.status({ contract }) };
+      }
+      const status = await repo.status();
+      const contract = parsed.contract === undefined
+        ? undefined
+        : resolveContextualContract(status, parsed.contract);
+      return {
+        kind: "observation",
+        command: "status",
+        scope: status.scope,
+        contracts: contract === undefined
+          ? status.contracts
+          : status.contracts.filter((item) => item.contractId === contract),
+      };
     }
     case "reconcile": {
-      if (parsed.contract === undefined) return reconcileAllFromCommand(repoAt(edge.coordinate));
-      const id = await selectContract(parsed.contract, edge.coordinate);
-      return reconcileFromCommand(id, contractAt(id, edge.coordinate));
+      if (parsed.contract === undefined) {
+        return { kind: "observation", command: "reconcile", ...await repo.reconcile() };
+      }
+      const { contract } = await selectContract(repo, parsed.contract);
+      return { kind: "observation", command: "reconcile", ...await contract.reconcile() };
     }
     case "bind":
-      return invokeBind(parsed, edge);
+      return invokeBind(parsed, repo, edge);
     default:
-      return invokeExisting(parsed, edge);
+      return invokeExisting(parsed, repo, edge);
   }
 }

@@ -1,18 +1,42 @@
-import type { DecideInput, OfferDecision } from "../decide.js";
+import type { DecideInput, OfferDecision, StampedPreparation } from "../decide.js";
+import { activeContract, documentIsCurrent } from "../facts/observation.js";
 import type { ActorId, ContractId, DeliverData, JournalEntry } from "../facts/types.js";
-import { contractId, entryUlid } from "../facts/types.js";
-export type DeliverInput = Readonly<{ contractId: ContractId; actor?: ActorId; at: string; data: DeliverData }>;
-export type DeliverRefusal = Readonly<{ kind: "contract-missing" | "not-bound" | "terminal"; contractId: ContractId }>;
-export function decideDeliver({ input, attempt, observation }: DecideInput<DeliverInput>): OfferDecision<DeliverRefusal> {
-  const id = contractId(input.contractId); const current = observation.contracts.get(id);
-  if (!current?.state) return { kind: "refused", refusal: { kind: "contract-missing", contractId: id } };
-  if (!current.state.bound) return { kind: "refused", refusal: { kind: "not-bound", contractId: id } };
-  if (current.state.terminal) return { kind: "refused", refusal: { kind: "terminal", contractId: id } };
-  const data: DeliverData = {
-    expectedPredecessor: input.data.expectedPredecessor,
-    candidate: input.data.candidate,
-    deliveryPatchId: input.data.deliveryPatchId,
+
+export type DeliverInput<Failure = never> = Readonly<{
+  contractId: ContractId;
+  actor?: ActorId;
+  at: string;
+  preparation: StampedPreparation<DeliverData, Failure>;
+}>;
+
+export type DeliverRefusal = Readonly<{
+  kind: "contract-missing" | "not-bound" | "terminal" | "document-moved";
+  contractId: ContractId;
+}>;
+
+export function decideDeliver<Failure>({
+  input,
+  attempt,
+  observation,
+}: DecideInput<DeliverInput<Failure>>): OfferDecision<DeliverRefusal | Failure> {
+  const state = activeContract(observation, input.contractId);
+  if ("kind" in state) return { kind: "refused", refusal: state };
+  if (state.bound === null) return { kind: "refused", refusal: { kind: "not-bound", contractId: input.contractId } };
+  if (input.preparation.kind === "unavailable") {
+    throw new Error("existing contract requires a stamped delivery preparation");
+  }
+  if (!documentIsCurrent(state, input.preparation.document)) {
+    return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
+  }
+  if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
+  const deliver: JournalEntry = {
+    v: 1,
+    kind: "deliver",
+    contract: input.contractId,
+    entry: attempt.entryUlids[0]!,
+    at: input.at,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    data: input.preparation.data,
   };
-  const deliver: JournalEntry = { v: 1, kind: "deliver", contract: id, entry: entryUlid(attempt.entryUlids[0]!), at: input.at, ...(input.actor === undefined ? {} : { actor: input.actor }), data };
-  return { kind: "offer", offer: { facts: [{ contractId: id, expectedHead: current.state.head, entries: [deliver] }] } };
+  return { kind: "offer", offer: { facts: [{ contractId: input.contractId, expectedHead: state.head, entries: [deliver] }] } };
 }

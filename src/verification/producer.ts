@@ -1,101 +1,82 @@
-import { type ProcessExit, type ProcessOutcome, type ProcessSpawnError, type ProcessTimeout, runProcess } from "../runtime/proc/run.js";
-import type { AttestationData, VerificationDeclaration } from "../core/facts/types.js";
-import {
-  resolveVerificationPlan,
-  type VerificationPlanStep,
-} from "./plan.js";
+import { runProcess } from "../runtime/proc/run.js";
+import type { AttestationData } from "../core/facts/types.js";
+import type { VerificationDeclaration } from "./types.js";
 
 type VerificationVerdict = AttestationData["verdict"];
+const SUMMARY_BYTES = 32 * 1024;
 
-type VerificationExecution = Readonly<{
-  readonly step: VerificationPlanStep;
-  readonly outcome: ProcessOutcome;
-}>;
-
-type VerificationBase = Readonly<{
-  readonly plan: readonly VerificationPlanStep[];
-}>;
-
-export type VerificationTerminalOutcome = VerificationBase & Readonly<{
+export type VerificationTerminalOutcome = Readonly<{
   readonly kind: "terminal";
   readonly verdict: VerificationVerdict;
-  readonly summary: string;
-  readonly executions: readonly VerificationExecution[];
+  readonly summary?: string;
 }>;
 
-export type VerificationTimeoutOutcome = VerificationBase & Readonly<{
-  readonly kind: "timeout";
-  readonly execution: VerificationExecution & Readonly<{ readonly outcome: ProcessTimeout }>;
-}>;
-
-export type VerificationSpawnErrorOutcome = VerificationBase & Readonly<{
+export type VerificationNonterminalOutcome = Readonly<{
+  readonly kind: "timeout" | "unknown-exit";
+}> | Readonly<{
   readonly kind: "spawn-error";
-  readonly execution: VerificationExecution & Readonly<{ readonly outcome: ProcessSpawnError }>;
-}>;
-
-export type VerificationUnknownExitOutcome = VerificationBase & Readonly<{
-  readonly kind: "unknown-exit";
-  readonly execution: VerificationExecution & Readonly<{ readonly outcome: ProcessExit }>;
+  readonly diagnostic: string;
 }>;
 
 export type VerificationOutcome =
   | VerificationTerminalOutcome
-  | VerificationTimeoutOutcome
-  | VerificationSpawnErrorOutcome
-  | VerificationUnknownExitOutcome;
+  | VerificationNonterminalOutcome;
 
 export type ProduceVerificationInput = Readonly<{
-  readonly candidateTree: string;
   readonly declarations: readonly VerificationDeclaration[];
   readonly cwd: string;
   readonly timeoutMs: number;
-  readonly stdoutLimitBytes: number;
-  readonly stderrLimitBytes: number;
   readonly env?: NodeJS.ProcessEnv;
-  readonly signal?: AbortSignal;
 }>;
 
-function summary(verdict: VerificationVerdict): string {
-  return `verification ${verdict}`;
+function argvFor(declaration: VerificationDeclaration): readonly string[] {
+  const args = declaration.executor === "pwsh" ? ["-Command", declaration.script] : ["-c", declaration.script];
+  return [declaration.executor, ...args];
 }
 
-function terminal(
-  base: VerificationBase,
-  verdict: VerificationVerdict,
-  executions: readonly VerificationExecution[],
-): VerificationTerminalOutcome {
-  return { ...base, kind: "terminal", verdict, summary: summary(verdict), executions };
-}
-
-function candidateTree(value: string): string {
-  if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(value)) {
-    throw new TypeError("candidate tree must be a lowercase SHA-1 or SHA-256 object ID");
+function processDiagnostic(
+  declaration: VerificationDeclaration,
+  index: number,
+  outcome: Readonly<{ code: number; stdout: string; stderr: string; truncated: boolean }>,
+): string | null {
+  if (outcome.code === 0 && outcome.stdout.length === 0 && outcome.stderr.length === 0 && !outcome.truncated) {
+    return null;
   }
-  return value;
+  return [
+    `[${index + 1} ${declaration.executor} exit ${outcome.code}${outcome.truncated ? " output-truncated" : ""}]`,
+    ...(outcome.stdout.length === 0 ? [] : [`stdout:\n${outcome.stdout}`]),
+    ...(outcome.stderr.length === 0 ? [] : [`stderr:\n${outcome.stderr}`]),
+  ].join("\n");
+}
+
+function appendSummary(current: string | undefined, diagnostic: string | null): string | undefined {
+  if (diagnostic === null) return current;
+  const combined = Buffer.from(current === undefined ? diagnostic : `${current}\n\n${diagnostic}`);
+  if (combined.length <= SUMMARY_BYTES) return combined.toString("utf8");
+  const marker = Buffer.from("[earlier output truncated]\n");
+  let start = combined.length - (SUMMARY_BYTES - marker.length);
+  while (start < combined.length && (combined[start]! & 0xc0) === 0x80) start += 1;
+  return Buffer.concat([marker, combined.subarray(start)]).toString("utf8");
 }
 
 export async function produceVerification(input: ProduceVerificationInput): Promise<VerificationOutcome> {
-  candidateTree(input.candidateTree);
-  const plan = resolveVerificationPlan(input.declarations);
-  const base: VerificationBase = { plan };
-  const executions: VerificationExecution[] = [];
+  const deadline = performance.now() + input.timeoutMs;
   let verdict: VerificationVerdict = "satisfied";
-  for (const step of plan) {
+  let summary: string | undefined;
+  for (const [index, declaration] of input.declarations.entries()) {
+    const timeoutMs = deadline - performance.now();
+    if (timeoutMs <= 0) return { kind: "timeout" };
     const outcome = await runProcess({
-      argv: step.argv,
+      argv: argvFor(declaration),
       cwd: input.cwd,
-      timeoutMs: input.timeoutMs,
-      stdoutLimitBytes: input.stdoutLimitBytes,
-      stderrLimitBytes: input.stderrLimitBytes,
+      timeoutMs,
       ...(input.env === undefined ? {} : { env: input.env }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
-    const execution: VerificationExecution = { step, outcome };
-    executions.push(execution);
-    if (outcome.kind === "timeout") return { ...base, kind: "timeout", execution: execution as VerificationTimeoutOutcome["execution"] };
-    if (outcome.kind === "spawn-error") return { ...base, kind: "spawn-error", execution: execution as VerificationSpawnErrorOutcome["execution"] };
-    if (outcome.code === null) return { ...base, kind: "unknown-exit", execution: execution as VerificationUnknownExitOutcome["execution"] };
+    if (outcome.kind === "timeout") return { kind: "timeout" };
+    if (outcome.kind === "spawn-error") return { kind: "spawn-error", diagnostic: outcome.diagnostic };
+    if (outcome.kind === "unknown-exit") return { kind: "unknown-exit" };
     if (outcome.code !== 0) verdict = "unsatisfied";
+    summary = appendSummary(summary, processDiagnostic(declaration, index, outcome));
   }
-  return terminal(base, verdict, executions);
+  return { kind: "terminal", verdict, ...(summary === undefined ? {} : { summary }) };
 }

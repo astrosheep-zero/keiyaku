@@ -1,40 +1,36 @@
-import type { DecideInput, OfferDecision } from "../decide.js";
-import { subjectIsCurrent } from "../subject.js";
+import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
+import { activeContract } from "../facts/observation.js";
 import type { ActorId, AttestationData, ContractId, JournalEntry } from "../facts/types.js";
-import { contractId, entryUlid } from "../facts/types.js";
 
-export type AttestationInput = Readonly<{
+export type AttestationInput<Failure = never> = Readonly<{
   contractId: ContractId;
   actor?: ActorId;
   at: string;
-  data: AttestationData;
+  preparation?: Preparation<AttestationData, Failure>;
 }>;
 
 export type AttestationRefusal =
-  | Readonly<{ kind: "contract-missing" | "delivery-missing" | "terminal" | "gate-undeclared"; contractId: ContractId }>
-  | Readonly<{ kind: "stale-subject"; contractId: ContractId; subject: AttestationData["subject"] }>;
+  Readonly<{ kind: "contract-missing" | "terminal"; contractId: ContractId }>;
 
-/** Admit captured testimony only for the subject that remains current. */
-export function decideAttestation({ input, attempt, observation }: DecideInput<AttestationInput>): OfferDecision<AttestationRefusal> {
-  const id = contractId(input.contractId);
-  const current = observation.contracts.get(id);
-  if (!current?.state) return { kind: "refused", refusal: { kind: "contract-missing", contractId: id } };
-  if (current.state.terminal) return { kind: "refused", refusal: { kind: "terminal", contractId: id } };
-  if (!current.state.delivery) return { kind: "refused", refusal: { kind: "delivery-missing", contractId: id } };
-  if (current.state.terms === null || !current.state.terms.gates.includes(input.data.gate)) {
-    return { kind: "refused", refusal: { kind: "gate-undeclared", contractId: id } };
+export function decideAttestation<Failure>({
+  input,
+  attempt,
+  observation,
+}: DecideInput<AttestationInput<Failure>>): OfferDecision<AttestationRefusal | Failure> {
+  const state = activeContract(observation, input.contractId);
+  if ("kind" in state) return { kind: "refused", refusal: state };
+  if (input.preparation === undefined) {
+    throw new Error("active contract requires an attestation preparation");
   }
-  if (!subjectIsCurrent(current.state, input.data.subject)) {
-    return { kind: "refused", refusal: { kind: "stale-subject", contractId: id, subject: input.data.subject } };
-  }
+  if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
   const attestation: JournalEntry = {
     v: 1,
     kind: "attestation",
-    contract: id,
-    entry: entryUlid(attempt.entryUlids[0]!),
+    contract: input.contractId,
+    entry: attempt.entryUlids[0]!,
     at: input.at,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
-    data: input.data,
+    data: input.preparation.data,
   };
-  return { kind: "offer", offer: { facts: [{ contractId: id, expectedHead: current.state.head, entries: [attestation] }] } };
+  return { kind: "offer", offer: { facts: [{ contractId: input.contractId, expectedHead: state.head, entries: [attestation] }] } };
 }

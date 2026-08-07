@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ContractId, StatusReport } from "../src/index.js";
-import { resolveExistingContract } from "../src/cli/selectors.js";
+import { resolveContextualContract } from "../src/cli/selectors.js";
 import { CliUsageError } from "../src/cli/parse.js";
 
 const active = "kei/active-contract" as ContractId;
@@ -14,18 +14,18 @@ function status(scope = "/repo/.keiyaku-v4/worktrees/active-contract"): StatusRe
       {
         contractId: active,
         phase: "bound",
-        terminal: null,
         workspace: "worktree",
         worktreePath: "/repo/.keiyaku-v4/worktrees/active-contract",
         target: "refs/heads/main",
+        verification: null,
       },
       {
         contractId: here,
         phase: "bound",
-        terminal: null,
         workspace: "here",
         worktreePath: null,
         target: "refs/heads/main",
+        verification: null,
       },
     ],
   };
@@ -33,17 +33,29 @@ function status(scope = "/repo/.keiyaku-v4/worktrees/active-contract"): StatusRe
 
 test("selectors resolve active worktrees from public status rows", () => {
   const report = status();
-  assert.equal(resolveExistingContract(report, "@active-contract"), active);
-  assert.equal(resolveExistingContract(report, undefined), active);
+  assert.equal(resolveContextualContract(report, "@active-contract"), active);
+  assert.equal(resolveContextualContract(report, undefined), active);
 });
 
 test("omitted selectors require an exact public scope and exclude here workspaces", () => {
   assert.throws(
-    () => resolveExistingContract(status("/repo/.keiyaku-v4/worktrees/active-contract/subdirectory"), undefined),
+    () => resolveContextualContract(status("/repo/.keiyaku-v4/worktrees/active-contract/subdirectory"), undefined),
     CliUsageError,
   );
   assert.throws(
-    () => resolveExistingContract({ ...status(), scope: "/repo" }, undefined),
+    () => resolveContextualContract({ ...status(), scope: "/repo" }, undefined),
     CliUsageError,
   );
+});
+
+test("selectors exclude claimed and abandoned rows from active candidates", () => {
+  for (const phase of ["claimed", "abandoned"] as const) {
+    const base = status();
+    const report = {
+      ...base,
+      contracts: [{ ...base.contracts[0]!, phase }],
+    } satisfies StatusReport;
+    assert.throws(() => resolveContextualContract(report, "@active-contract"), CliUsageError);
+    assert.throws(() => resolveContextualContract(report, undefined), CliUsageError);
+  }
 });

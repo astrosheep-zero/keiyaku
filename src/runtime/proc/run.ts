@@ -1,86 +1,65 @@
 import { spawn } from "node:child_process";
 
 const TERMINATION_GRACE_MS = 250;
+const STREAM_TAIL_BYTES = 16 * 1024;
 
-export type ProcessInput = Readonly<{
+type ProcessInput = Readonly<{
   readonly argv: readonly string[];
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly timeoutMs: number;
-  readonly stdoutLimitBytes: number;
-  readonly stderrLimitBytes: number;
-  readonly signal?: AbortSignal;
 }>;
 
-type ProcessOutput = Readonly<{
-  readonly stdout: Buffer;
-  readonly stderr: Buffer;
-  readonly stdoutTruncated: boolean;
-  readonly stderrTruncated: boolean;
-  readonly durationMs: number;
+type ProcessTerminal = Readonly<{
+  readonly kind: "terminal";
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly truncated: boolean;
 }>;
 
-export type ProcessExit = ProcessOutput & Readonly<{
-  readonly kind: "exit";
-  readonly code: number | null;
-  readonly signal: NodeJS.Signals | null;
-}>;
-
-export type ProcessTimeout = ProcessOutput & Readonly<{
+type ProcessTimeout = Readonly<{
   readonly kind: "timeout";
-  readonly reason: "timeout" | "cancelled";
 }>;
 
-export type ProcessSpawnError = ProcessOutput & Readonly<{
+type ProcessSpawnError = Readonly<{
   readonly kind: "spawn-error";
-  readonly error: Error;
+  readonly diagnostic: string;
 }>;
 
-export type ProcessOutcome = ProcessExit | ProcessTimeout | ProcessSpawnError;
+type ProcessUnknownExit = Readonly<{
+  readonly kind: "unknown-exit";
+}>;
 
-class BoundedOutput {
-  readonly #chunks: Buffer[] = [];
-  readonly #limit: number;
-  #size = 0;
-  #truncated = false;
+type ProcessOutcome = ProcessTerminal | ProcessTimeout | ProcessSpawnError | ProcessUnknownExit;
 
-  constructor(limit: number) {
-    this.#limit = limit;
-  }
-
-  append(chunk: Uint8Array): void {
-    const available = this.#limit - this.#size;
-    if (available <= 0) {
-      if (chunk.byteLength > 0) this.#truncated = true;
-      return;
-    }
-    const captured = Buffer.from(chunk.subarray(0, available));
-    this.#chunks.push(captured);
-    this.#size += captured.byteLength;
-    if (captured.byteLength < chunk.byteLength) this.#truncated = true;
-  }
-
-  get bytes(): Buffer {
-    return Buffer.concat(this.#chunks, this.#size);
-  }
-
-  get truncated(): boolean {
-    return this.#truncated;
-  }
-}
-
-function validateInput(input: ProcessInput): void {
-  if (input.argv.length === 0 || input.argv.some((part) => typeof part !== "string" || part.length === 0)) {
-    throw new TypeError("argv must contain a non-empty executable and arguments");
-  }
-  if (input.cwd !== undefined && typeof input.cwd !== "string") throw new TypeError("cwd must be a string");
-  for (const [name, value] of [
-    ["timeoutMs", input.timeoutMs],
-    ["stdoutLimitBytes", input.stdoutLimitBytes],
-    ["stderrLimitBytes", input.stderrLimitBytes],
-  ] as const) {
-    if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`${name} must be a non-negative safe integer`);
-  }
+function tailCapture(limit: number) {
+  const bytes = Buffer.allocUnsafe(limit);
+  let total = 0;
+  let cursor = 0;
+  return {
+    append(chunk: Buffer): void {
+      if (chunk.length >= limit) {
+        chunk.copy(bytes, 0, chunk.length - limit);
+        total += chunk.length;
+        cursor = 0;
+        return;
+      }
+      const first = Math.min(chunk.length, limit - cursor);
+      chunk.copy(bytes, cursor, 0, first);
+      if (first < chunk.length) chunk.copy(bytes, 0, first);
+      total += chunk.length;
+      cursor = (cursor + chunk.length) % limit;
+    },
+    result(): Readonly<{ text: string; truncated: boolean }> {
+      const size = Math.min(total, limit);
+      const start = total > limit ? cursor : 0;
+      const value = start === 0
+        ? bytes.subarray(0, size)
+        : Buffer.concat([bytes.subarray(start), bytes.subarray(0, start)]);
+      return { text: value.toString("utf8"), truncated: total > limit };
+    },
+  };
 }
 
 function wait(milliseconds: number): Promise<void> {
@@ -123,19 +102,6 @@ async function terminateProcessTree(pid: number | undefined): Promise<void> {
 }
 
 export async function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
-  validateInput(input);
-  const startedAt = performance.now();
-  const stdout = new BoundedOutput(input.stdoutLimitBytes);
-  const stderr = new BoundedOutput(input.stderrLimitBytes);
-  const output = (): ProcessOutput => ({
-    stdout: stdout.bytes,
-    stderr: stderr.bytes,
-    stdoutTruncated: stdout.truncated,
-    stderrTruncated: stderr.truncated,
-    durationMs: Math.round(performance.now() - startedAt),
-  });
-  if (input.signal?.aborted) return { kind: "timeout", reason: "cancelled", ...output() };
-
   const child = spawn(input.argv[0]!, input.argv.slice(1), {
     cwd: input.cwd,
     env: input.env,
@@ -143,33 +109,40 @@ export async function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
-  child.stdout?.on("data", (chunk: Uint8Array) => stdout.append(chunk));
-  child.stderr?.on("data", (chunk: Uint8Array) => stderr.append(chunk));
+  const stdout = tailCapture(STREAM_TAIL_BYTES);
+  const stderr = tailCapture(STREAM_TAIL_BYTES);
+  child.stdout.on("data", (chunk: Buffer) => stdout.append(chunk));
+  child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
 
-  let stopReason: ProcessTimeout["reason"] | undefined;
+  let timedOut = false;
   let termination: Promise<void> | undefined;
-  const requestStop = (reason: ProcessTimeout["reason"]): void => {
-    if (stopReason !== undefined) return;
-    stopReason = reason;
+  const requestStop = (): void => {
+    if (timedOut) return;
+    timedOut = true;
     termination = terminateProcessTree(child.pid);
   };
-  const onAbort = (): void => requestStop("cancelled");
-  input.signal?.addEventListener("abort", onAbort, { once: true });
-  if (input.signal?.aborted) requestStop("cancelled");
-  const timeout = setTimeout(() => requestStop("timeout"), input.timeoutMs);
+  const timeout = setTimeout(requestStop, input.timeoutMs);
 
   const terminal = await new Promise<
-    | Readonly<{ readonly kind: "closed"; readonly code: number | null; readonly signal: NodeJS.Signals | null }>
+    | Readonly<{ readonly kind: "closed"; readonly code: number | null }>
     | Readonly<{ readonly kind: "spawn-error"; readonly error: Error }>
   >((resolve) => {
-    child.once("close", (code, signal) => resolve({ kind: "closed", code, signal }));
+    child.once("close", (code) => resolve({ kind: "closed", code }));
     child.once("error", (error) => resolve({ kind: "spawn-error", error }));
   });
   clearTimeout(timeout);
-  input.signal?.removeEventListener("abort", onAbort);
   await termination;
 
-  if (terminal.kind === "spawn-error") return { kind: "spawn-error", error: terminal.error, ...output() };
-  if (stopReason !== undefined) return { kind: "timeout", reason: stopReason, ...output() };
-  return { kind: "exit", code: terminal.code, signal: terminal.signal, ...output() };
+  if (terminal.kind === "spawn-error") return { kind: "spawn-error", diagnostic: terminal.error.message };
+  if (timedOut) return { kind: "timeout" };
+  if (terminal.code === null) return { kind: "unknown-exit" };
+  const capturedStdout = stdout.result();
+  const capturedStderr = stderr.result();
+  return {
+    kind: "terminal",
+    code: terminal.code,
+    stdout: capturedStdout.text,
+    stderr: capturedStderr.text,
+    truncated: capturedStdout.truncated || capturedStderr.truncated,
+  };
 }

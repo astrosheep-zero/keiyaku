@@ -43,7 +43,7 @@ workflow. Every dispatch uses `-C` (or `--cwd`) for the v4 repository, uses
 `--bare`, and has an explicit bounded brief:
 
 ```bash
-keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 call worker-default \
+keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 call worker \
   --bare --detach --alias <alias> - <<'EOF'
 <bounded implementation brief, exact files, tests, and forbidden scope>
 EOF
@@ -72,7 +72,7 @@ when reviewing the returned diff.
 
 Use the roles deliberately:
 
-- `worker-default`: implementation or focused repository investigation.
+- `worker`: implementation or focused repository investigation.
 - `review-akuma` or `expert-review-akuma`: independent candidate review with
   concrete findings and file references; review does not silently become an
   implementation lane.

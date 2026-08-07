@@ -2,7 +2,7 @@ import type { ActorId } from "../index.js";
 
 const PROJECTION_ID_ENV = "KEIYAKU_PROJECTION_ID";
 
-export type ActorResolutionInput = Readonly<{
+type ActorResolutionInput = Readonly<{
   env?: Readonly<Record<string, string | undefined>>;
   actor?: string;
 }>;

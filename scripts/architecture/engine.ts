@@ -57,7 +57,8 @@ type Capability =
   | "process-environment"
   | "process-output"
   | "process-pid"
-  | "require";
+  | "require"
+  | "type-error-construction";
 
 type ImportedSymbols = Readonly<{
   runtime: readonly string[];
@@ -266,6 +267,7 @@ function constructedCapability(node: ts.NewExpression): Capability | null {
   if (!ts.isIdentifier(node.expression)) return null;
   if (node.expression.text === "Date" && (node.arguments?.length ?? 0) === 0) return "new-date-current";
   if (node.expression.text === "Function") return "function-constructor";
+  if (node.expression.text === "TypeError") return "type-error-construction";
   return null;
 }
 
@@ -445,19 +447,17 @@ function verbOwnerDiagnostic(unit: ParsedSource, policy: ArchitecturePolicy): Di
   const name = path.posix.basename(unit.path, ".ts");
   const expected = `decide${name[0]!.toUpperCase()}${name.slice(1)}`;
   const runtimeExports = unit.declarations.filter((declaration) => declaration.exported && declaration.runtime);
-  const decision = runtimeExports[0];
-  const valid = runtimeExports.length === 1
-    && unit.runtimeReExports.length === 0
-    && decision?.name === expected
-    && decision.function
-    && !decision.async;
-  if (valid) return null;
+  const decision = runtimeExports.find((declaration) => declaration.name === expected);
+  const invalidExport = runtimeExports.find((declaration) => !declaration.function || declaration.async);
+  const reExport = unit.runtimeReExports[0];
+  if (reExport === undefined && decision?.function === true && !decision.async && invalidExport === undefined) return null;
+  const location = reExport ?? invalidExport ?? decision ?? runtimeExports[0];
   return {
     rule: "architecture/verb-owner",
     file: unit.path,
-    line: unit.runtimeReExports[0]?.line ?? decision?.line ?? 1,
-    column: unit.runtimeReExports[0]?.column ?? decision?.column ?? 1,
-    detail: `verb owner must expose exactly one runtime export: non-async ${expected}`,
+    line: location?.line ?? 1,
+    column: location?.column ?? 1,
+    detail: `verb owner must expose non-async ${expected}; other runtime exports must be non-async functions`,
   };
 }
 

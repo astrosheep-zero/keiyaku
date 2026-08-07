@@ -1,13 +1,42 @@
-import type { ContractId, ContractState, JournalEntry, SnapshotId } from "./types.js";
+import type { ContractId, ContractState, DocumentKey } from "./types.js";
 
-export type ContractObservation = Readonly<{
-  id: ContractId;
-  entries: readonly JournalEntry[];
-  state: ContractState | null;
+/** The complete state projection consumed by one pure pact decision. */
+export type ContractsObservation = ReadonlyMap<ContractId, ContractState | null>;
+
+/** Read one requested identity; a missing key violates the observation contract. */
+export function contractState(
+  observation: ContractsObservation,
+  contract: ContractId,
+): ContractState | null {
+  const state = observation.get(contract);
+  if (state === undefined) {
+    throw new Error(`missing contract decision observation: ${contract}`);
+  }
+  if (state !== null && state.id !== contract) {
+    throw new Error(`contract state identity disagrees with decision map: ${contract}`);
+  }
+  return state;
+}
+
+export type ActiveContractRefusal = Readonly<{
+  kind: "contract-missing" | "terminal";
+  contractId: ContractId;
 }>;
 
-/** A carrier captures all observations in this value from one immutable snapshot. */
-export type ContractsObservation = Readonly<{
-  carrierSnapshot: SnapshotId | null;
-  contracts: ReadonlyMap<ContractId, ContractObservation>;
-}>;
+/** The single lifecycle guard shared by every operation on an existing contract. */
+export function activeContract(
+  observation: ContractsObservation,
+  contract: ContractId,
+): ContractState | ActiveContractRefusal {
+  const state = contractState(observation, contract);
+  if (state === null) return { kind: "contract-missing", contractId: contract };
+  if (state.terminal) return { kind: "terminal", contractId: contract };
+  return state;
+}
+
+export function documentIsCurrent(
+  state: ContractState,
+  document: DocumentKey,
+): boolean {
+  return state.terms.document.key === document;
+}

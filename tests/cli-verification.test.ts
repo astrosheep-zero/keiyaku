@@ -6,7 +6,8 @@ import { observeContract } from "../src/carrier/observe.js";
 import { repositoryAt } from "../src/carrier/repository.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { makeGitRepository } from "./support/git.js";
+import { renderText } from "../src/cli/render/text.js";
+import { makeGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithCandidate() {
   const raw = makeGitRepository();
@@ -47,7 +48,7 @@ function document(script?: string): string {
   ].join("\n");
 }
 
-async function bindAndDeliver(script?: string, gates: readonly string[] = []) {
+async function bindAndDeliver(script?: string, gates: readonly string[] = ["verified"]) {
   const setup = repositoryWithCandidate();
   mkdirSync(resolve(setup.raw.path, ".keiyaku"), { recursive: true });
   writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: gates } }));
@@ -73,7 +74,19 @@ test("deliver adapts a passing Verification through the package-root operation",
   if (result.kind !== "accepted") return;
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
   assert.equal(observeContract(repository, id).state?.terminal?.kind, "claimed");
-  assert.equal(raw.run(["rev-parse", "refs/heads/main"]).trim(), candidate);
+  assert.notEqual(raw.run(["rev-parse", "refs/heads/main"]).trim(), candidate);
+});
+
+test("Verification produces an attestation without becoming a placement gate", async () => {
+  const { repository, id, result } = await bindAndDeliver("exit 1", []);
+  assert.equal(result.kind, "accepted");
+  if (result.kind !== "accepted") return;
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  const state = observeContract(repository, id).state;
+  assert.deepEqual(state?.terms?.gates, []);
+  assert.equal(state?.attestations.at(-1)?.data.gate, "verified");
+  assert.equal(state?.attestations.at(-1)?.data.verdict, "unsatisfied");
+  assert.equal(state?.terminal?.kind, "claimed");
 });
 
 test("deliver adapts a failing Verification without a private producer injection", async () => {
@@ -85,13 +98,13 @@ test("deliver adapts a failing Verification without a private producer injection
   assert.equal(observeContract(repository, id).state?.attestations.at(-1)?.data.verdict, "unsatisfied");
 });
 
-test("deliver verifies the admitted candidate rather than dirty --here bytes and cleans up", async () => {
+test("dirty --here delivery materializes the verified candidate without mutating the index", async () => {
   const setup = repositoryWithCandidate();
   writeFileSync(resolve(setup.raw.path, "candidate.txt"), "failing\n");
   setup.raw.run(["add", "candidate.txt"]);
   setup.raw.run(["commit", "--quiet", "-m", "failing candidate"]);
   mkdirSync(resolve(setup.raw.path, ".keiyaku"), { recursive: true });
-  writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: [] } }));
+  writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: ["verified"] } }));
 
   const bound = await invoke(parseArgv([
     "bind", "--target", "refs/heads/main", "--here", "--actor", "external-test", "-",
@@ -105,19 +118,30 @@ test("deliver verifies the admitted candidate rather than dirty --here bytes and
 
   writeFileSync(resolve(setup.raw.path, "candidate.txt"), "passing\n");
   const worktreesBefore = setup.raw.run(["worktree", "list", "--porcelain"]);
-  const result = await invoke(parseArgv(["deliver", bound.contract, "--actor", "external-test"]), {
+  const indexBefore = setup.raw.run(["diff", "--cached", "--binary"]);
+  const result = await invoke(parseArgv([
+    "deliver", bound.contract, "--actor", "external-test", "--message", "Verified dirty candidate",
+  ]), {
     cwd: setup.raw.path,
     environment: {},
   });
 
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation"]);
-  assert.equal(observeContract(setup.repository, bound.contract).state?.attestations.at(-1)?.data.verdict, "unsatisfied");
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
+  const state = observeContract(setup.repository, bound.contract).state;
+  assert.equal(state?.attestations.at(-1)?.data.verdict, "satisfied");
+  assert.notEqual(state?.delivery?.data.candidate, setup.raw.run(["rev-parse", "HEAD"]).trim());
+  assert.equal(setup.raw.run(["show", `${state?.delivery?.data.candidate}:candidate.txt`]), "passing\n");
+  assert.equal(
+    setup.raw.run(["show", "-s", "--format=%B", state?.delivery?.data.candidate ?? "HEAD"]),
+    `Verified dirty candidate\n\nKeiyaku-Contract: ${bound.contract}\n\n`,
+  );
+  assert.equal(setup.raw.run(["diff", "--cached", "--binary"]), indexBefore);
   assert.equal(setup.raw.run(["worktree", "list", "--porcelain"]), worktreesBefore);
 });
 
-test("audit classifies its public receipt as accepted when it admits a verified attestation", async () => {
+test("audit stays accepted when it admits a verified attestation", async () => {
   const pending = await bindAndDeliver("exit 1");
   const audit = await invoke(parseArgv(["audit", pending.id, "--show-diff-body", "--actor", "audit-user"]), {
     cwd: pending.raw.path,
@@ -131,27 +155,68 @@ test("audit classifies its public receipt as accepted when it admits a verified 
   assert.equal(observeContract(pending.repository, pending.id).state?.attestations.at(-1)?.actor, "audit-user");
 });
 
-test("audit renders a pure read as an observation with its public report and optional diff", async () => {
-  const complete = await bindAndDeliver("exit 0");
+test("audit renders a pure read as accepted with its public report and optional diff", async () => {
+  const complete = await bindAndDeliver(undefined, []);
   const plain = await invoke(parseArgv(["audit", complete.id]), {
     cwd: complete.raw.path,
     environment: {},
   });
-  assert.equal(plain.kind, "observation");
-  if (plain.kind !== "observation") return;
-  assert.equal(plain.attempt, undefined);
-  assert.equal(plain.reworks, 1);
+  assert.equal(plain.kind, "accepted");
+  if (plain.kind !== "accepted") return;
+  assert.equal(plain.report?.attempt, undefined);
+  assert.equal(plain.report?.reworks, 1);
   assert.equal("diff" in plain, false);
 
   const detailed = await invoke(parseArgv(["audit", complete.id, "--show-diff-body"]), {
     cwd: complete.raw.path,
     environment: {},
   });
-  assert.equal(detailed.kind, "observation");
-  if (detailed.kind !== "observation") return;
-  assert.equal(detailed.attempt, undefined);
-  assert.equal(detailed.reworks, 1);
+  assert.equal(detailed.kind, "accepted");
+  if (detailed.kind !== "accepted") return;
+  assert.equal(detailed.report?.attempt, undefined);
+  assert.equal(detailed.report?.reworks, 1);
   assert.equal("diff" in detailed, true);
+});
+
+test("audit renders transient Verification cleanup leaks after accepted and observation paths", async () => {
+  const accepted = await bindAndDeliver("exit 1");
+  const cleanupFailure = [
+    "if [ \"$1\" = \"worktree\" ] && [ \"$2\" = \"remove\" ]; then",
+    "  printf 'forced verification cleanup failure\\n' >&2",
+    "  exit 17",
+    "fi",
+    "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+  ].join("\n");
+  const acceptedAudit = await withGitShim(cleanupFailure, {}, () => invoke(parseArgv(["audit", accepted.id]), {
+    cwd: accepted.raw.path,
+    environment: {},
+  }));
+
+  assert.equal(acceptedAudit.kind, "accepted");
+  if (acceptedAudit.kind !== "accepted") return;
+  assert.deepEqual(acceptedAudit.facts.map((fact) => fact.kind), ["attestation"]);
+  assert.match(acceptedAudit.report?.leak?.diagnostic ?? "", /forced verification cleanup failure/);
+  assert.equal(renderText(acceptedAudit).split("\n").includes(
+    `leak worktree ${acceptedAudit.report!.leak!.path} ${acceptedAudit.report!.leak!.diagnostic.trimEnd()}`,
+  ), true);
+  accepted.raw.run(["worktree", "remove", "--force", acceptedAudit.report!.leak!.path]);
+
+  const observed = await bindAndDeliver("kill -TERM $$");
+  const observationAudit = await withGitShim(cleanupFailure, {}, () => invoke(parseArgv(["audit", observed.id]), {
+    cwd: observed.raw.path,
+    environment: {},
+  }));
+
+  assert.equal(observationAudit.kind, "accepted");
+  if (observationAudit.kind !== "accepted") return;
+  assert.deepEqual(observationAudit.report?.attempt, { failure: "unknown-exit" });
+  const leak = observationAudit.report?.leak;
+  assert.match(leak?.diagnostic ?? "", /forced verification cleanup failure/);
+  assert.match(renderText(observationAudit), /"failure":"unknown-exit"/);
+  assert.equal(renderText(observationAudit).split("\n").includes(
+    `leak worktree ${leak!.path} ${leak!.diagnostic.trimEnd()}`,
+  ), true);
+  observed.raw.run(["worktree", "remove", "--force", leak!.path]);
 });
 
 test("audit renders a missing contract as a typed refusal", async () => {

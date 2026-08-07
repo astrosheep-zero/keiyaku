@@ -30,6 +30,14 @@ decisions and carrier observation/admission. Execution-side producers consume
 the shared process runtime without making either part of pact. Core knows no
 Markdown grammar, section name, or producer-specific declaration.
 
+A core `ContractsObservation` carries only the contract map that pure decisions
+actually read: every requested identity maps to its folded `ContractState` or
+to explicit `null` absence. A missing map key is a broken observation invariant,
+not another spelling of contract absence. Raw journal entries belong to the
+carrier/protocol observation used for audit and unknown-admission recovery; they
+do not enter the pact decision projection. Carrier snapshot identity and
+physical provenance likewise remain carrier concerns.
+
 `SnapshotId` names a work snapshot and `ChangeId` names patch content. Carrier
 mints both and is the sole physical Git object-ID validator; pact validates only
 their opaque nonblank values. Every tender has both identities. A producer or
@@ -112,6 +120,9 @@ type JournalEnvelope<Kind extends string, Data> = Readonly<{
 `BindData` is immutable `ContractCoordinates` plus revision-zero
 `ContractTerms`. `AmendData` is a complete replacement `ContractTerms` and
 never changes coordinates. Revision identity is the journal-entry coordinate.
+When present, `ContractCoordinates.target` is the canonical full
+`refs/heads/...` ref produced at the public library boundary; target validation
+and rejection are owned by [public-api.md](public-api.md).
 The edge library supplies the opaque whole-document bytes and mints the whole
 document and ordered segment keys from its Markdown methodology. Core stores
 those bytes and keys with the machine terms `gates` and `after`; it knows none
@@ -153,6 +164,11 @@ type AbandonedData = Readonly<{
 }>
 ```
 
+`summary` is the attestation producer's bounded textual context. Human review
+uses caller-authored prose; Verification uses a bounded rendering of terminal
+process output. It remains part of the one attestation fact, not an evidence
+blob, log ref, artifact store, or second authority.
+
 `abandoned` is the one abandonment terminal fact. It captures the target head
 when one was observed and optional opaque `note`; it has no reason category,
 intent precursor, or reopen fact.
@@ -170,8 +186,8 @@ or the Akuma pillar's own records.
 type ContractState = Readonly<{
   id: ContractId
   head: ContractHead | null
-  coordinates: ContractCoordinates | null
-  terms: ContractTerms | null
+  coordinates: ContractCoordinates
+  terms: ContractTerms
   bound: BoundEntry | null
   delivery: DeliverEntry | null
   attestations: readonly AttestationEntry[]
@@ -185,6 +201,13 @@ contract head, coordinates, effective opaque terms, binding placement, current
 tender, attestation history, current arc, and terminal placement. Pending
 delivery is a read-model projection over this state.
 
+Contract absence has exactly one representation: its requested decision-map
+entry is `null`. A `ContractState` value proves that a bind-rooted journal was
+folded successfully, so its coordinates and terms are total. A
+fold implementation may use a private partial accumulator while validating the
+first entry, but that accumulator is not a `ContractState` and never crosses
+the core boundary.
+
 Gate, subject, and document identities are opaque pact values. Their lifecycle
 meaning, producer ownership, and sole currentness adjudicator are defined once
 in [lifecycle.md](lifecycle.md); their producer-specific Verification use is
@@ -195,7 +218,11 @@ The carrier checks `meta/format.json` on every nonempty carrier read. A
 contract's `ContractHead` is its journal blob identity, so unrelated carrier
 movement does not change that contract. The journal's canonical bytes and entry
 ULIDs identify accepted facts. A partial match of a multi-entry admission is
-corrupted authority.
+corrupted authority. Invalid canonical journal bytes, an impossible journal
+fold, a malformed carrier format, and a partial unknown-admission match throw
+the package-root `AuthorityCorruptionError`. This exception identifies durable
+authority that cannot be interpreted; it is not a programmer `TypeError`, a
+lifecycle refusal, or a retry classification.
 
 Persist a field only when a named invariant and reader require it. A field with
 no reader is another state surface rather than authority.

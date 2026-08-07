@@ -1,13 +1,16 @@
-import type { AuditReport, ChangeId, ContractId, Fact, SnapshotId } from "../index.js";
+import type {
+  AuditReport,
+  ChangeId,
+  ContractId,
+  Fact,
+  PlacementStop,
+  ReconcileReport,
+  RegionOverlap,
+  SnapshotId,
+  VerificationStop,
+} from "../index.js";
 
-export type Effect = Readonly<{
-  kind: "worktree" | "ref";
-  path?: string;
-  name?: string;
-  action: "created" | "updated" | "removed" | "unchanged";
-  before?: string | null;
-  after?: string | null;
-}>;
+export type Effect = ReconcileReport["effects"][number];
 
 export type AcceptedFact = Readonly<{
   contract: ContractId;
@@ -15,11 +18,7 @@ export type AcceptedFact = Readonly<{
   kind: Fact["kind"];
 }>;
 
-export type Lag = Readonly<{
-  kind: "reconcile";
-  contract: ContractId;
-  error: string;
-}>;
+export type Lag = ReconcileReport["lag"][number];
 
 export type DiffUnavailable = Readonly<{
   reason: "transport-unavailable";
@@ -34,6 +33,11 @@ export type AcceptedResult = Readonly<{
   head: string | null;
   facts: readonly AcceptedFact[];
   effects: readonly Effect[];
+  verification?: VerificationStop;
+  placement?: PlacementStop;
+  leak?: NonNullable<AuditReport["leak"]>;
+  overlaps?: readonly RegionOverlap[];
+  overlapFailure?: string;
   report?: AuditReport;
   diff?: string | DiffUnavailable;
   lag?: readonly Lag[];
@@ -42,14 +46,14 @@ export type AcceptedResult = Readonly<{
 export type RefusedResult = Readonly<{
   kind: "refused";
   verb: string;
-  contract: ContractId;
+  contract?: ContractId;
   refusal: unknown;
 }>;
 
 export type RetryResult = Readonly<{
   kind: "retry";
   verb: string;
-  contract: ContractId;
+  contract?: ContractId;
   detail: unknown;
 }>;
 

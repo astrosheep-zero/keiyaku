@@ -1,39 +1,57 @@
 import { decodeJournal } from "../core/facts/codec.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { foldJournal } from "../core/facts/fold.js";
 import {
   type ContractId,
+  type ContractState,
+  type JournalEntry,
   type SnapshotId,
 } from "../core/facts/types.js";
-import type { ContractObservation, ContractsObservation } from "../core/facts/observation.js";
+import type { ContractsObservation } from "../core/facts/observation.js";
 import { contractJournalPath, mintContractHead, mintSnapshotId } from "./identity.js";
-import { readBlob, readBlobs, readCarrier, runGit, type CarrierSnapshot, type GitRepository } from "./repository.js";
+import {
+  isKeiyakuOwnedRef,
+  extendCarrierPaths,
+  readBlobs,
+  readCarrier,
+  readCarrierPaths,
+  runGit,
+  type CarrierSnapshot,
+  type GitOid,
+  type GitRepository,
+} from "./repository.js";
 
-export type { ContractObservation, ContractsObservation } from "../core/facts/observation.js";
+type CarrierJournalRecord = Readonly<{
+  entries: readonly JournalEntry[];
+  state: ContractState | null;
+}>;
 
-export type BindCoordinatesObservation = Readonly<{ start: SnapshotId; target?: string }>;
+type CarrierObservation = Readonly<{
+  contracts: ReadonlyMap<ContractId, CarrierJournalRecord>;
+}>;
 
-export type BindCoordinatesObservationErrorCode =
-  | "explicit-target-missing"
-  | "malformed-structured-output";
+type FrozenCarrierObservation = Readonly<{
+  contracts: ReadonlyMap<ContractId, CarrierJournalRecord>;
+  frozenJournalBytes: ReadonlyMap<GitOid, Buffer>;
+}>;
 
-/** A bind-edge refusal caused by a structured Git coordinate observation. */
-export class BindCoordinatesObservationError extends TypeError {
-  readonly code: BindCoordinatesObservationErrorCode;
+export type CarrierAdmissionSnapshot = Readonly<{
+  snapshot: CarrierSnapshot;
+  frozenJournalBytes: ReadonlyMap<GitOid, Buffer>;
+}>;
 
-  constructor(code: BindCoordinatesObservationErrorCode, message: string) {
-    super(message);
-    this.name = "BindCoordinatesObservationError";
-    this.code = code;
-  }
-}
+export type CarrierDecisionObservation = Readonly<{
+  admission: CarrierAdmissionSnapshot;
+  decision: ContractsObservation;
+  journals: ReadonlyMap<ContractId, CarrierJournalRecord>;
+}>;
+
+type BindCoordinatesObservation = Readonly<{ start: SnapshotId; target?: string }>;
 
 const TARGET_COORDINATES_FORMAT = "%(refname)%00%(objectname)%00";
 
 function malformedBindCoordinatesOutput(): never {
-  throw new BindCoordinatesObservationError(
-    "malformed-structured-output",
-    "malformed structured Git output while observing bind coordinates",
-  );
+  throw new Error("malformed structured Git output while observing bind coordinates");
 }
 
 function structuredFields(output: Buffer, fieldCount: number): readonly string[] {
@@ -55,6 +73,10 @@ export function observeBindCoordinates(
     }
   }
 
+  if (isKeiyakuOwnedRef(requestedTarget)) {
+    throw new Error(`bind target names a Keiyaku-owned ref: ${requestedTarget}`);
+  }
+
   const output = runGit(repository, [
     "for-each-ref",
     `--format=${TARGET_COORDINATES_FORMAT}`,
@@ -62,10 +84,7 @@ export function observeBindCoordinates(
     requestedTarget,
   ]);
   if (output.length === 0) {
-    throw new BindCoordinatesObservationError(
-      "explicit-target-missing",
-      `bind target does not exist: ${requestedTarget}`,
-    );
+    throw new Error(`bind target does not exist: ${requestedTarget}`);
   }
   const [target, start] = structuredFields(output, 2);
   if (target !== requestedTarget || start === undefined) malformedBindCoordinatesOutput();
@@ -83,17 +102,15 @@ type DecodedJournal = Readonly<{
 }>;
 
 function decodeCarrierJournal(
-  repository: GitRepository,
   path: string,
   carrier: CarrierSnapshot,
+  bytes: Buffer,
   expectedId?: ContractId,
-  blobs?: ReadonlyMap<string, Buffer>,
 ): DecodedJournal {
   const journal = carrier.paths.get(path);
-  if (journal === undefined) throw new TypeError(`missing carrier journal: ${path}`);
-  if (journal.type !== "blob") throw new TypeError(`journal path is not a blob: ${path}`);
+  if (journal === undefined) throw new AuthorityCorruptionError(`missing carrier journal: ${path}`);
+  if (journal.type !== "blob") throw new AuthorityCorruptionError(`journal path is not a blob: ${path}`);
 
-  const bytes = blobs?.get(journal.oid) ?? readBlob(repository, journal.oid);
   const entries = decodeJournal(bytes.toString("utf8"));
   const first = entries[0];
   if (
@@ -102,51 +119,53 @@ function decodeCarrierJournal(
     || entries.some((entry) => entry.contract !== (expectedId ?? first.contract))
   ) {
     if (expectedId !== undefined) {
-      throw new TypeError(`journal content does not canonically identify ${expectedId}: ${path}`);
+      throw new AuthorityCorruptionError(`journal content does not canonically identify ${expectedId}: ${path}`);
     }
-    throw new TypeError(`journal content does not canonically identify ${path}`);
+    throw new AuthorityCorruptionError(`journal content does not canonically identify ${path}`);
   }
   const id = first.contract;
   if (contractJournalPath(id) !== path) {
-    throw new TypeError(`journal path does not match canonical contract identity: ${path}`);
+    throw new AuthorityCorruptionError(`journal path does not match canonical contract identity: ${path}`);
   }
   return { id, entries, oid: journal.oid };
 }
 
-function observeDecodedJournal(id: ContractId, decoded: DecodedJournal): ContractObservation {
+function observeDecodedJournal(id: ContractId, decoded: DecodedJournal): CarrierJournalRecord {
   return {
-    id,
     entries: decoded.entries,
     state: foldJournal(id, decoded.entries, mintContractHead(decoded.oid)),
   };
 }
 
 function observeFromCarrier(
-  repository: GitRepository,
   carrier: CarrierSnapshot,
   id: ContractId,
-  blobs?: ReadonlyMap<string, Buffer>,
-): ContractObservation {
+  blobs: ReadonlyMap<GitOid, Buffer>,
+): CarrierJournalRecord {
   const path = contractJournalPath(id);
   const journal = carrier.paths.get(path);
-  if (journal === undefined) return { id, entries: [], state: null };
-  const decoded = decodeCarrierJournal(repository, path, carrier, id, blobs);
-  if (decoded.id !== id) throw new TypeError(`journal content does not canonically identify ${id}: ${path}`);
+  if (journal === undefined) return { entries: [], state: null };
+  if (journal.type !== "blob") throw new AuthorityCorruptionError(`journal path is not a blob: ${path}`);
+  const bytes = blobs.get(journal.oid);
+  if (bytes === undefined) throw new Error(`missing batched journal bytes: ${path}`);
+  const decoded = decodeCarrierJournal(path, carrier, bytes, id);
   return observeDecodedJournal(id, decoded);
 }
 
 function enumerateContractObservations(
-  repository: GitRepository,
   carrier: CarrierSnapshot,
-  blobs?: ReadonlyMap<string, Buffer>,
-): ReadonlyMap<ContractId, ContractObservation> {
-  const observations = new Map<ContractId, ContractObservation>();
+  blobs: ReadonlyMap<GitOid, Buffer>,
+): ReadonlyMap<ContractId, CarrierJournalRecord> {
+  const observations = new Map<ContractId, CarrierJournalRecord>();
   const seen = new Set<ContractId>();
-  for (const [path] of carrier.paths) {
+  for (const [path, journal] of carrier.paths) {
     if (!path.startsWith("contracts/") || !path.endsWith(".jsonl")) continue;
-    const decoded = decodeCarrierJournal(repository, path, carrier, undefined, blobs);
+    if (journal.type !== "blob") throw new AuthorityCorruptionError(`journal path is not a blob: ${path}`);
+    const bytes = blobs.get(journal.oid);
+    if (bytes === undefined) throw new Error(`missing batched journal bytes: ${path}`);
+    const decoded = decodeCarrierJournal(path, carrier, bytes);
     const id = decoded.id;
-    if (seen.has(id)) throw new TypeError(`duplicate contract journal identity: ${id}`);
+    if (seen.has(id)) throw new AuthorityCorruptionError(`duplicate contract journal identity: ${id}`);
     seen.add(id);
     observations.set(id, observeDecodedJournal(id, decoded));
   }
@@ -157,26 +176,27 @@ function enumerateContractObservations(
 export function observeCarrier(
   repository: GitRepository,
   requested: readonly ContractId[] = [],
-): ContractsObservation {
+): CarrierObservation {
   const carrier = readCarrier(repository);
+  const observed = observeFrozenCarrierSnapshot(repository, carrier, requested);
+  return { contracts: observed.contracts };
+}
+
+function observeFrozenCarrierSnapshot(
+  repository: GitRepository,
+  carrier: CarrierSnapshot,
+  requested: readonly ContractId[],
+): FrozenCarrierObservation {
   const blobs = readBlobs(repository, [...carrier.paths]
     .filter(([path, entry]) => path.startsWith("contracts/") && path.endsWith(".jsonl") && entry.type === "blob")
     .map(([, entry]) => entry.oid));
-  const contracts = new Map(enumerateContractObservations(repository, carrier, blobs));
-  const seen = new Set(contracts.keys());
-  const ids = [...seen];
+  const contracts = new Map(enumerateContractObservations(carrier, blobs));
   for (const id of requested) {
-    if (!seen.has(id)) {
-      seen.add(id);
-      ids.push(id);
-    }
-  }
-  for (const id of ids) {
-    if (!contracts.has(id)) contracts.set(id, observeFromCarrier(repository, carrier, id));
+    if (!contracts.has(id)) contracts.set(id, observeFromCarrier(carrier, id, blobs));
   }
   return {
-    carrierSnapshot: carrier.commit === null ? null : mintSnapshotId(carrier.commit),
     contracts,
+    frozenJournalBytes: blobs,
   };
 }
 
@@ -184,24 +204,90 @@ export function observeCarrier(
 export function observeContracts(
   repository: GitRepository,
   ids: readonly ContractId[],
-): ContractsObservation {
-  const carrier = readCarrier(repository);
-  const contracts = new Map<ContractId, ContractObservation>();
+): CarrierObservation {
+  const carrier = readCarrierPaths(repository, ids.map((id) => contractJournalPath(id)));
+  const observed = observeFrozenContractsSnapshot(repository, carrier, ids);
+  return { contracts: observed.contracts };
+}
+
+function observeFrozenContractsSnapshot(
+  repository: GitRepository,
+  carrier: CarrierSnapshot,
+  ids: readonly ContractId[],
+): FrozenCarrierObservation {
+  const contracts = new Map<ContractId, CarrierJournalRecord>();
   const paths = ids.map((id) => contractJournalPath(id));
   const blobs = readBlobs(repository, paths.flatMap((path) => {
     const journal = carrier.paths.get(path);
     return journal?.type === "blob" ? [journal.oid] : [];
   }));
   for (const id of ids) {
-    if (!contracts.has(id)) contracts.set(id, observeFromCarrier(repository, carrier, id, blobs));
+    if (!contracts.has(id)) contracts.set(id, observeFromCarrier(carrier, id, blobs));
   }
   return {
-    carrierSnapshot: carrier.commit === null ? null : mintSnapshotId(carrier.commit),
     contracts,
+    frozenJournalBytes: blobs,
   };
 }
 
-export function observeContract(repository: GitRepository, id: ContractId): ContractObservation {
+function decisionProjection(observation: CarrierObservation): ContractsObservation {
+  return new Map([...observation.contracts].map(([id, record]) => [id, record.state]));
+}
+
+export function observeContractsForAdmission(
+  repository: GitRepository,
+  ids: readonly ContractId[],
+): CarrierDecisionObservation {
+  const carrier = readCarrierPaths(repository, ids.map((id) => contractJournalPath(id)));
+  const contracts = observeFrozenContractsSnapshot(repository, carrier, ids);
+  return {
+    admission: { snapshot: carrier, frozenJournalBytes: contracts.frozenJournalBytes },
+    decision: decisionProjection(contracts),
+    journals: contracts.contracts,
+  };
+}
+
+/** Extend one admission observation with contracts from its already-pinned tree. */
+export function extendContractsForAdmission(
+  repository: GitRepository,
+  observation: CarrierDecisionObservation,
+  ids: readonly ContractId[],
+): CarrierDecisionObservation {
+  const missing = ids.filter((id) => !observation.decision.has(id));
+  if (missing.length === 0) return observation;
+  const snapshot = extendCarrierPaths(
+    repository,
+    observation.admission.snapshot,
+    missing.map((id) => contractJournalPath(id)),
+  );
+  const added = observeFrozenContractsSnapshot(repository, snapshot, missing);
+  return {
+    admission: {
+      snapshot,
+      frozenJournalBytes: new Map([
+        ...observation.admission.frozenJournalBytes,
+        ...added.frozenJournalBytes,
+      ]),
+    },
+    decision: new Map([...observation.decision, ...decisionProjection(added)]),
+    journals: new Map([...observation.journals, ...added.contracts]),
+  };
+}
+
+export function observeCarrierForAdmission(
+  repository: GitRepository,
+  ids: readonly ContractId[],
+): CarrierDecisionObservation {
+  const carrier = readCarrier(repository);
+  const contracts = observeFrozenCarrierSnapshot(repository, carrier, ids);
+  return {
+    admission: { snapshot: carrier, frozenJournalBytes: contracts.frozenJournalBytes },
+    decision: decisionProjection(contracts),
+    journals: contracts.contracts,
+  };
+}
+
+export function observeContract(repository: GitRepository, id: ContractId): CarrierJournalRecord {
   const observation = observeContracts(repository, [id]).contracts.get(id);
   if (observation === undefined) throw new Error(`missing requested contract observation: ${id}`);
   return observation;

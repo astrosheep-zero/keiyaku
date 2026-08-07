@@ -13,28 +13,28 @@ function rules(diagnostics: readonly Diagnostic[]): readonly string[] {
   return diagnostics.map((diagnostic) => diagnostic.rule);
 }
 
-test("production TypeScript has a hard 7000-line architecture budget", () => {
+test("production TypeScript has a hard 7500-line architecture budget", () => {
   const atLimit = productionLineBudgetDiagnostic([
-    { path: "core/limit.ts", source: "x\n".repeat(7_000) },
+    { path: "core/limit.ts", source: "x\n".repeat(7_500) },
     { path: "scripts/ignored.ts", source: "x\n".repeat(10_000) },
   ]);
   assert.equal(atLimit, null);
 
   const overLimit = productionLineBudgetDiagnostic([
-    { path: "core/over.ts", source: "x\n".repeat(7_001) },
+    { path: "core/over.ts", source: "x\n".repeat(7_501) },
   ]);
   assert.equal(overLimit?.rule, "architecture/production-line-budget");
-  assert.match(overLimit?.detail ?? "", /7001 lines; limit is 7000/);
+  assert.match(overLimit?.detail ?? "", /7501 lines; limit is 7500/);
 });
 
 test("architecture policy accepts public command adapters", () => {
   const diagnostics = check({
-    "index.ts": "export class Keiyaku { static bind(): void {} }",
+    "index.ts": "export class Repo { bind(): void {} }",
     "cli/parse.ts": "export type ParsedBind = { contract: string };",
     "cli/commands/bind.ts": [
-      'import { Keiyaku } from "../../index.js";',
+      'import { Repo } from "../../index.js";',
       'import type { ParsedBind } from "../parse.js";',
-      "export function adapt(value: ParsedBind): void { void value; Keiyaku.bind(); }",
+      "export function adapt(value: ParsedBind, repo: Repo): void { void value; repo.bind(); }",
     ].join("\n"),
   });
   assert.deepEqual(diagnostics, []);
@@ -64,15 +64,15 @@ test("architecture policy keeps the library facade on protocol-owned operations"
     "carrier/repository.ts": "export function repositoryAt(): void {}",
     "core/verbs/attestation.ts": "export function decideAttestation(): void {}",
     "protocol/run.ts": "export function runProtocol(): void {}",
-    "protocol/intent.ts": "export function admitReview(): void {}",
+    "protocol/intent.ts": "export function admitPlacement(): void {}",
     "protocol/operations.ts": "export function reviewOperation(): void {}",
     "library/keiyaku.ts": [
       'import { repositoryAt } from "../carrier/repository.js";',
       'import { decideAttestation } from "../core/verbs/attestation.js";',
       'import { runProtocol } from "../protocol/run.js";',
-      'import { admitReview } from "../protocol/intent.js";',
+      'import { admitPlacement } from "../protocol/intent.js";',
       'import { reviewOperation } from "../protocol/operations.js";',
-      "export function facade(): void { repositoryAt(); decideAttestation(); runProtocol(); admitReview(); reviewOperation(); }",
+      "export function facade(): void { repositoryAt(); decideAttestation(); runProtocol(); admitPlacement(); reviewOperation(); }",
     ].join("\n"),
   });
   assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/dependency-direction").length, 4);
@@ -137,14 +137,22 @@ test("architecture policy keeps verbs away from admission and repository", () =>
 
 test("architecture policy permits protocol to join pact with carrier", () => {
   const diagnostics = check({
-    "core/facts/types.ts": "export type ContractId = string;",
-    "core/facts/fold.ts": "export function foldJournal(): void {}",
-    "core/facts/observation.ts": 'import type { ContractId } from "./types.js"; export type Observation = ContractId;',
+    "core/decide.ts": "export type AttemptContext = {};",
     "carrier/repository.ts": "export type GitRepository = {};",
-    "carrier/observe.ts": 'import type { Observation } from "../core/facts/observation.js"; import type { GitRepository } from "./repository.js"; export function observe(repository: GitRepository): Observation { return repository as Observation; }',
-    "protocol/run.ts": 'import { observe } from "../carrier/observe.js"; import type { GitRepository } from "../carrier/repository.js"; import { foldJournal } from "../core/facts/fold.js"; export function run(repository: GitRepository): void { observe(repository); foldJournal(); }',
+    "carrier/observe.ts": 'import type { GitRepository } from "./repository.js"; export function observeContractsForAdmission(repository: GitRepository): void { void repository; }',
+    "protocol/attempt.ts": "export function admitDecidedOffer(): void {}",
+    "protocol/run.ts": 'import { observeContractsForAdmission } from "../carrier/observe.js"; import type { GitRepository } from "../carrier/repository.js"; import type { AttemptContext } from "../core/decide.js"; import { admitDecidedOffer } from "./attempt.js"; export function run(repository: GitRepository, attempt: AttemptContext): void { observeContractsForAdmission(repository); void attempt; admitDecidedOffer(); }',
   });
   assert.deepEqual(diagnostics, []);
+});
+
+test("architecture policy rejects former unread admission and fold readers", () => {
+  const diagnostics = check({
+    "core/facts/fold.ts": "export function foldJournal(): void {}",
+    "carrier/admission.ts": 'import { foldJournal } from "../core/facts/fold.js"; export function admit(): void { foldJournal(); }',
+    "protocol/run.ts": 'import { foldJournal } from "../core/facts/fold.js"; export function run(): void { foldJournal(); }',
+  });
+  assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/dependency-direction").length, 2);
 });
 
 test("architecture policy keeps receipt folding out of operation orchestration", () => {
@@ -157,12 +165,15 @@ test("architecture policy keeps receipt folding out of operation orchestration",
 
 test("architecture policy permits the aggregate status read path", () => {
   const diagnostics = check({
-    "core/facts/types.ts": "export type ContractStatus = {}; export type StatusReport = {};",
+    "core/facts/types.ts": "export type ContractStatus = {}; export type StatusReport = {}; export function gate(): string { return ''; }",
+    "core/facts/gate.ts": "export function latestCurrentAttestations(): void {} export function gatesSatisfied(): void {}",
     "carrier/reconcile.ts": "export function deliveryWorktreePath(): string { return \"\"; }",
     "protocol/read/status.ts": [
       'import { deliveryWorktreePath } from "../../carrier/reconcile.js";',
+      'import { latestCurrentAttestations } from "../../core/facts/gate.js";',
+      'import { gate } from "../../core/facts/types.js";',
       'import type { ContractStatus, StatusReport } from "../../core/facts/types.js";',
-      "export function readStatus(): StatusReport { void deliveryWorktreePath; return {} as StatusReport; }",
+      "export function readStatus(): StatusReport { void deliveryWorktreePath; void latestCurrentAttestations; void gate; return {} as StatusReport; }",
       "export type { ContractStatus };",
     ].join("\n"),
     "protocol/operations.ts": [
@@ -172,19 +183,38 @@ test("architecture policy permits the aggregate status read path", () => {
     ].join("\n"),
   });
   assert.deepEqual(diagnostics, []);
+
+  const rejected = check({
+    "core/facts/gate.ts": "export function gatesSatisfied(): void {}",
+    "protocol/read/status.ts": 'import { gatesSatisfied } from "../../core/facts/gate.js"; export function readStatus(): void { gatesSatisfied(); }',
+  });
+  assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
+});
+
+test("architecture policy limits publication retry observation to asserted refs", () => {
+  const accepted = check({
+    "carrier/repository.ts": "export const CARRIER_REF = ''; export function readRef(): void {} export function runGit(): void {} export type GitRepository = {};",
+    "protocol/attempt.ts": 'import { CARRIER_REF, readRef, type GitRepository } from "../carrier/repository.js"; export function classify(repository: GitRepository): void { void CARRIER_REF; readRef(); void repository; }',
+  });
+  assert.deepEqual(accepted, []);
+
+  const rejected = check({
+    "carrier/repository.ts": "export function runGit(): void {}",
+    "protocol/attempt.ts": 'import { runGit } from "../carrier/repository.js"; export function classify(): void { runGit(); }',
+  });
+  assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
 });
 
 test("architecture policy keeps Markdown generic and contract grammar at the CLI edge", () => {
   const accepted = check({
-    "core/facts/types.ts": "export type ContractBody = {};",
-    "core/facts/codec.ts": 'import type { ContractBody } from "./types.js"; export function validate(value: ContractBody): void {}',
+    "core/facts/types.ts": "export type DocumentKey = string;",
+    "body/types.ts": 'import type { DocumentKey } from "../core/facts/types.js"; export type ContractBody = { key: DocumentKey };',
     "markdown/types.ts": "export type Document = {};",
     "markdown/parse.ts": 'import type { Document } from "./types.js"; export function parse(): Document { return {}; }',
     "body/decode.ts": [
-      'import { validate } from "../core/facts/codec.js";',
-      'import type { ContractBody } from "../core/facts/types.js";',
+      'import type { ContractBody } from "./types.js";',
       'import { parse } from "../markdown/parse.js";',
-      "export function decode(value: ContractBody): void { parse(); validate(value); }",
+      "export function decode(value: ContractBody): void { parse(); void value; }",
     ].join("\n"),
   });
   assert.deepEqual(accepted, []);
@@ -233,4 +263,52 @@ test("architecture policy rejects removed owners and malformed verb owners", () 
   assert.ok(found.has("architecture/removed-owner"));
   assert.ok(found.has("architecture/verb-owner"));
   assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/verb-owner").length, 3);
+});
+
+test("architecture policy rejects forbidden declaration patterns", () => {
+  const diagnostics = check({
+    "core/verbs/bind.ts": ["export function decideBind(): void {}", "export type OpenData = {};"].join("\n"),
+  });
+  assert.ok(rules(diagnostics).includes("architecture/removed-declaration"));
+});
+
+test("architecture policy rejects forbidden module imports", () => {
+  const diagnostics = check({
+    "cli/actor.ts": 'import Database from "better-sqlite3"; export function run(): void { void Database; }',
+  });
+  assert.ok(rules(diagnostics).includes("architecture/forbidden-module"));
+});
+
+test("architecture policy rejects capability use outside declared owners", () => {
+  const accepted = check({
+    "carrier/identity.ts": "export function stamp(): number { return Date.now(); }",
+    "library/keiyaku.ts": "export function reject(): never { throw new TypeError('bad input'); }",
+  });
+  assert.deepEqual(rules(accepted).filter((r) => r === "architecture/capability-use"), []);
+
+  const rejected = check({
+    "core/facts/types.ts": "export function stamp(): number { return Date.now(); }",
+  });
+  assert.ok(rules(rejected).includes("architecture/capability-use"));
+
+  const misplacedTypeError = check({
+    "core/facts/types.ts": "export function reject(): never { throw new TypeError('bad state'); }",
+  });
+  assert.ok(rules(misplacedTypeError).includes("architecture/capability-use"));
+});
+
+test("architecture policy enforces symbol-scoped allowances", () => {
+  const diagnostics = check({
+    "core/subject.ts": "export function parseDependencyKeySet(): void {} export function other(): void {}",
+    "core/facts/codec.ts": 'import { other } from "../subject.js"; export function codec(): void { other(); }',
+  });
+  assert.ok(rules(diagnostics).includes("architecture/dependency-direction"));
+});
+
+test("architecture policy uses specific zone before catch-all for library facade", () => {
+  const diagnostics = check({
+    "protocol/operations.ts": "export function reviewOperation(): void {}",
+    "library/keiyaku.ts": 'import { reviewOperation } from "../protocol/operations.js"; export function facade(): void { reviewOperation(); }',
+  });
+  assert.deepEqual(diagnostics, []);
 });

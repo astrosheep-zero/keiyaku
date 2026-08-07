@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyAmendOperations } from "../src/body/amend.js";
-import type { ContractBody as ContractBodyValue } from "../src/core/facts/types.js";
+import { applyAmendDocument } from "../src/body/amend.js";
+import { decodeContractDocument } from "../src/body/decode.js";
+import { renderContractBody } from "../src/body/render.js";
+import type { ContractBody as ContractBodyValue } from "../src/body/types.js";
 
 const body: ContractBodyValue = {
   title: "Current",
@@ -15,9 +17,12 @@ const body: ContractBodyValue = {
   ],
   verification: [{ executor: "bash", script: "true" }],
   extensions: [{ title: "Notes", content: "first\n" }],
-  gates: ["reviewed", "verified"],
-  after: [],
 };
+
+function applyAmendOperations(source: string, current: ContractBodyValue) {
+  const document = decodeContractDocument(renderContractBody(current));
+  return decodeContractDocument(applyAmendDocument(source, document));
+}
 
 test("amend H2 operations form one complete body replacement", () => {
   const amended = applyAmendOperations([
@@ -48,15 +53,16 @@ test("amend H2 operations form one complete body replacement", () => {
     "",
   ].join("\n"), body);
 
-  assert.equal(amended.context, "current\n\nmore\n");
+  assert.equal(amended.context.trim(), "current\n\nmore");
   assert.deepEqual(amended.region, ["lib/**"]);
-  assert.deepEqual(amended.criteria, [
-    { title: "Keep", body: "after\n\n" },
-    { title: "Added", body: "added\n\n" },
+  assert.deepEqual(amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })), [
+    { title: "Keep", body: "after" },
+    { title: "Added", body: "added" },
   ]);
   assert.deepEqual(amended.verification, [{ executor: "zsh", script: "print ok" }]);
-  assert.deepEqual(amended.extensions, [{ title: "Notes", content: "first\n\nsecond\n" }]);
-  assert.deepEqual(amended.gates, ["reviewed", "verified"]);
+  assert.deepEqual(amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })), [
+    { title: "Notes", content: "first\n\nsecond" },
+  ]);
 });
 
 test("amend supports every ruled core, criterion, and extension operation", () => {
@@ -122,14 +128,92 @@ test("amend supports every ruled core, criterion, and extension operation", () =
     "",
   ].join("\n"), body);
 
-  assert.equal(amended.context, "replaced context\n\nappended context\n");
-  assert.equal(amended.objective, "replaced objective\n\nappended objective\n");
-  assert.equal(amended.design, "replaced design\n\nappended design\n");
+  assert.equal(amended.context.trim(), "replaced context\n\nappended context");
+  assert.equal(amended.objective.trim(), "replaced objective\n\nappended objective");
+  assert.equal(amended.design.trim(), "replaced design\n\nappended design");
   assert.deepEqual(amended.region, ["lib/**"]);
-  assert.deepEqual(amended.criteria, [
-    { title: "Replace me", body: "updated\n\n" },
-    { title: "Add me", body: "added\n\n" },
+  assert.deepEqual(amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })), [
+    { title: "Replace me", body: "updated" },
+    { title: "Add me", body: "added" },
   ]);
   assert.deepEqual(amended.verification, [{ executor: "pwsh", script: "Write-Output ok" }]);
-  assert.deepEqual(amended.extensions, [{ title: "Notes", content: "updated extension\n\n" }]);
+  assert.deepEqual(amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })), [
+    { title: "Notes", content: "updated extension" },
+  ]);
+});
+
+test("amend keeps criterion and extension targets indexed across ordered mutations", () => {
+  const indexedBody: ContractBodyValue = {
+    ...body,
+    extensions: [...body.extensions, { title: "Archive", content: "archive\n" }],
+  };
+  const amended = applyAmendOperations([
+    "## Remove: Criterion Keep",
+    "",
+    "## Update: Criterion Drop",
+    "kept after earlier removal",
+    "",
+    "## Replace: Criteria",
+    "### Replaced",
+    "replacement",
+    "",
+    "## Append: Criteria",
+    "### Appended",
+    "appended",
+    "",
+    "## Add: Criteria",
+    "### Added",
+    "added",
+    "",
+    "## Update: Criterion Added",
+    "updated added",
+    "",
+    "## Remove: Criterion Replaced",
+    "",
+    "## Remove: Notes",
+    "",
+    "## Update: Archive",
+    "updated archive",
+    "",
+    "## Add: Extra",
+    "first extra",
+    "",
+    "## Append: Extra",
+    "second extra",
+    "",
+    "## Update: Extra",
+    "updated extra",
+    "",
+    "## Replace: Extra",
+    "replaced extra",
+    "",
+    "## Remove: Extra",
+    "",
+  ].join("\n"), indexedBody);
+
+  assert.deepEqual(amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })), [
+    { title: "Appended", body: "appended" },
+    { title: "Added", body: "updated added" },
+  ]);
+  assert.deepEqual(amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })), [
+    { title: "Archive", content: "updated archive" },
+  ]);
+});
+
+test("amend cannot add a reserved H2 as an extension", () => {
+  for (const title of ["Gates", "Pipeline", "After"]) {
+    assert.throws(
+      () => applyAmendOperations(`## Add: ${title}\nvalue\n`, body),
+      (error: unknown) => error instanceof TypeError
+        && error.message === `${title.toLowerCase()} is not a contract Markdown section`,
+    );
+  }
+});
+
+test("amend rejects a normalized extension-title collision at the operation boundary", () => {
+  assert.throws(
+    () => applyAmendOperations("## Add: notes\nsecond notes\n", body),
+    (error: unknown) => error instanceof TypeError
+      && error.message === "extension already exists 'notes'",
+  );
 });

@@ -3,14 +3,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { deliveryWorktreePath } from "../src/carrier/reconcile.js";
+import { contractJournalPath } from "../src/carrier/identity.js";
 import { repositoryAt } from "../src/carrier/repository.js";
+import { decodeContractDocument } from "../src/body/decode.js";
 import {
   bindOperation,
   reconcileAllOperation,
   scopeOperation,
   statusOperation,
 } from "../src/protocol/operations.js";
-import type { ContractBody, ContractId } from "../src/core/facts/types.js";
+import type { ContractId } from "../src/core/facts/types.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithMain(): TestGitRepository {
@@ -22,21 +24,34 @@ function repositoryWithMain(): TestGitRepository {
   return repository;
 }
 
-function body(title: string): ContractBody {
-  return {
-    title,
-    context: "Exercise the repository-level protocol reads.",
-    objective: "Expose one pinned scope and snapshot-backed status.",
-    design: "The protocol owns carrier observation and effects.",
-    region: ["src/**"],
-    criteria: [{ title: "Protocol result", body: "The operation returns only plain data." }],
-    verification: [],
-    extensions: [],
-  };
+function terms(title: string) {
+  const document = decodeContractDocument([
+    `# ${title}`,
+    "",
+    "## Context",
+    "Exercise the repository-level protocol reads.",
+    "",
+    "## Objective",
+    "Expose one pinned scope and snapshot-backed status.",
+    "",
+    "## Design",
+    "The protocol owns carrier observation and effects.",
+    "",
+    "## Region",
+    "```",
+    "src/**",
+    "```",
+    "",
+    "## Criteria",
+    "### Protocol result",
+    "The operation returns only plain data.",
+    "",
+  ].join("\n"));
+  return { document: document.document, segments: document.segments, gates: [], after: [] };
 }
 
 function bind(repository: TestGitRepository, title: string, workspace: "worktree" | "here"): ContractId {
-  const result = bindOperation({ scope: scopeOperation({ coordinate: repository.path }), body: body(title), workspace });
+  const result = bindOperation({ scope: scopeOperation({ coordinate: repository.path }), terms: terms(title), workspace });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("bind did not succeed");
   return result.value.contractId;
@@ -70,22 +85,33 @@ test("scope and status operations return plain pinned data from one carrier snap
   assert.deepEqual(report.contracts.find((contract) => contract.contractId === first), {
     contractId: first,
     phase: "bound",
-    terminal: null,
     workspace: "here",
     worktreePath: null,
     target: null,
+    verification: null,
   });
   assert.deepEqual(report.contracts.find((contract) => contract.contractId === second), {
     contractId: second,
     phase: "bound",
-    terminal: null,
     workspace: "worktree",
     worktreePath: deliveryWorktreePath(carrier, second),
     target: null,
+    verification: null,
   });
   const invocations = readFileSync(log, "utf8").trim().split("\n");
   assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
   assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 1);
+
+  writeFileSync(log, "");
+  const targeted = withGitShim(
+    "printf '%s\\n' \"$*\" >> \"$KEIYAKU_STATUS_READ_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    { KEIYAKU_STATUS_READ_LOG: log },
+    () => statusOperation({ scope, contractId: first }),
+  );
+  assert.deepEqual(targeted.contracts.map((contract) => contract.contractId), [first]);
+  const targetedInvocations = readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(targetedInvocations.some((command) => command.includes("ls-tree -r")), false);
+  assert.equal(targetedInvocations.some((command) => command.includes(contractJournalPath(first))), true);
 });
 
 test("batch reconcile isolates a failed contract and retains successful reports", () => {
@@ -100,7 +126,7 @@ test("batch reconcile isolates a failed contract and retains successful reports"
 
   const failed = report.contracts.find((contract) => contract.contractId === blocked);
   assert.deepEqual(failed?.kind, "failed");
-  if (failed?.kind === "failed") assert.match(failed.error, /delivery worktree path is occupied/);
+  if (failed?.kind === "failed") assert.match(failed.diagnostic, /delivery worktree path is occupied/);
 
   const reconciled = report.contracts.find((contract) => contract.contractId === healthy);
   assert.equal(reconciled?.kind, "reconciled");

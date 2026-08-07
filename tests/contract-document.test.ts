@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeContractDocument } from "../src/body/decode.js";
-import { ContractDocumentError } from "../src/body/grammar.js";
 
 function document(extra = ""): string {
   return [
@@ -69,15 +68,15 @@ test("contract Markdown decodes core fields and retains unknown H2 bytes", () =>
 test("contract Markdown rejects frontmatter, duplicate sections, and missing structure", () => {
   assert.throws(
     () => decodeContractDocument(`---\nkind: contract\n---\n${document()}`),
-    (error: unknown) => error instanceof ContractDocumentError && error.code === "FRONTMATTER_FORBIDDEN",
+    (error: unknown) => error instanceof TypeError && error.message.includes("contract document may not contain frontmatter"),
   );
   assert.throws(
     () => decodeContractDocument(`${document()}\n## context\nduplicate\n`),
-    (error: unknown) => error instanceof ContractDocumentError && error.code === "DUPLICATE_SECTION",
+    (error: unknown) => error instanceof TypeError && error.message.includes("duplicate contract section 'context'"),
   );
   assert.throws(
     () => decodeContractDocument("# Missing\n## Context\nonly one section\n"),
-    (error: unknown) => error instanceof ContractDocumentError && error.code === "MISSING_SECTION",
+    (error: unknown) => error instanceof TypeError && error.message.includes("contract document is missing ## Objective"),
   );
 });
 
@@ -87,7 +86,7 @@ test("Verification uses direct fenced executors and retired H2s are refused", ()
   for (const name of ["Gates", "Pipeline", "After"]) {
     assert.throws(
       () => decodeContractDocument(`${document()}\n## ${name}\n- declaration\n`),
-      (error: unknown) => error instanceof ContractDocumentError && error.code === "REMOVED_SECTION",
+      (error: unknown) => error instanceof TypeError && error.message.includes(`${name.toLowerCase()} is not a contract Markdown section`),
     );
   }
 });
@@ -101,7 +100,7 @@ test("criteria bodies keep exact bytes through nested structure; duplicate title
   ]);
   assert.throws(
     () => decodeContractDocument(withCriteria("### First\none\n\n###  FIRST \ntwo")),
-    (error: unknown) => error instanceof ContractDocumentError && error.code === "DUPLICATE_CRITERION",
+    (error: unknown) => error instanceof TypeError && error.message.includes("duplicate criterion 'FIRST'"),
   );
 });
 

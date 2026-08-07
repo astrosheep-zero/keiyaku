@@ -6,6 +6,7 @@ import { CliUsageError } from "./parse.js";
 const GATE_SET_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 type GateSets = ReadonlyMap<string, readonly Gate[]>;
+const DEFAULT_GATES: readonly Gate[] = ["reviewed"];
 
 function malformed(message: string): never {
   throw new CliUsageError(`invalid .keiyaku/settings.json: ${message}`);
@@ -46,7 +47,7 @@ function gateSets(root: string): GateSets {
 
 export function selectedGates(root: string, selected?: string): readonly Gate[] {
   const sets = gateSets(root);
-  if (selected === undefined) return [...(sets.get("default") ?? ["reviewed"] as const)];
+  if (selected === undefined) return [...(sets.get("default") ?? DEFAULT_GATES)];
   if (!GATE_SET_NAME.test(selected)) throw new CliUsageError("--gates must be a lowercase machine segment");
   const gates = sets.get(selected);
   if (gates === undefined) throw new CliUsageError(`unknown gate set: ${selected}`);

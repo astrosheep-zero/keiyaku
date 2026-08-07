@@ -16,8 +16,17 @@ export type GitObjectId = string & { readonly [gitObjectIdBrand]: "GitObjectId" 
 
 const GIT_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const FNV_PRIME = 0x100000001b3n;
+const FNV_MASK = 0xffffffffffffffffn;
 
-/** Mint the current carrier's opaque contract coordinate for one bind invocation. */
+function fanoutHash(value: string, seed: bigint): string {
+  let state = seed;
+  for (let index = 0; index < value.length; index += 1) {
+    state = ((state ^ BigInt(value.charCodeAt(index)!)) * FNV_PRIME) & FNV_MASK;
+  }
+  return state.toString(16).padStart(16, "0");
+}
+
 export function mintContractId(): ContractId {
   let timestamp = BigInt(Date.now());
   let value = "";
@@ -33,15 +42,14 @@ export function mintContractId(): ContractId {
   return contractId(`kei/${value.toLowerCase()}`);
 }
 
-/** Project a public contract identity into this carrier's private journal layout. */
 export function contractJournalPath(contract: ContractId): string {
   const id = contractId(contract);
-  return `contracts/${id.slice("kei/".length)}.jsonl`;
+  const fanout = fanoutHash(id, 0xcbf29ce484222325n).slice(0, 4);
+  return `contracts/${fanout.slice(0, 2)}/${fanout.slice(2, 4)}/${id.slice("kei/".length)}.jsonl`;
 }
 
-/** The current Git carrier is the only physical object-ID validation boundary. */
 export function gitObjectId(value: string, label = "Git object ID"): GitObjectId {
-  if (!GIT_OBJECT_ID.test(value)) throw new TypeError(`${label} is not a Git object ID: ${value}`);
+  if (!GIT_OBJECT_ID.test(value)) throw new Error(`${label} is not a Git object ID: ${value}`);
   return value as GitObjectId;
 }
 

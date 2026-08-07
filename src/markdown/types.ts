@@ -1,6 +1,6 @@
 export type SourceSpan = Readonly<{ start: number; end: number }>;
 
-export interface FrontmatterMap {
+interface FrontmatterMap {
   readonly [key: string]: FrontmatterValue;
 }
 
@@ -16,7 +16,7 @@ export type FenceState = Readonly<{ delimiter: "`" | "~"; length: number }>;
 
 type Spanned = Readonly<{ span: SourceSpan }>;
 
-export type HeaderToken = Spanned & Readonly<{
+type HeaderToken = Spanned & Readonly<{
   type: "header";
   raw: string;
   leadingSpaces: number;
@@ -24,7 +24,7 @@ export type HeaderToken = Spanned & Readonly<{
   text: string;
 }>;
 
-export type FenceToken = Spanned & Readonly<{
+type FenceToken = Spanned & Readonly<{
   type: "fence";
   raw: string;
   leadingSpaces: number;
@@ -44,7 +44,7 @@ export type ListMarkerToken = Spanned & Readonly<{
   bodyStart: number;
 }>;
 
-export type BlockquoteToken = Spanned & Readonly<{
+type BlockquoteToken = Spanned & Readonly<{
   type: "blockquote";
   raw: string;
   leadingSpaces: number;
@@ -52,13 +52,13 @@ export type BlockquoteToken = Spanned & Readonly<{
   body: string;
 }>;
 
-export type TextToken = Spanned & Readonly<{
+type TextToken = Spanned & Readonly<{
   type: "text";
   raw: string;
   leadingSpaces: number;
 }>;
 
-export type FrontmatterToken = Spanned & Readonly<{
+type FrontmatterToken = Spanned & Readonly<{
   type: "frontmatter";
   raw: string;
   entries: Readonly<Record<string, FrontmatterValue>>;
@@ -93,7 +93,7 @@ export type SectionNode = Spanned & Readonly<{
   children: readonly MarkdownBlockNode[];
 }>;
 
-export type ListNode = Spanned & Readonly<{
+type ListNode = Spanned & Readonly<{
   type: "list";
   ordered: boolean;
   indent: number;
@@ -107,7 +107,7 @@ export type ListItemNode = Spanned & Readonly<{
   children: readonly MarkdownBlockNode[];
 }>;
 
-export type CodeBlockNode = Spanned & Readonly<{
+type CodeBlockNode = Spanned & Readonly<{
   type: "code_block";
   delimiter: "`" | "~";
   fenceLength: number;
@@ -116,7 +116,7 @@ export type CodeBlockNode = Spanned & Readonly<{
   lines: readonly string[];
 }>;
 
-export type BlockquoteNode = Spanned & Readonly<{
+type BlockquoteNode = Spanned & Readonly<{
   type: "blockquote";
   marker: string;
   lines: readonly string[];

@@ -1,18 +1,30 @@
-import { subjectIsCurrent } from "../subject.js";
-import type { ContractState, DependencyKeySet, Gate } from "./types.js";
+import { currentSubjectPredicate } from "../subject.js";
+import type { AttestationEntry, ContractState, Gate } from "./types.js";
 
-/** A gate passes when a current subject's latest testimony is satisfied. */
-export function gateSatisfied(state: ContractState, gate: Gate): boolean {
-  const seen = new Set<DependencyKeySet>();
+/** Resolve the latest testimony for each requested gate and current subject. */
+export function latestCurrentAttestations(
+  state: ContractState,
+  requested: ReadonlySet<Gate>,
+): ReadonlyMap<Gate, AttestationEntry> {
+  const attestations = new Map<Gate, AttestationEntry>();
+  const subjectIsCurrent = currentSubjectPredicate(state);
+
   for (let index = state.attestations.length - 1; index >= 0; index -= 1) {
     const attestation = state.attestations[index]!;
-    if (attestation.data.gate !== gate || seen.has(attestation.data.subject)) continue;
-    seen.add(attestation.data.subject);
-    if (subjectIsCurrent(state, attestation.data.subject)) return attestation.data.verdict === "satisfied";
+    const { gate, subject } = attestation.data;
+    if (!requested.has(gate) || attestations.has(gate) || !subjectIsCurrent(subject)) continue;
+    attestations.set(gate, attestation);
+    if (attestations.size === requested.size) break;
   }
-  return false;
+
+  return attestations;
 }
 
 export function gatesSatisfied(state: ContractState): boolean {
-  return state.terms !== null && state.terms.gates.every((gate) => gateSatisfied(state, gate));
+  const required = new Set(state.terms.gates);
+  if (required.size === 0) return true;
+
+  const attestations = latestCurrentAttestations(state, required);
+  return attestations.size === required.size
+    && [...attestations.values()].every((entry) => entry.data.verdict === "satisfied");
 }

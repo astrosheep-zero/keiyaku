@@ -1,114 +1,165 @@
-import { prepareDelivery } from "../carrier/delivery.js";
-import { mintContractId, mintSnapshotId } from "../carrier/identity.js";
-import { observeBindCoordinates, observeCarrier, observeContract } from "../carrier/observe.js";
-import { deliveryWorktreePath, reconcile, reconcileBatch, type ReconcileResult } from "../carrier/reconcile.js";
-import { readRef, repositoryAt, type GitRepository } from "../carrier/repository.js";
-import { readDeliveryDiff } from "../carrier/verification.js";
-import { currentSubject } from "../core/subject.js";
-import type {
-  ActorId, AmendData, ArcData, AttestationData, BindData, ChangeId, ContractBody, ContractId, ContractState, JournalEntry, SnapshotId,
-} from "../core/facts/types.js";
-import { decideAbandon, type AbandonRefusal } from "../core/verbs/abandon.js";
-import { decideAmend, type AmendRefusal } from "../core/verbs/amend.js";
-import { decideArc, type ArcRefusal } from "../core/verbs/arc.js";
-import { decideBind, type BindRefusal } from "../core/verbs/bind.js";
-import { decideDeliver, type DeliverRefusal } from "../core/verbs/deliver.js";
-import type { PlacementRefusal } from "../core/verbs/placement.js";
-import { decideAttestation, type AttestationRefusal } from "../core/verbs/attestation.js";
-import { produceVerification } from "../verification/producer.js";
 import {
-  admitAbandon,
-  admitAmend,
-  admitArc,
-  admitBind,
-  admitDeliver,
-  admitReview,
-  admitPlacement,
-  verifyPreparedDelivery,
-  verifyStoredDelivery,
-} from "./intent.js";
-import { readAudit, type AuditReport } from "./read/audit.js";
+  prepareDelivery,
+  prepareReview,
+  type DeliveryPreparationRefusal,
+  type ReviewPreparationRefusal,
+} from "../carrier/delivery.js";
+import { mintContractId, mintSnapshotId } from "../carrier/identity.js";
+import {
+  extendContractsForAdmission,
+  observeBindCoordinates,
+  observeCarrier,
+  observeContract,
+  observeContractsForAdmission,
+  type CarrierDecisionObservation,
+} from "../carrier/observe.js";
+import { reconcile, reconcileBatch, type ReconcileResult } from "../carrier/reconcile.js";
+import { normalizeTargetBranch, readRef, repositoryAt, type GitRepository } from "../carrier/repository.js";
+import { readDeliveryDiff } from "../carrier/verification.js";
+import type { WorktreeLeak } from "../carrier/verification.js";
+import { dependencyKeySet } from "../core/subject.js";
+import { contractState, documentIsCurrent } from "../core/facts/observation.js";
+import type { ActorId, AmendData, ArcData, AttestationData, BindData, ChangeId, ContractHead, ContractId, ContractState, ContractTerms, DocumentKey, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import { gate } from "../core/facts/types.js";
+import { decideAbandon, type AbandonRefusal } from "../core/verbs/abandon.js";
+import { decideAmend, type AmendInput, type AmendRefusal } from "../core/verbs/amend.js";
+import { decideArc, type ArcRefusal } from "../core/verbs/arc.js";
+import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
+import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
+import type { PlacementRefusal } from "../core/verbs/placement.js";
+import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
+import { produceVerification } from "../verification/producer.js";
+import type { VerificationDeclarationRefusal, VerificationDefinition } from "../verification/types.js";
+import { admitIntent, admitPlacement, mintAttempts, verifyDelivery, VERIFIED, type VerificationRuntimeStop } from "./intent.js";
+import { auditReport, readAudit, type AuditReport as AuditReadReport } from "./read/audit.js";
+import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import { readStatus, type StatusReport } from "./read/status.js";
-import type { ProtocolReceipt, ProtocolResult, ProtocolTerminal } from "./run.js";
+import { admitDecidedOffer, type AcceptedAdmission, type DecidedOfferResult } from "./attempt.js";
+import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 
-export type { AuditReport, FactKind, TimelineEntry } from "./read/audit.js";
+export type { FactKind, TimelineEntry } from "./read/audit.js";
 export type { ContractStatus, StatusReport } from "./read/status.js";
+export type { ContractDocumentProjection } from "./read/documents.js";
+export type { VerificationDeclarationRefusal } from "../verification/types.js";
 
-export type DeliveryPreparationRefusal = Readonly<{
-  kind: "target-missing" | "candidate-not-based-on-target";
-  contractId: ContractId;
-}>;
+type DeliveryFailure = DeliveryPreparationRefusal | VerificationDeclarationRefusal | DeliverRefusal;
 
-export type IntentRefusal =
-  | AbandonRefusal | AmendRefusal | ArcRefusal | BindRefusal | DeliverRefusal
-  | DeliveryPreparationRefusal | PlacementRefusal | AttestationRefusal;
+type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
+
+const REVIEWED = gate("reviewed");
+
+export type IntentRefusal = AbandonRefusal | AmendRefusal | ArcRefusal | BindRefusal | DeliverRefusal
+  | DeliveryPreparationRefusal | PlacementRefusal | ReviewRefusal | TargetInputRefusal | VerificationDeclarationRefusal;
+
+export type TargetInputRefusal = Readonly<{ kind: "invalid-target" }>;
 
 export type IntentRetry = ProtocolTerminal;
-export type IntentReceipt = ProtocolReceipt;
 export type IntentOutcome<Value, Refusal = IntentRefusal> =
-  | Readonly<{ kind: "accepted"; receipt: IntentReceipt; value: Value }>
+  | Readonly<{ kind: "accepted"; facts: readonly JournalEntry[]; head: ContractHead; value: Value }>
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | Readonly<{ kind: "retry"; reason: IntentRetry }>;
 
 type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId; actor?: ActorId }>;
 
-function timestamp(): string {
-  return new Date().toISOString();
-}
+export type AuditReport = AuditReadReport & Readonly<{ attempt?: VerificationStop; leak?: WorktreeLeak }>;
+
+export type DocumentDerivation = Readonly<{ document: DocumentKey; title: string; verification: VerificationDefinition | null }>;
+
+export type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: IntentRetry; refusal?: never }>;
+
+export type VerificationStop = StepStop<AttestationRefusal> | VerificationRuntimeStop;
+export type PlacementStop = StepStop<PlacementRefusal>;
+
+function timestamp(): string { return new Date().toISOString(); }
 
 function accepted<Value, Refusal = IntentRefusal>(
-  id: ContractId,
+  state: ContractState,
   facts: readonly JournalEntry[],
   value: Value,
-  prior: ContractState | null,
-  snapshot: ContractState,
 ): IntentOutcome<Value, Refusal> {
-  if (snapshot.id !== id) throw new TypeError(`accepted snapshot does not belong to ${id}`);
-  return { kind: "accepted", receipt: { facts, prior, snapshot }, value };
+  if (state.head === null) throw new Error("accepted contract is missing its journal head");
+  return { kind: "accepted", facts, head: state.head, value };
 }
 
-function complete<Value, Refusal>(
-  id: ContractId,
-  result: ProtocolResult<Refusal>,
+function admitted<Value, Refusal = IntentRefusal>(
+  admission: AcceptedAdmission,
   value: Value,
 ): IntentOutcome<Value, Refusal> {
+  return accepted(admission.state, admission.facts, value);
+}
+
+function complete<Value, Refusal>(result: ProtocolResult<Refusal>, value: Value): IntentOutcome<Value, Refusal> {
   if (result.kind === "refused") return { kind: "refused", refusal: result.refusal };
   if (result.kind !== "accepted") return { kind: "retry", reason: result };
-  if (result.receipt.snapshot.id !== id) throw new TypeError(`accepted snapshot does not belong to ${id}`);
-  return { ...result, value };
+  return admitted(result, value);
 }
 
-export type ScopeOperationInput = Readonly<{ coordinate: string }>;
+function mergeAdmissions(current: AcceptedAdmission, next: AcceptedAdmission): AcceptedAdmission {
+  return { ...next, facts: [...current.facts, ...next.facts] };
+}
+
+function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> | undefined {
+  if (result.kind === "accepted") return undefined;
+  return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
+}
+
+type ScopeOperationInput = Readonly<{ coordinate: string }>;
 export type RepositoryScope = GitRepository;
 
-/** Resolve the caller worktree and its shared repository scope once. */
-export function scopeOperation(input: ScopeOperationInput): RepositoryScope {
-  return repositoryAt(input.coordinate);
+export function scopeOperation(input: ScopeOperationInput): RepositoryScope { return repositoryAt(input.coordinate); }
+
+export function statusOperation(input: Readonly<{ scope: RepositoryScope; contractId?: ContractId }>): StatusReport {
+  return readStatus(input.scope, input.contractId);
 }
 
-export function statusOperation(input: Readonly<{ scope: RepositoryScope }>): StatusReport {
-  return readStatus(input.scope);
+export function documentsOperation(input: Readonly<{ scope: RepositoryScope }>): readonly ContractDocumentProjection[] { return readDocuments(input.scope); }
+
+type BindOperationInput = Readonly<{ scope: RepositoryScope; terms: BindData["terms"]; verification: VerificationDefinition | null; target?: string; workspace: "worktree" | "here"; actor?: ActorId }>;
+
+function declarationFailure(terms: ContractTerms | undefined, verification: VerificationDefinition | null | undefined, contractId?: ContractId): VerificationDeclarationRefusal | undefined {
+  if (terms === undefined || verification !== null || !terms.gates.includes(VERIFIED)) return undefined;
+  return {
+    kind: "verification-declaration-invalid",
+    ...(contractId === undefined ? {} : { contractId }),
+  };
 }
 
-export type BindOperationInput = Readonly<{
-  scope: RepositoryScope; body: ContractBody; target?: string; workspace: "worktree" | "here"; actor?: ActorId;
-}>;
-
-export function bindOperation(input: BindOperationInput): IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal> {
-  const id = mintContractId();
+export function bindOperation(
+  input: BindOperationInput,
+): IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal> {
   const carrier = input.scope;
-  const observed = observeBindCoordinates(carrier, input.target);
+  let target: string | undefined;
+  if (input.target !== undefined) {
+    const normalized = normalizeTargetBranch(carrier, input.target);
+    if (normalized === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
+    target = normalized;
+  }
+  const id = mintContractId();
+  const observed = observeBindCoordinates(carrier, target);
   const data: BindData = {
     coordinates: {
       start: observed.start,
       ...(observed.target === undefined ? {} : { target: observed.target }),
       workspace: input.workspace,
     },
-    body: input.body,
+    terms: input.terms,
+  };
+  const failure = declarationFailure(input.terms, input.verification);
+  const decisionInput: BindInput<VerificationDeclarationRefusal> = {
+    contractId: id,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    at: timestamp(),
+    preparation: failure === undefined
+      ? { kind: "prepared", data }
+      : { kind: "refused", refusal: failure },
   };
   return complete(
-    id,
-    admitBind(carrier, { contractId: id, ...(input.actor === undefined ? {} : { actor: input.actor }), at: timestamp(), data }, decideBind),
+    admitIntent(
+      carrier,
+      decisionInput,
+      decideBind,
+      { observedContracts: [id, ...input.terms.after] },
+    ),
     { contractId: id },
   );
 }
@@ -119,127 +170,197 @@ export function stateOperation(input: OperationInput): ContractState {
   return state;
 }
 
-/** Read a contract state for facade preparation without turning absence into an exception. */
-export function readStateOperation(input: OperationInput): ContractState | null {
-  return observeContract(input.scope, input.contractId).state;
-}
+export function readStateOperation(input: OperationInput): ContractState | null { return observeContract(input.scope, input.contractId).state; }
 
-/** Read the deterministic managed worktree path without exposing carrier state. */
-export function worktreePathOperation(input: OperationInput): string | null {
-  const carrier = input.scope;
-  const state = observeContract(carrier, input.contractId).state;
-  if (state?.coordinates?.workspace !== "worktree") return null;
-  return deliveryWorktreePath(carrier, input.contractId);
-}
+type DeliveryIdentity = Readonly<{ snapshotId: SnapshotId; changeId: ChangeId; expectedPredecessor: SnapshotId }>;
 
-export function deliveryOperation(
-  input: OperationInput,
-): DeliveryOperationValue | null {
+export function deliveryOperation(input: OperationInput): DeliveryIdentity | null {
   const state = observeContract(input.scope, input.contractId).state;
   if (state === null || state.delivery === null) return null;
-  const reviewSubject = currentSubject(state, "reviewed");
-  if (reviewSubject === null) throw new Error(`delivery subject is absent: ${input.contractId}`);
   return {
     snapshotId: state.delivery.data.candidate,
     changeId: state.delivery.data.deliveryPatchId,
     expectedPredecessor: state.delivery.data.expectedPredecessor,
-    reviewSubject,
   };
 }
 
-export type DeliveryDiffOperationInput = Readonly<{
-  scope: RepositoryScope;
-  expectedPredecessor: SnapshotId;
-  snapshotId: SnapshotId;
-}>;
-
-export async function deliveryDiffOperation(input: DeliveryDiffOperationInput): Promise<string | null> {
-  return readDeliveryDiff(input.scope, input.expectedPredecessor, input.snapshotId);
+function observePrerequisiteClosure(
+  repository: GitRepository,
+  contracts: readonly ContractId[],
+): CarrierDecisionObservation {
+  let observation = observeContractsForAdmission(repository, contracts);
+  let frontier = contracts.slice(1);
+  while (frontier.length > 0) {
+    const next = new Set<ContractId>();
+    for (const id of frontier) {
+      const state = contractState(observation.decision, id);
+      if (state === null) continue;
+      for (const dependency of state.terms.after) {
+        if (!observation.decision.has(dependency)) next.add(dependency);
+      }
+    }
+    frontier = [...next];
+    observation = extendContractsForAdmission(repository, observation, frontier);
+  }
+  return observation;
 }
 
-export function amendOperation(
-  input: OperationInput & Readonly<{ body: AmendData }>,
-): IntentOutcome<void, AmendRefusal> {
+type DeliveryDiffOperationInput = Readonly<{ scope: RepositoryScope; expectedPredecessor: SnapshotId; snapshotId: SnapshotId }>;
+
+export async function deliveryDiffOperation(input: DeliveryDiffOperationInput): Promise<string | null> { return readDeliveryDiff(input.scope, input.expectedPredecessor, input.snapshotId); }
+
+export function amendOperation(input: OperationInput & Readonly<{ source?: ContractTerms; terms?: AmendData; verification?: VerificationDefinition | null }>): IntentOutcome<void, AmendRefusal | VerificationDeclarationRefusal> {
+  const failure = declarationFailure(input.terms, input.verification, input.contractId);
+  const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] = input.terms === undefined
+    ? undefined
+    : failure === undefined
+      ? { kind: "prepared", data: input.terms }
+      : { kind: "refused", refusal: failure };
+  const decisionInput: AmendInput<VerificationDeclarationRefusal> = {
+    contractId: input.contractId,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    at: timestamp(),
+    ...(input.source === undefined ? {} : { source: input.source }),
+    ...(preparation === undefined ? {} : { preparation }),
+  };
   return complete(
-    input.contractId,
-    admitAmend(input.scope, {
-      contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      at: timestamp(),
-      data: input.body,
-    }, decideAmend),
+    admitIntent(
+      input.scope,
+      decisionInput,
+      decideAmend,
+      {
+        observedContracts: [input.contractId, ...(input.terms?.after ?? [])],
+        observe: observePrerequisiteClosure,
+      },
+    ),
     undefined,
   );
 }
 
-export type DeliveryOperationValue = Readonly<{
-  snapshotId: SnapshotId;
-  changeId: ChangeId;
-  expectedPredecessor: SnapshotId;
-  reviewSubject: AttestationData["subject"];
-}>;
+export type DeliverValue = DeliveryIdentity & Readonly<{ verification?: VerificationStop; placement?: PlacementStop; leak?: WorktreeLeak }>;
 
-type PreparedDeliveryValue = Omit<DeliveryOperationValue, "reviewSubject">;
+type AttemptDecision<Value, Refusal = IntentRefusal> =
+  | (AcceptedAdmission & Readonly<{ value: Value }>)
+  | Readonly<{ kind: "refused"; refusal: Refusal }>
+  | Readonly<{ kind: "redecide" }>
+  | Readonly<{ kind: "collision" }>
+  | Extract<DecidedOfferResult, { kind: "publication-failed" }>;
 
-export async function deliverOperation(input: OperationInput): Promise<IntentOutcome<DeliveryOperationValue>> {
-  const carrier = input.scope;
-  const prepared = prepareDelivery(carrier, input.contractId);
-  if (prepared.kind === "refused") return { kind: "refused", refusal: prepared.refusal as DeliveryPreparationRefusal };
+type DeliverOperationInput = OperationInput & Readonly<{ derivation?: DocumentDerivation; message?: string }>;
 
-  const preparedValue: PreparedDeliveryValue = {
-    snapshotId: prepared.delivery.candidate,
-    changeId: prepared.delivery.deliveryPatchId,
-    expectedPredecessor: prepared.delivery.expectedPredecessor,
-  };
-  const first = complete(
-    input.contractId,
-    admitDeliver(carrier, {
-      contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      at: timestamp(),
-      data: prepared.delivery,
-    }, decideDeliver),
-    preparedValue,
-  );
-  if (first.kind !== "accepted") return first;
-  const reviewSubject = currentSubject(first.receipt.snapshot, "reviewed");
-  if (reviewSubject === null) throw new Error(`delivery subject is absent: ${input.contractId}`);
-  const value: DeliveryOperationValue = { ...preparedValue, reviewSubject };
-
-  const facts = [...first.receipt.facts];
-  let snapshot = first.receipt.snapshot;
-  const verification = await verifyPreparedDelivery({
-    repository: carrier,
+function deliverAttempt(input: DeliverOperationInput, attempt: Parameters<typeof admitDecidedOffer>[2]): AttemptDecision<DeliveryIdentity> {
+  const decisionObservation = observeContractsForAdmission(input.scope, [input.contractId]);
+  const state = contractState(decisionObservation.decision, input.contractId);
+  let preparation: DeliverInput<DeliveryFailure>["preparation"];
+  if (state === null || input.derivation === undefined) {
+    preparation = { kind: "unavailable" };
+  } else {
+    const prepared = prepareDelivery(input.scope, {
+      contractId: state.id,
+      coordinates: state.coordinates,
+    }, {
+      title: input.derivation.title,
+      ...(input.message === undefined ? {} : { message: input.message }),
+    });
+    const declaration = declarationFailure(state.terms, input.derivation.verification, input.contractId);
+    preparation = declaration !== undefined
+      ? { kind: "refused", document: input.derivation.document, refusal: declaration }
+      : prepared.kind === "refused"
+        ? { kind: "refused", document: input.derivation.document, refusal: prepared.refusal }
+        : { kind: "prepared", document: input.derivation.document, data: prepared.data };
+  }
+  const decisionInput: DeliverInput<DeliveryFailure> = {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
-    prepared,
+    preparation,
+  };
+  const decision = decideDeliver({ input: decisionInput, attempt, observation: decisionObservation.decision });
+  if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
+  if (preparation.kind !== "prepared") {
+    throw new Error("offered delivery is missing its mechanical preparation");
+  }
+  const admitted = admitDecidedOffer(
+    input.scope,
+    decisionObservation,
+    attempt,
+    decision.offer,
+    input.contractId,
+  );
+  if (admitted.kind === "accepted") {
+    return { ...admitted, value: {
+      snapshotId: preparation.data.candidate,
+      changeId: preparation.data.deliveryPatchId,
+      expectedPredecessor: preparation.data.expectedPredecessor,
+    } };
+  }
+  return admitted;
+}
+
+async function completeDelivery(
+  input: DeliverOperationInput,
+  first: Extract<AttemptDecision<DeliveryIdentity>, { kind: "accepted" }>,
+): Promise<IntentOutcome<DeliverValue>> {
+  if (input.derivation === undefined) {
+    throw new Error("accepted delivery is missing its document derivation");
+  }
+  const derivation = input.derivation;
+  let admission: AcceptedAdmission = first;
+  let verificationValue: VerificationStop | undefined;
+  let leak: WorktreeLeak | undefined;
+  const verification = await verifyDelivery({
+    repository: input.scope,
+    contractId: input.contractId,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    at: timestamp(),
+    state: first.state,
     environment: process.env,
     produce: produceVerification,
+    ...(derivation.verification === null
+      ? {}
+      : { verification: derivation.verification }),
   });
-  if (verification?.kind === "accepted") {
-    const acceptedVerification = complete(input.contractId, verification, undefined);
-    if (acceptedVerification.kind === "accepted") {
-      facts.push(...acceptedVerification.receipt.facts);
-      snapshot = acceptedVerification.receipt.snapshot;
+  if (verification !== null) {
+    leak = verification.leak;
+    if ("failure" in verification.step) verificationValue = verification.step;
+    else {
+      verificationValue = stepStop(verification.step);
+      if (verification.step.kind === "accepted") admission = mergeAdmissions(admission, verification.step);
     }
   }
-
-  const placement = admitPlacement(carrier, {
+  const placement = admitPlacement(input.scope, {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
   });
-  if (!(placement.kind === "refused" && placement.refusal.kind === "gates-unsatisfied")) {
-    const acceptedPlacement = complete(input.contractId, placement, undefined);
-    if (acceptedPlacement.kind === "accepted") {
-      facts.push(...acceptedPlacement.receipt.facts);
-      snapshot = acceptedPlacement.receipt.snapshot;
-    } else {
-      return acceptedPlacement;
+  const placementValue = stepStop(placement);
+  if (placement.kind === "accepted") admission = mergeAdmissions(admission, placement);
+  return admitted(admission, {
+    ...first.value,
+    ...(verificationValue === undefined ? {} : { verification: verificationValue }),
+    ...(placementValue === undefined ? {} : { placement: placementValue }),
+    ...(leak === undefined ? {} : { leak }),
+  });
+}
+
+export async function deliverOperation(
+  input: DeliverOperationInput,
+): Promise<IntentOutcome<DeliverValue>> {
+  const attempts = mintAttempts({ entryCount: 2 });
+  let first: Extract<AttemptDecision<DeliveryIdentity>, { kind: "accepted" }> | null = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    const result = deliverAttempt(input, attempts[index]!);
+    if (result.kind === "accepted") {
+      first = result;
+      break;
     }
+    if (result.kind === "refused") return result;
+    if (result.kind === "publication-failed") return { kind: "retry", reason: result };
+    if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
+    if (result.kind === "redecide") continue;
   }
-  return accepted(input.contractId, facts, value, first.receipt.prior, snapshot);
+  if (first === null) return { kind: "retry", reason: { kind: "exhausted" } };
+  return completeDelivery(input, first);
 }
 
 export function abandonOperation(
@@ -247,16 +368,15 @@ export function abandonOperation(
 ): IntentOutcome<void, AbandonRefusal> {
   const carrier = input.scope;
   const state = observeContract(carrier, input.contractId).state;
-  const target = state?.coordinates?.target;
+  const target = state === null ? undefined : state.coordinates.target;
   const finalHead = target === undefined ? null : readRef(carrier, target);
   return complete(
-    input.contractId,
-    admitAbandon(carrier, {
+    admitIntent(carrier, {
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
       finalHead: finalHead === null ? null : mintSnapshotId(finalHead),
-      data: { ...(input.note === undefined ? {} : { note: input.note }) },
+      ...(input.note === undefined ? {} : { note: input.note }),
     }, decideAbandon),
     undefined,
   );
@@ -266,8 +386,7 @@ export function arcOperation(
   input: OperationInput & Readonly<{ chapter: Omit<ArcData, "seq"> }>,
 ): IntentOutcome<void, ArcRefusal> {
   return complete(
-    input.contractId,
-    admitArc(input.scope, {
+    admitIntent(input.scope, {
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
@@ -277,45 +396,101 @@ export function arcOperation(
   );
 }
 
-export function reviewOperation(
-  input: OperationInput & Readonly<{ data: AttestationData & Readonly<{ gate: "reviewed" }> }>,
-): IntentOutcome<void, AttestationRefusal | PlacementRefusal> {
-  const carrier = input.scope;
-  const review = complete(
+type ReviewOperationInput = OperationInput & Readonly<{ verdict: AttestationData["verdict"]; summary?: string }>;
+
+export type ReviewValue = Readonly<{ placement?: PlacementStop }>;
+
+function reviewAttempt(
+  input: ReviewOperationInput,
+  attempt: Parameters<typeof admitDecidedOffer>[2],
+): AttemptDecision<void, ReviewRefusal> {
+  const decisionObservation = observeContractsForAdmission(input.scope, [input.contractId]);
+  const state = contractState(decisionObservation.decision, input.contractId);
+  let preparation: AttestationInput<ReviewRefusal>["preparation"];
+  if (state !== null) {
+    const prepared = prepareReview(input.scope, { contractId: state.id, coordinates: state.coordinates });
+    preparation = prepared.kind === "refused"
+      ? { kind: "refused", refusal: prepared.refusal }
+      : {
+        kind: "prepared",
+        data: {
+          gate: REVIEWED,
+          subject: dependencyKeySet([
+            { kind: "document", value: state.terms.document.key },
+            { kind: "change", value: prepared.data },
+          ]),
+          verdict: input.verdict,
+          ...(input.summary === undefined ? {} : { summary: input.summary }),
+        },
+      };
+  }
+  const decisionInput: AttestationInput<ReviewRefusal> = {
+    contractId: input.contractId,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    at: timestamp(),
+    ...(preparation === undefined ? {} : { preparation }),
+  };
+  const decision = decideAttestation({ input: decisionInput, attempt, observation: decisionObservation.decision });
+  if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
+  const admitted = admitDecidedOffer(
+    input.scope,
+    decisionObservation,
+    attempt,
+    decision.offer,
     input.contractId,
-    admitReview(carrier, {
-      contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      at: timestamp(),
-      data: input.data,
-    }, decideAttestation),
-    undefined,
   );
-  if (review.kind !== "accepted" || input.data.verdict !== "satisfied") return review;
+  if (admitted.kind === "accepted") return { ...admitted, value: undefined };
+  return admitted;
+}
+
+export function reviewOperation(
+  input: ReviewOperationInput,
+): IntentOutcome<ReviewValue, ReviewRefusal> {
+  const carrier = input.scope;
+  const attempts = mintAttempts({ entryCount: 2 });
+  let review: Extract<AttemptDecision<void, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    const result = reviewAttempt(input, attempts[index]!);
+    if (result.kind === "accepted" || result.kind === "refused") {
+      review = result;
+      break;
+    }
+    if (result.kind === "publication-failed") return { kind: "retry", reason: result };
+    if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
+  }
+  if (review === null) return { kind: "retry", reason: { kind: "exhausted" } };
+  if (review.kind !== "accepted") return review;
+  if (input.verdict !== "satisfied") return admitted(review, {});
 
   const placement = admitPlacement(carrier, {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
   });
-  if (placement.kind === "refused" && placement.refusal.kind === "gates-unsatisfied") return review;
-  const placed = complete(input.contractId, placement, undefined);
-  if (placed.kind !== "accepted") return placed;
-  return accepted<void, AttestationRefusal | PlacementRefusal>(
-    input.contractId,
-    [...review.receipt.facts, ...placed.receipt.facts],
-    undefined,
-    review.receipt.prior,
-    placed.receipt.snapshot,
-  );
+  const placementStop = stepStop(placement);
+  const admission = placement.kind === "accepted" ? mergeAdmissions(review, placement) : review;
+  return admitted(admission, placementStop === undefined ? {} : { placement: placementStop });
 }
 
-export async function auditOperation(input: OperationInput): Promise<IntentOutcome<AuditReport>> {
+export async function auditOperation(
+  input: OperationInput & Readonly<{ derivation?: DocumentDerivation }>,
+): Promise<IntentOutcome<AuditReport>> {
   const carrier = input.scope;
-  const initial = readAudit(carrier, input.contractId);
+  const initial = readAudit(carrier, input.contractId, REVIEWED);
   if (initial.state === null) return { kind: "refused", refusal: { kind: "contract-missing", contractId: input.contractId } };
+  const derivation = input.derivation;
+  if (derivation === undefined) {
+    return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
+  }
 
-  const verification = await verifyStoredDelivery({
+  if (initial.state.delivery === null || derivation.verification === null) {
+    if (!documentIsCurrent(initial.state, derivation.document)) {
+      return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
+    }
+    return accepted(initial.state, [], initial.report);
+  }
+
+  const verification = await verifyDelivery({
     repository: carrier,
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
@@ -323,51 +498,52 @@ export async function auditOperation(input: OperationInput): Promise<IntentOutco
     state: initial.state,
     environment: process.env,
     produce: produceVerification,
+    verification: derivation.verification,
   });
-  const attempt = verification !== null && "failure" in verification ? verification : undefined;
-  const verified = verification !== null && !("failure" in verification)
-    ? complete(input.contractId, verification, undefined)
-    : undefined;
-  if (verified?.kind === "refused") return verified;
-  if (verified?.kind === "retry") return verified;
-
-  const current = readAudit(carrier, input.contractId, attempt);
-  return accepted(
-    input.contractId,
-    verified?.receipt.facts ?? [],
-    current.report,
-    verified?.receipt.prior ?? initial.state,
-    verified?.receipt.snapshot ?? current.state ?? initial.state,
-  );
+  if (verification === null) {
+    throw new Error("audit verification preparation unexpectedly produced no attempt");
+  }
+  const attempt = "failure" in verification.step
+    ? verification.step
+    : verification.step.kind === "accepted"
+      ? undefined
+      : verification.step.kind === "refused"
+        ? { refusal: verification.step.refusal }
+        : { retry: verification.step };
+  const report = !("failure" in verification.step) && verification.step.kind === "accepted"
+    ? auditReport(verification.step.journal, REVIEWED)
+    : initial.report;
+  const value = {
+    ...report,
+    ...(attempt === undefined ? {} : { attempt }),
+    ...(verification.leak === undefined ? {} : { leak: verification.leak }),
+  };
+  return !("failure" in verification.step) && verification.step.kind === "accepted"
+    ? admitted(verification.step, value)
+    : accepted(initial.state, [], value);
 }
 
 export type ReconcileReport = ReconcileResult;
 
 export function reconcileOperation(input: OperationInput): ReconcileReport {
-  const carrier = input.scope;
-  return reconcile({ repository: carrier, state: observeContract(carrier, input.contractId).state });
+  return reconcile({ repository: input.scope, state: observeContract(input.scope, input.contractId).state });
 }
 
-export type RepoReconcileItem =
+type RepoReconcileItem =
   | Readonly<{ contractId: ContractId; kind: "reconciled"; report: ReconcileReport }>
-  | Readonly<{ contractId: ContractId; kind: "failed"; error: string }>;
+  | Readonly<{ contractId: ContractId; kind: "failed"; diagnostic: string }>;
 
-export type RepoReconcileReport = Readonly<{
-  contracts: readonly RepoReconcileItem[];
-}>;
+export type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>;
 
-function reconcileError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+function reconcileError(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
-/** Reconcile every contract from one immutable carrier observation. */
 export function reconcileAllOperation(input: Readonly<{ scope: RepositoryScope }>): RepoReconcileReport {
   const carrier = input.scope;
   const observation = observeCarrier(carrier);
-  const contracts = reconcileBatch(carrier, observation.contracts.values()).map((item): RepoReconcileItem => (
+  const contracts = reconcileBatch(carrier, [...observation.contracts].map(([id, record]) => ({ id, state: record.state }))).map((item): RepoReconcileItem => (
     item.kind === "reconciled"
       ? { contractId: item.contract, kind: "reconciled", report: item.result }
-      : { contractId: item.contract, kind: "failed", error: reconcileError(item.error) }
+      : { contractId: item.contract, kind: "failed", diagnostic: reconcileError(item.error) }
   ));
   return { contracts };
 }

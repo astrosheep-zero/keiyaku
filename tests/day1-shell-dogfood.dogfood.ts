@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -10,11 +10,11 @@ const temporaryPaths: string[] = [];
 let bin = "";
 
 type ShellResult = Readonly<{ status: number | null; stdout: string; stderr: string }>;
-type AuditObservation = Readonly<{
+type AuditReport = Readonly<{
   reworks: number;
-  reviewed: number;
+  reviews: number;
   timeline: readonly unknown[];
-  attempt?: Readonly<{ failure: "timeout" | "spawn-error" | "unknown-exit" }>;
+  attempt?: Readonly<{ failure: "candidate-unavailable" | "timeout" | "spawn-error" | "unknown-exit" }>;
   diff?: string;
 }>;
 
@@ -166,9 +166,14 @@ function journalEntries(repository: string, id: string): Array<Readonly<{
   kind: string;
   data?: Readonly<{ note?: string }>;
 }>> {
-  const journal = git(repository, ["ls-tree", "-r", "--name-only", "refs/heads/keiyaku-state"])
+  const journals = git(repository, ["ls-tree", "-r", "--name-only", "refs/heads/keiyaku-state"])
     .split("\n")
-    .find((path) => path.endsWith(`/${id.slice(4)}.jsonl`));
+    .filter((path) => path.startsWith("contracts/") && path.endsWith(".jsonl"));
+  const journal = journals.find((path) => {
+    const first = git(repository, ["show", `refs/heads/keiyaku-state:${path}`]).split("\n")[0];
+    if (first === undefined || first.length === 0) return false;
+    return (JSON.parse(first) as { contract?: unknown }).contract === id;
+  });
   assert.ok(journal, `carrier journal for ${id} is absent`);
   return git(repository, ["show", `refs/heads/keiyaku-state:${journal}`])
     .trimEnd()
@@ -180,10 +185,11 @@ function journalKinds(repository: string, id: string): string[] {
   return journalEntries(repository, id).map((entry) => entry.kind);
 }
 
-function auditObservation(text: string): AuditObservation {
-  const prefix = "observation audit\n";
-  assert.ok(text.startsWith(prefix), `audit did not use tagged text observation output:\n${text}`);
-  return JSON.parse(text.slice(prefix.length)) as AuditObservation;
+function auditReport(text: string): AuditReport {
+  assert.match(text, /^accepted audit kei\/[^\s]+ head=/m, `audit did not render an accepted result:\n${text}`);
+  const line = text.split("\n").find((entry) => entry.startsWith("report "));
+  assert.ok(line, `audit report is absent:\n${text}`);
+  return JSON.parse(line.slice("report ".length)) as AuditReport;
 }
 
 function worktreePaths(repository: string): string[] {
@@ -300,12 +306,12 @@ test("installed binary abandonment preserves the target and user commit", () => 
 
   const userCommit = commit(repository, "user-owned.txt", "keep this user commit\n", "user commit after bind");
   const abandoned = invoke(repository, ["abandon", id, "--note", "scope changed"]);
-  assert.deepEqual(acceptedFactKinds(abandoned, id), ["abandon", "abandoned"]);
+  assert.deepEqual(acceptedFactKinds(abandoned, id), ["abandoned"]);
   assert.equal(gitRef(repository, target), userCommit);
   assert.equal(git(repository, ["show", `${userCommit}:user-owned.txt`]), "keep this user commit\n");
-  assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "abandon", "abandoned"]);
-  const abandon = journalEntries(repository, id).find((entry) => entry.kind === "abandon");
-  assert.deepEqual(abandon?.data, { note: "scope changed" });
+  assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "abandoned"]);
+  const terminal = journalEntries(repository, id).find((entry) => entry.kind === "abandoned");
+  assert.deepEqual(terminal?.data, { finalHead: userCommit, note: "scope changed" });
   assert.equal(gitRef(repository, deliveryRef), null);
   assert.equal(existsSync(managed), false);
 });
@@ -326,6 +332,10 @@ test("installed binary dogfoods here verification and gate-controlled placement"
   const originalTarget = gitRef(repository, target);
   assert.ok(originalTarget);
   const originalWorktrees = worktreePaths(repository);
+  mkdirSync(join(repository, ".keiyaku"));
+  writeFileSync(join(repository, ".keiyaku", "settings.json"), JSON.stringify({
+    gates: { default: ["reviewed", "verified"] },
+  }));
 
   const bound = succeeds(invokeResult(
     here,
@@ -338,13 +348,9 @@ test("installed binary dogfoods here verification and gate-controlled placement"
   assert.deepEqual(worktreePaths(repository), originalWorktrees);
 
   const candidate = commit(here, "candidate.txt", "candidate\n", "candidate");
-  const refusal = invokeResult(here, ["review", id, "--satisfied"]);
-  assert.equal(refusal.status, 1);
-  assert.equal(refusal.stderr, "");
-  assert.equal(
-    refusal.stdout,
-    `refused review ${id} {"kind":"delivery-missing","contractId":"${id}"}\n`,
-  );
+  const preDeliveryReview = succeeds(invokeResult(here, ["review", id, "--satisfied"]));
+  assert.deepEqual(acceptedFactKinds(preDeliveryReview, id), ["attestation"]);
+  assert.match(preDeliveryReview, /stop placement \{"refusal"/);
 
   const delivered = succeeds(invokeResult(here, ["deliver", id]));
   assert.deepEqual(acceptedFactKinds(delivered, id), ["deliver", "attestation"]);
@@ -358,20 +364,28 @@ test("installed binary dogfoods here verification and gate-controlled placement"
   assert.equal(gitRef(repository, target), originalTarget, "audit admission must not place the target");
 
   writeFileSync(poison, "rerun must not occur\n");
-  const reused = auditObservation(succeeds(invokeResult(here, ["audit", id, "--show-diff-body"])));
-  assert.match(reused.diff ?? "", /\+candidate/);
-  assert.equal(reused.attempt, undefined);
-  assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "deliver", "attestation", "attestation"]);
+  const rerun = succeeds(invokeResult(here, ["audit", id, "--show-diff-body"]));
+  assert.deepEqual(acceptedFactKinds(rerun, id), ["attestation"]);
+  assert.match(rerun, /diff --git a\/candidate\.txt b\/candidate\.txt/);
+  assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "attestation", "deliver", "attestation", "attestation", "attestation"]);
+
+  rmSync(poison);
+  const repaired = succeeds(invokeResult(here, ["audit", id, "--show-diff-body"]));
+  assert.deepEqual(acceptedFactKinds(repaired, id), ["attestation"]);
+  assert.match(repaired, /diff --git a\/candidate\.txt b\/candidate\.txt/);
+  assert.deepEqual(journalKinds(repository, id), ["bind", "bound", "attestation", "deliver", "attestation", "attestation", "attestation", "attestation"]);
 
   const satisfiedReview = succeeds(invokeResult(here, ["review", id, "--satisfied"]));
   assert.deepEqual(acceptedFactKinds(satisfiedReview, id), ["attestation", "claimed"]);
   assert.equal(gitRef(repository, target), candidate, "review places only after the verified gate is satisfied");
 
-  const terminal = auditObservation(succeeds(invokeResult(here, ["audit", id, "--show-diff-body"])));
-  assert.equal(terminal.attempt, undefined);
+  const terminal = auditReport(succeeds(invokeResult(here, ["audit", id, "--show-diff-body"])));
+  assert.deepEqual(terminal.attempt, {
+    refusal: { kind: "terminal", contractId: id },
+  });
   assert.deepEqual(
     journalKinds(repository, id),
-    ["bind", "bound", "deliver", "attestation", "attestation", "attestation", "claimed"],
+    ["bind", "bound", "attestation", "deliver", "attestation", "attestation", "attestation", "attestation", "attestation", "claimed"],
   );
   assert.equal(git(here, ["branch", "--show-current"]).trim(), "caller");
   assert.equal(git(here, ["rev-parse", "HEAD"]).trim(), candidate);

@@ -1,29 +1,30 @@
-import { applyAmendOperations } from "../body/amend.js";
+import { createTwoFilesPatch } from "diff";
+import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
-import { decodeContractDocument } from "../body/decode.js";
-import { renderContractBody } from "../body/render.js";
-import { validateContractBody } from "../core/facts/codec.js";
-import { effectiveGates as resolveEffectiveGates } from "../core/facts/gate.js";
+import { decodeContractDocument, verificationDefinition } from "../body/decode.js";
+import { regionsOverlap } from "../body/region.js";
+import type { DecodedContractDocument } from "../body/types.js";
 import {
   contractId,
   actorId,
+  gate,
   type ActorId as CoreActorId,
-  type ArcData,
   type ChangeId,
-  type ContractBody as ContractBodyValue,
   type ContractId,
   type ContractState,
-  type Gate,
+  type ContractTerms,
+  type Gate as CoreGate,
   type JournalEntry,
   type SnapshotId,
-  type SubjectKey,
 } from "../core/facts/types.js";
+export { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
   abandonOperation,
   amendOperation,
   arcOperation,
   auditOperation,
   bindOperation,
+  documentsOperation,
   deliveryDiffOperation,
   deliverOperation,
   deliveryOperation,
@@ -34,18 +35,22 @@ import {
   scopeOperation,
   stateOperation,
   statusOperation,
-  worktreePathOperation,
   type AuditReport,
   type ContractStatus,
+  type DeliverValue,
+  type DocumentDerivation,
   type FactKind,
   type IntentOutcome,
   type IntentRefusal,
   type IntentRetry,
+  type PlacementStop,
   type RepoReconcileReport,
   type ReconcileReport as ProtocolReconcileReport,
   type RepositoryScope,
+  type ReviewValue,
   type StatusReport,
   type TimelineEntry,
+  type VerificationStop,
 } from "../protocol/operations.js";
 
 export type {
@@ -55,38 +60,40 @@ export type {
   ContractState,
   ContractStatus,
   FactKind,
-  Gate,
   RepoReconcileReport,
   SnapshotId,
   StatusReport,
   TimelineEntry,
 };
 
-export type ContractBody = ContractBodyValue;
 export type Fact = JournalEntry;
 export type ActorId = string;
 export type AttestationVerdict = "satisfied" | "unsatisfied";
-export type ArcChapter = ArcData;
+export type Gate = "reviewed" | "verified";
+export type Review = ReviewValue;
+export type RegionOverlap = Readonly<{
+  contract: ContractId;
+  patterns: readonly Readonly<{ mine: string; theirs: string }>[];
+}>;
+type RegionObservation = Readonly<
+  | { overlaps: readonly RegionOverlap[]; overlapFailure?: never }
+  | { overlapFailure: string; overlaps?: never }
+>;
+export type { VerificationDeclarationRefusal } from "../protocol/operations.js";
 export type TypedRefusal = IntentRefusal;
 export type TypedRetry = IntentRetry;
+export type { PlacementStop, VerificationStop };
 
-export type Receipt = Readonly<{
-  facts: readonly Fact[];
-  prior: ContractState | null;
-  snapshot: ContractState;
-}>;
+export type Outcome<A, Observation extends object = Record<never, never>> =
+  | (Extract<IntentOutcome<A>, { kind: "accepted" }> & Observation)
+  | Exclude<IntentOutcome<A>, { kind: "accepted" }>;
 
-export type Outcome<A> =
-  | Readonly<{ kind: "accepted"; receipt: Receipt; value: A }>
-  | Readonly<{ kind: "refused"; refusal: TypedRefusal }>
-  | Readonly<{ kind: "retry"; reason: TypedRetry }>;
-
-export type BindResult = Outcome<Keiyaku>;
+export type BindResult = Outcome<Keiyaku, RegionObservation>;
+export type AmendResult = Outcome<void, RegionObservation & Readonly<{ documentDiff: string }>>;
 export type ReconcileReport = ProtocolReconcileReport;
 
 export type BindInput = Readonly<{
   markdown: string;
-  repo?: string;
   target?: string;
   workspace?: "worktree" | "here";
   actor?: ActorId;
@@ -107,22 +114,15 @@ export type ArcInput = Readonly<{
 }>;
 
 type ActorOptions = Readonly<{ actor?: ActorId }>;
-export type KeiyakuOfInput = Readonly<{ id: ContractId; repo?: string }>;
 export type RepoAtInput = Readonly<{ path?: string }>;
-export type ContractBodyRenderInput = Readonly<{ body: ContractBody; currentArc?: ArcChapter }>;
+export type StatusInput = Readonly<{ contract?: ContractId }>;
+type ContractInput = Readonly<{ id: ContractId }>;
 export type ReviewInput = ActorOptions & Readonly<{ verdict: AttestationVerdict; summary?: string }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
-export type DeliverInput = ActorOptions;
+export type DeliverInput = ActorOptions & Readonly<{ message?: string }>;
 export type AuditInput = ActorOptions;
 
-export const ContractBody = Object.freeze({
-  render(input: ContractBodyRenderInput): string {
-    const values = requireInput(input, "ContractBody.render input");
-    return renderContractBody(values.body as ContractBody, values.currentArc as ArcChapter | undefined);
-  },
-});
-
-function actorOption(actor: ActorId | undefined): Readonly<{ actor?: CoreActorId }> {
+function actorOption(actor: unknown): Readonly<{ actor?: CoreActorId }> {
   if (actor === undefined) return {};
   if (typeof actor !== "string" || actor.trim().length === 0) {
     throw new TypeError("actor must be a nonblank string");
@@ -135,14 +135,16 @@ function requireMarkdown(value: unknown, label = "markdown"): string {
   return value;
 }
 
-function requireInput(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function optionalNonblank(value: string | undefined, label: string): string | undefined {
+function requireInput(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
+  return value;
+}
+
+function optionalNonblank(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new TypeError(`${label} must be a nonblank string`);
@@ -150,52 +152,54 @@ function optionalNonblank(value: string | undefined, label: string): string | un
   return value;
 }
 
-function optionalRepository(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.length === 0) throw new TypeError("repository path must be a nonempty string");
-  return value;
-}
-
-function normalizedAfter(values: readonly ContractId[] | undefined): readonly ContractId[] {
+function normalizedList<T>(
+  values: unknown,
+  label: string,
+  brand: (value: string) => T,
+): readonly T[] {
   if (values === undefined) return [];
-  if (!Array.isArray(values)) throw new TypeError("after must be an array");
+  if (!Array.isArray(values)) throw new TypeError(`${label} must be an array`);
   return values.map((value, index) => {
-    if (typeof value !== "string") throw new TypeError(`after[${index}] must be a string`);
+    if (typeof value !== "string") throw new TypeError(`${label}[${index}] must be a string`);
     try {
-      return contractId(value);
+      return brand(value);
     } catch (error) {
-      throw new TypeError(error instanceof Error ? error.message : `after[${index}] is invalid`);
+      throw new TypeError(error instanceof Error ? error.message : `${label}[${index}] is invalid`);
     }
   });
 }
 
-function normalizedGates(values: readonly Gate[] | undefined): readonly Gate[] | undefined {
-  if (values === undefined) return undefined;
+function normalizedGates(values: unknown): readonly CoreGate[] {
+  if (values === undefined) return [];
   if (!Array.isArray(values)) throw new TypeError("gates must be an array");
-  return values.map((value, index) => {
+  const normalized = values.map((value, index) => {
     if (value !== "reviewed" && value !== "verified") {
       throw new TypeError(`gates[${index}] must be reviewed or verified`);
     }
-    return value;
+    return gate(value);
   });
+  if (new Set(normalized).size !== normalized.length) throw new TypeError("gates must not contain duplicates");
+  return normalized;
 }
 
-function structuredBody(
-  body: ContractBodyValue,
-  gates: readonly Gate[] | undefined,
-  after: readonly ContractId[] | undefined,
-): ContractBodyValue {
-  const declaredGates = normalizedGates(gates);
-  const declaredBody: ContractBodyValue = {
-    ...body,
-    ...(declaredGates === undefined ? {} : { gates: declaredGates }),
-  };
+function contractTerms(
+  document: DecodedContractDocument,
+  gates: readonly CoreGate[],
+  after: readonly ContractId[],
+): ContractTerms {
   return {
-    ...declaredBody,
-    gates: resolveEffectiveGates(declaredBody),
-    after: after === undefined
-      ? []
-      : normalizedAfter(after),
+    document: document.document,
+    segments: document.segments,
+    gates,
+    after,
+  };
+}
+
+function documentDerivation(document: DecodedContractDocument): DocumentDerivation {
+  return {
+    document: document.document.key,
+    title: document.title,
+    verification: verificationDefinition(document),
   };
 }
 
@@ -203,54 +207,60 @@ function mapOutcome<Value, PublicValue>(
   result: IntentOutcome<Value>,
   value: (result: Value) => PublicValue,
 ): Outcome<PublicValue> {
-  if (result.kind === "refused") return { kind: "refused", refusal: result.refusal };
-  if (result.kind === "retry") return { kind: "retry", reason: result.reason };
-  return {
-    kind: "accepted",
-    receipt: Object.freeze({
-      facts: Object.freeze([...result.receipt.facts]),
-      prior: result.receipt.prior,
-      snapshot: result.receipt.snapshot,
-    }),
-    value: value(result.value),
-  };
+  if (result.kind !== "accepted") return result;
+  return { ...result, value: value(result.value) };
 }
 
-type PinnedScope = RepositoryScope;
+function diagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
-function resolvePinnedScope(path?: string): PinnedScope {
-  const coordinate = path === undefined ? process.cwd() : path;
-  if (typeof coordinate !== "string" || coordinate.length === 0) {
-    throw new TypeError("repository path must be a nonempty string");
+function observeRegion(
+  scope: RepositoryScope,
+  self: ContractId,
+  mine: readonly string[],
+): RegionObservation {
+  try {
+    const peers = documentsOperation({ scope });
+    const overlaps: RegionOverlap[] = [];
+    for (const peer of peers) {
+      if (peer.contract === self) continue;
+      try {
+        const theirs = decodeContractDocument(peer.documentBytes).region;
+        const pairs = regionsOverlap(mine, theirs);
+        if (pairs.length === 0) continue;
+        overlaps.push({
+          contract: peer.contract,
+          patterns: pairs.map(([minePattern, theirsPattern]) => ({ mine: minePattern, theirs: theirsPattern })),
+        });
+      } catch (error) {
+        return { overlapFailure: `${peer.contract}: ${diagnostic(error)}` };
+      }
+    }
+    return { overlaps };
+  } catch (error) {
+    return { overlapFailure: diagnostic(error) };
   }
+}
+
+function resolvePinnedScope(path?: string): RepositoryScope {
+  const coordinate = path === undefined ? process.cwd() : path;
   return scopeOperation({ coordinate });
 }
 
 class DeliveryHandle {
-  readonly snapshotId: SnapshotId;
-  readonly changeId: ChangeId;
+  declare readonly verification?: DeliverValue["verification"];
+  declare readonly placement?: DeliverValue["placement"];
+  declare readonly leak?: DeliverValue["leak"];
 
   constructor(
-    snapshotId: SnapshotId,
-    changeId: ChangeId,
+    readonly snapshotId: SnapshotId,
+    readonly changeId: ChangeId,
+    readonly expectedPredecessor: SnapshotId,
     private readonly readDiff: () => Promise<string | null>,
-    private readonly reviewDelivery: (input: ReviewInput) => Promise<Outcome<void>>,
+    outcomes: Partial<Pick<DeliverValue, "verification" | "placement" | "leak">> = {},
   ) {
-    this.snapshotId = snapshotId;
-    this.changeId = changeId;
-  }
-
-  review(input: ReviewInput): Promise<Outcome<void>> {
-    const values = requireInput(input, "review input");
-    const verdict = values.verdict as AttestationVerdict;
-    if (verdict !== "satisfied" && verdict !== "unsatisfied") {
-      throw new TypeError("verdict must be satisfied or unsatisfied");
-    }
-    return this.reviewDelivery({
-      verdict,
-      ...(values.actor === undefined ? {} : { actor: values.actor as ActorId }),
-      ...(values.summary === undefined ? {} : { summary: values.summary as string }),
-    });
+    Object.assign(this, outcomes);
   }
 
   diff(): Promise<string | null> {
@@ -259,48 +269,20 @@ class DeliveryHandle {
 }
 
 export type Delivery = DeliveryHandle;
-type DeliveryObject = Readonly<{ prototype: DeliveryHandle }>;
-export const Delivery: DeliveryObject = DeliveryHandle;
+type HandleType<T extends object> = Readonly<{
+  prototype: T;
+  [Symbol.hasInstance](value: unknown): boolean;
+}>;
+function handleType<T extends object>(prototype: T, hasInstance: (value: unknown) => boolean): HandleType<T> {
+  return Object.freeze({ prototype, [Symbol.hasInstance]: hasInstance });
+}
+export const Delivery = handleType(DeliveryHandle.prototype, (value) => value instanceof DeliveryHandle);
 
-export class Keiyaku {
-  private constructor(
+class KeiyakuHandle {
+  constructor(
     private readonly id: ContractId,
-    private readonly scope: PinnedScope,
+    private readonly scope: RepositoryScope,
   ) {}
-
-  static async bind(input: BindInput): Promise<BindResult> {
-    const values = requireInput(input, "bind input");
-    const markdown = requireMarkdown(values.markdown);
-    const scope = resolvePinnedScope(optionalRepository(values.repo));
-    const body = decodeContractDocument(markdown);
-    const workspace = values.workspace === undefined ? "worktree" : values.workspace;
-    if (workspace !== "worktree" && workspace !== "here") throw new TypeError("workspace must be worktree or here");
-    const target = optionalNonblank(values.target as string | undefined, "target");
-    const actor = actorOption(values.actor as ActorId | undefined);
-    const structured = structuredBody(body, values.gates as readonly Gate[] | undefined, values.after as readonly ContractId[] | undefined);
-    return mapOutcome(
-      bindOperation({
-        scope,
-        body: validateContractBody(structured),
-        workspace,
-        ...(target === undefined ? {} : { target }),
-        ...actor,
-      }),
-      ({ contractId: id }) => Keiyaku.#create(id, scope),
-    );
-  }
-
-  static of(input: KeiyakuOfInput): Keiyaku {
-    const values = requireInput(input, "Keiyaku.of input");
-    if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
-    const identity = contractId(values.id);
-    const scope = resolvePinnedScope(optionalRepository(values?.repo));
-    return Keiyaku.#create(identity, scope);
-  }
-
-  get worktreePath(): string | null {
-    return worktreePathOperation({ scope: this.scope, contractId: this.id });
-  }
 
   async state(): Promise<ContractState> {
     return stateOperation({ scope: this.scope, contractId: this.id });
@@ -310,42 +292,95 @@ export class Keiyaku {
     const delivery = deliveryOperation({ scope: this.scope, contractId: this.id });
     return delivery === null
       ? null
-      : this.deliveryHandle(delivery.snapshotId, delivery.changeId, delivery.expectedPredecessor, delivery.reviewSubject);
+      : this.deliveryHandle(delivery);
   }
 
-  async amend(input: AmendInput): Promise<Outcome<void>> {
+  async amend(input: AmendInput): Promise<AmendResult> {
     const values = requireInput(input, "amend input");
     const markdown = requireMarkdown(values.markdown);
+    const actor = actorOption(values.actor);
+    const gates = values.gates === undefined ? undefined : normalizedGates(values.gates);
+    const prerequisites = values.after === undefined
+      ? undefined
+      : normalizedList(values.after, "after", contractId);
     const current = readStateOperation({ scope: this.scope, contractId: this.id });
-    if (current === null) return { kind: "refused", refusal: { kind: "contract-missing", contractId: this.id } };
-    if (current.body === null) throw new Error(`contract body is absent: ${this.id}`);
-    const body = applyAmendOperations(markdown, current.body);
-    const gates = values.gates === undefined ? current.body.gates : values.gates as readonly Gate[];
-    const after = values.after === undefined ? current.body.after : values.after as readonly ContractId[];
-    const amended = structuredBody(body, gates, after);
-    return mapOutcome(amendOperation({
+    let document: DecodedContractDocument | undefined;
+    let terms: ContractTerms | undefined;
+    let definition: ReturnType<typeof verificationDefinition> | undefined;
+    if (current !== null) {
+      const before = current.terms.document.bytes;
+      const currentDocument = decodeContractDocument(before);
+      document = decodeContractDocument(applyAmendDocument(markdown, currentDocument));
+      terms = contractTerms(
+        document,
+        gates ?? current.terms.gates,
+        prerequisites ?? current.terms.after,
+      );
+      definition = verificationDefinition(document);
+    }
+    const outcome = mapOutcome(amendOperation({
       scope: this.scope,
       contractId: this.id,
-      ...actorOption(values.actor as ActorId | undefined),
-      body: validateContractBody(amended),
+      ...(current === null ? {} : { source: current.terms }),
+      ...actor,
+      ...(terms === undefined ? {} : { terms }),
+      ...(definition === undefined ? {} : { verification: definition }),
     }), () => undefined);
+    if (outcome.kind !== "accepted") return outcome;
+    if (document === undefined || current === null) {
+      throw new Error("accepted amendment is missing its document derivation");
+    }
+    const before = current.terms.document.bytes;
+    const after = document.document.bytes;
+    const documentDiff = before === after
+      ? ""
+      : createTwoFilesPatch("before", "after", before, after, "", "", { context: 3 });
+    return { ...outcome, documentDiff, ...observeRegion(this.scope, this.id, document.region) };
   }
 
   async deliver(input?: DeliverInput): Promise<Outcome<Delivery>> {
     const values = input === undefined ? undefined : requireInput(input, "deliver input");
+    const message = optionalNonblank(values?.message, "deliver message");
+    const actor = actorOption(values?.actor);
+    const state = readStateOperation({ scope: this.scope, contractId: this.id });
+    const derivation = state === null
+      ? undefined
+      : documentDerivation(decodeContractDocument(state.terms.document.bytes));
     return mapOutcome(
-      await deliverOperation({ scope: this.scope, contractId: this.id, ...actorOption(values?.actor as ActorId | undefined) }),
-      (delivery) => this.deliveryHandle(delivery.snapshotId, delivery.changeId, delivery.expectedPredecessor, delivery.reviewSubject),
+      await deliverOperation({
+        scope: this.scope,
+        contractId: this.id,
+        ...(derivation === undefined ? {} : { derivation }),
+        ...actor,
+        ...(message === undefined ? {} : { message }),
+      }),
+      (delivery) => this.deliveryHandle(delivery),
     );
+  }
+
+  async review(input: ReviewInput): Promise<Outcome<Review>> {
+    const values = requireInput(input, "review input");
+    const verdict = values.verdict;
+    if (verdict !== "satisfied" && verdict !== "unsatisfied") {
+      throw new TypeError("verdict must be satisfied or unsatisfied");
+    }
+    const summary = optionalNonblank(values.summary, "review summary");
+    return mapOutcome(reviewOperation({
+      scope: this.scope,
+      contractId: this.id,
+      verdict,
+      ...(summary === undefined ? {} : { summary }),
+      ...actorOption(values.actor),
+    }), (value) => value);
   }
 
   async abandon(input?: AbandonInput): Promise<Outcome<void>> {
     const values = input === undefined ? undefined : requireInput(input, "abandon input");
-    const note = optionalNonblank(values?.note as string | undefined, "abandon note");
+    const note = optionalNonblank(values?.note, "abandon note");
     return mapOutcome(abandonOperation({
       scope: this.scope,
       contractId: this.id,
-      ...actorOption(values?.actor as ActorId | undefined),
+      ...actorOption(values?.actor),
       ...(note === undefined ? {} : { note }),
     }), () => undefined);
   }
@@ -356,15 +391,25 @@ export class Keiyaku {
     return mapOutcome(arcOperation({
       scope: this.scope,
       contractId: this.id,
-      ...actorOption(values.actor as ActorId | undefined),
+      ...actorOption(values.actor),
       chapter,
     }), () => undefined);
   }
 
   async audit(input?: AuditInput): Promise<Outcome<AuditReport>> {
     const values = input === undefined ? undefined : requireInput(input, "audit input");
+    const actor = actorOption(values?.actor);
+    const state = readStateOperation({ scope: this.scope, contractId: this.id });
+    const derivation = state === null
+      ? undefined
+      : documentDerivation(decodeContractDocument(state.terms.document.bytes));
     return mapOutcome(
-      await auditOperation({ scope: this.scope, contractId: this.id, ...actorOption(values?.actor as ActorId | undefined) }),
+      await auditOperation({
+        scope: this.scope,
+        contractId: this.id,
+        ...(derivation === undefined ? {} : { derivation }),
+        ...actor,
+      }),
       (report) => report,
     );
   }
@@ -373,55 +418,85 @@ export class Keiyaku {
     return reconcileOperation({ scope: this.scope, contractId: this.id });
   }
 
-  private deliveryHandle(
-    snapshotId: SnapshotId,
-    changeId: ChangeId,
-    expectedPredecessor: SnapshotId,
-    reviewSubject: SubjectKey,
-  ): Delivery {
+  private deliveryHandle(delivery: DeliverValue): Delivery {
     return new DeliveryHandle(
-      snapshotId,
-      changeId,
-      () => deliveryDiffOperation({ scope: this.scope, expectedPredecessor, snapshotId }),
-      (input) => this.review(reviewSubject, input),
+      delivery.snapshotId,
+      delivery.changeId,
+      delivery.expectedPredecessor,
+      () => deliveryDiffOperation({
+        scope: this.scope,
+        expectedPredecessor: delivery.expectedPredecessor,
+        snapshotId: delivery.snapshotId,
+      }),
+      delivery,
     );
   }
 
-  static #create(id: ContractId, scope: PinnedScope): Keiyaku {
-    return new Keiyaku(id, scope);
-  }
-
-  private async review(subject: SubjectKey, input: ReviewInput): Promise<Outcome<void>> {
-    const summary = optionalNonblank(input.summary, "review summary");
-    return mapOutcome(reviewOperation({
-      scope: this.scope,
-      contractId: this.id,
-      data: {
-        gate: "reviewed",
-        subject,
-        verdict: input.verdict,
-        ...(summary === undefined ? {} : { summary }),
-      },
-      ...actorOption(input.actor),
-    }), () => undefined);
-  }
 }
+
+export type Keiyaku = KeiyakuHandle;
+export const Keiyaku = handleType(KeiyakuHandle.prototype, (value) => value instanceof KeiyakuHandle);
 
 export class Repo {
   readonly root: string;
 
-  private constructor(private readonly scope: PinnedScope) {
+  private constructor(private readonly scope: RepositoryScope) {
     this.root = scope.primaryWorktree;
   }
 
   static at(input?: RepoAtInput): Repo {
     const values = input === undefined ? undefined : requireInput(input, "Repo.at input");
-    const scope = resolvePinnedScope(optionalRepository(values?.path));
+    const scope = resolvePinnedScope(optionalNonblank(values?.path, "repository path"));
     return new Repo(scope);
   }
 
-  async status(): Promise<StatusReport> {
-    return statusOperation({ scope: this.scope });
+  contract(input: ContractInput): Keiyaku {
+    const values = requireInput(input, "repo.contract input");
+    if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
+    return new KeiyakuHandle(contractId(values.id), this.scope);
+  }
+
+  async bind(input: BindInput): Promise<BindResult> {
+    const values = requireInput(input, "repo.bind input");
+    const markdown = requireMarkdown(values.markdown);
+    const document = decodeContractDocument(markdown);
+    const workspace = values.workspace === undefined ? "worktree" : values.workspace;
+    if (workspace !== "worktree" && workspace !== "here") throw new TypeError("workspace must be worktree or here");
+    const target = values.target;
+    if (target !== undefined && typeof target !== "string") throw new TypeError("target must be a string");
+    const actor = actorOption(values.actor);
+    const terms = contractTerms(
+      document,
+      normalizedGates(values.gates),
+      normalizedList(values.after, "after", contractId),
+    );
+    const admitted = bindOperation({
+      scope: this.scope,
+      terms,
+      verification: verificationDefinition(document),
+      workspace,
+      ...(target === undefined ? {} : { target }),
+      ...actor,
+    });
+    const outcome = mapOutcome(admitted, ({ contractId: id }) => this.contract({ id }));
+    if (outcome.kind !== "accepted") return outcome;
+    if (admitted.kind !== "accepted") throw new Error("accepted bind is missing its contract identity");
+    return { ...outcome, ...observeRegion(this.scope, admitted.value.contractId, document.region) };
+  }
+
+  async status(input?: StatusInput): Promise<StatusReport> {
+    if (input === undefined) return statusOperation({ scope: this.scope });
+    const values = requireInput(input, "repo.status input");
+    const value = values.contract;
+    if (value === undefined) return statusOperation({ scope: this.scope });
+    if (typeof value !== "string") throw new TypeError("contract ID must be a string");
+    let contract: ContractId;
+    try {
+      contract = contractId(value);
+    } catch (error) {
+      throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
+    }
+    return statusOperation({ scope: this.scope, contractId: contract });
   }
 
   async reconcile(): Promise<RepoReconcileReport> {

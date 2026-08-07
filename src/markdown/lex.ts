@@ -4,7 +4,7 @@ import type { FrontmatterValue } from "./types.js";
 
 type SourceLine = Readonly<{ text: string; raw: string; span: SourceSpan }>;
 
-export type FenceOpening = FenceState & Readonly<{ leadingSpaces: number; info: string }>;
+type FenceOpening = FenceState & Readonly<{ leadingSpaces: number; info: string }>;
 
 function leadingSpaces(line: string): number {
   let index = 0;
@@ -12,7 +12,7 @@ function leadingSpaces(line: string): number {
   return index;
 }
 
-export function fenceOpening(line: string): FenceOpening | null {
+function fenceOpening(line: string): FenceOpening | null {
   const spaces = leadingSpaces(line);
   if (spaces > 3) return null;
   const value = line.slice(spaces);
