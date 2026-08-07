@@ -1,15 +1,14 @@
 ---
 id: 删除无生产读者的-keiyaku-worktreepath
 title: 删除无生产读者的 Keiyaku worktreePath
-state: in_progress
+state: done
 pri: 1
 needs: []
 parent: null
 from: []
 createdAt: 2026-08-06T21:45:30.159Z
-updatedAt: 2026-08-07T03:10:24.600Z
+updatedAt: 2026-08-07T04:48:19.711Z
 creator: thekoc
-startedAt: 2026-08-07T03:10:24.600Z
 ---
 依据 docs/public-api.md 的最小 package-root surface 与 existence razor，删除 Keiyaku.worktreePath public getter。生产 CLI selector 已从一次 repo.status() 的 ContractStatus.worktreePath 读取，仓库内无其他 production reader；当前 getter 只驱动测试，并额外触发 protocol/repository discovery。
 
