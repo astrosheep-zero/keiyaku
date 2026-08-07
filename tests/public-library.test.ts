@@ -222,9 +222,15 @@ test("Repo owns contract construction and binding", async () => {
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind did not return a contract");
   const state = await bound.value.state();
+  assert.equal(state.id, "kei/markdown-input");
   assert.equal(state.terms.document.bytes, markdown("Markdown input"));
   assert.deepEqual(state.terms.after, []);
   assert.deepEqual(state.terms.gates, []);
+
+  const sameTitle = await repo.bind({ markdown: markdown("Markdown input"), workspace: "here" });
+  assert.equal(sameTitle.kind, "accepted");
+  if (sameTitle.kind !== "accepted") throw new Error("colliding bind did not return a contract");
+  assert.match((await sameTitle.value.state()).id, /^kei\/markdown-input-[0-9a-hjkmnp-tv-z]{8}$/);
 
   assert.equal(repo.root, resolve(repo.root));
   assert.equal((await repo.status()).contracts.some((contract) => contract.contractId === state.id), true);

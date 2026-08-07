@@ -35,8 +35,8 @@ import { makeGitRepository, withGitShim } from "./support/git.js";
 
 const NO_VERIFICATION = { kind: "prepared", data: null } as const;
 
-function bindOperation(input: Omit<Parameters<typeof rawBindOperation>[0], "verification">) {
-  return rawBindOperation({ ...input, verification: NO_VERIFICATION });
+function bindOperation(input: Omit<Parameters<typeof rawBindOperation>[0], "verification" | "title"> & Readonly<{ title?: string }>) {
+  return rawBindOperation({ ...input, title: input.title ?? "Protocol bind", verification: NO_VERIFICATION });
 }
 
 type AmendTestInput = Omit<Parameters<typeof rawAmendOperation>[0], "amendment"> & Readonly<{
@@ -211,7 +211,7 @@ function gitProcessCounts(invocations: readonly string[]): Record<string, number
   return counts;
 }
 
-test("contract-local admission never recursively enumerates the carrier", async () => {
+test("contract-local admission scopes ancestor discovery to its journal path", async () => {
   const repository = repositoryWithHead();
   const bound = await Repo.at({ path: repository.path }).bind({ markdown: contractBody(), workspace: "here" });
   assert.equal(bound.kind, "accepted");
@@ -242,7 +242,9 @@ test("contract-local admission never recursively enumerates the carrier", async 
 
   assert.equal(admission.kind, "accepted");
   const invocations = readFileSync(log, "utf8").split("\n").filter(Boolean);
-  assert.equal(invocations.some((command) => command.startsWith("ls-tree -r ")), false);
+  const recursiveReads = invocations.filter((command) => command.split(" ").includes("-r"));
+  assert.equal(recursiveReads.length, 1);
+  assert.equal(recursiveReads[0]!.includes(`:(literal)${contractJournalPath(id)}`), true);
 });
 
 test("known publication failure is returned without a post-result ref read", async () => {
@@ -361,6 +363,7 @@ test("single-contract amend object I/O stays fixed as the carrier grows", () => 
   const oneIo = amendObjectIo(oneCarrier, oneBound.value.contractId);
   const manyIo = amendObjectIo(manyCarrier, manyBound.value.contractId);
   assert.deepEqual(manyIo, oneIo);
+  assert.equal(oneIo.mktree, 1);
 });
 
 test("runProtocol observes only watched contracts", async () => {
@@ -424,6 +427,15 @@ function terms(after: readonly ContractId[]) {
   } as const;
 }
 
+test("carrier journal depth is independent of contract identity length", () => {
+  const short = contractJournalPath(contractId("kei/alpha"));
+  const long = contractJournalPath(contractId(`kei/${"可读".repeat(1_000)}`));
+
+  assert.match(short, /^contracts\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/);
+  assert.match(long, /^contracts\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/);
+  assert.notEqual(long, short);
+});
+
 test("admission reuses frozen journal bytes for a multi-contract placement offer", () => {
   const repository = repositoryWithHead();
   const carrier = repositoryAt(repository.path);
@@ -463,7 +475,7 @@ test("admission reuses frozen journal bytes for a multi-contract placement offer
   if (claimed.kind !== "accepted") throw new Error("placement was not accepted");
   assert.deepEqual(claimed.facts.map((entry) => entry.kind), ["bound", "claimed"]);
   const invocations = readFileSync(log, "utf8").trim().split("\n");
-  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 1);
+  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 2);
   assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 1);
 });
 

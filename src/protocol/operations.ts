@@ -4,27 +4,24 @@ import {
   type DeliveryPreparationRefusal,
   type ReviewPreparationRefusal,
 } from "../carrier/delivery.js";
-import { mintContractId } from "../carrier/identity.js";
 import {
   extendContractsForAdmission,
-  observeBindCoordinates,
   observeCarrier,
   observeContract,
   observeContractsForAdmission,
   type CarrierDecisionObservation,
 } from "../carrier/observe.js";
 import { reconcile, reconcileBatch, type ReconcileResult } from "../carrier/reconcile.js";
-import { normalizeTargetBranch, repositoryAt, type GitRepository } from "../carrier/repository.js";
+import { repositoryAt, type GitRepository } from "../carrier/repository.js";
 import { readDeliveryDiff } from "../carrier/verification.js";
 import type { WorktreeLeak } from "../carrier/verification.js";
 import { dependencyKeySet } from "../core/subject.js";
 import { contractState, documentIsCurrent } from "../core/facts/observation.js";
-import type { ActorId, AmendData, ArcData, AttestationData, BindData, ChangeId, ContractHead, ContractId, ContractState, ContractTerms, DocumentKey, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import type { ActorId, AmendData, ArcData, AttestationData, ChangeId, ContractId, ContractState, ContractTerms, DocumentKey, SnapshotId } from "../core/facts/types.js";
 import { gate } from "../core/facts/types.js";
 import { decideAbandon, type AbandonRefusal } from "../core/verbs/abandon.js";
 import { decideAmend, type AmendInput, type AmendRefusal } from "../core/verbs/amend.js";
 import { decideArc, type ArcRefusal } from "../core/verbs/arc.js";
-import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import type { PlacementRefusal } from "../core/verbs/placement.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
@@ -35,6 +32,9 @@ import { auditReport, readAudit, type AuditReport as AuditReadReport } from "./r
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import { readStatus, type StatusReport } from "./read/status.js";
 import { admitDecidedOffer, type AcceptedAdmission, type DecidedOfferResult } from "./attempt.js";
+export { bindOperation } from "./bind.js";
+import type { BindRefusal, TargetInputRefusal } from "./bind.js";
+import { accepted, admitted, complete, type IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
 import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 
 export type { FactKind, TimelineEntry } from "./read/audit.js";
@@ -49,15 +49,10 @@ const REVIEWED = gate("reviewed");
 export type IntentRefusal = AbandonRefusal | AmendRefusal | ArcRefusal | BindRefusal | DeliverRefusal
   | DeliveryPreparationRefusal | PlacementRefusal | ReviewRefusal | TargetInputRefusal | VerificationDeclarationRefusal;
 
-export type TargetInputRefusal =
-  | Readonly<{ kind: "invalid-target" }>
-  | Readonly<{ kind: "target-missing" }>;
+export type { TargetInputRefusal } from "./bind.js";
 
 export type IntentRetry = ProtocolTerminal;
-export type IntentOutcome<Value, Refusal = IntentRefusal> =
-  | Readonly<{ kind: "accepted"; facts: readonly JournalEntry[]; head: ContractHead; value: Value }>
-  | Readonly<{ kind: "refused"; refusal: Refusal }>
-  | Readonly<{ kind: "retry"; reason: IntentRetry }>;
+export type IntentOutcome<Value, Refusal = IntentRefusal> = ProtocolIntentOutcome<Value, Refusal>;
 
 type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId; actor?: ActorId }>;
 
@@ -71,28 +66,6 @@ export type VerificationStop = StepStop<AttestationRefusal> | VerificationRuntim
 export type PlacementStop = StepStop<PlacementRefusal>;
 
 function timestamp(): string { return new Date().toISOString(); }
-
-function accepted<Value, Refusal = IntentRefusal>(
-  state: ContractState,
-  facts: readonly JournalEntry[],
-  value: Value,
-): IntentOutcome<Value, Refusal> {
-  if (state.head === null) throw new Error("accepted contract is missing its journal head");
-  return { kind: "accepted", facts, head: state.head, value };
-}
-
-function admitted<Value, Refusal = IntentRefusal>(
-  admission: AcceptedAdmission,
-  value: Value,
-): IntentOutcome<Value, Refusal> {
-  return accepted(admission.state, admission.facts, value);
-}
-
-function complete<Value, Refusal>(result: ProtocolResult<Refusal>, value: Value): IntentOutcome<Value, Refusal> {
-  if (result.kind === "refused") return { kind: "refused", refusal: result.refusal };
-  if (result.kind !== "accepted") return { kind: "retry", reason: result };
-  return admitted(result, value);
-}
 
 function mergeAdmissions(current: AcceptedAdmission, next: AcceptedAdmission): AcceptedAdmission {
   return { ...next, facts: [...current.facts, ...next.facts] };
@@ -113,48 +86,6 @@ export function statusOperation(input: Readonly<{ scope: RepositoryScope; contra
 }
 
 export function documentsOperation(input: Readonly<{ scope: RepositoryScope }>): readonly ContractDocumentProjection[] { return readDocuments(input.scope); }
-
-type BindOperationInput = Readonly<{ scope: RepositoryScope; terms: BindData["terms"]; verification: VerificationDeclarationPreparation; target?: string; workspace: "worktree" | "here"; actor?: ActorId }>;
-
-export function bindOperation(
-  input: BindOperationInput,
-): IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal> {
-  const carrier = input.scope;
-  let target: string | undefined;
-  if (input.target !== undefined) {
-    const normalized = normalizeTargetBranch(carrier, input.target);
-    if (normalized === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
-    target = normalized;
-  }
-  const observed = observeBindCoordinates(carrier, target);
-  if (observed === null) return { kind: "refused", refusal: { kind: "target-missing" } };
-  const id = mintContractId();
-  const data: BindData = {
-    coordinates: {
-      start: observed.start,
-      ...(observed.target === undefined ? {} : { target: observed.target }),
-      workspace: input.workspace,
-    },
-    terms: input.terms,
-  };
-  const decisionInput: BindInput<VerificationDeclarationRefusal> = {
-    contractId: id,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-    preparation: input.verification.kind === "prepared"
-      ? { kind: "prepared", data }
-      : { kind: "refused", refusal: input.verification.refusal },
-  };
-  return complete(
-    admitIntent(
-      carrier,
-      decisionInput,
-      decideBind,
-      { observedContracts: [id, ...input.terms.after] },
-    ),
-    { contractId: id },
-  );
-}
 
 export function stateOperation(input: OperationInput): ContractState {
   const state = observeContract(input.scope, input.contractId).state;

@@ -281,7 +281,7 @@ test("architecture policy rejects forbidden module imports", () => {
 
 test("architecture policy rejects capability use outside declared owners", () => {
   const accepted = check({
-    "carrier/identity.ts": "export function stamp(): number { return Date.now(); }",
+    "protocol/intent.ts": "export function stamp(): number { return Date.now(); }",
     "library/keiyaku.ts": "export function reject(): never { throw new TypeError('bad input'); }",
   });
   assert.deepEqual(rules(accepted).filter((r) => r === "architecture/capability-use"), []);

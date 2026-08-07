@@ -32,7 +32,6 @@ export function contractFromInput(repo: Repo, value: string): SelectedContract {
 function resolveShortContract(status: StatusReport, selector: string): ContractId {
   if (selector.startsWith("@kei/")) selectorError(`redundant short contract selector: ${selector}`);
   const short = selector.slice(1);
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(short)) selectorError(`invalid short contract selector: ${selector}`);
   const candidates = activeManagedCandidates(status)
     .filter((candidate) => candidate.id.slice("kei/".length) === short);
   if (candidates.length === 0) selectorError(`unknown contract selector: ${selector}`);
@@ -53,5 +52,5 @@ function resolveOmittedContract(status: StatusReport): ContractId {
 export function resolveContextualContract(status: StatusReport, selector: string | undefined): ContractId {
   if (selector === undefined) return resolveOmittedContract(status);
   if (selector.startsWith("@")) return resolveShortContract(status, selector);
-  return selectorError(`contract selector must be kei/<machine-contract> or @<machine-contract>: ${selector}`);
+  return selectorError(`contract selector must be kei/<contract-segment> or @<contract-segment>: ${selector}`);
 }

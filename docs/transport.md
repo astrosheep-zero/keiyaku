@@ -22,6 +22,11 @@ full-world observation is `O(N)`. The private carrier map has no cache,
 current-state snapshot, second or per-contract carrier ref, or in-repository
 fact index. The deterministic managed refs and pins are topology and
 reachability only; they are not a carrier-state index or a second fact store.
+Variable-length public identities do not determine carrier depth. A journal
+locator uses a fixed-width strong digest of the complete ContractId as a
+bounded-fanout Git tree path, while the journal bytes retain and canonically
+verify the complete identity. The digest is a private locator, never contract
+identity or a second uniqueness authority.
 
 The transport mints `ContractCoordinates.start` at bind. With a target it is
 the resolved target head; without a target it is the caller worktree's current
@@ -102,9 +107,11 @@ second acceptance authority.
 
 Transport and protocol have no document callback, decoded-document import, or
 document interpretation. They receive no raw document projection for a write
-attempt. The only document-derived transport input to delivery preparation is
+attempt. Bind protocol receives the title scalar only to mint the readable
+ContractId defined in [model.md](model.md); carrier receives only the resulting
+identity. The only document-derived transport input to delivery preparation is
 the title scalar stamped by its `DocumentKey`, as defined in
-[document.md](document.md); transport does not persist or cache that
+[document.md](document.md); transport does not persist or cache either
 derivation. Review preparation receives no document-derived value. Protocol
 combines its mechanical patch identity with the document key from the attempt
 observation to form the testimony subject. Carrier does not judge whether that

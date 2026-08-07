@@ -138,11 +138,11 @@ function contractDocument(title: string): string {
   ].join("\n");
 }
 
-function acceptedId(text: string): string {
+function acceptedId(text: string, expected: string): string {
   const match = /^accepted bind (kei\/[^\s]+) head=/m.exec(text);
   assert.ok(match, `bind did not render a minted contract ID:\n${text}`);
   const id = match[1]!;
-  assert.match(id, /^kei\/[0-9abcdefghjkmnpqrstvwxyz]{26}$/);
+  assert.equal(id, expected);
   return id;
 }
 
@@ -252,7 +252,7 @@ test("installed binary dogfoods managed delivery, replacement review, and termin
   assert.ok(start);
 
   const bound = invoke(repository, ["bind", "--target", target, "-"], contractDocument("Managed shell dogfood"));
-  const id = acceptedId(bound);
+  const id = acceptedId(bound, "kei/managed-shell-dogfood");
   assert.deepEqual(acceptedFactKinds(bound, id), ["bind", "bound"]);
   const managed = managedWorktree(bound);
   const deliveryRef = effectRef(bound, "refs/heads/keiyaku-delivery/");
@@ -300,7 +300,7 @@ test("installed binary abandonment preserves the target and user commit", () => 
   const repository = repositoryWithMain();
   const target = "refs/heads/main";
   const bound = invoke(repository, ["bind", "--target", target, "-"], contractDocument("Abandon shell dogfood"));
-  const id = acceptedId(bound);
+  const id = acceptedId(bound, "kei/abandon-shell-dogfood");
   const managed = managedWorktree(bound);
   const deliveryRef = effectRef(bound, "refs/heads/keiyaku-delivery/");
 
@@ -342,7 +342,7 @@ test("installed binary dogfoods here verification and gate-controlled placement"
     ["bind", "--here", "--target", target, "-"],
     hereContractDocument(marker, poison),
   ));
-  const id = acceptedId(bound);
+  const id = acceptedId(bound, "kei/here-verification-shell-dogfood");
   assert.deepEqual(acceptedFactKinds(bound, id), ["bind", "bound"]);
   assert.equal(git(here, ["branch", "--show-current"]).trim(), "caller");
   assert.deepEqual(worktreePaths(repository), originalWorktrees);

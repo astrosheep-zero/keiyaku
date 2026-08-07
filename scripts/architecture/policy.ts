@@ -5,6 +5,7 @@ const types = (target: string) => ({ target, mode: "type-only" as const });
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
+    { source: "identity/readable.ts", allow: [] },
     { source: "core/facts/types.ts", allow: [] },
     { source: "core/facts/errors.ts", allow: [] },
     { source: "core/facts/codec.ts", allow: [any("core/facts/errors.ts"), any("core/facts/types.ts"), any("core/subject.ts", ["parseDependencyKeySet"])] },
@@ -38,7 +39,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     { source: "carrier/identity.ts", allow: [any("core/facts/types.ts")] },
-    { source: "carrier/repository.ts", allow: [any("carrier/identity.ts"), any("core/facts/errors.ts")] },
+    { source: "carrier/tree.ts", allow: [any("carrier/identity.ts")] },
+    { source: "carrier/repository.ts", allow: [any("carrier/identity.ts"), any("carrier/tree.ts"), any("core/facts/errors.ts")] },
     {
       source: "carrier/admission.ts",
       allow: [
@@ -107,6 +109,23 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
+      source: "protocol/outcome.ts",
+      allow: [types("core/facts/types.ts"), types("protocol/attempt.ts"), types("protocol/run.ts")],
+    },
+    {
+      source: "protocol/bind.ts",
+      allow: [
+        any("carrier/observe.ts"),
+        any("carrier/repository.ts"),
+        any("core/facts/types.ts"),
+        any("core/verbs/bind.ts"),
+        any("identity/readable.ts"),
+        any("protocol/intent.ts"),
+        any("protocol/outcome.ts"),
+        types("verification/declaration.ts"),
+      ],
+    },
+    {
       source: "protocol/intent.ts",
       allow: [
         any("carrier/observe.ts"),
@@ -147,6 +166,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/verbs/attestation.ts"),
         any("protocol/intent.ts"),
         any("protocol/attempt.ts"),
+        any("protocol/bind.ts"),
+        any("protocol/outcome.ts"),
         any("protocol/read/audit.ts"),
         any("protocol/read/documents.ts"),
         any("protocol/read/status.ts"),
@@ -286,7 +307,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       module: "node:crypto",
       owners: [
         { source: "carrier/verification.ts", symbols: ["randomBytes"] },
-        { source: "carrier/identity.ts", symbols: ["randomBytes"] },
+        { source: "carrier/identity.ts", symbols: ["createHash"] },
+        { source: "carrier/tree.ts", symbols: ["createHash"] },
+        { source: "protocol/bind.ts", symbols: ["randomBytes"] },
         { source: "protocol/intent.ts", symbols: ["randomBytes"] },
         { source: "body/keys.ts", symbols: ["createHash"] },
       ],
@@ -304,8 +327,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "function-constructor", owners: [] },
     { capability: "math-random", owners: [] },
     { capability: "module-mutable-state", owners: [] },
-    { capability: "date-now", owners: ["carrier/identity.ts", "protocol/intent.ts"] },
-    { capability: "new-date-current", owners: ["protocol/operations.ts"] },
+    { capability: "date-now", owners: ["protocol/intent.ts"] },
+    { capability: "new-date-current", owners: ["protocol/bind.ts", "protocol/operations.ts"] },
     { capability: "process-argv", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-cwd", owners: ["carrier/repository.ts", "library/keiyaku.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-environment", owners: ["cli/invoke.ts", "carrier/repository.ts", "protocol/operations.ts"] },

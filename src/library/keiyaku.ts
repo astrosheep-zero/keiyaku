@@ -487,6 +487,7 @@ export class Repo {
     );
     const admitted = bindOperation({
       scope: this.scope,
+      title: document.title,
       terms,
       verification: prepareVerificationDeclaration({
         gates: terms.gates,

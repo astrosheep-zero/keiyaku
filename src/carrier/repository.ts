@@ -2,12 +2,22 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectId } from "./identity.js";
+import {
+  parseTreeObject,
+  prepareTreeUpdate,
+  treeUpdate,
+  validPath,
+  type PreparedTree,
+  type TreeChange,
+  type TreeEntry,
+} from "./tree.js";
+export type { TreeChange } from "./tree.js";
 
 export const CARRIER_REF = "refs/heads/keiyaku-state";
 export const DELIVERY_REF_NAMESPACE = "refs/heads/keiyaku-delivery";
 export const CANDIDATE_PIN_REF_NAMESPACE = "refs/heads/keiyaku-candidate";
 export const CARRIER_FORMAT_PATH = "meta/format.json";
-const CURRENT_FORMAT_VERSION = 2;
+const CURRENT_FORMAT_VERSION = 3;
 export const CARRIER_FORMAT_BYTES = `{"version":${CURRENT_FORMAT_VERSION}}\n`;
 
 export function isKeiyakuOwnedRef(ref: string): boolean {
@@ -48,22 +58,10 @@ export type GitRepository = Readonly<{
   readonly primaryWorktree: string;
 }>;
 
-type TreeEntry = Readonly<{
-  readonly mode: string;
-  readonly type: string;
-  readonly oid: GitOid;
-}>;
-
 export type CarrierSnapshot = Readonly<{
   readonly commit: GitOid | null;
   readonly tree: GitOid | null;
   readonly paths: ReadonlyMap<string, TreeEntry>;
-}>;
-
-export type TreeChange = Readonly<{
-  readonly oid: GitOid;
-  readonly mode?: string;
-  readonly type?: string;
 }>;
 
 class GitPlumbingError extends Error {
@@ -300,14 +298,15 @@ function malformedBatchOutput(detail: string): never {
   });
 }
 
-/** Read immutable Git objects through one structured, length-delimited batch. */
-export function readBlobs(repository: GitRepository, oids: readonly GitOid[]): ReadonlyMap<GitOid, Buffer> {
+type GitObject = Readonly<{ type: string; bytes: Buffer }>;
+
+function readObjects(repository: GitRepository, oids: readonly GitOid[]): ReadonlyMap<GitOid, GitObject> {
   const unique = [...new Set(oids)];
-  for (const oid of unique) assertOid(oid, "blob");
+  for (const oid of unique) assertOid(oid, "Git object");
   if (unique.length === 0) return new Map();
 
   const output = runGit(repository, ["cat-file", "--batch"], `${unique.join("\n")}\n`);
-  const blobs = new Map<GitOid, Buffer>();
+  const objects = new Map<GitOid, GitObject>();
   let offset = 0;
   for (const oid of unique) {
     const headerEnd = output.indexOf(0x0a, offset);
@@ -318,10 +317,10 @@ export function readBlobs(repository: GitRepository, oids: readonly GitOid[]): R
       throw new GitPlumbingError({
         stderr: `missing Git object: ${oid}`,
         status: 1,
-        message: `cat-file blob ${oid}: missing Git object`,
+        message: `cat-file --batch: missing Git object ${oid}`,
       });
     }
-    if (fields.length !== 3 || fields[0] !== oid || fields[1] !== "blob" || fields[2] === undefined) {
+    if (fields.length !== 3 || fields[0] !== oid || fields[1] === undefined || fields[2] === undefined) {
       malformedBatchOutput(`unexpected header for ${oid}`);
     }
     if (!/^(0|[1-9][0-9]*)$/.test(fields[2])) malformedBatchOutput(`invalid size for ${oid}`);
@@ -333,9 +332,19 @@ export function readBlobs(repository: GitRepository, oids: readonly GitOid[]): R
     offset += size;
     if (output[offset] !== 0x0a) malformedBatchOutput(`missing content delimiter for ${oid}`);
     offset += 1;
-    blobs.set(oid, bytes);
+    objects.set(oid, { type: fields[1], bytes });
   }
   if (offset !== output.length) malformedBatchOutput("trailing bytes");
+  return objects;
+}
+
+/** Read immutable Git objects through one structured, length-delimited batch. */
+export function readBlobs(repository: GitRepository, oids: readonly GitOid[]): ReadonlyMap<GitOid, Buffer> {
+  const blobs = new Map<GitOid, Buffer>();
+  for (const [oid, object] of readObjects(repository, oids)) {
+    if (object.type !== "blob") malformedBatchOutput(`expected blob for ${oid}, found ${object.type}`);
+    blobs.set(oid, object.bytes);
+  }
   return blobs;
 }
 
@@ -349,83 +358,60 @@ function validateCarrierFormat(repository: GitRepository, paths: ReadonlyMap<str
   }
 }
 
-type MutableTreeNode = {
-  readonly files: Map<string, TreeChange>;
-  readonly directories: Map<string, MutableTreeNode>;
-};
-
-function validPath(path: string): void {
-  if (
-    path.length === 0 ||
-    path.startsWith("/") ||
-    path.endsWith("/") ||
-    path.includes("\0") ||
-    path.split("/").some((part) => part.length === 0 || part === "." || part === "..")
-  ) {
-    throw new Error(`invalid carrier path: ${path}`);
-  }
-}
-
-function addEntry(root: MutableTreeNode, path: string, change: TreeChange): void {
-  validPath(path);
-  const parts = path.split("/");
-  let node = root;
-  for (const part of parts.slice(0, -1)) {
-    if (node.files.has(part)) throw new Error(`carrier path is both file and directory: ${path}`);
-    let child = node.directories.get(part);
-    if (child === undefined) {
-      child = { files: new Map(), directories: new Map() };
-      node.directories.set(part, child);
-    }
-    node = child;
-  }
-  const name = parts[parts.length - 1];
-  if (name === undefined || node.directories.has(name)) {
-    throw new Error(`carrier path is both file and directory: ${path}`);
-  }
-  node.files.set(name, change);
-}
-
-function treeRecord(name: string, change: TreeChange): string {
-  assertOid(change.oid, `tree entry ${name}`);
-  const mode = change.mode ?? "100644";
-  const type = change.type ?? (mode === "160000" ? "commit" : "blob");
-  return `${mode} ${type} ${change.oid}\t${name}\n`;
-}
-
-function writeTree(repository: GitRepository, records: readonly string[]): GitOid {
-  const tree = runGit(repository, ["mktree"], records.join(""));
-  const oid = tree.toString("utf8").trim();
-  assertOid(oid, "written tree");
-  return oid;
-}
-
-function updateTreeNode(
+function baseTreeEntries(
   repository: GitRepository,
   baseTree: GitOid | null,
-  node: MutableTreeNode,
-): GitOid {
-  const entries = baseTree === null
-    ? new Map<string, TreeEntry>()
-    : parseTreeEntries(runGit(repository, ["ls-tree", "-z", baseTree]));
-  for (const [name, change] of node.files) {
-    entries.set(name, {
-      oid: change.oid,
-      mode: change.mode ?? "100644",
-      type: change.type ?? (change.mode === "160000" ? "commit" : "blob"),
-    });
+  changedPaths: readonly string[],
+  nodePaths: readonly string[],
+): ReadonlyMap<string, Map<string, TreeEntry>> {
+  const byPath = new Map<string, Map<string, TreeEntry>>();
+  if (baseTree === null) return byPath;
+
+  const ancestry = parseTreeEntries(runGit(repository, [
+    "ls-tree",
+    "-z",
+    "-t",
+    "-r",
+    "--full-tree",
+    baseTree,
+    "--",
+    ...changedPaths.map((path) => `:(literal)${path}`),
+  ]));
+  const treeByPath = new Map<string, GitOid>([["", baseTree]]);
+  for (const path of nodePaths) {
+    if (path.length === 0) continue;
+    const entry = ancestry.get(path);
+    if (entry === undefined) continue;
+    if (entry.type !== "tree") throw new Error(`carrier path is both file and directory: ${path}`);
+    treeByPath.set(path, entry.oid);
   }
-  for (const [name, child] of node.directories) {
-    const prior = entries.get(name);
-    if (prior !== undefined && prior.type !== "tree") {
-      throw new Error(`carrier path is both file and directory: ${name}`);
+
+  const objects = readObjects(repository, [...treeByPath.values()]);
+  const oidBytes = baseTree.length / 2;
+  for (const [path, oid] of treeByPath) {
+    const object = objects.get(oid);
+    if (object === undefined || object.type !== "tree") {
+      throw new GitPlumbingError({ stderr: oid, status: null, message: `carrier tree is not a tree: ${path || "/"}` });
     }
-    const oid = updateTreeNode(repository, prior?.oid ?? null, child);
-    entries.set(name, { mode: "040000", type: "tree", oid });
+    byPath.set(path, parseTreeObject(object.bytes, oidBytes));
   }
-  const records = [...entries].map(([name, entry]) => treeRecord(name, entry));
-  records.sort((left, right) => Buffer.from(left).compare(Buffer.from(right)));
-  return writeTree(repository, records);
+  return byPath;
+}
+
+function writePreparedTrees(repository: GitRepository, prepared: readonly PreparedTree[]): void {
+  const output = runGit(repository, ["mktree", "--batch"], prepared.map(({ records }) => `${records}\n`).join(""));
+  const written = output.toString("ascii").trimEnd().split("\n");
+  if (written.length !== prepared.length) {
+    throw new GitPlumbingError({ stderr: output, status: null, message: "malformed mktree --batch output" });
+  }
+  for (let index = 0; index < prepared.length; index += 1) {
+    const expected = prepared[index]!.oid;
+    const actual = written[index]!;
+    assertOid(actual, "written tree");
+    if (actual !== expected) {
+      throw new GitPlumbingError({ stderr: output, status: null, message: `mktree wrote unexpected tree: ${actual}` });
+    }
+  }
 }
 
 /** Copy only the changed paths' tree ancestors, preserving untouched subtrees by object ID. */
@@ -434,9 +420,13 @@ export function updateCarrierTree(
   baseTree: GitOid | null,
   changes: ReadonlyMap<string, TreeChange>,
 ): GitOid {
-  const root: MutableTreeNode = { files: new Map(), directories: new Map() };
-  for (const [path, change] of changes) addEntry(root, path, change);
-  return updateTreeNode(repository, baseTree, root);
+  const update = treeUpdate(changes);
+  const bases = baseTreeEntries(repository, baseTree, [...changes.keys()], update.nodePaths);
+  const representativeOid = baseTree ?? changes.values().next().value?.oid;
+  if (representativeOid === undefined) throw new Error("cannot write an empty carrier tree without an object format");
+  const prepared = prepareTreeUpdate({ update, bases, oidBytes: representativeOid.length / 2 });
+  writePreparedTrees(repository, prepared.trees);
+  return prepared.root;
 }
 
 function writeCommitObject(input: Readonly<{

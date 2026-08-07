@@ -52,9 +52,21 @@ Public identities use this closed registry:
 | Prefix | Grammar |
 | --- | --- |
 | `aku/` | `aku/<human-profile>` or `aku/<human-profile>/<lower-hex8>` |
-| `kei/` | `kei/<machine-contract>` |
+| `kei/` | `kei/<contract-segment>` |
 | `task/` | `task/<human-ns>/<human-local-id>` |
 | `resp/` | `resp/<machine-artifact>` |
+
+A legal contract segment is nonempty and contains no slash, whitespace, or
+control character. Coordinate validation does not rerun the narrower readable
+construction used by bind.
+
+Readable stems are minted from titles by NFKC normalization, locale-independent
+lowercasing, retaining Unicode letters, numbers, and complete emoji graphemes,
+and collapsing every intervening run to one hyphen. Fitting truncates only at a
+grapheme boundary under an owner-selected UTF-8 byte budget and reserves room
+for an optional suffix. This normalization and fitting are one shared pure
+identity primitive; each identity family separately owns its prefix,
+namespace, suffix generation, collision policy, and persistence.
 
 Human segments are nonempty lowercase ASCII letters, digits, hyphens, or RGI
 emoji sequences, with no whitespace. Machine segments match
@@ -62,12 +74,14 @@ emoji sequences, with no whitespace. Machine segments match
 namespace and local-id segments. Identity bytes are exact: no Unicode
 normalization or visual-confusable deduplication applies.
 
-Carrier mints a ContractId once before bind protocol attempts, and every
-attempt for that bind reuses it. The Git carrier currently uses a lowercased
-26-character Crockford-base32 ULID as the machine segment. Readers, folds,
-gates, and paths compare the whole `ContractId` and do not parse its machine
-segment. Admission adjudicates uniqueness; an existing identity produces the
-typed `contract-exists` refusal for that bind.
+Bind derives the first ContractId as `kei/<fitted-readable-title>`. Admission is
+the sole uniqueness adjudicator. An existing unsuffixed identity causes bind to
+mint one random readable suffix, refit the same stem with space reserved for
+that suffix, and make one new identity attempt. Other carrier movement retries
+reuse the selected identity; they never silently remint it. A second identity
+collision remains the typed `contract-exists` refusal. An empty normalized stem
+uses `contract` before the same collision rule. Readers, folds, and gates compare
+the whole `ContractId` and never renormalize an admitted identity.
 
 `@` is input-only. A slash denotes a full registered identity after removing
 `@`; no slash denotes a context-resolved movable reference. Neither form is

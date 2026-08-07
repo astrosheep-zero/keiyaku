@@ -53,6 +53,7 @@ function terms(title: string) {
 function bind(repository: TestGitRepository, title: string, workspace: "worktree" | "here"): ContractId {
   const result = bindOperation({
     scope: scopeOperation({ coordinate: repository.path }),
+    title,
     terms: terms(title),
     verification: { kind: "prepared", data: null },
     workspace,

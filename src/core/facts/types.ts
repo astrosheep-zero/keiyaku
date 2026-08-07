@@ -21,7 +21,7 @@ export type DependencyKeySet = string & { readonly [dependencyKeySetBrand]: "Dep
 export type ActorId = string & { readonly [actorIdBrand]: "ActorId" };
 
 const ULID = /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
-const CONTRACT_ID = /^kei\/([a-z0-9][a-z0-9-]*)$/;
+const CONTRACT_ID = /^kei\/[^/\p{White_Space}\p{Cc}]+$/u;
 
 function requireText(value: string, label: string): string {
   if (value.length === 0 || /\s/.test(value)) throw new Error(`${label} must be nonempty and contain no whitespace`);
@@ -35,7 +35,7 @@ function requireOpaqueId(value: string, label: string): string {
 
 export function contractId(value: string): ContractId {
   requireText(value, "contract ID");
-  if (!CONTRACT_ID.test(value)) throw new Error("contract ID must be kei/<lowercase-machine-contract>");
+  if (!CONTRACT_ID.test(value)) throw new Error("contract ID must be kei/<contract-segment>");
   return value as ContractId;
 }
 

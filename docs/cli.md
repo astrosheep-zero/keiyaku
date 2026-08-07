@@ -50,8 +50,8 @@ The command vocabulary is:
 | `reconcile` | Calls the selected public reconciliation method. |
 
 `bind` accepts no contract positional. Commands addressing an existing contract
-accept a full `kei/<machine-contract>` identity or an active short
-`@<machine-contract>` reference. The short reference is the deterministic
+accept a full `kei/<contract-segment>` identity or an active short
+`@<contract-segment>` reference. The short reference is the deterministic
 managed-worktree name when that worktree exists. It resolves as a pure function
 over `StatusReport` rows and is never stored.
 

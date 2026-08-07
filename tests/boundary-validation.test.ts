@@ -27,7 +27,7 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
   await assert.rejects(
     () => withGitShim("exit 99", {}, () => Reflect.apply(repo.status, repo, [{ contract: "bad" }])),
     (error: unknown) => error instanceof TypeError
-      && error.message === "contract ID must be kei/<lowercase-machine-contract>",
+      && error.message === "contract ID must be kei/<contract-segment>",
   );
   await assert.rejects(
     () => withGitShim("exit 99", {}, () => Reflect.apply(repo.bind, repo, [{ markdown: null, workspace: "here" }])),
