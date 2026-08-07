@@ -1,14 +1,15 @@
 ---
 id: 消除-单契约-admission-的全-carri-982a00ba
 title: 消除-单契约-admission-的全-carrier-树重建
-state: open
+state: in_progress
 pri: 0
 needs: []
 parent: null
 from: []
 createdAt: 2026-08-06T22:35:15.465Z
-updatedAt: 2026-08-06T22:52:25.453Z
+updatedAt: 2026-08-07T05:59:17.303Z
 creator: thekoc
+startedAt: 2026-08-07T05:59:17.303Z
 ---
 Owner: docs/transport.md after act_362 integration.
 
