@@ -10,6 +10,7 @@ import { verifyDelivery } from "../src/protocol/intent.js";
 import { auditOperation, deliverOperation, scopeOperation, type AuditReport } from "../src/protocol/operations.js";
 import { readAudit } from "../src/protocol/read/audit.js";
 import { produceVerification, type VerificationOutcome } from "../src/verification/producer.js";
+import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { makeGitRepository, type TestGitRepository } from "./support/git.js";
 
 function repositoryWithMain(): TestGitRepository {
@@ -85,6 +86,26 @@ test("a verified placement gate without a Verification declaration is refused at
   });
 });
 
+test("an active amend cannot admit verified terms without a Verification declaration", async () => {
+  const repository = repositoryWithMain();
+  const bound = await Repo.at({ path: repository.path }).bind({ markdown: verificationBody(null), workspace: "here" });
+  assert.equal(bound.kind, "accepted");
+  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
+  const before = await bound.value.state();
+
+  assert.deepEqual(await bound.value.amend({
+    markdown: "## Replace: Objective\nKeep declaration admission at the document edge.\n\n",
+    gates: ["verified"],
+  }), {
+    kind: "refused",
+    refusal: { kind: "verification-declaration-invalid", contractId: before.id },
+  });
+
+  const after = await bound.value.state();
+  assert.equal(after.head, before.head);
+  assert.deepEqual(after.terms, before.terms);
+});
+
 test("terminal amend refusal outranks a missing Verification declaration", async () => {
   const repository = repositoryWithMain();
   const bound = await Repo.at({ path: repository.path }).bind({ markdown: verificationBody(null), workspace: "here" });
@@ -112,7 +133,11 @@ test("amend between document derivation and attempt returns document-moved", asy
   const derivation = {
     document: decoded.document.key,
     title: decoded.title,
-    verification: verificationDefinition(decoded),
+    verification: prepareVerificationDeclaration({
+      gates: [gate("verified")],
+      definition: verificationDefinition(decoded),
+      contractId: state.id,
+    }),
   };
   const amended = await bound.value.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
   assert.equal(amended.kind, "accepted");
@@ -142,7 +167,11 @@ test("read-only audit returns its initial observation when verification is skipp
     derivation: {
       document: decoded.document.key,
       title: decoded.title,
-      verification: verificationDefinition(decoded),
+      verification: prepareVerificationDeclaration({
+        gates: initial.state!.terms.gates,
+        definition: verificationDefinition(decoded),
+        contractId,
+      }),
     },
   });
   const amendment = new Promise<void>((resolve, reject) => {

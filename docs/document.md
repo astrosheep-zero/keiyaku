@@ -9,8 +9,11 @@ it knows no section name or Markdown grammar.
 
 The sole cross-layer output of a decoded document is the key-stamped scalar
 derivation `{ document, title, verification }`. `document` is the `DocumentKey`
-stamp; `title` and `verification` are derived from exactly that decoded
-document. The derivation carries neither a `ContractBody`, section tree, raw
+stamp; `title` and the Verification definition are derived from exactly that
+decoded document. The `verification` member carries the one typed declaration
+preparation defined by [verification.md](verification.md); protocol may compose
+that prepared or refused value into a verb input but never re-derive its
+legality. The derivation carries neither a `ContractBody`, section tree, raw
 body callback, nor a protocol body reader. It is attempt-local and is never a
 persisted fact, cache, or replacement document authority. Its currency is
 decided against the attempt observation by the one legal `decide` in

@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import type { VerificationDeclaration } from "../src/verification/types.js";
+import type { VerificationDeclaration } from "../src/verification/declaration.js";
 import { produceVerification, type ProduceVerificationInput } from "../src/verification/producer.js";
 
 function declaration(script: string, executor: VerificationDeclaration["executor"] = "bash"): VerificationDeclaration {

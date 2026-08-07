@@ -13,7 +13,7 @@ import type { DocumentNode, MarkdownBlockNode, SectionNode } from "../markdown/t
 import { CONTRACT_SECTIONS, RESERVED_SECTIONS, type ContractSectionName } from "./shape.js";
 import { decodeRegion, RegionDocumentError } from "./region.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
-import type { VerificationDefinition } from "../verification/types.js";
+import type { VerificationDefinition } from "../verification/declaration.js";
 
 type RequiredSectionName = {
   [Name in ContractSectionName]: typeof CONTRACT_SECTIONS[Name]["required"] extends true ? Name : never;

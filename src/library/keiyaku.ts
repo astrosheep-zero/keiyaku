@@ -5,6 +5,10 @@ import { decodeContractDocument, verificationDefinition } from "../body/decode.j
 import { regionsOverlap } from "../body/region.js";
 import type { DecodedContractDocument } from "../body/types.js";
 import {
+  prepareVerificationDeclaration,
+  type VerificationDeclarationPreparation,
+} from "../verification/declaration.js";
+import {
   contractId,
   actorId,
   gate,
@@ -79,7 +83,6 @@ type RegionObservation = Readonly<
   | { overlaps: readonly RegionOverlap[]; overlapFailure?: never }
   | { overlapFailure: string; overlaps?: never }
 >;
-export type { VerificationDeclarationRefusal } from "../protocol/operations.js";
 export type TypedRefusal = IntentRefusal;
 export type TypedRetry = IntentRetry;
 export type { PlacementStop, VerificationStop };
@@ -195,11 +198,19 @@ function contractTerms(
   };
 }
 
-function documentDerivation(document: DecodedContractDocument): DocumentDerivation {
+function documentDerivation(
+  document: DecodedContractDocument,
+  gates: readonly CoreGate[],
+  contractId?: ContractId,
+): DocumentDerivation {
   return {
     document: document.document.key,
     title: document.title,
-    verification: verificationDefinition(document),
+    verification: prepareVerificationDeclaration({
+      gates,
+      definition: verificationDefinition(document),
+      ...(contractId === undefined ? {} : { contractId }),
+    }),
   };
 }
 
@@ -306,7 +317,7 @@ class KeiyakuHandle {
     const current = readStateOperation({ scope: this.scope, contractId: this.id });
     let document: DecodedContractDocument | undefined;
     let terms: ContractTerms | undefined;
-    let definition: ReturnType<typeof verificationDefinition> | undefined;
+    let verification: VerificationDeclarationPreparation | undefined;
     if (current !== null) {
       const before = current.terms.document.bytes;
       const currentDocument = decodeContractDocument(before);
@@ -316,15 +327,19 @@ class KeiyakuHandle {
         gates ?? current.terms.gates,
         prerequisites ?? current.terms.after,
       );
-      definition = verificationDefinition(document);
+      verification = prepareVerificationDeclaration({
+        gates: terms.gates,
+        definition: verificationDefinition(document),
+        contractId: this.id,
+      });
     }
     const outcome = mapOutcome(amendOperation({
       scope: this.scope,
       contractId: this.id,
-      ...(current === null ? {} : { source: current.terms }),
       ...actor,
-      ...(terms === undefined ? {} : { terms }),
-      ...(definition === undefined ? {} : { verification: definition }),
+      ...(current === null || terms === undefined || verification === undefined
+        ? {}
+        : { amendment: { source: current.terms, terms, verification } }),
     }), () => undefined);
     if (outcome.kind !== "accepted") return outcome;
     if (document === undefined || current === null) {
@@ -345,7 +360,7 @@ class KeiyakuHandle {
     const state = readStateOperation({ scope: this.scope, contractId: this.id });
     const derivation = state === null
       ? undefined
-      : documentDerivation(decodeContractDocument(state.terms.document.bytes));
+      : documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
     return mapOutcome(
       await deliverOperation({
         scope: this.scope,
@@ -402,7 +417,7 @@ class KeiyakuHandle {
     const state = readStateOperation({ scope: this.scope, contractId: this.id });
     const derivation = state === null
       ? undefined
-      : documentDerivation(decodeContractDocument(state.terms.document.bytes));
+      : documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
     return mapOutcome(
       await auditOperation({
         scope: this.scope,
@@ -473,7 +488,10 @@ export class Repo {
     const admitted = bindOperation({
       scope: this.scope,
       terms,
-      verification: verificationDefinition(document),
+      verification: prepareVerificationDeclaration({
+        gates: terms.gates,
+        definition: verificationDefinition(document),
+      }),
       workspace,
       ...(target === undefined ? {} : { target }),
       ...actor,

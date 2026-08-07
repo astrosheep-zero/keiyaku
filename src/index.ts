@@ -33,6 +33,5 @@ export type {
   TimelineEntry,
   TypedRefusal,
   TypedRetry,
-  VerificationDeclarationRefusal,
   VerificationStop,
 } from "./library/keiyaku.js";

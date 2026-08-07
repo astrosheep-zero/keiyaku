@@ -51,7 +51,12 @@ function terms(title: string) {
 }
 
 function bind(repository: TestGitRepository, title: string, workspace: "worktree" | "here"): ContractId {
-  const result = bindOperation({ scope: scopeOperation({ coordinate: repository.path }), terms: terms(title), workspace });
+  const result = bindOperation({
+    scope: scopeOperation({ coordinate: repository.path }),
+    terms: terms(title),
+    verification: { kind: "prepared", data: null },
+    workspace,
+  });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("bind did not succeed");
   return result.value.contractId;

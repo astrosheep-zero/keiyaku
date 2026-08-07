@@ -6,7 +6,7 @@ import type { WorktreeLeak } from "../carrier/verification.js";
 import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
 import { dependencyKeySet } from "../core/subject.js";
 import type { ActorId, ContractId, ContractState, DependencyKeySet } from "../core/facts/types.js";
-import { entryUlid, gate } from "../core/facts/types.js";
+import { entryUlid } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
 import {
@@ -15,12 +15,11 @@ import {
   type VerificationOutcome,
   type VerificationTerminalOutcome,
 } from "../verification/producer.js";
-import type { VerificationDefinition } from "../verification/types.js";
+import { VERIFIED, type VerificationDefinition } from "../verification/declaration.js";
 import { runProtocol, type ProtocolResult } from "./run.js";
 
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const VERIFICATION_TIMEOUT_MS = 5 * 60 * 1_000;
-export const VERIFIED = gate("verified");
 
 function nextEntryUlid(): ReturnType<typeof entryUlid> {
   let value = "";

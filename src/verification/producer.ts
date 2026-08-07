@@ -1,6 +1,6 @@
 import { runProcess } from "../runtime/proc/run.js";
 import type { AttestationData } from "../core/facts/types.js";
-import type { VerificationDeclaration } from "./types.js";
+import type { VerificationDeclaration } from "./declaration.js";
 
 type VerificationVerdict = AttestationData["verdict"];
 const SUMMARY_BYTES = 32 * 1024;

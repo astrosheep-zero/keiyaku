@@ -152,6 +152,8 @@ test("package root exposes only the ruled library values and declarations", () =
     'type InternalVerification = import("@astrosheep/keiyaku-v4").VerificationDeclaration;',
     '// @ts-expect-error internal verification data is not a package-root export',
     'type InternalExecutor = import("@astrosheep/keiyaku-v4").VerificationExecutor;',
+    '// @ts-expect-error internal verification refusal has no separate package-root name',
+    'type InternalVerificationRefusal = import("@astrosheep/keiyaku-v4").VerificationDeclarationRefusal;',
     '// @ts-expect-error legacy ReviewResult alias is not a package-root export',
     'type InternalReviewResult = import("@astrosheep/keiyaku-v4").ReviewResult;',
     '// @ts-expect-error legacy ReviewValue alias is not a package-root export',

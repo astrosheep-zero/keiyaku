@@ -25,13 +25,34 @@ import {
   observeContractsForAdmission,
 } from "../src/carrier/observe.js";
 import { contractJournalPath } from "../src/carrier/identity.js";
-import { bindOperation, amendOperation } from "../src/protocol/operations.js";
-import { contractId, documentKey, entryUlid, gate, type ContractId, type JournalEntry, type SnapshotId } from "../src/core/facts/types.js";
+import { bindOperation as rawBindOperation, amendOperation as rawAmendOperation } from "../src/protocol/operations.js";
+import { contractId, documentKey, entryUlid, gate, type AmendData, type ContractId, type ContractTerms, type JournalEntry, type SnapshotId } from "../src/core/facts/types.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { admitIntent, admitPlacement } from "../src/protocol/intent.js";
 import { runProtocol } from "../src/protocol/run.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
+
+const NO_VERIFICATION = { kind: "prepared", data: null } as const;
+
+function bindOperation(input: Omit<Parameters<typeof rawBindOperation>[0], "verification">) {
+  return rawBindOperation({ ...input, verification: NO_VERIFICATION });
+}
+
+type AmendTestInput = Omit<Parameters<typeof rawAmendOperation>[0], "amendment"> & Readonly<{
+  source?: ContractTerms;
+  terms?: AmendData;
+}>;
+
+function amendOperation(input: AmendTestInput) {
+  const { source, terms, ...operation } = input;
+  return rawAmendOperation({
+    ...operation,
+    ...(source === undefined || terms === undefined
+      ? {}
+      : { amendment: { source, terms, verification: NO_VERIFICATION } }),
+  });
+}
 
 function repositoryWithHead() {
   const repository = makeGitRepository();

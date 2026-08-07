@@ -1,6 +1,6 @@
 import type { ArcData } from "../core/facts/types.js";
 import type { ContractBody } from "./types.js";
-import type { VerificationDeclaration } from "../verification/types.js";
+import type { VerificationDeclaration } from "../verification/declaration.js";
 import { parseToAST } from "../markdown/parse.js";
 import { indexDocument, indexedHeadings, normalizeTitle, rawSlice } from "../markdown/query.js";
 import type { DocumentNode, SectionNode } from "../markdown/types.js";

@@ -29,8 +29,8 @@ import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/v
 import type { PlacementRefusal } from "../core/verbs/placement.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
 import { produceVerification } from "../verification/producer.js";
-import type { VerificationDeclarationRefusal, VerificationDefinition } from "../verification/types.js";
-import { admitIntent, admitPlacement, mintAttempts, verifyDelivery, VERIFIED, type VerificationRuntimeStop } from "./intent.js";
+import type { VerificationDeclarationPreparation, VerificationDeclarationRefusal } from "../verification/declaration.js";
+import { admitIntent, admitPlacement, mintAttempts, verifyDelivery, type VerificationRuntimeStop } from "./intent.js";
 import { auditReport, readAudit, type AuditReport as AuditReadReport } from "./read/audit.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import { readStatus, type StatusReport } from "./read/status.js";
@@ -40,8 +40,6 @@ import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 export type { FactKind, TimelineEntry } from "./read/audit.js";
 export type { ContractStatus, StatusReport } from "./read/status.js";
 export type { ContractDocumentProjection } from "./read/documents.js";
-export type { VerificationDeclarationRefusal } from "../verification/types.js";
-
 type DeliveryFailure = DeliveryPreparationRefusal | VerificationDeclarationRefusal | DeliverRefusal;
 
 type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
@@ -65,7 +63,7 @@ type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId;
 
 export type AuditReport = AuditReadReport & Readonly<{ attempt?: VerificationStop; leak?: WorktreeLeak }>;
 
-export type DocumentDerivation = Readonly<{ document: DocumentKey; title: string; verification: VerificationDefinition | null }>;
+export type DocumentDerivation = Readonly<{ document: DocumentKey; title: string; verification: VerificationDeclarationPreparation }>;
 
 export type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: IntentRetry; refusal?: never }>;
 
@@ -116,15 +114,7 @@ export function statusOperation(input: Readonly<{ scope: RepositoryScope; contra
 
 export function documentsOperation(input: Readonly<{ scope: RepositoryScope }>): readonly ContractDocumentProjection[] { return readDocuments(input.scope); }
 
-type BindOperationInput = Readonly<{ scope: RepositoryScope; terms: BindData["terms"]; verification: VerificationDefinition | null; target?: string; workspace: "worktree" | "here"; actor?: ActorId }>;
-
-function declarationFailure(terms: ContractTerms | undefined, verification: VerificationDefinition | null | undefined, contractId?: ContractId): VerificationDeclarationRefusal | undefined {
-  if (terms === undefined || verification !== null || !terms.gates.includes(VERIFIED)) return undefined;
-  return {
-    kind: "verification-declaration-invalid",
-    ...(contractId === undefined ? {} : { contractId }),
-  };
-}
+type BindOperationInput = Readonly<{ scope: RepositoryScope; terms: BindData["terms"]; verification: VerificationDeclarationPreparation; target?: string; workspace: "worktree" | "here"; actor?: ActorId }>;
 
 export function bindOperation(
   input: BindOperationInput,
@@ -147,14 +137,13 @@ export function bindOperation(
     },
     terms: input.terms,
   };
-  const failure = declarationFailure(input.terms, input.verification);
   const decisionInput: BindInput<VerificationDeclarationRefusal> = {
     contractId: id,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
-    preparation: failure === undefined
+    preparation: input.verification.kind === "prepared"
       ? { kind: "prepared", data }
-      : { kind: "refused", refusal: failure },
+      : { kind: "refused", refusal: input.verification.refusal },
   };
   return complete(
     admitIntent(
@@ -212,18 +201,26 @@ type DeliveryDiffOperationInput = Readonly<{ scope: RepositoryScope; expectedPre
 
 export async function deliveryDiffOperation(input: DeliveryDiffOperationInput): Promise<string | null> { return readDeliveryDiff(input.scope, input.expectedPredecessor, input.snapshotId); }
 
-export function amendOperation(input: OperationInput & Readonly<{ source?: ContractTerms; terms?: AmendData; verification?: VerificationDefinition | null }>): IntentOutcome<void, AmendRefusal | VerificationDeclarationRefusal> {
-  const failure = declarationFailure(input.terms, input.verification, input.contractId);
-  const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] = input.terms === undefined
+type AmendOperationInput = OperationInput & Readonly<{
+  amendment?: Readonly<{
+    source: ContractTerms;
+    terms: AmendData;
+    verification: VerificationDeclarationPreparation;
+  }>;
+}>;
+
+export function amendOperation(input: AmendOperationInput): IntentOutcome<void, AmendRefusal | VerificationDeclarationRefusal> {
+  const amendment = input.amendment;
+  const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] = amendment === undefined
     ? undefined
-    : failure === undefined
-      ? { kind: "prepared", data: input.terms }
-      : { kind: "refused", refusal: failure };
+    : amendment.verification.kind === "prepared"
+      ? { kind: "prepared", data: amendment.terms }
+      : { kind: "refused", refusal: amendment.verification.refusal };
   const decisionInput: AmendInput<VerificationDeclarationRefusal> = {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
-    ...(input.source === undefined ? {} : { source: input.source }),
+    ...(amendment === undefined ? {} : { source: amendment.source }),
     ...(preparation === undefined ? {} : { preparation }),
   };
   return complete(
@@ -232,7 +229,7 @@ export function amendOperation(input: OperationInput & Readonly<{ source?: Contr
       decisionInput,
       decideAmend,
       {
-        observedContracts: [input.contractId, ...(input.terms?.after ?? [])],
+        observedContracts: [input.contractId, ...(amendment?.terms.after ?? [])],
         observe: observePrerequisiteClosure,
       },
     ),
@@ -257,6 +254,12 @@ function deliverAttempt(input: DeliverOperationInput, attempt: Parameters<typeof
   let preparation: DeliverInput<DeliveryFailure>["preparation"];
   if (state === null || input.derivation === undefined) {
     preparation = { kind: "unavailable" };
+  } else if (input.derivation.verification.kind === "refused") {
+    preparation = {
+      kind: "refused",
+      document: input.derivation.document,
+      refusal: input.derivation.verification.refusal,
+    };
   } else {
     const prepared = prepareDelivery(input.scope, {
       contractId: state.id,
@@ -265,12 +268,9 @@ function deliverAttempt(input: DeliverOperationInput, attempt: Parameters<typeof
       title: input.derivation.title,
       ...(input.message === undefined ? {} : { message: input.message }),
     });
-    const declaration = declarationFailure(state.terms, input.derivation.verification, input.contractId);
-    preparation = declaration !== undefined
-      ? { kind: "refused", document: input.derivation.document, refusal: declaration }
-      : prepared.kind === "refused"
-        ? { kind: "refused", document: input.derivation.document, refusal: prepared.refusal }
-        : { kind: "prepared", document: input.derivation.document, data: prepared.data };
+    preparation = prepared.kind === "refused"
+      ? { kind: "refused", document: input.derivation.document, refusal: prepared.refusal }
+      : { kind: "prepared", document: input.derivation.document, data: prepared.data };
   }
   const decisionInput: DeliverInput<DeliveryFailure> = {
     contractId: input.contractId,
@@ -308,6 +308,9 @@ async function completeDelivery(
     throw new Error("accepted delivery is missing its document derivation");
   }
   const derivation = input.derivation;
+  if (derivation.verification.kind !== "prepared") {
+    throw new Error("accepted delivery is missing its Verification preparation");
+  }
   let admission: AcceptedAdmission = first;
   let verificationValue: VerificationStop | undefined;
   let leak: WorktreeLeak | undefined;
@@ -319,9 +322,9 @@ async function completeDelivery(
     state: first.state,
     environment: process.env,
     produce: produceVerification,
-    ...(derivation.verification === null
+    ...(derivation.verification.data === null
       ? {}
-      : { verification: derivation.verification }),
+      : { verification: derivation.verification.data }),
   });
   if (verification !== null) {
     leak = verification.leak;
@@ -481,10 +484,14 @@ export async function auditOperation(
     return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
   }
 
-  if (initial.state.delivery === null || derivation.verification === null) {
-    if (!documentIsCurrent(initial.state, derivation.document)) {
-      return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
-    }
+  if (!documentIsCurrent(initial.state, derivation.document)) {
+    return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
+  }
+  if (derivation.verification.kind === "refused") {
+    return { kind: "refused", refusal: derivation.verification.refusal };
+  }
+
+  if (initial.state.delivery === null || derivation.verification.data === null) {
     return accepted(initial.state, [], initial.report);
   }
 
@@ -496,7 +503,7 @@ export async function auditOperation(
     state: initial.state,
     environment: process.env,
     produce: produceVerification,
-    verification: derivation.verification,
+    verification: derivation.verification.data,
   });
   if (verification === null) {
     throw new Error("audit verification preparation unexpectedly produced no attempt");

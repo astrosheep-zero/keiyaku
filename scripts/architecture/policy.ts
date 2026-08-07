@@ -121,7 +121,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/verbs/attestation.ts"),
         any("protocol/run.ts"),
         types("verification/producer.ts"),
-        types("verification/types.ts"),
+        any("verification/declaration.ts", ["VERIFIED", "VerificationDefinition"]),
       ],
     },
     {
@@ -152,7 +152,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/read/status.ts"),
         types("protocol/run.ts"),
         any("verification/producer.ts"),
-        types("verification/types.ts"),
+        types("verification/declaration.ts"),
       ],
     },
     {
@@ -167,13 +167,19 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     { source: "runtime/proc/**", allow: [] },
-    { source: "verification/types.ts", allow: [types("core/facts/types.ts")] },
+    {
+      source: "verification/declaration.ts",
+      allow: [
+        types("core/decide.ts"),
+        any("core/facts/types.ts", ["ContractId", "DocumentSegmentKey", "Gate", "gate"]),
+      ],
+    },
     {
       source: "verification/producer.ts",
       allow: [
         types("core/facts/types.ts"),
         any("runtime/proc/run.ts"),
-        types("verification/types.ts"),
+        types("verification/declaration.ts"),
       ],
     },
     {
@@ -188,6 +194,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/errors.ts"),
         any("core/facts/types.ts"),
         any("protocol/operations.ts"),
+        any("verification/declaration.ts", [
+          "VerificationDeclarationPreparation",
+          "prepareVerificationDeclaration",
+        ]),
       ],
     },
     { source: "library/**", allow: [] },
@@ -201,7 +211,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("body/region.ts"), any("body/render.ts"), any("body/shape.ts"), types("body/types.ts"),
         any("body/verification.ts"), any("markdown/parse.ts"), any("markdown/query.ts"), types("markdown/types.ts"),
-        types("verification/types.ts"),
+        types("verification/declaration.ts"),
       ],
     },
     {
@@ -216,7 +226,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("markdown/query.ts"),
         types("markdown/types.ts"),
         any("core/facts/types.ts"),
-        types("verification/types.ts"),
+        types("verification/declaration.ts"),
       ],
     },
     {

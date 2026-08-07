@@ -50,6 +50,12 @@ decision rejects it after judging document currency; it is not a preflight
 readiness check, a journal deadlock, or a new core fact. Other opaque gate
 tokens belong to their own producers and are outside this chapter.
 
+The library edge performs that declaration preparation once and returns a
+typed prepared or refused value. Protocol may combine that value with a
+mechanical preparation, but it never reads gate names or repeats the
+gate/declaration legality formula. Core receives the composed preparation and
+remains the sole judge of lifecycle and document-currentness priority.
+
 The producer resolves the admitted declarations and runs them against the
 selected candidate tree. It accepts the derivation as data; it imports no
 decoded document, callback, or protocol body. Deliver and audit use the same

@@ -1,5 +1,5 @@
 import type { ContractBody, ContractCriterion, ContractExtension, DecodedContractDocument } from "./types.js";
-import type { VerificationDeclaration } from "../verification/types.js";
+import type { VerificationDeclaration } from "../verification/declaration.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
 import { parseToAST } from "../markdown/parse.js";
 import { directChildren, indexDocument, indexedHeadings, normalizeTitle, rawSlice, sectionContent } from "../markdown/query.js";

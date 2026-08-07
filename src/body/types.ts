@@ -1,5 +1,5 @@
 import type { DocumentKey, DocumentSegmentKey } from "../core/facts/types.js";
-import type { VerificationDeclaration } from "../verification/types.js";
+import type { VerificationDeclaration } from "../verification/declaration.js";
 
 export type ContractCriterion = Readonly<{
   readonly title: string;
