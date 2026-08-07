@@ -5,13 +5,14 @@ import {
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { acquireSqliteTransactionLock, SqliteTransactionLockError, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
-import { installNamespaceContext, readNamespaceContext, type NamespaceContextRead } from "../coordination/namespace-context.js";
 import { parseTaskDocument, type TaskDocument } from "./document.js";
 import { formatTaskId, parseTaskId, taskAuthorityPath, type TaskId } from "./identity.js";
 import type { TaskBoard } from "./board.js";
 
-export type TaskWorld = Readonly<{ root: string; tasksDirectory: string }>;
-export type BoardSnapshot = Readonly<{ board: TaskBoard; bytes: ReadonlyMap<TaskId, Uint8Array>; paths: ReadonlyMap<TaskId, string> }>;
+export type TaskWorld = Readonly<{ root: string }>;
+export type BoardSnapshot = Readonly<{ board: TaskBoard; bytes: ReadonlyMap<TaskId, Uint8Array> }>;
+
+function tasksDirectory(world: TaskWorld): string { return resolve(world.root, ".keiyaku", "tasks"); }
 
 function authorityFiles(directory: string): readonly string[] {
   if (!existsSync(directory)) return [];
@@ -31,14 +32,15 @@ function coordinateFromPath(tasksDirectory: string, path: string) {
   return parseTaskId(`task/${local.slice(0, -3).split(sep).join("/")}`);
 }
 
-export function readBoard(tasksDirectory: string): BoardSnapshot {
-  const tasks = new Map<TaskId, TaskDocument>(), bytes = new Map<TaskId, Uint8Array>(), paths = new Map<TaskId, string>();
-  for (const path of authorityFiles(tasksDirectory)) {
+export function readBoard(world: TaskWorld): BoardSnapshot {
+  const directory = tasksDirectory(world);
+  const tasks = new Map<TaskId, TaskDocument>(), bytes = new Map<TaskId, Uint8Array>();
+  for (const path of authorityFiles(directory)) {
     const stat = lstatSync(path); if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Task authority is not a regular file: ${path}`);
-    const coordinate = coordinateFromPath(tasksDirectory, path); const id = formatTaskId(coordinate); const source = readFileSync(path);
-    tasks.set(id, parseTaskDocument(source, coordinate)); bytes.set(id, source); paths.set(id, path);
+    const coordinate = coordinateFromPath(directory, path); const id = formatTaskId(coordinate); const source = readFileSync(path);
+    tasks.set(id, parseTaskDocument(source, coordinate)); bytes.set(id, source);
   }
-  return { board: { tasks }, bytes, paths };
+  return { board: { tasks }, bytes };
 }
 
 function equal(left: Uint8Array | null, right: Uint8Array | null): boolean {
@@ -70,10 +72,10 @@ function lockPath(world: TaskWorld, id: TaskId): string {
 }
 
 export async function withTaskLocks<T>(input: Readonly<{
-  world: TaskWorld; graph: boolean; ids: readonly TaskId[]; signal?: AbortSignal;
+  world: TaskWorld; allocation: boolean; ids: readonly TaskId[]; signal?: AbortSignal;
 }>, action: () => Promise<T>): Promise<T | "busy"> {
   const paths = [
-    ...(input.graph ? [resolve(input.world.root, ".keiyaku", "locks", "task-graph.sqlite")] : []),
+    ...(input.allocation ? [resolve(input.world.root, ".keiyaku", "locks", "task-allocation.sqlite")] : []),
     ...[...new Set(input.ids)].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))).map((id) => lockPath(input.world, id)),
   ];
   const held: HeldSqliteTransactionLock[] = [];
@@ -88,6 +90,4 @@ export async function withTaskLocks<T>(input: Readonly<{
   }
 }
 
-export function namespaceContext(world: TaskWorld): NamespaceContextRead { return readNamespaceContext(world.root); }
-export function setNamespaceContext(world: TaskWorld, namespace: readonly string[]): void { installNamespaceContext(world.root, namespace); }
-export function authorityPath(world: TaskWorld, id: TaskId): string { return taskAuthorityPath(world.tasksDirectory, parseTaskId(id)); }
+export function authorityPath(world: TaskWorld, id: TaskId): string { return taskAuthorityPath(tasksDirectory(world), parseTaskId(id)); }

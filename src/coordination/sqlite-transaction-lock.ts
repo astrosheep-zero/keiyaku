@@ -10,8 +10,6 @@ const MAX_RETRY_MS = 100;
 export type SqliteTransactionLockMode = "immediate" | "exclusive";
 
 export class SqliteTransactionLockError extends Error {
-  readonly code = "SQLITE_TRANSACTION_LOCK_UNAVAILABLE" as const;
-
   constructor(
     message: string,
     readonly reason: "timeout" | "invalid" | "open-failed" | "release-failed",
@@ -23,7 +21,6 @@ export class SqliteTransactionLockError extends Error {
 }
 
 export type HeldSqliteTransactionLock = Readonly<{
-  path: string;
   close(): void;
 }>;
 
@@ -74,7 +71,7 @@ function openLock(path: string, mode: SqliteTransactionLockMode): HeldSqliteTran
   }
 
   let closed = false;
-  return { path, close(): void {
+  return { close(): void {
     if (closed) return;
     closed = true;
     const failure = closeDatabase(database!);
@@ -90,6 +87,7 @@ function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
     const timer = setTimeout(finish, milliseconds);
     const abort = (): void => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(signal?.reason); };
     signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
   });
 }
 

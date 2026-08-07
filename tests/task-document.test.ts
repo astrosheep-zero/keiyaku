@@ -12,11 +12,13 @@ test("task identity normalizes titles, caps local IDs, and supports nested names
 });
 
 test("creation and authority documents preserve an opaque nonblank contract association", () => {
-  const creation = parseTaskCreationDocument("---\ntitle: Native task\ncontractId: 'external system #42'\n---\nBody\n");
+  const creation = parseTaskCreationDocument("---\ntitle: Native task\nstate: in_progress\ncontractId: 'external system #42'\n---\nBody\n");
   assert.equal(creation.contractId, "external system #42");
+  assert.equal(creation.state, "in_progress");
   const coordinate = { namespace: ["nested"], localId: "native-task" } as const;
-  const document = { ...creation, id: formatTaskId(coordinate), coordinate, state: "open" as const };
+  const document = { ...creation, id: formatTaskId(coordinate) };
   assert.deepEqual(parseTaskDocument(serializeTaskDocument(document), coordinate), document);
+  assert.equal(parseTaskCreationDocument("---\ntitle: Default state\n---\n").state, "open");
   assert.throws(() => parseTaskCreationDocument("---\ntitle: Bad\ncontractId: '   '\n---\n"), /nonblank string/u);
 });
 

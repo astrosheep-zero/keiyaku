@@ -5,7 +5,6 @@ export type TaskState = "open" | "in_progress" | "on_hold" | "done" | "drop";
 export type TaskPriority = 0 | 1 | 2 | 3;
 export type TaskDocument = Readonly<{
   id: TaskId;
-  coordinate: TaskCoordinate;
   title: string;
   state: TaskState;
   priority: TaskPriority;
@@ -16,7 +15,7 @@ export type TaskDocument = Readonly<{
   contractId: string | null;
   body: string;
 }>;
-export type TaskCreationDocument = Omit<TaskDocument, "id" | "coordinate" | "state">;
+export type TaskCreationDocument = Omit<TaskDocument, "id">;
 
 export class TaskAuthorityCorruptionError extends Error {
   constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "TaskAuthorityCorruptionError"; }
@@ -24,7 +23,7 @@ export class TaskAuthorityCorruptionError extends Error {
 
 const STATES = new Set<TaskState>(["open", "in_progress", "on_hold", "done", "drop"]);
 const STORED_KEYS = ["id", "title", "state", "priority", "needs", "parent", "supersedes", "relates", "contractId"] as const;
-const CREATION_KEYS = ["title", "priority", "needs", "parent", "supersedes", "relates", "contractId"] as const;
+const CREATION_KEYS = ["title", "state", "priority", "needs", "parent", "supersedes", "relates", "contractId"] as const;
 
 function frontMatter(markdown: string, fail: (message: string, cause?: unknown) => never): Readonly<{ value: Record<string, unknown>; body: string }> {
   if (!markdown.startsWith("---\n")) fail("task document must begin with YAML front matter");
@@ -52,6 +51,10 @@ function priority(value: unknown, fail: (message: string) => never): TaskPriorit
   if (!Number.isInteger(value) || typeof value !== "number" || value < 0 || value > 3) fail("task priority must be 0, 1, 2, or 3");
   return value as TaskPriority;
 }
+function state(value: unknown, fail: (message: string) => never): TaskState {
+  if (typeof value !== "string" || !STATES.has(value as TaskState)) fail("task state is invalid");
+  return value as TaskState;
+}
 function taskId(value: unknown, field: string, fail: (message: string) => never): TaskId {
   if (typeof value !== "string") fail(`${field} must be a TaskId`);
   try { parseTaskId(value); return value as TaskId; } catch { return fail(`${field} must be a canonical TaskId`); }
@@ -71,7 +74,7 @@ function contractId(value: unknown, fail: (message: string) => never): string | 
   return value;
 }
 
-function fields(value: Record<string, unknown>, body: string, fail: (message: string) => never): TaskCreationDocument {
+function fields(value: Record<string, unknown>, body: string, fail: (message: string) => never): Omit<TaskCreationDocument, "state"> {
   return {
     title: title(value.title, fail),
     priority: priority(value.priority, fail),
@@ -90,8 +93,7 @@ export function parseTaskDocument(bytes: Uint8Array, expected: TaskCoordinate): 
   closed(value, STORED_KEYS, STORED_KEYS, fail);
   const id = taskId(value.id, "id", fail);
   if (id !== formatTaskId(expected)) fail(`task document ID ${id} does not match its authority path`);
-  if (typeof value.state !== "string" || !STATES.has(value.state as TaskState)) fail("task state is invalid");
-  return { id, coordinate: expected, state: value.state as TaskState, ...fields(value, body, fail) };
+  return { id, state: state(value.state, fail), ...fields(value, body, fail) };
 }
 
 export function parseTaskCreationDocument(markdown: string): TaskCreationDocument {
@@ -99,10 +101,10 @@ export function parseTaskCreationDocument(markdown: string): TaskCreationDocumen
   const { value, body } = frontMatter(markdown, fail);
   closed(value, CREATION_KEYS, ["title"], fail);
   const complete = {
-    priority: 2, needs: [], parent: null, supersedes: [], relates: [], contractId: null,
+    state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], contractId: null,
     ...value,
   };
-  return fields(complete, body, fail);
+  return { state: state(complete.state, fail), ...fields(complete, body, fail) };
 }
 
 export function serializeTaskDocument(document: TaskDocument): Uint8Array {

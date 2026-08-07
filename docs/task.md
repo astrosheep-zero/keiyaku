@@ -36,13 +36,10 @@ context-consuming Task operations as `invalid-namespace-context`. `add`,
 `addDocument`, and `compose` use it as their allocation default; `list`,
 `ready`, and `blocked` use it as their default scope. Explicit full-TaskId
 operations (`show`, `tree`, `update`, and lifecycle) never consult it.
-`cycles` is always world-scoped. `setNamespace` atomically replaces it.
+`doctor` is always world-scoped. `setNamespace` atomically replaces it.
 
-For a managed contract worktree, transport materialization and reconcile
-install or repair an absent or malformed marker using the already-admitted
-ContractId readable segment. They preserve a valid different value as a
-deliberate override. A `workspace: "here"` contract never installs context in
-the caller-owned worktree.
+Installation of this marker in a managed Contract worktree is owned by
+[transport](transport.md), not by Task.
 
 ## Authority And Document
 
@@ -89,11 +86,14 @@ Declarations on both sides are idempotent, not corruption. Removing `relates`
 removes only the addressed task's declaration; removing an edge declared only
 by the other side refuses and names that task.
 
-Product graph mutation rejects missing targets, self edges, and cycles in
-`needs`, `parent`, or `supersedes`. Manual dangling edges and cycles remain
-observable as graph disease, but mutation refuses to build on an invalid board.
-Parent is decomposition, supersedes is navigation, and relates is nonblocking;
-none changes readiness or lifecycle.
+Product graph mutation rejects a missing target or self edge that the mutation
+itself declares. It does not validate unrelated documents and never detects or
+rejects a cycle. Manual and product-written graph disease remains authoritative
+until another mutation or manual edit changes it. `doctor` is the sole active
+graph-diagnosis surface; it reports missing targets, self edges, and cycle
+components in `needs`, `parent`, and `supersedes`. Parent is decomposition,
+supersedes is navigation, and relates is nonblocking; none changes readiness or
+lifecycle.
 
 ## Native TypeScript Surface
 
@@ -103,7 +103,7 @@ objects validated at the JavaScript boundary.
 ```ts
 Tasks.at(input?: { path?: string }): Tasks
 tasks.root: string
-tasks.namespace(): Promise<readonly string[]>
+tasks.namespace(): Promise<TaskNamespaceResult>
 tasks.setNamespace(input: { namespace: readonly string[] }): Promise<void>
 tasks.task(input: { id: string }): Task
 tasks.add(input: AddTaskInput): Promise<TaskMutationResult>
@@ -111,7 +111,7 @@ tasks.addDocument(input: AddTaskDocumentInput): Promise<TaskMutationResult>
 tasks.list(input?: { selection?: "active" | "closed" | "all"; scope?: "namespace" | "world" }): Promise<TaskList>
 tasks.ready(input?: { scope?: "namespace" | "world" }): Promise<TaskList>
 tasks.blocked(input?: { scope?: "namespace" | "world" }): Promise<BlockedTaskList>
-tasks.cycles(): Promise<TaskCycleReport>
+tasks.doctor(): Promise<TaskDoctorReport>
 tasks.batch(input: { verb: "done" | "drop" | "hold"; ids: readonly string[]; signal?: AbortSignal }): Promise<TaskBatchResult>
 tasks.compose(input: { markdown: string; signal?: AbortSignal }): Promise<TaskCompositionResult>
 
@@ -127,11 +127,13 @@ task.drop(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 ```
 
 `add` accepts structured title, namespace, body, priority, relations, optional
-contract, and signal. `addDocument` accepts creation-document Markdown plus an
-optional namespace and signal. The creation document cannot set identity or
-state. `update` is a field-preserving patch: title, mutually exclusive body or
+contract, optional initial state, and signal. `addDocument` accepts
+creation-document Markdown plus an optional namespace and signal. The creation
+document cannot set identity but may set any persisted state; omitted state
+defaults to `open`. After creation, product state changes use lifecycle methods.
+`update` is a field-preserving patch: title, mutually exclusive body or
 append-body, priority, relation replace/add/drop, nullable parent, and nullable
-contract. State is changed only by lifecycle methods.
+contract.
 
 Shape errors throw `TypeError` before world observation. Malformed persisted
 authority throws `TaskAuthorityCorruptionError`. Infrastructure failures stay
@@ -143,6 +145,12 @@ type TaskOutcome<A> =
   | { kind: "refused"; refusal: TaskRefusal }
   | { kind: "retry"; reason: "busy" | "concurrent-modification" }
 ```
+
+`TaskNamespaceResult` is `TaskOutcome<readonly string[]>` and preserves a
+malformed marker as `invalid-namespace-context`, not a programmer `TypeError`.
+`TaskDoctorReport` contains ordered `issues`; each issue is a missing target,
+self relation, or strongly connected cycle component. An empty issue array is
+healthy. Doctor observes authority and never repairs it.
 
 Add and lifecycle acceptance return `TaskView`. Only accepted `update` returns
 the exact predecessor-to-successor whole-document diff. Batch applies IDs in
@@ -158,7 +166,8 @@ supersededBy/related, parent, outgoing supersedes, and the retained `contractId`
 bytes when present.
 `tree <TaskId> [--full]` follows transitive needs across namespaces, marks
 cycles, and either deduplicates shared nodes or expands every acyclic
-occurrence. `cycles` returns canonical, deduplicated needs cycles for the world.
+occurrence. `doctor` diagnoses the complete world independently of current
+namespace.
 
 `list` defaults to active tasks in the current namespace. Closed and all are
 explicit selections; `scope: "world"` escapes the current namespace. `ready`
@@ -179,8 +188,10 @@ begin with `\`, `+ `, or `@task/` use one leading backslash, which parsing strip
 and failure-draft serialization restores.
 
 Planning first allocates every `+` node in document order, then resolves every
-full TaskId reference against the board and all allocations. It validates the
-complete intended board before admission. An empty change set is accepted.
+full TaskId reference against the board and all allocations. One document may
+address a TaskId at most once. Planning validates missing targets and self edges
+introduced by planned documents but performs no cycle diagnosis. An empty
+change set is accepted.
 
 Documents admit in TaskId byte order. Each successful atomic rename is an
 independent Task commit point; compose has no cross-file atomicity or rollback.
@@ -205,11 +216,13 @@ changes Git refs. It writes a temporary regular file, flushes it, rechecks the
 observed predecessor bytes, atomically renames it, and syncs the directory.
 
 Cooperating writers use `.keiyaku/locks/task/<namespace...>/<local-id>.sqlite`.
-Graph-changing work first takes `.keiyaku/locks/task-graph.sqlite`, then task
-locks in TaskId byte order. The shared SQLite transaction primitive waits at
-most three seconds and propagates cancellation. Databases contain no Task fact,
-owner row, PID, lease, heartbeat, or stale-break policy and may be recreated
-when idle. Only coordination imports `node:sqlite`.
+ID allocation first takes `.keiyaku/locks/task-allocation.sqlite`; compose then
+takes its addressed task locks in TaskId byte order. Relation changes have no
+world-wide adjudication and take only the addressed task lock. The shared
+SQLite transaction primitive waits at most three seconds and propagates
+cancellation. Databases contain no Task fact, owner row, PID, lease, heartbeat,
+or stale-break policy and may be recreated when idle. Only coordination imports
+`node:sqlite`.
 
 Locks serialize cooperating writers; predecessor-byte comparison remains the
 sole write adjudicator against manual editors. Byte movement returns

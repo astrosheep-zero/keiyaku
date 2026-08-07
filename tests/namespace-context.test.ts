@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { installNamespaceContext, readNamespaceContext, repairNamespaceContext } from "../src/coordination/namespace-context.js";
+import { installNamespaceContext, readNamespaceContext, repairNamespaceContext } from "../src/namespace-context.js";
 
 function temporary(): string { return mkdtempSync(join(tmpdir(), "keiyaku-namespace-")); }
 
@@ -21,9 +21,11 @@ test("namespace context stores root and nested namespaces in canonical bytes", (
 test("repair preserves a valid override and repairs the ignored carrier", () => {
   const root = temporary();
   installNamespaceContext(root, ["override"]);
+  const current = join(root, ".keiyaku", "namespace", "current"), inode = lstatSync(current).ino;
   writeFileSync(join(root, ".keiyaku", "namespace", ".gitignore"), "wrong\n");
   assert.equal(repairNamespaceContext(root, ["default"]), "kept");
   assert.deepEqual(readNamespaceContext(root), ["override"]);
+  assert.equal(lstatSync(current).ino, inode);
   assert.equal(readFileSync(join(root, ".keiyaku", "namespace", ".gitignore"), "utf8"), "*\n");
 });
 

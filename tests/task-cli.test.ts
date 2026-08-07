@@ -11,27 +11,35 @@ import type { TaskInvocationResult } from "../src/cli/commands/task.js";
 function world(): string { const root = mkdtempSync(join(tmpdir(), "keiyaku-task-cli-")); mkdirSync(join(root, ".keiyaku")); return root; }
 
 test("task parser owns subcommand arity, repeat flags, and selected stdin", () => {
-  assert.deepEqual(parseArgv(["-C", "/tmp/project", "task", "add", "Ship task", "--namespace", "contract/inside", "--needs", "task/a", "--needs", "task/b", "--json"]), {
+  assert.deepEqual(parseArgv(["-C", "/tmp/project", "task", "add", "Ship task", "--namespace", "contract/inside", "--state", "in_progress", "--needs", "task/a", "--needs", "task/b", "--json"]), {
     cwd: "/tmp/project",
-    command: { command: "task", action: "add", output: "json", positionals: ["Ship task"], flags: { namespace: "contract/inside", needs: ["task/a", "task/b"], json: true } },
+    command: { command: "task", action: "add", output: "json", positionals: ["Ship task"], flags: { namespace: "contract/inside", state: "in_progress", needs: ["task/a", "task/b"], json: true } },
   });
   assert.deepEqual(parseArgv(["task", "update", "task/a", "--append", "-"]), {
     command: { command: "task", action: "update", output: "text", positionals: ["task/a"], flags: { append: "" }, stdin: "append" },
   });
   assert.equal(parseArgv(["task", "compose", "-"]).command.command, "task");
   assert.throws(() => parseArgv(["task", "add", "Title", "-"]), CliUsageError);
+  assert.throws(() => parseArgv(["task", "add", "--state", "done", "-"]), CliUsageError);
   assert.throws(() => parseArgv(["task", "ls", "--closed", "--all"]), CliUsageError);
   assert.throws(() => parseArgv(["task", "update", "task/a"]), CliUsageError);
 });
 test("task invocation works outside Git and consumes stdin only when selected", async () => {
   const root = world(); let reads = 0;
-  const add = await invoke(parseArgv(["-C", root, "task", "add", "Native CLI", "--contract", "external #7"]), { readStdin: () => { reads += 1; return "unused"; } }) as TaskInvocationResult;
+  const add = await invoke(parseArgv(["-C", root, "task", "add", "Native CLI", "--state", "on_hold", "--contract", "external #7"]), { readStdin: () => { reads += 1; return "unused"; } }) as TaskInvocationResult;
   assert.equal((add as { kind: string }).kind, "accepted"); assert.equal(reads, 0);
   const update = await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--body", "-"]), { readStdin: () => { reads += 1; return "body from stdin\n"; } }) as TaskInvocationResult;
   assert.equal((update as { kind: string }).kind, "accepted"); assert.equal(reads, 1);
   const shown = await invoke(parseArgv(["-C", root, "task", "show", "task/native-cli"])) as TaskInvocationResult;
   assert.equal((shown as { task: { body: string; contractId: string } }).task.body, "body from stdin\n");
   assert.equal((shown as { task: { body: string; contractId: string } }).task.contractId, "external #7");
+  assert.equal((shown as { task: { state: string } }).task.state, "on_hold");
+
+  const document = "---\ntitle: From document\nstate: done\n---\ncreated closed\n";
+  const documentAdd = await invoke(parseArgv(["-C", root, "task", "add", "-"]), { readStdin: () => document }) as TaskInvocationResult;
+  assert.equal((documentAdd as { kind: string }).kind, "accepted");
+  const documentShown = await invoke(parseArgv(["-C", root, "task", "show", "task/from-document"])) as TaskInvocationResult;
+  assert.equal((documentShown as { task: { state: string } }).task.state, "done");
 });
 
 test("task compose and views flow through native results", async () => {
@@ -43,6 +51,19 @@ test("task compose and views flow through native results", async () => {
   if (command.command !== "task") throw new Error("not a task command");
   assert.match(renderTaskText(command, listed), /task\/parent - P2 - ready - Parent/u);
   assert.equal(taskExitCode(listed), 0);
+});
+
+test("task doctor renders graph disease and controls exit status", async () => {
+  const root = world();
+  await invoke(parseArgv(["-C", root, "task", "add", "First"]));
+  await invoke(parseArgv(["-C", root, "task", "add", "Second"]));
+  await invoke(parseArgv(["-C", root, "task", "update", "task/first", "--needs", "task/second"]));
+  await invoke(parseArgv(["-C", root, "task", "update", "task/second", "--needs", "task/first"]));
+  const result = await invoke(parseArgv(["-C", root, "task", "doctor"])) as TaskInvocationResult;
+  const command = parseArgv(["task", "doctor"]).command;
+  if (command.command !== "task") throw new Error("not a task command");
+  assert.match(renderTaskText(command, result), /needs cycle: task\/first -> task\/second/u);
+  assert.equal(taskExitCode(result), 1);
 });
 
 test("incomplete compose rendering keeps draft on stdout and diagnostics separate", () => {

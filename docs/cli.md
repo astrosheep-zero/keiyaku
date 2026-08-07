@@ -232,6 +232,7 @@ decisions remain in the native Task surface.
 
 ```text
 task add <TITLE> [--namespace <ns>] [--priority 0..3]
+  [--state open|in_progress|on_hold|done|drop]
   [--needs <TaskId>]... [--parent <TaskId>]
   [--supersedes <TaskId>]... [--relates <TaskId>]...
   [--contract <ContractId>] [--body <text>] [--json]
@@ -241,7 +242,7 @@ task ls [--closed | --all] [--world] [--json]
 task ready [--world] [--json]
 task blocked [--world] [--json]
 task tree <TaskId> [--full] [--json]
-task cycles [--json]
+task doctor [--json]
 task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
   [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
   [--parent <TaskId> | --no-parent]
@@ -256,13 +257,18 @@ task compose [--json] -
 
 Literal `-` selects creation-document input for add, body input only after
 `--body` or `--append` for update, and composition input for compose. Unselected
-piped stdin is not consumed. Add document input rejects creation-owned identity
-and state. Update requires at least one explicit patch.
+piped stdin is not consumed. Add document input rejects creation-owned identity,
+may declare its initial state, and cannot be combined with structured creation
+flags other than `--namespace`. Update requires at least one explicit patch.
 
 `ls`, `ready`, and `blocked` use current namespace unless `--world` is present.
-`show`, `tree`, update, lifecycle, and cycles use complete IDs and never infer
+`show`, `tree`, update, and lifecycle use complete IDs and never infer
 from namespace. Text rows are `TaskId - P<n> - <disposition> - title`, with an
 associated ContractId appended when present.
+
+`task doctor` scans the complete Task world and renders every graph issue. It
+does not repair authority. A healthy report renders `healthy` and exits `0`; a
+report containing issues exits `1`.
 
 Accepted update and compose render native whole-document diffs; the CLI never
 computes them. An incomplete compose writes only its reusable draft to stdout,

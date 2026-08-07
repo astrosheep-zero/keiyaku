@@ -188,7 +188,7 @@ test("task package export exposes only the Tasks-first native surface", () => {
     'const tasks = Tasks.at({ path: "." });',
     'const task: Task = tasks.task({ id: "task/example" });',
     'const id: TaskId = task.id;',
-    'const result: Promise<TaskMutationResult> = tasks.add({ title: "Example" });',
+    'const result: Promise<TaskMutationResult> = tasks.add({ title: "Example", state: "in_progress" });',
     '// @ts-expect-error Task has no static construction surface',
     'Task.at({ path: "." });',
     '// @ts-expect-error callers do not choose IDs during creation',

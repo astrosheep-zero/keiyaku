@@ -1,6 +1,5 @@
-import { resolve } from "node:path";
 import { resolveContextRoot } from "../context-root.js";
-import { buildTree, findNeedsCycles, projectDetailFacts, type BlockedTaskRow, type TaskCycle, type TaskDetailFacts, type TaskRow, type TaskTreeNode } from "./board.js";
+import { buildTree, diagnoseBoard, projectDetailFacts, type BlockedTaskRow, type TaskDetailFacts, type TaskDoctorIssue, type TaskRow, type TaskTreeNode } from "./board.js";
 import { composeTasks, type TaskCompositionResult } from "./compose.js";
 import { TaskAuthorityCorruptionError, type TaskPriority, type TaskState } from "./document.js";
 import { isTaskSegment, parseTaskId, type TaskId } from "./identity.js";
@@ -14,9 +13,10 @@ import { readBoard, type TaskWorld } from "./store.js";
 export type TaskDetail = Omit<TaskDetailFacts, "task"> & Readonly<{ task: TaskView }>;
 export type TaskList = TaskOutcome<readonly TaskRow[]>;
 export type BlockedTaskList = TaskOutcome<readonly BlockedTaskRow[]>;
-export type TaskCycleReport = Readonly<{ cycles: readonly TaskCycle[] }>;
+export type TaskNamespaceResult = TaskOutcome<readonly string[]>;
+export type TaskDoctorReport = Readonly<{ issues: readonly TaskDoctorIssue[] }>;
 export type TaskDependencyTree = TaskOutcome<TaskTreeNode>;
-export type { AddTaskDocumentInput, AddTaskInput, BlockedTaskRow, TaskBatchResult, TaskCompositionResult, TaskId, TaskMutationResult, TaskOutcome, TaskPriority, TaskRefusal, TaskRetry, TaskRow, TaskState, TaskUpdateResult, TaskView, UpdateTaskInput };
+export type { AddTaskDocumentInput, AddTaskInput, BlockedTaskRow, TaskBatchResult, TaskCompositionResult, TaskDoctorIssue, TaskId, TaskMutationResult, TaskOutcome, TaskPriority, TaskRefusal, TaskRetry, TaskRow, TaskState, TaskUpdateResult, TaskView, UpdateTaskInput };
 export { TaskAuthorityCorruptionError };
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -45,6 +45,11 @@ function namespace(value: unknown): readonly string[] | undefined {
 }
 function text(value: unknown, label: string): string | undefined { if (value === undefined) return undefined; if (typeof value !== "string") throw new TypeError(`${label} must be a string`); return value; }
 function priority(value: unknown): TaskPriority | undefined { if (value === undefined) return undefined; if (!Number.isInteger(value) || typeof value !== "number" || value < 0 || value > 3) throw new TypeError("priority must be 0..3"); return value as TaskPriority; }
+function state(value: unknown): TaskState | undefined {
+  if (value === undefined) return undefined;
+  if (value !== "open" && value !== "in_progress" && value !== "on_hold" && value !== "done" && value !== "drop") throw new TypeError("state is invalid");
+  return value;
+}
 function nullableId(value: unknown): TaskId | null | undefined { return value === undefined || value === null ? value : id(value); }
 function contract(value: unknown): string | null | undefined {
   if (value === undefined || value === null) return value;
@@ -54,12 +59,16 @@ function contract(value: unknown): string | null | undefined {
 
 function addInput(input: unknown): AddTaskInput {
   const v = record(input, "add input");
-  closed(v, ["title", "namespace", "body", "priority", "needs", "parent", "supersedes", "relates", "contractId", "signal"], "add input");
+  closed(v, ["title", "namespace", "body", "state", "priority", "needs", "parent", "supersedes", "relates", "contractId", "signal"], "add input");
   const title = text(v.title, "title"); if (title === undefined || title.trim() === "") throw new TypeError("title is required");
-  return { title, ...(namespace(v.namespace) === undefined ? {} : { namespace: namespace(v.namespace) }), ...(text(v.body, "body") === undefined ? {} : { body: text(v.body, "body") }),
-    ...(priority(v.priority) === undefined ? {} : { priority: priority(v.priority) }), ...(taskIds(v.needs, "needs") === undefined ? {} : { needs: taskIds(v.needs, "needs") }),
-    ...(nullableId(v.parent) === undefined ? {} : { parent: nullableId(v.parent) }), ...(taskIds(v.supersedes, "supersedes") === undefined ? {} : { supersedes: taskIds(v.supersedes, "supersedes") }),
-    ...(taskIds(v.relates, "relates") === undefined ? {} : { relates: taskIds(v.relates, "relates") }), ...(contract(v.contractId) === undefined ? {} : { contractId: contract(v.contractId) }), ...(signal(v.signal) === undefined ? {} : { signal: signal(v.signal) }) } as AddTaskInput;
+  const ns = namespace(v.namespace), body = text(v.body, "body"), initialState = state(v.state), pri = priority(v.priority);
+  const needs = taskIds(v.needs, "needs"), parent = nullableId(v.parent), supersedes = taskIds(v.supersedes, "supersedes"), relates = taskIds(v.relates, "relates");
+  const contractId = contract(v.contractId), abort = signal(v.signal);
+  return { title, ...(ns === undefined ? {} : { namespace: ns }), ...(body === undefined ? {} : { body }),
+    ...(initialState === undefined ? {} : { state: initialState }), ...(pri === undefined ? {} : { priority: pri }),
+    ...(needs === undefined ? {} : { needs }), ...(parent === undefined ? {} : { parent }),
+    ...(supersedes === undefined ? {} : { supersedes }), ...(relates === undefined ? {} : { relates }),
+    ...(contractId === undefined ? {} : { contractId }), ...(abort === undefined ? {} : { signal: abort }) };
 }
 function updateInput(input: unknown): UpdateTaskInput {
   const v = record(input, "update input");
@@ -81,13 +90,13 @@ function updateInput(input: unknown): UpdateTaskInput {
 class TaskHandle {
   constructor(readonly id: TaskId, private readonly world: TaskWorld) {}
   async read(): Promise<TaskDetail | null> {
-    const facts = projectDetailFacts(readBoard(this.world.tasksDirectory).board, this.id);
+    const facts = projectDetailFacts(readBoard(this.world).board, this.id);
     return facts === null ? null : { ...facts, task: taskView(facts.task) };
   }
   async tree(input?: Readonly<{ full?: boolean }>): Promise<TaskDependencyTree> {
     const value = record(input ?? {}, "tree input"); closed(value, ["full"], "tree input");
     if (value.full !== undefined && typeof value.full !== "boolean") throw new TypeError("full must be a boolean");
-    const node = buildTree(readBoard(this.world.tasksDirectory).board, this.id, value.full ?? false);
+    const node = buildTree(readBoard(this.world).board, this.id, value.full ?? false);
     return node === null ? { kind: "refused", refusal: { kind: "task-missing", taskId: this.id } } : { kind: "accepted", value: node };
   }
   update(input: UpdateTaskInput): Promise<TaskUpdateResult> { return updateTask(this.world, this.id, updateInput(input)); }
@@ -108,9 +117,9 @@ class TasksHandle {
   readonly root: string; private readonly world: TaskWorld;
   constructor(path?: string) {
     const root = resolveContextRoot({ from: path ?? process.cwd(), marker: ".keiyaku" });
-    this.world = { root, tasksDirectory: resolve(root, ".keiyaku", "tasks") }; this.root = root;
+    this.world = { root }; this.root = root;
   }
-  async namespace(): Promise<readonly string[]> { const value = currentNamespace(this.world); if ("kind" in value) throw new TypeError(value.kind); return value; }
+  async namespace(): Promise<TaskNamespaceResult> { const value = currentNamespace(this.world); return "kind" in value ? { kind: "refused", refusal: value } : { kind: "accepted", value }; }
   async setNamespace(input: Readonly<{ namespace: readonly string[] }>): Promise<void> { const v = record(input, "setNamespace input"); closed(v, ["namespace"], "setNamespace input"); const ns = namespace(v.namespace); if (ns === undefined) throw new TypeError("namespace is required"); setCurrentNamespace(this.world, ns); }
   task(input: Readonly<{ id: string }>): Task { const v = record(input, "task input"); closed(v, ["id"], "task input"); return new TaskHandle(id(v.id), this.world); }
   add(input: AddTaskInput): Promise<TaskMutationResult> { return addTask(this.world, addInput(input)); }
@@ -118,7 +127,7 @@ class TasksHandle {
   async list(input: Readonly<{ selection?: "active" | "closed" | "all"; scope?: "namespace" | "world" }> = {}): Promise<TaskList> { const v = record(input, "list input"); closed(v, ["selection", "scope"], "list input"); if (v.selection !== undefined && v.selection !== "active" && v.selection !== "closed" && v.selection !== "all") throw new TypeError("selection must be active, closed, or all"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return listTasks(this.world, v.selection ?? "active", v.scope as "namespace" | "world" | undefined); }
   async ready(input: Readonly<{ scope?: "namespace" | "world" }> = {}): Promise<TaskList> { const v = record(input, "ready input"); closed(v, ["scope"], "ready input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return readyTasks(this.world, v.scope as "namespace" | "world" | undefined); }
   async blocked(input: Readonly<{ scope?: "namespace" | "world" }> = {}): Promise<BlockedTaskList> { const v = record(input, "blocked input"); closed(v, ["scope"], "blocked input"); if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world") throw new TypeError("scope must be namespace or world"); return blockedTasks(this.world, v.scope as "namespace" | "world" | undefined); }
-  async cycles(): Promise<TaskCycleReport> { return { cycles: findNeedsCycles(readBoard(this.world.tasksDirectory).board) }; }
+  async doctor(): Promise<TaskDoctorReport> { return { issues: diagnoseBoard(readBoard(this.world).board) }; }
   batch(input: Readonly<{ verb: "done" | "drop" | "hold"; ids: readonly string[]; signal?: AbortSignal }>): Promise<TaskBatchResult> { const v = record(input, "batch input"); closed(v, ["verb", "ids", "signal"], "batch input"); const verb = v.verb; if (verb !== "done" && verb !== "drop" && verb !== "hold") throw new TypeError("batch verb is invalid"); return batchTasks(this.world, verb, taskIds(v.ids, "ids") ?? [], signal(v.signal)); }
   compose(input: Readonly<{ markdown: string; signal?: AbortSignal }>): Promise<TaskCompositionResult> { const v = record(input, "compose input"); closed(v, ["markdown", "signal"], "compose input"); const markdown = text(v.markdown, "markdown"); if (markdown === undefined) throw new TypeError("markdown is required"); return composeTasks(this.world, markdown, signal(v.signal)); }
 }

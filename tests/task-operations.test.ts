@@ -5,6 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { Tasks, type TaskId } from "../src/task/index.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
+import { parseTaskDocument, serializeTaskDocument } from "../src/task/document.js";
+import { parseTaskId } from "../src/task/identity.js";
 import { replaceAuthority, withTaskLocks } from "../src/task/store.js";
 
 function world(): { root: string; tasks: ReturnType<typeof Tasks.at> } {
@@ -22,8 +24,9 @@ test("Tasks creates root and nested authority and preserves opaque contractId", 
   const rootId = acceptedId(await tasks.add({ title: "Root task", contractId: "external #42" }));
   assert.equal(rootId, "task/root-task");
   await tasks.setNamespace({ namespace: ["contract", "inside"] });
-  const nestedId = acceptedId(await tasks.add({ title: "Nested task" }));
+  const nestedId = acceptedId(await tasks.add({ title: "Nested task", state: "in_progress" }));
   assert.equal(nestedId, "task/contract/inside/nested-task");
+  assert.equal((await tasks.task({ id: nestedId }).read())?.task.state, "in_progress");
   assert.equal((await tasks.task({ id: rootId }).read())?.task.contractId, "external #42");
   assert.deepEqual((await tasks.list()).kind === "accepted" ? (await tasks.list() as { kind: "accepted"; value: readonly { id: string }[] }).value.map((row) => row.id) : [], [nestedId]);
   const worldList = await tasks.list({ scope: "world", selection: "all" });
@@ -44,17 +47,23 @@ test("lifecycle, readiness, blocked projection, update diff, and batch results c
   assert.equal((await tasks.blocked()).kind === "accepted" ? (await tasks.blocked() as { kind: "accepted"; value: readonly unknown[] }).value.length : -1, 0);
   const updated = await tasks.task({ id: dependent }).update({ title: "Dependent renamed", appendBody: "body" });
   assert.equal(updated.kind, "accepted");
-  if (updated.kind === "accepted") assert.match(updated.value.documentDiff, /Dependent renamed/u);
+  if (updated.kind === "accepted") {
+    assert.match(updated.value.documentDiff, /Dependent renamed/u);
+    assert.match(updated.value.documentDiff, /task\/dependent\.md/u);
+    assert.equal(updated.value.documentDiff.includes(tasks.root), false);
+  }
   const batch = await tasks.batch({ verb: "done", ids: [dependent, "task/missing"] });
   assert.deepEqual(batch.items.map((item) => item.outcome.kind), ["accepted", "refused"]);
 });
 
-test("graph mutation rejects cycles and concurrent lifecycle writers serialize", async () => {
+test("graph mutation admits cycles, doctor diagnoses them, and lifecycle writers serialize", async () => {
   const { tasks } = world();
   const first = acceptedId(await tasks.add({ title: "First" })), second = acceptedId(await tasks.add({ title: "Second", needs: [first] }));
   const cycle = await tasks.task({ id: first }).update({ needs: [second] });
-  assert.equal(cycle.kind, "refused");
-  if (cycle.kind === "refused") assert.equal(cycle.refusal.kind, "invalid-graph");
+  assert.equal(cycle.kind, "accepted");
+  assert.deepEqual((await tasks.doctor()).issues, [{ kind: "cycle", relation: "needs", tasks: [first, second] }]);
+  assert.equal((await tasks.add({ title: "Unrelated after disease" })).kind, "accepted");
+  assert.equal((await tasks.task({ id: first }).update({ title: "First renamed" })).kind, "accepted");
   const outcomes = await Promise.all([tasks.task({ id: first }).start(), tasks.task({ id: first }).start()]);
   assert.deepEqual(outcomes.map((outcome) => outcome.kind).sort(), ["accepted", "refused"]);
 });
@@ -67,15 +76,37 @@ test("concurrent same-title creation allocates stable unique suffixes", async ()
   assert.deepEqual(ids.sort(), ["task/collision", "task/collision-2", "task/collision-3", "task/collision-4", "task/collision-5", "task/collision-6"]);
 });
 
-test("reverse dependency writers share one graph adjudication", async () => {
+test("reverse dependency writers both admit and leave diagnosis to doctor", async () => {
   const { tasks } = world();
   const first = acceptedId(await tasks.add({ title: "First" })), second = acceptedId(await tasks.add({ title: "Second" }));
   const outcomes = await Promise.all([
     tasks.task({ id: first }).update({ needs: [second] }),
     tasks.task({ id: second }).update({ needs: [first] }),
   ]);
-  assert.deepEqual(outcomes.map((outcome) => outcome.kind).sort(), ["accepted", "refused"]);
-  assert.deepEqual((await tasks.cycles()).cycles, []);
+  assert.deepEqual(outcomes.map((outcome) => outcome.kind), ["accepted", "accepted"]);
+  assert.deepEqual((await tasks.doctor()).issues, [{ kind: "cycle", relation: "needs", tasks: [first, second] }]);
+});
+
+test("relation mutation rejects only newly declared missing and self targets", async () => {
+  const { tasks } = world(), id = acceptedId(await tasks.add({ title: "Subject" }));
+  const missing = await tasks.task({ id }).update({ needs: ["task/missing"] });
+  assert.equal(missing.kind, "refused");
+  if (missing.kind === "refused") assert.equal(missing.refusal.kind, "invalid-graph");
+  const self = await tasks.task({ id }).update({ relates: [id] });
+  assert.equal(self.kind, "refused");
+  if (self.kind === "refused") assert.equal(self.refusal.kind, "invalid-graph");
+});
+
+test("existing graph disease does not adjudicate an unrelated relation addition", async () => {
+  const { root, tasks } = world();
+  const subject = acceptedId(await tasks.add({ title: "Subject" }));
+  const valid = acceptedId(await tasks.add({ title: "Valid target" }));
+  const path = join(root, ".keiyaku", "tasks", "subject.md");
+  const document = parseTaskDocument(readFileSync(path), parseTaskId(subject));
+  writeFileSync(path, serializeTaskDocument({ ...document, needs: ["task/missing"] }));
+
+  assert.equal((await tasks.task({ id: subject }).update({ addNeeds: [valid] })).kind, "accepted");
+  assert.deepEqual((await tasks.doctor()).issues, [{ kind: "missing-target", taskId: subject, relation: "needs", target: "task/missing" }]);
 });
 
 test("different task IDs and different worlds do not share task locks", async () => {
@@ -91,6 +122,16 @@ test("different task IDs and different worlds do not share task locks", async ()
   assert.equal(firstA, secondA);
 });
 
+test("allocation contention does not block relation updates", async () => {
+  const { tasks } = world();
+  const first = acceptedId(await tasks.add({ title: "First" }));
+  const second = acceptedId(await tasks.add({ title: "Second" }));
+  const path = join(tasks.root, ".keiyaku", "locks", "task-allocation.sqlite");
+  const held = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 100 });
+  try { assert.equal((await tasks.task({ id: first }).update({ needs: [second] })).kind, "accepted"); }
+  finally { held.close(); }
+});
+
 test("task lock cancellation propagates and exceptional actions release held locks", async () => {
   const { tasks } = world(), id = acceptedId(await tasks.add({ title: "Cancel" }));
   const path = join(tasks.root, ".keiyaku", "locks", "task", "cancel.sqlite");
@@ -99,8 +140,8 @@ test("task lock cancellation propagates and exceptional actions release held loc
   const pending = tasks.task({ id }).start({ signal: controller.signal }); controller.abort(new Error("cancel task"));
   await assert.rejects(pending, /cancel task/u); held.close();
 
-  const taskWorld = { root: tasks.root, tasksDirectory: join(tasks.root, ".keiyaku", "tasks") };
-  await assert.rejects(withTaskLocks({ world: taskWorld, graph: false, ids: [id] }, async () => { throw new Error("action failed"); }), /action failed/u);
+  const taskWorld = { root: tasks.root };
+  await assert.rejects(withTaskLocks({ world: taskWorld, allocation: false, ids: [id] }, async () => { throw new Error("action failed"); }), /action failed/u);
   assert.equal((await tasks.task({ id }).start()).kind, "accepted");
 });
 
@@ -141,6 +182,9 @@ test("malformed current namespace refuses context consumers but not explicit Tas
     if (listed.refusal.kind === "invalid-namespace-context") assert.equal(listed.refusal.path, join(tasks.root, ".keiyaku", "namespace", "current"));
   }
   assert.equal((await tasks.task({ id }).read())?.task.id, id);
+  const namespace = await tasks.namespace();
+  assert.equal(namespace.kind, "refused");
+  if (namespace.kind === "refused") assert.equal(namespace.refusal.kind, "invalid-namespace-context");
 });
 
 test("public inputs reject unknown fields before observing authority", async () => {
@@ -148,6 +192,7 @@ test("public inputs reject unknown fields before observing authority", async () 
   assert.throws(() => tasks.add({ title: "Bad", extra: true } as never), /unknown field/u);
   assert.throws(() => tasks.add({ title: "Bad", namespace: ["nested/escape"] }), /canonical segments/u);
   assert.throws(() => tasks.add({ title: "Bad", needs: ["task/a", "task/a"] }), /must not contain duplicates/u);
+  assert.throws(() => tasks.add({ title: "Bad", state: "started" as never }), /state is invalid/u);
   const id = acceptedId(await tasks.add({ title: "Valid" }));
   assert.throws(() => tasks.task({ id }).update({ title: "   " }), /title must be nonblank/u);
   assert.throws(() => tasks.task({ id }).start({ extra: true } as never), /unknown field/u);

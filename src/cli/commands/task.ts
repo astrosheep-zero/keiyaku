@@ -3,17 +3,19 @@ import {
   type BlockedTaskList,
   type TaskBatchResult,
   type TaskCompositionResult,
-  type TaskCycleReport,
   type TaskDependencyTree,
   type TaskDetail,
+  type TaskDoctorReport,
   type TaskId,
   type TaskList,
   type TaskMutationResult,
+  type TaskNamespaceResult,
   type TaskPriority,
+  type TaskState,
   type TaskUpdateResult,
 } from "../../task/index.js";
 
-type TaskAction = "add" | "show" | "ls" | "ready" | "blocked" | "tree" | "cycles" | "update"
+type TaskAction = "add" | "show" | "ls" | "ready" | "blocked" | "tree" | "doctor" | "update"
   | "start" | "stop" | "hold" | "resume" | "done" | "drop" | "namespace" | "compose";
 type TaskFlagValue = string | true | readonly string[];
 type TaskStdin = "document" | "body" | "append" | "compose";
@@ -35,13 +37,13 @@ type TaskCommandSpec = Readonly<{
 
 const COMMON = { json: "boolean" } as const;
 const SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
-  add: { arity: [0, 1], stdin: "document", flags: { ...COMMON, namespace: "value", priority: "value", needs: "repeat", parent: "value", supersedes: "repeat", relates: "repeat", contract: "value", body: "value" } },
+  add: { arity: [0, 1], stdin: "document", flags: { ...COMMON, namespace: "value", state: "value", priority: "value", needs: "repeat", parent: "value", supersedes: "repeat", relates: "repeat", contract: "value", body: "value" } },
   show: { arity: [1, 1], flags: COMMON },
   ls: { arity: [0, 0], flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean" } },
   ready: { arity: [0, 0], flags: { ...COMMON, world: "boolean" } },
   blocked: { arity: [0, 0], flags: { ...COMMON, world: "boolean" } },
   tree: { arity: [1, 1], flags: { ...COMMON, full: "boolean" } },
-  cycles: { arity: [0, 0], flags: COMMON },
+  doctor: { arity: [0, 0], flags: COMMON },
   update: { arity: [1, 1], flags: { ...COMMON, title: "value", body: "value", append: "value", priority: "value", needs: "repeat", "drop-needs": "repeat", parent: "value", "no-parent": "boolean", supersedes: "repeat", "drop-supersedes": "repeat", relates: "repeat", "drop-relates": "repeat", contract: "value", "no-contract": "boolean" } },
   start: { arity: [1, 1], flags: COMMON }, stop: { arity: [1, 1], flags: COMMON },
   hold: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON }, resume: { arity: [1, 1], flags: COMMON },
@@ -111,6 +113,7 @@ function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (messa
   const spec = SPECS[action], { positionals, flags, stdin } = scanned;
   if (positionals.length < spec.arity[0] || positionals.length > spec.arity[1]) fail(`task ${action} has invalid positional arguments`);
   if (action === "add" && (stdin === "document") === (positionals.length === 1)) fail("task add requires either TITLE or final '-' input");
+  if (action === "add" && stdin === "document" && Object.keys(flags).some((name) => name !== "json" && name !== "namespace")) fail("task add document input owns its creation fields");
   if (action === "compose" && stdin !== "compose") fail("task compose requires final '-' input");
   if (action === "ls" && flags.closed === true && flags.all === true) fail("--closed and --all are mutually exclusive");
   if (action === "update") validateUpdate(scanned, fail);
@@ -135,10 +138,11 @@ function priority(raw: string | undefined): TaskPriority | undefined {
   if (raw === undefined) return undefined;
   const number = Number(raw); return number as TaskPriority;
 }
+function state(raw: string | undefined): TaskState | undefined { return raw as TaskState | undefined; }
 function ids(items: readonly string[] | undefined): readonly TaskId[] | undefined { return items as readonly TaskId[] | undefined; }
 
 export type TaskInvocationResult = TaskMutationResult | TaskUpdateResult | TaskBatchResult | TaskCompositionResult
-  | TaskDetail | TaskList | BlockedTaskList | TaskDependencyTree | TaskCycleReport | readonly string[];
+  | TaskDetail | TaskList | BlockedTaskList | TaskDependencyTree | TaskDoctorReport | TaskNamespaceResult;
 
 type TaskProduct = ReturnType<typeof Tasks.at>;
 type TaskInput = Readonly<{ path?: string; readStdin(): string }>;
@@ -146,12 +150,12 @@ type TaskInput = Readonly<{ path?: string; readStdin(): string }>;
 function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => string): Promise<TaskMutationResult> {
   const selectedNamespace = namespace(value(command, "namespace"));
   if (command.stdin === "document") return tasks.addDocument({ markdown: readStdin(), ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }) });
-  const body = value(command, "body"), selectedPriority = priority(value(command, "priority"));
+  const body = value(command, "body"), initialState = state(value(command, "state")), selectedPriority = priority(value(command, "priority"));
   const needs = ids(values(command, "needs")), parent = value(command, "parent");
   const supersedes = ids(values(command, "supersedes")), relates = ids(values(command, "relates")), contractId = value(command, "contract");
   return tasks.add({
     title: command.positionals[0]!, ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }),
-    ...(body === undefined ? {} : { body }), ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
+    ...(body === undefined ? {} : { body }), ...(initialState === undefined ? {} : { state: initialState }), ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
     ...(needs === undefined ? {} : { needs }), ...(parent === undefined ? {} : { parent: parent as TaskId }),
     ...(supersedes === undefined ? {} : { supersedes }), ...(relates === undefined ? {} : { relates }),
     ...(contractId === undefined ? {} : { contractId }),
@@ -186,14 +190,14 @@ async function invokeRead(tasks: TaskProduct, command: ParsedTaskCommand): Promi
     case "ready": return tasks.ready(command.flags.world === true ? { scope: "world" } : {});
     case "blocked": return tasks.blocked(command.flags.world === true ? { scope: "world" } : {});
     case "tree": return tasks.task({ id }).tree(command.flags.full === true ? { full: true } : {});
-    case "cycles": return tasks.cycles();
+    case "doctor": return tasks.doctor();
     default: throw new Error(`task action is not a read: ${command.action}`);
   }
 }
 
 export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): Promise<TaskInvocationResult> {
   const tasks = input.path === undefined ? Tasks.at() : Tasks.at({ path: input.path });
-  if (["show", "ls", "ready", "blocked", "tree", "cycles"].includes(command.action)) return invokeRead(tasks, command);
+  if (["show", "ls", "ready", "blocked", "tree", "doctor"].includes(command.action)) return invokeRead(tasks, command);
   if (command.action === "add") return invokeAdd(tasks, command, input.readStdin);
   if (command.action === "update") return invokeUpdate(tasks, command, input.readStdin);
   const id = command.positionals[0]!;
