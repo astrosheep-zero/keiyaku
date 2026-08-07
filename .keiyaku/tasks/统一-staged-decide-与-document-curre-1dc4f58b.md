@@ -1,7 +1,7 @@
 ---
 id: 统一-staged-decide-与-document-curre-1dc4f58b
 title: 统一 staged decide 与 document currency 单一裁决
-state: open
+state: drop
 pri: 0
 needs:
   - 收束-core-decision-observation-为唯-5ab4af33
@@ -14,8 +14,11 @@ notes:
   - actor: thekoc
     timestamp: 2026-08-06T23:08:02.187Z
     text: "Correction after reading document.md: do not treat malformed caller amend Markdown as the same class as carrier mechanical preparation. The document chapter explicitly makes invalid-document a package-edge usage failure and says amendment application occurs at the edge before the stamped derivation crosses. Keep syntax validation there. The staged precedence audit should cover only carrier/declaration preparation that produces a typed operation refusal, not malformed public input."
+  - actor: thekoc
+    timestamp: 2026-08-07T05:00:24.534Z
+    text: 真实残留已分别归位：Verification declaration 归方言任务，abandon 跨快照 finalHead 归既有 abandon 单事实终态任务；audit/review 其余条目已满足或被后续 note 推翻。删除 umbrella，避免继续承载互不相干的裁决。
 createdAt: 2026-08-06T21:41:47.998Z
-updatedAt: 2026-08-07T04:49:14.132Z
+updatedAt: 2026-08-07T05:00:24.534Z
 creator: thekoc
 ---
 依据 docs/lifecycle.md 的 every attempt one legal decide 和 docs/document.md 的 key-stamped derivation law，删除 deliver/audit/review 的拼装裁决漂移：
