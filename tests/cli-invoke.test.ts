@@ -21,11 +21,11 @@ function repositoryWithMain() {
 }
 
 function deliveryRefFor(contract: ContractId): string {
-  return `refs/heads/keiyaku-delivery/${contract.slice("kei/".length)}`;
+  return `refs/heads/keiyaku-delivery/kei-${contract.slice("kei/".length)}`;
 }
 
 function candidatePinRefFor(contract: ContractId): string {
-  return `refs/heads/keiyaku-candidate/${contract.slice("kei/".length)}`;
+  return `refs/heads/keiyaku-candidate/kei-${contract.slice("kei/".length)}`;
 }
 
 function contractDocument(title: string, extra = ""): string {

@@ -50,6 +50,14 @@ this one transport owner. The library boundary rejects a target that names any
 of them before coordinates are recorded; target input and canonicalization are
 defined only in [public-api.md](public-api.md).
 
+Transport derives each managed delivery-ref leaf, candidate-pin leaf, and
+worktree basename from the complete ContractId using one private physical-name
+projection. The projection preserves the normalized contract segment and adds
+the fixed `kei-` family namespace; for example, `kei/example` materializes as
+`kei-example`. These names are deterministic topology, not public identity or a
+second legality authority. Platform-specific filename concerns do not enter
+identity normalization.
+
 ## Delivery Preparation And Placement
 
 Preparation consumes only the state coordinates projected from that attempt and
@@ -107,7 +115,7 @@ second acceptance authority.
 
 Transport and protocol have no document callback, decoded-document import, or
 document interpretation. They receive no raw document projection for a write
-attempt. Bind protocol receives the title scalar only to mint the readable
+attempt. Bind protocol receives the title scalar only to mint the normalized
 ContractId defined in [model.md](model.md); carrier receives only the resulting
 identity. The only document-derived transport input to delivery preparation is
 the title scalar stamped by its `DocumentKey`, as defined in

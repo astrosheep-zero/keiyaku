@@ -57,16 +57,21 @@ Public identities use this closed registry:
 | `resp/` | `resp/<machine-artifact>` |
 
 A legal contract segment is nonempty and contains no slash, whitespace, or
-control character. Coordinate validation does not rerun the narrower readable
-construction used by bind.
+control character. Coordinate validation does not rerun the narrower title
+normalization used by bind.
 
-Readable stems are minted from titles by NFKC normalization, locale-independent
-lowercasing, retaining Unicode letters, numbers, and complete emoji graphemes,
-and collapsing every intervening run to one hyphen. Fitting truncates only at a
-grapheme boundary under an owner-selected UTF-8 byte budget and reserves room
-for an optional suffix. This normalization and fitting are one shared pure
-identity primitive; each identity family separately owns its prefix,
-namespace, suffix generation, collision policy, and persistence.
+An identity stem is normalized from human-readable input by NFKC normalization,
+locale-independent lowercasing, retaining Unicode letters, numbers, and
+complete emoji graphemes, and collapsing every intervening run to one hyphen.
+The transformation is pure and idempotent: normalizing an already normalized
+stem returns the same bytes. Its output uses a portable filename character form;
+platform-specific physical names remain the carrier's concern.
+
+Fitting is a separate pure operation. It truncates only at a grapheme boundary
+under an owner-selected UTF-8 byte budget and may reserve room for a suffix. Each
+identity family separately owns its prefix, namespace, suffix generation,
+collision policy, and persistence. Legality validates an identity coordinate as
+given and never substitutes for normalization or fitting.
 
 Human segments are nonempty lowercase ASCII letters, digits, hyphens, or RGI
 emoji sequences, with no whitespace. Machine segments match
@@ -74,14 +79,15 @@ emoji sequences, with no whitespace. Machine segments match
 namespace and local-id segments. Identity bytes are exact: no Unicode
 normalization or visual-confusable deduplication applies.
 
-Bind derives the first ContractId as `kei/<fitted-readable-title>`. Admission is
-the sole uniqueness adjudicator. An existing unsuffixed identity causes bind to
-mint one random readable suffix, refit the same stem with space reserved for
-that suffix, and make one new identity attempt. Other carrier movement retries
-reuse the selected identity; they never silently remint it. A second identity
-collision remains the typed `contract-exists` refusal. An empty normalized stem
-uses `contract` before the same collision rule. Readers, folds, and gates compare
-the whole `ContractId` and never renormalize an admitted identity.
+Bind derives the first ContractId as `kei/<fitted-normalized-title>`. Admission
+is the sole uniqueness adjudicator. An existing unsuffixed identity causes bind
+to mint one random collision suffix, refit the same normalized stem with space
+reserved for that suffix, and make one new identity attempt. Suffixing is not
+part of normalization. Other carrier movement retries reuse the selected
+identity; they never silently remint it. A second identity collision remains the
+typed `contract-exists` refusal. An empty normalized stem uses `contract` before
+the same collision rule. Readers, folds, and gates compare the whole
+`ContractId` and never renormalize an admitted identity.
 
 `@` is input-only. A slash denotes a full registered identity after removing
 `@`; no slash denotes a context-resolved movable reference. Neither form is

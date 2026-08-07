@@ -5,7 +5,7 @@ import type { BindData, ActorId, ContractId } from "../core/facts/types.js";
 import { contractId } from "../core/facts/types.js";
 import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
 export type { BindRefusal } from "../core/verbs/bind.js";
-import { fitReadableStem, normalizeReadableStem } from "../identity/readable.js";
+import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js";
 import type { VerificationDeclarationPreparation, VerificationDeclarationRefusal } from "../verification/declaration.js";
 import { admitIntent } from "./intent.js";
 import { complete, type IntentOutcome } from "./outcome.js";
@@ -37,8 +37,8 @@ function mintCollisionSuffix(): string {
   return suffix.toLowerCase();
 }
 
-function readableContractId(stem: string, suffix?: string): ContractId {
-  return contractId(`kei/${fitReadableStem({
+function contractIdFromStem(stem: string, suffix?: string): ContractId {
+  return contractId(`kei/${fitIdentityStem({
     stem,
     maxBytes: CONTRACT_ID_STEM_BYTES,
     ...(suffix === undefined ? {} : { suffix }),
@@ -64,7 +64,7 @@ export function bindOperation(
     },
     terms: input.terms,
   };
-  const stem = normalizeReadableStem({ source: input.title }) || "contract";
+  const stem = normalizeIdentityStem({ source: input.title }) || "contract";
   const at = new Date().toISOString();
   const attempt = (id: ContractId): IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | VerificationDeclarationRefusal> => complete(
     admitIntent(
@@ -82,8 +82,8 @@ export function bindOperation(
     ),
     { contractId: id },
   );
-  const first = attempt(readableContractId(stem));
+  const first = attempt(contractIdFromStem(stem));
   return first.kind === "refused" && first.refusal.kind === "contract-exists"
-    ? attempt(readableContractId(stem, mintCollisionSuffix()))
+    ? attempt(contractIdFromStem(stem, mintCollisionSuffix()))
     : first;
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import test from "node:test";
 import { prepareDelivery, prepareReview } from "../src/carrier/delivery.js";
 import { mintSnapshotId } from "../src/carrier/identity.js";
@@ -9,6 +9,7 @@ import { readRef, repositoryAt } from "../src/carrier/repository.js";
 import { observeContract } from "../src/carrier/observe.js";
 import { materializeVerificationCandidate, readDeliveryDiff } from "../src/carrier/verification.js";
 import { deliveryWorktreePath, reconcile } from "../src/carrier/reconcile.js";
+import { contractId } from "../src/core/facts/types.js";
 import { AuthorityCorruptionError, Repo, type ContractId } from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
@@ -62,12 +63,20 @@ function preparedDelivery(repository: TestGitRepository, id: ContractId) {
 }
 
 function deliveryRefFor(contract: ContractId): string {
-  return `refs/heads/keiyaku-delivery/${contract.slice("kei/".length)}`;
+  return `refs/heads/keiyaku-delivery/kei-${contract.slice("kei/".length)}`;
 }
 
 function candidatePinRefFor(contract: ContractId): string {
-  return `refs/heads/keiyaku-candidate/${contract.slice("kei/".length)}`;
+  return `refs/heads/keiyaku-candidate/kei-${contract.slice("kei/".length)}`;
 }
+
+test("carrier materialization adds the identity-family namespace", () => {
+  const repository = makeGitRepository();
+  assert.equal(
+    basename(deliveryWorktreePath(repositoryAt(repository.path), contractId("kei/con"))),
+    "kei-con",
+  );
+});
 
 test("dirty delivery materializes a candidate without changing the caller index", async () => {
   const { repository, id } = await boundContract();

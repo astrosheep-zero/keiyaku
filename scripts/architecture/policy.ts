@@ -5,7 +5,7 @@ const types = (target: string) => ({ target, mode: "type-only" as const });
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
-    { source: "identity/readable.ts", allow: [] },
+    { source: "identity/normalize.ts", allow: [] },
     { source: "core/facts/types.ts", allow: [] },
     { source: "core/facts/errors.ts", allow: [] },
     { source: "core/facts/codec.ts", allow: [any("core/facts/errors.ts"), any("core/facts/types.ts"), any("core/subject.ts", ["parseDependencyKeySet"])] },
@@ -119,7 +119,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("carrier/repository.ts"),
         any("core/facts/types.ts"),
         any("core/verbs/bind.ts"),
-        any("identity/readable.ts"),
+        any("identity/normalize.ts"),
         any("protocol/intent.ts"),
         any("protocol/outcome.ts"),
         types("verification/declaration.ts"),

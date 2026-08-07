@@ -37,14 +37,14 @@ test("selectors resolve active worktrees from public status rows", () => {
   assert.equal(resolveContextualContract(report, undefined), active);
 });
 
-test("short selectors match readable contract segments without a second grammar", () => {
-  const readable = "kei/修复-👩‍💻" as ContractId;
+test("short selectors match normalized contract segments without a second grammar", () => {
+  const normalized = "kei/修复-👩‍💻" as ContractId;
   const base = status();
   const report = {
     ...base,
-    contracts: [{ ...base.contracts[0]!, contractId: readable }],
+    contracts: [{ ...base.contracts[0]!, contractId: normalized }],
   } satisfies StatusReport;
-  assert.equal(resolveContextualContract(report, "@修复-👩‍💻"), readable);
+  assert.equal(resolveContextualContract(report, "@修复-👩‍💻"), normalized);
 });
 
 test("omitted selectors require an exact public scope and exclude here workspaces", () => {

@@ -42,10 +42,10 @@ type ReconcileBatchItem =
 
 type WorktreeTopology = Readonly<{ paths: Set<string> }>;
 
-function payload(contract: ContractId): string { return contractId(contract).slice(4); }
-function deliveryRefFor(contract: ContractId): string { return `${DELIVERY_REF_NAMESPACE}/${payload(contract)}`; }
-function candidatePinRefFor(contract: ContractId): string { return `${CANDIDATE_PIN_REF_NAMESPACE}/${payload(contract)}`; }
-export function deliveryWorktreePath(repository: GitRepository, contract: ContractId): string { return resolve(realpathSync(repository.primaryWorktree), ...WORKTREE_DIRECTORY, payload(contract)); }
+function materializedName(contract: ContractId): string { return `kei-${contractId(contract).slice("kei/".length)}`; }
+function deliveryRefFor(contract: ContractId): string { return `${DELIVERY_REF_NAMESPACE}/${materializedName(contract)}`; }
+function candidatePinRefFor(contract: ContractId): string { return `${CANDIDATE_PIN_REF_NAMESPACE}/${materializedName(contract)}`; }
+export function deliveryWorktreePath(repository: GitRepository, contract: ContractId): string { return resolve(realpathSync(repository.primaryWorktree), ...WORKTREE_DIRECTORY, materializedName(contract)); }
 function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Effect {
   const before = readRef(repository, ref);
   if (before === desired) return { kind: "ref", name: ref, action: "unchanged", before, after: desired };
