@@ -4,7 +4,7 @@ import {
   type DeliveryPreparationRefusal,
   type ReviewPreparationRefusal,
 } from "../carrier/delivery.js";
-import { mintContractId, mintSnapshotId } from "../carrier/identity.js";
+import { mintContractId } from "../carrier/identity.js";
 import {
   extendContractsForAdmission,
   observeBindCoordinates,
@@ -14,7 +14,7 @@ import {
   type CarrierDecisionObservation,
 } from "../carrier/observe.js";
 import { reconcile, reconcileBatch, type ReconcileResult } from "../carrier/reconcile.js";
-import { normalizeTargetBranch, readRef, repositoryAt, type GitRepository } from "../carrier/repository.js";
+import { normalizeTargetBranch, repositoryAt, type GitRepository } from "../carrier/repository.js";
 import { readDeliveryDiff } from "../carrier/verification.js";
 import type { WorktreeLeak } from "../carrier/verification.js";
 import { dependencyKeySet } from "../core/subject.js";
@@ -369,16 +369,11 @@ export async function deliverOperation(
 export function abandonOperation(
   input: OperationInput & Readonly<{ note?: string }>,
 ): IntentOutcome<void, AbandonRefusal> {
-  const carrier = input.scope;
-  const state = observeContract(carrier, input.contractId).state;
-  const target = state === null ? undefined : state.coordinates.target;
-  const finalHead = target === undefined ? null : readRef(carrier, target);
   return complete(
-    admitIntent(carrier, {
+    admitIntent(input.scope, {
       contractId: input.contractId,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
-      finalHead: finalHead === null ? null : mintSnapshotId(finalHead),
       ...(input.note === undefined ? {} : { note: input.note }),
     }, decideAbandon),
     undefined,

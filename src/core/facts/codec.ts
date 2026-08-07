@@ -212,9 +212,8 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
       return validateArc(value, path) satisfies ArcData;
     case "abandoned": {
       const object = requireRecord(value, path);
-      requireKeys(object, ["finalHead"], path, ["note"]);
+      requireKeys(object, [], path, ["note"]);
       return {
-        finalHead: object.finalHead === null ? null : brandedValue(object.finalHead, `${path}.finalHead`, snapshotId),
         ...(object.note === undefined ? {} : { note: stringValue(object.note, `${path}.note`) }),
       } satisfies AbandonedData;
     }

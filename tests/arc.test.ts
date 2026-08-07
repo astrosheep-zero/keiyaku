@@ -133,7 +133,7 @@ test("Arc facts round trip canonically and fold only exact sequences", () => {
 });
 
 test("Arc decision refuses terminal contracts", () => {
-  const abandoned = entry("abandoned", { finalHead: null }, "AG");
+  const abandoned = entry("abandoned", {}, "AG");
   const entries = [bind(), abandoned];
   const terminal = foldJournal(id, entries);
   const result = decideArc({

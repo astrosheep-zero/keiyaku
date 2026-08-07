@@ -125,7 +125,6 @@ export type ArcData = Readonly<{
 }>;
 
 export type AbandonedData = Readonly<{
-  finalHead: SnapshotId | null;
   note?: string;
 }>;
 

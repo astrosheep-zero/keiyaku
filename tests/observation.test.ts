@@ -183,7 +183,7 @@ test("lifecycle and document refusals outrank a refused preparation", () => {
       contract: id,
       entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
       at: "2026-08-07T00:00:02Z",
-      data: { finalHead: null },
+      data: {},
     },
   ]);
   const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY")] };

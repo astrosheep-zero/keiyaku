@@ -55,8 +55,9 @@ subject has no candidate identity. The reviewed producer boundary owns the
 review requests placement; an unsatisfied review records judgment only.
 Optional `summary` is opaque testimony and does not participate in a gate.
 
-`abandon` admits one `abandoned` terminal fact with `{ finalHead, note? }`.
-Optional `note` remains opaque testimony rather than a gate input.
+`abandon` admits one `abandoned` terminal fact with `{ note? }`. Optional
+`note` remains opaque testimony rather than a gate input. The decision neither
+reads nor changes a target ref.
 
 An arc is a narrative chapter within one contract lifetime:
 

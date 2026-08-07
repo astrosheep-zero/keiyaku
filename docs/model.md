@@ -159,7 +159,6 @@ type ArcData = Readonly<{
   brief: string
 }>
 type AbandonedData = Readonly<{
-  finalHead: SnapshotId | null
   note?: string
 }>
 ```
@@ -169,9 +168,9 @@ uses caller-authored prose; Verification uses a bounded rendering of terminal
 process output. It remains part of the one attestation fact, not an evidence
 blob, log ref, artifact store, or second authority.
 
-`abandoned` is the one abandonment terminal fact. It captures the target head
-when one was observed and optional opaque `note`; it has no reason category,
-intent precursor, or reopen fact.
+`abandoned` is the one abandonment terminal fact. It carries only an optional
+opaque `note`; it has no target snapshot, reason category, intent precursor, or
+reopen fact. Abandonment never reads or changes the target ref.
 
 The journal stores lifecycle facts and bounded intent data only. It stores no
 raw producer logs, reports, patches, artifacts, or blob evidence.

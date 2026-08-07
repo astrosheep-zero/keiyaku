@@ -170,7 +170,7 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   const abandoned = await contract.abandon({ note: "Return the task to planning." });
   assert.equal(abandoned.kind, "accepted");
   assert.equal((await contract.state()).terminal?.kind, "abandoned");
-  assert.deepEqual((await contract.state()).terminal?.data, { finalHead: null, note: "Return the task to planning." });
+  assert.deepEqual((await contract.state()).terminal?.data, { note: "Return the task to planning." });
   const terminalDelivery = await contract.delivery();
   assert.equal(terminalDelivery?.snapshotId, delivered.value.snapshotId);
   assert.deepEqual(await contract.review({ verdict: "satisfied" }), {
