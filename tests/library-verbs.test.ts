@@ -260,6 +260,28 @@ test("a changed worktree patch leaves the reviewed placement pending", async () 
   assert.equal((await result.value.state()).terminal, null);
 });
 
+test("a changed document leaves an otherwise unchanged reviewed patch pending", async () => {
+  const repository = repositoryWithMain();
+  const result = await Repo.at({ path: repository.path }).bind({ markdown: document(), workspace: "here", gates: ["reviewed"] });
+  assert.equal(result.kind, "accepted");
+  if (result.kind !== "accepted") throw new Error("bind was not accepted");
+  writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
+  const reviewed = await result.value.review({ verdict: "satisfied" });
+  assert.equal(reviewed.kind, "accepted");
+
+  const amended = await result.value.amend({
+    markdown: "## Replace: Objective\nRequire review of the current contract document.\n",
+  });
+  assert.equal(amended.kind, "accepted");
+
+  const delivered = await result.value.deliver();
+  assert.equal(delivered.kind, "accepted");
+  if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver"]);
+  assert.equal(delivered.value.placement?.refusal.kind, "gates-unsatisfied");
+  assert.equal((await result.value.state()).terminal, null);
+});
+
 test("review testimony is recorded when reviewed is not a placement gate", async () => {
   const repository = repositoryWithMain();
   const result = await Repo.at({ path: repository.path }).bind({ markdown: document(), workspace: "here", gates: [] });
