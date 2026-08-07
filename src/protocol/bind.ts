@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { observeBindCoordinates } from "../carrier/observe.js";
 import { normalizeTargetBranch, type GitRepository } from "../carrier/repository.js";
 import type { BindData, ActorId, ContractId } from "../core/facts/types.js";
-import { contractId } from "../core/facts/types.js";
+import { contractIdFromSegment } from "../core/facts/types.js";
 import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
 export type { BindRefusal } from "../core/verbs/bind.js";
 import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js";
@@ -38,11 +38,11 @@ function mintCollisionSuffix(): string {
 }
 
 function contractIdFromStem(stem: string, suffix?: string): ContractId {
-  return contractId(`kei/${fitIdentityStem({
+  return contractIdFromSegment(fitIdentityStem({
     stem,
     maxBytes: CONTRACT_ID_STEM_BYTES,
     ...(suffix === undefined ? {} : { suffix }),
-  })}`);
+  }));
 }
 
 export function bindOperation(

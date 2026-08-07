@@ -42,7 +42,7 @@ type ReconcileBatchItem =
 
 type WorktreeTopology = Readonly<{ paths: Set<string> }>;
 
-function materializedName(contract: ContractId): string { return `kei-${contractId(contract).slice("kei/".length)}`; }
+function materializedName(contract: ContractId): string { return contractId(contract).replace("/", "-"); }
 function deliveryRefFor(contract: ContractId): string { return `${DELIVERY_REF_NAMESPACE}/${materializedName(contract)}`; }
 function candidatePinRefFor(contract: ContractId): string { return `${CANDIDATE_PIN_REF_NAMESPACE}/${materializedName(contract)}`; }
 export function deliveryWorktreePath(repository: GitRepository, contract: ContractId): string { return resolve(realpathSync(repository.primaryWorktree), ...WORKTREE_DIRECTORY, materializedName(contract)); }

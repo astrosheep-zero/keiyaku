@@ -53,12 +53,19 @@ Public identities use this closed registry:
 | --- | --- |
 | `aku/` | `aku/<human-profile>` or `aku/<human-profile>/<lower-hex8>` |
 | `kei/` | `kei/<contract-segment>` |
-| `task/` | `task/<human-ns>/<human-local-id>` |
+| `task/` | `task/<human-local-id>` or `task/<human-ns...>/<human-local-id>` |
 | `resp/` | `resp/<machine-artifact>` |
 
 A legal contract segment is nonempty and contains no slash, whitespace, or
 control character. Coordinate validation does not rerun the narrower title
 normalization used by bind.
+
+The neutral coordinate primitive only joins and splits a caller-selected family;
+it owns no product semantics. Each identity family then owns its public
+constructor and parser or validator that accept only the complete prefixed
+coordinate. Contract construction adds `kei/`; Task construction adds `task/`.
+A bare stem or local ID is never a full identity, and no downstream consumer
+repairs a missing family prefix.
 
 An identity stem is normalized from human-readable input by NFKC normalization,
 locale-independent lowercasing, retaining Unicode letters, numbers, and
@@ -75,8 +82,9 @@ given and never substitutes for normalization or fitting.
 
 Human segments are nonempty lowercase ASCII letters, digits, hyphens, or RGI
 emoji sequences, with no whitespace. Machine segments match
-`[a-z0-9][a-z0-9-]*`; a projection suffix is lower hex8. A task has exactly its
-namespace and local-id segments. Identity bytes are exact: no Unicode
+`[a-z0-9][a-z0-9-]*`; a projection suffix is lower hex8. A task has one local-id
+segment after `task/` and may have any number of namespace segments before it;
+no namespace denotes the task root. Identity bytes are exact: no Unicode
 normalization or visual-confusable deduplication applies.
 
 Bind derives the first ContractId as `kei/<fitted-normalized-title>`. Admission

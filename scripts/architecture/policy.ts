@@ -5,8 +5,9 @@ const types = (target: string) => ({ target, mode: "type-only" as const });
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
+    { source: "identity/coordinates.ts", allow: [] },
     { source: "identity/normalize.ts", allow: [] },
-    { source: "core/facts/types.ts", allow: [] },
+    { source: "core/facts/types.ts", allow: [any("identity/coordinates.ts")] },
     { source: "core/facts/errors.ts", allow: [] },
     { source: "core/facts/codec.ts", allow: [any("core/facts/errors.ts"), any("core/facts/types.ts"), any("core/subject.ts", ["parseDependencyKeySet"])] },
     {
@@ -335,7 +336,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-pid", owners: [] },
     { capability: "require", owners: [] },
-    { capability: "type-error-construction", owners: ["body/**", "cli/actor.ts", "library/keiyaku.ts"] },
+    { capability: "type-error-construction", owners: ["body/**", "cli/actor.ts", "library/keiyaku.ts", "identity/coordinates.ts"] },
   ],
   forbiddenFileNames: [
     "approval-preparation.ts",

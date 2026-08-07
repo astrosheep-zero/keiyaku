@@ -70,7 +70,7 @@ function candidatePinRefFor(contract: ContractId): string {
   return `refs/heads/keiyaku-candidate/kei-${contract.slice("kei/".length)}`;
 }
 
-test("carrier materialization adds the identity-family namespace", () => {
+test("carrier materialization normalizes the complete prefixed identity", () => {
   const repository = makeGitRepository();
   assert.equal(
     basename(deliveryWorktreePath(repositoryAt(repository.path), contractId("kei/con"))),

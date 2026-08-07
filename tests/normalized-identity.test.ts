@@ -1,6 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { contractId, contractIdFromSegment, contractSegment } from "../src/core/facts/types.js";
+import { identityCoordinate, identitySegments } from "../src/identity/coordinates.js";
 import { fitIdentityStem, normalizeIdentityStem } from "../src/identity/normalize.js";
+
+test("contract identity construction and parsing own the kei family prefix", () => {
+  const id = contractIdFromSegment("example");
+  assert.equal(id, "kei/example");
+  assert.equal(contractSegment(id), "example");
+  assert.throws(() => contractId("example"), /kei\/<contract-segment>/u);
+  assert.throws(() => contractId("task/example"), /kei\/<contract-segment>/u);
+  assert.throws(() => contractId("kei/one/two"), /kei\/<contract-segment>/u);
+});
+
+test("identity coordinates preserve family ownership without importing another family", () => {
+  const id = identityCoordinate({ family: "task", segments: ["one", "two"] });
+  assert.equal(id, "task/one/two");
+  assert.deepEqual(identitySegments({ family: "task", value: id }), ["one", "two"]);
+  assert.throws(() => identitySegments({ family: "kei", value: id }), /identity must use kei\//u);
+  assert.throws(() => identityCoordinate({ family: "task", segments: [""] }), /nonempty segments/u);
+});
 
 test("identity normalization retains words and complete emoji graphemes", () => {
   assert.equal(

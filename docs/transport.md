@@ -52,11 +52,12 @@ defined only in [public-api.md](public-api.md).
 
 Transport derives each managed delivery-ref leaf, candidate-pin leaf, and
 worktree basename from the complete ContractId using one private physical-name
-projection. The projection preserves the normalized contract segment and adds
-the fixed `kei-` family namespace; for example, `kei/example` materializes as
-`kei-example`. These names are deterministic topology, not public identity or a
-second legality authority. Platform-specific filename concerns do not enter
-identity normalization.
+projection. It replaces the validated coordinate's structural `/` separator
+with `-`; for example, `kei/example` materializes as `kei-example`. The family
+prefix comes from the identity itself and is neither added nor reconstructed by
+transport. This stable projection does not reuse title normalization. These
+names are deterministic topology, not public identity or a second legality
+authority.
 
 ## Delivery Preparation And Placement
 

@@ -1,3 +1,5 @@
+import { identityCoordinate, identitySegments } from "../../identity/coordinates.js";
+
 declare const contractIdBrand: unique symbol;
 declare const entryUlidBrand: unique symbol;
 declare const contractHeadBrand: unique symbol;
@@ -21,8 +23,6 @@ export type DependencyKeySet = string & { readonly [dependencyKeySetBrand]: "Dep
 export type ActorId = string & { readonly [actorIdBrand]: "ActorId" };
 
 const ULID = /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
-const CONTRACT_ID = /^kei\/[^/\p{White_Space}\p{Cc}]+$/u;
-
 function requireText(value: string, label: string): string {
   if (value.length === 0 || /\s/.test(value)) throw new Error(`${label} must be nonempty and contain no whitespace`);
   return value;
@@ -35,8 +35,22 @@ function requireOpaqueId(value: string, label: string): string {
 
 export function contractId(value: string): ContractId {
   requireText(value, "contract ID");
-  if (!CONTRACT_ID.test(value)) throw new Error("contract ID must be kei/<contract-segment>");
+  let segments: readonly string[];
+  try {
+    segments = identitySegments({ family: "kei", value });
+  } catch {
+    throw new Error("contract ID must be kei/<contract-segment>");
+  }
+  if (segments.length !== 1) throw new Error("contract ID must be kei/<contract-segment>");
   return value as ContractId;
+}
+
+export function contractIdFromSegment(segment: string): ContractId {
+  return contractId(identityCoordinate({ family: "kei", segments: [segment] }));
+}
+
+export function contractSegment(value: ContractId): string {
+  return identitySegments({ family: "kei", value: contractId(value) })[0]!;
 }
 
 export function entryUlid(value: string): EntryUlid {
