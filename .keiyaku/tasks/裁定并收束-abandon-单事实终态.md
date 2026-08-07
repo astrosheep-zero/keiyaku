@@ -1,16 +1,15 @@
 ---
 id: 裁定并收束-abandon-单事实终态
 title: 删除 abandon 跨快照 finalHead
-state: in_progress
+state: done
 pri: 1
 needs:
   - attestation-subject-统一证词与-gat-da92658b
 parent: null
 from: []
 createdAt: 2026-08-06T05:42:56.344Z
-updatedAt: 2026-08-07T05:11:14.053Z
+updatedAt: 2026-08-07T05:25:48.339Z
 creator: thekoc
-startedAt: 2026-08-07T05:09:46.124Z
 ---
 依据 docs/model.md 与 docs/lifecycle.md，删除 abandonment 中没有读者的 target 快照。
 
