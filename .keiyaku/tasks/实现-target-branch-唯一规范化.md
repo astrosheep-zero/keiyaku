@@ -1,15 +1,14 @@
 ---
 id: 实现-target-branch-唯一规范化
 title: 实现-target-branch-唯一规范化
-state: in_progress
+state: open
 pri: 0
 needs: []
 parent: null
 from: []
 createdAt: 2026-08-06T22:52:04.101Z
-updatedAt: 2026-08-07T00:47:03.913Z
+updatedAt: 2026-08-07T04:49:14.739Z
 creator: thekoc
-startedAt: 2026-08-07T00:47:03.913Z
 ---
 Owner: act_362 integrated into docs/public-api.md and docs/transport.md before implementation.
 
