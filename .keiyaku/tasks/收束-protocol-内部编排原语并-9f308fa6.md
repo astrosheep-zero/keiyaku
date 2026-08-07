@@ -1,7 +1,7 @@
 ---
 id: 收束-protocol-内部编排原语并-9f308fa6
 title: 收束 protocol 内部编排原语并恢复行数预算
-state: in_progress
+state: done
 pri: 0
 needs: []
 parent: null
@@ -16,9 +16,8 @@ notes:
     timestamp: 2026-08-06T23:12:58.711Z
     text: "Small clarity cut: boundedAttempts(entryCount) hides two quantities and implements the attempt budget as [0,1,2]. Keep the settled private budget of three, but name MAX_SEMANTIC_ATTEMPTS and mintAttempts({attemptCount, entryCount}) or an equivalent unambiguous helper. No public retry knob and no new product rule."
 createdAt: 2026-08-06T16:28:55.578Z
-updatedAt: 2026-08-06T23:12:58.711Z
+updatedAt: 2026-08-07T04:48:14.353Z
 creator: thekoc
-startedAt: 2026-08-06T16:29:35.434Z
 ---
 按现行 docs/lifecycle.md、docs/verification.md、docs/public-api.md 做零产品语义变更的内部重塑：
 
