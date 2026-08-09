@@ -9,7 +9,7 @@ import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { akumaExitCode, akumaJsonValue, renderAkumaText } from "../src/cli/render/akuma.js";
+import { akumaExitCode, akumaJsonValue, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 
 test("akuma CLI parses the public verbs without inventing aliases", () => {
   assert.deepEqual(parseArgv(["-C", "/world", "akuma", "call", "--persona", "claude", "--cwd", "/work", "-"]), {
@@ -43,6 +43,30 @@ test("akuma CLI parses the public verbs without inventing aliases", () => {
   assert.throws(() => parseArgv(["akuma", "kill", "aku\/claude\/1234abcd", "-"]), /stdin marker .* not valid/);
   assert.throws(() => parseArgv(["akuma", "fork", "aku\/claude\/1234abcd"]), /requires --at/);
   assert.throws(() => parseArgv(["akuma", "fork", "aku\/claude\/1234abcd", "--at", ""]), /requires --at/);
+});
+
+test("akuma follow renders the closed event union as text and JSON lines", () => {
+  const command = parseArgv(["akuma", "follow", "aku/claude/1234abcd"]).command;
+  if (command.command !== "akuma") return;
+  const result = {
+    kind: "akuma" as const,
+    action: "follow" as const,
+    id: "aku/claude/1234abcd",
+    events: [
+      { type: "session" as const, coordinate: { sessionId: "native-1" } },
+      { type: "assistant" as const, text: "completed answer" },
+      { type: "action" as const, note: "Command npm test" },
+      { type: "unknown" as const, kind: "future/event" },
+    ],
+  };
+  assert.equal(renderAkumaText(command, result), [
+    "session: native-1",
+    "completed answer",
+    "action: Command npm test",
+    "unknown: future/event",
+  ].join("\n"));
+  assert.equal(renderAkumaJson(result), result.events.map((event) => JSON.stringify(event)).join("\n"));
+  assert.equal(renderAkumaJson(result).startsWith("["), false);
 });
 
 test("akuma fork renders the public receipt and maps every exit class", () => {

@@ -7,7 +7,7 @@ import {
 } from "./parse.js";
 import { renderText } from "./render/text.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "./render/task.js";
-import { akumaExitCode, akumaJsonValue, renderAkumaText } from "./render/akuma.js";
+import { akumaExitCode, renderAkumaJson, renderAkumaText } from "./render/akuma.js";
 import { renderAkumaHelp, type ParsedAkumaCommand } from "./commands/akuma.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import { renderTaskHelp, type ParsedTaskCommand } from "./commands/task.js";
@@ -25,7 +25,7 @@ function writeTask(command: ParsedTaskCommand, result: TaskInvocationResult): nu
 }
 
 function writeAkuma(command: ParsedAkumaCommand, result: AkumaInvocationResult): number {
-  process.stdout.write(`${command.output === "json" ? JSON.stringify(akumaJsonValue(result)) : renderAkumaText(command, result)}\n`);
+  process.stdout.write(`${command.output === "json" ? renderAkumaJson(result) : renderAkumaText(command, result)}\n`);
   return akumaExitCode(result);
 }
 

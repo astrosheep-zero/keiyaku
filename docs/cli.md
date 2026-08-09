@@ -148,8 +148,10 @@ prints the exact path searched. `--cwd` selects the immutable summon seat and
 is resolved to an absolute path at the public boundary. `status`, `follow`,
 `wait`, `tell`, `interrupt`, and `kill` require a complete
 `aku/<persona>/<hex8>`; `list` accepts none. Library `world.of()` constructs the
-addressed handle and has no CLI command of its own. `follow` renders each
-collected public `AgentEvent` in order and JSON returns the same event array.
+addressed handle and has no CLI command of its own. `follow` renders assistant
+text verbatim and each other collected public `AgentEvent` as one
+`type: payload` line. JSON writes the closed-union event objects in order, one
+object per line. Collection before printing remains the current CLI behavior.
 CLI `wait` uses the public default predicate (`life !== "running"`); predicate
 functions are library-only input. `fork` requires one nonblank `--at` history
 id and has no stdin body.

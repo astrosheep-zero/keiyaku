@@ -3,6 +3,7 @@ import type { ParsedAkumaCommand } from "../commands/akuma.js";
 type Status = Extract<AkumaInvocationResult, { action: "status" }>["status"];
 type Confinement = Status["confinement"];
 type Turn = Status["history"][number];
+type AgentEvent = Extract<AkumaInvocationResult, { action: "follow" }>["events"][number];
 
 function summary(input: Readonly<{
   id: string;
@@ -36,6 +37,15 @@ function status(input: Status): string {
   return [summary(input), `history ${input.history.length}`, ...input.history.map(turn)].join("\n");
 }
 
+function event(event: AgentEvent): string {
+  switch (event.type) {
+    case "assistant": return event.text;
+    case "session": return `session: ${event.coordinate.sessionId}`;
+    case "action": return `action: ${event.note}`;
+    case "unknown": return `unknown: ${event.kind}`;
+  }
+}
+
 export function renderAkumaText(_command: ParsedAkumaCommand, result: AkumaInvocationResult): string {
   switch (result.action) {
     case "call": return result.id;
@@ -43,7 +53,7 @@ export function renderAkumaText(_command: ParsedAkumaCommand, result: AkumaInvoc
       ? ["akuma 0", ...result.report.searched.map((path) => `searched ${path}`)].join("\n")
       : result.report.rows.map((row) => summary(row)).join("\n");
     case "status": return status(result.status);
-    case "follow": return result.events.map((event) => JSON.stringify(event)).join("\n");
+    case "follow": return result.events.map(event).join("\n");
     case "wait": return status(result.status);
     case "tell": return typeof result.receipt.wake === "string"
       ? `${result.akuma} tell ${result.receipt.id} recorded`
@@ -85,4 +95,10 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
 
 export function akumaJsonValue(result: AkumaInvocationResult): unknown {
   return result.action === "fork" ? result.receipt : result;
+}
+
+export function renderAkumaJson(result: AkumaInvocationResult): string {
+  return result.action === "follow"
+    ? result.events.map((event) => JSON.stringify(event)).join("\n")
+    : JSON.stringify(akumaJsonValue(result));
 }
