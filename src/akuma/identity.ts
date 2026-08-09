@@ -1,0 +1,118 @@
+import { randomBytes } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { identityCoordinate, identitySegments } from "../identity/coordinates.js";
+import { normalizeIdentityStem } from "../identity/normalize.js";
+import type { AkuId } from "./heart/facts.js";
+
+export type { AkuId };
+
+const HEX8 = /^[0-9a-f]{8}$/u;
+
+export type AkumaPaths = Readonly<{
+  directory: string;
+  heart: string;
+  leash: string;
+  log: string;
+}>;
+
+export type AllocatedAkuma = Readonly<{
+  id: AkuId;
+  persona: string;
+  suffix: string;
+  paths: AkumaPaths;
+}>;
+
+export function personaName(value: string): string {
+  if (value.length === 0 || normalizeIdentityStem({ source: value }) !== value) {
+    throw new TypeError("Akuma persona must be one normalized human identity segment");
+  }
+  return value;
+}
+
+function suffixSegment(value: string): string {
+  if (!HEX8.test(value)) throw new TypeError("Akuma suffix must be lower hex8");
+  return value;
+}
+
+export function akuId(input: Readonly<{ persona: string; suffix: string }>): AkuId {
+  return identityCoordinate({
+    family: "aku",
+    segments: [personaName(input.persona), suffixSegment(input.suffix)],
+  }) as AkuId;
+}
+
+export function parseAkuId(value: string): Readonly<{ id: AkuId; persona: string; suffix: string }> {
+  const segments = identitySegments({ family: "aku", value });
+  if (segments.length !== 2) throw new TypeError("Akuma identity must be aku/<persona>/<hex8>");
+  const persona = personaName(segments[0]!);
+  const suffix = suffixSegment(segments[1]!);
+  return { id: akuId({ persona, suffix }), persona, suffix };
+}
+
+export function akumaRunRoot(worldRoot: string): string {
+  return join(worldRoot, ".keiyaku", "akuma", "run");
+}
+
+export function akumaPaths(input: Readonly<{
+  runRoot: string;
+  persona: string;
+  suffix: string;
+}>): AkumaPaths {
+  const directory = join(input.runRoot, `${personaName(input.persona)}-${suffixSegment(input.suffix)}`);
+  return {
+    directory,
+    heart: join(directory, "heart.db"),
+    leash: join(directory, "leash.db"),
+    log: join(directory, "stdio.log"),
+  };
+}
+
+export function akuIdFromDirectoryName(name: string): Readonly<{ id: AkuId; persona: string; suffix: string }> {
+  if (name.length < 10 || name.at(-9) !== "-") throw new Error(`invalid Akuma run directory ${name}`);
+  const persona = name.slice(0, -9);
+  const suffix = name.slice(-8);
+  return { id: akuId({ persona, suffix }), persona, suffix };
+}
+
+export function ensureAkumaRunRoot(worldRoot: string): string {
+  const runRoot = akumaRunRoot(worldRoot);
+  mkdirSync(runRoot, { recursive: true });
+  try {
+    writeFileSync(join(runRoot, ".gitignore"), "*\n", { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  return runRoot;
+}
+
+export function allocateAkumaDirectory(input: Readonly<{
+  worldRoot: string;
+  persona: string;
+  draw?: () => string;
+}>): AllocatedAkuma {
+  const persona = personaName(input.persona);
+  const runRoot = ensureAkumaRunRoot(input.worldRoot);
+  for (;;) {
+    const suffix = suffixSegment(input.draw?.() ?? randomBytes(4).toString("hex"));
+    const paths = akumaPaths({ runRoot, persona, suffix });
+    try {
+      mkdirSync(paths.directory);
+      return { id: akuId({ persona, suffix }), persona, suffix, paths };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+}
+
+export function pathsForAkuId(worldRoot: string, id: AkuId): AkumaPaths {
+  const parsed = parseAkuId(id);
+  return akumaPaths({ runRoot: akumaRunRoot(worldRoot), persona: parsed.persona, suffix: parsed.suffix });
+}
+
+export function worldRootForAkumaPaths(paths: AkumaPaths): string {
+  const runRoot = dirname(paths.directory);
+  const worldRoot = dirname(dirname(dirname(runRoot)));
+  if (akumaRunRoot(worldRoot) !== runRoot) throw new Error("Akuma paths are outside the run topology");
+  return worldRoot;
+}

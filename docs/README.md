@@ -17,6 +17,7 @@ operating guidance; none can introduce product law.
 | [transport.md](transport.md) | Git world, worktrees, refs, pins, delivery-byte custody, and reconciliation. |
 | [cli.md](cli.md) | `keiyaku-v4` argv, edge adaptation, selectors, rendering, exit codes, status board, and audit presentation. |
 | [task.md](task.md) | Separate in-package task product: document authority, identity, lifecycle, associations, concurrency, and persistence. |
+| [akuma.md](akuma.md) | Separate Akuma product: identity, heart facts, life, detached bodies, providers, lifecycle verbs, and persistence. |
 
 ## Hard-Cut Discipline
 

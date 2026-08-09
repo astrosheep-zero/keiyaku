@@ -466,3 +466,10 @@ Their association, persistence, failure policy, and mutations are their own
 authority; the contract library has no task coordinate or settlement effect.
 The separate task subpath shipped in this package neither imports package-root
 values nor observes, validates, writes, or folds Contract facts.
+
+## Akuma Subpath
+
+`./akuma` is a separate product subpath and imports no Contract or Carrier
+domain. Its identity, construction, exported values, handle capabilities, and
+result behavior are owned only by [akuma.md](akuma.md); this package-root
+chapter does not duplicate that law.

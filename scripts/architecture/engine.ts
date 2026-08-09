@@ -26,7 +26,13 @@ export type DependencyZone = Readonly<{
 
 export type SensitiveImportRule = Readonly<{
   module: string;
-  owners: readonly Readonly<{ source: string; symbols: readonly string[] }>[];
+  owners: readonly Readonly<{ source: string; symbols: readonly string[]; mode?: DependencyMode }>[];
+}>;
+
+export type ForbiddenSourcePattern = Readonly<{
+  source: string;
+  pattern: RegExp;
+  detail: string;
 }>;
 
 export type CapabilityRule = Readonly<{
@@ -37,6 +43,7 @@ export type CapabilityRule = Readonly<{
 export type ArchitecturePolicy = Readonly<{
   zones: readonly DependencyZone[];
   sensitiveImports: readonly SensitiveImportRule[];
+  forbiddenSourcePatterns: readonly ForbiddenSourcePattern[];
   forbiddenModules: readonly string[];
   capabilityRules: readonly CapabilityRule[];
   forbiddenFileNames: readonly string[];
@@ -386,7 +393,9 @@ function referenceDiagnostics(
   const symbols = importedSymbols(reference);
   const allowed = sensitive.owners.some((owner) => {
     const permitted = new Set(owner.symbols);
-    return matches(owner.source, unit.path) && symbols.every((symbol) => permitted.has(symbol));
+    return matches(owner.source, unit.path)
+      && (owner.mode !== "type-only" || reference.symbols.runtime.length === 0)
+      && symbols.every((symbol) => permitted.has(symbol));
   });
   if (!allowed) diagnostics.push({
     rule: "architecture/capability-import",
@@ -480,6 +489,19 @@ function structureDiagnostics(units: readonly ParsedSource[], policy: Architectu
         column: declaration.column,
         detail: `removed declaration ${declaration.name}`,
       });
+    }
+    for (const rule of policy.forbiddenSourcePatterns.filter((candidate) => matches(candidate.source, unit.path))) {
+      const flags = rule.pattern.flags.includes("g") ? rule.pattern.flags : `${rule.pattern.flags}g`;
+      for (const match of unit.sourceFile.text.matchAll(new RegExp(rule.pattern.source, flags))) {
+        const at = unit.sourceFile.getLineAndCharacterOfPosition(match.index);
+        diagnostics.push({
+          rule: "architecture/forbidden-source-pattern",
+          file: unit.path,
+          line: at.line + 1,
+          column: at.character + 1,
+          detail: rule.detail,
+        });
+      }
     }
     const verbOwner = verbOwnerDiagnostic(unit, policy);
     if (verbOwner) diagnostics.push(verbOwner);

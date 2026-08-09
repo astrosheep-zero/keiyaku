@@ -51,7 +51,7 @@ Public identities use this closed registry:
 
 | Prefix | Grammar |
 | --- | --- |
-| `aku/` | `aku/<human-profile>` or `aku/<human-profile>/<lower-hex8>` |
+| `aku/` | `aku/<human-persona>/<lower-hex8>` |
 | `kei/` | `kei/<contract-segment>` |
 | `task/` | `task/<human-local-id>` or `task/<human-ns...>/<human-local-id>` |
 | `resp/` | `resp/<machine-artifact>` |
@@ -205,7 +205,7 @@ raw producer logs, reports, patches, artifacts, or blob evidence.
 Its `at` values are the contract timeline. Counts and elapsed intervals are
 read-time projections; no telemetry file, persisted counter, duration field,
 or additional fact kind is needed for a value derivable from journal facts, Git,
-or the Akuma pillar's own records.
+or the Akuma pillar's own records defined by [akuma.md](akuma.md).
 
 ## Folded State
 
