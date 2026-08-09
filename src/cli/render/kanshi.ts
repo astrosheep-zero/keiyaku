@@ -83,12 +83,15 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): string {
   }
   for (const row of section.value.rows) {
     const pending = "pending" in row && row.pending.length > 0 ? [`pending ${row.pending.length}`] : [];
+    const contract = "contract" in row && row.contract !== undefined
+      ? [`keiyaku ${row.contract.id} (${row.contract.observed})`]
+      : [];
     const confinement = "confinement" in row
       ? row.confinement.kind === "unconfined"
         ? ["unconfined"]
         : [`writes ${row.confinement.writableRoots.join(" ")}`]
       : [];
-    lines.push(...renderFacts(`${akumaMark(row.life)} ${safeText(row.id)}`, [row.life, ...confinement, ...pending], context.columns));
+    lines.push(...renderFacts(`${akumaMark(row.life)} ${safeText(row.id)}`, [row.life, ...contract, ...confinement, ...pending], context.columns));
   }
   return lines.join("\n");
 }

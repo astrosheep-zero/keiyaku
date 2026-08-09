@@ -19,108 +19,6 @@ import type {
   TurnFact,
 } from "./facts.js";
 
-const HEART_SCHEMA_VERSION = 2;
-
-export const HEART_SCHEMA = `
-  CREATE TABLE IF NOT EXISTS akuma_schema (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    version INTEGER NOT NULL CHECK (version = ${HEART_SCHEMA_VERSION})
-  ) STRICT;
-  INSERT OR IGNORE INTO akuma_schema(singleton, version) VALUES (1, ${HEART_SCHEMA_VERSION});
-  CREATE TABLE IF NOT EXISTS soul (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    id TEXT NOT NULL UNIQUE,
-    persona TEXT NOT NULL,
-    description TEXT,
-    provider TEXT NOT NULL,
-    options_json TEXT NOT NULL CHECK (json_valid(options_json)),
-    cwd TEXT NOT NULL,
-    origin_json TEXT NOT NULL CHECK (json_valid(origin_json)),
-    confinement_json TEXT NOT NULL CHECK (json_valid(confinement_json)),
-    created_at TEXT NOT NULL
-  ) STRICT;
-  CREATE TABLE IF NOT EXISTS bodies (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    pid INTEGER NOT NULL CHECK (pid > 0),
-    process_group INTEGER NOT NULL CHECK (process_group > 0),
-    spawned_at TEXT NOT NULL,
-    leash_taken_at TEXT NOT NULL,
-    end TEXT CHECK (end IN ('exited', 'broke-off', 'put-down')),
-    ended_at TEXT
-  ) STRICT;
-  CREATE TABLE IF NOT EXISTS sessions (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    provider TEXT NOT NULL,
-    coordinate_json TEXT NOT NULL CHECK (json_valid(coordinate_json)),
-    cwd TEXT NOT NULL,
-    options_json TEXT NOT NULL CHECK (json_valid(options_json)),
-    admitted_at TEXT NOT NULL
-  ) STRICT;
-  CREATE TABLE IF NOT EXISTS turns (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
-    outcome TEXT NOT NULL CHECK (outcome IN ('answered', 'failed')),
-    history_id TEXT UNIQUE,
-    session_json TEXT CHECK (session_json IS NULL OR json_valid(session_json)),
-    answer TEXT,
-    diagnostic TEXT,
-    completed_at TEXT NOT NULL,
-    CHECK (
-      (outcome = 'answered' AND history_id IS NOT NULL AND session_json IS NOT NULL AND answer IS NOT NULL AND diagnostic IS NULL)
-      OR (outcome = 'failed' AND history_id IS NULL AND session_json IS NULL AND answer IS NULL AND diagnostic IS NOT NULL)
-    )
-  ) STRICT;
-  CREATE TABLE IF NOT EXISTS activity (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_json TEXT NOT NULL CHECK (json_valid(event_json)),
-    at TEXT NOT NULL
-  ) STRICT;
-  CREATE TABLE IF NOT EXISTS tells (
-    id TEXT PRIMARY KEY,
-    body TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('recorded', 'delivered', 'seen', 'consumed', 'voided-by-death')),
-    recorded_at TEXT NOT NULL
-  ) STRICT;
-  CREATE TABLE IF NOT EXISTS requests (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    id TEXT NOT NULL UNIQUE,
-    persona TEXT NOT NULL,
-    body TEXT NOT NULL,
-    cwd TEXT,
-    world TEXT NOT NULL,
-    admitted_at TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('admitted', 'reserved', 'served', 'refused', 'voided')),
-    child TEXT,
-    diagnostic TEXT,
-    evidence TEXT,
-    CHECK (
-      (state = 'admitted' AND child IS NULL AND diagnostic IS NULL AND evidence IS NULL)
-      OR (state IN ('reserved', 'served') AND child IS NOT NULL AND diagnostic IS NULL AND evidence IS NULL)
-      OR (state = 'refused' AND child IS NULL AND diagnostic IS NOT NULL AND evidence IS NULL)
-      OR (state = 'voided' AND child IS NULL AND diagnostic IS NULL AND evidence IS NOT NULL)
-    )
-  ) STRICT;
-  CREATE TABLE IF NOT EXISTS control (
-    kind TEXT PRIMARY KEY CHECK (kind IN ('stop', 'pause', 'death')),
-    value_json TEXT NOT NULL CHECK (json_valid(value_json)),
-    at TEXT NOT NULL
-  ) STRICT;
-`;
-
-export const LEASH_SCHEMA = `
-  PRAGMA journal_mode=DELETE;
-  CREATE TABLE IF NOT EXISTS leash_schema (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    version INTEGER NOT NULL CHECK (version = ${HEART_SCHEMA_VERSION})
-  ) STRICT;
-  INSERT OR IGNORE INTO leash_schema(singleton, version) VALUES (1, ${HEART_SCHEMA_VERSION});
-  CREATE TABLE IF NOT EXISTS seal (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    evidence TEXT NOT NULL,
-    at TEXT NOT NULL
-  ) STRICT;
-`;
-
 export type SoulRow = Readonly<{
   id: string;
   persona: string;
@@ -130,6 +28,7 @@ export type SoulRow = Readonly<{
   cwd: string;
   origin_json: string;
   confinement_json: string;
+  contract: string | null;
   created_at: string;
 }>;
 
@@ -178,6 +77,7 @@ export type RequestRow = Readonly<{
   persona: string;
   body: string;
   cwd: string | null;
+  contract: string | null;
   world: string;
   admitted_at: string;
   state: RequestFact["state"];
@@ -207,6 +107,7 @@ export function encodeSoulRow(soul: Soul): readonly [
   string,
   string,
   string,
+  string | null,
   string,
 ] {
   return [
@@ -218,6 +119,7 @@ export function encodeSoulRow(soul: Soul): readonly [
     soul.cwd,
     json(soul.origin),
     json(soul.confinement),
+    soul.contract ?? null,
     soul.createdAt,
   ];
 }
@@ -232,6 +134,7 @@ export function decodeSoulRow(row: SoulRow): Soul {
     cwd: row.cwd,
     origin: parsed<AkumaOrigin>(row.origin_json),
     confinement: parsed<Confinement>(row.confinement_json),
+    ...(row.contract === null ? {} : { contract: row.contract }),
     createdAt: row.created_at,
   };
 }
@@ -291,6 +194,7 @@ export function decodeRequestRow(row: RequestRow): RequestFact {
     persona: row.persona,
     body: row.body,
     ...(row.cwd === null ? {} : { cwd: row.cwd }),
+    ...(row.contract === null ? {} : { contract: row.contract }),
     world: row.world,
     admittedAt: row.admitted_at,
   };
@@ -320,7 +224,7 @@ export function decodeDeathRow(row: DeathRow): DeathFact {
 
 export function soulFact(database: DatabaseSync): Soul | null {
   const row = database.prepare(`SELECT id, persona, description, provider, options_json, cwd,
-    origin_json, confinement_json, created_at FROM soul WHERE singleton = 1`).get() as SoulRow | undefined;
+    origin_json, confinement_json, contract, created_at FROM soul WHERE singleton = 1`).get() as SoulRow | undefined;
   return row === undefined ? null : decodeSoulRow(row);
 }
 
@@ -329,8 +233,8 @@ export function sealExists(database: DatabaseSync): boolean {
 }
 
 export function insertSoulFact(database: DatabaseSync, soul: Soul): void {
-  database.prepare(`INSERT INTO soul(singleton, id, persona, description, provider, options_json, cwd, origin_json, confinement_json, created_at)
-    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...encodeSoulRow(soul));
+  database.prepare(`INSERT INTO soul(singleton, id, persona, description, provider, options_json, cwd, origin_json, confinement_json, contract, created_at)
+    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...encodeSoulRow(soul));
 }
 
 export function insertSealFact(database: DatabaseSync, input: Readonly<{ evidence: string; at: string }>): void {
@@ -400,19 +304,20 @@ export function updateTellState(database: DatabaseSync, id: string, state: TellS
   database.prepare("UPDATE tells SET state = ? WHERE id = ?").run(state, id);
 }
 
-const REQUEST_COLUMNS = `sequence, id, persona, body, cwd, world, admitted_at,
+const REQUEST_COLUMNS = `sequence, id, persona, body, cwd, contract, world, admitted_at,
   state, child, diagnostic, evidence`;
 
 export function insertRequestFact(
   database: DatabaseSync,
   input: RequestInput & Readonly<{ admittedAt: string }>,
 ): void {
-  database.prepare(`INSERT OR IGNORE INTO requests(id, persona, body, cwd, world, admitted_at, state)
-    VALUES (?, ?, ?, ?, ?, ?, 'admitted')`).run(
+  database.prepare(`INSERT OR IGNORE INTO requests(id, persona, body, cwd, contract, world, admitted_at, state)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'admitted')`).run(
     input.id,
     input.persona,
     input.body,
     input.cwd ?? null,
+    input.contract ?? null,
     input.world,
     input.admittedAt,
   );

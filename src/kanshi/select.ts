@@ -15,5 +15,14 @@ export function selectKanshi(input: Readonly<{
     tasks: report.tasks.kind === "present"
       ? { kind: "present", value: { ...report.tasks.value, rows: report.tasks.value.rows.filter((row) => row.contract?.id === contract) } }
       : report.tasks,
+    akuma: report.akuma.kind === "present"
+      ? {
+          kind: "present",
+          value: {
+            ...report.akuma.value,
+            rows: report.akuma.value.rows.filter((row) => "contract" in row && row.contract?.id === contract),
+          },
+        }
+      : report.akuma,
   };
 }

@@ -6,6 +6,8 @@ import test from "node:test";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
+import { HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
+import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { kanshi, selectKanshi } from "../src/kanshi/index.js";
 import { Tasks } from "../src/task/index.js";
@@ -17,6 +19,25 @@ function document(): string {
     "## Design", "project public values", "", "## Region", "```", "src/**", "```", "",
     "## Criteria", "### Visible", "The status row is visible.", "",
   ].join("\n");
+}
+
+function bornAkuma(root: string, suffix: string, contract?: string): string {
+  const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "watcher", draw: () => suffix });
+  initializeHeart(allocated.paths);
+  const leash = HeldAkumaLeash.try(allocated.paths)!;
+  leash.birth(allocated.paths, {
+    id: allocated.id,
+    persona: "watcher",
+    provider: "claude",
+    options: {},
+    cwd: root,
+    origin: { kind: "direct" },
+    confinement: { kind: "unconfined" },
+    ...(contract === undefined ? {} : { contract }),
+    createdAt: "2026-08-09T00:00:00.000Z",
+  });
+  leash.release();
+  return allocated.id;
 }
 
 async function populatedWorld() {
@@ -33,16 +54,20 @@ async function populatedWorld() {
   assert.equal(added.kind, "accepted");
   if (added.kind !== "accepted") throw new Error("task add failed");
   await tasks.task({ id: added.value.id }).start();
-  return { repository, contract, taskId: added.value.id };
+  const akumaId = bornAkuma(repository.path, "a0000001", contract.id);
+  return { repository, contract, taskId: added.value.id, akumaId };
 }
 
 test("kanshi joins Contract, Task, and Akuma public rows", async () => {
-  const { repository, contract, taskId } = await populatedWorld();
+  const { repository, contract, taskId, akumaId } = await populatedWorld();
   const report = await kanshi({ path: repository.path });
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.tasks.kind, "present");
   assert.equal(report.akuma.kind, "present");
-  if (report.akuma.kind === "present") assert.deepEqual(report.akuma.value.rows, []);
+  if (report.akuma.kind === "present") assert.deepEqual(
+    report.akuma.value.rows.find((row) => row.id === akumaId)?.contract,
+    { id: contract.id, observed: "active" },
+  );
   if (report.contracts.kind !== "present" || report.tasks.kind !== "present") return;
   assert.equal(report.contracts.value.rows.some((row) => row.id === contract.id), true);
   assert.deepEqual(report.tasks.value.rows.find((row) => row.id === taskId)?.contract, {
@@ -53,11 +78,28 @@ test("kanshi joins Contract, Task, and Akuma public rows", async () => {
 
 test("kanshi keeps absent Contract and Task worlds explicit", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-no-git-"));
+  const akumaId = bornAkuma(root, "a0000002", "kei/outside");
   const report = await kanshi({ path: root });
   assert.deepEqual(report.contracts, { kind: "absent" });
   assert.equal(report.tasks.kind, "present");
   assert.equal(report.akuma.kind, "present");
   if (report.tasks.kind === "present") assert.deepEqual(report.tasks.value.rows, []);
+  if (report.akuma.kind === "present") assert.deepEqual(
+    report.akuma.value.rows.find((row) => row.id === akumaId)?.contract,
+    { id: "kei/outside", observed: "unavailable" },
+  );
+});
+
+test("an Akuma association is missing only when a present Contract board lacks it", async () => {
+  const { repository } = await populatedWorld();
+  const akumaId = bornAkuma(repository.path, "a0000003", "kei/missing");
+  const report = await kanshi({ path: repository.path });
+  assert.equal(report.akuma.kind, "present");
+  if (report.akuma.kind !== "present") return;
+  assert.deepEqual(report.akuma.value.rows.find((row) => row.id === akumaId)?.contract, {
+    id: "kei/missing",
+    observed: "missing",
+  });
 });
 
 test("a Task association is unavailable when the Contract world is absent", async () => {
@@ -95,19 +137,22 @@ test("Kanshi text retains the v3 ruler, marks, dense facts, and complete identit
   assert.match(text, /● P0 .*task\/render-status/u);
   assert.match(text, /in progress/u);
   assert.match(text, /keiyaku kei\/.*\(active\)/u);
-  assert.match(text, /akuma 0/u);
-  assert.match(text, /searched .*\.keiyaku\/akuma\/run/u);
+  assert.match(text, /akuma 1/u);
+  assert.match(text, /aku\/watcher\/a0000001/u);
+  assert.match(text, /keiyaku kei\/kanshi-contract \(active\)/u);
 });
 
 test("Kanshi selection is a projection that preserves source presence", async () => {
-  const { repository, contract, taskId } = await populatedWorld();
+  const { repository, contract, taskId, akumaId } = await populatedWorld();
   const report = await kanshi({ path: repository.path });
   const selected = selectKanshi({ report, contract: contract.id });
   assert.equal(selected.contracts.kind, "present");
   assert.equal(selected.tasks.kind, "present");
-  if (selected.contracts.kind !== "present" || selected.tasks.kind !== "present") return;
+  assert.equal(selected.akuma.kind, "present");
+  if (selected.contracts.kind !== "present" || selected.tasks.kind !== "present" || selected.akuma.kind !== "present") return;
   assert.deepEqual(selected.contracts.value.rows.map((row) => row.id), [contract.id]);
   assert.deepEqual(selected.tasks.value.rows.map((row) => row.id), [taskId]);
+  assert.deepEqual(selected.akuma.value.rows.map((row) => row.id), [akumaId]);
 });
 
 test("Kanshi text neutralizes control characters from source diagnostics", () => {

@@ -25,6 +25,7 @@ import {
 } from "./heart/index.js";
 import {
   parseAkuId,
+  contractId,
   pathsForAkuId,
   personaName,
   worldRootForAkumaPaths,
@@ -44,6 +45,7 @@ type RequestClaim = Readonly<{
   persona: string;
   body: string;
   cwd?: string;
+  contract?: string;
 }>;
 
 type RequestReceipt =
@@ -96,20 +98,29 @@ function decodeClaim(bytes: string, fileId: string): RequestClaim | null {
   try { decoded = JSON.parse(bytes); } catch { return null; }
   const value = object(decoded);
   if (value === null) return null;
-  const expected = value.cwd === undefined
-    ? ["body", "id", "persona", "world"]
-    : ["body", "cwd", "id", "persona", "world"];
+  const expected = [
+    "body",
+    ...(value.contract === undefined ? [] : ["contract"]),
+    ...(value.cwd === undefined ? [] : ["cwd"]),
+    "id",
+    "persona",
+    "world",
+  ];
   if (!exactKeys(value, expected)) return null;
   if (value.id !== fileId || typeof value.id !== "string" || !UUID.test(value.id)) return null;
   if (typeof value.body !== "string" || !absolute(value.world)) return null;
   if (value.cwd !== undefined && !absolute(value.cwd)) return null;
-  try { personaName(value.persona as string); } catch { return null; }
+  try {
+    personaName(value.persona as string);
+    if (value.contract !== undefined) contractId(value.contract as string);
+  } catch { return null; }
   return {
     id: value.id,
     world: value.world,
     persona: value.persona as string,
     body: value.body,
     ...(value.cwd === undefined ? {} : { cwd: value.cwd }),
+    ...(value.contract === undefined ? {} : { contract: value.contract as string }),
   };
 }
 
@@ -167,6 +178,7 @@ export async function requestBodyCall(input: RequestClaim & Readonly<{ directory
     persona: input.persona,
     body: input.body,
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    ...(input.contract === undefined ? {} : { contract: input.contract }),
   });
   const receiptPath = join(input.directory, `${input.id}.receipt.json`);
   for (;;) {
@@ -227,6 +239,7 @@ async function serveClaim(input: Readonly<{
           cwd,
           origin: { kind: "request", parentId: input.parent.id, requestId: request.id },
           confinement: persona.adapter.confinement({ cwd, options: persona.options }),
+          ...(request.contract === undefined ? {} : { contract: request.contract }),
         },
         initialBody: request.body,
       }),

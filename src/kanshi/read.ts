@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { Keiyaku, NoGitWorldError, Repo, type ContractBoard, type ContractDisposition } from "../index.js";
 import { Tasks, type TaskRow } from "../task/index.js";
 import { Akuma, type AkumaList } from "../akuma/index.js";
-import type { KanshiReport, Section, TaskKanshiRow, TaskKanshiWorld } from "./report.js";
+import type { AkumaKanshiRow, AkumaKanshiWorld, KanshiReport, Section, TaskKanshiRow, TaskKanshiWorld } from "./report.js";
 
 export type KanshiInput = Readonly<{ path?: string }>;
 
@@ -49,6 +49,21 @@ function joinTasks(rows: readonly TaskRow[], contracts: Section<ContractBoard>):
   });
 }
 
+function joinAkuma(rows: AkumaList["rows"], contracts: Section<ContractBoard>): readonly AkumaKanshiRow[] {
+  const dispositions = contracts.kind === "present"
+    ? new Map<string, ContractDisposition>(contracts.value.rows.map((row) => [row.id, row.disposition]))
+    : null;
+  return rows.map((row) => {
+    if (!("persona" in row)) return row;
+    const { contract, ...source } = row;
+    if (contract === undefined) return source;
+    const observed = contracts.kind !== "present"
+      ? "unavailable"
+      : dispositions?.get(contract) ?? "missing";
+    return { ...source, contract: { id: contract, observed } };
+  });
+}
+
 async function readTasks(path: string, contracts: Section<ContractBoard>): Promise<Section<TaskKanshiWorld>> {
   try {
     const tasks = Tasks.at({ path });
@@ -63,9 +78,10 @@ async function readTasks(path: string, contracts: Section<ContractBoard>): Promi
   }
 }
 
-function readAkuma(path: string): Section<AkumaList> {
+function readAkuma(path: string, contracts: Section<ContractBoard>): Section<AkumaKanshiWorld> {
   try {
-    return { kind: "present", value: Akuma.at({ path }).list() };
+    const source = Akuma.at({ path }).list();
+    return { kind: "present", value: { ...source, rows: joinAkuma(source.rows, contracts) } };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
   }
@@ -75,5 +91,5 @@ export async function kanshi(input?: KanshiInput): Promise<KanshiReport> {
   const path = resolve(coordinate(input));
   const contracts = await readContracts(path);
   const tasks = await readTasks(path, contracts);
-  return { root: path, contracts, tasks, akuma: readAkuma(path) };
+  return { root: path, contracts, tasks, akuma: readAkuma(path, contracts) };
 }

@@ -28,7 +28,12 @@ export async function invokeAkuma(
   const world = Akuma.at({ path: input.path });
   switch (command.action) {
     case "call": {
-      const handle = await world.call({ persona: command.persona, body: input.readStdin(), ...(command.cwd === undefined ? {} : { cwd: command.cwd }) });
+      const handle = await world.call({
+        persona: command.persona,
+        body: input.readStdin(),
+        ...(command.cwd === undefined ? {} : { cwd: command.cwd }),
+        ...(command.contract === undefined ? {} : { contract: command.contract }),
+      });
       return { kind: "akuma", action: "call", id: handle.id };
     }
     case "list": return { kind: "akuma", action: "list", report: world.list() };

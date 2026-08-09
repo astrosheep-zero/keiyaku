@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import {
@@ -45,6 +46,7 @@ function fixture() {
     cwd: root,
     origin: { kind: "direct" },
     confinement: { kind: "unconfined" },
+    contract: "kei/fixture",
     createdAt: "2026-08-08T00:00:00.000Z",
   };
   return { root, allocated, soul, close: () => rmSync(root, { recursive: true, force: true }) };
@@ -118,6 +120,7 @@ test("Body Request facts have one idempotent monotonic authority", () => {
       id: "00000000-0000-4000-8000-000000000001",
       persona: "claude",
       body: "build",
+      contract: "kei/fixture",
       world: value.root,
       admittedAt: "2026-08-08T00:00:01.000Z",
     };
@@ -169,6 +172,21 @@ test("Body Request facts have one idempotent monotonic authority", () => {
     });
     assert.deepEqual(readNonterminalRequests(value.allocated.paths), []);
   } finally { value.close(); }
+});
+
+test("schema version 3 hard-refuses old heart and leash authority", () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
+  const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "30000000" });
+  try {
+    const heart = new DatabaseSync(allocated.paths.heart);
+    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 2)");
+    heart.close();
+    const leash = new DatabaseSync(allocated.paths.leash);
+    leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
+    leash.close();
+    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 3/u);
+    assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 3/u);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("pause is death-fenced and remains distinct from terminal stop", () => {

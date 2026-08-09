@@ -22,8 +22,10 @@ and go; the heart stays.
   heart. Raw statements are row mechanics; they do not speak in the judge's
   transaction language.
 - **soul** — the immutable birth facts: id, persona, description, provider
-  options, summon cwd, origin, confinement. The cwd is the akuma's seat, not a
-  native resume coordinate; resumability remains a session fact.
+  options, summon cwd, origin, confinement, and optional Contract association.
+  The association is opaque `kei/...` identity bytes meaning "summoned for";
+  it carries no Contract lifecycle or carrier behavior. The cwd is the akuma's
+  seat, not a native resume coordinate; resumability remains a session fact.
 - **body** — the detached, unsandboxed process currently driving the akuma.
   At most one body at a time; most of the time, none.
 - **leash** — an exclusive transaction in `leash.db`. Whoever holds it is the
@@ -177,6 +179,9 @@ are refused because this cut has no second honest policy mapping for them. Its
 resumable coordinate is the native thread id; its answered history id is the
 completed native turn id, and native fork is `thread/fork` at that exact pair.
 No settings file, executable option, provider instance, or registry participates.
+Each app-server instance is a detached helper process tree. Drive completion
+awaits termination of that complete tree, so provider descendants cannot outlive
+the body turn or leave an answered Akuma headless.
 
 ## Placement
 
@@ -230,7 +235,9 @@ because the write-time truth cannot be reconstructed after a detached process
 dies; their existence does not depend on a current control-flow reader.
 
 - **soul** — one row, written at birth: id, persona, optional description,
-  provider, admitted options, summon cwd, origin, confinement, created-at.
+  provider, admitted options, summon cwd, origin, confinement, optional
+  Contract id, created-at. The Contract id is immutable for the soul's whole
+  life; there is no reassignment verb.
 - **bodies** — one row per body: collar, leash-taken-at, end (exited /
   broke-off / put-down).
 - **turns** — append-only completed turns. An answered outcome carries the
@@ -253,7 +260,7 @@ dies; their existence does not depend on a current control-flow reader.
   write.
 - **tells** — body plus its delivery state; see Tell.
 - **requests** — the sole durable authority for Body Requests. One fact holds
-  the caller UUID, Persona, body, optional cwd, normalized world, admission
+  the caller UUID, Persona, body, optional cwd, optional Contract id, normalized world, admission
   time, and exactly one monotonic state: `admitted`, `reserved` with the child
   coordinate, `served` with the child coordinate, `refused` with a diagnostic,
   or `voided` with evidence. `served`, `refused`, and `voided` are terminal.
@@ -268,10 +275,16 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed `heart/` custody core; no store or repository interface
 sits between callers and its index.
 
-The heart is exactly three files with one-way dependencies. `facts.ts` owns the
+Heart and leash schema version is `3`. Version 3 adds the nullable Contract
+column to soul and request facts. This is a hard cut: an older heart fails the
+existing schema gate; no migration or compatibility decoder exists. Absence is
+stored as SQL `NULL` and omitted from public values.
+
+The heart is four coherent files with one-way dependencies. `facts.ts` owns the
 domain fact vocabulary and the pure `life()` interpretation and has no imports.
-`rows.ts` depends only on those facts plus a type-only SQLite handle and owns
-all physical row mechanics: both DDL texts, private row shapes, named per-fact
+`schema.ts` depends only on a type-only SQLite handle and owns both DDL texts,
+the single schema version, and its hard-cut gates. `rows.ts` depends only on the
+facts plus a type-only SQLite handle and owns private row shapes, named per-fact
 codecs, and named single-statement functions. A statement function accepts a
 caller-owned SQLite handle, executes exactly one statement, and maps typed
 parameters and results;
@@ -482,9 +495,10 @@ upstream provider has made a child session there is no honest cancellation
 point that can erase that fact.
 
 The sequence is provider fork first, then ordinary local allocation and birth.
-The child's soul copies the parent snapshot except for its id, creation time,
-and origin `{ kind: "fork", parent, at }`; direct and body-request births
-retain their existing arms. Under the birth leash, publication also admits the
+The child's soul copies the parent snapshot, including its optional Contract
+association, except for its id, creation time, and origin `{ kind: "fork",
+parent, at }`; no fork override exists. Direct and body-request births retain
+their existing arms. Under the birth leash, publication also admits the
 provider-created child coordinate as the first `SessionFact`, with the selected
 answered turn's provider, cwd, and options recipe. Thus the child is born
 asleep with zero turns and its first tell resumes the forked native session.
@@ -543,10 +557,15 @@ not a claim that the child was born. The child soul records origin
 ### Admission and service
 
 A request carries the caller's normalized absolute world, Persona name, body,
-and optional cwd. The serving body requires that world to equal its own world,
+optional cwd, and optional Contract id. The caller must state the Contract id
+explicitly; a request never inherits the parent soul's association. The serving
+body requires that world to equal its own world,
 loads the Persona from its own home, admits provider options, and normalizes the
-cwd at this boundary. World mismatch, unknown or malformed Persona, and option
-refusal settle `refused`; the body never silently redirects a request.
+cwd at this boundary. The Akuma boundary structurally validates a present id as
+the shared `kei` identity family and stores its bytes verbatim. It never checks
+whether the endpoint exists or reads Contract state. World mismatch, unknown or
+malformed Persona, and option refusal settle `refused`; the body never silently
+redirects a request.
 
 Service is serial in heart admission order:
 
@@ -714,7 +733,7 @@ and detached body composition root. It maps only `claude` and
 ```ts
 const world = Akuma.at({ path });          // path is the world; no climbing
 
-const a = await world.call({ persona, body, cwd? });  // returns after birth
+const a = await world.call({ persona, body, cwd?, contract? }); // returns after birth
 world.of({ id });
 world.list();                              // compact fleet rows; no history scan
 
@@ -742,6 +761,7 @@ type AkumaStatus = {
   id: AkuId;
   persona: string;
   description?: string;
+  contract?: string;
   life: AkumaLife;
   collar: CollarProbe;
   confinement: Confinement;
@@ -764,8 +784,9 @@ akuma is the flagship's decision; the surface puts the state and available
 verbs in front of her and says nothing more.
 
 `list()` is deliberately smaller than `status()`: born fleet rows expose id,
-Persona and description snapshots, life, collar evidence, confinement, and
-pending tell ids, but no history or latest outcome. Unborn/stillborn rows retain
+Persona and description snapshots, optional Contract id, life, collar evidence,
+confinement, and pending tell ids, but no history or latest outcome. The id is
+projected verbatim and has no endpoint-state interpretation here. Unborn/stillborn rows retain
 their existing evidence. This keeps a fleet read from scanning the complete
 turn history of every akuma. Confinement is triage evidence and future Body Request
 placement input, never an admission result; no read reaches back into home.
@@ -798,7 +819,8 @@ src/akuma/
   persona.ts          one home read, strict decode, provider option admission
   heart/
     facts.ts          import-free typed facts and life() interpretation
-    rows.ts           private DDL, rows/codecs, named single-statement mechanics
+    schema.ts         private DDL, shared schema version, hard-cut gates
+    rows.ts           private rows/codecs, named single-statement mechanics
     index.ts          connections, leash, transaction judges, custody, projections
   provider.ts         ProviderAdapter, Drive, AgentEvent
   providers/index.ts  sole literal provider map
@@ -839,13 +861,16 @@ Natural-death terminals. Blind sweeps and age-based adjudication — the
 leash and the seal judge; age is evidence. Placement laws that claim to
 confine unconfined processes. Confinement gates — confinement facts are
 evidence, never admission control. Anti-forgery machinery of any kind —
-malice is outside the threat model. Contract or carrier knowledge inside
-`src/akuma` — the contract seat is forever an edge (SOUL: cut any pillar,
-the other two do not bleed).
+malice is outside the threat model. Contract lifecycle or carrier knowledge
+inside `src/akuma` — structural validation and opaque association bytes are the
+whole edge. There is no Task endpoint field, generic metadata bag, binding
+registry, existence validation, implicit Body Request inheritance, Contract or
+Task back-pointer, association sweep, or behavior conditioned on Contract state
+(SOUL: cut any pillar, the other two do not bleed).
 
 Inside `heart/`, no generic get/save/find API, query builder, connection-owning
-row object, per-table class, or fourth module is built. Row codecs do not make
+row object, per-table class, or table-by-table module is built. Row codecs do not make
 decisions; every conditional write remains visibly inside the index's owning
 transaction. Fact-table `SELECT` / `INSERT` / `UPDATE` / `DELETE` syntax and
-`prepare()` calls occur only in `rows.ts`; connection and transaction SQL remain
-in `index.ts`.
+their `prepare()` calls occur only in `rows.ts`; schema DDL and version reads
+occur only in `schema.ts`; connection and transaction SQL remain in `index.ts`.

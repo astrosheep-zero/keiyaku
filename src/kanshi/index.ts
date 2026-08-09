@@ -3,6 +3,8 @@ export { selectKanshi } from "./select.js";
 
 export type { KanshiInput } from "./read.js";
 export type {
+  AkumaKanshiRow,
+  AkumaKanshiWorld,
   ContractEndpointObservation,
   KanshiReport,
   Section,

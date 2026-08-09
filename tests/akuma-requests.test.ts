@@ -35,6 +35,7 @@ function fixture() {
     cwd: root,
     origin: { kind: "direct" },
     confinement: { kind: "declared", writableRoots: [root] },
+    contract: "kei/parent-purpose",
     createdAt: "2026-08-09T00:00:00.000Z",
   };
   const leash = HeldAkumaLeash.try(parent.paths)!;
@@ -64,8 +65,11 @@ test("a declared drive serves Body Requests through transport while Heart remain
   });
   try {
     process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-    const childId = (await Akuma.at({ path: value.root }).call({ persona: "worker", body: "build" })).id;
-    delete process.env[AKUMA_REQUESTS_ENV];
+    const childId = (await Akuma.at({ path: value.root }).call({
+      persona: "worker",
+      body: "build",
+      contract: "kei/explicit-purpose",
+    })).id;
     const origin = readSoul(pathsForAkuId(value.root, childId))?.origin;
     assert.equal(origin?.kind, "request");
     if (origin?.kind !== "request") return;
@@ -76,6 +80,11 @@ test("a declared drive serves Body Requests through transport while Heart remain
       parentId: value.parent.id,
       requestId,
     });
+    assert.equal(readSoul(pathsForAkuId(value.root, childId))?.contract, "kei/explicit-purpose");
+
+    const unassociated = (await Akuma.at({ path: value.root }).call({ persona: "worker", body: "separate" })).id;
+    assert.equal(readSoul(pathsForAkuId(value.root, unassociated))?.contract, undefined);
+    delete process.env[AKUMA_REQUESTS_ENV];
 
     await assert.rejects(requestBodyCall({
       directory: pump.directory,

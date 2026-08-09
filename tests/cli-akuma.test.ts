@@ -12,9 +12,9 @@ import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { akumaExitCode, akumaJsonValue, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 
 test("akuma CLI parses the public verbs without inventing aliases", () => {
-  assert.deepEqual(parseArgv(["-C", "/world", "akuma", "call", "--persona", "claude", "--cwd", "/work", "-"]), {
+  assert.deepEqual(parseArgv(["-C", "/world", "akuma", "call", "--persona", "claude", "--cwd", "/work", "--contract", "kei/delivery", "-"]), {
     cwd: "/world",
-    command: { command: "akuma", action: "call", persona: "claude", cwd: "/work", output: "text" },
+    command: { command: "akuma", action: "call", persona: "claude", cwd: "/work", contract: "kei/delivery", output: "text" },
   });
   assert.deepEqual(parseArgv(["akuma", "tell", "aku/claude/1234abcd", "--json", "-"]), {
     command: { command: "akuma", action: "tell", id: "aku/claude/1234abcd", output: "json" },
@@ -111,6 +111,7 @@ test("akuma interrupt invokes the public receipt and maps every exit class", asy
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
+        contract: "kei/cli-purpose",
         cwd: root,
       },
       initialBody: "done",
@@ -200,6 +201,7 @@ test("akuma status and wait expose the same ordered retained history", async () 
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
+        contract: "kei/cli-purpose",
         cwd: root,
       },
       initialBody: "work",
@@ -221,6 +223,7 @@ test("akuma status and wait expose the same ordered retained history", async () 
     }]);
     if (parsedStatus.command.command !== "akuma") return;
     assert.match(renderAkumaText(parsedStatus.command, statusResult), /history 1\nturn 1 answered cli-history session cli-session/);
+    assert.match(renderAkumaText(parsedStatus.command, statusResult), /contract kei\/cli-purpose/u);
 
     const waitResult = await invoke(parseArgv(["-C", root, "akuma", "wait", allocated.id]), {
       readStdin: () => { throw new Error("wait must not read stdin"); },

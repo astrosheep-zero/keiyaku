@@ -29,6 +29,7 @@ import {
   akuIdFromDirectoryName,
   akumaPaths,
   akumaRunRoot,
+  contractId,
   parseAkuId,
   pathsForAkuId,
   personaName,
@@ -49,6 +50,7 @@ export type AkumaListRow = Readonly<{
   id: AkuId;
   persona: string;
   description?: string;
+  contract?: string;
   life: AkumaLife;
   collar: CollarProbe;
   confinement: Soul["confinement"];
@@ -159,6 +161,7 @@ function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot = readHeart(pa
     id: snapshot.soul.id,
     persona: snapshot.soul.persona,
     ...(snapshot.soul.description === undefined ? {} : { description: snapshot.soul.description }),
+    ...(snapshot.soul.contract === undefined ? {} : { contract: snapshot.soul.contract }),
     life: life(probeLeash(paths), collar, snapshot.death),
     collar,
     confinement: snapshot.soul.confinement,
@@ -313,6 +316,7 @@ export class AkumaHandle {
             cwd: source.cwd,
             origin: { kind: "fork", parent: this.id, at: input.at },
             confinement: source.confinement,
+            ...(source.contract === undefined ? {} : { contract: source.contract }),
           },
           birthSession,
         }),
@@ -352,8 +356,9 @@ export class Akuma {
     return new AkumaHandle(parseAkuId(input.id).id, this.path);
   }
 
-  async call(input: Readonly<{ persona: string; body: string; cwd?: string }>): Promise<AkumaHandle> {
+  async call(input: Readonly<{ persona: string; body: string; cwd?: string; contract?: string }>): Promise<AkumaHandle> {
     const name = personaName(input.persona);
+    const contract = input.contract === undefined ? undefined : contractId(input.contract);
     const requests = injectedBodyRequests();
     if (requests !== null) {
       const child = await requestBodyCall({
@@ -363,6 +368,7 @@ export class Akuma {
         persona: name,
         body: input.body,
         ...(input.cwd === undefined ? {} : { cwd: resolve(input.cwd) }),
+        ...(contract === undefined ? {} : { contract }),
       });
       return new AkumaHandle(child, this.path);
     }
@@ -383,6 +389,7 @@ export class Akuma {
           cwd,
           origin: { kind: "direct" },
           confinement: provider.confinement({ cwd, options: persona.options }),
+          ...(contract === undefined ? {} : { contract }),
         },
         initialBody: input.body,
       }),

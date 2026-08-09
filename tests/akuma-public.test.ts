@@ -50,6 +50,7 @@ async function answeredSource(root: string, suffix: string) {
       options: { model: "fixture-model" },
       origin: { kind: "direct" },
       confinement: { kind: "unconfined" },
+      contract: "kei/fork-purpose",
       cwd: root,
     },
     initialBody: "work",
@@ -92,6 +93,7 @@ test("fork publishes a sleeping child with lineage and its native birth session"
     const snapshot = readHeart(childPaths);
     assert.deepEqual(snapshot.soul?.origin, { kind: "fork", parent: source.id, at: "public-history" });
     assert.equal(snapshot.soul?.description, "Fork source");
+    assert.equal(snapshot.soul?.contract, "kei/fork-purpose");
     assert.deepEqual(snapshot.latestSession, {
       sequence: 1,
       provider: "claude",
@@ -173,6 +175,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
+        contract: "kei/public-purpose",
         cwd: root,
       },
       initialBody: "work",
@@ -192,6 +195,8 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.equal(status.life, "asleep");
     assert.equal(status.persona, "claude");
     assert.equal(status.description, "Fixture akuma");
+    assert.equal(listed.contract, "kei/public-purpose");
+    assert.equal(status.contract, "kei/public-purpose");
     assert.deepEqual(status.confinement, { kind: "unconfined" });
     assert.equal(status.answer, "public answer");
     assert.deepEqual(status.pending, []);
@@ -445,6 +450,17 @@ test("Persona Markdown is strict call-time input with a durable option shape", (
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("call structurally refuses a non-Contract association before allocation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-contract-boundary-"));
+  try {
+    await assert.rejects(
+      Akuma.at({ path: root }).call({ persona: "worker", body: "build", contract: "task/not-a-contract" }),
+      /identity must use kei\//u,
+    );
+    assert.equal(existsSync(akumaRunRoot(root)), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("list distinguishes sealed residue from an unclaimed birth", () => {

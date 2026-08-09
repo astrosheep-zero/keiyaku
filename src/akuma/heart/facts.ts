@@ -28,6 +28,7 @@ export type Soul = Readonly<{
   cwd: string;
   origin: AkumaOrigin;
   confinement: Confinement;
+  contract?: string;
   createdAt: string;
 }>;
 
@@ -91,6 +92,7 @@ export type RequestInput = Readonly<{
   persona: string;
   body: string;
   cwd?: string;
+  contract?: string;
   world: string;
 }>;
 

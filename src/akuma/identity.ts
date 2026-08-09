@@ -50,6 +50,11 @@ export function parseAkuId(value: string): Readonly<{ id: AkuId; persona: string
   return { id: akuId({ persona, suffix }), persona, suffix };
 }
 
+export function contractId(value: string): string {
+  identitySegments({ family: "kei", value });
+  return value;
+}
+
 export function akumaRunRoot(worldRoot: string): string {
   return join(worldRoot, ".keiyaku", "akuma", "run");
 }

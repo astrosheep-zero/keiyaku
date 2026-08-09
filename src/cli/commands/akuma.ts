@@ -4,7 +4,7 @@ type Output = Readonly<{ output: "text" | "json" }>;
 type Addressed = Readonly<{ id: string }>;
 
 export type ParsedAkumaCommand = Output & (
-  | Readonly<{ command: "akuma"; action: "call"; persona: string; cwd?: string }>
+  | Readonly<{ command: "akuma"; action: "call"; persona: string; cwd?: string; contract?: string }>
   | (Readonly<{ command: "akuma"; action: "status" | "follow" | "wait" | "kill" }> & Addressed)
   | (Readonly<{ command: "akuma"; action: "fork"; at: string }> & Addressed)
   | Readonly<{ command: "akuma"; action: "list" }>
@@ -21,7 +21,7 @@ const AKUMA_COMMAND_SPECS: Readonly<Record<AkumaAction, Readonly<{
   usage: string;
   purpose: string;
 }>>> = {
-  call: { arity: 0, stdin: true, flags: { persona: "value", cwd: "value", json: "boolean" }, usage: "akuma call --persona <name> [--cwd <path>] [--json] -", purpose: "Summon an Akuma from a Persona and stdin body." },
+  call: { arity: 0, stdin: true, flags: { persona: "value", cwd: "value", contract: "value", json: "boolean" }, usage: "akuma call --persona <name> [--cwd <path>] [--contract <contract-id>] [--json] -", purpose: "Summon an Akuma from a Persona and stdin body." },
   list: { arity: 0, stdin: false, flags: { json: "boolean" }, usage: "akuma list [--json]", purpose: "List Akuma in the invocation world." },
   status: { arity: 1, stdin: false, flags: { json: "boolean" }, usage: "akuma status <aku/...> [--json]", purpose: "Read one Akuma's current status and retained history." },
   follow: { arity: 1, stdin: false, flags: { json: "boolean" }, usage: "akuma follow <aku/...> [--json]", purpose: "Observe one Akuma's public activity sequence." },
@@ -99,7 +99,14 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   if (action === "call") {
     const persona = flags.persona;
     if (typeof persona !== "string") throw new CliUsageError("akuma call requires --persona <name>", renderAkumaUsage(action));
-    return { command: "akuma", action, persona, ...(typeof flags.cwd === "string" ? { cwd: flags.cwd } : {}), output };
+    return {
+      command: "akuma",
+      action,
+      persona,
+      ...(typeof flags.cwd === "string" ? { cwd: flags.cwd } : {}),
+      ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
+      output,
+    };
   }
   if (action === "list") return { command: "akuma", action, output };
   const id = positionals[0]!;

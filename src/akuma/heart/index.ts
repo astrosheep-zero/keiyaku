@@ -22,6 +22,10 @@ import type {
 import {
   HEART_SCHEMA,
   LEASH_SCHEMA,
+  assertHeartSchemaVersion,
+  assertLeashSchemaVersion,
+} from "./schema.js";
+import {
   activityFactsAfter,
   answeredTurnFact,
   deathExists,
@@ -102,9 +106,10 @@ function isBusy(error: unknown): boolean {
     || value?.errcode === 5 || message.includes("database is locked") || message.includes("database is busy");
 }
 
-function openHeart(path: string): DatabaseSync {
+function openHeart(path: string, verify = true): DatabaseSync {
   const database = new DatabaseSync(path);
   database.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL");
+  if (verify) assertHeartSchemaVersion(database);
   return database;
 }
 
@@ -126,10 +131,16 @@ function transaction<T>(database: DatabaseSync, body: () => T): T {
 }
 
 export function initializeHeart(paths: AkumaPaths): void {
-  const heart = openHeart(paths.heart);
-  try { heart.exec(HEART_SCHEMA); } finally { heart.close(); }
+  const heart = openHeart(paths.heart, false);
+  try {
+    heart.exec(HEART_SCHEMA);
+    assertHeartSchemaVersion(heart);
+  } finally { heart.close(); }
   const leash = new DatabaseSync(paths.leash);
-  try { leash.exec(LEASH_SCHEMA); } finally { leash.close(); }
+  try {
+    leash.exec(LEASH_SCHEMA);
+    assertLeashSchemaVersion(leash);
+  } finally { leash.close(); }
 }
 
 export class HeldAkumaLeash {
@@ -140,6 +151,7 @@ export class HeldAkumaLeash {
   static try(paths: AkumaPaths): HeldAkumaLeash | null {
     const database = new DatabaseSync(paths.leash, { timeout: 0 });
     try {
+      assertLeashSchemaVersion(database);
       database.exec("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE");
       return new HeldAkumaLeash(database);
     } catch (error) {
@@ -199,7 +211,10 @@ export function heartExists(paths: AkumaPaths): boolean { return existsSync(path
 export function readSeal(paths: AkumaPaths): SealFact | null {
   if (!existsSync(paths.leash)) return null;
   const leash = new DatabaseSync(paths.leash);
-  try { return sealFact(leash); } finally { leash.close(); }
+  try {
+    assertLeashSchemaVersion(leash);
+    return sealFact(leash);
+  } finally { leash.close(); }
 }
 
 export function recordBody(paths: AkumaPaths, input: Readonly<{ collar: Collar; leashTakenAt: string }>): BodyFact {

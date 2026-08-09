@@ -76,7 +76,7 @@ arc [<contract>|@<contract>] [--actor <actor>] [--json] -
 status [<contract>|@<contract>] [--json]
 audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--json]
-akuma call --persona <name> [--cwd <path>] [--json] -
+akuma call --persona <name> [--cwd <path>] [--contract <contract-id>] [--json] -
 akuma list [--json]
 akuma status <aku/...> [--json]
 akuma follow <aku/...> [--json]
@@ -355,9 +355,10 @@ switch to another observation result. The Contract section is supplied by
 `Keiyaku.list({ repo })` and exposes lifecycle, candidate, and every declared
 gate's current report. Kanshi and the renderer copy those discriminants and do
 not evaluate gate currency, infer claimability, or derive terminality.
-Its Akuma section is supplied by `Akuma.list()`; the board copies life,
-identity, pending count, confinement, and searched coordinates without probing,
-reading history, or reclassifying them.
+Its Akuma section is supplied by `Akuma.list()` and joined as specified by
+[kanshi.md](kanshi.md); the board copies life, identity, optional Contract
+endpoint observation, pending count, confinement, and searched coordinates
+without probing, reading history, or reclassifying them.
 
 Akuma call, list, status, follow, wait, an `interrupted` interrupt, successful
 wake, a `forked` fork, and settled kill exit `0`. Interrupt `dead` or
@@ -378,7 +379,8 @@ exceptions use exit `3`.
 
 ## Product Boundary
 
-The CLI package entry is a shebang-only executable with no exports. Parser,
+The CLI package entry is a shebang-only executable with no exports. Every
+build recreates it with POSIX execute permission before packaging or linking. Parser,
 usage errors, renderers, and `main` are not package API. The CLI adapts the
 package-root Contract surface and the separate `./task` and `./akuma` product
 surfaces; it does not define their library behavior or obtain a raw scope,

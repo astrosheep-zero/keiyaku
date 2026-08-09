@@ -30,7 +30,7 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
   assert.match(renderTaskHelp("compose"), /usage: keiyaku-v4 task compose \[--json\] -/u);
   assert.match(renderAkumaHelp(), /akuma interrupt <aku\/\.\.\.>/u);
-  assert.match(renderAkumaHelp("call"), /usage: keiyaku-v4 akuma call --persona <name>/u);
+  assert.match(renderAkumaHelp("call"), /--contract <contract-id>/u);
 });
 
 test("syntax refusal retains the deepest reached grammar", () => {

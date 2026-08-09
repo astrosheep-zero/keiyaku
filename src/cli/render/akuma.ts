@@ -9,6 +9,7 @@ function summary(input: Readonly<{
   id: string;
   persona?: string;
   description?: string;
+  contract?: string;
   life: string;
   confinement?: Confinement;
   pending?: readonly string[];
@@ -17,6 +18,7 @@ function summary(input: Readonly<{
     `${input.id} ${input.life}`,
     ...(input.persona === undefined ? [] : [`persona ${input.persona}`]),
     ...(input.description === undefined ? [] : [`description ${input.description}`]),
+    ...(input.contract === undefined ? [] : [`contract ${input.contract}`]),
     ...(input.confinement === undefined ? [] : input.confinement.kind === "unconfined"
       ? ["confinement unconfined"]
       : [`confinement declared ${input.confinement.writableRoots.join(" ")}`]),
