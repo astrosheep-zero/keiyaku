@@ -1,12 +1,13 @@
 # Keiyaku v4 Repository Guide
 
-Before any change or review in this repository, read [`docs/README.md`](docs/README.md)
-and every owner chapter it names for the requested surface. Those documents are
-the sole product and architecture authority.
+Before any change or review in this repository, read [`SOUL.md`](SOUL.md),
+[`docs/README.md`](docs/README.md), and every owner chapter it names for the
+requested surface. `SOUL.md` defines the product stance; the documents under
+`docs/` are the sole product and architecture authority.
 
 | First | Then |
 | --- | --- |
-| [`docs/README.md`](docs/README.md) | The single owner chapter for each affected surface. |
+| [`SOUL.md`](SOUL.md) | [`docs/README.md`](docs/README.md), then the single owner chapter for each affected surface. |
 
 The index is the authority registry. It directs public API, document, model,
 lifecycle, verification, transport, and CLI questions to their one law home.
