@@ -294,6 +294,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "task/operations.ts", allow: [any("markdown/diff.ts"), any("namespace-context.ts"), any("task/board.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/store.ts")] },
     { source: "task/compose.ts", allow: [any("markdown/diff.ts"), any("namespace-context.ts"), any("task/board.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/operations.ts"), any("task/store.ts")] },
     { source: "task/index.ts", allow: [any("context-root.ts"), any("task/board.ts"), any("task/compose.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/operations.ts"), any("task/store.ts")] },
+    { source: "kanshi/read.ts", allow: [any("akuma/index.ts"), any("index.ts"), any("kanshi/**"), any("task/index.ts")] },
+    { source: "kanshi/report.ts", allow: [types("akuma/index.ts"), types("index.ts"), types("task/index.ts")] },
     { source: "kanshi/**", allow: [any("index.ts"), any("kanshi/**"), any("task/index.ts")] },
     { source: "markdown/diff.ts", allow: [] },
     {

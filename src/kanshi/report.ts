@@ -1,5 +1,6 @@
 import type { ContractBoard, ContractDisposition } from "../index.js";
 import type { TaskRow } from "../task/index.js";
+import type { AkumaList } from "../akuma/index.js";
 
 export type Section<Value> =
   | Readonly<{ kind: "present"; value: Value }>
@@ -21,5 +22,5 @@ export type KanshiReport = Readonly<{
   root: string;
   contracts: Section<ContractBoard>;
   tasks: Section<TaskKanshiWorld>;
-  akuma: Section<never>;
+  akuma: Section<AkumaList>;
 }>;

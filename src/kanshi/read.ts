@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { Keiyaku, NoGitWorldError, Repo, type ContractBoard, type ContractDisposition } from "../index.js";
 import { Tasks, type TaskRow } from "../task/index.js";
+import { Akuma, type AkumaList } from "../akuma/index.js";
 import type { KanshiReport, Section, TaskKanshiRow, TaskKanshiWorld } from "./report.js";
 
 export type KanshiInput = Readonly<{ path?: string }>;
@@ -62,9 +63,17 @@ async function readTasks(path: string, contracts: Section<ContractBoard>): Promi
   }
 }
 
+function readAkuma(path: string): Section<AkumaList> {
+  try {
+    return { kind: "present", value: Akuma.at({ path }).list() };
+  } catch (error) {
+    return { kind: "failed", failure: { message: diagnostic(error) } };
+  }
+}
+
 export async function kanshi(input?: KanshiInput): Promise<KanshiReport> {
   const path = resolve(coordinate(input));
   const contracts = await readContracts(path);
   const tasks = await readTasks(path, contracts);
-  return { root: path, contracts, tasks, akuma: { kind: "absent" } };
+  return { root: path, contracts, tasks, akuma: readAkuma(path) };
 }

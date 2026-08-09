@@ -36,12 +36,13 @@ async function populatedWorld() {
   return { repository, contract, taskId: added.value.id };
 }
 
-test("kanshi joins Contract and Task public rows while Akuma remains explicitly absent", async () => {
+test("kanshi joins Contract, Task, and Akuma public rows", async () => {
   const { repository, contract, taskId } = await populatedWorld();
   const report = await kanshi({ path: repository.path });
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.tasks.kind, "present");
-  assert.deepEqual(report.akuma, { kind: "absent" });
+  assert.equal(report.akuma.kind, "present");
+  if (report.akuma.kind === "present") assert.deepEqual(report.akuma.value.rows, []);
   if (report.contracts.kind !== "present" || report.tasks.kind !== "present") return;
   assert.equal(report.contracts.value.rows.some((row) => row.id === contract.id), true);
   assert.deepEqual(report.tasks.value.rows.find((row) => row.id === taskId)?.contract, {
@@ -55,6 +56,7 @@ test("kanshi keeps absent Contract and Task worlds explicit", async () => {
   const report = await kanshi({ path: root });
   assert.deepEqual(report.contracts, { kind: "absent" });
   assert.equal(report.tasks.kind, "present");
+  assert.equal(report.akuma.kind, "present");
   if (report.tasks.kind === "present") assert.deepEqual(report.tasks.value.rows, []);
 });
 
@@ -93,7 +95,8 @@ test("Kanshi text retains the v3 ruler, marks, dense facts, and complete identit
   assert.match(text, /● P0 .*task\/render-status/u);
   assert.match(text, /in progress/u);
   assert.match(text, /keiyaku kei\/.*\(active\)/u);
-  assert.match(text, /akuma absent/u);
+  assert.match(text, /akuma 0/u);
+  assert.match(text, /searched .*\.keiyaku\/akuma\/run/u);
 });
 
 test("Kanshi selection is a projection that preserves source presence", async () => {

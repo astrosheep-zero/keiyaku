@@ -22,6 +22,14 @@ function taskMark(row: TaskKanshiRow): string {
   return row.disposition === "blocked" ? "⧗" : "○";
 }
 
+function akumaMark(life: string): string {
+  if (life === "running") return "●";
+  if (life === "asleep") return "✓";
+  if (life === "stranded" || life === "headless") return "?";
+  if (life === "unborn") return "○";
+  return "×";
+}
+
 function failure(name: string, section: Extract<Section<unknown>, { kind: "failed" }>, context: TextRenderContext): string {
   return `${name} failed\n${tone(`! ${safeText(section.failure.message)}`, "alert", context.color)}`;
 }
@@ -65,19 +73,34 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): string {
   return lines.join("\n");
 }
 
+function renderAkuma(report: KanshiReport, context: TextRenderContext): string {
+  const section = report.akuma;
+  if (section.kind === "absent") return "akuma absent";
+  if (section.kind === "failed") return failure("akuma", section, context);
+  const lines = [`akuma ${section.value.rows.length}`];
+  if (section.value.rows.length === 0) {
+    for (const path of section.value.searched) lines.push(`  searched ${safeText(path)}`);
+  }
+  for (const row of section.value.rows) {
+    const pending = "pending" in row && row.pending.length > 0 ? [`pending ${row.pending.length}`] : [];
+    const confinement = "confinement" in row
+      ? row.confinement.kind === "unconfined"
+        ? ["unconfined"]
+        : [`writes ${row.confinement.writableRoots.join(" ")}`]
+      : [];
+    lines.push(...renderFacts(`${akumaMark(row.life)} ${safeText(row.id)}`, [row.life, ...confinement, ...pending], context.columns));
+  }
+  return lines.join("\n");
+}
+
 export function renderKanshiText(report: KanshiReport, context: TextRenderContext = { columns: 80, color: false }): string {
   const root = tone(`root ${safeText(report.root)}`, "dim", context.color);
-  const akuma = report.akuma.kind === "absent"
-    ? "akuma absent"
-    : report.akuma.kind === "failed"
-      ? failure("akuma", report.akuma, context)
-      : "akuma 0";
   return [
     renderVoiceRuler("kanshi", "現世", context.columns),
     root,
     MARKS,
     renderContracts(report, context),
     renderTasks(report, context),
-    akuma,
+    renderAkuma(report, context),
   ].join("\n\n");
 }
