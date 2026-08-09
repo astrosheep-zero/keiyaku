@@ -641,10 +641,51 @@ type Drive = {
 };
 ```
 
-The AgentEvent vocabulary includes the session-admission event: the adapter
-authors it the moment the native harness grants a resumable coordinate
-(v3's `onSessionAdmission`), and the pump records it as the heart's session
-fact right then — never waiting for turn completion.
+Provider observation is the closed public vocabulary:
+
+```ts
+type AgentEvent =
+  | { type: "session"; coordinate: ResumeCoordinate }
+  | { type: "assistant"; text: string }
+  | { type: "action"; note: string }
+  | { type: "unknown"; kind: string };
+```
+
+`session` is authored when the native harness grants a resumable coordinate
+(v3's `onSessionAdmission`). The pump records that coordinate immediately as
+the heart's authoritative session fact and also appends the event as activity;
+it never waits for turn completion. `assistant` contains only completed agent
+utterances, never deltas or summaries. `action` is one provider-neutral,
+single-line statement of a tool or command invocation, file change, plan or
+todo update, retry, warning, or refusal. The adapter truncates it to 200
+characters. `unknown` contains only the unmapped native kind or method name and
+never carries the native payload.
+
+Activity is disposable narration. Deleting every activity row may change only
+`follow()` output. Recovery, resume, fork, outcome, failure, and life never read
+activity. Turn answer, failure, and history remain authoritative in
+`TurnResult` and `TurnFact`; a session row remains the sole resume authority.
+
+Every adapter owns a total disposition of its native events. Known native
+kinds are mapped or explicitly dropped, and every unrecognized kind becomes
+`unknown`. Tool, command, and file-change invocation, plan or todo updates, and
+retry, warning, and refusal map to one `action`. Partial and delta streams,
+input echoes, tool results and command output streams, thinking content, and
+token, cost, and rate-limit telemetry are dropped. The Claude adapter's SDK
+union disposition is compile-time exhaustive with a runtime unknown fallback.
+The Codex app-server method set is open, so its explicit known dispositions end
+in an unknown fallback. Tests pin both tables and both unknown paths.
+
+Claude's terminal answer is exactly `result.result`. Codex joins all completed
+`agentMessage` texts in order with one blank line. A failed Codex turn preserves
+the native explanation from an `error` notification or `turn.error`, using a
+generic status diagnostic only when no native detail exists.
+
+Activity persistence remains the bounded sequence `(sequence, event_json, at)`
+with the existing 200-row limit. It has no turn or body coordinate. No event
+bus, subscription fan-out, lifecycle coalescing, file-change ledger, usage or
+cost arm, thought arm, raw-provider passthrough, severity taxonomy, or envelope
+field beyond sequence and time belongs in this boundary.
 
 An answered `TurnResult.historyId` is the provider-owned fork point, not a
 generic result identifier. The Claude adapter uses the outer assistant message
@@ -735,6 +776,8 @@ diagnostic and no fork coordinates. Failure is not an activity invented by the
 body, and it cannot be forked. Activity
 contains only events authored by the provider. `status()` exposes the latest
 failed diagnostic from history instead of asking activity to reinterpret it.
+The provider-observation law and rendering semantics are defined in Provider
+boundary above; the public surface does not reinterpret native events.
 
 The CLI is one argv skin:
 `keiyaku-v4 akuma <call|list|status|follow|wait|tell|interrupt|fork|kill>`. Call,

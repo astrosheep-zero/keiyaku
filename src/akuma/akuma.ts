@@ -182,11 +182,10 @@ function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
 
 function eventFrom(value: unknown): AgentEvent {
   if (value === null || typeof value !== "object") throw new Error("Akuma activity is not an event object");
-  const event = value as { type?: unknown; coordinate?: unknown; text?: unknown; event?: unknown };
+  const event = value as { type?: unknown; coordinate?: unknown; text?: unknown; note?: unknown; kind?: unknown };
   if (event.type === "assistant" && typeof event.text === "string") return { type: "assistant", text: event.text };
-  if (event.type === "activity" && event.event !== null && typeof event.event === "object") {
-    return { type: "activity", event: event.event as Readonly<Record<string, unknown>> };
-  }
+  if (event.type === "action" && typeof event.note === "string") return { type: "action", note: event.note };
+  if (event.type === "unknown" && typeof event.kind === "string") return { type: "unknown", kind: event.kind };
   if (event.type === "session" && event.coordinate !== null && typeof event.coordinate === "object") {
     const sessionId = (event.coordinate as { sessionId?: unknown }).sessionId;
     if (typeof sessionId === "string") return { type: "session", coordinate: { sessionId } };

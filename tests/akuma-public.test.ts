@@ -2,11 +2,20 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Akuma, AkumaNotBornError } from "../src/akuma/index.js";
 import { AkumaPersonaError, loadPersona } from "../src/akuma/persona.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
-import { HeldAkumaLeash, initializeHeart, pauseRequested, readHeart, readHistory, recordBody } from "../src/akuma/heart/index.js";
+import {
+  appendActivity,
+  HeldAkumaLeash,
+  initializeHeart,
+  pauseRequested,
+  readHeart,
+  readHistory,
+  recordBody,
+} from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude.js";
@@ -284,7 +293,7 @@ test("interrupt waits for a running body to self-abort before recording the tell
           events: {
             async *[Symbol.asyncIterator]() {
               while (!aborted) {
-                yield { type: "activity" as const, event: { type: "working" } };
+                yield { type: "action" as const, note: "Working" };
                 await new Promise((resolve) => setTimeout(resolve, 10));
               }
             },
@@ -506,6 +515,32 @@ test("a failed turn is durable public evidence and never masquerades as provider
   }
 });
 
+test("activity is disposable narration and old raw events fail the public hard cut", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-activity-law-"));
+  try {
+    const source = await answeredSource(root, "ac710001");
+    const handle = Akuma.at({ path: root }).of({ id: source.id });
+    const before = handle.status();
+    const heart = new DatabaseSync(source.paths.heart);
+    try { heart.prepare("DELETE FROM activity").run(); } finally { heart.close(); }
+    assert.deepEqual(handle.status(), before);
+    const afterDeletion = [];
+    for await (const event of handle.follow()) afterDeletion.push(event);
+    assert.deepEqual(afterDeletion, []);
+
+    appendActivity(source.paths, {
+      event: { type: "activity", event: { provider: "legacy", secret: "raw" } },
+      at: "2026-08-08T00:00:01.000Z",
+    });
+    await assert.rejects(async () => {
+      for await (const _event of handle.follow()) { /* drain */ }
+    }, /invalid event shape/);
+    assert.deepEqual(handle.status(), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("kill gives the body a stop grace before putting down its process tree", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-kill-"));
   try {
@@ -522,7 +557,7 @@ test("kill gives the body a stop grace before putting down its process tree", as
           events: {
             async *[Symbol.asyncIterator]() {
               while (!aborted) {
-                yield { type: "activity" as const, event: { type: "working" } };
+                yield { type: "action" as const, note: "Working" };
                 await new Promise((resolve) => setTimeout(resolve, 10));
               }
             },

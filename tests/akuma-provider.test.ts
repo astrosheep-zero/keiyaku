@@ -4,10 +4,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { createClaudeProvider } from "../src/akuma/providers/claude.js";
-import { createCodexAppServerProvider } from "../src/akuma/providers/codex-app-server.js";
+import {
+  CLAUDE_MESSAGE_DISPOSITIONS,
+  CLAUDE_SYSTEM_DISPOSITIONS,
+  createClaudeProvider,
+} from "../src/akuma/providers/claude.js";
+import {
+  CODEX_ITEM_DISPOSITIONS,
+  CODEX_NOTIFICATION_DISPOSITIONS,
+  createCodexAppServerProvider,
+} from "../src/akuma/providers/codex-app-server.js";
 
-function fakeCodex(root: string, mode: "complete" | "interrupt" = "complete"): Readonly<{
+function fakeCodex(
+  root: string,
+  mode: "complete" | "interrupt" | "observations" | "failed-notification" | "failed-turn" = "complete",
+): Readonly<{
   executable: string;
   requests(): readonly Readonly<Record<string, unknown>>[];
   requestEnvironment(): string;
@@ -37,6 +48,24 @@ function fakeCodex(root: string, mode: "complete" | "interrupt" = "complete"): R
     "      send({method:'item/completed',params:{item:{id:'item-1',type:'agentMessage',text:'codex answer'}}});",
     "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
     "    }",
+    "    if(mode==='observations'){",
+    "      send({method:'item/started',params:{item:{id:'command-1',type:'commandExecution',command:'npm test'}}});",
+    "      send({method:'item/commandExecution/outputDelta',params:{delta:'secret output'}});",
+    "      send({method:'turn/plan/updated',params:{explanation:'Verify the adapter',plan:[{step:'test'}]}});",
+    "      send({method:'error',params:{error:{message:'temporary outage',additionalDetails:null},willRetry:true}});",
+    "      send({method:'item/completed',params:{item:{id:'answer-1',type:'agentMessage',text:'first answer'}}});",
+    "      send({method:'future/native-event',params:{secret:'must not escape'}});",
+    "      send({method:'item/completed',params:{item:{id:'answer-2',type:'agentMessage',text:'second answer'}}});",
+    "      send({method:'thread/tokenUsage/updated',params:{tokens:999}});",
+    "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
+    "    }",
+    "    if(mode==='failed-notification'){",
+    "      send({method:'error',params:{error:{message:'native request exploded',additionalDetails:'provider detail'},willRetry:false}});",
+    "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'failed',error:null}}});",
+    "    }",
+    "    if(mode==='failed-turn'){",
+    "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'failed',error:{message:'native turn failed',additionalDetails:'turn detail'}}}});",
+    "    }",
     "    return;",
     "  }",
     "  if(message.method==='turn/interrupt'){",
@@ -61,6 +90,100 @@ function fakeQuery(messages: readonly SDKMessage[]): Query {
     for (const message of messages) yield message;
   })() as unknown as Query;
 }
+
+test("Claude observation dispositions are closed over the installed SDK union", () => {
+  assert.deepEqual(CLAUDE_MESSAGE_DISPOSITIONS, {
+    assistant: "assistant",
+    auth_status: "auth",
+    conversation_reset: "action",
+    prompt_suggestion: "drop",
+    rate_limit_event: "drop",
+    result: "terminal",
+    stream_event: "drop",
+    system: "system",
+    tool_progress: "drop",
+    tool_use_summary: "drop",
+    user: "drop",
+  });
+  assert.deepEqual(CLAUDE_SYSTEM_DISPOSITIONS, {
+    api_retry: "action",
+    background_tasks_changed: "action",
+    commands_changed: "drop",
+    compact_boundary: "drop",
+    control_request_progress: "control-progress",
+    elicitation_complete: "drop",
+    files_persisted: "action",
+    hook_progress: "drop",
+    hook_response: "drop",
+    hook_started: "action",
+    informational: "action",
+    init: "drop",
+    local_command_output: "drop",
+    memory_recall: "drop",
+    mirror_error: "action",
+    model_refusal_fallback: "action",
+    model_refusal_no_fallback: "action",
+    notification: "action",
+    permission_denied: "action",
+    plugin_install: "action",
+    session_state_changed: "drop",
+    status: "action",
+    task_notification: "action",
+    task_progress: "action",
+    task_started: "action",
+    task_updated: "action",
+    thinking_tokens: "drop",
+    worker_shutting_down: "action",
+  });
+});
+
+test("Claude maps narration, drops native streams, and contains runtime skew", async () => {
+  const longNotice = `line one\n${"x".repeat(220)}`;
+  const provider = createClaudeProvider(async () => ({
+    query() {
+      return fakeQuery([
+        { type: "system", subtype: "init", session_id: "session-events" } as unknown as SDKMessage,
+        {
+          type: "assistant",
+          uuid: "assistant-events",
+          session_id: "session-events",
+          parent_tool_use_id: null,
+          message: { content: [
+            { type: "text", text: "working" },
+            { type: "tool_use", id: "tool-1", name: "Bash", input: { command: "secret" } },
+          ] },
+        } as unknown as SDKMessage,
+        { type: "stream_event", event: { delta: { text: "partial" } }, session_id: "session-events" } as unknown as SDKMessage,
+        { type: "rate_limit_event", rate_limit_info: { used: 1 }, session_id: "session-events" } as unknown as SDKMessage,
+        { type: "system", subtype: "api_retry", attempt: 2, max_retries: 4, session_id: "session-events" } as unknown as SDKMessage,
+        { type: "system", subtype: "informational", content: longNotice, session_id: "session-events" } as unknown as SDKMessage,
+        { type: "future_type", secret: "must not escape", session_id: "session-events" } as unknown as SDKMessage,
+        { type: "system", subtype: "future_subtype", secret: "must not escape", session_id: "session-events" } as unknown as SDKMessage,
+        { type: "result", subtype: "success", result: "done", session_id: "session-events" } as unknown as SDKMessage,
+      ]);
+    },
+  }));
+  const drive = await provider.start({ prompt: "observe", cwd: "/work", options: {} });
+  const events = [];
+  for await (const event of drive.events) events.push(event);
+
+  assert.deepEqual(events.slice(0, 4), [
+    { type: "session", coordinate: { sessionId: "session-events" } },
+    { type: "assistant", text: "working" },
+    { type: "action", note: "Tool Bash" },
+    { type: "action", note: "Retrying request 2/4" },
+  ]);
+  assert.equal(events[4]?.type, "action");
+  if (events[4]?.type === "action") {
+    assert.equal(events[4].note.length, 200);
+    assert.equal(events[4].note.includes("\n"), false);
+  }
+  assert.deepEqual(events.slice(5), [
+    { type: "unknown", kind: "future_type" },
+    { type: "unknown", kind: "future_subtype" },
+  ]);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "assistant-events" });
+});
 
 test("Claude adapter admits the native session before returning its answer", async () => {
   const seenOptions: unknown[] = [];
@@ -307,6 +430,103 @@ test("Claude fork rejects an unavailable primitive and dishonest child coordinat
   }
 });
 
+test("Codex observation dispositions pin every currently known method and item", () => {
+  assert.deepEqual(CODEX_NOTIFICATION_DISPOSITIONS, {
+    "account/login/completed": "drop",
+    "account/rateLimits/updated": "drop",
+    "account/updated": "drop",
+    "app/list/updated": "drop",
+    "command/exec/outputDelta": "drop",
+    configWarning: "action",
+    deprecationNotice: "action",
+    error: "error",
+    "externalAgentConfig/import/completed": "action",
+    "externalAgentConfig/import/progress": "action",
+    "fs/changed": "action",
+    "fuzzyFileSearch/sessionCompleted": "drop",
+    "fuzzyFileSearch/sessionUpdated": "drop",
+    guardianWarning: "action",
+    "hook/completed": "drop",
+    "hook/started": "action",
+    "item/agentMessage/delta": "drop",
+    "item/autoApprovalReview/completed": "action",
+    "item/autoApprovalReview/started": "action",
+    "item/commandExecution/outputDelta": "drop",
+    "item/commandExecution/terminalInteraction": "drop",
+    "item/completed": "item-completed",
+    "item/fileChange/outputDelta": "drop",
+    "item/fileChange/patchUpdated": "drop",
+    "item/mcpToolCall/progress": "drop",
+    "item/plan/delta": "drop",
+    "item/reasoning/summaryPartAdded": "drop",
+    "item/reasoning/summaryTextDelta": "drop",
+    "item/reasoning/textDelta": "drop",
+    "item/started": "item-started",
+    "mcpServer/oauthLogin/completed": "drop",
+    "mcpServer/startupStatus/updated": "drop",
+    "model/rerouted": "action",
+    "model/safetyBuffering/updated": "drop",
+    "model/verification": "drop",
+    "process/exited": "drop",
+    "process/outputDelta": "drop",
+    "rawResponse/completed": "drop",
+    "rawResponseItem/completed": "drop",
+    "remoteControl/status/changed": "drop",
+    "serverRequest/resolved": "drop",
+    "skills/changed": "drop",
+    "thread/archived": "drop",
+    "thread/closed": "drop",
+    "thread/compacted": "drop",
+    "thread/deleted": "drop",
+    "thread/environment/connected": "drop",
+    "thread/environment/disconnected": "drop",
+    "thread/goal/cleared": "action",
+    "thread/goal/updated": "action",
+    "thread/name/updated": "drop",
+    "thread/realtime/closed": "drop",
+    "thread/realtime/error": "action",
+    "thread/realtime/itemAdded": "drop",
+    "thread/realtime/outputAudio/delta": "drop",
+    "thread/realtime/sdp": "drop",
+    "thread/realtime/started": "drop",
+    "thread/realtime/transcript/delta": "drop",
+    "thread/realtime/transcript/done": "drop",
+    "thread/settings/updated": "drop",
+    "thread/started": "drop",
+    "thread/status/changed": "drop",
+    "thread/tokenUsage/updated": "drop",
+    "thread/unarchived": "drop",
+    "turn/completed": "terminal",
+    "turn/diff/updated": "drop",
+    "turn/moderationMetadata": "action",
+    "turn/plan/updated": "plan",
+    "turn/started": "drop",
+    warning: "action",
+    "windows/worldWritableWarning": "action",
+    "windowsSandbox/setupCompleted": "action",
+  });
+  assert.deepEqual(CODEX_ITEM_DISPOSITIONS, {
+    agentMessage: "assistant",
+    collabAgentToolCall: "action",
+    commandExecution: "action",
+    contextCompaction: "drop",
+    dynamicToolCall: "action",
+    enteredReviewMode: "action",
+    exitedReviewMode: "action",
+    fileChange: "action",
+    hookPrompt: "drop",
+    imageGeneration: "action",
+    imageView: "action",
+    mcpToolCall: "action",
+    plan: "plan",
+    reasoning: "drop",
+    sleep: "action",
+    subAgentActivity: "action",
+    userMessage: "drop",
+    webSearch: "action",
+  });
+});
+
 test("Codex app-server maps admitted options, native session, answer, and exact turn history", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-provider-"));
   try {
@@ -359,6 +579,49 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     });
     assert.equal(fake.requestEnvironment(), requestDirectory);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex maps observations without leaking output or unknown payloads", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-observations-"));
+  try {
+    const provider = createCodexAppServerProvider(fakeCodex(root, "observations").executable);
+    const drive = await provider.start({ prompt: "observe", cwd: root, options: {} });
+    const events = [];
+    for await (const event of drive.events) events.push(event);
+
+    assert.deepEqual(events, [
+      { type: "session", coordinate: { sessionId: "thread-fresh" } },
+      { type: "action", note: "Command npm test" },
+      { type: "action", note: "Plan updated: Verify the adapter" },
+      { type: "action", note: "Retrying after error: temporary outage" },
+      { type: "assistant", text: "first answer" },
+      { type: "unknown", kind: "future/native-event" },
+      { type: "assistant", text: "second answer" },
+    ]);
+    assert.deepEqual(await drive.completion, {
+      kind: "answered",
+      answer: "first answer\n\nsecond answer",
+      historyId: "turn-1",
+    });
+    assert.equal(JSON.stringify(events).includes("secret output"), false);
+    assert.equal(JSON.stringify(events).includes("must not escape"), false);
+    assert.equal(JSON.stringify(events).includes("999"), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex failed turns retain native notification and turn diagnostics", async () => {
+  for (const [mode, diagnostic] of [
+    ["failed-notification", "native request exploded: provider detail"],
+    ["failed-turn", "native turn failed: turn detail"],
+  ] as const) {
+    const root = mkdtempSync(join(tmpdir(), `keiyaku-codex-${mode}-`));
+    try {
+      const provider = createCodexAppServerProvider(fakeCodex(root, mode).executable);
+      const drive = await provider.start({ prompt: "fail", cwd: root, options: {} });
+      for await (const _event of drive.events) { /* drain */ }
+      assert.deepEqual(await drive.completion, { kind: "failed", diagnostic });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
 });
 
 test("Codex app-server resumes and forks only the supplied native coordinates", async () => {

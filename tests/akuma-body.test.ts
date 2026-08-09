@@ -91,7 +91,7 @@ test("body births, admits native session, records the turn, and exits only when 
     });
     await driveAkumaBody({ paths: allocated.paths }, adapter({
       starts,
-      events: [{ type: "activity", event: { type: "started" } }],
+      events: [{ type: "action", note: "Started" }],
       result: { kind: "answered", answer: "adjusted", historyId: "history-2" },
     }), {
       collar: { pid: 999_998, processGroup: 999_998, spawnedAt: "fixture-2" },
@@ -405,7 +405,7 @@ test("pause aborts the current drive and records the body as put down", async ()
           events: {
             async *[Symbol.asyncIterator]() {
               while (!aborted) {
-                yield { type: "activity" as const, event: { type: "working" } };
+                yield { type: "action" as const, note: "Working" };
                 await new Promise((resolve) => setTimeout(resolve, 10));
               }
             },
@@ -461,7 +461,7 @@ test("a body aborts and buries its process tree when the heart disappears during
         events: {
           async *[Symbol.asyncIterator]() {
             rmSync(allocated.paths.directory, { recursive: true, force: true });
-            yield { type: "activity", event: { type: "working" } } as const;
+            yield { type: "action", note: "Working" } as const;
           },
         },
         completion: Promise.resolve({ kind: "failed", diagnostic: "heart gone" }),

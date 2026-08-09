@@ -6,7 +6,16 @@ export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
 export type AgentEvent =
   | Readonly<{ type: "session"; coordinate: ResumeCoordinate }>
   | Readonly<{ type: "assistant"; text: string }>
-  | Readonly<{ type: "activity"; event: Readonly<Record<string, unknown>> }>;
+  | Readonly<{ type: "action"; note: string }>
+  | Readonly<{ type: "unknown"; kind: string }>;
+
+export function actionEvent(note: string): Extract<AgentEvent, { type: "action" }> {
+  return { type: "action", note: note.replace(/\s+/g, " ").trim().slice(0, 200) };
+}
+
+export function unknownEvent(kind: string): Extract<AgentEvent, { type: "unknown" }> {
+  return { type: "unknown", kind };
+}
 
 type EventWaiter = Readonly<{ resolve(value: IteratorResult<AgentEvent>): void }>;
 
