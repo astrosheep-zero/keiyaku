@@ -106,7 +106,15 @@ test("architecture policy reserves asynchronous process spawn for runtime/proc",
   assert.deepEqual(rules(rejected), ["architecture/capability-import"]);
 });
 
-test("architecture policy keeps Heart statements in rows and SQLite construction in index", () => {
+test("architecture policy separates Heart schema, fact statements, and SQLite construction", () => {
+  const typedSchema = check({
+    "akuma/heart/schema.ts": [
+      'import type { DatabaseSync } from "node:sqlite";',
+      "export function version(database: DatabaseSync): void { void database; }",
+    ].join("\n"),
+  });
+  assert.deepEqual(typedSchema, []);
+
   const typedRows = check({
     "akuma/heart/rows.ts": [
       'import type { DatabaseSync } from "node:sqlite";',
@@ -119,6 +127,11 @@ test("architecture policy keeps Heart statements in rows and SQLite construction
     "akuma/heart/rows.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
   });
   assert.ok(rules(runtimeRows).includes("architecture/capability-import"));
+
+  const runtimeSchema = check({
+    "akuma/heart/schema.ts": 'import { DatabaseSync } from "node:sqlite"; export const database = new DatabaseSync(":memory:");',
+  });
+  assert.ok(rules(runtimeSchema).includes("architecture/capability-import"));
 
   const statementInJudge = check({
     "akuma/heart/index.ts": 'export function judge(database: { prepare(sql: string): void }): void { database.prepare("SELECT 1"); }',

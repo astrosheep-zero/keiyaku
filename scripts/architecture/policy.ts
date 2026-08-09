@@ -12,8 +12,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "identity/normalize.ts", allow: [] },
     { source: "akuma/identity.ts", allow: [any("identity/coordinates.ts"), any("identity/normalize.ts"), types("akuma/heart/facts.ts")] },
     { source: "akuma/heart/facts.ts", allow: [] },
+    { source: "akuma/heart/schema.ts", allow: [] },
     { source: "akuma/heart/rows.ts", allow: [types("akuma/heart/facts.ts")] },
-    { source: "akuma/heart/index.ts", allow: [types("akuma/identity.ts"), any("akuma/heart/facts.ts"), any("akuma/heart/rows.ts")] },
+    { source: "akuma/heart/index.ts", allow: [types("akuma/identity.ts"), any("akuma/heart/facts.ts"), any("akuma/heart/schema.ts"), any("akuma/heart/rows.ts")] },
     { source: "akuma/provider.ts", allow: [types("akuma/heart/index.ts")] },
     { source: "akuma/providers/index.ts", allow: [types("akuma/provider.ts"), any("akuma/providers/claude.ts"), any("akuma/providers/codex-app-server.ts")] },
     { source: "akuma/providers/**", allow: [any("akuma/provider.ts"), any("runtime/proc/line-rpc.ts")] },
@@ -240,6 +241,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("core/facts/types.ts"),
       ],
     },
+    { source: "runtime/proc/line-rpc.ts", allow: [any("runtime/proc/run.ts")] },
     { source: "runtime/proc/**", allow: [] },
     {
       source: "verification/declaration.ts",
@@ -424,6 +426,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { module: "node:sqlite", owners: [
       { source: "coordination/sqlite-transaction-lock.ts", symbols: ["DatabaseSync"] },
       { source: "akuma/heart/index.ts", symbols: ["DatabaseSync"] },
+      { source: "akuma/heart/schema.ts", symbols: ["DatabaseSync"], mode: "type-only" },
       { source: "akuma/heart/rows.ts", symbols: ["DatabaseSync"], mode: "type-only" },
     ] },
     { module: "crypto", owners: [] },
@@ -432,12 +435,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "akuma/heart/index.ts",
       pattern: /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/iu,
-      detail: "Heart fact SQL belongs to named single-statement mechanics in akuma/heart/rows.ts",
+      detail: "Heart SQL belongs to schema mechanics or named fact statements, never the transaction judge",
     },
     {
       source: "akuma/heart/index.ts",
       pattern: /\.prepare\s*\(/u,
-      detail: "Heart index owns adjudication and must execute fact statements through akuma/heart/rows.ts",
+      detail: "Heart index owns adjudication and must execute SQL through schema.ts or rows.ts",
     },
   ],
   forbiddenModules: [

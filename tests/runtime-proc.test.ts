@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
+import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
 import {
   probeProcessTree,
   putDownProcessTree,
@@ -113,6 +114,39 @@ test("runProcess timeout kills a detached descendant tree", async () => {
       } catch {
         // The asserted path has already reaped the descendant.
       }
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("LineRpcProcess close terminates its complete helper tree", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-tree-"));
+  const descendantFile = join(root, "descendant-pid");
+  const descendant = 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000);';
+  const parent = [
+    'const { writeFileSync } = require("node:fs");',
+    'const { spawn } = require("node:child_process");',
+    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore" });`,
+    `writeFileSync(${JSON.stringify(descendantFile)}, String(child.pid));`,
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
+  let descendantPid: number | undefined;
+  try {
+    const rpc = new LineRpcProcess({ argv: [process.execPath, "-e", parent], cwd: root });
+    const deadline = performance.now() + 2_000;
+    while (descendantPid === undefined) {
+      try { descendantPid = Number.parseInt(readFileSync(descendantFile, "utf8"), 10); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if (performance.now() >= deadline) throw new Error("line RPC descendant was not spawned");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+    await rpc.close();
+    await waitForExit(descendantPid);
+  } finally {
+    if (descendantPid !== undefined) {
+      try { process.kill(descendantPid, "SIGKILL"); } catch { /* already reaped */ }
     }
     rmSync(root, { recursive: true, force: true });
   }

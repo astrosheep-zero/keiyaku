@@ -102,10 +102,14 @@ function terminateWindowsTree(pid: number): Promise<void> {
   });
 }
 
-export async function terminateProcessTree(pid: number | undefined): Promise<void> {
+export async function terminateProcessTree(pid: number | undefined, force = false): Promise<void> {
   if (pid === undefined) return;
   if (process.platform === "win32") {
     await terminateWindowsTree(pid);
+    return;
+  }
+  if (force) {
+    try { process.kill(-pid, "SIGKILL"); } catch (error) { ignoreMissingProcess(error); }
     return;
   }
   try {

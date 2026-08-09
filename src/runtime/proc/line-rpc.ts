@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { terminateProcessTree } from "./run.js";
 
 type Pending = Readonly<{ resolve(value: unknown): void; reject(error: unknown): void }>;
 export type LineRpcNotification = Readonly<{ method: string; params?: Readonly<Record<string, unknown>> }>;
@@ -30,7 +31,9 @@ export class LineRpcProcess {
     this.child = spawn(input.argv[0], input.argv.slice(1), {
       cwd: input.cwd,
       env: input.env ?? process.env,
+      detached: true,
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
     this.child.stdout.setEncoding("utf8");
     this.child.stderr.setEncoding("utf8");
@@ -110,11 +113,7 @@ export class LineRpcProcess {
     this.closed = true;
     this.fail(new Error("line RPC process is closed"));
     this.child.stdin.end();
-    this.child.kill(force ? "SIGKILL" : "SIGTERM");
-    let timer: NodeJS.Timeout | undefined;
-    const grace = new Promise<"timeout">((resolve) => { timer = setTimeout(() => resolve("timeout"), 1_000); });
-    if (await Promise.race([this.exited.then(() => "exited" as const), grace]) === "timeout") this.child.kill("SIGKILL");
-    if (timer !== undefined) clearTimeout(timer);
+    await terminateProcessTree(this.child.pid, force);
     await this.exited;
   }
 }

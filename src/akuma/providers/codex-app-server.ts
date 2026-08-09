@@ -372,8 +372,10 @@ async function startCodex(executable: string, input: StartInput): Promise<Drive>
     if (state.settled) return;
     state.settled = true;
     events.end();
-    settle(result);
-    void server.close();
+    void server.close().then(
+      () => settle(result),
+      (error: unknown) => settle({ kind: "failed", diagnostic: `codex app-server cleanup failed: ${diagnostic(error)}` }),
+    );
   };
   server.onExit(({ code, signal, stderr }) => finish({
     kind: "failed",
