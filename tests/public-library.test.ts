@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -210,7 +210,7 @@ test("built CLI bin keeps its shebang and executes through an installed-style sy
   const linkDirectory = mkdtempSync(join(tmpdir(), "keiyaku-v4-bin-"));
   const link = join(linkDirectory, "keiyaku-v4");
   assert.equal(readFileSync(bin, "utf8").split("\n", 1)[0], "#!/usr/bin/env node");
-  chmodSync(bin, 0o755);
+  assert.notEqual(statSync(bin).mode & 0o111, 0, "build must make the CLI entry executable");
   symlinkSync(bin, link);
   const output = execFileSync(link, ["status", "--json"], { cwd: repository.path, encoding: "utf8" });
   assert.equal(JSON.parse(output).contracts.kind, "present");
