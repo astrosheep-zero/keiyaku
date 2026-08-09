@@ -44,7 +44,7 @@ and go; the heart stays.
 The dependency direction is fixed:
 
 ```text
-cli -> akuma -> {body, heart, identity, persona, publication, requests, providers(map), runtime/proc(collar)}
+cli -> akuma -> {body, heart, identity, persona, provider(codec), publication, requests, providers(map), runtime/proc(collar)}
 persona -> {identity, provider, providers(map)}
 body -> {heart, provider, providers, requests, runtime/proc}
 requests -> {heart, identity, persona, provider, publication}
