@@ -19,7 +19,7 @@ import {
   type BodyFact,
 } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
-import type { Drive, ProviderAdapter, TurnResult } from "./provider.js";
+import { encodeAgentEvent, type Drive, type ProviderAdapter, type TurnResult } from "./provider.js";
 import { providerNamed } from "./providers/index.js";
 import {
   BodyRequestPump,
@@ -180,7 +180,7 @@ async function consumeTurnDrive(
         admittedAt: at,
       });
     }
-    appendActivity(input.paths, { event, at });
+    appendActivity(input.paths, { event: encodeAgentEvent(event), at });
     if (!entered && input.tellId !== undefined) {
       entered = true;
       advanceTell(input.paths, input.tellId, "seen");

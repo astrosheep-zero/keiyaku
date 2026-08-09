@@ -139,6 +139,26 @@ test("architecture policy separates Heart schema, fact statements, and SQLite co
   assert.equal(rules(statementInJudge).filter((rule) => rule === "architecture/forbidden-source-pattern").length, 2);
 });
 
+test("architecture policy gives activity codec directions exact runtime owners", () => {
+  const provider = [
+    "export function encodeAgentEvent(): void {}",
+    "export function decodeAgentEvent(): void {}",
+  ].join("\n");
+  const accepted = check({
+    "akuma/provider.ts": provider,
+    "akuma/body.ts": 'import { encodeAgentEvent } from "./provider.js"; export const encode = encodeAgentEvent;',
+    "akuma/akuma.ts": 'import { decodeAgentEvent } from "./provider.js"; export const decode = decodeAgentEvent;',
+  });
+  assert.deepEqual(accepted, []);
+
+  const rejected = check({
+    "akuma/provider.ts": provider,
+    "akuma/body.ts": 'import { decodeAgentEvent } from "./provider.js"; export const decode = decodeAgentEvent;',
+    "akuma/akuma.ts": 'import { encodeAgentEvent } from "./provider.js"; export const encode = encodeAgentEvent;',
+  });
+  assert.equal(rules(rejected).filter((rule) => rule === "architecture/dependency-direction").length, 2);
+});
+
 test("architecture policy rejects dependency cycles including type-only cycles", () => {
   const diagnostics = check({
     "core/facts/a.ts": 'import type { B } from "./b.js"; export type A = B;',

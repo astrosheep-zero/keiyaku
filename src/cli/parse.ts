@@ -8,6 +8,7 @@ import {
 import {
   isAkumaAction,
   parseAkumaCommand,
+  renderAkumaRootRows,
   renderAkumaUsage,
   type AkumaAction,
   type ParsedAkumaCommand,
@@ -71,7 +72,7 @@ const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { json: "boolean" },
-    usage: "status [<contract>|@<contract>] [--json]",
+    usage: "status [<contract>|@<contract>|<aku/...>] [--json]",
     purpose: "Read the world status board or one Contract projection.",
   },
   audit: {
@@ -102,8 +103,7 @@ export function renderRootHelp(): string {
     ...Object.values(CONTRACT_COMMAND_SPECS).flatMap((spec) => [`  ${spec.usage}`, `    ${spec.purpose}`]),
     "  task ...",
     "    Task coordination; see `keiyaku-v4 task --help`.",
-    "  akuma ...",
-    "    Akuma lifecycle; see `keiyaku-v4 akuma --help`.",
+    ...renderAkumaRootRows(),
   ].join("\n");
 }
 
@@ -118,7 +118,7 @@ function contractUsage(command: Command): string {
 
 export function renderCommandUsage(command: ParsedCommand): string {
   if (command.command === "task") return renderTaskUsage(command.action);
-  if (command.command === "akuma") return renderAkumaUsage(command.action);
+  if (isAkumaAction(command.command)) return renderAkumaUsage(command.command);
   return contractUsage(command.command);
 }
 
@@ -160,7 +160,10 @@ export type ParsedAbandon = Output & Actor & Readonly<{
   contract?: string;
   note?: string;
 }>;
-type ParsedStatus = Output & Readonly<{ command: "status"; contract?: string }>;
+type ParsedStatus = Output & (
+  | Readonly<{ command: "status"; contract?: string; akuma?: never }>
+  | Readonly<{ command: "status"; contract: string; akuma: true }>
+);
 export type ParsedAudit = Output & Readonly<{
   command: "audit";
   contract?: string;
@@ -186,7 +189,7 @@ export type CliHelpCoordinate =
   | Readonly<{ kind: "root" }>
   | Readonly<{ kind: "contract"; command: Command }>
   | Readonly<{ kind: "task"; action?: TaskAction }>
-  | Readonly<{ kind: "akuma"; action?: AkumaAction }>;
+  | Readonly<{ kind: "akuma"; action: AkumaAction }>;
 
 export type ParsedExecution = Readonly<{ cwd?: string; command: ParsedCommand }>;
 export type ParsedInvocation = ParsedExecution | Readonly<{ help: CliHelpCoordinate }>;
@@ -367,6 +370,14 @@ function parseAbandon(parts: ParsedParts): ParsedAbandon {
 
 function parseStatus(parts: ParsedParts): ParsedStatus {
   const contract = parts.positionals[0];
+  if (contract?.startsWith("aku/") === true) {
+    return {
+      command: "status",
+      contract,
+      akuma: true,
+      output: parts.output,
+    };
+  }
   return {
     command: "status",
     ...(contract === undefined ? {} : { contract }),
@@ -390,10 +401,7 @@ function helpCoordinate(argv: readonly string[]): CliHelpCoordinate | null {
     const action = isTaskAction(words[1]) ? words[1] : undefined;
     return { kind: "task", ...(action === undefined ? {} : { action }) };
   }
-  if (root === "akuma") {
-    const action = isAkumaAction(words[1]) ? words[1] : undefined;
-    return { kind: "akuma", ...(action === undefined ? {} : { action }) };
-  }
+  if (isAkumaAction(root)) return { kind: "akuma", action: root };
   if (root !== undefined && Object.hasOwn(CONTRACT_COMMAND_SPECS, root)) {
     return { kind: "contract", command: root as Command };
   }
@@ -433,8 +441,8 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const task = invocation.commandArgv[0] === "task"
     ? parseTaskCommand(invocation.commandArgv.slice(1))
     : undefined;
-  const akuma = invocation.commandArgv[0] === "akuma"
-    ? parseAkumaCommand(invocation.commandArgv.slice(1))
+  const akuma = isAkumaAction(invocation.commandArgv[0])
+    ? parseAkumaCommand(invocation.commandArgv)
     : undefined;
   return {
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),

@@ -1,12 +1,14 @@
 import { LineRpcProcess, type LineRpcNotification } from "../../runtime/proc/line-rpc.js";
 import {
-  actionEvent,
   AgentEventChannel,
   AKUMA_REQUESTS_ENV,
+  boundedEventText,
+  noteEvent,
   unknownEvent,
   type Drive,
   type ProviderAdapter,
   type ProviderOptions,
+  type ToolCall,
   type TurnResult,
 } from "../provider.js";
 
@@ -19,10 +21,11 @@ type TurnState = {
   answers: string[];
   error?: string;
   settled: boolean;
+  tools: Map<string, Readonly<{ name: string; call: ToolCall }>>;
 };
 
-type NotificationDisposition = "action" | "drop" | "error" | "item-completed" | "item-started" | "plan" | "terminal";
-type ItemDisposition = "action" | "assistant" | "drop" | "plan";
+type NotificationDisposition = "note" | "drop" | "error" | "item-completed" | "item-started" | "plan" | "terminal";
+type ItemDisposition = "tool" | "note" | "assistant" | "drop" | "plan";
 
 export const CODEX_NOTIFICATION_DISPOSITIONS = {
   "account/login/completed": "drop",
@@ -30,20 +33,20 @@ export const CODEX_NOTIFICATION_DISPOSITIONS = {
   "account/updated": "drop",
   "app/list/updated": "drop",
   "command/exec/outputDelta": "drop",
-  configWarning: "action",
-  deprecationNotice: "action",
+  configWarning: "note",
+  deprecationNotice: "note",
   error: "error",
-  "externalAgentConfig/import/completed": "action",
-  "externalAgentConfig/import/progress": "action",
-  "fs/changed": "action",
+  "externalAgentConfig/import/completed": "note",
+  "externalAgentConfig/import/progress": "note",
+  "fs/changed": "note",
   "fuzzyFileSearch/sessionCompleted": "drop",
   "fuzzyFileSearch/sessionUpdated": "drop",
-  guardianWarning: "action",
+  guardianWarning: "note",
   "hook/completed": "drop",
-  "hook/started": "action",
+  "hook/started": "note",
   "item/agentMessage/delta": "drop",
-  "item/autoApprovalReview/completed": "action",
-  "item/autoApprovalReview/started": "action",
+  "item/autoApprovalReview/completed": "note",
+  "item/autoApprovalReview/started": "note",
   "item/commandExecution/outputDelta": "drop",
   "item/commandExecution/terminalInteraction": "drop",
   "item/completed": "item-completed",
@@ -57,7 +60,7 @@ export const CODEX_NOTIFICATION_DISPOSITIONS = {
   "item/started": "item-started",
   "mcpServer/oauthLogin/completed": "drop",
   "mcpServer/startupStatus/updated": "drop",
-  "model/rerouted": "action",
+  "model/rerouted": "note",
   "model/safetyBuffering/updated": "drop",
   "model/verification": "drop",
   "process/exited": "drop",
@@ -73,11 +76,11 @@ export const CODEX_NOTIFICATION_DISPOSITIONS = {
   "thread/deleted": "drop",
   "thread/environment/connected": "drop",
   "thread/environment/disconnected": "drop",
-  "thread/goal/cleared": "action",
-  "thread/goal/updated": "action",
+  "thread/goal/cleared": "note",
+  "thread/goal/updated": "note",
   "thread/name/updated": "drop",
   "thread/realtime/closed": "drop",
-  "thread/realtime/error": "action",
+  "thread/realtime/error": "note",
   "thread/realtime/itemAdded": "drop",
   "thread/realtime/outputAudio/delta": "drop",
   "thread/realtime/sdp": "drop",
@@ -91,33 +94,33 @@ export const CODEX_NOTIFICATION_DISPOSITIONS = {
   "thread/unarchived": "drop",
   "turn/completed": "terminal",
   "turn/diff/updated": "drop",
-  "turn/moderationMetadata": "action",
+  "turn/moderationMetadata": "note",
   "turn/plan/updated": "plan",
   "turn/started": "drop",
-  warning: "action",
-  "windows/worldWritableWarning": "action",
-  "windowsSandbox/setupCompleted": "action",
+  warning: "note",
+  "windows/worldWritableWarning": "note",
+  "windowsSandbox/setupCompleted": "note",
 } as const satisfies Readonly<Record<string, NotificationDisposition>>;
 
 export const CODEX_ITEM_DISPOSITIONS = {
   agentMessage: "assistant",
-  collabAgentToolCall: "action",
-  commandExecution: "action",
+  collabAgentToolCall: "tool",
+  commandExecution: "tool",
   contextCompaction: "drop",
-  dynamicToolCall: "action",
-  enteredReviewMode: "action",
-  exitedReviewMode: "action",
-  fileChange: "action",
+  dynamicToolCall: "tool",
+  enteredReviewMode: "note",
+  exitedReviewMode: "note",
+  fileChange: "tool",
   hookPrompt: "drop",
-  imageGeneration: "action",
-  imageView: "action",
-  mcpToolCall: "action",
+  imageGeneration: "tool",
+  imageView: "tool",
+  mcpToolCall: "tool",
   plan: "plan",
   reasoning: "drop",
-  sleep: "action",
-  subAgentActivity: "action",
+  sleep: "note",
+  subAgentActivity: "note",
   userMessage: "drop",
-  webSearch: "action",
+  webSearch: "tool",
 } as const satisfies Readonly<Record<string, ItemDisposition>>;
 
 function diagnostic(error: unknown): string {
@@ -142,22 +145,62 @@ function turnError(value: unknown): string | undefined {
   return details === undefined || details === message ? message : `${message}: ${details}`;
 }
 
-function itemAction(item: Readonly<Record<string, unknown>>, kind: string): string {
+function itemNote(item: Readonly<Record<string, unknown>>, kind: string): string {
   switch (kind) {
-    case "collabAgentToolCall": return `Agent tool ${text(item.tool) ?? "unknown"}`;
-    case "commandExecution": return `Command ${text(item.command) ?? "started"}`;
-    case "dynamicToolCall": return `Tool ${text(item.namespace) === undefined ? "" : `${text(item.namespace)}/`}${text(item.tool) ?? "unknown"}`;
     case "enteredReviewMode": return "Entered review mode";
     case "exitedReviewMode": return "Exited review mode";
-    case "fileChange": return "File change";
-    case "imageGeneration": return "Image generation";
-    case "imageView": return `Image view${text(item.path) === undefined ? "" : `: ${text(item.path)}`}`;
-    case "mcpToolCall": return `Tool ${text(item.server) ?? "unknown"}/${text(item.tool) ?? "unknown"}`;
     case "sleep": return "Waiting";
     case "subAgentActivity": return `Agent activity: ${text(item.kind) ?? "updated"}`;
-    case "webSearch": return "Web search";
     default: return kind;
   }
+}
+
+function itemToolName(item: Readonly<Record<string, unknown>>, kind: string): string {
+  if (kind === "mcpToolCall") return `${text(item.server) ?? "unknown"}/${text(item.tool) ?? "unknown"}`;
+  if (kind === "dynamicToolCall") {
+    const namespace = text(item.namespace);
+    return `${namespace === undefined ? "" : `${namespace}/`}${text(item.tool) ?? "unknown"}`;
+  }
+  return text(item.tool) ?? kind;
+}
+
+function itemPaths(item: Readonly<Record<string, unknown>>): readonly string[] {
+  if (!Array.isArray(item.changes)) {
+    const path = text(item.path);
+    return path === undefined ? [] : [boundedEventText(path)];
+  }
+  return item.changes.flatMap((change) => {
+    const path = text(object(change)?.path);
+    return path === undefined ? [] : [boundedEventText(path)];
+  });
+}
+
+function itemToolCall(item: Readonly<Record<string, unknown>>, kind: string): ToolCall {
+  if (kind === "commandExecution") {
+    return { kind: "run", command: boundedEventText(text(item.command) ?? "command") };
+  }
+  if (kind === "imageView") {
+    const path = text(item.path);
+    return path === undefined ? { kind: "other", display: "image view" } : { kind: "read", path: boundedEventText(path) };
+  }
+  if (kind === "webSearch") {
+    return { kind: "search", query: boundedEventText(text(item.query) ?? "web search") };
+  }
+  if (kind === "fileChange") return { kind: "fileChange", paths: itemPaths(item) };
+  return { kind: "other", display: boundedEventText(itemToolName(item, kind)) };
+}
+
+function itemToolResult(item: Readonly<Record<string, unknown>>): Readonly<{ status: "ok" | "error"; message?: string }> {
+  const error = object(item.error);
+  const status = text(item.status);
+  const failed = error !== undefined || status === "failed" || status === "error";
+  const detail = text(error?.message) ?? text(error?.additionalDetails);
+  const exitCode = typeof item.exitCode === "number" && Number.isFinite(item.exitCode) ? item.exitCode : undefined;
+  const message = detail ?? (exitCode !== undefined && exitCode !== 0 ? `exit ${exitCode}` : undefined);
+  return {
+    status: failed || (exitCode !== undefined && exitCode !== 0) ? "error" : "ok",
+    ...(message === undefined ? {} : { message: boundedEventText(message) }),
+  };
 }
 
 function emitItem(item: Readonly<Record<string, unknown>>, completed: boolean, events: AgentEventChannel, state: TurnState): void {
@@ -177,10 +220,28 @@ function emitItem(item: Readonly<Record<string, unknown>>, completed: boolean, e
     return;
   }
   if (disposition === "plan") {
-    if (completed) events.emit(actionEvent(`Plan updated: ${text(item.text) ?? "updated"}`));
+    if (completed) events.emit(noteEvent(`Plan updated: ${text(item.text) ?? "updated"}`));
     return;
   }
-  if (disposition === "action" && !completed) events.emit(actionEvent(itemAction(item, kind)));
+  if (disposition === "note") {
+    if (!completed) events.emit(noteEvent(itemNote(item, kind)));
+    return;
+  }
+  if (disposition !== "tool") return;
+  const id = text(item.id);
+  if (id === undefined) {
+    events.emit(unknownEvent(`${kind}/missing-id`));
+    return;
+  }
+  if (!completed) {
+    const observed = { name: itemToolName(item, kind), call: itemToolCall(item, kind) };
+    state.tools.set(id, observed);
+    events.emit({ type: "tool", phase: "started", id, ...observed });
+    return;
+  }
+  const observed = state.tools.get(id) ?? { name: itemToolName(item, kind), call: itemToolCall(item, kind) };
+  state.tools.delete(id);
+  events.emit({ type: "tool", phase: "completed", id, ...observed, result: itemToolResult(item) });
 }
 
 function notificationAction(method: string, params: Readonly<Record<string, unknown>>): string {
@@ -210,7 +271,7 @@ function notificationAction(method: string, params: Readonly<Record<string, unkn
 function observeError(params: Readonly<Record<string, unknown>>, state: TurnState, events: AgentEventChannel): void {
   const detail = turnError(params.error) ?? text(params.message) ?? "codex app-server error";
   state.error = detail;
-  events.emit(actionEvent(params.willRetry === true ? `Retrying after error: ${detail}` : `Error: ${detail}`));
+  events.emit(noteEvent(params.willRetry === true ? `Retrying after error: ${detail}` : `Error: ${detail}`));
 }
 
 function terminalResult(params: Readonly<Record<string, unknown>>, state: TurnState): TurnResult {
@@ -274,13 +335,13 @@ function notificationResult(
   const params = object(notification.params) ?? {};
   switch (disposition) {
     case "drop": return undefined;
-    case "action":
-      events.emit(actionEvent(notificationAction(method, params)));
+    case "note":
+      events.emit(noteEvent(notificationAction(method, params)));
       return undefined;
     case "plan": {
       const explanation = text(params.explanation);
       const steps = Array.isArray(params.plan) ? params.plan.length : 0;
-      events.emit(actionEvent(`Plan updated: ${explanation ?? `${steps} steps`}`));
+      events.emit(noteEvent(`Plan updated: ${explanation ?? `${steps} steps`}`));
       return undefined;
     }
     case "item-started":
@@ -365,7 +426,7 @@ async function startCodex(executable: string, input: StartInput): Promise<Drive>
       env: { ...process.env, [AKUMA_REQUESTS_ENV]: input.requests.dir },
     }),
   });
-  const state: TurnState = { answers: [], settled: false };
+  const state: TurnState = { answers: [], settled: false, tools: new Map() };
   let settle!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
   const finish: Finish = (result) => {

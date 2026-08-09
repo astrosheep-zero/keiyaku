@@ -7,6 +7,7 @@ import {
   activityAfter,
   life,
   probeLeash,
+  readCurrentTurn,
   readHeart,
   readHistory,
   readForkPoint,
@@ -36,7 +37,7 @@ import {
   type AkumaPaths,
 } from "./identity.js";
 import type { AkuId } from "./heart/index.js";
-import type { AgentEvent } from "./provider.js";
+import { decodeAgentEvent, type AgentEvent, type ToolCall, type ToolResult } from "./provider.js";
 import { loadPersona } from "./persona.js";
 import { publishAkuma } from "./publication.js";
 import { providerNamed } from "./providers/index.js";
@@ -60,7 +61,17 @@ export type AkumaListRow = Readonly<{
 export type AkumaStatus = AkumaListRow & Readonly<{
   answer?: string;
   failure?: string;
-  history: readonly TurnFact[];
+  activity: ActivitySnapshot;
+}>;
+
+export type ActivityRow =
+  | Readonly<{ kind: "said"; text: string }>
+  | Readonly<{ kind: "tool"; name: string; call: ToolCall; state: "running" | ToolResult }>
+  | Readonly<{ kind: "note"; text: string }>;
+
+export type ActivitySnapshot = Readonly<{
+  rows: readonly ActivityRow[];
+  omitted: number;
 }>;
 
 export type UnbornAkumaListRow = Readonly<{
@@ -111,7 +122,6 @@ export class AkumaNotBornError extends Error {
     this.name = "AkumaNotBornError";
   }
 }
-
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -173,27 +183,69 @@ function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
   const snapshot = readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const current = bornListRow(paths, expected, snapshot);
-  const history = readHistory(paths);
-  const latest = history.at(-1)?.outcome;
+  const latest = readCurrentTurn(paths)?.outcome;
   return {
     ...current,
     ...(latest?.kind === "answered" ? { answer: latest.answer } : {}),
     ...(latest?.kind === "failed" ? { failure: latest.diagnostic } : {}),
-    history,
+    activity: activitySnapshot(activityAfter(paths, 0)),
   };
 }
 
-function eventFrom(value: unknown): AgentEvent {
-  if (value === null || typeof value !== "object") throw new Error("Akuma activity is not an event object");
-  const event = value as { type?: unknown; coordinate?: unknown; text?: unknown; note?: unknown; kind?: unknown };
-  if (event.type === "assistant" && typeof event.text === "string") return { type: "assistant", text: event.text };
-  if (event.type === "action" && typeof event.note === "string") return { type: "action", note: event.note };
-  if (event.type === "unknown" && typeof event.kind === "string") return { type: "unknown", kind: event.kind };
-  if (event.type === "session" && event.coordinate !== null && typeof event.coordinate === "object") {
-    const sessionId = (event.coordinate as { sessionId?: unknown }).sessionId;
-    if (typeof sessionId === "string") return { type: "session", coordinate: { sessionId } };
+type OrderedActivityRow = Readonly<{ order: number; row: ActivityRow; settled: boolean }>;
+export function foldActivitySnapshot(
+  retained: readonly Readonly<{ sequence: number; event: unknown }>[],
+): ActivitySnapshot {
+  const rows: OrderedActivityRow[] = [];
+  const running = new Map<string, number>();
+  for (const retainedEvent of retained) {
+    const event = decodeAgentEvent(retainedEvent.event);
+    if (event.type === "assistant") {
+      rows.push({ order: retainedEvent.sequence, row: { kind: "said", text: event.text }, settled: true });
+      continue;
+    }
+    if (event.type === "note") {
+      rows.push({ order: retainedEvent.sequence, row: { kind: "note", text: event.text }, settled: true });
+      continue;
+    }
+    if (event.type !== "tool") continue;
+    if (event.phase === "started") {
+      const index = rows.length;
+      rows.push({
+        order: retainedEvent.sequence,
+        row: { kind: "tool", name: event.name, call: event.call, state: "running" },
+        settled: false,
+      });
+      running.set(event.id, index);
+      continue;
+    }
+    const index = running.get(event.id);
+    if (index === undefined) {
+      rows.push({
+        order: retainedEvent.sequence,
+        row: { kind: "tool", name: event.name, call: event.call, state: event.result },
+        settled: true,
+      });
+      continue;
+    }
+    const started = rows[index]!;
+    rows[index] = {
+      order: started.order,
+      row: { kind: "tool", name: event.name, call: event.call, state: event.result },
+      settled: true,
+    };
+    running.delete(event.id);
   }
-  throw new Error("Akuma activity has an invalid event shape");
+  const settled = rows.filter((row) => row.settled);
+  const selectedSettled = new Set(settled.slice(-8));
+  return {
+    rows: rows.filter((row) => !row.settled || selectedSettled.has(row)).map((row) => row.row),
+    omitted: settled.length - selectedSettled.size,
+  };
+}
+
+function activitySnapshot(retained: ReturnType<typeof activityAfter>): ActivitySnapshot {
+  return foldActivitySnapshot(retained);
 }
 
 function diagnostic(error: unknown): string {
@@ -211,24 +263,36 @@ export class AkumaHandle {
     return bornStatus(this.paths, this.id);
   }
 
+  history(): readonly TurnFact[] {
+    return readHistory(this.paths);
+  }
+
   async *follow(): AsyncIterable<AgentEvent> {
     let sequence = 0;
     for (;;) {
       const rows = activityAfter(this.paths, sequence);
       for (const row of rows) {
         sequence = row.sequence;
-        yield eventFrom(row.event);
+        yield decodeAgentEvent(row.event);
       }
       if (bornListRow(this.paths, this.id).life !== "running" && activityAfter(this.paths, sequence).length === 0) return;
       await wait(POLL_MS);
     }
   }
 
-  async wait(predicate: (status: AkumaStatus) => boolean = (status) => status.life !== "running"): Promise<AkumaStatus> {
+  async wait(
+    predicate: (status: AkumaStatus) => boolean = (status) => status.life !== "running",
+    options: Readonly<{ deadline?: number }> = {},
+  ): Promise<AkumaStatus> {
+    if (options.deadline !== undefined
+      && (!Number.isFinite(options.deadline) || options.deadline < 0)) {
+      throw new TypeError("Akuma wait deadline must be a nonnegative finite millisecond duration");
+    }
+    const deadline = options.deadline === undefined ? undefined : performance.now() + options.deadline;
     for (;;) {
       const status = this.status();
-      if (predicate(status)) return status;
-      await wait(POLL_MS);
+      if (predicate(status) || (deadline !== undefined && performance.now() >= deadline)) return status;
+      await wait(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
     }
   }
 

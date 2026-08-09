@@ -5,12 +5,14 @@ export type {
   AkumaList,
   AkumaListRow,
   AkumaStatus,
+  ActivityRow,
+  ActivitySnapshot,
   ForkReceipt,
   InterruptReceipt,
   TellReceipt,
   UnbornAkumaListRow,
 } from "./akuma.js";
-export type { AgentEvent } from "./provider.js";
+export type { AgentEvent, ToolCall, ToolEvent, ToolResult } from "./provider.js";
 export type {
   AkuId,
   Confinement,

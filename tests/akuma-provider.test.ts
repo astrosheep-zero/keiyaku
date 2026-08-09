@@ -5,6 +5,11 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
+  decodeAgentEvent,
+  encodeAgentEvent,
+  type AgentEvent,
+} from "../src/akuma/provider.js";
+import {
   CLAUDE_MESSAGE_DISPOSITIONS,
   CLAUDE_SYSTEM_DISPOSITIONS,
   createClaudeProvider,
@@ -14,6 +19,29 @@ import {
   CODEX_NOTIFICATION_DISPOSITIONS,
   createCodexAppServerProvider,
 } from "../src/akuma/providers/codex-app-server.js";
+
+test("provider activity codec round trips every closed event and tool-call arm", () => {
+  const events: readonly AgentEvent[] = [
+    { type: "session", coordinate: { sessionId: "native-1" } },
+    { type: "assistant", text: "complete answer" },
+    { type: "note", text: "Retrying" },
+    { type: "unknown", kind: "future/event" },
+    { type: "tool", phase: "started", id: "run", name: "Bash", call: { kind: "run", command: "npm test" } },
+    { type: "tool", phase: "completed", id: "read", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } },
+    { type: "tool", phase: "started", id: "search", name: "Search", call: { kind: "search", query: "TODO" } },
+    { type: "tool", phase: "completed", id: "change", name: "Edit", call: { kind: "fileChange", paths: ["src/a.ts"] }, result: { status: "ok" } },
+    { type: "tool", phase: "started", id: "other", name: "MCP", call: { kind: "other", display: "server/tool" } },
+  ];
+  for (const event of events) assert.deepEqual(decodeAgentEvent(encodeAgentEvent(event)), event);
+  assert.throws(
+    () => decodeAgentEvent({ type: "tool", phase: "completed", id: "bad", name: "Bash", call: { kind: "run", command: "x" } }),
+    /invalid event shape/u,
+  );
+  assert.throws(
+    () => decodeAgentEvent({ type: "tool", phase: "started", id: "bad", name: "Bash", call: { kind: "run", command: "x" }, result: { status: "ok" } }),
+    /invalid event shape/u,
+  );
+});
 
 function fakeCodex(
   root: string,
@@ -51,6 +79,7 @@ function fakeCodex(
     "    if(mode==='observations'){",
     "      send({method:'item/started',params:{item:{id:'command-1',type:'commandExecution',command:'npm test'}}});",
     "      send({method:'item/commandExecution/outputDelta',params:{delta:'secret output'}});",
+    "      send({method:'item/completed',params:{item:{id:'command-1',type:'commandExecution',command:'npm test',status:'completed',exitCode:0,aggregatedOutput:'secret output'}}});",
     "      send({method:'turn/plan/updated',params:{explanation:'Verify the adapter',plan:[{step:'test'}]}});",
     "      send({method:'error',params:{error:{message:'temporary outage',additionalDetails:null},willRetry:true}});",
     "      send({method:'item/completed',params:{item:{id:'answer-1',type:'agentMessage',text:'first answer'}}});",
@@ -95,7 +124,7 @@ test("Claude observation dispositions are closed over the installed SDK union", 
   assert.deepEqual(CLAUDE_MESSAGE_DISPOSITIONS, {
     assistant: "assistant",
     auth_status: "auth",
-    conversation_reset: "action",
+    conversation_reset: "note",
     prompt_suggestion: "drop",
     rate_limit_event: "drop",
     result: "terminal",
@@ -103,37 +132,37 @@ test("Claude observation dispositions are closed over the installed SDK union", 
     system: "system",
     tool_progress: "drop",
     tool_use_summary: "drop",
-    user: "drop",
+    user: "tool-results",
   });
   assert.deepEqual(CLAUDE_SYSTEM_DISPOSITIONS, {
-    api_retry: "action",
-    background_tasks_changed: "action",
+    api_retry: "note",
+    background_tasks_changed: "note",
     commands_changed: "drop",
     compact_boundary: "drop",
     control_request_progress: "control-progress",
     elicitation_complete: "drop",
-    files_persisted: "action",
+    files_persisted: "note",
     hook_progress: "drop",
     hook_response: "drop",
-    hook_started: "action",
-    informational: "action",
+    hook_started: "note",
+    informational: "note",
     init: "drop",
     local_command_output: "drop",
     memory_recall: "drop",
-    mirror_error: "action",
-    model_refusal_fallback: "action",
-    model_refusal_no_fallback: "action",
-    notification: "action",
-    permission_denied: "action",
-    plugin_install: "action",
+    mirror_error: "note",
+    model_refusal_fallback: "note",
+    model_refusal_no_fallback: "note",
+    notification: "note",
+    permission_denied: "note",
+    plugin_install: "note",
     session_state_changed: "drop",
-    status: "action",
-    task_notification: "action",
-    task_progress: "action",
-    task_started: "action",
-    task_updated: "action",
+    status: "note",
+    task_notification: "note",
+    task_progress: "note",
+    task_started: "note",
+    task_updated: "note",
     thinking_tokens: "drop",
-    worker_shutting_down: "action",
+    worker_shutting_down: "note",
   });
 });
 
@@ -153,6 +182,12 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
             { type: "tool_use", id: "tool-1", name: "Bash", input: { command: "secret" } },
           ] },
         } as unknown as SDKMessage,
+        {
+          type: "user",
+          session_id: "session-events",
+          parent_tool_use_id: null,
+          message: { content: [{ type: "tool_result", tool_use_id: "tool-1", content: "secret result body" }] },
+        } as unknown as SDKMessage,
         { type: "stream_event", event: { delta: { text: "partial" } }, session_id: "session-events" } as unknown as SDKMessage,
         { type: "rate_limit_event", rate_limit_info: { used: 1 }, session_id: "session-events" } as unknown as SDKMessage,
         { type: "system", subtype: "api_retry", attempt: 2, max_retries: 4, session_id: "session-events" } as unknown as SDKMessage,
@@ -167,21 +202,23 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
   const events = [];
   for await (const event of drive.events) events.push(event);
 
-  assert.deepEqual(events.slice(0, 4), [
+  assert.deepEqual(events.slice(0, 5), [
     { type: "session", coordinate: { sessionId: "session-events" } },
     { type: "assistant", text: "working" },
-    { type: "action", note: "Tool Bash" },
-    { type: "action", note: "Retrying request 2/4" },
+    { type: "tool", phase: "started", id: "tool-1", name: "Bash", call: { kind: "run", command: "secret" } },
+    { type: "tool", phase: "completed", id: "tool-1", name: "Bash", call: { kind: "run", command: "secret" }, result: { status: "ok" } },
+    { type: "note", text: "Retrying request 2/4" },
   ]);
-  assert.equal(events[4]?.type, "action");
-  if (events[4]?.type === "action") {
-    assert.equal(events[4].note.length, 200);
-    assert.equal(events[4].note.includes("\n"), false);
+  assert.equal(events[5]?.type, "note");
+  if (events[5]?.type === "note") {
+    assert.equal(events[5].text.length, 200);
+    assert.equal(events[5].text.includes("\n"), false);
   }
-  assert.deepEqual(events.slice(5), [
+  assert.deepEqual(events.slice(6), [
     { type: "unknown", kind: "future_type" },
     { type: "unknown", kind: "future_subtype" },
   ]);
+  assert.equal(JSON.stringify(events).includes("secret result body"), false);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "assistant-events" });
 });
 
@@ -437,20 +474,20 @@ test("Codex observation dispositions pin every currently known method and item",
     "account/updated": "drop",
     "app/list/updated": "drop",
     "command/exec/outputDelta": "drop",
-    configWarning: "action",
-    deprecationNotice: "action",
+    configWarning: "note",
+    deprecationNotice: "note",
     error: "error",
-    "externalAgentConfig/import/completed": "action",
-    "externalAgentConfig/import/progress": "action",
-    "fs/changed": "action",
+    "externalAgentConfig/import/completed": "note",
+    "externalAgentConfig/import/progress": "note",
+    "fs/changed": "note",
     "fuzzyFileSearch/sessionCompleted": "drop",
     "fuzzyFileSearch/sessionUpdated": "drop",
-    guardianWarning: "action",
+    guardianWarning: "note",
     "hook/completed": "drop",
-    "hook/started": "action",
+    "hook/started": "note",
     "item/agentMessage/delta": "drop",
-    "item/autoApprovalReview/completed": "action",
-    "item/autoApprovalReview/started": "action",
+    "item/autoApprovalReview/completed": "note",
+    "item/autoApprovalReview/started": "note",
     "item/commandExecution/outputDelta": "drop",
     "item/commandExecution/terminalInteraction": "drop",
     "item/completed": "item-completed",
@@ -464,7 +501,7 @@ test("Codex observation dispositions pin every currently known method and item",
     "item/started": "item-started",
     "mcpServer/oauthLogin/completed": "drop",
     "mcpServer/startupStatus/updated": "drop",
-    "model/rerouted": "action",
+    "model/rerouted": "note",
     "model/safetyBuffering/updated": "drop",
     "model/verification": "drop",
     "process/exited": "drop",
@@ -480,11 +517,11 @@ test("Codex observation dispositions pin every currently known method and item",
     "thread/deleted": "drop",
     "thread/environment/connected": "drop",
     "thread/environment/disconnected": "drop",
-    "thread/goal/cleared": "action",
-    "thread/goal/updated": "action",
+    "thread/goal/cleared": "note",
+    "thread/goal/updated": "note",
     "thread/name/updated": "drop",
     "thread/realtime/closed": "drop",
-    "thread/realtime/error": "action",
+    "thread/realtime/error": "note",
     "thread/realtime/itemAdded": "drop",
     "thread/realtime/outputAudio/delta": "drop",
     "thread/realtime/sdp": "drop",
@@ -498,32 +535,32 @@ test("Codex observation dispositions pin every currently known method and item",
     "thread/unarchived": "drop",
     "turn/completed": "terminal",
     "turn/diff/updated": "drop",
-    "turn/moderationMetadata": "action",
+    "turn/moderationMetadata": "note",
     "turn/plan/updated": "plan",
     "turn/started": "drop",
-    warning: "action",
-    "windows/worldWritableWarning": "action",
-    "windowsSandbox/setupCompleted": "action",
+    warning: "note",
+    "windows/worldWritableWarning": "note",
+    "windowsSandbox/setupCompleted": "note",
   });
   assert.deepEqual(CODEX_ITEM_DISPOSITIONS, {
     agentMessage: "assistant",
-    collabAgentToolCall: "action",
-    commandExecution: "action",
+    collabAgentToolCall: "tool",
+    commandExecution: "tool",
     contextCompaction: "drop",
-    dynamicToolCall: "action",
-    enteredReviewMode: "action",
-    exitedReviewMode: "action",
-    fileChange: "action",
+    dynamicToolCall: "tool",
+    enteredReviewMode: "note",
+    exitedReviewMode: "note",
+    fileChange: "tool",
     hookPrompt: "drop",
-    imageGeneration: "action",
-    imageView: "action",
-    mcpToolCall: "action",
+    imageGeneration: "tool",
+    imageView: "tool",
+    mcpToolCall: "tool",
     plan: "plan",
     reasoning: "drop",
-    sleep: "action",
-    subAgentActivity: "action",
+    sleep: "note",
+    subAgentActivity: "note",
     userMessage: "drop",
-    webSearch: "action",
+    webSearch: "tool",
   });
 });
 
@@ -591,9 +628,10 @@ test("Codex maps observations without leaking output or unknown payloads", async
 
     assert.deepEqual(events, [
       { type: "session", coordinate: { sessionId: "thread-fresh" } },
-      { type: "action", note: "Command npm test" },
-      { type: "action", note: "Plan updated: Verify the adapter" },
-      { type: "action", note: "Retrying after error: temporary outage" },
+      { type: "tool", phase: "started", id: "command-1", name: "commandExecution", call: { kind: "run", command: "npm test" } },
+      { type: "tool", phase: "completed", id: "command-1", name: "commandExecution", call: { kind: "run", command: "npm test" }, result: { status: "ok" } },
+      { type: "note", text: "Plan updated: Verify the adapter" },
+      { type: "note", text: "Retrying after error: temporary outage" },
       { type: "assistant", text: "first answer" },
       { type: "unknown", kind: "future/native-event" },
       { type: "assistant", text: "second answer" },

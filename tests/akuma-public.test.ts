@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { Akuma, AkumaNotBornError } from "../src/akuma/index.js";
+import { Akuma, AkumaNotBornError, foldActivitySnapshot } from "../src/akuma/akuma.js";
 import { AkumaPersonaError, loadPersona } from "../src/akuma/persona.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
@@ -63,6 +63,55 @@ async function answeredSource(root: string, suffix: string) {
 }
 
 type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapter[Key] };
+
+test("activity fold pairs tools and bounds settled rows without dropping in-flight tools", () => {
+  assert.deepEqual(foldActivitySnapshot([
+    { sequence: 1, event: { type: "tool", phase: "started", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" } } },
+    { sequence: 2, event: { type: "note", text: "checking" } },
+    { sequence: 3, event: { type: "tool", phase: "completed", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" }, result: { status: "ok" } } },
+    { sequence: 4, event: { type: "tool", phase: "completed", id: "orphan", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } } },
+    { sequence: 5, event: { type: "tool", phase: "started", id: "open", name: "Search", call: { kind: "search", query: "TODO" } } },
+  ]), {
+    rows: [
+      { kind: "tool", name: "Bash", call: { kind: "run", command: "npm test" }, state: { status: "ok" } },
+      { kind: "note", text: "checking" },
+      { kind: "tool", name: "Read", call: { kind: "read", path: "README.md" }, state: { status: "error", message: "missing" } },
+      { kind: "tool", name: "Search", call: { kind: "search", query: "TODO" }, state: "running" },
+    ],
+    omitted: 0,
+  });
+
+  const bounded = foldActivitySnapshot([
+    { sequence: 1, event: { type: "tool", phase: "started", id: "open", name: "Bash", call: { kind: "run", command: "long" } } },
+    ...Array.from({ length: 10 }, (_, index) => ({
+      sequence: index + 2,
+      event: { type: "note", text: `note-${index + 1}` },
+    })),
+  ]);
+  assert.equal(bounded.omitted, 2);
+  assert.deepEqual(bounded.rows, [
+    { kind: "tool", name: "Bash", call: { kind: "run", command: "long" }, state: "running" },
+    ...Array.from({ length: 8 }, (_, index) => ({ kind: "note" as const, text: `note-${index + 3}` })),
+  ]);
+});
+
+test("wait deadline returns the same running status carrier", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wait-deadline-"));
+  try {
+    const source = await answeredSource(root, "de1ad100");
+    const leash = HeldAkumaLeash.try(source.paths)!;
+    try {
+      const handle = Akuma.at({ path: root }).of({ id: source.id });
+      const expected = handle.status();
+      assert.equal(expected.life, "running");
+      assert.deepEqual(await handle.wait(undefined, { deadline: 0 }), expected);
+    } finally {
+      leash.release();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("fork publishes a sleeping child with lineage and its native birth session", async () => {
   const root = mkdtempSync(join(process.cwd(), ".tmp-keiyaku-akuma-fork-"));
@@ -200,13 +249,15 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.deepEqual(status.confinement, { kind: "unconfined" });
     assert.equal(status.answer, "public answer");
     assert.deepEqual(status.pending, []);
-    assert.deepEqual(status.history[0]?.outcome, {
+    assert.equal("history" in status, false);
+    assert.deepEqual(handle.history()[0]?.outcome, {
       kind: "answered",
       answer: "public answer",
       historyId: "public-history",
       session: { sessionId: "public-session" },
     });
-    assert.deepEqual(await handle.wait((candidate) => candidate.history.length === 1), status);
+    assert.deepEqual(status.activity, { rows: [{ kind: "said", text: "working" }], omitted: 0 });
+    assert.deepEqual(await handle.wait((candidate) => candidate.answer === "public answer"), status);
     const events = [];
     for await (const event of handle.follow()) events.push(event);
     assert.deepEqual(events.slice(0, 2), [
@@ -520,7 +571,7 @@ test("a failed turn is durable public evidence and never masquerades as provider
     assert.equal(settled.life, "stranded");
     assert.equal(settled.failure, "native failed");
     assert.deepEqual(settled.pending, []);
-    assert.deepEqual(settled.history.map((turn) => turn.outcome), [
+    assert.deepEqual(handle.history().map((turn) => turn.outcome), [
       { kind: "failed", diagnostic: "native failed" },
     ]);
     const events = [];
@@ -539,7 +590,7 @@ test("activity is disposable narration and old raw events fail the public hard c
     const before = handle.status();
     const heart = new DatabaseSync(source.paths.heart);
     try { heart.prepare("DELETE FROM activity").run(); } finally { heart.close(); }
-    assert.deepEqual(handle.status(), before);
+    assert.deepEqual(handle.status(), { ...before, activity: { rows: [], omitted: 0 } });
     const afterDeletion = [];
     for await (const event of handle.follow()) afterDeletion.push(event);
     assert.deepEqual(afterDeletion, []);
@@ -551,7 +602,7 @@ test("activity is disposable narration and old raw events fail the public hard c
     await assert.rejects(async () => {
       for await (const _event of handle.follow()) { /* drain */ }
     }, /invalid event shape/);
-    assert.deepEqual(handle.status(), before);
+    assert.throws(() => handle.status(), /invalid event shape/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -573,7 +624,7 @@ test("kill gives the body a stop grace before putting down its process tree", as
           events: {
             async *[Symbol.asyncIterator]() {
               while (!aborted) {
-                yield { type: "action" as const, note: "Working" };
+                yield { type: "note" as const, text: "Working" };
                 await new Promise((resolve) => setTimeout(resolve, 10));
               }
             },

@@ -14,7 +14,7 @@ test("help resolves the longest legal command-word prefix before syntax scanning
   assert.deepEqual(parseArgv(["task", "show", "bad", "--help"]), {
     help: { kind: "task", action: "show" },
   });
-  assert.deepEqual(parseArgv(["akuma", "fork", "--json", "--help"]), {
+  assert.deepEqual(parseArgv(["fork", "--json", "--help"]), {
     help: { kind: "akuma", action: "fork" },
   });
   assert.deepEqual(parseArgv(["-C", "/absent/world", "--json", "--help"]), {
@@ -29,15 +29,15 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderContractHelp("review"), /usage: keiyaku-v4 review .*--satisfied \| --unsatisfied/u);
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
   assert.match(renderTaskHelp("compose"), /usage: keiyaku-v4 task compose \[--json\] -/u);
-  assert.match(renderAkumaHelp(), /akuma interrupt <aku\/\.\.\.>/u);
+  assert.match(renderRootHelp(), /interrupt <aku\/\.\.\.>/u);
   assert.match(renderAkumaHelp("call"), /--contract <contract-id>/u);
 });
 
 test("syntax refusal retains the deepest reached grammar", () => {
   assert.throws(
-    () => parseArgv(["akuma", "call", "--cwd", "/tmp", "-"]),
+    () => parseArgv(["call", "--cwd", "/tmp", "-"]),
     (error: unknown) => error instanceof CliUsageError
-      && error.message.includes("usage: keiyaku-v4 akuma call --persona <name>")
+      && error.message.includes("usage: keiyaku-v4 call --persona <name>")
       && !error.message.includes("<command>"),
   );
   assert.throws(

@@ -8,7 +8,7 @@ import {
 import { renderText } from "./render/text.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "./render/task.js";
 import { akumaExitCode, renderAkumaJson, renderAkumaText } from "./render/akuma.js";
-import { renderAkumaHelp, type ParsedAkumaCommand } from "./commands/akuma.js";
+import { isParsedAkumaCommand, renderAkumaHelp } from "./commands/akuma.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import { renderTaskHelp, type ParsedTaskCommand } from "./commands/task.js";
 import type { TaskInvocationResult } from "./commands/task-invoke.js";
@@ -24,8 +24,10 @@ function writeTask(command: ParsedTaskCommand, result: TaskInvocationResult): nu
   return taskExitCode(result);
 }
 
-function writeAkuma(command: ParsedAkumaCommand, result: AkumaInvocationResult): number {
-  process.stdout.write(`${command.output === "json" ? renderAkumaJson(result) : renderAkumaText(command, result)}\n`);
+function writeAkuma(command: Parameters<typeof renderAkumaText>[0], result: AkumaInvocationResult): number {
+  const output = command.output === "json" ? renderAkumaJson(command, result) : renderAkumaText(command, result);
+  const rawLast = command.command === "history" && command.last && command.output === "text";
+  process.stdout.write(rawLast ? output : `${output}\n`);
   return akumaExitCode(result);
 }
 
@@ -50,7 +52,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     if (parsed.command.command === "task") {
       return writeTask(parsed.command, result as TaskInvocationResult);
     }
-    if (parsed.command.command === "akuma") {
+    if (isParsedAkumaCommand(parsed.command)
+      || (typeof result === "object" && result !== null && "kind" in result && result.kind === "akuma")) {
       return writeAkuma(parsed.command, result as AkumaInvocationResult);
     }
     const contractResult = result as InvocationResult;

@@ -47,11 +47,11 @@ The command vocabulary is:
 | `review` | Calls `keiyaku.review` directly. |
 | `abandon` | Calls `keiyaku.abandon`. |
 | `arc` | Calls `keiyaku.arc` with arc Markdown. |
-| `status` | Calls the public Kanshi read and optionally projects one Contract and its associated rows. |
+| `status` | Calls Kanshi or one exact Akuma status according to its selector. |
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
 | `task ...` | Calls the separate `./task` public surface described below. |
-| `akuma ...` | Calls the separate `./akuma` public surface described below. |
+| `call`, `follow`, `wait`, `tell`, `interrupt`, `history`, `fork`, `kill` | Call the corresponding separate `./akuma` capability as root verbs. |
 
 `bind` accepts no contract positional. Commands addressing an existing contract
 accept a full `kei/<contract-segment>` identity or an active short
@@ -73,18 +73,17 @@ deliver [<contract>|@<contract>] [--message <text>] [--actor <actor>] [--json]
 review [<contract>|@<contract>] (--satisfied | --unsatisfied) [--summary <text>] [--actor <actor>] [--json] [-]
 abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
-status [<contract>|@<contract>] [--json]
+status [<contract>|@<contract>|<aku/...>] [--json]
 audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--json]
-akuma call --persona <name> [--cwd <path>] [--contract <contract-id>] [--json] -
-akuma list [--json]
-akuma status <aku/...> [--json]
-akuma follow <aku/...> [--json]
-akuma wait <aku/...> [--json]
-akuma tell <aku/...> [--json] -
-akuma interrupt <aku/...> [--json] -
-akuma fork <aku/...> --at <historyId> [--json]
-akuma kill <aku/...> [--json]
+call --persona <name> [--cwd <path>] [--contract <contract-id>] [--json] -
+follow <aku/...> [--json]
+wait <aku/...> [--deadline <ms>] [--json]
+tell <aku/...> [--json] -
+interrupt <aku/...> [--json] -
+history <aku/...> [--last] [--json]
+fork <aku/...> --at <historyId> [--json]
+kill <aku/...> [--json]
 ```
 
 ## Inputs And Flags
@@ -140,29 +139,35 @@ no reason flag or hidden reason classification. `arc` and `audit` accept
 `--show-diff-body`. `status` and `reconcile` accept `--json`.
 `--json` is output-only.
 
-Akuma `call`, `tell`, and `interrupt` require the final `-` and pass those bytes
+`call`, `tell`, and `interrupt` require the final `-` and pass those bytes
 as the public body input. `--persona` is required for call and names
 `~/.keiyaku/akuma/<name>.md`; its provider must resolve through the Cut 1
-literal map, which contains only `claude`. Missing or malformed configuration
+literal map, which contains `claude` and `codex-app-server`. Missing or malformed configuration
 prints the exact path searched. `--cwd` selects the immutable summon seat and
-is resolved to an absolute path at the public boundary. `status`, `follow`,
-`wait`, `tell`, `interrupt`, and `kill` require a complete
-`aku/<persona>/<hex8>`; `list` accepts none. Library `world.of()` constructs the
-addressed handle and has no CLI command of its own. `follow` renders assistant
-text verbatim and each other collected public `AgentEvent` as one
-`type: payload` line. JSON writes the closed-union event objects in order, one
+is resolved to an absolute path at the public boundary. `follow`, `wait`,
+`tell`, `interrupt`, `history`, `fork`, and `kill` require a complete
+`aku/<persona>/<hex8>`. `status <aku/...>` addresses the same exact handle.
+Bare `status` already exposes the Akuma fleet through Kanshi; there is no
+second raw-roster flag. Library `world.of()`
+constructs the addressed handle and has no CLI command of its own. `follow`
+renders assistant text verbatim and every other collected public `AgentEvent`
+as one typed line. JSON writes the closed-union event objects in order, one
 object per line. Collection before printing remains the current CLI behavior.
-CLI `wait` uses the public default predicate (`life !== "running"`); predicate
-functions are library-only input. `fork` requires one nonblank `--at` history
-id and has no stdin body.
+CLI `wait` uses the public default predicate (`life !== "running"`);
+`--deadline` passes a nonnegative integer millisecond duration, while
+predicate functions remain library-only input. `history` with no mode renders
+every retained turn in stable order. `--last` writes the complete answer from
+the last answered turn, skipping later failed turns; it does not read activity
+or append framing. `fork` requires one nonblank `--at` history id and has no
+stdin body.
 
 ## Help
 
-CLI grammar has three owners. `src/cli/parse.ts` owns the root and Contract
-command rows, `src/cli/commands/task.ts` owns Task action rows, and
-`src/cli/commands/akuma.ts` owns Akuma action rows. Root knows only the two
-namespace coordinates `task ...` and `akuma ...`; it never copies their action
-grammar. Each owner row contains its machine syntax, the corresponding usage
+CLI grammar has three owners. `src/cli/parse.ts` owns Contract rows and the
+shared root `status`, `src/cli/commands/task.ts` owns Task action rows, and
+`src/cli/commands/akuma.ts` owns root Akuma verb rows. Root help composes those
+owner rows without copying their grammar; only Task remains a namespace. Each
+owner row contains its machine syntax, the corresponding usage
 line or block, and one help-only purpose line.
 Validation, usage refusal, namespace help, and leaf help read that row.
 Structural rules that are clearer as command code remain adjacent to their row
@@ -173,8 +178,8 @@ optional `-C <path>` prefix is removed, its presence anywhere makes the
 invocation a help request for the longest legal command-word prefix. Other
 tokens do not need to form a valid invocation: `task unknown --help` describes
 the Task namespace. Root help lists the root command vocabulary and points one
-hop to `task --help` and `akuma --help`; namespace help lists every action and
-its usage; leaf help gives that row's purpose and full usage. There is no
+hop to `task --help`; Task namespace help lists every action and its usage.
+Root Akuma and Contract leaf help give the owning row's purpose and full usage. There is no
 `help` command, `-h` alias, or per-row `--help` flag.
 
 Help is a terminal parser observation. It writes text to stdout, exits `0`,
@@ -360,15 +365,21 @@ Its Akuma section is supplied by `Akuma.list()` and joined as specified by
 endpoint observation, pending count, confinement, and searched coordinates
 without probing, reading history, or reclassifying them.
 
-Akuma call, list, status, follow, wait, an `interrupted` interrupt, successful
+Akuma call, exact status, follow, wait, history, an `interrupted`
+interrupt, successful
 wake, a `forked` fork, and settled kill exit `0`. Interrupt `dead` or
 `unstoppable`, and an
 interrupted tell refused by concurrent death, exit `1`; an interrupted tell
-whose detached wake failed exits `2`. Text status and wait render the same
-`AkumaStatus`, including every
-retained turn in stable sequence order; JSON returns that public value without
-reshaping it. `unavailable` and `alive-after-sigkill` exit `1`; a recorded tell
-whose detached wake failed exits `2`. Fork text renders the child id for
+whose detached wake failed exits `2`. Exact status renders current state, the
+latest complete answer or failure, and the public activity snapshot. Wait uses
+the same carrier: when its predicate is satisfied it renders the complete
+answer or failure; when its deadline arrives while still running it renders the
+snapshot. JSON returns that public value without reshaping it. History text
+renders explicit retained turns; `--last` emits only the final selected answer
+bytes. Tell text combines its public write receipt with one subsequent exact
+status snapshot; JSON carries both values. `unavailable` and
+`alive-after-sigkill` exit `1`; a recorded tell whose detached wake failed exits
+`2`. Fork text renders the child id for
 `forked`; provider plus unavailable capability for `provider-cannot-fork`; the
 requested coordinate plus no matching retained answered turn for
 `unknown-history`; and the diagnostic for `fork-failed`. These three clean

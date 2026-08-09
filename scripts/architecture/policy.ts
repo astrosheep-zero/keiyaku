@@ -39,7 +39,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("akuma/heart/index.ts"),
         types("akuma/identity.ts"),
-        types("akuma/provider.ts"),
+        any("akuma/provider.ts", ["encodeAgentEvent", "Drive", "ProviderAdapter", "TurnResult"]),
         any("akuma/providers/index.ts"),
         any("akuma/requests.ts"),
         any("runtime/proc/run.ts"),
@@ -53,7 +53,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/identity.ts"),
         any("akuma/persona.ts"),
         any("akuma/publication.ts"),
-        types("akuma/provider.ts"),
+        any("akuma/provider.ts", ["decodeAgentEvent", "AgentEvent", "ToolCall", "ToolResult"]),
         any("akuma/providers/index.ts"),
         any("akuma/requests.ts"),
         any("runtime/proc/run.ts"),

@@ -466,6 +466,12 @@ export function historyFacts(database: DatabaseSync): readonly TurnFact[] {
   return rows.map(decodeTurnRow);
 }
 
+export function latestTurnFact(database: DatabaseSync): TurnFact | null {
+  const row = database.prepare(`SELECT sequence, body_sequence, outcome, history_id, session_json,
+    answer, diagnostic, completed_at FROM turns ORDER BY sequence DESC LIMIT 1`).get() as TurnRow | undefined;
+  return row === undefined ? null : decodeTurnRow(row);
+}
+
 export function answeredTurnFact(database: DatabaseSync, historyId: string): TurnFact | null {
   const row = database.prepare(`SELECT sequence, body_sequence, outcome, history_id, session_json,
     answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' AND history_id = ?`).get(historyId) as TurnRow | undefined;

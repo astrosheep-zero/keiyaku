@@ -1,8 +1,11 @@
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
-import type { ParsedAkumaCommand } from "../commands/akuma.js";
-type Status = Extract<AkumaInvocationResult, { action: "status" }>["status"];
-type Confinement = Status["confinement"];
-type Turn = Status["history"][number];
+import type { ParsedCommand } from "../parse.js";
+
+type AkumaStatus = Extract<AkumaInvocationResult, { action: "status" }>["status"];
+type Confinement = AkumaStatus["confinement"];
+type ActivityRow = AkumaStatus["activity"]["rows"][number];
+type ToolCall = Extract<ActivityRow, { kind: "tool" }>["call"];
+type TurnFact = Extract<AkumaInvocationResult, { action: "history" }>["turns"][number];
 type AgentEvent = Extract<AkumaInvocationResult, { action: "follow" }>["events"][number];
 
 function summary(input: Readonly<{
@@ -26,7 +29,45 @@ function summary(input: Readonly<{
   ].join("\n");
 }
 
-function turn(turn: Turn): string {
+function toolCall(call: ToolCall): string {
+  switch (call.kind) {
+    case "run": return `run ${JSON.stringify(call.command)}`;
+    case "read": return `read ${JSON.stringify(call.path)}`;
+    case "search": return `search ${JSON.stringify(call.query)}`;
+    case "fileChange": return `change ${call.paths.map((path) => JSON.stringify(path)).join(" ")}`;
+    case "other": return `use ${JSON.stringify(call.display)}`;
+  }
+}
+
+function activityRow(row: ActivityRow): string {
+  if (row.kind === "said") return `said ${JSON.stringify(row.text)}`;
+  if (row.kind === "note") return `note ${JSON.stringify(row.text)}`;
+  const state = row.state === "running"
+    ? "running"
+    : row.state.message === undefined
+      ? row.state.status
+      : `${row.state.status} ${JSON.stringify(row.state.message)}`;
+  return `tool ${JSON.stringify(row.name)} ${state} ${toolCall(row.call)}`;
+}
+
+function activity(status: AkumaStatus): string[] {
+  const heading = status.activity.omitted === 0
+    ? `activity ${status.activity.rows.length}`
+    : `activity ${status.activity.rows.length} omitted ${status.activity.omitted}`;
+  return [heading, ...status.activity.rows.map(activityRow)];
+}
+
+function outcome(status: AkumaStatus): string[] {
+  if (status.answer !== undefined) return ["answer", status.answer];
+  if (status.failure !== undefined) return [`failure ${status.failure}`];
+  return [];
+}
+
+function status(status: AkumaStatus): string {
+  return [summary(status), ...outcome(status), ...activity(status)].join("\n");
+}
+
+function turn(turn: TurnFact): string {
   return turn.outcome.kind === "answered"
     ? [
         `turn ${turn.sequence} answered ${turn.outcome.historyId} session ${turn.outcome.session.sessionId} at ${turn.completedAt}`,
@@ -35,31 +76,50 @@ function turn(turn: Turn): string {
     : `turn ${turn.sequence} failed at ${turn.completedAt}\nfailure ${turn.outcome.diagnostic}`;
 }
 
-function status(input: Status): string {
-  return [summary(input), `history ${input.history.length}`, ...input.history.map(turn)].join("\n");
+function lastAnswer(turns: readonly TurnFact[]): string {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const outcome = turns[index]!.outcome;
+    if (outcome.kind === "answered") return outcome.answer;
+  }
+  return "";
 }
 
 function event(event: AgentEvent): string {
   switch (event.type) {
     case "assistant": return event.text;
-    case "session": return `session: ${event.coordinate.sessionId}`;
-    case "action": return `action: ${event.note}`;
-    case "unknown": return `unknown: ${event.kind}`;
+    case "session": return `session ${event.coordinate.sessionId}`;
+    case "tool": {
+      const state = event.phase === "started"
+        ? "started"
+        : event.result.message === undefined
+          ? `completed ${event.result.status}`
+          : `completed ${event.result.status} ${JSON.stringify(event.result.message)}`;
+      return `tool ${JSON.stringify(event.id)} ${JSON.stringify(event.name)} ${state} ${toolCall(event.call)}`;
+    }
+    case "note": return `note ${JSON.stringify(event.text)}`;
+    case "unknown": return `unknown ${JSON.stringify(event.kind)}`;
   }
 }
 
-export function renderAkumaText(_command: ParsedAkumaCommand, result: AkumaInvocationResult): string {
+function waitResult(statusValue: AkumaStatus): string {
+  if (statusValue.life === "running") return [summary(statusValue), ...activity(statusValue)].join("\n");
+  if (statusValue.answer !== undefined) return statusValue.answer;
+  if (statusValue.failure !== undefined) return `failure ${statusValue.failure}`;
+  return summary(statusValue);
+}
+
+export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationResult): string {
   switch (result.action) {
     case "call": return result.id;
-    case "list": return result.report.rows.length === 0
-      ? ["akuma 0", ...result.report.searched.map((path) => `searched ${path}`)].join("\n")
-      : result.report.rows.map((row) => summary(row)).join("\n");
     case "status": return status(result.status);
     case "follow": return result.events.map(event).join("\n");
-    case "wait": return status(result.status);
-    case "tell": return typeof result.receipt.wake === "string"
-      ? `${result.akuma} tell ${result.receipt.id} recorded`
-      : `${result.akuma} tell ${result.receipt.id} recorded\nwake failed ${result.receipt.wake.diagnostic}`;
+    case "wait": return waitResult(result.status);
+    case "tell": {
+      const receipt = typeof result.receipt.wake === "string"
+        ? `${result.akuma} tell ${result.receipt.id} recorded`
+        : `${result.akuma} tell ${result.receipt.id} recorded\nwake failed ${result.receipt.wake.diagnostic}`;
+      return `${receipt}\n${status(result.status)}`;
+    }
     case "interrupt": {
       const receipt = result.receipt;
       if (receipt.kind === "dead") return `${result.akuma} interrupt dead`;
@@ -69,6 +129,9 @@ export function renderAkumaText(_command: ParsedAkumaCommand, result: AkumaInvoc
         ? `${result.akuma} interrupted ${receipt.putDown}\ntell ${receipt.tell.id} recorded`
         : `${result.akuma} interrupted ${receipt.putDown}\ntell ${receipt.tell.id} recorded\nwake failed ${receipt.tell.wake.diagnostic}`;
     }
+    case "history": return command.command === "history" && command.last
+      ? lastAnswer(result.turns)
+      : result.turns.map(turn).join("\n");
     case "fork": {
       const receipt = result.receipt;
       if (receipt.kind === "forked") return receipt.child;
@@ -95,12 +158,18 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
   return 0;
 }
 
-export function akumaJsonValue(result: AkumaInvocationResult): unknown {
-  return result.action === "fork" ? result.receipt : result;
+export function akumaJsonValue(command: ParsedCommand, result: AkumaInvocationResult): unknown {
+  if (result.action === "fork") return result.receipt;
+  if (result.action === "status" || result.action === "wait") return result.status;
+  if (result.action === "tell") return { receipt: result.receipt, status: result.status };
+  if (result.action === "history") {
+    return command.command === "history" && command.last ? lastAnswer(result.turns) : result.turns;
+  }
+  return result;
 }
 
-export function renderAkumaJson(result: AkumaInvocationResult): string {
+export function renderAkumaJson(command: ParsedCommand, result: AkumaInvocationResult): string {
   return result.action === "follow"
-    ? result.events.map((event) => JSON.stringify(event)).join("\n")
-    : JSON.stringify(akumaJsonValue(result));
+    ? result.events.map((item) => JSON.stringify(item)).join("\n")
+    : JSON.stringify(akumaJsonValue(command, result));
 }

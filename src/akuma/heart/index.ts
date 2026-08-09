@@ -49,6 +49,7 @@ import {
   insertTellFact,
   latestBodyFact,
   latestSessionFact,
+  latestTurnFact,
   nonterminalRequestFacts,
   pauseExists,
   pendingTellFacts,
@@ -434,6 +435,10 @@ export function readHeart(paths: AkumaPaths): HeartSnapshot {
 
 export function readHistory(paths: AkumaPaths): readonly TurnFact[] {
   return withHeart(paths, historyFacts);
+}
+
+export function readCurrentTurn(paths: AkumaPaths): TurnFact | null {
+  return withHeart(paths, latestTurnFact);
 }
 
 export function readForkPoint(

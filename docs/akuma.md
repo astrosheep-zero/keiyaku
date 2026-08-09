@@ -256,8 +256,10 @@ dies; their existence does not depend on a current control-flow reader.
   Its cwd and provider options preserve the exact Cut 1 native resume recipe.
   Before any session admission, wake starts fresh from the soul's summon cwd
   and options.
-- **activity** — bounded recent events for the snapshot; the body prunes on
-  write.
+- **activity** — provider-authored observation events as the bounded sequence
+  `(sequence, event_json, at)`. The body retains the newest 200 rows on write.
+  Read-time folding, not persistence, pairs tool lifecycle events and selects
+  the public activity snapshot.
 - **tells** — body plus its delivery state; see Tell.
 - **requests** — the sole durable authority for Body Requests. One fact holds
   the caller UUID, Persona, body, optional cwd, optional Contract id, normalized world, admission
@@ -303,11 +305,13 @@ point. It also resolves that session coordinate's admitted provider, cwd, and
 options recipe for the native call and child birth; a retained answered turn
 without that recipe is authority corruption, not `unknown-history`. It never
 reconstructs or scans the public history projection.
-`readHeart()` does not read or reinterpret turns. The public `status()` combines one history read with
-the compact heart snapshot and physical probes, and derives its latest answer
-or failure from the final retained turn. `list()` and `follow()` remain compact
-fleet/current-activity reads and never scan or reconstruct history. Thus SQL
-placement and the meaning of history each have one interpreter.
+`readHeart()` does not read or reinterpret turns. `readCurrentTurn()` reads only
+the newest retained turn for `status()`; `readHistory()` is the explicit full
+turn-history read. `status()` combines that current turn with the compact heart
+snapshot, physical probes, and one bounded activity fold. `list()` remains a
+compact fleet read and never scans activity or turns. `follow()` reads retained
+activity directly and never reconstructs turn history. Thus current outcome,
+full history, and activity each have one projection.
 
 One judge per question:
 
@@ -666,30 +670,59 @@ Provider observation is the closed public vocabulary:
 type AgentEvent =
   | { type: "session"; coordinate: ResumeCoordinate }
   | { type: "assistant"; text: string }
-  | { type: "action"; note: string }
+  | {
+      type: "tool";
+      id: string;
+      phase: "started" | "completed";
+      name: string;
+      call: ToolCall;
+      result?: ToolResult;
+    }
+  | { type: "note"; text: string }
   | { type: "unknown"; kind: string };
+
+type ToolCall =
+  | { kind: "run"; command: string }
+  | { kind: "read"; path: string }
+  | { kind: "search"; query: string }
+  | { kind: "fileChange"; paths: readonly string[] }
+  | { kind: "other"; display: string };
+
+type ToolResult = { status: "ok" | "error"; message?: string };
 ```
+
+`provider.ts` owns this vocabulary and its strict encode/decode pair. The body
+encodes normalized events before handing opaque JSON to Heart; public activity
+readers decode through the same owner before following or folding. Exhaustive
+event-type switches make a union change fail typecheck until the codec changes
+with it. Heart remains the opaque persistence owner and does not import provider
+semantics.
 
 `session` is authored when the native harness grants a resumable coordinate
 (v3's `onSessionAdmission`). The pump records that coordinate immediately as
 the heart's authoritative session fact and also appends the event as activity;
 it never waits for turn completion. `assistant` contains only completed agent
-utterances, never deltas or summaries. `action` is one provider-neutral,
-single-line statement of a tool or command invocation, file change, plan or
-todo update, retry, warning, or refusal. The adapter truncates it to 200
-characters. `unknown` contains only the unmapped native kind or method name and
-never carries the native payload.
+utterances, never deltas or summaries. `tool` preserves the provider's stable
+tool id, the started/completed lifecycle, one provider-neutral call shape, and
+the typed result disposition. A started event carries no result; a completed
+event requires one. Result `message` is a bounded diagnostic, never stdout,
+stderr, or a native result body. `note` is one bounded line for non-tool plan,
+todo, retry, warning, or refusal narration. All bounded text fields use one
+shared limit. `unknown` contains only the unmapped native kind or method name
+and never carries the native payload.
 
 Activity is disposable narration. Deleting every activity row may change only
-`follow()` output. Recovery, resume, fork, outcome, failure, and life never read
-activity. Turn answer, failure, and history remain authoritative in
+`follow()` output and the activity snapshot returned by `status()` or `wait()`.
+Recovery, resume, fork, outcome, failure, and life never read activity. Turn
+answer, failure, and history remain authoritative in
 `TurnResult` and `TurnFact`; a session row remains the sole resume authority.
 
 Every adapter owns a total disposition of its native events. Known native
 kinds are mapped or explicitly dropped, and every unrecognized kind becomes
-`unknown`. Tool, command, and file-change invocation, plan or todo updates, and
-retry, warning, and refusal map to one `action`. Partial and delta streams,
-input echoes, tool results and command output streams, thinking content, and
+`unknown`. Tool, command, and file-change lifecycle maps to `tool`; plan or
+todo updates and retry, warning, and refusal map to `note`. A native completion
+must provide the matching typed tool result. Partial and delta streams, input
+echoes, tool-result bodies and command output streams, thinking content, and
 token, cost, and rate-limit telemetry are dropped. The Claude adapter's SDK
 union disposition is compile-time exhaustive with a runtime unknown fallback.
 The Codex app-server method set is open, so its explicit known dispositions end
@@ -701,10 +734,14 @@ the native explanation from an `error` notification or `turn.error`, using a
 generic status diagnostic only when no native detail exists.
 
 Activity persistence remains the bounded sequence `(sequence, event_json, at)`
-with the existing 200-row limit. It has no turn or body coordinate. No event
-bus, subscription fan-out, lifecycle coalescing, file-change ledger, usage or
-cost arm, thought arm, raw-provider passthrough, severity taxonomy, or envelope
-field beyond sequence and time belongs in this boundary.
+with the existing 200-row limit. It has no turn or body coordinate and performs
+no write-time lifecycle coalescing. One pure read-time fold pairs tool events by
+their provider id. A completed event whose start was pruned is a settled row; a
+retained start without a completion is in flight. It selects the newest eight
+settled rows plus every in-flight tool row, in source order, and reports the
+count of omitted settled rows. No event bus, subscription fan-out, file-change
+ledger, usage or cost arm, thought arm, raw-provider passthrough, severity
+taxonomy, or envelope field beyond sequence and time belongs in this boundary.
 
 An answered `TurnResult.historyId` is the provider-owned fork point, not a
 generic result identifier. The Claude adapter uses the outer assistant message
@@ -738,9 +775,10 @@ world.of({ id });
 world.list();                              // compact fleet rows; no history scan
 
 a.id                                       // aku/<persona>/<hex8>
-a.status()                                 // full retained history + current state
+a.status()                                 // current state + bounded activity
 a.follow()                                 // AsyncIterable<AgentEvent>
-a.wait(predicate?)                        // defaults to life !== "running"
+a.wait(predicate?, { deadline? })          // same status carrier on either outcome
+a.history()                                // all retained TurnFact values
 a.tell(body)
 a.interrupt(body)                         // synchronous put-down, then tell
 a.fork({ at: historyId })                 // exact retained native fork point
@@ -754,7 +792,7 @@ errors retain their existing types; Body Requests do not wrap them before
 heart admission.
 
 `status()` combines the current compact heart snapshot, leash and collar probes,
-and the single full retained-history projection. Its shape is:
+the newest retained turn, and one activity snapshot. Its shape is:
 
 ```ts
 type AkumaStatus = {
@@ -768,15 +806,34 @@ type AkumaStatus = {
   answer?: string;
   failure?: string;
   pending: readonly TellId[];
-  history: readonly TurnFact[];
+  activity: ActivitySnapshot;
 };
+
+type ActivitySnapshot = {
+  rows: readonly ActivityRow[];
+  omitted: number;
+};
+
+type ActivityRow =
+  | { kind: "said"; text: string }
+  | { kind: "tool"; name: string; call: ToolCall; state: "running" | ToolResult }
+  | { kind: "note"; text: string };
 ```
 
-`wait(predicate?)` polls `status()` and returns the first complete
+`wait(predicate?, options?)` polls `status()` and returns the first complete
 `AkumaStatus` accepted by the predicate. Its default predicate is
-`status.life !== "running"`. It does not promise that every recorded tell was
-consumed: a crash can kill body and waker together and legitimately leave tells
-pending, which remain present in the returned status.
+`status.life !== "running"`. `options.deadline`, when present, is a
+nonnegative millisecond duration. If it arrives first, `wait` returns the
+current `AkumaStatus`; it adds no timeout arm or flag. The caller can reapply
+its predicate to the returned observation. One status read prevents a torn
+timeout result assembled from separate liveness and snapshot observations.
+`wait` does not promise that every recorded tell was consumed: a crash can
+kill body and waker together and legitimately leave tells pending.
+
+`history()` is the sole public full-turn read and returns all retained
+`TurnFact` values in stable sequence order. Status and wait never carry that
+collection. An explicit CLI history read may project the last answered turn;
+activity text is not a turn response and never participates.
 
 An akuma that answered and was later killed reports both: `life: "dead"` with
 the retained answer still attached. What to do about a stranded or headless
@@ -785,7 +842,7 @@ verbs in front of her and says nothing more.
 
 `list()` is deliberately smaller than `status()`: born fleet rows expose id,
 Persona and description snapshots, optional Contract id, life, collar evidence,
-confinement, and pending tell ids, but no history or latest outcome. The id is
+confinement, and pending tell ids, but no activity, history, or latest outcome. The id is
 projected verbatim and has no endpoint-state interpretation here. Unborn/stillborn rows retain
 their existing evidence. This keeps a fleet read from scanning the complete
 turn history of every akuma. Confinement is triage evidence and future Body Request
@@ -800,14 +857,18 @@ failed diagnostic from history instead of asking activity to reinterpret it.
 The provider-observation law and rendering semantics are defined in Provider
 boundary above; the public surface does not reinterpret native events.
 
-The CLI is one argv skin:
-`keiyaku-v4 akuma <call|list|status|follow|wait|tell|interrupt|fork|kill>`. Call,
-tell, and interrupt read their bodies from a final `-`; `--json` changes
+The CLI exposes Akuma operations as root verbs: `call`, `follow`, `wait`,
+`tell`, `interrupt`, `history`, `fork`, and `kill`. The shared root
+`status` verb addresses an exact `aku/...`; bare `status` already carries the
+fleet through Kanshi and no second raw-roster flag exists. Call, tell, and
+interrupt read their bodies from a final `-`; `--json`
+changes
 rendering only. Library `world.of()` remains the handle constructor and has no
-redundant CLI verb. CLI wait uses only the default predicate; predicate
-functions are a library capability. Kanshi obtains its Akuma section from
-`Akuma.list()` and copies every life discriminant verbatim without reading
-history.
+redundant CLI verb. CLI wait uses the default predicate and may supply a
+deadline. Predicate functions are library-only input. CLI tell composes its
+write receipt with one subsequent public `status()` read; it uses the same
+activity snapshot and never creates a per-verb window. Kanshi obtains its Akuma
+section from `Akuma.list()` without reading activity or history.
 
 ## Modules
 
@@ -822,7 +883,7 @@ src/akuma/
     schema.ts         private DDL, shared schema version, hard-cut gates
     rows.ts           private rows/codecs, named single-statement mechanics
     index.ts          connections, leash, transaction judges, custody, projections
-  provider.ts         ProviderAdapter, Drive, AgentEvent
+  provider.ts         ProviderAdapter, Drive, AgentEvent, activity codec
   providers/index.ts  sole literal provider map
   providers/claude.ts Claude Agent SDK translation
   providers/codex-app-server.ts Codex stdio JSON-RPC translation
@@ -867,6 +928,11 @@ whole edge. There is no Task endpoint field, generic metadata bag, binding
 registry, existence validation, implicit Body Request inheritance, Contract or
 Task back-pointer, association sweep, or behavior conditioned on Contract state
 (SOUL: cut any pillar, the other two do not bleed).
+
+Activity does not grow an updated phase, write-time fold, per-verb snapshot
+window, thought or usage arm, warning taxonomy, diffstat or terminal file
+ledger, truncation metadata envelope, native output stream, or turn/body
+coordinate. Each would require a new named reader and a change to this law.
 
 Inside `heart/`, no generic get/save/find API, query builder, connection-owning
 row object, per-table class, or table-by-table module is built. Row codecs do not make
