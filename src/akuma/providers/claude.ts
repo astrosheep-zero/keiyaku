@@ -238,21 +238,30 @@ function permissionMode(access: ProviderOptions["access"]): "plan" | "acceptEdit
   return "bypassPermissions";
 }
 
-export function createClaudeProvider(load: () => Promise<ClaudeSdk>): ProviderAdapter {
+async function forkClaude(
+  load: () => Promise<ClaudeSdk>,
+  execution: Readonly<{ env?: Readonly<Record<string, string>> }>,
+  input: Parameters<NonNullable<ProviderAdapter["fork"]>>[0],
+): Promise<Readonly<{ session: { sessionId: string } }>> {
+  if (execution.env !== undefined) {
+    throw new Error("Claude fork cannot apply the frozen provider environment");
+  }
+  const sdk = await load();
+  if (sdk.forkSession === undefined) throw new Error("Claude SDK does not expose forkSession");
+  const forked = await sdk.forkSession(input.session.sessionId, { dir: input.cwd, upToMessageId: input.at });
+  if (forked.sessionId.trim().length === 0) throw new Error("Claude fork returned an empty child session id");
+  if (forked.sessionId === input.session.sessionId) throw new Error("Claude fork reused the source session id");
+  return { session: { sessionId: forked.sessionId } };
+}
+
+export function createClaudeProvider(
+  load: () => Promise<ClaudeSdk>,
+  execution: Readonly<{ executable?: string; env?: Readonly<Record<string, string>> }> = {},
+): ProviderAdapter {
   return {
     confinement: () => ({ kind: "unconfined" }),
     admitOptions: admitClaudeOptions,
-    async fork(input) {
-      const sdk = await load();
-      if (sdk.forkSession === undefined) throw new Error("Claude SDK does not expose forkSession");
-      const forked = await sdk.forkSession(input.session.sessionId, {
-        dir: input.cwd,
-        upToMessageId: input.at,
-      });
-      if (forked.sessionId.trim().length === 0) throw new Error("Claude fork returned an empty child session id");
-      if (forked.sessionId === input.session.sessionId) throw new Error("Claude fork reused the source session id");
-      return { session: { sessionId: forked.sessionId } };
-    },
+    fork: (input) => forkClaude(load, execution, input),
     async start(input): Promise<Drive> {
       const sdk = await load();
       const events = new AgentEventChannel();
@@ -262,6 +271,8 @@ export function createClaudeProvider(load: () => Promise<ClaudeSdk>): ProviderAd
       const options: Options = {
         cwd: input.cwd,
         abortController,
+        ...(execution.executable === undefined ? {} : { pathToClaudeCodeExecutable: execution.executable }),
+        ...(execution.env === undefined ? {} : { env: { ...process.env, ...execution.env } }),
         permissionMode: access,
         ...(access === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
         settingSources: ["user", "project", "local"],

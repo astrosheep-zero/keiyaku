@@ -43,7 +43,7 @@ test("body births, admits native session, records the turn, and exits only when 
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { model: "claude-sonnet-4-5", effort: "high", systemPrompt: "Build carefully." },
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
@@ -148,6 +148,11 @@ test("a declared drive drains Body Requests before recording its terminal turn",
           world: root,
           persona: "worker",
           body: "nested work",
+          recipe: {
+            provider: { name: "claude", kind: "claude-agent-sdk" },
+            options: { systemPrompt: "Work.\n" },
+            confinement: { kind: "unconfined" },
+          },
         });
         return {
           events: {
@@ -165,7 +170,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
       seed: {
         id: allocated.id,
         persona: "parent",
-        provider: "codex-app-server",
+        provider: { name: "codex-app-server", kind: "codex-app-server" },
         options: { access: "write" },
         origin: { kind: "direct" },
         confinement: { kind: "declared", writableRoots: [root] },
@@ -211,7 +216,7 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { model: "soul-model" },
         origin: { kind: "fork", parent: "aku/claude/1234abcd" as typeof allocated.id, at: "history-1" },
         confinement: { kind: "unconfined" },
@@ -269,7 +274,7 @@ test("the soul retains the summon cwd before native session admission", async ()
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
@@ -305,7 +310,7 @@ test("an answer without an admitted or resumed session is retained as a failed t
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
@@ -341,7 +346,7 @@ test("a new leash holder revokes stop and pause abandoned before settlement", as
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
@@ -423,7 +428,7 @@ test("pause aborts the current drive and records the body as put down", async ()
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
@@ -474,7 +479,7 @@ test("a body aborts and buries its process tree when the heart disappears during
     seed: {
       id: allocated.id,
       persona: "claude",
-      provider: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       origin: { kind: "direct" },
       confinement: { kind: "unconfined" },

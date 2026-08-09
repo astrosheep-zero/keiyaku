@@ -5,6 +5,7 @@ const types = (target: string) => ({ target, mode: "type-only" as const });
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
+    { source: "settings.ts", allow: [] },
     { source: "context-root.ts", allow: [] },
     { source: "namespace-context.ts", allow: [any("identity/normalize.ts")] },
     { source: "coordination/**", allow: [] },
@@ -16,9 +17,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "akuma/heart/rows.ts", allow: [types("akuma/heart/facts.ts")] },
     { source: "akuma/heart/index.ts", allow: [types("akuma/identity.ts"), any("akuma/heart/facts.ts"), any("akuma/heart/schema.ts"), any("akuma/heart/rows.ts")] },
     { source: "akuma/provider.ts", allow: [types("akuma/heart/index.ts")] },
-    { source: "akuma/providers/index.ts", allow: [types("akuma/provider.ts"), any("akuma/providers/claude.ts"), any("akuma/providers/codex-app-server.ts")] },
-    { source: "akuma/providers/**", allow: [any("akuma/provider.ts"), any("runtime/proc/line-rpc.ts")] },
-    { source: "akuma/persona.ts", allow: [any("akuma/identity.ts"), types("akuma/provider.ts"), any("akuma/providers/index.ts")] },
+    { source: "akuma/providers/index.ts", allow: [types("akuma/heart/index.ts"), types("akuma/provider.ts"), any("akuma/providers/claude.ts"), any("akuma/providers/codex-app-server.ts")] },
+    { source: "akuma/providers/**", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts"), any("runtime/proc/line-rpc.ts")] },
+    { source: "akuma/persona.ts", allow: [types("akuma/heart/index.ts"), any("akuma/identity.ts"), any("akuma/provider.ts", ["ProviderAdapter", "ProviderOptions", "decodeProviderOptions"]), any("akuma/providers/index.ts"), types("settings.ts")] },
     {
       source: "akuma/publication.ts",
       allow: [any("akuma/heart/index.ts"), any("akuma/identity.ts"), any("runtime/proc/run.ts")],
@@ -28,8 +29,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("akuma/heart/index.ts"),
         any("akuma/identity.ts"),
-        any("akuma/persona.ts"),
         any("akuma/provider.ts"),
+        any("akuma/providers/index.ts", ["decodeProviderExecution", "providerNamed"]),
         any("akuma/publication.ts"),
         types("runtime/proc/run.ts"),
       ],
@@ -56,6 +57,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/provider.ts", ["decodeAgentEvent", "AgentEvent", "ToolCall", "ToolResult"]),
         any("akuma/providers/index.ts"),
         any("akuma/requests.ts"),
+        any("settings.ts"),
         any("runtime/proc/run.ts"),
       ],
     },
@@ -274,8 +276,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "prepareVerificationDeclaration",
         ]),
         any("library/region.ts"),
+        any("library/gates.ts"),
+        any("settings.ts"),
       ],
     },
+    { source: "library/gates.ts", allow: [any("core/facts/types.ts", ["gateWord"]), types("settings.ts")] },
     {
       source: "library/region.ts",
       allow: [
@@ -286,7 +291,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "library/**", allow: [] },
     {
       source: "index.ts",
-      allow: [any("library/keiyaku.ts")],
+      allow: [any("library/keiyaku.ts"), any("settings.ts")],
     },
     { source: "markdown/**", allow: [any("markdown/lex.ts"), any("markdown/types.ts"), any("markdown/diff.ts")] },
     { source: "task/identity.ts", allow: [any("identity/coordinates.ts"), any("identity/normalize.ts")] },
@@ -329,7 +334,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "cli/commands/akuma-invoke.ts",
-      allow: [any("akuma/index.ts"), types("cli/commands/akuma.ts")],
+      allow: [any("akuma/index.ts"), types("cli/commands/akuma.ts"), types("settings.ts")],
     },
     {
       source: "cli/commands/task.ts",
@@ -352,10 +357,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("cli/render/**"),
         types("cli/result.ts"),
         any("cli/selectors.ts"),
-        any("cli/settings.ts"),
         any("cli/usage.ts"),
         any("identity/coordinates.ts"),
         any("kanshi/index.ts"),
+        any("settings.ts"),
         any("task/index.ts"),
       ],
     },
@@ -388,7 +393,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "scripts/check-architecture.ts", symbols: ["readFileSync", "readdirSync"] },
         { source: "scripts/model-change-impact.ts", symbols: ["readFileSync", "readdirSync"] },
         { source: "cli/invoke.ts", symbols: ["readFileSync"] },
-        { source: "cli/settings.ts", symbols: ["readFileSync"] },
+        { source: "settings.ts", symbols: ["readFileSync"] },
         { source: "carrier/reconcile.ts", symbols: ["existsSync", "mkdirSync", "realpathSync"] },
         { source: "carrier/delivery.ts", symbols: ["existsSync", "mkdtempSync", "rmSync"] },
         { source: "namespace-context.ts", symbols: ["closeSync", "fsyncSync", "lstatSync", "mkdirSync", "openSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"] },
@@ -457,11 +462,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "new-date-current", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/publication.ts", "protocol/bind.ts", "protocol/operations.ts", "task/compose.ts", "task/operations.ts"] },
     { capability: "process-argv", owners: ["akuma/body.ts", "cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-cwd", owners: ["carrier/repository.ts", "cli/main.ts", "kanshi/read.ts", "library/keiyaku.ts", "task/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
-    { capability: "process-environment", owners: ["akuma/providers/codex-app-server.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "carrier/repository.ts", "protocol/operations.ts", "runtime/proc/**"] },
+    { capability: "process-environment", owners: ["akuma/providers/claude.ts", "akuma/providers/codex-app-server.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "carrier/repository.ts", "protocol/operations.ts", "runtime/proc/**"] },
     { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },
-    { capability: "type-error-construction", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/persona.ts", "akuma/providers/index.ts", "body/**", "cli/actor.ts", "kanshi/**", "library/keiyaku.ts", "identity/coordinates.ts", "namespace-context.ts", "task/**"] },
+    { capability: "type-error-construction", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/persona.ts", "akuma/provider.ts", "akuma/providers/index.ts", "body/**", "cli/actor.ts", "kanshi/**", "library/gates.ts", "library/keiyaku.ts", "identity/coordinates.ts", "namespace-context.ts", "settings.ts", "task/**"] },
   ],
   forbiddenFileNames: [
     "approval-preparation.ts",

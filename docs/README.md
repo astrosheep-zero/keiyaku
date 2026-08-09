@@ -18,6 +18,7 @@ operating guidance; none can introduce product law.
 | [cli.md](cli.md) | `keiyaku-v4` argv, edge adaptation, selectors, rendering, exit codes, status board, and audit presentation. |
 | [task.md](task.md) | Separate in-package task product: document authority, identity, lifecycle, associations, concurrency, and persistence. |
 | [akuma.md](akuma.md) | Separate Akuma product: identity, heart facts, life, detached bodies, providers, lifecycle verbs, and persistence. |
+| [settings.md](settings.md) | Shared Settings resource: coordinates, scope, shadowing, failure isolation, provenance, and observation. |
 | [kanshi.md](kanshi.md) | Composite world observation: section availability, read-time associations, selection, and public report shape. |
 
 ## Hard-Cut Discipline

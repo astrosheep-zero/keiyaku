@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseDocument } from "yaml";
+import type { Settings } from "../settings.js";
 import { personaName } from "./identity.js";
-import type { ProviderAdapter, ProviderOptions } from "./provider.js";
-import { providerNamed } from "./providers/index.js";
+import { decodeProviderOptions, type ProviderAdapter, type ProviderOptions } from "./provider.js";
+import type { ProviderExecution } from "./heart/index.js";
+import { decodeProviderExecution, providerNamed } from "./providers/index.js";
 
 type DecodedPersona = Readonly<{
   name: string;
@@ -15,6 +16,7 @@ type DecodedPersona = Readonly<{
 }>;
 
 type PersonaDefinition = DecodedPersona & Readonly<{ adapter: ProviderAdapter }>;
+type AdmittedPersona = Omit<PersonaDefinition, "provider"> & Readonly<{ provider: ProviderExecution }>;
 
 const PERSONA_KEYS = new Set(["provider", "model", "access", "network", "effort", "description"]);
 
@@ -80,7 +82,7 @@ function decodePersona(name: string, path: string, markdown: string): DecodedPer
     path,
     provider,
     ...(description === undefined ? {} : { description }),
-    options: Object.freeze({
+    options: decodeProviderOptions({
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),
       ...(access === undefined ? {} : { access }),
@@ -90,26 +92,65 @@ function decodePersona(name: string, path: string, markdown: string): DecodedPer
   });
 }
 
-function admitPersona(persona: DecodedPersona): PersonaDefinition {
-  let adapter: ProviderAdapter;
-  try {
-    adapter = providerNamed(persona.provider);
-  } catch (error) {
-    if (error instanceof TypeError) {
-      throw new AkumaPersonaError(persona.name, [persona.path], `uses unknown provider ${persona.provider}`);
-    }
+function record(value: unknown): Readonly<Record<string, unknown>> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>> : null;
+}
+
+function optionalProviderText(value: Readonly<Record<string, unknown>>, name: string, field: "description"): string | undefined {
+  const selected = value[field];
+  if (selected === undefined) return undefined;
+  if (typeof selected !== "string" || selected.trim().length === 0) {
+    throw new TypeError(`provider ${name} ${field} must be a nonblank string`);
+  }
+  return selected;
+}
+
+function configuredProvider(name: string, selected: unknown): ProviderExecution {
+  const value = record(selected);
+  if (value === null) throw new TypeError(`provider ${name} must be an object`);
+  const unknown = Object.keys(value).find((key) => !["kind", "description", "executable", "config", "env"].includes(key));
+  if (unknown !== undefined) throw new TypeError(`provider ${name} has unknown field ${unknown}`);
+  optionalProviderText(value, name, "description");
+  return decodeProviderExecution({
+    name,
+    kind: value.kind,
+    ...(value.executable === undefined ? {} : { executable: value.executable }),
+    ...(value.config === undefined ? {} : { config: value.config }),
+    ...(value.env === undefined ? {} : { env: value.env }),
+  });
+}
+
+function providerExecution(settings: Settings, name: string): ProviderExecution {
+  const view = settings.namespace("providers");
+  if (view.kind === "failed") throw new TypeError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
+  const selected = view.entries.find((entry) => entry.name === name)?.value;
+  if (selected !== undefined) return configuredProvider(name, selected);
+  if (name === "claude") return Object.freeze({ name, kind: "claude-agent-sdk" });
+  if (name === "codex-app-server") return Object.freeze({ name, kind: "codex-app-server" });
+  throw new TypeError(`unknown provider ${name}`);
+}
+
+function admitPersona(persona: DecodedPersona, settings: Settings): AdmittedPersona {
+  let execution: ProviderExecution;
+  try { execution = providerExecution(settings, persona.provider); }
+  catch (error) {
+    if (error instanceof TypeError) throw new AkumaPersonaError(persona.name, [persona.path], `uses ${error.message}`);
     throw error;
   }
+  const adapter = providerNamed(execution);
   const admission = adapter.admitOptions(persona.options);
   if (admission.kind === "refused") {
     throw new AkumaPersonaError(persona.name, [persona.path], `is unsupported: ${admission.diagnostic}`);
   }
-  return Object.freeze({ ...persona, adapter, options: admission.options });
+  return Object.freeze({ ...persona, provider: execution, adapter, options: admission.options });
 }
 
-export function loadPersona(input: Readonly<{ name: string; keiyakuHome?: string }>): PersonaDefinition {
+export function loadPersona(input: Readonly<{ name: string; settings: Settings }>): AdmittedPersona {
   const name = personaName(input.name);
-  const path = join(input.keiyakuHome ?? join(homedir(), ".keiyaku"), "akuma", `${name}.md`);
+  const userPath = input.settings.scopes.user.path;
+  if (userPath === undefined) throw new AkumaPersonaError(name, [], "has no user Settings coordinate");
+  const path = join(dirname(userPath), "akuma", `${name}.md`);
   let markdown: string;
   try {
     markdown = readFileSync(path, "utf8");
@@ -120,7 +161,7 @@ export function loadPersona(input: Readonly<{ name: string; keiyakuHome?: string
     throw new AkumaPersonaError(name, [path], `could not be read: ${error instanceof Error ? error.message : String(error)}`);
   }
   try {
-    return admitPersona(decodePersona(name, path, markdown));
+    return admitPersona(decodePersona(name, path, markdown), input.settings);
   } catch (error) {
     if (error instanceof AkumaPersonaError) throw error;
     throw new AkumaPersonaError(name, [path], `is invalid: ${error instanceof Error ? error.message : String(error)}`);

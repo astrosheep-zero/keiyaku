@@ -41,7 +41,7 @@ function fixture() {
     id: allocated.id,
     persona: "claude",
     description: "Claude fixture",
-    provider: "claude",
+    provider: { name: "claude", kind: "claude-agent-sdk" },
     options: { model: "claude-sonnet-4-5", systemPrompt: "Be precise." },
     cwd: root,
     origin: { kind: "direct" },
@@ -122,6 +122,12 @@ test("Body Request facts have one idempotent monotonic authority", () => {
       body: "build",
       contract: "kei/fixture",
       world: value.root,
+      recipe: {
+        description: value.soul.description,
+        provider: value.soul.provider,
+        options: value.soul.options,
+        confinement: value.soul.confinement,
+      },
       admittedAt: "2026-08-08T00:00:01.000Z",
     };
     assert.equal(admitRequest(value.allocated.paths, input).state, "admitted");
@@ -174,7 +180,7 @@ test("Body Request facts have one idempotent monotonic authority", () => {
   } finally { value.close(); }
 });
 
-test("schema version 3 hard-refuses old heart and leash authority", () => {
+test("schema version 4 hard-refuses old heart and leash authority", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "30000000" });
   try {
@@ -184,8 +190,8 @@ test("schema version 3 hard-refuses old heart and leash authority", () => {
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 3/u);
-    assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 3/u);
+    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 4/u);
+    assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

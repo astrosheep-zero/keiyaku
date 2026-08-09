@@ -4,6 +4,7 @@ import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument, verificationDefinition } from "../body/decode.js";
 import type { DecodedContractDocument } from "../body/types.js";
 import { observeRegion, type RegionObservation, type RegionOverlap } from "./region.js";
+import type { Gate } from "./gates.js";
 import {
   prepareVerificationDeclaration,
   type VerificationDeclarationPreparation,
@@ -12,6 +13,7 @@ import {
   contractId,
   actorId,
   gate,
+  gateWord,
   type ActorId as CoreActorId,
   type ChangeId,
   type ContractId,
@@ -63,6 +65,8 @@ import {
   type VerificationStop,
 } from "../protocol/operations.js";
 export { NoGitWorldError };
+export { gatesFrom, SettingsError } from "./gates.js";
+export type { Gate, GatesFromInput } from "./gates.js";
 
 export type {
   AuditReport,
@@ -86,7 +90,6 @@ export type { RegionOverlap };
 export type Fact = JournalEntry;
 export type ActorId = string;
 export type AttestationVerdict = "satisfied" | "unsatisfied";
-export type Gate = "reviewed" | "verified";
 export type Review = ReviewValue;
 export type TypedRefusal = IntentRefusal;
 export type TypedRetry = IntentRetry;
@@ -183,7 +186,9 @@ function normalizedGates(values: unknown): readonly CoreGate[] {
   if (values === undefined) return [];
   if (!Array.isArray(values)) throw new TypeError("gates must be an array");
   const normalized = values.map((value, index) => {
-    if (value !== "reviewed" && value !== "verified") throw new TypeError(`gates[${index}] must be reviewed or verified`);
+    if (!gateWord(value)) {
+      throw new TypeError(`gates[${index}] must match ^[a-z][a-z0-9-]{0,63}$`);
+    }
     return gate(value);
   });
   if (new Set(normalized).size !== normalized.length) throw new TypeError("gates must not contain duplicates");

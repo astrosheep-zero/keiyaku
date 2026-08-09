@@ -1,4 +1,14 @@
-export { AuthorityCorruptionError, Delivery, Keiyaku, NoGitWorldError, Repo } from "./library/keiyaku.js";
+export { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, NoGitWorldError, Repo, SettingsError } from "./library/keiyaku.js";
+export { settings } from "./settings.js";
+export type {
+  Settings,
+  SettingsEntry,
+  SettingsInput,
+  SettingsNamespaceFailure,
+  SettingsNamespaceView,
+  SettingsScope,
+  SettingsScopeState,
+} from "./settings.js";
 
 export type {
   AttestationVerdict,
@@ -26,6 +36,7 @@ export type {
   Fact,
   FactKind,
   Gate,
+  GatesFromInput,
   KeiyakuOfInput,
   Outcome,
   PlacementStop,

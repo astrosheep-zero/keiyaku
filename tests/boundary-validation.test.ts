@@ -48,9 +48,9 @@ test("amend validates programmer input before observing a missing contract", asy
   const before = (await Keiyaku.list({ repo })).rows;
 
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => Reflect.apply(contract.amend, contract, [{ markdown: "## Append: Context\ntext\n", gates: ["invalid"] }])),
+    () => withGitShim("exit 99", {}, () => Reflect.apply(contract.amend, contract, [{ markdown: "## Append: Context\ntext\n", gates: ["Invalid"] }])),
     (error: unknown) => error instanceof TypeError
-      && error.message === "gates[0] must be reviewed or verified",
+      && error.message === "gates[0] must match ^[a-z][a-z0-9-]{0,63}$",
   );
   assert.deepEqual((await Keiyaku.list({ repo })).rows, before);
 });
@@ -72,6 +72,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
   const bound = await Keiyaku.bind({ repo,
     markdown: ["# T", "", "## Context", "C", "", "## Objective", "O", "", "## Design", "D", "", "## Region", "~~~", "src/**", "~~~", "", "## Criteria", "### C", "C", ""].join("\n"),
     workspace: "here",
+    gates: ["security-audited"],
   });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");

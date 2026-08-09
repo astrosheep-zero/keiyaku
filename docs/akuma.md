@@ -21,8 +21,9 @@ and go; the heart stays.
   mechanics, and transaction judges remain separate paragraphs of the same
   heart. Raw statements are row mechanics; they do not speak in the judge's
   transaction language.
-- **soul** — the immutable birth facts: id, persona, description, provider
-  options, summon cwd, origin, confinement, and optional Contract association.
+- **soul** — the immutable birth facts: id, persona, description, resolved
+  provider execution, provider options, summon cwd, origin, confinement, and
+  optional Contract association.
   The association is opaque `kei/...` identity bytes meaning "summoned for";
   it carries no Contract lifecycle or carrier behavior. The cwd is the akuma's
   seat, not a native resume coordinate; resumability remains a session fact.
@@ -37,17 +38,17 @@ and go; the heart stays.
   directory will never be born.
   Written only under the leash; a late body's birth claim checks the seal
   in the same transaction and self-aborts if present.
-- **provider** — the agent process the body drives through one adapter.
-  Cut 1 ships the built-in Claude adapter. Its writable reach is a typed
+- **provider** — the agent process the body drives through the built-in adapter
+  kind selected by its frozen execution recipe. Its writable reach is a typed
   confinement fact, never an admission gate.
 
 The dependency direction is fixed:
 
 ```text
-cli -> akuma -> {body, heart, identity, persona, provider(codec), publication, requests, providers(map), runtime/proc(collar)}
-persona -> {identity, provider, providers(map)}
+cli -> akuma -> {body, heart, identity, persona, provider(codec), publication, requests, providers(map), settings, runtime/proc(collar)}
+persona -> {identity, provider, providers(map), settings}
 body -> {heart, provider, providers, requests, runtime/proc}
-requests -> {heart, identity, persona, provider, publication}
+requests -> {heart, identity, provider, providers(map), publication}
 publication -> {heart, identity, runtime/proc}
 provider -> heart types
 providers/* -> {provider, runtime/proc/line-rpc}
@@ -151,34 +152,46 @@ The file begins with one strict YAML mapping. `provider` is required;
 other present value is a nonblank string. Unknown keys are refused. The
 Markdown body after frontmatter is the system prompt, including an empty one.
 
-`call({ persona })` validates the name, reads this one file, checks its provider
-through the sole literal provider map, and asks that adapter to admit its
+`Akuma.at({ path, settings? })` normalizes the world once. It uses the injected
+Settings snapshot when present and otherwise constructs one Settings value for
+that world. `call({ persona })` validates the name, reads this one Persona file,
+resolves its `provider` as an execution name in the Settings `providers`
+namespace, and asks the selected built-in adapter kind to admit the Persona
 options before allocating an identity. Missing, malformed, unknown-provider,
-and provider-unsupported input is typed failure; a missing or malformed
-Persona includes the exact path searched. There is no fallback Persona,
-directory layering, or provider registry.
+and provider-unsupported input is typed failure; a missing or malformed Persona
+includes the exact path searched. There is no fallback Persona or directory
+layering.
 
-Birth snapshots the Persona name, optional description, provider, and admitted
-options into the soul. The body never reads the home file. A newly admitted
+A provider entry is one strict object with required `kind`, optional nonblank
+`description` and `executable`, optional object `config`, and optional `env`
+whose values are strings. The two kinds are `claude-agent-sdk` and
+`codex-app-server`; only Codex consumes `config`. When no same-name Settings
+entry exists, Persona names `claude` and `codex-app-server` select their
+Akuma-owned default executions. A configured same-name entry replaces that
+default wholly under Settings shadow law.
+
+Birth snapshots the Persona name, optional description, complete provider
+execution, and admitted options into the soul. The body never reads Settings or
+the Persona file. A newly admitted
 native session snapshots the exact options used alongside its coordinate and
 cwd; resume reads that session recipe. Before admission, the body uses the
 soul's options and summon cwd. Thus later edits to Persona Markdown affect only
 future akuma.
 
-Provider `claude` consumes `model`, `effort`, and
+Provider kind `claude-agent-sdk` consumes `model`, `effort`, and
 the system prompt. `access` maps `read` to plan mode, `write` to edit acceptance,
 and `auto` or absence to bypass mode. Claude cannot honestly enforce the
 portable `network` claim, so either network value is refused before birth.
 
-Provider `codex-app-server` runs the PATH-resolved `codex app-server --listen
-stdio://` with the body's inherited environment. It consumes `model`, `effort`,
+Provider kind `codex-app-server` runs the selected executable, defaulting to
+`codex`, as `app-server --listen stdio://`. It consumes `model`, `effort`,
 and the system prompt. Missing `access` and `access: write` both select native
 workspace-write rooted exactly at the normalized call cwd; `network` selects
 that sandbox's native network flag and defaults to disabled. `read` and `auto`
 are refused because this cut has no second honest policy mapping for them. Its
 resumable coordinate is the native thread id; its answered history id is the
 completed native turn id, and native fork is `thread/fork` at that exact pair.
-No settings file, executable option, provider instance, or registry participates.
+The frozen `config` object is supplied to native thread start/resume.
 Each app-server instance is a detached helper process tree. Drive completion
 awaits termination of that complete tree, so provider descendants cannot outlive
 the body turn or leave an answered Akuma headless.
@@ -235,7 +248,8 @@ because the write-time truth cannot be reconstructed after a detached process
 dies; their existence does not depend on a current control-flow reader.
 
 - **soul** — one row, written at birth: id, persona, optional description,
-  provider, admitted options, summon cwd, origin, confinement, optional
+  resolved provider execution, admitted options, summon cwd, origin,
+  confinement, optional
   Contract id, created-at. The Contract id is immutable for the soul's whole
   life; there is no reassignment verb.
 - **bodies** — one row per body: collar, leash-taken-at, end (exited /
@@ -262,7 +276,8 @@ dies; their existence does not depend on a current control-flow reader.
   the public activity snapshot.
 - **tells** — body plus its delivery state; see Tell.
 - **requests** — the sole durable authority for Body Requests. One fact holds
-  the caller UUID, Persona, body, optional cwd, optional Contract id, normalized world, admission
+  the caller UUID, Persona, frozen provider recipe, body, optional cwd,
+  optional Contract id, normalized world, admission
   time, and exactly one monotonic state: `admitted`, `reserved` with the child
   coordinate, `served` with the child coordinate, `refused` with a diagnostic,
   or `voided` with evidence. `served`, `refused`, and `voided` are terminal.
@@ -277,10 +292,10 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed `heart/` custody core; no store or repository interface
 sits between callers and its index.
 
-Heart and leash schema version is `3`. Version 3 adds the nullable Contract
-column to soul and request facts. This is a hard cut: an older heart fails the
-existing schema gate; no migration or compatibility decoder exists. Absence is
-stored as SQL `NULL` and omitted from public values.
+Heart and leash schema version is `4`. Version 4 freezes the resolved provider
+execution recipe into soul, session, and request facts. This is a hard cut: an
+older heart fails the existing schema gate; no migration or compatibility
+decoder exists. Absence is stored as SQL `NULL` and omitted from public values.
 
 The heart is four coherent files with one-way dependencies. `facts.ts` owns the
 domain fact vocabulary and the pure `life()` interpretation and has no imports.
@@ -553,6 +568,12 @@ authority and have one writer: the body holding its leash. Admission uses the
 request id for idempotence, so at-least-once claim observation produces at most
 one fact. There is no second store.
 
+The claim decoder validates the complete frozen recipe before Heart admission.
+Its provider execution uses the same exact decoder as Persona admission, its
+options use the provider-owned option decoder, and its confinement must equal
+the selected adapter's pure projection for that cwd. A malformed recipe is a
+malformed claim and never becomes a durable request fact.
+
 The child directory and its leash remain the sole judge of child birth. The
 parent heart remembers only the reserved child coordinate: where to observe,
 not a claim that the child was born. The child soul records origin
@@ -749,10 +770,24 @@ UUID associated with the successful result; the result UUID is not a valid
 substitute. Together with the session observed by the body, it forms the
 answered turn's durable fork coordinate.
 
-Option admission is provider-owned validation at the public boundary, before
-identity allocation. `start()` is their effect reader. The admitted snapshot
-crosses the detached process boundary in the soul and then in each native
-session fact; the adapter never reopens Persona configuration.
+Provider execution and option admission are provider-owned validation at the
+public boundary, before identity allocation. `start()` is their effect reader.
+The execution crosses the detached process boundary in the soul; each native
+session records the execution name and exact options. Tell, resume, recovery,
+and fork reconstruct the adapter only from those durable facts. A rerouted Body
+Request carries its already resolved recipe into the parent heart, so the body
+does not reopen Settings to birth the child. A fork inherits its parent's
+execution.
+
+`executable` constrains each provider process start. Literal provider `env`
+values overlay the ambient environment at every provider interaction whose
+native boundary accepts an environment. The ambient environment remains
+launch-local and is not a Settings scope or durable fact. Codex start and fork
+both use the frozen execution. Claude start uses its frozen executable and env,
+but the in-process SDK `forkSession` primitive accepts neither; a Claude
+execution carrying env therefore refuses fork instead of silently consulting
+the default native session world. Akuma loads no dotenv file and performs no
+environment interpolation.
 
 Alongside its adapter, each provider module states its confinement for a
 given call: declared writable roots, or `unconfined`. The soul records it;
@@ -760,15 +795,14 @@ nothing gates call admission on it. During a declared drive the adapter grants
 the body-owned request transport as one additional writable root and injects
 `AKUMA_REQUESTS`; an unconfined adapter never receives that input.
 
-No `probe`, registry, or registration schema exists. `providers/index.ts`
-contains the one literal name-to-adapter map used by both the public boundary
-and detached body composition root. It maps only `claude` and
-`codex-app-server`.
+No `probe`, plugin registry, or registration schema exists. Provider instance
+names are Settings data; `providers/index.ts` remains the closed kind-to-adapter
+composition root used by the public boundary and detached body.
 
 ## Public surface
 
 ```ts
-const world = Akuma.at({ path });          // path is the world; no climbing
+const world = Akuma.at({ path, settings? }); // path is the world; no climbing
 
 const a = await world.call({ persona, body, cwd?, contract? }); // returns after birth
 world.of({ id });
@@ -877,14 +911,14 @@ Coherent owner modules, not mechanical-step directories.
 ```text
 src/akuma/
   identity.ts         aku/ constructor/parser, allocation, topology
-  persona.ts          one home read, strict decode, provider option admission
+  persona.ts          one Persona read, Settings provider interpretation, option admission
   heart/
     facts.ts          import-free typed facts and life() interpretation
     schema.ts         private DDL, shared schema version, hard-cut gates
     rows.ts           private rows/codecs, named single-statement mechanics
     index.ts          connections, leash, transaction judges, custody, projections
   provider.ts         ProviderAdapter, Drive, AgentEvent, activity codec
-  providers/index.ts  sole literal provider map
+  providers/index.ts  provider-execution codec and closed kind composition map
   providers/claude.ts Claude Agent SDK translation
   providers/codex-app-server.ts Codex stdio JSON-RPC translation
   publication.ts      allocate, initialize, launch, await birth, local sealing
@@ -906,8 +940,8 @@ verification evidence for those runtime claims.
 
 Cut 1 established identity + heart + body + boundary + Claude + public
 status/wait/interrupt. Cut 2 adds the provider fork primitive, public fork,
-origin arm, and retention. The Codex app-server adapter adds a second literal
-provider without a provider registry. Cut 3 adds Body Requests. CLI skin and the
+origin arm, and retention. The Codex app-server adapter adds a second built-in
+provider kind without a plugin registry. Cut 3 adds Body Requests. CLI skin and the
 Kanshi compact fleet read ride Cut 1.
 
 ## Never built

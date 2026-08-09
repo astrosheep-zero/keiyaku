@@ -76,17 +76,26 @@ terminal fact and otherwise receives a typed refusal.
 
 ## Gates And Attestations
 
+Named gate snapshots in Settings are construction input only. Their resource
+and shadow law lives in [settings.md](settings.md). The Contract-owned
+`gatesFrom` consumer validates a selected record and produces the concrete
+ordered gate array supplied to bind or amend. Once admitted, only
+`terms.gates` matters; lifecycle and status never read Settings or reconcile an
+existing Contract against later configuration edits.
+
 Each `gates` term is an opaque, contract-declared placement obligation. Core
 has no built-in gate names, defaults, or verification-derived gates. Its codec
-and placement rule stay total for opaque gate values.
+admits the gate-word grammar from [settings.md](settings.md); its placement rule
+otherwise stays total and attaches no semantic registry to a word.
 
-The package-root gate vocabulary is closed to `reviewed | verified`. The
-package-root surface admits a token only when that same surface has a
-satisfiable attestation path for it: `Keiyaku.review` produces `reviewed`, and
-the declared Verification path reached by `Keiyaku.deliver` or `Keiyaku.audit` produces
-`verified`. A producer may still record its own token when it is absent from
-`terms.gates`; that testimony is history and does not add a placement
-obligation. The declared order is retained as a contract term; gate
+The package root accepts the same opaque gate-word grammar and does not close
+the vocabulary to its current producers. `Keiyaku.review` produces `reviewed`,
+and the declared Verification path reached by `Keiyaku.deliver` or
+`Keiyaku.audit` produces `verified`. A custom word may remain unsatisfied until
+an existing or future producer records matching testimony; declaring it does
+not invent a producer. A producer may still record its own token when it is
+absent from `terms.gates`; that testimony is history and does not add a
+placement obligation. The declared order is retained as a contract term; gate
 satisfaction uses the same generic rule for each declared gate.
 
 `AttestationData` has the shape defined in [model.md](model.md): its `gate` is
@@ -121,8 +130,9 @@ it also returns the same aggregate satisfaction judgment used by placement.
 No protocol adapter, Kanshi join, or renderer reorders attestations, compares
 subjects, derives staleness, or infers terminality from phase names.
 
-A declared gate whose producer has no valid declaration is rejected by that
-producer's owning outer decision. It is not a preflight readiness check, a
+An invoked producer with no valid producer declaration is rejected by that
+producer's owning outer decision. This does not reject a custom gate merely
+because no current producer owns it. It is not a preflight readiness check, a
 pending journal state, or a journal deadlock. A valid producer declaration may
 be executed even when its token is not a placement gate. The package root has
 no generic attest operation or gate registry.

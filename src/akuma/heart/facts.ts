@@ -14,6 +14,14 @@ export type ProviderOptions = Readonly<{
   systemPrompt?: string;
 }>;
 
+export type ProviderExecution = Readonly<{
+  name: string;
+  kind: "claude-agent-sdk" | "codex-app-server";
+  executable?: string;
+  config?: Readonly<Record<string, unknown>>;
+  env?: Readonly<Record<string, string>>;
+}>;
+
 export type AkumaOrigin =
   | Readonly<{ kind: "direct" }>
   | Readonly<{ kind: "request"; parentId: AkuId; requestId: string }>
@@ -23,7 +31,7 @@ export type Soul = Readonly<{
   id: AkuId;
   persona: string;
   description?: string;
-  provider: string;
+  provider: ProviderExecution;
   options: ProviderOptions;
   cwd: string;
   origin: AkumaOrigin;
@@ -31,6 +39,8 @@ export type Soul = Readonly<{
   contract?: string;
   createdAt: string;
 }>;
+
+export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "confinement">;
 
 export type Collar = Readonly<{
   pid: number;
@@ -94,6 +104,7 @@ export type RequestInput = Readonly<{
   cwd?: string;
   contract?: string;
   world: string;
+  recipe: RequestRecipe;
 }>;
 
 export type RequestFact = RequestInput & Readonly<{ admittedAt: string }> & (

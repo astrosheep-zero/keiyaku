@@ -8,9 +8,11 @@ import type {
   Confinement,
   DeathFact,
   KillEvidence,
+  ProviderExecution,
   ProviderOptions,
   RequestFact,
   RequestInput,
+  RequestRecipe,
   ResumeCoordinate,
   SessionFact,
   Soul,
@@ -23,7 +25,7 @@ export type SoulRow = Readonly<{
   id: string;
   persona: string;
   description: string | null;
-  provider: string;
+  provider_json: string;
   options_json: string;
   cwd: string;
   origin_json: string;
@@ -79,6 +81,7 @@ export type RequestRow = Readonly<{
   cwd: string | null;
   contract: string | null;
   world: string;
+  recipe_json: string;
   admitted_at: string;
   state: RequestFact["state"];
   child: string | null;
@@ -114,7 +117,7 @@ export function encodeSoulRow(soul: Soul): readonly [
     soul.id,
     soul.persona,
     soul.description ?? null,
-    soul.provider,
+    json(soul.provider),
     json(soul.options),
     soul.cwd,
     json(soul.origin),
@@ -129,7 +132,7 @@ export function decodeSoulRow(row: SoulRow): Soul {
     id: row.id as AkuId,
     persona: row.persona,
     ...(row.description === null ? {} : { description: row.description }),
-    provider: row.provider,
+    provider: parsed<ProviderExecution>(row.provider_json),
     options: parsed<ProviderOptions>(row.options_json),
     cwd: row.cwd,
     origin: parsed<AkumaOrigin>(row.origin_json),
@@ -196,6 +199,7 @@ export function decodeRequestRow(row: RequestRow): RequestFact {
     ...(row.cwd === null ? {} : { cwd: row.cwd }),
     ...(row.contract === null ? {} : { contract: row.contract }),
     world: row.world,
+    recipe: parsed<RequestRecipe>(row.recipe_json),
     admittedAt: row.admitted_at,
   };
   if (row.state === "reserved" || row.state === "served") {
@@ -223,7 +227,7 @@ export function decodeDeathRow(row: DeathRow): DeathFact {
 }
 
 export function soulFact(database: DatabaseSync): Soul | null {
-  const row = database.prepare(`SELECT id, persona, description, provider, options_json, cwd,
+  const row = database.prepare(`SELECT id, persona, description, provider_json, options_json, cwd,
     origin_json, confinement_json, contract, created_at FROM soul WHERE singleton = 1`).get() as SoulRow | undefined;
   return row === undefined ? null : decodeSoulRow(row);
 }
@@ -233,7 +237,7 @@ export function sealExists(database: DatabaseSync): boolean {
 }
 
 export function insertSoulFact(database: DatabaseSync, soul: Soul): void {
-  database.prepare(`INSERT INTO soul(singleton, id, persona, description, provider, options_json, cwd, origin_json, confinement_json, contract, created_at)
+  database.prepare(`INSERT INTO soul(singleton, id, persona, description, provider_json, options_json, cwd, origin_json, confinement_json, contract, created_at)
     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...encodeSoulRow(soul));
 }
 
@@ -304,21 +308,22 @@ export function updateTellState(database: DatabaseSync, id: string, state: TellS
   database.prepare("UPDATE tells SET state = ? WHERE id = ?").run(state, id);
 }
 
-const REQUEST_COLUMNS = `sequence, id, persona, body, cwd, contract, world, admitted_at,
+const REQUEST_COLUMNS = `sequence, id, persona, body, cwd, contract, world, recipe_json, admitted_at,
   state, child, diagnostic, evidence`;
 
 export function insertRequestFact(
   database: DatabaseSync,
   input: RequestInput & Readonly<{ admittedAt: string }>,
 ): void {
-  database.prepare(`INSERT OR IGNORE INTO requests(id, persona, body, cwd, contract, world, admitted_at, state)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'admitted')`).run(
+  database.prepare(`INSERT OR IGNORE INTO requests(id, persona, body, cwd, contract, world, recipe_json, admitted_at, state)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'admitted')`).run(
     input.id,
     input.persona,
     input.body,
     input.cwd ?? null,
     input.contract ?? null,
     input.world,
+    json(input.recipe),
     input.admittedAt,
   );
 }

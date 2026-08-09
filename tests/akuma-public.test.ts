@@ -19,6 +19,9 @@ import {
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude.js";
+import { settings } from "../src/settings.js";
+
+const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
 const provider: ProviderAdapter = {
   confinement: () => ({ kind: "unconfined" }),
@@ -46,7 +49,7 @@ async function answeredSource(root: string, suffix: string) {
       id: allocated.id,
       persona: "claude",
       description: "Fork source",
-      provider: "claude",
+      provider: CLAUDE_EXECUTION,
       options: { model: "fixture-model" },
       origin: { kind: "direct" },
       confinement: { kind: "unconfined" },
@@ -220,7 +223,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
         id: allocated.id,
         persona: "claude",
         description: "Fixture akuma",
-        provider: "claude",
+        provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
@@ -293,7 +296,7 @@ test("interrupt records a tell only after taking an idle leash", async () => {
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
@@ -334,7 +337,7 @@ test("interrupt waits for a running body to self-abort before recording the tell
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
@@ -391,7 +394,7 @@ test("interrupt leaves pause behind and records no tell when a held leash has no
     holder.birth(allocated.paths, {
       id: allocated.id,
       persona: "claude",
-      provider: "claude",
+      provider: CLAUDE_EXECUTION,
       options: {},
       origin: { kind: "direct" },
       confinement: { kind: "unconfined" },
@@ -422,7 +425,7 @@ test("physical put-down evidence is not success while the leash remains held", a
     holder.birth(allocated.paths, {
       id: allocated.id,
       persona: "claude",
-      provider: "claude",
+      provider: CLAUDE_EXECUTION,
       options: {},
       origin: { kind: "direct" },
       confinement: { kind: "unconfined" },
@@ -452,6 +455,7 @@ test("Persona Markdown is strict call-time input with a durable option shape", (
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-persona-"));
   try {
     mkdirSync(join(home, "akuma"));
+    const settingsValue = settings({ home });
     writeFileSync(join(home, "akuma", "reviewer.md"), [
       "---",
       "provider: claude",
@@ -463,13 +467,13 @@ test("Persona Markdown is strict call-time input with a durable option shape", (
       "Review the change from first principles.",
       "",
     ].join("\n"));
-    const loaded = loadPersona({ name: "reviewer", keiyakuHome: home });
+    const loaded = loadPersona({ name: "reviewer", settings: settingsValue });
     const { adapter, ...definition } = loaded;
     assert.equal(typeof adapter.start, "function");
     assert.deepEqual(definition, {
       name: "reviewer",
       path: join(home, "akuma", "reviewer.md"),
-      provider: "claude",
+      provider: CLAUDE_EXECUTION,
       description: "Careful reviewer",
       options: {
         model: "claude-sonnet-4-5",
@@ -480,20 +484,20 @@ test("Persona Markdown is strict call-time input with a durable option shape", (
     });
     writeFileSync(join(home, "akuma", "invalid.md"), "---\nprovider: claude\nextra: no\n---\n");
     assert.throws(
-      () => loadPersona({ name: "invalid", keiyakuHome: home }),
+      () => loadPersona({ name: "invalid", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaPersonaError
         && error.reason.includes("unknown Persona frontmatter key: extra")
         && error.searched[0] === join(home, "akuma", "invalid.md"),
     );
     writeFileSync(join(home, "akuma", "unknown.md"), "---\nprovider: missing\n---\n");
     assert.throws(
-      () => loadPersona({ name: "unknown", keiyakuHome: home }),
+      () => loadPersona({ name: "unknown", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaPersonaError
         && error.reason === "uses unknown provider missing"
         && error.searched[0] === join(home, "akuma", "unknown.md"),
     );
     assert.throws(
-      () => loadPersona({ name: "missing", keiyakuHome: home }),
+      () => loadPersona({ name: "missing", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaPersonaError
         && error.kind === "akuma-persona"
         && error.searched[0] === join(home, "akuma", "missing.md"),
@@ -544,7 +548,7 @@ test("a failed turn is durable public evidence and never masquerades as provider
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
@@ -642,7 +646,7 @@ test("kill gives the body a stop grace before putting down its process tree", as
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },

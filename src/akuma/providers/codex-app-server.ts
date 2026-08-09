@@ -11,6 +11,7 @@ import {
   type ToolCall,
   type TurnResult,
 } from "../provider.js";
+import type { ProviderExecution } from "../heart/index.js";
 
 type StartInput = Parameters<ProviderAdapter["start"]>[0];
 type ForkInput = Parameters<NonNullable<ProviderAdapter["fork"]>>[0];
@@ -362,10 +363,12 @@ async function admitTurn(
   input: StartInput,
   state: TurnState,
   events: AgentEventChannel,
+  config?: Readonly<Record<string, unknown>>,
 ): Promise<void> {
   await initialize(server);
   const threadParams = {
     cwd: input.cwd,
+    ...(config === undefined ? {} : { config }),
     ...(input.options.model === undefined ? {} : { model: input.options.model }),
     ...(input.options.systemPrompt === undefined || input.options.systemPrompt.length === 0
       ? {} : { developerInstructions: input.options.systemPrompt }),
@@ -387,8 +390,12 @@ async function admitTurn(
   }));
 }
 
-async function forkCodex(executable: string, input: ForkInput): Promise<Readonly<{ session: { sessionId: string } }>> {
-  const server = new LineRpcProcess({ argv: [executable, "app-server", "--listen", "stdio://"], cwd: input.cwd });
+async function forkCodex(execution: ProviderExecution, input: ForkInput): Promise<Readonly<{ session: { sessionId: string } }>> {
+  const server = new LineRpcProcess({
+    argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
+    cwd: input.cwd,
+    ...(execution.env === undefined ? {} : { env: { ...process.env, ...execution.env } }),
+  });
   try {
     await initialize(server);
     const child = threadId(await server.request("thread/fork", {
@@ -417,14 +424,16 @@ async function abortTurn(
   await server.close(true);
 }
 
-async function startCodex(executable: string, input: StartInput): Promise<Drive> {
+async function startCodex(execution: ProviderExecution, input: StartInput): Promise<Drive> {
   const events = new AgentEventChannel();
   const server = new LineRpcProcess({
-    argv: [executable, "app-server", "--listen", "stdio://"],
+    argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
     cwd: input.cwd,
-    ...(input.requests === undefined ? {} : {
-      env: { ...process.env, [AKUMA_REQUESTS_ENV]: input.requests.dir },
-    }),
+    ...((execution.env === undefined && input.requests === undefined) ? {} : { env: {
+      ...process.env,
+      ...execution.env,
+      ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
+    } }),
   });
   const state: TurnState = { answers: [], settled: false, tools: new Map() };
   let settle!: (result: TurnResult) => void;
@@ -450,7 +459,7 @@ async function startCodex(executable: string, input: StartInput): Promise<Drive>
     const result = notificationResult(notification, state, events);
     if (result !== undefined) finish(result);
   });
-  try { await admitTurn(server, input, state, events); }
+  try { await admitTurn(server, input, state, events, execution.config); }
   catch (error) { finish({ kind: "failed", diagnostic: diagnostic(error) }); }
   return {
     events,
@@ -459,7 +468,10 @@ async function startCodex(executable: string, input: StartInput): Promise<Drive>
   };
 }
 
-export function createCodexAppServerProvider(executable = "codex"): ProviderAdapter {
+export function createCodexAppServerProvider(input: string | ProviderExecution = "codex"): ProviderAdapter {
+  const execution: ProviderExecution = typeof input === "string"
+    ? { name: "codex-app-server", kind: "codex-app-server", executable: input }
+    : input;
   return {
     confinement: ({ cwd }) => ({ kind: "declared", writableRoots: [cwd] }),
     admitOptions(options) {
@@ -468,8 +480,8 @@ export function createCodexAppServerProvider(executable = "codex"): ProviderAdap
       }
       return { kind: "admitted", options: Object.freeze({ ...options }) };
     },
-    fork: (input) => forkCodex(executable, input),
-    start: (input) => startCodex(executable, input),
+    fork: (input) => forkCodex(execution, input),
+    start: (input) => startCodex(execution, input),
   };
 }
 

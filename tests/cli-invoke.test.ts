@@ -17,7 +17,10 @@ function repositoryWithMain() {
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  mkdirSync(resolve(repository.path, ".keiyaku"), { recursive: true });
+  writeFileSync(resolve(repository.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: ["reviewed"] } }));
+  repository.run(["add", ".keiyaku/settings.json"]);
+  repository.run(["commit", "--quiet", "-m", "initial"]);
   return repository;
 }
 
@@ -70,7 +73,7 @@ function acceptedContract(result: Awaited<ReturnType<typeof invoke>>): ContractI
 
 test("one CLI invocation reuses its Repo for selector, settings, and contract lookup", async () => {
   const repository = repositoryWithMain();
-  mkdirSync(resolve(repository.path, ".keiyaku"));
+  mkdirSync(resolve(repository.path, ".keiyaku"), { recursive: true });
   writeFileSync(resolve(repository.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: ["reviewed"] } }));
   const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Single public repo"));
   const id = acceptedContract(bound);

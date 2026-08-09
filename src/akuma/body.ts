@@ -64,7 +64,7 @@ function turnRecipe(paths: AkumaPaths, soul: Soul): Readonly<{
   session?: ResumeCoordinate;
 }> {
   const latest = readHeart(paths).latestSession;
-  const admitted = latest?.provider === soul.provider ? latest : undefined;
+  const admitted = latest?.provider === soul.provider.name ? latest : undefined;
   const session = admitted?.coordinate;
   return {
     cwd: admitted?.cwd ?? soul.cwd,
@@ -173,7 +173,7 @@ async function consumeTurnDrive(
     if (event.type === "session") {
       turnSession = event.coordinate;
       recordSession(input.paths, {
-        provider: input.soul.provider,
+        provider: input.soul.provider.name,
         coordinate: event.coordinate,
         cwd,
         options,
@@ -239,7 +239,7 @@ function launchCwd(launch: BodyLaunch): string {
   const snapshot = readHeart(launch.paths);
   const soul = snapshot.soul;
   if (soul === null) throw new Error("Akuma wake has no born soul");
-  return snapshot.latestSession?.provider === soul.provider
+  return snapshot.latestSession?.provider === soul.provider.name
     ? snapshot.latestSession.cwd
     : soul.cwd;
 }

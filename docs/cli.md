@@ -15,10 +15,10 @@ keiyaku-v4 [-C <path>] <command> [<contract>|@<contract>] [--flag ...] [-]
 
 `-C <path>` is a global invocation prefix and is never persisted. Contract
 commands supply it to the one `Repo.at` construction point. Task commands use
-it as their task world; Akuma commands resolve it once as the absolute exact
-Akuma world without Git-root climbing. An omitted `-C` uses the working-directory coordinate.
-The adapter constructs exactly one `Repo` per invocation. It derives selector
-reads, the settings coordinate, contract handles and verbs, and reconciliation
+it as their task world; Akuma and Settings commands resolve it once as their
+absolute exact world without Git-root climbing. An omitted `-C` uses the
+working-directory coordinate. A Contract invocation constructs exactly one
+`Repo`. It derives selector reads, contract handles and verbs, and reconciliation
 from that value: `Keiyaku.list({ repo })`, `repo.root`, `Keiyaku.of({ repo, id })`,
 `Keiyaku.bind({ repo, ... })`, and the selected public reconcile method. It
 uses only public `Repo`, `Keiyaku`, and `Delivery` values. Neither Keiyaku
@@ -50,6 +50,7 @@ The command vocabulary is:
 | `status` | Calls Kanshi or one exact Akuma status according to its selector. |
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
+| `settings` | Constructs and observes the shared read-only Settings resource. |
 | `task ...` | Calls the separate `./task` public surface described below. |
 | `call`, `follow`, `wait`, `tell`, `interrupt`, `history`, `fork`, `kill` | Call the corresponding separate `./akuma` capability as root verbs. |
 
@@ -76,6 +77,7 @@ arc [<contract>|@<contract>] [--actor <actor>] [--json] -
 status [<contract>|@<contract>|<aku/...>] [--json]
 audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--json]
+settings [--json]
 call --persona <name> [--cwd <path>] [--contract <contract-id>] [--json] -
 follow <aku/...> [--json]
 wait <aku/...> [--deadline <ms>] [--json]
@@ -122,13 +124,13 @@ Repository `.keiyaku/settings.json` may supply named gate snapshots for the
 }
 ```
 
-A gate-set name is a lowercase machine segment. Each snapshot is an ordered,
-duplicate-free array of public Gate values; an empty array is valid. The adapter
-resolves the selected name to its array and passes that array to the public
-operation. Bind uses the configured `default` snapshot when its flag is
-omitted, falling back to `[reviewed]`; amend retains its current public value
-when its flag is omitted. A malformed settings file or unknown name is a typed
-usage refusal.
+A gate-set name and each gate word match `^[a-z][a-z0-9-]{0,63}$`. Each
+snapshot is an ordered, duplicate-free array; an empty array is valid. The
+adapter resolves the selected name to its array and passes that array to the
+public operation. Bind uses the configured `default` snapshot when its flag is
+omitted and uses `[]` when that entry is absent; amend retains its current
+public value when its flag is omitted. A malformed Settings scope, malformed
+selected entry, or explicitly selected unknown name is a typed usage refusal.
 
 `deliver` accepts an optional materialized-commit `--message`, `--actor`, and
 `--json`. `review` requires exactly one of
@@ -142,9 +144,11 @@ no reason flag or hidden reason classification. `arc` and `audit` accept
 `call`, `tell`, and `interrupt` require the final `-` and pass those bytes
 as the public body input. `--persona` is required for call and names
 `~/.keiyaku/akuma/<name>.md`; its provider must resolve through the Cut 1
-literal map, which contains `claude` and `codex-app-server`. Missing or malformed configuration
-prints the exact path searched. `--cwd` selects the immutable summon seat and
-is resolved to an absolute path at the public boundary. `follow`, `wait`,
+Settings-backed provider interpretation. When no same-name Settings entry
+exists, the built-in fallback execution names are `claude` and
+`codex-app-server`. Missing or malformed configuration prints the exact path
+searched. `--cwd` selects the immutable summon seat and is resolved to an
+absolute path at the public boundary. `follow`, `wait`,
 `tell`, `interrupt`, `history`, `fork`, and `kill` require a complete
 `aku/<persona>/<hex8>`. `status <aku/...>` addresses the same exact handle.
 Bare `status` already exposes the Akuma fleet through Kanshi; there is no

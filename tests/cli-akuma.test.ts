@@ -101,7 +101,7 @@ test("akuma interrupt invokes the public receipt and maps every exit class", asy
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
@@ -191,7 +191,7 @@ test("Akuma status, wait, and history share public observations without embeddin
       seed: {
         id: allocated.id,
         persona: "claude",
-        provider: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },

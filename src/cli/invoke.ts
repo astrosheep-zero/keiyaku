@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { Keiyaku, Repo, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Outcome, type SnapshotId } from "../index.js";
+import { resolve } from "node:path";
+import { gatesFrom, Keiyaku, Repo, settings, SettingsError, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Outcome, type Settings, type SnapshotId } from "../index.js";
 import { kanshi, selectKanshi } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromOutcome } from "./accepted.js";
@@ -11,7 +12,6 @@ import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js
 import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
 import type { AcceptedResult, DiffUnavailable, InvocationResult } from "./result.js";
 import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
-import { selectedGates } from "./settings.js";
 
 export type { AcceptedFact, DiffUnavailable, InvocationResult, Lag } from "./result.js";
 
@@ -21,11 +21,26 @@ type InvokeRuntime = Readonly<{
   readStdin?: () => string;
 }>;
 
-type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "reconcile" | "task" }>;
+type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "reconcile" | "settings" | "task" }>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin: () => string;
 }>;
+
+export type SettingsInvocationResult = Readonly<{ kind: "settings"; value: Settings }>;
+
+function settingsAt(root: string, environment: NodeJS.ProcessEnv): Settings {
+  const home = environment.KEIYAKU_HOME?.trim();
+  return settings({ root, ...(home === undefined || home.length === 0 ? {} : { home }) });
+}
+
+function selectedGates(value: Settings, name?: string) {
+  try { return gatesFrom({ settings: value, ...(name === undefined ? {} : { name }) }); }
+  catch (error) {
+    if (error instanceof SettingsError) throw new CliUsageError(error.message);
+    throw error;
+  }
+}
 
 function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
   let resolved: ActorId | undefined;
@@ -63,7 +78,7 @@ async function invokeBind(
   edge: InvocationEdge,
 ): Promise<InvocationResult> {
   const markdown = edge.readStdin();
-  const gates = selectedGates(repo.root, parsed.gates);
+  const gates = selectedGates(settingsAt(repo.root, edge.environment), parsed.gates);
   const outcome = await bindFromCommand(parsed, repo, markdown, gates, actorFromEdge(parsed.actor, edge.environment));
   return resultFromOutcome("bind", outcome, outcome.kind === "accepted" ? { reconcile: outcome.value } : {});
 }
@@ -142,7 +157,7 @@ async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: Invocat
       const markdown = edge.readStdin();
       const gates = parsed.gates === undefined
         ? undefined
-        : selectedGates(repo.root, parsed.gates);
+        : selectedGates(settingsAt(repo.root, edge.environment), parsed.gates);
       const outcome = await amendFromCommand({ command: parsed, repo, contract, markdown, gates, ...(actor === undefined ? {} : { actor }) });
       return resultFromOutcome("amend", outcome, { coordinate: id, reconcile: contract });
     }
@@ -169,19 +184,23 @@ async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: Invocat
   }
 }
 
-async function invokeParsed(invocation: ParsedExecution, runtime: InvokeRuntime): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult> {
+async function invokeParsed(invocation: ParsedExecution, runtime: InvokeRuntime): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
   const coordinate = invocation.cwd ?? runtime.cwd;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
     readStdin: runtime.readStdin ?? (() => readFileSync(0, "utf8")),
   };
   const parsed = invocation.command;
+  if (parsed.command === "settings") {
+    return { kind: "settings", value: settingsAt(resolve(coordinate ?? "."), edge.environment) };
+  }
   if (parsed.command === "task") {
     try { return await invokeTask(parsed, { ...(coordinate === undefined ? {} : { path: coordinate }), readStdin: edge.readStdin }); }
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
   }
   if (isParsedAkumaCommand(parsed)) {
-    return await invokeAkuma(parsed, { path: coordinate ?? ".", readStdin: edge.readStdin });
+    const path = resolve(coordinate ?? ".");
+    return await invokeAkuma(parsed, { path, settings: settingsAt(path, edge.environment), readStdin: edge.readStdin });
   }
   if (parsed.command === "status") {
     if (parsed.akuma === true) {
@@ -210,7 +229,7 @@ async function invokeParsed(invocation: ParsedExecution, runtime: InvokeRuntime)
   }
 }
 
-export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult> {
+export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
   try {
     return await invokeParsed(invocation, runtime);
   } catch (error) {

@@ -247,6 +247,13 @@ function hereContractDocument(marker: string, poison: string): string {
 
 test("installed binary dogfoods managed delivery, replacement review, and terminal cleanup", () => {
   const repository = repositoryWithMain();
+  mkdirSync(join(repository, ".keiyaku"));
+  commit(
+    repository,
+    ".keiyaku/settings.json",
+    `${JSON.stringify({ gates: { default: ["reviewed"] } }, null, 2)}\n`,
+    "configure review gate",
+  );
   const target = "refs/heads/main";
   const start = gitRef(repository, target);
   assert.ok(start);

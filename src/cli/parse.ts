@@ -89,6 +89,13 @@ const CONTRACT_COMMAND_SPECS = {
     usage: "reconcile [<contract>|@<contract>] [--json]",
     purpose: "Reconcile one Contract or the invocation world.",
   },
+  settings: {
+    positional: "none",
+    stdin: "none",
+    flags: { json: "boolean" },
+    usage: "settings [--json]",
+    purpose: "Read user and project Settings resources.",
+  },
 } as const satisfies Readonly<Record<string, CommandSpec>>;
 
 export type Command = keyof typeof CONTRACT_COMMAND_SPECS;
@@ -171,6 +178,7 @@ export type ParsedAudit = Output & Readonly<{
   actor?: string;
 }>;
 type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string }>;
+export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
 
 export type ParsedCommand =
   | ParsedBind
@@ -182,6 +190,7 @@ export type ParsedCommand =
   | ParsedStatus
   | ParsedAudit
   | ParsedReconcile
+  | ParsedSettings
   | ParsedAkumaCommand
   | ParsedTaskCommand;
 
@@ -431,6 +440,7 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
       const contract = parts.positionals[0];
       return { command: "reconcile", ...(contract === undefined ? {} : { contract }), output: parts.output };
     }
+    case "settings": return { command: "settings", output: parts.output };
   }
 }
 

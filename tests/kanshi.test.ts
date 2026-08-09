@@ -28,7 +28,7 @@ function bornAkuma(root: string, suffix: string, contract?: string): string {
   leash.birth(allocated.paths, {
     id: allocated.id,
     persona: "watcher",
-    provider: "claude",
+    provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {},
     cwd: root,
     origin: { kind: "direct" },

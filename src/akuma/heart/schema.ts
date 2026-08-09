@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 3;
+const HEART_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema"): void {
   const row = database.prepare(`SELECT version FROM ${table} WHERE singleton = 1`).get() as { version: number } | undefined;
@@ -28,7 +28,7 @@ export const HEART_SCHEMA = `
     id TEXT NOT NULL UNIQUE,
     persona TEXT NOT NULL,
     description TEXT,
-    provider TEXT NOT NULL,
+    provider_json TEXT NOT NULL CHECK (json_valid(provider_json)),
     options_json TEXT NOT NULL CHECK (json_valid(options_json)),
     cwd TEXT NOT NULL,
     origin_json TEXT NOT NULL CHECK (json_valid(origin_json)),
@@ -86,6 +86,7 @@ export const HEART_SCHEMA = `
     cwd TEXT,
     contract TEXT,
     world TEXT NOT NULL,
+    recipe_json TEXT NOT NULL CHECK (json_valid(recipe_json)),
     admitted_at TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('admitted', 'reserved', 'served', 'refused', 'voided')),
     child TEXT,

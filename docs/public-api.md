@@ -6,7 +6,8 @@ Keiyaku.bind({ repo: Repo.at(), markdown, target: "main" });
 
 Keiyaku is the package-root contract library. It is ESM-only and the package
 root is its sole public import surface. The public objects are `Keiyaku`,
-`Repo`, `Delivery`, and the exported value types defined by their operations.
+`Repo`, `Delivery`, the shared `settings` resource constructor, and the
+exported value types defined by their operations.
 
 Every package-root domain operation that accepts input takes exactly one
 readonly object. Public operations have no positional value parameters and no
@@ -28,6 +29,15 @@ invariant failures remain ordinary exceptions; none is converted into an
 `Outcome` arm.
 
 ## Construction And Scope
+
+Settings construction and generic resource behavior are owned by
+[settings.md](settings.md). This package root exports `settings`, `Settings`,
+its observation value types, and the Contract-owned pure consumer
+`gatesFrom({ settings, name? })`. `gatesFrom` returns concrete public Gate values;
+it does not make bind or amend depend on a mutable resource. Its selected-entry
+and resource-view failures throw the exported Contract-owned `SettingsError`;
+generic Settings construction represents its own failures as scope and
+namespace states and never produces that error.
 
 `Repo.at` is the only public construction point for a Git world. Its public
 surface is exactly:
@@ -62,14 +72,15 @@ is defined by [document.md](document.md) and [lifecycle.md](lifecycle.md).
 inputs accept nonblank string bytes; the library validates and brands them as
 the core `ActorId` before a journal write.
 
-Core facts treat gate names as opaque values. The current package-root `Gate`
-input is nevertheless the closed union `"reviewed" | "verified"`, because
-those are the only names with public attestation producers. It has no public
-mint or opaque brand. At the JavaScript boundary, `bind` and `amend`
-validate every `gates` element and throw a programmer `TypeError` for an
-unknown or duplicate token. Widening this union requires the same change to add a
-satisfiable attestation producer path on this package-root surface; a token is
-never admitted on the promise of a future producer.
+Core facts treat gate names as opaque words. The package-root `Gate` type is
+`string`, with no public mint, brand, registry, or closed producer union. At
+the JavaScript boundary, `bind` and `amend` require each element to match
+`^[a-z][a-z0-9-]{0,63}$` and reject duplicates with a programmer `TypeError`.
+`reviewed` and `verified` are conventional words, not privileged type members.
+This surface does not infer what a custom word means or add a producer for it.
+The deepest core `gateWord` predicate owns the lexical definition; Settings
+consumption, public input admission, and persisted decoding each apply that one
+definition at their own boundary.
 
 `target` is a library-boundary input. A short input is validated with Git's
 branch-name rules and then canonicalized to `refs/heads/<input>`. A full input

@@ -59,7 +59,7 @@ function repositoryWithInitialCommit() {
 test("package root exposes only the ruled library values and declarations", () => {
   const directory = externalConsumer();
   const source = [
-    'import { AuthorityCorruptionError, Delivery, Keiyaku, Repo, type AbandonInput, type ActorId, type AmendInput, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractBoard, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type DeliverInput, type Fact, type FactKind, type Gate, type Outcome, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type SnapshotId, type TimelineEntry, type TypedRefusal, type TypedRetry } from "@astrosheep/keiyaku-v4";',
+    'import { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, Repo, settings, SettingsError, type AbandonInput, type ActorId, type AmendInput, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractBoard, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type DeliverInput, type Fact, type FactKind, type Gate, type Outcome, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SnapshotId, type TimelineEntry, type TypedRefusal, type TypedRetry } from "@astrosheep/keiyaku-v4";',
     'const repo = Repo.at({ path: "." });',
     'const id = "kei/consumer" as ContractId;',
     'const input: BindInput = { repo, markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", after: [id], gates: ["reviewed"] };',
@@ -80,8 +80,12 @@ test("package root exposes only the ruled library values and declarations", () =
     'const invalidBind: BindInput = { ...input, after: ["kei/unbranded"] };',
     '// @ts-expect-error AmendInput.after requires branded ContractId values',
     'const invalidAmend: AmendInput = { ...amendment, after: ["kei/unbranded"] };',
-    '// @ts-expect-error Gate is limited to names with a public producer',
     'const customGate: Gate = "edge-owned";',
+    'const settingsValue: Settings = settings({ root: "." });',
+    'const selectedGates: readonly Gate[] = gatesFrom({ settings: settingsValue });',
+    'const settingsEntry = null as unknown as SettingsEntry;',
+    'const settingsView = null as unknown as SettingsNamespaceView;',
+    'const settingsScope = null as unknown as SettingsScopeState;',
     '// @ts-expect-error abandon accepts options, not a reason enum',
     'existing.abandon("manual");',
     'const bound: Promise<Outcome<Keiyaku>> = Keiyaku.bind(input);',
@@ -163,12 +167,12 @@ test("package root exposes only the ruled library values and declarations", () =
     'type InternalReviewValue = import("@astrosheep/keiyaku-v4").ReviewValue;',
     '// @ts-expect-error legacy DeliverValue alias is not a package-root export',
     'type InternalDeliverValue = import("@astrosheep/keiyaku-v4").DeliverValue;',
-    'void new AuthorityCorruptionError("corrupt"); void existing; void delivery; void bound; void repo; void report; void timeline; void kind; void amendment; void invalidBind; void invalidAmend; void customGate; void contractListInput; void contractObservationInput; void contractPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry;',
+    'void new AuthorityCorruptionError("corrupt"); void new SettingsError("invalid"); void existing; void delivery; void bound; void repo; void report; void timeline; void kind; void amendment; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry;',
   ].join("\n");
   writeFileSync(join(directory, "consumer.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer.ts"], { cwd: directory, stdio: "ignore" });
   const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku-v4"); console.log(Object.keys(m).sort().join(","));'], { cwd: directory, encoding: "utf8" });
-  assert.equal(output.trim(), "AuthorityCorruptionError,Delivery,Keiyaku,NoGitWorldError,Repo");
+  assert.equal(output.trim(), "AuthorityCorruptionError,Delivery,Keiyaku,NoGitWorldError,Repo,SettingsError,gatesFrom,settings");
 });
 
 test("package exports reject deep internal imports", () => {
@@ -224,8 +228,8 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   assert.deepEqual(Object.getOwnPropertyNames(Repo).filter((name) => !["length", "name", "prototype"].includes(name)), ["at"]);
   assert.deepEqual(Object.getOwnPropertyNames(Repo.prototype).filter((name) => name !== "constructor").sort(), ["reconcile"]);
   await assert.rejects(
-    Keiyaku.bind({ repo, markdown: markdown("Invalid gate"), workspace: "here", gates: ["edge-owned"] as never }),
-    (error: unknown) => error instanceof TypeError && error.message === "gates[0] must be reviewed or verified",
+    Keiyaku.bind({ repo, markdown: markdown("Invalid gate"), workspace: "here", gates: ["Edge-owned"] }),
+    (error: unknown) => error instanceof TypeError && error.message === "gates[0] must match ^[a-z][a-z0-9-]{0,63}$",
   );
   await assert.rejects(
     Keiyaku.bind({ repo,
@@ -336,8 +340,8 @@ test("amend applies Markdown once and preserves structured values unless replace
   if (bound.kind !== "accepted") throw new Error("bind did not return a contract");
 
   await assert.rejects(
-    bound.value.amend({ markdown: "## Append: Context\ninvalid gate\n", gates: ["edge-owned"] as never }),
-    (error: unknown) => error instanceof TypeError && error.message === "gates[0] must be reviewed or verified",
+    bound.value.amend({ markdown: "## Append: Context\ninvalid gate\n", gates: ["Edge-owned"] }),
+    (error: unknown) => error instanceof TypeError && error.message === "gates[0] must match ^[a-z][a-z0-9-]{0,63}$",
   );
 
   const verified = await bound.value.amend({

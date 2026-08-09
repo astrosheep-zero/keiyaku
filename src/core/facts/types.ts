@@ -85,8 +85,15 @@ export function documentSegmentKey(value: string): DocumentSegmentKey {
   return requireOpaqueId(value, "document segment key") as DocumentSegmentKey;
 }
 
+export function gateWord(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/u.test(value);
+}
+
 export function gate(value: string): Gate {
-  return requireOpaqueId(value, "gate") as Gate;
+  if (!gateWord(value)) {
+    throw new Error("gate must match ^[a-z][a-z0-9-]{0,63}$");
+  }
+  return value as Gate;
 }
 
 export type ContractCoordinates = Readonly<{

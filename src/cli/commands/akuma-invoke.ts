@@ -8,6 +8,7 @@ import {
   type TellReceipt,
   type TurnFact,
 } from "../../akuma/index.js";
+import type { Settings } from "../../settings.js";
 import type { ParsedAkumaCommand } from "./akuma.js";
 
 export type AkumaInvocationResult =
@@ -23,9 +24,9 @@ export type AkumaInvocationResult =
 
 export async function invokeAkuma(
   command: ParsedAkumaCommand,
-  input: Readonly<{ path: string; readStdin(): string }>,
+  input: Readonly<{ path: string; settings: Settings; readStdin(): string }>,
 ): Promise<AkumaInvocationResult> {
-  const world = Akuma.at({ path: input.path });
+  const world = Akuma.at({ path: input.path, settings: input.settings });
   switch (command.command) {
     case "call": {
       const handle = await world.call({

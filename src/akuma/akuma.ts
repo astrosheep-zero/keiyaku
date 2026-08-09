@@ -43,6 +43,7 @@ import { publishAkuma } from "./publication.js";
 import { providerNamed } from "./providers/index.js";
 import { injectedBodyRequests, requestBodyCall } from "./requests.js";
 import { probeProcessTree, putDownProcessTree } from "../runtime/proc/run.js";
+import { settings as readSettings, type Settings } from "../settings.js";
 
 const POLL_MS = 25;
 const KILL_GRACE_MS = 1_000;
@@ -344,10 +345,10 @@ export class AkumaHandle {
     if (source === null) throw new AkumaNotBornError(this.id);
     if (source.id !== this.id) throw new Error("Akuma soul does not match its coordinate");
     const adapter = providerNamed(source.provider);
-    if (adapter.fork === undefined) return { kind: "provider-cannot-fork", provider: source.provider };
+    if (adapter.fork === undefined) return { kind: "provider-cannot-fork", provider: source.provider.name };
     const point = readForkPoint(this.paths, input.at);
     if (point === null) return { kind: "unknown-history", at: input.at };
-    if (point.provider !== source.provider) throw new Error(`Akuma fork point ${input.at} has a mismatched provider`);
+    if (point.provider !== source.provider.name) throw new Error(`Akuma fork point ${input.at} has a mismatched provider`);
 
     let childSession: ResumeCoordinate;
     try {
@@ -410,10 +411,11 @@ export class AkumaHandle {
 }
 
 export class Akuma {
-  private constructor(private readonly path: string) {}
+  private constructor(private readonly path: string, private readonly settings: Settings) {}
 
-  static at(input: Readonly<{ path: string }>): Akuma {
-    return new Akuma(resolve(input.path));
+  static at(input: Readonly<{ path: string; settings?: Settings }>): Akuma {
+    const path = resolve(input.path);
+    return new Akuma(path, input.settings ?? readSettings({ root: path }));
   }
 
   of(input: Readonly<{ id: string }>): AkumaHandle {
@@ -423,6 +425,15 @@ export class Akuma {
   async call(input: Readonly<{ persona: string; body: string; cwd?: string; contract?: string }>): Promise<AkumaHandle> {
     const name = personaName(input.persona);
     const contract = input.contract === undefined ? undefined : contractId(input.contract);
+    const persona = loadPersona({ name, settings: this.settings });
+    const provider = persona.adapter;
+    const cwd = resolve(input.cwd ?? this.path);
+    const recipe = Object.freeze({
+      ...(persona.description === undefined ? {} : { description: persona.description }),
+      provider: persona.provider,
+      options: persona.options,
+      confinement: provider.confinement({ cwd, options: persona.options }),
+    });
     const requests = injectedBodyRequests();
     if (requests !== null) {
       const child = await requestBodyCall({
@@ -431,14 +442,12 @@ export class Akuma {
         world: this.path,
         persona: name,
         body: input.body,
-        ...(input.cwd === undefined ? {} : { cwd: resolve(input.cwd) }),
+        cwd,
+        recipe,
         ...(contract === undefined ? {} : { contract }),
       });
       return new AkumaHandle(child, this.path);
     }
-    const persona = loadPersona({ name });
-    const provider = persona.adapter;
-    const cwd = resolve(input.cwd ?? this.path);
     const published = await publishAkuma({
       worldPath: this.path,
       persona: persona.name,
@@ -452,7 +461,7 @@ export class Akuma {
           options: persona.options,
           cwd,
           origin: { kind: "direct" },
-          confinement: provider.confinement({ cwd, options: persona.options }),
+          confinement: recipe.confinement,
           ...(contract === undefined ? {} : { contract }),
         },
         initialBody: input.body,

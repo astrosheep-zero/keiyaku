@@ -49,7 +49,7 @@ function fakeCodex(
 ): Readonly<{
   executable: string;
   requests(): readonly Readonly<Record<string, unknown>>[];
-  requestEnvironment(): string;
+  requestEnvironment(): Readonly<{ requests: string; literal: string }>;
 }> {
   const executable = join(root, "codex");
   const log = join(root, "requests.jsonl");
@@ -59,7 +59,7 @@ function fakeCodex(
     "const fs=require('node:fs');",
     "const readline=require('node:readline');",
     `const log=${JSON.stringify(log)};`,
-    `fs.writeFileSync(${JSON.stringify(environment)},process.env.AKUMA_REQUESTS||'');`,
+    `fs.writeFileSync(${JSON.stringify(environment)},JSON.stringify({requests:process.env.AKUMA_REQUESTS||'',literal:process.env.SETTINGS_LITERAL||''}));`,
     `const mode=${JSON.stringify(mode)};`,
     "const send=(value)=>process.stdout.write(JSON.stringify(value)+'\\n');",
     "const reply=(message,result)=>send({id:message.id,result});",
@@ -110,7 +110,7 @@ function fakeCodex(
       try { return readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
     },
-    requestEnvironment: () => readFileSync(environment, "utf8"),
+    requestEnvironment: () => JSON.parse(readFileSync(environment, "utf8")),
   };
 }
 
@@ -392,6 +392,32 @@ test("Claude adapter consumes the admitted Persona options", async () => {
   });
 });
 
+test("Claude execution overlays literal env and selects its executable", async () => {
+  let seen: unknown;
+  const provider = createClaudeProvider(async () => ({
+    query(input) {
+      seen = input.options;
+      return fakeQuery([
+        {
+          type: "assistant",
+          uuid: "assistant-execution",
+          session_id: "session-execution",
+          parent_tool_use_id: null,
+          message: { content: [] },
+        } as unknown as SDKMessage,
+        { type: "result", subtype: "success", session_id: "session-execution", result: "done" } as unknown as SDKMessage,
+      ]);
+    },
+  }), { executable: "/custom/claude", env: { SETTINGS_LITERAL: "yes" } });
+  const drive = await provider.start({ prompt: "inspect", cwd: "/work", options: {} });
+  for await (const _event of drive.events) { /* drain */ }
+  await drive.completion;
+  const options = seen as { pathToClaudeCodeExecutable: string; env: NodeJS.ProcessEnv };
+  assert.equal(options.pathToClaudeCodeExecutable, "/custom/claude");
+  assert.equal(options.env.SETTINGS_LITERAL, "yes");
+  assert.equal(options.env.PATH, process.env.PATH);
+});
+
 test("Claude start consumes its admitted snapshot without a second admission", async () => {
   let called = false;
   const provider = createClaudeProvider(async () => ({
@@ -465,6 +491,22 @@ test("Claude fork rejects an unavailable primitive and dishonest child coordinat
       child === "" ? /empty child session id/ : /reused the source session id/,
     );
   }
+});
+
+test("Claude fork refuses a frozen environment it cannot apply", async () => {
+  let loaded = false;
+  const provider = createClaudeProvider(async () => {
+    loaded = true;
+    return {
+      query() { throw new Error("unused"); },
+      async forkSession() { return { sessionId: "child" }; },
+    };
+  }, { env: { CLAUDE_CONFIG_DIR: "/configured" } });
+  await assert.rejects(
+    provider.fork!({ session: { sessionId: "source" }, at: "point", cwd: "/work" }),
+    /cannot apply the frozen provider environment/u,
+  );
+  assert.equal(loaded, false);
 });
 
 test("Codex observation dispositions pin every currently known method and item", () => {
@@ -568,7 +610,13 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-provider-"));
   try {
     const fake = fakeCodex(root);
-    const provider = createCodexAppServerProvider(fake.executable);
+    const provider = createCodexAppServerProvider({
+      name: "configured",
+      kind: "codex-app-server",
+      executable: fake.executable,
+      config: { service_tier: "priority" },
+      env: { SETTINGS_LITERAL: "from-settings" },
+    });
     const options = {
       model: "gpt-test",
       effort: "high",
@@ -598,7 +646,12 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     const requests = fake.requests();
     assert.deepEqual(requests.map((request) => request.method), ["initialize", "initialized", "thread/start", "turn/start"]);
     const thread = requests[2]!.params as Record<string, unknown>;
-    assert.deepEqual(thread, { cwd: root, model: "gpt-test", developerInstructions: "Work precisely." });
+    assert.deepEqual(thread, {
+      cwd: root,
+      config: { service_tier: "priority" },
+      model: "gpt-test",
+      developerInstructions: "Work precisely.",
+    });
     const turn = requests[3]!.params as Record<string, unknown>;
     assert.deepEqual(turn, {
       threadId: "thread-fresh",
@@ -614,7 +667,7 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
         excludeSlashTmp: false,
       },
     });
-    assert.equal(fake.requestEnvironment(), requestDirectory);
+    assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -45,6 +45,52 @@ function object(value: unknown): Readonly<Record<string, unknown>> | null {
     : null;
 }
 
+function optionText(
+  options: Readonly<Record<string, unknown>>,
+  field: "model" | "effort" | "systemPrompt",
+  blank: "allow" | "refuse",
+): string | undefined {
+  const selected = options[field];
+  if (selected === undefined) return undefined;
+  if (typeof selected !== "string" || (blank === "refuse" && selected.trim().length === 0)) {
+    throw new TypeError(`provider option ${field} must be ${blank === "allow" ? "a string" : "a nonblank string"}`);
+  }
+  return selected;
+}
+
+function optionEnum<T extends string>(
+  options: Readonly<Record<string, unknown>>,
+  field: "access" | "network",
+  allowed: readonly T[],
+): T | undefined {
+  const selected = options[field];
+  if (selected === undefined) return undefined;
+  if (typeof selected !== "string" || !allowed.includes(selected as T)) {
+    throw new TypeError(`provider option ${field} must be ${allowed.join(", ")}`);
+  }
+  return selected as T;
+}
+
+export function decodeProviderOptions(value: unknown): ProviderOptions {
+  const options = object(value);
+  if (options === null) throw new TypeError("provider options must be an object");
+  const allowed = ["access", "effort", "model", "network", "systemPrompt"];
+  const unknown = Object.keys(options).find((key) => !allowed.includes(key));
+  if (unknown !== undefined) throw new TypeError(`provider options have unknown field ${unknown}`);
+  const model = optionText(options, "model", "refuse");
+  const effort = optionText(options, "effort", "refuse");
+  const access = optionEnum(options, "access", ["read", "write", "auto"] as const);
+  const network = optionEnum(options, "network", ["disabled", "enabled"] as const);
+  const systemPrompt = optionText(options, "systemPrompt", "allow");
+  return Object.freeze({
+    ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
+    ...(access === undefined ? {} : { access }),
+    ...(network === undefined ? {} : { network }),
+    ...(systemPrompt === undefined ? {} : { systemPrompt }),
+  });
+}
+
 function eventType(value: unknown): value is AgentEvent["type"] {
   return typeof value === "string" && Object.hasOwn(AGENT_EVENT_TYPES, value);
 }

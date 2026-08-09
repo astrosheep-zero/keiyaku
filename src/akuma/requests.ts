@@ -21,6 +21,7 @@ import {
   voidRequest,
   type AkuId,
   type RequestFact,
+  type RequestRecipe,
   type Soul,
 } from "./heart/index.js";
 import {
@@ -31,9 +32,9 @@ import {
   worldRootForAkumaPaths,
   type AkumaPaths,
 } from "./identity.js";
-import { loadPersona } from "./persona.js";
 import { BIRTH_TIMEOUT_MS, publishAkuma } from "./publication.js";
-import { AKUMA_REQUESTS_ENV } from "./provider.js";
+import { AKUMA_REQUESTS_ENV, decodeProviderOptions } from "./provider.js";
+import { decodeProviderExecution, providerNamed } from "./providers/index.js";
 import type { ProcessCollar } from "../runtime/proc/run.js";
 
 const POLL_MS = 25;
@@ -46,6 +47,7 @@ type RequestClaim = Readonly<{
   body: string;
   cwd?: string;
   contract?: string;
+  recipe: RequestRecipe;
 }>;
 
 type RequestReceipt =
@@ -93,6 +95,46 @@ function absolute(value: unknown): value is string {
   return typeof value === "string" && isAbsolute(value) && resolve(value) === value;
 }
 
+function matchingConfinement(value: unknown, expected: RequestRecipe["confinement"]): boolean {
+  const confinement = object(value);
+  if (confinement === null || confinement.kind !== expected.kind) return false;
+  if (expected.kind === "unconfined") return exactKeys(confinement, ["kind"]);
+  if (!exactKeys(confinement, ["kind", "writableRoots"]) || !Array.isArray(confinement.writableRoots)) return false;
+  return confinement.writableRoots.length === expected.writableRoots.length
+    && confinement.writableRoots.every((root, index) => root === expected.writableRoots[index]);
+}
+
+function decodeRecipe(value: unknown, cwd: string): RequestRecipe | null {
+  const recipe = object(value);
+  if (recipe === null) return null;
+  const expectedKeys = [
+    "confinement",
+    ...(recipe.description === undefined ? [] : ["description"]),
+    "options",
+    "provider",
+  ];
+  if (!exactKeys(recipe, expectedKeys)) return null;
+  if (recipe.description !== undefined
+    && (typeof recipe.description !== "string" || recipe.description.trim().length === 0)) return null;
+  try {
+    const provider = decodeProviderExecution(recipe.provider);
+    const adapter = providerNamed(provider);
+    const decodedOptions = decodeProviderOptions(recipe.options);
+    const admission = adapter.admitOptions(decodedOptions);
+    if (admission.kind === "refused") return null;
+    const confinement = adapter.confinement({ cwd, options: admission.options });
+    if (!matchingConfinement(recipe.confinement, confinement)) return null;
+    return Object.freeze({
+      ...(recipe.description === undefined ? {} : { description: recipe.description }),
+      provider,
+      options: admission.options,
+      confinement,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function decodeClaim(bytes: string, fileId: string): RequestClaim | null {
   let decoded: unknown;
   try { decoded = JSON.parse(bytes); } catch { return null; }
@@ -104,6 +146,7 @@ function decodeClaim(bytes: string, fileId: string): RequestClaim | null {
     ...(value.cwd === undefined ? [] : ["cwd"]),
     "id",
     "persona",
+    "recipe",
     "world",
   ];
   if (!exactKeys(value, expected)) return null;
@@ -114,11 +157,14 @@ function decodeClaim(bytes: string, fileId: string): RequestClaim | null {
     personaName(value.persona as string);
     if (value.contract !== undefined) contractId(value.contract as string);
   } catch { return null; }
+  const recipe = decodeRecipe(value.recipe, (value.cwd ?? value.world) as string);
+  if (recipe === null) return null;
   return {
     id: value.id,
     world: value.world,
     persona: value.persona as string,
     body: value.body,
+    recipe,
     ...(value.cwd === undefined ? {} : { cwd: value.cwd }),
     ...(value.contract === undefined ? {} : { contract: value.contract as string }),
   };
@@ -177,6 +223,7 @@ export async function requestBodyCall(input: RequestClaim & Readonly<{ directory
     world: input.world,
     persona: input.persona,
     body: input.body,
+    recipe: input.recipe,
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     ...(input.contract === undefined ? {} : { contract: input.contract }),
   });
@@ -214,31 +261,24 @@ async function serveClaim(input: Readonly<{
     projectReceipt(input.directory, fact);
     return;
   }
-  let persona: ReturnType<typeof loadPersona>;
-  try { persona = loadPersona({ name: request.persona }); }
-  catch (error) {
-    fact = refuseRequest(input.paths, request.id, diagnostic(error));
-    projectReceipt(input.directory, fact);
-    return;
-  }
   const cwd = resolve(request.cwd ?? servingWorld);
   let child: AkuId;
   try {
     const published = await publishAkuma({
       worldPath: servingWorld,
-      persona: persona.name,
+      persona: request.persona,
       reserve: (allocated) => { fact = reserveRequest(input.paths, request.id, allocated.id); },
       launch: async (allocated) => await input.spawn({
         paths: allocated.paths,
         seed: {
           id: allocated.id,
           persona: allocated.persona,
-          ...(persona.description === undefined ? {} : { description: persona.description }),
-          provider: persona.provider,
-          options: persona.options,
+          ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),
+          provider: request.recipe.provider,
+          options: request.recipe.options,
           cwd,
           origin: { kind: "request", parentId: input.parent.id, requestId: request.id },
-          confinement: persona.adapter.confinement({ cwd, options: persona.options }),
+          confinement: request.recipe.confinement,
           ...(request.contract === undefined ? {} : { contract: request.contract }),
         },
         initialBody: request.body,

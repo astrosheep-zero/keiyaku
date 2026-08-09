@@ -86,8 +86,10 @@ export type {
   KillEvidence,
   LeashProbe,
   ProviderOptions,
+  ProviderExecution,
   RequestFact,
   RequestInput,
+  RequestRecipe,
   ResumeCoordinate,
   SealFact,
   SessionFact,
@@ -273,7 +275,9 @@ function sameRequestInput(fact: RequestFact, input: RequestInput): boolean {
     && fact.persona === input.persona
     && fact.body === input.body
     && fact.cwd === input.cwd
-    && fact.world === input.world;
+    && fact.contract === input.contract
+    && fact.world === input.world
+    && JSON.stringify(fact.recipe) === JSON.stringify(input.recipe);
 }
 
 export function admitRequest(
