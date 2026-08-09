@@ -3,7 +3,13 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { runProcess, type ProcessInput } from "../src/runtime/proc/run.js";
+import {
+  probeProcessTree,
+  putDownProcessTree,
+  runProcess,
+  spawnDetachedProcess,
+  type ProcessInput,
+} from "../src/runtime/proc/run.js";
 
 function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): ProcessInput {
   return {
@@ -81,7 +87,7 @@ test("runProcess reports spawn errors", async () => {
   assert.match(outcome.diagnostic, /ENOENT/);
 });
 
-test("runProcess timeout kills a POSIX descendant that ignores TERM", { skip: process.platform === "win32" }, async () => {
+test("runProcess timeout kills a detached descendant tree", async () => {
   const descendant = 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000);';
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-"));
   const descendantFile = join(root, "descendant-pid");
@@ -108,6 +114,23 @@ test("runProcess timeout kills a POSIX descendant that ignores TERM", { skip: pr
         // The asserted path has already reaped the descendant.
       }
     }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("detached process collars fence put-down by process identity", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-collar-"));
+  try {
+    const collar = await spawnDetachedProcess({
+      argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+      cwd: root,
+      log: join(root, "stdio.log"),
+    });
+    assert.deepEqual(probeProcessTree(collar), { kind: "alive" });
+    assert.equal(await putDownProcessTree(collar), "killed");
+    assert.deepEqual(probeProcessTree(collar), { kind: "gone" });
+    assert.equal(await putDownProcessTree(collar), "already-dead");
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

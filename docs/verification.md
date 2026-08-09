@@ -114,11 +114,18 @@ candidate, Verification plan, Akuma
 projection, lease, mailbox, or public cancellation field. Callers normalize
 paths before invoking it.
 
+The same domain-free runtime owns detached spawn and process-tree custody for
+long-lived callers. `spawnDetachedProcess` returns a collar containing pid,
+process group, and observed start identity. `probeProcessTree` returns `gone`,
+`alive`, or `unverifiable`; `putDownProcessTree` returns typed terminal
+evidence without importing Akuma facts. A start-identity mismatch is never
+group-killed blindly.
+
 Each verification run has a fixed five-minute budget; exceeding it produces
 `timeout`. Day one has no settings, CLI, or library timeout knob and no public
-cancellation input. For timeout, POSIX execution starts a
-new session and process group, sends that group a graceful signal, waits a
-bounded grace interval, then force-kills the group. Windows uses
+cancellation input. Execution starts detached on every platform. For timeout,
+POSIX execution starts a new session and process group, sends that group a
+graceful signal, waits a bounded grace interval, then force-kills the group. Windows uses
 `taskkill /PID <pid> /T /F`. The portable process-tree guarantee covers the
 observed tree. A subprocess that escapes the tree, or remains after SIGKILL,
 harness loss, or a Node crash, lies outside that guarantee.

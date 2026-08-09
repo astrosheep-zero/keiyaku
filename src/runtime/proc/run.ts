@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { closeSync, openSync } from "node:fs";
 
 const TERMINATION_GRACE_MS = 250;
 const STREAM_TAIL_BYTES = 16 * 1024;
 
-type ProcessInput = Readonly<{
+export type ProcessInput = Readonly<{
   readonly argv: readonly string[];
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
@@ -31,7 +32,27 @@ type ProcessUnknownExit = Readonly<{
   readonly kind: "unknown-exit";
 }>;
 
-type ProcessOutcome = ProcessTerminal | ProcessTimeout | ProcessSpawnError | ProcessUnknownExit;
+export type ProcessOutcome = ProcessTerminal | ProcessTimeout | ProcessSpawnError | ProcessUnknownExit;
+
+export type ProcessCollar = Readonly<{
+  pid: number;
+  processGroup: number;
+  spawnedAt: string;
+}>;
+
+export type ProcessTreeProbe =
+  | Readonly<{ kind: "gone" }>
+  | Readonly<{ kind: "alive" }>
+  | Readonly<{ kind: "unverifiable"; diagnostic: string }>;
+
+export type PutDownEvidence = "killed" | "already-dead" | "alive-after-sigkill" | "unavailable";
+
+export type DetachedProcessInput = Readonly<{
+  argv: readonly string[];
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  log: string;
+}>;
 
 function tailCapture(limit: number) {
   const bytes = Buffer.allocUnsafe(limit);
@@ -81,7 +102,7 @@ function terminateWindowsTree(pid: number): Promise<void> {
   });
 }
 
-async function terminateProcessTree(pid: number | undefined): Promise<void> {
+export async function terminateProcessTree(pid: number | undefined): Promise<void> {
   if (pid === undefined) return;
   if (process.platform === "win32") {
     await terminateWindowsTree(pid);
@@ -101,11 +122,74 @@ async function terminateProcessTree(pid: number | undefined): Promise<void> {
   }
 }
 
+function processStartToken(pid: number): string | null {
+  const command = process.platform === "win32"
+    ? ["powershell.exe", "-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter \"ProcessId=${pid}\").CreationDate`]
+    : ["ps", "-o", "lstart=", "-p", String(pid)];
+  const result = spawnSync(command[0]!, command.slice(1), { encoding: "utf8", windowsHide: true });
+  const token = result.status === 0 ? result.stdout.trim() : "";
+  return token.length === 0 ? null : token;
+}
+
+export function currentProcessCollar(): ProcessCollar {
+  const spawnedAt = processStartToken(process.pid);
+  if (spawnedAt === null) throw new Error(`cannot read process start identity for ${process.pid}`);
+  return { pid: process.pid, processGroup: process.pid, spawnedAt };
+}
+
+export async function spawnDetachedProcess(input: DetachedProcessInput): Promise<ProcessCollar> {
+  const log = openSync(input.log, "a");
+  try {
+    const child = spawn(input.argv[0]!, input.argv.slice(1), {
+      cwd: input.cwd,
+      env: input.env,
+      detached: true,
+      stdio: ["ignore", log, log],
+      windowsHide: true,
+    });
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
+    if (child.pid === undefined) throw new Error("detached process spawned without a pid");
+    const spawnedAt = processStartToken(child.pid);
+    if (spawnedAt === null) throw new Error(`cannot read process start identity for ${child.pid}`);
+    child.unref();
+    return { pid: child.pid, processGroup: child.pid, spawnedAt };
+  } finally {
+    closeSync(log);
+  }
+}
+
+export function probeProcessTree(collar: ProcessCollar): ProcessTreeProbe {
+  try {
+    process.kill(process.platform === "win32" ? collar.pid : -collar.processGroup, 0);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return { kind: "gone" };
+    return { kind: "unverifiable", diagnostic: error instanceof Error ? error.message : String(error) };
+  }
+  const current = processStartToken(collar.pid);
+  if (current === null && process.platform !== "win32") return { kind: "alive" };
+  if (current === collar.spawnedAt) return { kind: "alive" };
+  return { kind: "unverifiable", diagnostic: `process ${collar.pid} no longer matches its recorded start identity` };
+}
+
+export async function putDownProcessTree(collar: ProcessCollar): Promise<PutDownEvidence> {
+  const before = probeProcessTree(collar);
+  if (before.kind === "gone") return "already-dead";
+  if (before.kind === "unverifiable") return "unavailable";
+  await terminateProcessTree(collar.pid);
+  const after = probeProcessTree(collar);
+  if (after.kind === "gone") return "killed";
+  return after.kind === "alive" ? "alive-after-sigkill" : "unavailable";
+}
+
 export async function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
   const child = spawn(input.argv[0]!, input.argv.slice(1), {
     cwd: input.cwd,
     env: input.env,
-    detached: process.platform !== "win32",
+    detached: true,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
