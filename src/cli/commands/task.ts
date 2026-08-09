@@ -1,21 +1,6 @@
-import {
-  Tasks,
-  type BlockedTaskList,
-  type TaskBatchResult,
-  type TaskCompositionResult,
-  type TaskDependencyTree,
-  type TaskDetail,
-  type TaskDoctorReport,
-  type TaskId,
-  type TaskList,
-  type TaskMutationResult,
-  type TaskNamespaceResult,
-  type TaskPriority,
-  type TaskState,
-  type TaskUpdateResult,
-} from "../../task/index.js";
+import { CliUsageError, usageLine } from "../usage.js";
 
-type TaskAction = "add" | "show" | "ls" | "ready" | "blocked" | "tree" | "doctor" | "update"
+export type TaskAction = "add" | "show" | "ls" | "ready" | "blocked" | "tree" | "doctor" | "update"
   | "start" | "stop" | "hold" | "resume" | "done" | "drop" | "namespace" | "compose";
 type TaskFlagValue = string | true | readonly string[];
 type TaskStdin = "document" | "body" | "append" | "note" | "compose";
@@ -33,24 +18,70 @@ type TaskCommandSpec = Readonly<{
   arity: readonly [minimum: number, maximum: number];
   flags: Readonly<Record<string, "boolean" | "value" | "repeat">>;
   stdin?: "document" | "compose";
+  usage: string;
+  purpose: string;
 }>;
 
 const COMMON = { json: "boolean" } as const;
-const SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
-  add: { arity: [0, 1], stdin: "document", flags: { ...COMMON, namespace: "value", state: "value", priority: "value", needs: "repeat", parent: "value", supersedes: "repeat", relates: "repeat", contract: "value", body: "value", note: "value" } },
-  show: { arity: [1, 1], flags: COMMON },
-  ls: { arity: [0, 0], flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean" } },
-  ready: { arity: [0, 0], flags: { ...COMMON, world: "boolean" } },
-  blocked: { arity: [0, 0], flags: { ...COMMON, world: "boolean" } },
-  tree: { arity: [1, 1], flags: { ...COMMON, full: "boolean" } },
-  doctor: { arity: [0, 0], flags: COMMON },
-  update: { arity: [1, 1], flags: { ...COMMON, title: "value", body: "value", append: "value", note: "value", priority: "value", needs: "repeat", "drop-needs": "repeat", parent: "value", "no-parent": "boolean", supersedes: "repeat", "drop-supersedes": "repeat", relates: "repeat", "drop-relates": "repeat", contract: "value", "no-contract": "boolean" } },
-  start: { arity: [1, 1], flags: COMMON }, stop: { arity: [1, 1], flags: COMMON },
-  hold: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON }, resume: { arity: [1, 1], flags: COMMON },
-  done: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON }, drop: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" } },
-  namespace: { arity: [0, 1], flags: COMMON },
-  compose: { arity: [0, 0], stdin: "compose", flags: COMMON },
+const TASK_COMMAND_SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
+  add: {
+    arity: [0, 1], stdin: "document", flags: { ...COMMON, namespace: "value", state: "value", priority: "value", needs: "repeat", parent: "value", supersedes: "repeat", relates: "repeat", contract: "value", body: "value", note: "value" },
+    usage: `task add <TITLE> [--namespace <ns>] [--priority 0..3]
+  [--state open|in_progress|on_hold|done|drop]
+  [--note <text>]
+  [--needs <TaskId>]... [--parent <TaskId>]
+  [--supersedes <TaskId>]... [--relates <TaskId>]...
+  [--contract <ContractId>] [--body <text>] [--json]
+task add [--namespace <ns>] [--json] -`,
+    purpose: "Create one Task from flags or a canonical stdin document.",
+  },
+  show: { arity: [1, 1], flags: COMMON, usage: "task show <TaskId> [--json]", purpose: "Read one Task and its relationships." },
+  ls: { arity: [0, 0], flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean" }, usage: "task ls [--closed | --all] [--world] [--json]", purpose: "List Tasks in the selected scope." },
+  ready: { arity: [0, 0], flags: { ...COMMON, world: "boolean" }, usage: "task ready [--world] [--json]", purpose: "List Tasks whose dependencies are satisfied." },
+  blocked: { arity: [0, 0], flags: { ...COMMON, world: "boolean" }, usage: "task blocked [--world] [--json]", purpose: "List Tasks blocked by dependencies." },
+  tree: { arity: [1, 1], flags: { ...COMMON, full: "boolean" }, usage: "task tree <TaskId> [--full] [--json]", purpose: "Read one Task dependency tree." },
+  doctor: { arity: [0, 0], flags: COMMON, usage: "task doctor [--json]", purpose: "Inspect Task authority without repairing it." },
+  update: {
+    arity: [1, 1], flags: { ...COMMON, title: "value", body: "value", append: "value", note: "value", priority: "value", needs: "repeat", "drop-needs": "repeat", parent: "value", "no-parent": "boolean", supersedes: "repeat", "drop-supersedes": "repeat", relates: "repeat", "drop-relates": "repeat", contract: "value", "no-contract": "boolean" },
+    usage: `task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
+  [--note <text>|-]
+  [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
+  [--parent <TaskId> | --no-parent]
+  [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
+  [--relates <TaskId>]... [--drop-relates <TaskId>]...
+  [--contract <ContractId> | --no-contract] [--json]`,
+    purpose: "Apply one or more patches to a Task.",
+  },
+  start: { arity: [1, 1], flags: COMMON, usage: "task start <TaskId> [--json]", purpose: "Move one open Task into progress." },
+  stop: { arity: [1, 1], flags: COMMON, usage: "task stop <TaskId> [--json]", purpose: "Return one in-progress Task to open." },
+  hold: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON, usage: "task hold <TaskId>... [--json]", purpose: "Put one or more Tasks on hold." },
+  resume: { arity: [1, 1], flags: COMMON, usage: "task resume <TaskId> [--json]", purpose: "Return one held Task to open." },
+  done: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON, usage: "task done <TaskId>... [--json]", purpose: "Mark one or more Tasks done." },
+  drop: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" }, usage: "task drop <TaskId>... [--note <text>] [--json]", purpose: "Drop one or more Tasks." },
+  namespace: { arity: [0, 1], flags: COMMON, usage: "task namespace [<namespace>] [--json]", purpose: "Read or replace the current Task namespace." },
+  compose: { arity: [0, 0], stdin: "compose", flags: COMMON, usage: "task compose [--json] -", purpose: "Apply one atomic Task graph composition from stdin." },
 };
+
+export function isTaskAction(value: string | undefined): value is TaskAction {
+  return value !== undefined && Object.hasOwn(TASK_COMMAND_SPECS, value);
+}
+
+export function renderTaskHelp(action?: TaskAction): string {
+  if (action !== undefined) {
+    const spec = TASK_COMMAND_SPECS[action];
+    return `${spec.purpose}\n\n${usageLine(spec.usage)}`;
+  }
+  return [
+    "usage: keiyaku-v4 task <command> ...",
+    "",
+    "commands:",
+    ...Object.values(TASK_COMMAND_SPECS).flatMap((spec) => spec.usage.split("\n").map((line) => `  ${line}`).concat(`    ${spec.purpose}`)),
+  ].join("\n");
+}
+
+export function renderTaskUsage(action: TaskAction): string {
+  return usageLine(TASK_COMMAND_SPECS[action].usage);
+}
 
 function setFlag(
   flags: Record<string, TaskFlagValue>,
@@ -86,7 +117,7 @@ function scanTaskOption(input: Readonly<{
 }
 
 function scanTaskArgv(action: TaskAction, argv: readonly string[], fail: (message: string) => never): ScannedTask {
-  const spec = SPECS[action], positionals: string[] = [], flags: Record<string, TaskFlagValue> = {};
+  const spec = TASK_COMMAND_SPECS[action], positionals: string[] = [], flags: Record<string, TaskFlagValue> = {};
   let stdin: TaskStdin | undefined;
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index]!;
@@ -110,7 +141,7 @@ function validateUpdate(scanned: ScannedTask, fail: (message: string) => never):
 }
 
 function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (message: string) => never): void {
-  const spec = SPECS[action], { positionals, flags, stdin } = scanned;
+  const spec = TASK_COMMAND_SPECS[action], { positionals, flags, stdin } = scanned;
   if (positionals.length < spec.arity[0] || positionals.length > spec.arity[1]) fail(`task ${action} has invalid positional arguments`);
   if (action === "add" && (stdin === "document") === (positionals.length === 1)) fail("task add requires either TITLE or final '-' input");
   if (action === "add" && stdin === "document" && Object.keys(flags).some((name) => name !== "json" && name !== "namespace")) fail("task add document input owns its creation fields");
@@ -119,105 +150,12 @@ function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (messa
   if (action === "update") validateUpdate(scanned, fail);
 }
 
-export function parseTaskCommand(argv: readonly string[], fail: (message: string) => never): ParsedTaskCommand {
+export function parseTaskCommand(argv: readonly string[]): ParsedTaskCommand {
   const candidate = argv[0];
-  if (candidate === undefined || !Object.hasOwn(SPECS, candidate)) fail(`unknown task command: ${candidate ?? ""}`);
-  const action = candidate as TaskAction, scanned = scanTaskArgv(action, argv, fail);
+  if (!isTaskAction(candidate)) throw new CliUsageError(`unknown task command: ${candidate ?? ""}`, renderTaskHelp());
+  const action = candidate;
+  const fail = (message: string): never => { throw new CliUsageError(message, renderTaskUsage(action)); };
+  const scanned = scanTaskArgv(action, argv, fail);
   validateTaskScan(action, scanned, fail);
   return { command: "task", action, output: scanned.flags.json === true ? "json" : "text", ...scanned };
-}
-
-function value(command: ParsedTaskCommand, name: string): string | undefined {
-  const item = command.flags[name]; return typeof item === "string" ? item : undefined;
-}
-function values(command: ParsedTaskCommand, name: string): readonly string[] | undefined {
-  const item = command.flags[name]; return Array.isArray(item) ? item : undefined;
-}
-function namespace(raw: string | undefined): readonly string[] | undefined { return raw === undefined ? undefined : raw === "" ? [] : raw.split("/"); }
-function priority(raw: string | undefined): TaskPriority | undefined {
-  if (raw === undefined) return undefined;
-  const number = Number(raw); return number as TaskPriority;
-}
-function state(raw: string | undefined): TaskState | undefined { return raw as TaskState | undefined; }
-function ids(items: readonly string[] | undefined): readonly TaskId[] | undefined { return items as readonly TaskId[] | undefined; }
-
-export type TaskInvocationResult = TaskMutationResult | TaskUpdateResult | TaskBatchResult | TaskCompositionResult
-  | TaskDetail | TaskList | BlockedTaskList | TaskDependencyTree | TaskDoctorReport | TaskNamespaceResult;
-
-type TaskProduct = ReturnType<typeof Tasks.at>;
-type TaskInput = Readonly<{ path?: string; readStdin(): string }>;
-
-function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => string): Promise<TaskMutationResult> {
-  const selectedNamespace = namespace(value(command, "namespace"));
-  if (command.stdin === "document") return tasks.addDocument({ markdown: readStdin(), ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }) });
-  const body = value(command, "body"), note = value(command, "note"), initialState = state(value(command, "state")), selectedPriority = priority(value(command, "priority"));
-  const needs = ids(values(command, "needs")), parent = value(command, "parent");
-  const supersedes = ids(values(command, "supersedes")), relates = ids(values(command, "relates")), contractId = value(command, "contract");
-  return tasks.add({
-    title: command.positionals[0]!, ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }),
-    ...(body === undefined ? {} : { body }), ...(note === undefined ? {} : { note }), ...(initialState === undefined ? {} : { state: initialState }), ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
-    ...(needs === undefined ? {} : { needs }), ...(parent === undefined ? {} : { parent: parent as TaskId }),
-    ...(supersedes === undefined ? {} : { supersedes }), ...(relates === undefined ? {} : { relates }),
-    ...(contractId === undefined ? {} : { contractId }),
-  });
-}
-
-function invokeUpdate(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: () => string): Promise<TaskUpdateResult> {
-  const body = command.stdin === "body" ? readStdin() : value(command, "body"), appendBody = command.stdin === "append" ? readStdin() : value(command, "append");
-  const note = command.stdin === "note" ? readStdin() : value(command, "note");
-  const title = value(command, "title"), selectedPriority = priority(value(command, "priority"));
-  const addNeeds = ids(values(command, "needs")), dropNeeds = ids(values(command, "drop-needs"));
-  const parent = value(command, "parent"), addSupersedes = ids(values(command, "supersedes"));
-  const dropSupersedes = ids(values(command, "drop-supersedes")), addRelates = ids(values(command, "relates"));
-  const dropRelates = ids(values(command, "drop-relates")), contractId = value(command, "contract");
-  return tasks.task({ id: command.positionals[0]! }).update({
-    ...(title === undefined ? {} : { title }), ...(body === undefined ? {} : { body }), ...(appendBody === undefined ? {} : { appendBody }), ...(note === undefined ? {} : { note }),
-    ...(selectedPriority === undefined ? {} : { priority: selectedPriority }), ...(addNeeds === undefined ? {} : { addNeeds }),
-    ...(dropNeeds === undefined ? {} : { dropNeeds }), ...(command.flags["no-parent"] === true ? { parent: null } : parent === undefined ? {} : { parent: parent as TaskId }),
-    ...(addSupersedes === undefined ? {} : { addSupersedes }), ...(dropSupersedes === undefined ? {} : { dropSupersedes }),
-    ...(addRelates === undefined ? {} : { addRelates }), ...(dropRelates === undefined ? {} : { dropRelates }),
-    ...(command.flags["no-contract"] === true ? { contractId: null } : contractId === undefined ? {} : { contractId }),
-  });
-}
-
-async function invokeRead(tasks: TaskProduct, command: ParsedTaskCommand): Promise<TaskInvocationResult> {
-  const id = command.positionals[0]!;
-  switch (command.action) {
-    case "show": {
-      const detail = await tasks.task({ id }).read();
-      return detail ?? { kind: "refused", refusal: { kind: "task-missing", taskId: id as TaskId } };
-    }
-    case "ls": return tasks.list({ selection: command.flags.all === true ? "all" : command.flags.closed === true ? "closed" : "active", ...(command.flags.world === true ? { scope: "world" } : {}) });
-    case "ready": return tasks.ready(command.flags.world === true ? { scope: "world" } : {});
-    case "blocked": return tasks.blocked(command.flags.world === true ? { scope: "world" } : {});
-    case "tree": return tasks.task({ id }).tree(command.flags.full === true ? { full: true } : {});
-    case "doctor": return tasks.doctor();
-    default: throw new Error(`task action is not a read: ${command.action}`);
-  }
-}
-
-export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): Promise<TaskInvocationResult> {
-  const tasks = input.path === undefined ? Tasks.at() : Tasks.at({ path: input.path });
-  if (["show", "ls", "ready", "blocked", "tree", "doctor"].includes(command.action)) return invokeRead(tasks, command);
-  if (command.action === "add") return invokeAdd(tasks, command, input.readStdin);
-  if (command.action === "update") return invokeUpdate(tasks, command, input.readStdin);
-  const id = command.positionals[0]!;
-  switch (command.action) {
-    case "start": return tasks.task({ id }).start();
-    case "stop": return tasks.task({ id }).stop();
-    case "resume": return tasks.task({ id }).resume();
-    case "hold": return tasks.batch({ verb: "hold", ids: command.positionals });
-    case "done": return tasks.batch({ verb: "done", ids: command.positionals });
-    case "drop": {
-      const note = value(command, "note");
-      return tasks.batch({ verb: "drop", ids: command.positionals, ...(note === undefined ? {} : { note }) });
-    }
-    case "namespace": {
-      const selected = namespace(command.positionals[0]);
-      if (selected !== undefined) await tasks.setNamespace({ namespace: selected });
-      return tasks.namespace();
-    }
-    case "compose": return tasks.compose({ markdown: input.readStdin() });
-    default: throw new Error(`task action has no invocation: ${command.action}`);
-  }
 }

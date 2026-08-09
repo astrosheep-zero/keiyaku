@@ -4,9 +4,10 @@ import { kanshi, selectKanshi } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromOutcome } from "./accepted.js";
 import { amendFromCommand } from "./commands/amend.js";
+import { invokeAkuma, type AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import { bindFromCommand } from "./commands/bind.js";
-import { invokeTask, type TaskInvocationResult } from "./commands/task.js";
-import { CliUsageError, type ParsedInvocation } from "./parse.js";
+import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js";
+import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
 import type { AcceptedResult, DiffUnavailable, InvocationResult } from "./result.js";
 import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
 import { selectedGates } from "./settings.js";
@@ -19,8 +20,7 @@ type InvokeRuntime = Readonly<{
   readStdin?: () => string;
 }>;
 
-type ParsedCommand = ParsedInvocation["command"];
-type ExistingCommand = Exclude<ParsedCommand, { command: "bind" | "status" | "reconcile" | "task" }>;
+type ExistingCommand = Exclude<ParsedCommand, { command: "akuma" | "bind" | "status" | "reconcile" | "task" }>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin: () => string;
@@ -168,7 +168,7 @@ async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: Invocat
   }
 }
 
-export async function invoke(invocation: ParsedInvocation, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult> {
+async function invokeParsed(invocation: ParsedExecution, runtime: InvokeRuntime): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult> {
   const coordinate = invocation.cwd ?? runtime.cwd;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
@@ -178,6 +178,9 @@ export async function invoke(invocation: ParsedInvocation, runtime: InvokeRuntim
   if (parsed.command === "task") {
     try { return await invokeTask(parsed, { ...(coordinate === undefined ? {} : { path: coordinate }), readStdin: edge.readStdin }); }
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
+  }
+  if (parsed.command === "akuma") {
+    return await invokeAkuma(parsed, { path: coordinate ?? ".", readStdin: edge.readStdin });
   }
   if (parsed.command === "status") {
     const report = await kanshi(coordinate === undefined ? {} : { path: coordinate });
@@ -200,5 +203,16 @@ export async function invoke(invocation: ParsedInvocation, runtime: InvokeRuntim
       return invokeBind(parsed, repo, edge);
     default:
       return invokeExisting(parsed, repo, edge, scope);
+  }
+}
+
+export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult> {
+  try {
+    return await invokeParsed(invocation, runtime);
+  } catch (error) {
+    if (error instanceof CliUsageError && error.projection === undefined) {
+      throw new CliUsageError(error.diagnostic, renderCommandUsage(invocation.command));
+    }
+    throw error;
   }
 }

@@ -6,7 +6,7 @@ import test from "node:test";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "../src/cli/render/task.js";
-import type { TaskInvocationResult } from "../src/cli/commands/task.js";
+import type { TaskInvocationResult } from "../src/cli/commands/task-invoke.js";
 
 function world(): string { const root = mkdtempSync(join(tmpdir(), "keiyaku-task-cli-")); mkdirSync(join(root, ".keiyaku")); return root; }
 

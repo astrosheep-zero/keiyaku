@@ -322,6 +322,22 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
+      source: "cli/commands/akuma.ts",
+      allow: [any("cli/usage.ts")],
+    },
+    {
+      source: "cli/commands/akuma-invoke.ts",
+      allow: [any("akuma/index.ts"), types("cli/commands/akuma.ts")],
+    },
+    {
+      source: "cli/commands/task.ts",
+      allow: [any("cli/usage.ts")],
+    },
+    {
+      source: "cli/commands/task-invoke.ts",
+      allow: [types("cli/commands/task.ts"), any("task/index.ts")],
+    },
+    {
       source: "cli/**",
       allow: [
         any("index.ts"),

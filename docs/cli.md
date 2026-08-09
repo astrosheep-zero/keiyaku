@@ -13,9 +13,10 @@ The canonical invocation is:
 keiyaku-v4 [-C <path>] <command> [<contract>|@<contract>] [--flag ...] [-]
 ```
 
-`-C <path>` is a global invocation prefix. It supplies the repository coordinate
-to the one `Repo.at` construction point used by this invocation and is never
-persisted. An omitted `-C` lets `Repo.at` apply its working-directory default.
+`-C <path>` is a global invocation prefix and is never persisted. Contract
+commands supply it to the one `Repo.at` construction point. Task commands use
+it as their task world; Akuma commands resolve it once as the absolute exact
+Akuma world without Git-root climbing. An omitted `-C` uses the working-directory coordinate.
 The adapter constructs exactly one `Repo` per invocation. It derives selector
 reads, the settings coordinate, contract handles and verbs, and reconciliation
 from that value: `Keiyaku.list({ repo })`, `repo.root`, `Keiyaku.of({ repo, id })`,
@@ -50,6 +51,7 @@ The command vocabulary is:
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
 | `task ...` | Calls the separate `./task` public surface described below. |
+| `akuma ...` | Calls the separate `./akuma` public surface described below. |
 
 `bind` accepts no contract positional. Commands addressing an existing contract
 accept a full `kei/<contract-segment>` identity or an active short
@@ -74,6 +76,15 @@ arc [<contract>|@<contract>] [--actor <actor>] [--json] -
 status [<contract>|@<contract>] [--json]
 audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--json]
+akuma call --persona <name> [--cwd <path>] [--json] -
+akuma list [--json]
+akuma status <aku/...> [--json]
+akuma follow <aku/...> [--json]
+akuma wait <aku/...> [--json]
+akuma tell <aku/...> [--json] -
+akuma interrupt <aku/...> [--json] -
+akuma fork <aku/...> --at <historyId> [--json]
+akuma kill <aku/...> [--json]
 ```
 
 ## Inputs And Flags
@@ -81,8 +92,9 @@ reconcile [<contract>|@<contract>] [--json]
 A final bare `-` reads stdin. For `bind`, it reads one contract document; for
 `amend`, one amendment-operation document; for `arc`, one arc document; and for
 `review`, an optional summary. Review stdin and `--summary <text>` are mutually
-exclusive. No other command reads stdin. The grammar of all document inputs is
-owned by [document.md](document.md).
+exclusive. No other Contract command reads stdin. Akuma and Task stdin entry
+points are specified by their command grammars below. The grammar of all
+document inputs is owned by [document.md](document.md).
 
 The parser decides only whether stdin is syntactically required or allowed.
 Failure while acquiring bytes from stdin is an internal invocation failure and
@@ -127,6 +139,53 @@ no reason flag or hidden reason classification. `arc` and `audit` accept
 `--actor` and `--json`; audit also accepts
 `--show-diff-body`. `status` and `reconcile` accept `--json`.
 `--json` is output-only.
+
+Akuma `call`, `tell`, and `interrupt` require the final `-` and pass those bytes
+as the public body input. `--persona` is required for call and names
+`~/.keiyaku/akuma/<name>.md`; its provider must resolve through the Cut 1
+literal map, which contains only `claude`. Missing or malformed configuration
+prints the exact path searched. `--cwd` selects the immutable summon seat and
+is resolved to an absolute path at the public boundary. `status`, `follow`,
+`wait`, `tell`, `interrupt`, and `kill` require a complete
+`aku/<persona>/<hex8>`; `list` accepts none. Library `world.of()` constructs the
+addressed handle and has no CLI command of its own. `follow` renders each
+collected public `AgentEvent` in order and JSON returns the same event array.
+CLI `wait` uses the public default predicate (`life !== "running"`); predicate
+functions are library-only input. `fork` requires one nonblank `--at` history
+id and has no stdin body.
+
+## Help
+
+CLI grammar has three owners. `src/cli/parse.ts` owns the root and Contract
+command rows, `src/cli/commands/task.ts` owns Task action rows, and
+`src/cli/commands/akuma.ts` owns Akuma action rows. Root knows only the two
+namespace coordinates `task ...` and `akuma ...`; it never copies their action
+grammar. Each owner row contains its machine syntax, the corresponding usage
+line or block, and one help-only purpose line.
+Validation, usage refusal, namespace help, and leaf help read that row.
+Structural rules that are clearer as command code remain adjacent to their row
+rather than creating a grammar language.
+
+`--help` is a reserved parser token, not a command or command flag. After the
+optional `-C <path>` prefix is removed, its presence anywhere makes the
+invocation a help request for the longest legal command-word prefix. Other
+tokens do not need to form a valid invocation: `task unknown --help` describes
+the Task namespace. Root help lists the root command vocabulary and points one
+hop to `task --help` and `akuma --help`; namespace help lists every action and
+its usage; leaf help gives that row's purpose and full usage. There is no
+`help` command, `-h` alias, or per-row `--help` flag.
+
+Help is a terminal parser observation. It writes text to stdout, exits `0`,
+does not read stdin, does not enter invocation, and never constructs or reads
+`Repo`, `Tasks`, or `Akuma`. `-C` is accepted but has no effect and `--json`
+does not give help a JSON form. Therefore help works from a directory with no
+Keiyaku world.
+
+A syntax refusal carries the deepest grammar coordinate reached and renders
+that owner's stored usage, never an ancestor's. It writes stderr and exits `1`.
+A bare invocation remains an incomplete-call refusal whose body is the root
+projection; requesting root help produces that projection on stdout with exit
+`0`.
 
 The adapter chooses actor testimony in this order: explicit nonblank `--actor`,
 then `KEIYAKU_PROJECTION_ID`, then no actor. Explicit input wins over the
@@ -251,8 +310,11 @@ task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
   [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
   [--relates <TaskId>]... [--drop-relates <TaskId>]...
   [--contract <ContractId> | --no-contract] [--json]
-task start|stop|hold|resume <TaskId> [--json]
-task done|hold <TaskId>... [--json]
+task start <TaskId> [--json]
+task stop <TaskId> [--json]
+task hold <TaskId>... [--json]
+task resume <TaskId> [--json]
+task done <TaskId>... [--json]
 task drop <TaskId>... [--note <text>] [--json]
 task namespace [<namespace>] [--json]
 task compose [--json] -
@@ -291,21 +353,42 @@ switch to another observation result. The Contract section is supplied by
 `Keiyaku.list({ repo })` and exposes lifecycle, candidate, and every declared
 gate's current report. Kanshi and the renderer copy those discriminants and do
 not evaluate gate currency, infer claimability, or derive terminality.
+Its Akuma section is supplied by `Akuma.list()`; the board copies life,
+identity, pending count, confinement, and searched coordinates without probing,
+reading history, or reclassifying them.
+
+Akuma call, list, status, follow, wait, an `interrupted` interrupt, successful
+wake, a `forked` fork, and settled kill exit `0`. Interrupt `dead` or
+`unstoppable`, and an
+interrupted tell refused by concurrent death, exit `1`; an interrupted tell
+whose detached wake failed exits `2`. Text status and wait render the same
+`AkumaStatus`, including every
+retained turn in stable sequence order; JSON returns that public value without
+reshaping it. `unavailable` and `alive-after-sigkill` exit `1`; a recorded tell
+whose detached wake failed exits `2`. Fork text renders the child id for
+`forked`; provider plus unavailable capability for `provider-cannot-fork`; the
+requested coordinate plus no matching retained answered turn for
+`unknown-history`; and the diagnostic for `fork-failed`. These three clean
+refusals exit `1`. `upstream-forked` renders both
+`childSession.sessionId` and its diagnostic and exits `2`. Fork JSON serializes
+the public receipt verbatim. Syntax uses exit `1`; corruption and infrastructure
+exceptions use exit `3`.
 
 ## Product Boundary
 
 The CLI package entry is a shebang-only executable with no exports. Parser,
-usage errors, renderers, and `main` are not package API. The CLI imports the
-package root and its own modules only; it does not define package-root library
-behavior or obtain a raw scope, token, registry, or orchestrator.
+usage errors, renderers, and `main` are not package API. The CLI adapts the
+package-root Contract surface and the separate `./task` and `./akuma` product
+surfaces; it does not define their library behavior or obtain a raw scope,
+token, registry, or orchestrator.
 
 Contract commands accept no task coordinate and produce no task mutation or
 settlement effect. Task coordination and its associations are owned by the
 external task product.
 
 The surface has no interactive mode, input envelope, independent JSON schema,
-per-command JSON payload, configurable attempt count, command alias, or
-additional top-level command.
+per-command JSON payload, configurable attempt count, command alias, or other
+top-level command.
 
 The report `root` remains the invocation world coordinate. There is no
 `scope` or `region` command; cross-contract fact relationships and a world

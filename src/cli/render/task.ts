@@ -13,7 +13,8 @@ import type {
   TaskUpdateResult,
   TaskView,
 } from "../../task/index.js";
-import type { ParsedTaskCommand, TaskInvocationResult } from "../commands/task.js";
+import type { TaskInvocationResult } from "../commands/task-invoke.js";
+import type { ParsedTaskCommand } from "../commands/task.js";
 
 type TaskReadOutcome = TaskList | BlockedTaskList | TaskDependencyTree | TaskNamespaceResult;
 type TaskDocumentChanges = Extract<TaskCompositionResult, { kind: "accepted" }>["documentChanges"];

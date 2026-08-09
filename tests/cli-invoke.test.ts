@@ -109,7 +109,8 @@ test("an explicit status selector projects one Kanshi report without changing se
   if (result.kind !== "status") return;
   assert.equal(result.report.contracts.kind, "present");
   assert.equal(result.report.tasks.kind, "present");
-  assert.deepEqual(result.report.akuma, { kind: "absent" });
+  assert.equal(result.report.akuma.kind, "present");
+  if (result.report.akuma.kind === "present") assert.deepEqual(result.report.akuma.value.rows, []);
   if (result.report.contracts.kind !== "present" || result.report.tasks.kind !== "present") return;
   assert.deepEqual(result.report.contracts.value.rows.map((row) => row.id), [id]);
   assert.deepEqual(result.report.tasks.value.rows.map((row) => row.contract?.id), [id]);
