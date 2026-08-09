@@ -98,8 +98,8 @@ test("activity fold pairs tools and bounds settled rows without dropping in-flig
   ]);
 });
 
-test("wait deadline returns the same running status carrier", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wait-deadline-"));
+test("wait timeout returns the same running status carrier", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wait-timeout-"));
   try {
     const source = await answeredSource(root, "de1ad100");
     const leash = HeldAkumaLeash.try(source.paths)!;
@@ -107,9 +107,25 @@ test("wait deadline returns the same running status carrier", async () => {
       const handle = Akuma.at({ path: root }).of({ id: source.id });
       const expected = handle.status();
       assert.equal(expected.life, "running");
-      assert.deepEqual(await handle.wait(undefined, { deadline: 0 }), expected);
+      assert.deepEqual(await handle.wait(undefined, { timeoutMs: 0 }), expected);
     } finally {
       leash.release();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("wait refuses invalid public timeoutMs values", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wait-invalid-timeout-"));
+  try {
+    const source = await answeredSource(root, "de1ad101");
+    const handle = Akuma.at({ path: root }).of({ id: source.id });
+    for (const timeoutMs of [-1, Number.POSITIVE_INFINITY, Number.NaN]) {
+      await assert.rejects(
+        handle.wait(undefined, { timeoutMs }),
+        /Akuma wait timeoutMs must be a nonnegative finite millisecond duration/u,
+      );
     }
   } finally {
     rmSync(root, { recursive: true, force: true });

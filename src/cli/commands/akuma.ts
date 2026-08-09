@@ -6,7 +6,7 @@ type Addressed = Readonly<{ id: string }>;
 export type ParsedAkumaCommand = Output & (
   | Readonly<{ command: "call"; persona: string; cwd?: string; contract?: string }>
   | (Readonly<{ command: "follow" | "kill" }> & Addressed)
-  | (Readonly<{ command: "wait"; deadline?: number }> & Addressed)
+  | (Readonly<{ command: "wait"; timeoutMs?: number }> & Addressed)
   | (Readonly<{ command: "tell" | "interrupt" }> & Addressed)
   | (Readonly<{ command: "history"; last: boolean }> & Addressed)
   | (Readonly<{ command: "fork"; at: string }> & Addressed)
@@ -40,9 +40,9 @@ const AKUMA_COMMAND_SPECS = {
   wait: {
     arity: 1,
     stdin: false,
-    flags: { deadline: "value", json: "boolean" },
-    usage: "wait <aku/...> [--deadline <ms>] [--json]",
-    purpose: "Wait for one Akuma or return its current snapshot at the deadline.",
+    flags: { timeout: "value", json: "boolean" },
+    usage: "wait <aku/...> [--timeout <duration>] [--json]",
+    purpose: "Wait for one Akuma or return its current snapshot at the timeout.",
   },
   tell: {
     arity: 1,
@@ -109,6 +109,15 @@ function stringFlag(value: FlagValue | undefined, diagnostic: string, fail: (mes
   return value as string;
 }
 
+function parseDuration(raw: FlagValue, fail: (message: string) => never): number {
+  const match = typeof raw === "string" ? /^(0|[1-9][0-9]*)(ms|s|m|h)$/u.exec(raw) : null;
+  if (match === null) fail("--timeout requires an integer duration with unit ms, s, m, or h");
+  const multipliers = { ms: 1n, s: 1_000n, m: 60_000n, h: 3_600_000n } as const;
+  const milliseconds = BigInt(match[1]!) * multipliers[match[2] as keyof typeof multipliers];
+  if (milliseconds > BigInt(Number.MAX_SAFE_INTEGER)) fail("--timeout duration exceeds the safe millisecond range");
+  return Number(milliseconds);
+}
+
 function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message: string) => never): Scanned {
   const spec = AKUMA_COMMAND_SPECS[action];
   const flags: Record<string, FlagValue> = {};
@@ -148,11 +157,9 @@ function parseAddressed(
     return { command: action, id, output };
   }
   if (action === "wait") {
-    const raw = flags.deadline;
+    const raw = flags.timeout;
     if (raw === undefined) return { command: action, id, output };
-    const deadline = typeof raw === "string" && /^\d+$/u.test(raw) ? Number(raw) : Number.NaN;
-    if (!Number.isSafeInteger(deadline) || deadline < 0) fail("--deadline requires a nonnegative safe integer");
-    return { command: action, id, deadline, output };
+    return { command: action, id, timeoutMs: parseDuration(raw, fail), output };
   }
   if (action === "history") return { command: action, id, last: flags.last === true, output };
   const at = stringFlag(flags.at, "fork requires --at <historyId>", fail);

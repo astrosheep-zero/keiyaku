@@ -29,9 +29,20 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["status", "aku/claude/1234abcd"]), {
     command: { command: "status", contract: "aku/claude/1234abcd", akuma: true, output: "text" },
   });
-  assert.deepEqual(parseArgv(["wait", "aku/claude/1234abcd", "--deadline", "25", "--json"]), {
-    command: { command: "wait", id: "aku/claude/1234abcd", deadline: 25, output: "json" },
+  assert.deepEqual(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "25ms", "--json"]), {
+    command: { command: "wait", id: "aku/claude/1234abcd", timeoutMs: 25, output: "json" },
   });
+  assert.equal(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "50s"]).command.timeoutMs, 50_000);
+  assert.equal(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "10m"]).command.timeoutMs, 600_000);
+  assert.equal(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "2h"]).command.timeoutMs, 7_200_000);
+  for (const duration of ["5000", "1.5m", "01s", "-1s", "1d"]) {
+    assert.throws(() => parseArgv(["wait", "aku/claude/1234abcd", "--timeout", duration]), /--timeout requires/u);
+  }
+  assert.throws(
+    () => parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "9007199254741s"]),
+    /exceeds the safe millisecond range/u,
+  );
+  assert.throws(() => parseArgv(["wait", "aku/claude/1234abcd", "--deadline", "25"]), /option --deadline is not valid/u);
   assert.throws(() => parseArgv(["akuma", "ls"]), CliUsageError);
   assert.throws(() => parseArgv(["status", "--akuma"]), CliUsageError);
   assert.throws(() => parseArgv(["call", "--persona", "claude"]), /requires stdin/);
@@ -215,7 +226,7 @@ test("Akuma status, wait, and history share public observations without embeddin
     assert.match(renderAkumaText(parsedStatus.command, statusResult), /answer\ncli answer\nactivity 0/u);
     assert.match(renderAkumaText(parsedStatus.command, statusResult), /contract kei\/cli-purpose/u);
 
-    const waitResult = await invoke(parseArgv(["-C", root, "wait", allocated.id, "--deadline", "0"]), {
+    const waitResult = await invoke(parseArgv(["-C", root, "wait", allocated.id, "--timeout", "0ms"]), {
       readStdin: () => { throw new Error("wait must not read stdin"); },
     });
     assert.equal("kind" in waitResult && waitResult.kind, "akuma");

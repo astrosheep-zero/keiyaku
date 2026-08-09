@@ -283,13 +283,13 @@ export class AkumaHandle {
 
   async wait(
     predicate: (status: AkumaStatus) => boolean = (status) => status.life !== "running",
-    options: Readonly<{ deadline?: number }> = {},
+    options: Readonly<{ timeoutMs?: number }> = {},
   ): Promise<AkumaStatus> {
-    if (options.deadline !== undefined
-      && (!Number.isFinite(options.deadline) || options.deadline < 0)) {
-      throw new TypeError("Akuma wait deadline must be a nonnegative finite millisecond duration");
+    if (options.timeoutMs !== undefined
+      && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
+      throw new TypeError("Akuma wait timeoutMs must be a nonnegative finite millisecond duration");
     }
-    const deadline = options.deadline === undefined ? undefined : performance.now() + options.deadline;
+    const deadline = options.timeoutMs === undefined ? undefined : performance.now() + options.timeoutMs;
     for (;;) {
       const status = this.status();
       if (predicate(status) || (deadline !== undefined && performance.now() >= deadline)) return status;

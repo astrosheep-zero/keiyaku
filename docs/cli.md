@@ -80,7 +80,7 @@ reconcile [<contract>|@<contract>] [--json]
 settings [--json]
 call --persona <name> [--cwd <path>] [--contract <contract-id>] [--json] -
 follow <aku/...> [--json]
-wait <aku/...> [--deadline <ms>] [--json]
+wait <aku/...> [--timeout <duration>] [--json]
 tell <aku/...> [--json] -
 interrupt <aku/...> [--json] -
 history <aku/...> [--last] [--json]
@@ -157,9 +157,12 @@ constructs the addressed handle and has no CLI command of its own. `follow`
 renders assistant text verbatim and every other collected public `AgentEvent`
 as one typed line. JSON writes the closed-union event objects in order, one
 object per line. Collection before printing remains the current CLI behavior.
-CLI `wait` uses the public default predicate (`life !== "running"`);
-`--deadline` passes a nonnegative integer millisecond duration, while
-predicate functions remain library-only input. `history` with no mode renders
+CLI `wait` uses the public default predicate (`life !== "running"`). Its
+optional duration matches exactly `^(0|[1-9][0-9]*)(ms|s|m|h)$`: integers and
+units are required, leading zeroes are refused except for zero itself, and the
+units convert to milliseconds before the public call. A converted value beyond
+the safe integer range is refused. `--timeout` passes that value as
+`timeoutMs`, while predicate functions remain library-only input. `history` with no mode renders
 every retained turn in stable order. `--last` writes the complete answer from
 the last answered turn, skipping later failed turns; it does not read activity
 or append framing. `fork` requires one nonblank `--at` history id and has no
@@ -377,7 +380,7 @@ interrupted tell refused by concurrent death, exit `1`; an interrupted tell
 whose detached wake failed exits `2`. Exact status renders current state, the
 latest complete answer or failure, and the public activity snapshot. Wait uses
 the same carrier: when its predicate is satisfied it renders the complete
-answer or failure; when its deadline arrives while still running it renders the
+answer or failure; when its timeout arrives while still running it renders the
 snapshot. JSON returns that public value without reshaping it. History text
 renders explicit retained turns; `--last` emits only the final selected answer
 bytes. Tell text combines its public write receipt with one subsequent exact

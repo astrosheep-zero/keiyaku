@@ -45,7 +45,7 @@ export async function invokeAkuma(
     case "wait": return {
       kind: "akuma",
       action: "wait",
-      status: await world.of({ id: command.id }).wait(undefined, command.deadline === undefined ? {} : { deadline: command.deadline }),
+      status: await world.of({ id: command.id }).wait(undefined, command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
     };
     case "tell": {
       const handle = world.of({ id: command.id });

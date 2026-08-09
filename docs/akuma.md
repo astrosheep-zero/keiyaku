@@ -811,7 +811,7 @@ world.list();                              // compact fleet rows; no history sca
 a.id                                       // aku/<persona>/<hex8>
 a.status()                                 // current state + bounded activity
 a.follow()                                 // AsyncIterable<AgentEvent>
-a.wait(predicate?, { deadline? })          // same status carrier on either outcome
+a.wait(predicate?, { timeoutMs? })         // same status carrier on either outcome
 a.history()                                // all retained TurnFact values
 a.tell(body)
 a.interrupt(body)                         // synchronous put-down, then tell
@@ -856,7 +856,7 @@ type ActivityRow =
 
 `wait(predicate?, options?)` polls `status()` and returns the first complete
 `AkumaStatus` accepted by the predicate. Its default predicate is
-`status.life !== "running"`. `options.deadline`, when present, is a
+`status.life !== "running"`. `options.timeoutMs`, when present, is a
 nonnegative millisecond duration. If it arrives first, `wait` returns the
 current `AkumaStatus`; it adds no timeout arm or flag. The caller can reapply
 its predicate to the returned observation. One status read prevents a torn
@@ -899,7 +899,7 @@ interrupt read their bodies from a final `-`; `--json`
 changes
 rendering only. Library `world.of()` remains the handle constructor and has no
 redundant CLI verb. CLI wait uses the default predicate and may supply a
-deadline. Predicate functions are library-only input. CLI tell composes its
+timeout. Predicate functions are library-only input. CLI tell composes its
 write receipt with one subsequent public `status()` read; it uses the same
 activity snapshot and never creates a per-verb window. Kanshi obtains its Akuma
 section from `Akuma.list()` without reading activity or history.
