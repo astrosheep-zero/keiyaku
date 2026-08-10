@@ -89,7 +89,23 @@ export type RequestRow = Readonly<{
   evidence: string | null;
 }>;
 
-export type ActivityRow = Readonly<{ sequence: number; event_json: string; at: string }>;
+export type ActivityRow = Readonly<{
+  sequence: number;
+  body_sequence: number;
+  event_json: string;
+  at: string;
+}>;
+export type ActivityFact = Readonly<{
+  sequence: number;
+  bodySequence: number;
+  event: unknown;
+  at: string;
+}>;
+export type ActivityFactSlice = Readonly<{
+  rows: readonly ActivityFact[];
+  lowestRetained: number | null;
+  highest: number | null;
+}>;
 export type DeathRow = Readonly<{ value_json: string; at: string }>;
 
 function json(value: unknown): string {
@@ -214,8 +230,13 @@ export function encodeActivityEvent(event: unknown): string {
   return json(event);
 }
 
-export function decodeActivityRow(row: ActivityRow): Readonly<{ sequence: number; event: unknown; at: string }> {
-  return { sequence: row.sequence, event: parsed(row.event_json), at: row.at };
+export function decodeActivityRow(row: ActivityRow): ActivityFact {
+  return {
+    sequence: row.sequence,
+    bodySequence: row.body_sequence,
+    event: parsed(row.event_json),
+    at: row.at,
+  };
 }
 
 export function encodeDeathRow(death: DeathFact): string {
@@ -270,24 +291,46 @@ export function insertSessionFact(database: DatabaseSync, input: Omit<SessionFac
   return Number(result.lastInsertRowid);
 }
 
-export function insertActivityFact(database: DatabaseSync, input: Readonly<{ event: unknown; at: string }>): number {
-  const result = database.prepare("INSERT INTO activity(event_json, at) VALUES (?, ?)")
-    .run(encodeActivityEvent(input.event), input.at);
+export function insertActivityFact(
+  database: DatabaseSync,
+  input: Readonly<{ bodySequence: number; event: unknown; at: string }>,
+): number {
+  const result = database.prepare("INSERT INTO activity(body_sequence, event_json, at) VALUES (?, ?, ?)")
+    .run(input.bodySequence, encodeActivityEvent(input.event), input.at);
   return Number(result.lastInsertRowid);
 }
 
 export function pruneActivityFacts(database: DatabaseSync, limit: number): void {
-  database.prepare("DELETE FROM activity WHERE sequence <= (SELECT COALESCE(MAX(sequence), 0) - ? FROM activity)")
+  database.prepare(`DELETE FROM activity
+    WHERE sequence NOT IN (SELECT sequence FROM activity ORDER BY sequence DESC LIMIT ?)`)
     .run(limit);
 }
 
-export function activityFactsAfter(
+export function activityFactSlice(
   database: DatabaseSync,
-  sequence: number,
-): readonly Readonly<{ sequence: number; event: unknown; at: string }>[] {
-  const rows = database.prepare("SELECT sequence, event_json, at FROM activity WHERE sequence > ? ORDER BY sequence")
-    .all(sequence) as unknown as readonly ActivityRow[];
-  return rows.map(decodeActivityRow);
+  input: Readonly<{ before?: number; since?: number; limit: number }>,
+): ActivityFactSlice {
+  const bounds = database.prepare("SELECT MIN(sequence) AS lowest, MAX(sequence) AS highest FROM activity")
+    .get() as { lowest: number | null; highest: number | null };
+  let rows: readonly ActivityRow[];
+  if (input.before !== undefined) {
+    rows = database.prepare(`SELECT sequence, body_sequence, event_json, at FROM (
+      SELECT sequence, body_sequence, event_json, at FROM activity
+      WHERE sequence < ? ORDER BY sequence DESC LIMIT ?
+    ) ORDER BY sequence`).all(input.before, input.limit) as unknown as readonly ActivityRow[];
+  } else if (input.since !== undefined) {
+    rows = database.prepare(`SELECT sequence, body_sequence, event_json, at FROM activity
+      WHERE sequence > ? ORDER BY sequence LIMIT ?`).all(input.since, input.limit) as unknown as readonly ActivityRow[];
+  } else {
+    rows = database.prepare(`SELECT sequence, body_sequence, event_json, at FROM (
+      SELECT sequence, body_sequence, event_json, at FROM activity ORDER BY sequence DESC LIMIT ?
+    ) ORDER BY sequence`).all(input.limit) as unknown as readonly ActivityRow[];
+  }
+  return {
+    rows: rows.map(decodeActivityRow),
+    lowestRetained: bounds.lowest,
+    highest: bounds.highest,
+  };
 }
 
 export function deathExists(database: DatabaseSync): boolean {
@@ -469,6 +512,13 @@ export function historyFacts(database: DatabaseSync): readonly TurnFact[] {
   const rows = database.prepare(`SELECT sequence, body_sequence, outcome, history_id, session_json,
     answer, diagnostic, completed_at FROM turns ORDER BY sequence`).all() as unknown as readonly TurnRow[];
   return rows.map(decodeTurnRow);
+}
+
+export function lastAnsweredTurnFact(database: DatabaseSync): TurnFact | null {
+  const row = database.prepare(`SELECT sequence, body_sequence, outcome, history_id, session_json,
+    answer, diagnostic, completed_at FROM turns WHERE outcome = 'answered' ORDER BY sequence DESC LIMIT 1`)
+    .get() as TurnRow | undefined;
+  return row === undefined ? null : decodeTurnRow(row);
 }
 
 export function latestTurnFact(database: DatabaseSync): TurnFact | null {

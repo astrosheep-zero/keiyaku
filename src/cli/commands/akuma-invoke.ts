@@ -1,24 +1,22 @@
 import {
   Akuma,
-  type AgentEvent,
   type AkumaStatus,
   type ForkReceipt,
   type InterruptReceipt,
   type KillEvidence,
   type TellReceipt,
-  type TurnFact,
 } from "../../akuma/index.js";
+import type { ActivityHistory } from "../../akuma/index.js";
 import type { Settings } from "../../settings.js";
 import type { ParsedAkumaCommand } from "./akuma.js";
 
 export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; id: string }>
   | Readonly<{ kind: "akuma"; action: "status"; status: AkumaStatus }>
-  | Readonly<{ kind: "akuma"; action: "follow"; id: string; events: readonly AgentEvent[] }>
   | Readonly<{ kind: "akuma"; action: "wait"; status: AkumaStatus }>
   | Readonly<{ kind: "akuma"; action: "tell"; akuma: string; receipt: TellReceipt; status: AkumaStatus }>
   | Readonly<{ kind: "akuma"; action: "interrupt"; akuma: string; receipt: InterruptReceipt }>
-  | Readonly<{ kind: "akuma"; action: "history"; akuma: string; turns: readonly TurnFact[] }>
+  | Readonly<{ kind: "akuma"; action: "history"; akuma: string; history: ActivityHistory; answer?: string }>
   | Readonly<{ kind: "akuma"; action: "fork"; akuma: string; receipt: ForkReceipt }>
   | Readonly<{ kind: "akuma"; action: "kill"; id: string; evidence: KillEvidence }>;
 
@@ -37,11 +35,6 @@ export async function invokeAkuma(
       });
       return { kind: "akuma", action: "call", id: handle.id };
     }
-    case "follow": {
-      const events: AgentEvent[] = [];
-      for await (const event of world.of({ id: command.id }).follow()) events.push(event);
-      return { kind: "akuma", action: "follow", id: command.id, events };
-    }
     case "wait": return {
       kind: "akuma",
       action: "wait",
@@ -58,12 +51,20 @@ export async function invokeAkuma(
       akuma: command.id,
       receipt: await world.of({ id: command.id }).interrupt(input.readStdin()),
     };
-    case "history": return {
-      kind: "akuma",
-      action: "history",
-      akuma: command.id,
-      turns: world.of({ id: command.id }).history(),
-    };
+    case "history": {
+      const handle = world.of({ id: command.id });
+      const history = handle.history({
+        ...(command.before === undefined ? {} : { before: command.before }),
+        ...(command.since === undefined ? {} : { since: command.since }),
+      });
+      return {
+        kind: "akuma",
+        action: "history",
+        akuma: command.id,
+        history,
+        ...(command.last ? { answer: handle.lastAnswer() } : {}),
+      };
+    }
     case "fork": return {
       kind: "akuma",
       action: "fork",

@@ -5,6 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
+  AGENT_EVENT_TEXT_LIMIT,
+  AGENT_THOUGHT_TEXT_LIMIT,
   decodeAgentEvent,
   encodeAgentEvent,
   type AgentEvent,
@@ -29,7 +31,7 @@ test("provider activity codec round trips every closed event and tool-call arm",
     { type: "tool", phase: "started", id: "run", name: "Bash", call: { kind: "run", command: "npm test" } },
     { type: "tool", phase: "completed", id: "read", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } },
     { type: "tool", phase: "started", id: "search", name: "Search", call: { kind: "search", query: "TODO" } },
-    { type: "tool", phase: "completed", id: "change", name: "Edit", call: { kind: "fileChange", paths: ["src/a.ts"] }, result: { status: "ok" } },
+    { type: "tool", phase: "completed", id: "change", name: "Edit", call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts" }] }, result: { status: "ok" } },
     { type: "tool", phase: "started", id: "other", name: "MCP", call: { kind: "other", display: "server/tool" } },
   ];
   for (const event of events) assert.deepEqual(decodeAgentEvent(encodeAgentEvent(event)), event);
@@ -41,6 +43,27 @@ test("provider activity codec round trips every closed event and tool-call arm",
     () => decodeAgentEvent({ type: "tool", phase: "started", id: "bad", name: "Bash", call: { kind: "run", command: "x" }, result: { status: "ok" } }),
     /invalid event shape/u,
   );
+});
+
+test("provider persistence bounds narration without truncating coordinates or pairing ids", () => {
+  const general = "g".repeat(AGENT_EVENT_TEXT_LIMIT + 100);
+  const thought = "t".repeat(AGENT_THOUGHT_TEXT_LIMIT + 100);
+  assert.deepEqual(decodeAgentEvent(encodeAgentEvent({ type: "assistant", text: general })), {
+    type: "assistant",
+    text: general.slice(0, AGENT_EVENT_TEXT_LIMIT),
+  });
+  assert.deepEqual(decodeAgentEvent(encodeAgentEvent({ type: "thought", text: thought })), {
+    type: "thought",
+    text: thought.slice(0, AGENT_THOUGHT_TEXT_LIMIT),
+  });
+  const coordinate = "session-" + "s".repeat(AGENT_EVENT_TEXT_LIMIT);
+  const id = "tool-" + "i".repeat(AGENT_EVENT_TEXT_LIMIT);
+  assert.deepEqual(decodeAgentEvent(encodeAgentEvent({ type: "session", coordinate: { sessionId: coordinate } })), {
+    type: "session", coordinate: { sessionId: coordinate },
+  });
+  assert.equal((decodeAgentEvent(encodeAgentEvent({
+    type: "tool", phase: "started", id, name: "Bash", call: { kind: "run", command: "true" },
+  })) as Extract<AgentEvent, { type: "tool" }>).id, id);
 });
 
 function fakeCodex(
@@ -211,7 +234,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
   ]);
   assert.equal(events[5]?.type, "note");
   if (events[5]?.type === "note") {
-    assert.equal(events[5].text.length, 200);
+    assert.equal(events[5].text, longNotice.replace(/\s+/gu, " ").trim());
     assert.equal(events[5].text.includes("\n"), false);
   }
   assert.deepEqual(events.slice(6), [
@@ -598,7 +621,7 @@ test("Codex observation dispositions pin every currently known method and item",
     imageView: "tool",
     mcpToolCall: "tool",
     plan: "plan",
-    reasoning: "drop",
+    reasoning: "thought",
     sleep: "note",
     subAgentActivity: "note",
     userMessage: "drop",
@@ -682,7 +705,7 @@ test("Codex maps observations without leaking output or unknown payloads", async
     assert.deepEqual(events, [
       { type: "session", coordinate: { sessionId: "thread-fresh" } },
       { type: "tool", phase: "started", id: "command-1", name: "commandExecution", call: { kind: "run", command: "npm test" } },
-      { type: "tool", phase: "completed", id: "command-1", name: "commandExecution", call: { kind: "run", command: "npm test" }, result: { status: "ok" } },
+      { type: "tool", phase: "completed", id: "command-1", name: "commandExecution", call: { kind: "run", command: "npm test" }, result: { status: "ok", exitCode: 0 } },
       { type: "note", text: "Plan updated: Verify the adapter" },
       { type: "note", text: "Retrying after error: temporary outage" },
       { type: "assistant", text: "first answer" },

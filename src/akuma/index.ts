@@ -5,6 +5,7 @@ export type {
   AkumaList,
   AkumaListRow,
   AkumaStatus,
+  ActivityHistory,
   ActivityRow,
   ActivitySnapshot,
   ForkReceipt,

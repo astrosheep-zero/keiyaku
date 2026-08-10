@@ -10,7 +10,7 @@ import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { akumaExitCode, akumaJsonValue, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
+import { akumaExitCode, akumaJsonValue, renderAkumaText } from "../src/cli/render/akuma.js";
 
 test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["-C", "/world", "call", "--persona", "claude", "--cwd", "/work", "--contract", "kei/delivery", "-"]), {
@@ -50,29 +50,6 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.throws(() => parseArgv(["kill", "aku\/claude\/1234abcd", "-"]), /stdin marker .* not valid/);
   assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd"]), /requires --at/);
   assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd", "--at", ""]), /requires --at/);
-});
-
-test("Akuma follow renders the closed event union as text and JSON lines", () => {
-  const command = parseArgv(["follow", "aku/claude/1234abcd"]).command;
-  const result = {
-    kind: "akuma" as const,
-    action: "follow" as const,
-    id: "aku/claude/1234abcd",
-    events: [
-      { type: "session" as const, coordinate: { sessionId: "native-1" } },
-      { type: "assistant" as const, text: "completed answer" },
-      { type: "note" as const, text: "Command npm test" },
-      { type: "unknown" as const, kind: "future/event" },
-    ],
-  };
-  assert.equal(renderAkumaText(command, result), [
-    "session native-1",
-    "completed answer",
-    'note "Command npm test"',
-    'unknown "future/event"',
-  ].join("\n"));
-  assert.equal(renderAkumaJson(command, result), result.events.map((event) => JSON.stringify(event)).join("\n"));
-  assert.equal(renderAkumaJson(command, result).startsWith("["), false);
 });
 
 test("akuma fork renders the public receipt and maps every exit class", () => {
@@ -179,6 +156,7 @@ test("akuma interrupt invokes the public receipt and maps every exit class", asy
 
 test("Akuma status, wait, and history share public observations without embedding history", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-status-"));
+  const completeAnswer = `${"x".repeat(20_000)}\nfinal line`;
   try {
     const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "1234abcd" });
     initializeHeart(allocated.paths);
@@ -192,7 +170,7 @@ test("Akuma status, wait, and history share public observations without embeddin
               yield { type: "session" as const, coordinate: { sessionId: "cli-session" } };
             },
           },
-          completion: Promise.resolve({ kind: "answered", answer: "cli answer", historyId: "cli-history" }),
+          completion: Promise.resolve({ kind: "answered", answer: completeAnswer, historyId: "cli-history" }),
           async abort() {},
         };
       },
@@ -220,11 +198,14 @@ test("Akuma status, wait, and history share public observations without embeddin
     const statusResult = await invoke(parsedStatus, { readStdin: () => { throw new Error("status must not read stdin"); } });
     assert.equal("kind" in statusResult && statusResult.kind, "akuma");
     if (!("kind" in statusResult) || statusResult.kind !== "akuma" || statusResult.action !== "status") return;
-    assert.equal(statusResult.status.answer, "cli answer");
+    assert.equal(statusResult.status.answer, completeAnswer);
     assert.equal("history" in statusResult.status, false);
-    assert.deepEqual(statusResult.status.activity, { rows: [], omitted: 0 });
-    assert.match(renderAkumaText(parsedStatus.command, statusResult), /answer\ncli answer\nactivity 0/u);
-    assert.match(renderAkumaText(parsedStatus.command, statusResult), /contract kei\/cli-purpose/u);
+    assert.deepEqual(statusResult.status.activity.rows, []);
+    assert.equal(statusResult.status.activity.omitted, 0);
+    const renderedStatus = renderAkumaText(parsedStatus.command, statusResult);
+    assert.match(renderedStatus, /aku\/claude\/1234abcd/u);
+    assert.match(renderedStatus, /answered · keiyaku history cli-history --last/u);
+    assert.match(renderedStatus, /── ○ aku\/claude\/1234abcd ── kei\/cli-purpose/u);
 
     const waitResult = await invoke(parseArgv(["-C", root, "wait", allocated.id, "--timeout", "0ms"]), {
       readStdin: () => { throw new Error("wait must not read stdin"); },
@@ -246,15 +227,17 @@ test("Akuma status, wait, and history share public observations without embeddin
     const historyParsed = parseArgv(["-C", root, "history", allocated.id]);
     const historyResult = await invoke(historyParsed, { readStdin: () => { throw new Error("history must not read stdin"); } });
     if (!("kind" in historyResult) || historyResult.kind !== "akuma" || historyResult.action !== "history") return;
-    assert.deepEqual(historyResult.turns.map((turn) => turn.outcome), [
-      { kind: "answered", answer: "cli answer", historyId: "cli-history", session: { sessionId: "cli-session" } },
+    assert.deepEqual(historyResult.history.turns.map((turn) => turn.outcome), [
+      { kind: "answered", answer: completeAnswer, historyId: "cli-history", session: { sessionId: "cli-session" } },
       { kind: "failed", diagnostic: "later failed" },
     ]);
-    assert.match(renderAkumaText(historyParsed.command, historyResult), /turn 1 answered cli-history session cli-session/u);
+    const renderedHistory = renderAkumaText(historyParsed.command, historyResult);
+    assert.match(renderedHistory, /answered · keiyaku history cli-history --last/u);
+    assert.match(renderedHistory, /failed · later failed/u);
     const lastParsed = parseArgv(["-C", root, "history", allocated.id, "--last"]);
     const lastResult = await invoke(lastParsed);
     if (!("kind" in lastResult) || lastResult.kind !== "akuma" || lastResult.action !== "history") return;
-    assert.equal(renderAkumaText(lastParsed.command, lastResult), "cli answer");
+    assert.equal(renderAkumaText(lastParsed.command, lastResult), completeAnswer);
     let stdout = "";
     const writeStdout = process.stdout.write;
     process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
@@ -263,7 +246,7 @@ test("Akuma status, wait, and history share public observations without embeddin
     } finally {
       process.stdout.write = writeStdout;
     }
-    assert.equal(stdout, "cli answer");
+    assert.equal(stdout, completeAnswer);
 
     const forkResult = await invoke(parseArgv(["-C", root, "fork", allocated.id, "--at", "missing-history"]), {
       readStdin: () => { throw new Error("fork must not read stdin"); },

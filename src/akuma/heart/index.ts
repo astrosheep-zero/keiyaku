@@ -26,7 +26,7 @@ import {
   assertLeashSchemaVersion,
 } from "./schema.js";
 import {
-  activityFactsAfter,
+  activityFactSlice,
   answeredTurnFact,
   deathExists,
   deathFact,
@@ -50,6 +50,7 @@ import {
   latestBodyFact,
   latestSessionFact,
   latestTurnFact,
+  lastAnsweredTurnFact,
   nonterminalRequestFacts,
   pauseExists,
   pendingTellFacts,
@@ -69,6 +70,7 @@ import {
   voidRequestsByDeath,
   voidTellsByDeath,
 } from "./rows.js";
+import type { ActivityFact, ActivityFactSlice } from "./rows.js";
 
 export { life } from "./facts.js";
 export type {
@@ -100,7 +102,7 @@ export type {
   TurnOutcome,
 } from "./facts.js";
 
-const ACTIVITY_LIMIT = 200;
+const ACTIVITY_LIMIT = 5_000;
 
 function isBusy(error: unknown): boolean {
   const value = error as { code?: unknown; errcode?: unknown; message?: unknown };
@@ -230,7 +232,10 @@ export function recordSession(paths: AkumaPaths, input: Omit<SessionFact, "seque
   return withHeart(paths, (heart) => ({ sequence: insertSessionFact(heart, input), ...input }));
 }
 
-export function appendActivity(paths: AkumaPaths, input: Readonly<{ event: unknown; at: string }>): number {
+export function appendActivity(
+  paths: AkumaPaths,
+  input: Readonly<{ bodySequence: number; event: unknown; at: string }>,
+): number {
   return withHeart(paths, (heart) =>
     transaction(heart, () => {
       const sequence = insertActivityFact(heart, input);
@@ -239,8 +244,13 @@ export function appendActivity(paths: AkumaPaths, input: Readonly<{ event: unkno
     }));
 }
 
-export function activityAfter(paths: AkumaPaths, sequence: number): readonly Readonly<{ sequence: number; event: unknown; at: string }>[] {
-  return withHeart(paths, (heart) => activityFactsAfter(heart, sequence));
+export type ActivitySliceInput = Readonly<{ before?: number; since?: number; limit?: number }>;
+export type ActivitySlice = ActivityFactSlice;
+export type { ActivityFact };
+
+export function activitySlice(paths: AkumaPaths, input: ActivitySliceInput = {}): ActivitySlice {
+  const limit = input.limit ?? ACTIVITY_LIMIT;
+  return withHeart(paths, (heart) => activityFactSlice(heart, { ...input, limit }));
 }
 
 export function recordTell(paths: AkumaPaths, tell: Omit<TellFact, "state">): "recorded" | "dead" {
@@ -437,8 +447,12 @@ export function readHeart(paths: AkumaPaths): HeartSnapshot {
   }));
 }
 
-export function readHistory(paths: AkumaPaths): readonly TurnFact[] {
+export function readTurns(paths: AkumaPaths): readonly TurnFact[] {
   return withHeart(paths, historyFacts);
+}
+
+export function readLastAnsweredTurn(paths: AkumaPaths): TurnFact | null {
+  return withHeart(paths, lastAnsweredTurnFact);
 }
 
 export function readCurrentTurn(paths: AkumaPaths): TurnFact | null {

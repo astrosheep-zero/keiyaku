@@ -51,8 +51,9 @@ The command vocabulary is:
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
 | `settings` | Constructs and observes the shared read-only Settings resource. |
+| `install` | Installs the bundled Keiyaku skill through one or more native harness installers. |
 | `task ...` | Calls the separate `./task` public surface described below. |
-| `call`, `follow`, `wait`, `tell`, `interrupt`, `history`, `fork`, `kill` | Call the corresponding separate `./akuma` capability as root verbs. |
+| `call`, `wait`, `tell`, `interrupt`, `history`, `fork`, `kill` | Call the corresponding separate `./akuma` capability as root verbs. |
 
 `bind` accepts no contract positional. Commands addressing an existing contract
 accept a full `kei/<contract-segment>` identity or an active short
@@ -78,12 +79,13 @@ status [<contract>|@<contract>|<aku/...>] [--json]
 audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--json]
 settings [--json]
+install <codex|claude|opencode|pi> [--json]
+       install --all [--json]
 call --persona <name> [--cwd <path>] [--contract <contract-id>] [--json] -
-follow <aku/...> [--json]
 wait <aku/...> [--timeout <duration>] [--json]
 tell <aku/...> [--json] -
 interrupt <aku/...> [--json] -
-history <aku/...> [--last] [--json]
+history <aku/...> [--before <index> | --since <index> | --last] [--json]
 fork <aku/...> --at <historyId> [--json]
 kill <aku/...> [--json]
 ```
@@ -141,6 +143,16 @@ no reason flag or hidden reason classification. `arc` and `audit` accept
 `--show-diff-body`. `status` and `reconcile` accept `--json`.
 `--json` is output-only.
 
+`install` is the one edge command that does not read a repository or Git. It
+installs the bundled `skills/keiyaku/SKILL.md` into `codex`, `claude`,
+`opencode`, or `pi` using each harness's native installer and its default user
+scope. `--all` runs the fixed order `codex`, `claude`, `opencode`, `pi`; a
+failure is recorded, remaining harnesses still run, and no cross-harness
+rollback occurs. Text prints one result per harness. JSON returns
+`{ kind: "install", results: [...] }`, with each result typed as `installed` or
+`failed` and a diagnostic on failure. Any failed harness makes the command exit
+`1`; successful installation exits `0`.
+
 `call`, `tell`, and `interrupt` require the final `-` and pass those bytes
 as the public body input. `--persona` is required for call and names
 `~/.keiyaku/akuma/<name>.md`; its provider must resolve through the Cut 1
@@ -148,25 +160,89 @@ Settings-backed provider interpretation. When no same-name Settings entry
 exists, the built-in fallback execution names are `claude` and
 `codex-app-server`. Missing or malformed configuration prints the exact path
 searched. `--cwd` selects the immutable summon seat and is resolved to an
-absolute path at the public boundary. `follow`, `wait`,
-`tell`, `interrupt`, `history`, `fork`, and `kill` require a complete
+absolute path at the public boundary. `wait`, `tell`, `interrupt`, `history`,
+`fork`, and `kill` require a complete
 `aku/<persona>/<hex8>`. `status <aku/...>` addresses the same exact handle.
 Bare `status` already exposes the Akuma fleet through Kanshi; there is no
 second raw-roster flag. Library `world.of()`
-constructs the addressed handle and has no CLI command of its own. `follow`
-renders assistant text verbatim and every other collected public `AgentEvent`
-as one typed line. JSON writes the closed-union event objects in order, one
-object per line. Collection before printing remains the current CLI behavior.
+constructs the addressed handle and has no CLI command of its own.
 CLI `wait` uses the public default predicate (`life !== "running"`). Its
 optional duration matches exactly `^(0|[1-9][0-9]*)(ms|s|m|h)$`: integers and
 units are required, leading zeroes are refused except for zero itself, and the
 units convert to milliseconds before the public call. A converted value beyond
 the safe integer range is refused. `--timeout` passes that value as
-`timeoutMs`, while predicate functions remain library-only input. `history` with no mode renders
-every retained turn in stable order. `--last` writes the complete answer from
-the last answered turn, skipping later failed turns; it does not read activity
-or append framing. `fork` requires one nonblank `--at` history id and has no
-stdin body.
+`timeoutMs`, while predicate functions remain library-only input. `history`
+with no mode renders the newest page of at most 50 semantic rows. `--before`
+reads the page preceding an already visible activity index; `--since` reads
+activity following an already visible index. Both are exclusive, accept only
+positive safe integers, and are mutually exclusive with each other and
+`--last`. `--last` writes the complete answer from the last answered turn,
+skipping later failed turns; it does not read activity or append framing.
+`fork` requires one nonblank `--at` history id and has no stdin body.
+
+## Akuma Text Surface
+
+Akuma text is one pure projection over public values. Provider adapters retain
+facts, the Akuma activity read model folds and selects rows, and the CLI only
+lays those rows onto one ruler and spine. No CLI branch repairs, reselects, or
+reinterprets activity. JSON exposes the same public value with complete ISO
+`at` values and no text-only time suppression.
+
+The ruler carries only facts fixed for the invocation: the life mark, complete
+Akuma id, and optional Contract. The id already contains the Persona, so the
+Persona is never repeated. The closed marks are `●` running, `○` nonterminal
+idle, `×` dead, `!` stillborn or warning, `│` spine, `⋮` omitted history, `⧗`
+tell, `✂` interrupted, and `✓` answered. Text never prints the storage words
+`retained`, `latest`, `body`, `heart`, or `turn`, and never emits a standalone
+`running` line. An unfinished tool row, which has no duration or result suffix,
+expresses the running work.
+
+```text
+── ● aku/worker/1234abcd ── kei/delivery ──────────────────
+   ⋮ earlier · keiyaku history aku/worker/1234abcd
+09:31 │ say      narrowing the failing suite
+      │ run      $ npm test — 41s · exit 1
+09:32 │ edit     src/akuma.ts — +12 -3
+      │ thought  the collar probe races the pid check
+      │ run      $ npm test
+      │ ⧗ tell   "also check the leash timeout"
+```
+
+The spine prints the first visible row's `HH:MM`. It then suppresses a row's
+gutter while that row is less than 60 seconds after the last timestamp actually
+printed, and prints again at 60 seconds or more. A row without `at`, such as an
+unconsumed tell, always has an empty gutter and does not move the anchor. There
+is no date line, cross-day exception, seconds display, or derived silence row.
+The same pure gutter function serves exact status, running wait results, tell,
+interrupt, kill, and history.
+
+Tool presentation is one pure function. A completed run prints immutable
+duration and then `ok`, `exit <code>`, or `error`; an unfinished run omits the
+suffix. One file change prints its operation and path. Multiple changes print
+`edit <n> files · <representative-path> ...`; an aggregate `+<n> -<n>` appears
+only when every change has a diffstat. Missing optional provider facts shorten
+the row and never produce placeholders.
+
+History is the only text surface with an index column. The index is a visible
+activity cursor and exists only to be copied into the next command. The three
+navigation laws are: every cursor was already visible, direction words match
+caller intent, and every recoverable omission line contains a complete command.
+
+```text
+── aku/worker/1234abcd ── history ─────────────────────────
+   ⋮ 32 earlier · keiyaku history aku/worker/1234abcd --before 37
+  37 09:31 │ say      narrowing the failing suite
+  38       │ run      $ npm test — 41s · exit 1
+
+── aku/worker/1234abcd ── history ── since 43 ─────────────
+  44 09:41 │ say      checking the leash timeout
+```
+
+A page that reaches a pruned lower boundary prints exactly `⋮ earlier history
+no longer kept`. A `--since` page with no rows prints exactly `⋮ no activity
+since <index>`. Exact status uses `⋮ earlier · keiyaku history <id>` when its
+snapshot omits semantic rows. No text asks the caller to calculate a cursor.
+`history --last` bypasses this frame and writes only exact answer bytes.
 
 ## Help
 
@@ -372,8 +448,7 @@ Its Akuma section is supplied by `Akuma.list()` and joined as specified by
 endpoint observation, pending count, confinement, and searched coordinates
 without probing, reading history, or reclassifying them.
 
-Akuma call, exact status, follow, wait, history, an `interrupted`
-interrupt, successful
+Akuma call, exact status, wait, history, an `interrupted` interrupt, successful
 wake, a `forked` fork, and settled kill exit `0`. Interrupt `dead` or
 `unstoppable`, and an
 interrupted tell refused by concurrent death, exit `1`; an interrupted tell
@@ -382,9 +457,11 @@ latest complete answer or failure, and the public activity snapshot. Wait uses
 the same carrier: when its predicate is satisfied it renders the complete
 answer or failure; when its timeout arrives while still running it renders the
 snapshot. JSON returns that public value without reshaping it. History text
-renders explicit retained turns; `--last` emits only the final selected answer
-bytes. Tell text combines its public write receipt with one subsequent exact
-status snapshot; JSON carries both values. `unavailable` and
+renders the requested persistent activity page and its completed-turn
+boundaries; `--last` emits only the final selected answer bytes. Tell text
+renders the subsequent exact status, whose untimestamped `⧗ tell` row is the
+write receipt's useful projection; JSON carries both receipt and status values.
+`unavailable` and
 `alive-after-sigkill` exit `1`; a recorded tell whose detached wake failed exits
 `2`. Fork text renders the child id for
 `forked`; provider plus unavailable capability for `provider-cannot-fork`; the

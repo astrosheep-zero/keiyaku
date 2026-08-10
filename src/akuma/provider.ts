@@ -2,17 +2,28 @@ import type { Confinement, ProviderOptions, ResumeCoordinate } from "./heart/ind
 export type { ProviderOptions, ResumeCoordinate } from "./heart/index.js";
 
 export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
-
-export const AGENT_EVENT_TEXT_LIMIT = 200;
+export const AGENT_EVENT_TEXT_LIMIT = 16_384;
+export const AGENT_THOUGHT_TEXT_LIMIT = 4_000;
 
 export type ToolCall =
   | Readonly<{ kind: "run"; command: string }>
   | Readonly<{ kind: "read"; path: string }>
   | Readonly<{ kind: "search"; query: string }>
-  | Readonly<{ kind: "fileChange"; paths: readonly string[] }>
+  | Readonly<{
+      kind: "fileChange";
+      changes: readonly Readonly<{
+        op: "add" | "update" | "delete";
+        path: string;
+        diffstat?: Readonly<{ added: number; removed: number }>;
+      }>[];
+    }>
   | Readonly<{ kind: "other"; display: string }>;
 
-export type ToolResult = Readonly<{ status: "ok" | "error"; message?: string }>;
+export type ToolResult = Readonly<{
+  status: "ok" | "error";
+  message?: string;
+  exitCode?: number;
+}>;
 
 export type ToolEvent = Readonly<{
   type: "tool";
@@ -27,6 +38,7 @@ export type ToolEvent = Readonly<{
 export type AgentEvent =
   | Readonly<{ type: "session"; coordinate: ResumeCoordinate }>
   | Readonly<{ type: "assistant"; text: string }>
+  | Readonly<{ type: "thought"; text: string }>
   | ToolEvent
   | Readonly<{ type: "note"; text: string }>
   | Readonly<{ type: "unknown"; kind: string }>;
@@ -34,6 +46,7 @@ export type AgentEvent =
 const AGENT_EVENT_TYPES = {
   session: true,
   assistant: true,
+  thought: true,
   tool: true,
   note: true,
   unknown: true,
@@ -100,7 +113,25 @@ function decodeToolCall(value: unknown): ToolCall | null {
   if (call?.kind === "run" && typeof call.command === "string") return { kind: "run", command: call.command };
   if (call?.kind === "read" && typeof call.path === "string") return { kind: "read", path: call.path };
   if (call?.kind === "search" && typeof call.query === "string") return { kind: "search", query: call.query };
-  if (call?.kind === "fileChange" && Array.isArray(call.paths) && call.paths.every((path) => typeof path === "string")) return { kind: "fileChange", paths: call.paths };
+  if (call?.kind === "fileChange" && Array.isArray(call.changes)) {
+    const changes = call.changes.map((value) => {
+      const change = object(value);
+      if (change === null || (change.op !== "add" && change.op !== "update" && change.op !== "delete")
+        || typeof change.path !== "string") return null;
+      const rawDiffstat = change.diffstat;
+      const op = change.op as "add" | "update" | "delete";
+      if (rawDiffstat === undefined) return { op, path: change.path };
+      const diffstat = object(rawDiffstat);
+      if (diffstat === null || !Number.isSafeInteger(diffstat.added) || !Number.isSafeInteger(diffstat.removed)
+        || (diffstat.added as number) < 0 || (diffstat.removed as number) < 0) return null;
+      return {
+        op,
+        path: change.path,
+        diffstat: { added: diffstat.added as number, removed: diffstat.removed as number },
+      };
+    });
+    if (changes.every((change) => change !== null)) return { kind: "fileChange", changes };
+  }
   if (call?.kind === "other" && typeof call.display === "string") return { kind: "other", display: call.display };
   return null;
 }
@@ -109,7 +140,12 @@ function decodeToolResult(value: unknown): ToolResult | null {
   const result = object(value);
   if (result === null || (result.status !== "ok" && result.status !== "error")) return null;
   if (result.message !== undefined && typeof result.message !== "string") return null;
-  return { status: result.status, ...(result.message === undefined ? {} : { message: result.message }) };
+  if (result.exitCode !== undefined && !Number.isSafeInteger(result.exitCode)) return null;
+  return {
+    status: result.status,
+    ...(result.message === undefined ? {} : { message: result.message }),
+    ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode as number }),
+  };
 }
 
 function decodeToolEvent(event: Readonly<Record<string, unknown>>): ToolEvent | null {
@@ -127,7 +163,8 @@ function decodeToolEvent(event: Readonly<Record<string, unknown>>): ToolEvent | 
 
 function decodeTypedEvent(type: AgentEvent["type"], event: Readonly<Record<string, unknown>>): AgentEvent | null {
   switch (type) {
-    case "assistant": return typeof event.text === "string" ? { type, text: event.text } : null;
+    case "assistant":
+    case "thought": return typeof event.text === "string" ? { type, text: event.text } : null;
     case "note": return typeof event.text === "string" ? { type, text: event.text } : null;
     case "unknown": return typeof event.kind === "string" ? { type, kind: event.kind } : null;
     case "session": {
@@ -147,25 +184,54 @@ export function decodeAgentEvent(value: unknown): AgentEvent {
   return decoded;
 }
 
+function boundedToolCall(call: ToolCall): ToolCall {
+  switch (call.kind) {
+    case "run": return { kind: call.kind, command: boundedEventText(call.command) };
+    case "read": return { kind: call.kind, path: boundedEventText(call.path) };
+    case "search": return { kind: call.kind, query: boundedEventText(call.query) };
+    case "fileChange": return {
+      kind: call.kind,
+      changes: call.changes.map((change) => ({ ...change, path: boundedEventText(change.path) })),
+    };
+    case "other": return { kind: call.kind, display: boundedEventText(call.display) };
+    default: return call satisfies never;
+  }
+}
+
+function boundedToolResult(result: ToolResult): ToolResult {
+  return {
+    status: result.status,
+    ...(result.message === undefined ? {} : { message: boundedEventText(result.message) }),
+    ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+  };
+}
+
 export function encodeAgentEvent(event: AgentEvent): unknown {
   switch (event.type) {
     case "session": return { type: event.type, coordinate: { sessionId: event.coordinate.sessionId } };
-    case "assistant": return { type: event.type, text: event.text };
-    case "note": return { type: event.type, text: event.text };
-    case "unknown": return { type: event.type, kind: event.kind };
+    case "assistant": return { type: event.type, text: boundedEventText(event.text) };
+    case "thought": return { type: event.type, text: boundedThoughtText(event.text) };
+    case "note": return { type: event.type, text: boundedEventText(event.text) };
+    case "unknown": return { type: event.type, kind: boundedEventText(event.kind) };
     case "tool": return event.phase === "started"
-      ? { type: event.type, id: event.id, phase: event.phase, name: event.name, call: event.call }
-      : { type: event.type, id: event.id, phase: event.phase, name: event.name, call: event.call, result: event.result };
+      ? { type: event.type, id: event.id, phase: event.phase,
+          name: boundedEventText(event.name), call: boundedToolCall(event.call) }
+      : { type: event.type, id: event.id, phase: event.phase,
+          name: boundedEventText(event.name), call: boundedToolCall(event.call),
+          result: boundedToolResult(event.result) };
     default: return event satisfies never;
   }
 }
 
-export function boundedEventText(value: string): string {
+function boundedEventText(value: string): string {
   return value.slice(0, AGENT_EVENT_TEXT_LIMIT);
+}
+function boundedThoughtText(value: string): string {
+  return value.slice(0, AGENT_THOUGHT_TEXT_LIMIT);
 }
 
 export function noteEvent(note: string): Extract<AgentEvent, { type: "note" }> {
-  return { type: "note", text: boundedEventText(note.replace(/\s+/g, " ").trim()) };
+  return { type: "note", text: note.replace(/\s+/g, " ").trim() };
 }
 
 export function unknownEvent(kind: string): Extract<AgentEvent, { type: "unknown" }> {

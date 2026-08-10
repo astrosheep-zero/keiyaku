@@ -1,20 +1,25 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 4;
+const HEART_SCHEMA_VERSION = 5;
+const LEASH_SCHEMA_VERSION = 4;
 
-function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema"): void {
+function assertSchemaVersion(
+  database: DatabaseSync,
+  table: "akuma_schema" | "leash_schema",
+  expected: number,
+): void {
   const row = database.prepare(`SELECT version FROM ${table} WHERE singleton = 1`).get() as { version: number } | undefined;
-  if (row?.version !== HEART_SCHEMA_VERSION) throw new Error(
-    `Akuma ${table === "akuma_schema" ? "heart" : "leash"} schema version must be ${HEART_SCHEMA_VERSION}`,
+  if (row?.version !== expected) throw new Error(
+    `Akuma ${table === "akuma_schema" ? "heart" : "leash"} schema version must be ${expected}`,
   );
 }
 
 export function assertHeartSchemaVersion(database: DatabaseSync): void {
-  assertSchemaVersion(database, "akuma_schema");
+  assertSchemaVersion(database, "akuma_schema", HEART_SCHEMA_VERSION);
 }
 
 export function assertLeashSchemaVersion(database: DatabaseSync): void {
-  assertSchemaVersion(database, "leash_schema");
+  assertSchemaVersion(database, "leash_schema", LEASH_SCHEMA_VERSION);
 }
 
 export const HEART_SCHEMA = `
@@ -69,6 +74,7 @@ export const HEART_SCHEMA = `
   ) STRICT;
   CREATE TABLE IF NOT EXISTS activity (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
     event_json TEXT NOT NULL CHECK (json_valid(event_json)),
     at TEXT NOT NULL
   ) STRICT;
@@ -110,9 +116,9 @@ export const LEASH_SCHEMA = `
   PRAGMA journal_mode=DELETE;
   CREATE TABLE IF NOT EXISTS leash_schema (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    version INTEGER NOT NULL CHECK (version = ${HEART_SCHEMA_VERSION})
+    version INTEGER NOT NULL CHECK (version = ${LEASH_SCHEMA_VERSION})
   ) STRICT;
-  INSERT OR IGNORE INTO leash_schema(singleton, version) VALUES (1, ${HEART_SCHEMA_VERSION});
+  INSERT OR IGNORE INTO leash_schema(singleton, version) VALUES (1, ${LEASH_SCHEMA_VERSION});
   CREATE TABLE IF NOT EXISTS seal (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     evidence TEXT NOT NULL,

@@ -180,7 +180,11 @@ async function consumeTurnDrive(
         admittedAt: at,
       });
     }
-    appendActivity(input.paths, { event: encodeAgentEvent(event), at });
+    appendActivity(input.paths, {
+      bodySequence: input.bodySequence,
+      event: encodeAgentEvent(event),
+      at,
+    });
     if (!entered && input.tellId !== undefined) {
       entered = true;
       advanceTell(input.paths, input.tellId, "seen");

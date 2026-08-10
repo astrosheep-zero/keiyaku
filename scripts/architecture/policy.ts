@@ -17,7 +17,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "akuma/heart/rows.ts", allow: [types("akuma/heart/facts.ts")] },
     { source: "akuma/heart/index.ts", allow: [types("akuma/identity.ts"), any("akuma/heart/facts.ts"), any("akuma/heart/schema.ts"), any("akuma/heart/rows.ts")] },
     { source: "akuma/provider.ts", allow: [types("akuma/heart/index.ts")] },
+    { source: "akuma/activity.ts", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts")] },
     { source: "akuma/providers/index.ts", allow: [types("akuma/heart/index.ts"), types("akuma/provider.ts"), any("akuma/providers/claude.ts"), any("akuma/providers/codex-app-server.ts")] },
+    { source: "akuma/providers/codex-app-server.ts", allow: [any("akuma/providers/codex-app-server-events.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts"), any("runtime/proc/line-rpc.ts")] },
+    { source: "akuma/providers/codex-app-server-events.ts", allow: [any("akuma/provider.ts"), types("runtime/proc/line-rpc.ts")] },
     { source: "akuma/providers/**", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts"), any("runtime/proc/line-rpc.ts")] },
     { source: "akuma/persona.ts", allow: [types("akuma/heart/index.ts"), any("akuma/identity.ts"), any("akuma/provider.ts", ["ProviderAdapter", "ProviderOptions", "decodeProviderOptions"]), any("akuma/providers/index.ts"), types("settings.ts")] },
     {
@@ -50,6 +53,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "akuma/akuma.ts",
       allow: [
         any("akuma/body.ts"),
+        any("akuma/activity.ts"),
         any("akuma/heart/index.ts"),
         any("akuma/identity.ts"),
         any("akuma/persona.ts"),
@@ -343,6 +347,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "cli/commands/task-invoke.ts",
       allow: [types("cli/commands/task.ts"), any("task/index.ts")],
+    },
+    { source: "cli/render/akuma-tool.ts", allow: [types("akuma/index.ts")] },
+    {
+      source: "cli/render/akuma.ts",
+      allow: [types("akuma/index.ts"), types("cli/commands/akuma-invoke.ts"), types("cli/parse.ts"), any("cli/render/akuma-tool.ts")],
     },
     {
       source: "cli/**",

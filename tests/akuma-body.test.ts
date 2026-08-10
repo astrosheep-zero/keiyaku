@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
-import { HeldAkumaLeash, initializeHeart, pauseRequested, probeLeash, readHeart, readHistory, readRequest, readSoul, recordTell, requestPause, requestStop, stopRequested, type AkuId, type ProviderOptions } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, initializeHeart, pauseRequested, probeLeash, readHeart, readTurns, readRequest, readSoul, recordTell, requestPause, requestStop, stopRequested, type AkuId, type ProviderOptions } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import type { AgentEvent, ProviderAdapter, TurnResult } from "../src/akuma/provider.js";
 import { requestBodyCall } from "../src/akuma/requests.js";
@@ -72,7 +72,7 @@ test("body births, admits native session, records the turn, and exits only when 
     assert.deepEqual(first.latestSession?.options, {
       model: "claude-sonnet-4-5", effort: "high", systemPrompt: "Build carefully.",
     });
-    assert.deepEqual(readHistory(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
       kind: "answered",
       answer: "done",
       historyId: "history-1",
@@ -111,7 +111,7 @@ test("body births, admits native session, records the turn, and exits only when 
         session: "native-1",
       },
     ]);
-    assert.deepEqual(readHistory(allocated.paths)[1]?.outcome, {
+    assert.deepEqual(readTurns(allocated.paths)[1]?.outcome, {
       kind: "answered",
       answer: "adjusted",
       historyId: "history-2",
@@ -196,7 +196,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
       requestId: "00000000-0000-4000-8000-000000000021",
     });
     assert.equal(readRequest(allocated.paths, "00000000-0000-4000-8000-000000000021")?.state, "served");
-    assert.equal(readHistory(allocated.paths).at(-1)?.outcome.kind, "answered");
+    assert.equal(readTurns(allocated.paths).at(-1)?.outcome.kind, "answered");
     assert.equal(requestDirectory === undefined ? true : existsSync(requestDirectory), false);
   } finally {
     if (priorHome === undefined) delete process.env.HOME;
@@ -239,7 +239,7 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
       async putDownOwnTree() {},
     });
     assert.deepEqual(starts, []);
-    assert.deepEqual(readHistory(allocated.paths), []);
+    assert.deepEqual(readTurns(allocated.paths), []);
     assert.equal(readHeart(allocated.paths).latestBody?.end, "exited");
 
     recordTell(allocated.paths, { id: "tell-fork", body: "continue", recordedAt: "2026-08-08T00:00:01.000Z" });
@@ -253,7 +253,7 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
       async putDownOwnTree() {},
     });
     assert.deepEqual(starts, [{ prompt: "continue", options: { model: "fork-recipe" }, session: "native-child" }]);
-    assert.deepEqual(readHistory(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
       kind: "answered",
       answer: "continued",
       historyId: "history-2",
@@ -292,7 +292,7 @@ test("the soul retains the summon cwd before native session admission", async ()
       async putDownOwnTree() {},
     });
     assert.equal(readHeart(allocated.paths).soul?.cwd, join(root, "custom-seat"));
-    assert.deepEqual(readHistory(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
       kind: "failed", diagnostic: "failed before session",
     });
   } finally {
@@ -326,7 +326,7 @@ test("an answer without an admitted or resumed session is retained as a failed t
       now: () => "2026-08-08T00:00:00.000Z",
       async putDownOwnTree() {},
     });
-    assert.deepEqual(readHistory(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
       kind: "failed",
       diagnostic: "Provider answered without a resumable session",
     });
@@ -382,7 +382,7 @@ test("a new leash holder revokes stop and pause abandoned before settlement", as
     });
     assert.equal(stopRequested(allocated.paths), false);
     assert.equal(pauseRequested(allocated.paths), false);
-    assert.deepEqual(readHistory(allocated.paths).at(-1)?.outcome, {
+    assert.deepEqual(readTurns(allocated.paths).at(-1)?.outcome, {
       kind: "answered",
       answer: "continued",
       historyId: "orphan-history-2",

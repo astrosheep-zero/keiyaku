@@ -52,6 +52,7 @@ requests -> {heart, identity, provider, providers(map), publication}
 publication -> {heart, identity, runtime/proc}
 provider -> heart types
 providers/* -> {provider, runtime/proc/line-rpc}
+providers/codex-app-server -> {providers/codex-app-server-events, provider, heart, runtime/proc/line-rpc}
 kanshi -> akuma public values
 ```
 
@@ -270,10 +271,12 @@ dies; their existence does not depend on a current control-flow reader.
   Its cwd and provider options preserve the exact Cut 1 native resume recipe.
   Before any session admission, wake starts fresh from the soul's summon cwd
   and options.
-- **activity** — provider-authored observation events as the bounded sequence
-  `(sequence, event_json, at)`. The body retains the newest 200 rows on write.
-  Read-time folding, not persistence, pairs tool lifecycle events and selects
-  the public activity snapshot.
+- **activity** — the persistent execution-history sequence
+  `(sequence, body_sequence, event_json, at)`. `sequence` is monotonic and
+  never reused. Every row belongs to the body that observed it. The body keeps
+  the newest 5,000 rows on write; recent status is a read-time selection, not
+  a smaller persisted log. Typed, bounded activity is the first and only
+  execution-history log. Raw native payloads are never activity facts.
 - **tells** — body plus its delivery state; see Tell.
 - **requests** — the sole durable authority for Body Requests. One fact holds
   the caller UUID, Persona, frozen provider recipe, body, optional cwd,
@@ -292,8 +295,9 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed `heart/` custody core; no store or repository interface
 sits between callers and its index.
 
-Heart and leash schema version is `4`. Version 4 freezes the resolved provider
-execution recipe into soul, session, and request facts. This is a hard cut: an
+Heart schema version is `5`; leash schema version remains `4`. Heart version 5
+adds the activity body coordinate and 5,000-row persistent history to the
+version 4 provider-execution recipe. This is a hard cut: an
 older heart fails the existing schema gate; no migration or compatibility
 decoder exists. Absence is stored as SQL `NULL` and omitted from public values.
 
@@ -312,21 +316,49 @@ owns connections, transactions, the leash, every conditional judge, custody
 verb, and public projection. Consumers import only the index. Custody is one
 authority boundary, not one source file.
 
-`readHistory()` is the sole retained-history projection. Its named row
-statement returns all retained `TurnFact` values in ascending sequence order.
-The fork-point reader is the only targeted `turns` read: it exact-matches one
-answered `historyId` and returns that fact's inseparable session and native
-point. It also resolves that session coordinate's admitted provider, cwd, and
-options recipe for the native call and child birth; a retained answered turn
-without that recipe is authority corruption, not `unknown-history`. It never
-reconstructs or scans the public history projection.
+`activitySlice({ before?, since?, limit? })` is the sole activity-history
+primitive. `before` and `since` are mutually exclusive, exclusive sequence
+coordinates. `before` returns the newest page whose rows precede an already
+seen sequence; `since` returns rows following an already seen sequence; an
+inputless slice returns the newest page. It returns rows in ascending sequence
+order together with `lowestRetained` and `highest`. The numbers are persisted
+activity sequence coordinates, not semantic-row counts. A sequence below
+`lowestRetained` is permanently unavailable. Gaps inside the retained range
+are reported arithmetically from the rows, never by persisted marker facts.
+
+The activity fold and the snapshot selector are separate pure readers. The
+fold decodes events, pairs tool start and completion by provider id, retains
+both timestamps, derives completed duration, and produces semantic rows before
+any budget is applied. A completed event whose start was pruned is a settled
+row without duration; a retained start without completion is in flight. The
+snapshot selector pins every in-flight tool and every unconsumed tell outside
+its budget, selects the newest eight settled semantic rows, and additionally
+retains the newest two `say` or `thought` rows even when they precede that tail.
+One omitted interval becomes one derived gap whose count is semantic rows, not
+stored events. `status()` and `wait()` use this one selector. Full history pages
+do not apply snapshot pinning or category budgets.
+
+`readTurns()` is the sole retained completed-turn projection. Its named row
+statement returns retained `TurnFact` values in ascending sequence order for
+answer, failure, and boundary joins. The fork-point reader is the only targeted
+`turns` read: it exact-matches one answered `historyId` and returns that fact's
+inseparable session and native point. It also resolves that session
+coordinate's admitted provider, cwd, and options recipe for the native call and
+child birth; a retained answered turn without that recipe is authority
+corruption, not `unknown-history`.
+
 `readHeart()` does not read or reinterpret turns. `readCurrentTurn()` reads only
-the newest retained turn for `status()`; `readHistory()` is the explicit full
-turn-history read. `status()` combines that current turn with the compact heart
-snapshot, physical probes, and one bounded activity fold. `list()` remains a
-compact fleet read and never scans activity or turns. `follow()` reads retained
-activity directly and never reconstructs turn history. Thus current outcome,
-full history, and activity each have one projection.
+the newest retained turn for `status()`. Public history joins activity pages to
+the relevant body and turn facts without copying answer bytes into activity.
+`history --last` reads the final answered `TurnFact` directly. Recovery,
+resume, fork, outcome, failure, and life never read activity. Thus activity
+owns execution chronology, `TurnFact` owns complete outcome bytes and native
+fork points, and session rows remain the sole resume authority.
+
+`list()` remains a compact fleet read and never scans activity or turns. It
+isolates each member read: malformed identity, heart, or schema silently omits
+that member. Only inability to read the Akuma run root fails the list. There is
+no member diagnostic or partial marker.
 
 One judge per question:
 
@@ -415,8 +447,8 @@ consumed when death arrives gets a typed `voided-by-death` receipt from the
 killer — nothing recorded is ever silently unreachable.
 
 There is no `resume` verb. Providers cannot continue a broken-off turn;
-waking means new input through `tell`. Cut 1's verb set is call, of, list,
-status, follow, wait, tell, interrupt, fork, and kill.
+waking means new input through `tell`. The verb set is call, of, list, status,
+wait, tell, interrupt, history, fork, and kill.
 
 ## Interrupt
 
@@ -691,6 +723,7 @@ Provider observation is the closed public vocabulary:
 type AgentEvent =
   | { type: "session"; coordinate: ResumeCoordinate }
   | { type: "assistant"; text: string }
+  | { type: "thought"; text: string }
   | {
       type: "tool";
       id: string;
@@ -706,45 +739,69 @@ type ToolCall =
   | { kind: "run"; command: string }
   | { kind: "read"; path: string }
   | { kind: "search"; query: string }
-  | { kind: "fileChange"; paths: readonly string[] }
+  | {
+      kind: "fileChange";
+      changes: readonly {
+        op: "add" | "update" | "delete";
+        path: string;
+        diffstat?: { added: number; removed: number };
+      }[];
+    }
   | { kind: "other"; display: string };
 
-type ToolResult = { status: "ok" | "error"; message?: string };
+type ToolResult = {
+  status: "ok" | "error";
+  message?: string;
+  exitCode?: number;
+};
 ```
 
 `provider.ts` owns this vocabulary and its strict encode/decode pair. The body
 encodes normalized events before handing opaque JSON to Heart; public activity
-readers decode through the same owner before following or folding. Exhaustive
+readers decode through the same owner before history or snapshot folding. Exhaustive
 event-type switches make a union change fail typecheck until the codec changes
 with it. Heart remains the opaque persistence owner and does not import provider
 semantics.
 
+The Codex adapter has two coherent owners: `codex-app-server.ts` drives the
+line-RPC process, native session admission, fork, and interrupt; the adjacent
+`codex-app-server-events.ts` owns native notification/item dispositions and the
+pure `AgentEvent` codec. The driver consumes that codec and does not reinterpret
+native event payloads.
+
 `session` is authored when the native harness grants a resumable coordinate
 (v3's `onSessionAdmission`). The pump records that coordinate immediately as
 the heart's authoritative session fact and also appends the event as activity;
-it never waits for turn completion. `assistant` contains only completed agent
-utterances, never deltas or summaries. `tool` preserves the provider's stable
+it never waits for turn completion. `assistant` contains a bounded completed
+agent narration of at most 16,384 characters, never deltas or summaries. The
+complete answer is stored separately in `TurnFact` and is never truncated.
+`tool` preserves the provider's stable
 tool id, the started/completed lifecycle, one provider-neutral call shape, and
 the typed result disposition. A started event carries no result; a completed
 event requires one. Result `message` is a bounded diagnostic, never stdout,
-stderr, or a native result body. `note` is one bounded line for non-tool plan,
-todo, retry, warning, or refusal narration. All bounded text fields use one
-shared limit. `unknown` contains only the unmapped native kind or method name
+stderr, or a native result body. `thought` is one completed reasoning summary
+or block bounded at 4,000 characters, never raw thinking text or a delta stream.
+`note` is one bounded line for non-tool plan, todo, retry, warning, or refusal
+narration. Every other persisted activity text field, including tool names,
+calls, diagnostics, and unknown native names, is bounded at 16,384 characters.
+The provider codec is the sole persistence-bound judge; session coordinates and
+tool pairing ids are never truncated. `unknown` contains only the unmapped native kind or method name
 and never carries the native payload.
 
-Activity is disposable narration. Deleting every activity row may change only
-`follow()` output and the activity snapshot returned by `status()` or `wait()`.
-Recovery, resume, fork, outcome, failure, and life never read activity. Turn
-answer, failure, and history remain authoritative in
-`TurnResult` and `TurnFact`; a session row remains the sole resume authority.
+Activity is persistent execution narration. Deleting retained activity changes
+history and recent snapshots, but never recovery, resume, fork, outcome,
+failure, or life. Complete answer bytes and fork coordinates remain
+authoritative only in `TurnFact`; a session row remains the sole resume
+authority.
 
 Every adapter owns a total disposition of its native events. Known native
 kinds are mapped or explicitly dropped, and every unrecognized kind becomes
-`unknown`. Tool, command, and file-change lifecycle maps to `tool`; plan or
-todo updates and retry, warning, and refusal map to `note`. A native completion
+`unknown`. Tool, command, and file-change lifecycle maps to `tool`; bounded
+completed reasoning summaries map to `thought`; plan or todo updates and
+retry, warning, and refusal map to `note`. A native completion
 must provide the matching typed tool result. Partial and delta streams, input
-echoes, tool-result bodies and command output streams, thinking content, and
-token, cost, and rate-limit telemetry are dropped. The Claude adapter's SDK
+echoes, tool-result bodies and command output streams, raw thinking and
+reasoning deltas, and token, cost, and rate-limit telemetry are dropped. The Claude adapter's SDK
 union disposition is compile-time exhaustive with a runtime unknown fallback.
 The Codex app-server method set is open, so its explicit known dispositions end
 in an unknown fallback. Tests pin both tables and both unknown paths.
@@ -754,15 +811,15 @@ Claude's terminal answer is exactly `result.result`. Codex joins all completed
 the native explanation from an `error` notification or `turn.error`, using a
 generic status diagnostic only when no native detail exists.
 
-Activity persistence remains the bounded sequence `(sequence, event_json, at)`
-with the existing 200-row limit. It has no turn or body coordinate and performs
-no write-time lifecycle coalescing. One pure read-time fold pairs tool events by
-their provider id. A completed event whose start was pruned is a settled row; a
-retained start without a completion is in flight. It selects the newest eight
-settled rows plus every in-flight tool row, in source order, and reports the
-count of omitted settled rows. No event bus, subscription fan-out, file-change
-ledger, usage or cost arm, thought arm, raw-provider passthrough, severity
-taxonomy, or envelope field beyond sequence and time belongs in this boundary.
+File-change adapters preserve every available native operation, path, and
+per-change diffstat. Missing optional facts make the public row shorter; an
+adapter never invents a diffstat. Codex app-server derives diffstat only from a
+native unified patch and preserves the native change operation. Claude derives
+add/update from its named write/edit tool and omits diffstat when the SDK does
+not provide one. A multi-file public summary prints an aggregate only when
+every represented change supplies a diffstat. No terminal file ledger, event
+bus, subscription fan-out, usage or cost arm, raw-provider passthrough,
+severity taxonomy, or native output body belongs in this boundary.
 
 An answered `TurnResult.historyId` is the provider-owned fork point, not a
 generic result identifier. The Claude adapter uses the outer assistant message
@@ -810,9 +867,8 @@ world.list();                              // compact fleet rows; no history sca
 
 a.id                                       // aku/<persona>/<hex8>
 a.status()                                 // current state + bounded activity
-a.follow()                                 // AsyncIterable<AgentEvent>
 a.wait(predicate?, { timeoutMs? })         // same status carrier on either outcome
-a.history()                                // all retained TurnFact values
+a.history({ before?, since?, limit? })      // persistent execution-history page
 a.tell(body)
 a.interrupt(body)                         // synchronous put-down, then tell
 a.fork({ at: historyId })                 // exact retained native fork point
@@ -838,20 +894,47 @@ type AkumaStatus = {
   collar: CollarProbe;
   confinement: Confinement;
   answer?: string;
+  answerHistoryId?: string;
   failure?: string;
+  outcomeAt?: string;
   pending: readonly TellId[];
   activity: ActivitySnapshot;
 };
 
 type ActivitySnapshot = {
   rows: readonly ActivityRow[];
+  pendingTells: readonly { id: TellId; body: string; recordedAt: string }[];
   omitted: number;
+  lowestRetained: number | null;
+  highest: number | null;
+};
+
+type ActivityHistory = {
+  rows: readonly ActivityRow[];
+  turns: readonly TurnFact[];
+  omitted: number;
+  hasEarlier: boolean;
+  hasLater: boolean;
+  historyLost: boolean;
+  lowestRetained: number | null;
+  highest: number | null;
 };
 
 type ActivityRow =
-  | { kind: "said"; text: string }
-  | { kind: "tool"; name: string; call: ToolCall; state: "running" | ToolResult }
-  | { kind: "note"; text: string };
+  | { kind: "said"; sequence: number; bodySequence: number; at: string; text: string }
+  | { kind: "thought"; sequence: number; bodySequence: number; at: string; text: string }
+  | {
+      kind: "tool";
+      sequence: number;
+      bodySequence: number;
+      at: string;
+      completedAt?: string;
+      durationMs?: number;
+      name: string;
+      call: ToolCall;
+      state: "running" | ToolResult;
+    }
+  | { kind: "note"; sequence: number; bodySequence: number; at: string; text: string };
 ```
 
 `wait(predicate?, options?)` polls `status()` and returns the first complete
@@ -864,10 +947,13 @@ timeout result assembled from separate liveness and snapshot observations.
 `wait` does not promise that every recorded tell was consumed: a crash can
 kill body and waker together and legitimately leave tells pending.
 
-`history()` is the sole public full-turn read and returns all retained
-`TurnFact` values in stable sequence order. Status and wait never carry that
-collection. An explicit CLI history read may project the last answered turn;
-activity text is not a turn response and never participates.
+`history()` is the sole public execution-history read. It returns one stable
+activity page plus the completed-turn facts whose bodies occur in that page;
+the read model, not Heart or the CLI, owns that join. Cursor coordinates are
+persisted activity sequences. `before` and `since` are exclusive and mutually
+exclusive. Status and wait never carry a full history page. The final answer
+is not activity text: the explicit last-answer read selects the last answered
+`TurnFact`, and CLI `history --last` writes its exact answer bytes.
 
 An akuma that answered and was later killed reports both: `life: "dead"` with
 the retained answer still attached. What to do about a stranded or headless
@@ -879,7 +965,8 @@ Persona and description snapshots, optional Contract id, life, collar evidence,
 confinement, and pending tell ids, but no activity, history, or latest outcome. The id is
 projected verbatim and has no endpoint-state interpretation here. Unborn/stillborn rows retain
 their existing evidence. This keeps a fleet read from scanning the complete
-turn history of every akuma. Confinement is triage evidence and future Body Request
+turn history of every akuma. A corrupt member is silently skipped at this
+boundary; healthy members remain visible. Confinement is triage evidence and future Body Request
 placement input, never an admission result; no read reaches back into home.
 
 Every attempted provider turn is durable as one outcome: `answered` carries its
@@ -891,7 +978,7 @@ failed diagnostic from history instead of asking activity to reinterpret it.
 The provider-observation law and rendering semantics are defined in Provider
 boundary above; the public surface does not reinterpret native events.
 
-The CLI exposes Akuma operations as root verbs: `call`, `follow`, `wait`,
+The CLI exposes Akuma operations as root verbs: `call`, `wait`,
 `tell`, `interrupt`, `history`, `fork`, and `kill`. The shared root
 `status` verb addresses an exact `aku/...`; bare `status` already carries the
 fleet through Kanshi and no second raw-roster flag exists. Call, tell, and
@@ -914,10 +1001,11 @@ src/akuma/
   persona.ts          one Persona read, Settings provider interpretation, option admission
   heart/
     facts.ts          import-free typed facts and life() interpretation
-    schema.ts         private DDL, shared schema version, hard-cut gates
+    schema.ts         private DDL, independent heart/leash versions, hard-cut gates
     rows.ts           private rows/codecs, named single-statement mechanics
     index.ts          connections, leash, transaction judges, custody, projections
   provider.ts         ProviderAdapter, Drive, AgentEvent, activity codec
+  activity.ts         pure semantic fold, history page, snapshot selection
   providers/index.ts  provider-execution codec and closed kind composition map
   providers/claude.ts Claude Agent SDK translation
   providers/codex-app-server.ts Codex stdio JSON-RPC translation
@@ -964,9 +1052,9 @@ Task back-pointer, association sweep, or behavior conditioned on Contract state
 (SOUL: cut any pillar, the other two do not bleed).
 
 Activity does not grow an updated phase, write-time fold, per-verb snapshot
-window, thought or usage arm, warning taxonomy, diffstat or terminal file
-ledger, truncation metadata envelope, native output stream, or turn/body
-coordinate. Each would require a new named reader and a change to this law.
+window, usage arm, warning taxonomy, terminal file ledger, truncation metadata
+envelope, or native output stream. Each would require a new named reader and a
+change to this law.
 
 Inside `heart/`, no generic get/save/find API, query builder, connection-owning
 row object, per-table class, or table-by-table module is built. Row codecs do not make

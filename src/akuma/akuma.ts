@@ -4,12 +4,13 @@ import { resolve } from "node:path";
 import { spawnAkumaBody } from "./body.js";
 import {
   HeldAkumaLeash,
-  activityAfter,
+  activitySlice,
   life,
   probeLeash,
   readCurrentTurn,
   readHeart,
-  readHistory,
+  readLastAnsweredTurn,
+  readTurns,
   readForkPoint,
   readSeal,
   readSoul,
@@ -24,7 +25,6 @@ import {
   type ResumeCoordinate,
   type SessionFact,
   type Soul,
-  type TurnFact,
 } from "./heart/index.js";
 import {
   akuIdFromDirectoryName,
@@ -37,7 +37,12 @@ import {
   type AkumaPaths,
 } from "./identity.js";
 import type { AkuId } from "./heart/index.js";
-import { decodeAgentEvent, type AgentEvent, type ToolCall, type ToolResult } from "./provider.js";
+import {
+  projectActivityHistory,
+  selectActivitySnapshot,
+  type ActivityHistory,
+  type ActivitySnapshot,
+} from "./activity.js";
 import { loadPersona } from "./persona.js";
 import { publishAkuma } from "./publication.js";
 import { providerNamed } from "./providers/index.js";
@@ -61,19 +66,12 @@ export type AkumaListRow = Readonly<{
 
 export type AkumaStatus = AkumaListRow & Readonly<{
   answer?: string;
+  answerHistoryId?: string;
   failure?: string;
+  outcomeAt?: string;
   activity: ActivitySnapshot;
 }>;
-
-export type ActivityRow =
-  | Readonly<{ kind: "said"; text: string }>
-  | Readonly<{ kind: "tool"; name: string; call: ToolCall; state: "running" | ToolResult }>
-  | Readonly<{ kind: "note"; text: string }>;
-
-export type ActivitySnapshot = Readonly<{
-  rows: readonly ActivityRow[];
-  omitted: number;
-}>;
+export type { ActivityHistory, ActivityRow, ActivitySnapshot } from "./activity.js";
 
 export type UnbornAkumaListRow = Readonly<{
   id: AkuId;
@@ -184,69 +182,23 @@ function bornStatus(paths: AkumaPaths, expected: AkuId): AkumaStatus {
   const snapshot = readHeart(paths);
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const current = bornListRow(paths, expected, snapshot);
-  const latest = readCurrentTurn(paths)?.outcome;
+  const latest = readCurrentTurn(paths);
   return {
     ...current,
-    ...(latest?.kind === "answered" ? { answer: latest.answer } : {}),
-    ...(latest?.kind === "failed" ? { failure: latest.diagnostic } : {}),
-    activity: activitySnapshot(activityAfter(paths, 0)),
-  };
-}
-
-type OrderedActivityRow = Readonly<{ order: number; row: ActivityRow; settled: boolean }>;
-export function foldActivitySnapshot(
-  retained: readonly Readonly<{ sequence: number; event: unknown }>[],
-): ActivitySnapshot {
-  const rows: OrderedActivityRow[] = [];
-  const running = new Map<string, number>();
-  for (const retainedEvent of retained) {
-    const event = decodeAgentEvent(retainedEvent.event);
-    if (event.type === "assistant") {
-      rows.push({ order: retainedEvent.sequence, row: { kind: "said", text: event.text }, settled: true });
-      continue;
-    }
-    if (event.type === "note") {
-      rows.push({ order: retainedEvent.sequence, row: { kind: "note", text: event.text }, settled: true });
-      continue;
-    }
-    if (event.type !== "tool") continue;
-    if (event.phase === "started") {
-      const index = rows.length;
-      rows.push({
-        order: retainedEvent.sequence,
-        row: { kind: "tool", name: event.name, call: event.call, state: "running" },
-        settled: false,
+    ...(latest === null ? {} : { outcomeAt: latest.completedAt }),
+    ...(latest?.outcome.kind === "answered"
+      ? { answer: latest.outcome.answer, answerHistoryId: latest.outcome.historyId }
+      : {}),
+    ...(latest?.outcome.kind === "failed" ? { failure: latest.outcome.diagnostic } : {}),
+    activity: (() => {
+      const slice = activitySlice(paths, { limit: 5_000 });
+      return selectActivitySnapshot(slice.rows, {
+        pending: snapshot.pending,
+        lowestRetained: slice.lowestRetained,
+        highest: slice.highest,
       });
-      running.set(event.id, index);
-      continue;
-    }
-    const index = running.get(event.id);
-    if (index === undefined) {
-      rows.push({
-        order: retainedEvent.sequence,
-        row: { kind: "tool", name: event.name, call: event.call, state: event.result },
-        settled: true,
-      });
-      continue;
-    }
-    const started = rows[index]!;
-    rows[index] = {
-      order: started.order,
-      row: { kind: "tool", name: event.name, call: event.call, state: event.result },
-      settled: true,
-    };
-    running.delete(event.id);
-  }
-  const settled = rows.filter((row) => row.settled);
-  const selectedSettled = new Set(settled.slice(-8));
-  return {
-    rows: rows.filter((row) => !row.settled || selectedSettled.has(row)).map((row) => row.row),
-    omitted: settled.length - selectedSettled.size,
+    })(),
   };
-}
-
-function activitySnapshot(retained: ReturnType<typeof activityAfter>): ActivitySnapshot {
-  return foldActivitySnapshot(retained);
 }
 
 function diagnostic(error: unknown): string {
@@ -264,21 +216,28 @@ export class AkumaHandle {
     return bornStatus(this.paths, this.id);
   }
 
-  history(): readonly TurnFact[] {
-    return readHistory(this.paths);
-  }
-
-  async *follow(): AsyncIterable<AgentEvent> {
-    let sequence = 0;
-    for (;;) {
-      const rows = activityAfter(this.paths, sequence);
-      for (const row of rows) {
-        sequence = row.sequence;
-        yield decodeAgentEvent(row.event);
-      }
-      if (bornListRow(this.paths, this.id).life !== "running" && activityAfter(this.paths, sequence).length === 0) return;
-      await wait(POLL_MS);
+  history(input: Readonly<{ before?: number; since?: number; limit?: number }> = {}): ActivityHistory {
+    if (input.before !== undefined && input.since !== undefined) {
+      throw new TypeError("Akuma history before and since are mutually exclusive");
     }
+    for (const [name, value] of [["before", input.before], ["since", input.since]] as const) {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
+        throw new TypeError(`Akuma history ${name} must be a positive safe integer`);
+      }
+    }
+    const limit = input.limit ?? 50;
+    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 5_000) {
+      throw new TypeError("Akuma history limit must be a positive safe integer no greater than 5000");
+    }
+    const slice = activitySlice(this.paths, {
+      ...(input.before === undefined ? {} : { before: input.before }),
+      ...(input.since === undefined ? {} : { since: input.since }),
+      limit: 5_000,
+    });
+    return projectActivityHistory(slice, readTurns(this.paths), {
+      since: input.since !== undefined,
+      limit,
+    });
   }
 
   async wait(
@@ -408,6 +367,11 @@ export class AkumaHandle {
     if (probeLeash(this.paths) === "held") return "unavailable";
     return recordDeath(this.paths, { evidence: "killed", at }) === "already-dead" ? "already-dead" : "killed";
   }
+
+  lastAnswer(): string {
+    const turn = readLastAnsweredTurn(this.paths);
+    return turn?.outcome.kind === "answered" ? turn.outcome.answer : "";
+  }
 }
 
 export class Akuma {
@@ -482,18 +446,23 @@ export class Akuma {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return { rows: [], searched: [runRoot] };
       throw error;
     }
-    return {
-      rows: names.map((name) => {
+    const rows: AkumaList["rows"] = names.flatMap((name): AkumaList["rows"] => {
+      try {
         const physical = akuIdFromDirectoryName(name);
         const paths = akumaPaths({ runRoot, persona: physical.persona, suffix: physical.suffix });
         const snapshot = readHeart(paths);
-        if (snapshot.soul !== null) return bornListRow(paths, physical.id, snapshot);
-        if (probeLeash(paths) === "held") return { id: physical.id, life: "unborn" as const };
+        if (snapshot.soul !== null) return [bornListRow(paths, physical.id, snapshot)];
+        if (probeLeash(paths) === "held") return [{ id: physical.id, life: "unborn" as const }];
         const seal = readSeal(paths);
         return seal === null
-          ? { id: physical.id, life: "unborn" as const }
-          : { id: physical.id, life: "stillborn" as const, seal };
-      }),
+          ? [{ id: physical.id, life: "unborn" as const }]
+          : [{ id: physical.id, life: "stillborn" as const, seal }];
+      } catch {
+        return [];
+      }
+    });
+    return {
+      rows,
       searched: [runRoot],
     };
   }

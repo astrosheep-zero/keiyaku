@@ -5,10 +5,10 @@ type Addressed = Readonly<{ id: string }>;
 
 export type ParsedAkumaCommand = Output & (
   | Readonly<{ command: "call"; persona: string; cwd?: string; contract?: string }>
-  | (Readonly<{ command: "follow" | "kill" }> & Addressed)
+  | (Readonly<{ command: "kill" }> & Addressed)
   | (Readonly<{ command: "wait"; timeoutMs?: number }> & Addressed)
   | (Readonly<{ command: "tell" | "interrupt" }> & Addressed)
-  | (Readonly<{ command: "history"; last: boolean }> & Addressed)
+  | (Readonly<{ command: "history"; last: boolean; before?: number; since?: number }> & Addressed)
   | (Readonly<{ command: "fork"; at: string }> & Addressed)
 );
 
@@ -29,13 +29,6 @@ const AKUMA_COMMAND_SPECS = {
     flags: { persona: "value", cwd: "value", contract: "value", json: "boolean" },
     usage: "call --persona <name> [--cwd <path>] [--contract <contract-id>] [--json] -",
     purpose: "Summon an Akuma from a Persona and stdin body.",
-  },
-  follow: {
-    arity: 1,
-    stdin: false,
-    flags: { json: "boolean" },
-    usage: "follow <aku/...> [--json]",
-    purpose: "Read one Akuma's retained public event stream.",
   },
   wait: {
     arity: 1,
@@ -61,9 +54,9 @@ const AKUMA_COMMAND_SPECS = {
   history: {
     arity: 1,
     stdin: false,
-    flags: { last: "boolean", json: "boolean" },
-    usage: "history <aku/...> [--last] [--json]",
-    purpose: "Read retained turns or the last answered response.",
+    flags: { before: "value", since: "value", last: "boolean", json: "boolean" },
+    usage: "history <aku/...> [--before <index> | --since <index> | --last] [--json]",
+    purpose: "Read the persistent execution history or the last answer.",
   },
   fork: {
     arity: 1,
@@ -146,6 +139,13 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
   return { flags, positionals, stdin };
 }
 
+function positiveIndex(raw: FlagValue, option: string, fail: (message: string) => never): number {
+  if (typeof raw !== "string" || !/^[1-9][0-9]*$/u.test(raw)) fail(`${option} requires a positive integer`);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) fail(`${option} exceeds the safe integer range`);
+  return value;
+}
+
 function parseAddressed(
   action: Exclude<AkumaAction, "call">,
   id: string,
@@ -153,7 +153,7 @@ function parseAddressed(
   output: "text" | "json",
   fail: (message: string) => never,
 ): ParsedAkumaCommand {
-  if (action === "tell" || action === "interrupt" || action === "follow" || action === "kill") {
+  if (action === "tell" || action === "interrupt" || action === "kill") {
     return { command: action, id, output };
   }
   if (action === "wait") {
@@ -161,7 +161,20 @@ function parseAddressed(
     if (raw === undefined) return { command: action, id, output };
     return { command: action, id, timeoutMs: parseDuration(raw, fail), output };
   }
-  if (action === "history") return { command: action, id, last: flags.last === true, output };
+  if (action === "history") {
+    if (flags.before !== undefined && flags.since !== undefined) fail("history --before and --since are mutually exclusive");
+    if (flags.last === true && (flags.before !== undefined || flags.since !== undefined)) {
+      fail("history --last cannot be combined with --before or --since");
+    }
+    return {
+      command: action,
+      id,
+      last: flags.last === true,
+      ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
+      ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),
+      output,
+    };
+  }
   const at = stringFlag(flags.at, "fork requires --at <historyId>", fail);
   if (at.trim().length === 0) fail("fork requires --at <historyId>");
   return { command: action, id, at, output };

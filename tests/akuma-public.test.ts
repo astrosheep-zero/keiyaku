@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { Akuma, AkumaNotBornError, foldActivitySnapshot } from "../src/akuma/akuma.js";
+import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
+import { foldActivity, selectActivitySnapshot } from "../src/akuma/activity.js";
 import { AkumaPersonaError, loadPersona } from "../src/akuma/persona.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
@@ -13,7 +14,7 @@ import {
   initializeHeart,
   pauseRequested,
   readHeart,
-  readHistory,
+  readTurns,
   recordBody,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
@@ -67,35 +68,30 @@ async function answeredSource(root: string, suffix: string) {
 
 type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapter[Key] };
 
-test("activity fold pairs tools and bounds settled rows without dropping in-flight tools", () => {
-  assert.deepEqual(foldActivitySnapshot([
-    { sequence: 1, event: { type: "tool", phase: "started", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" } } },
-    { sequence: 2, event: { type: "note", text: "checking" } },
-    { sequence: 3, event: { type: "tool", phase: "completed", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" }, result: { status: "ok" } } },
-    { sequence: 4, event: { type: "tool", phase: "completed", id: "orphan", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } } },
-    { sequence: 5, event: { type: "tool", phase: "started", id: "open", name: "Search", call: { kind: "search", query: "TODO" } } },
-  ]), {
-    rows: [
-      { kind: "tool", name: "Bash", call: { kind: "run", command: "npm test" }, state: { status: "ok" } },
-      { kind: "note", text: "checking" },
-      { kind: "tool", name: "Read", call: { kind: "read", path: "README.md" }, state: { status: "error", message: "missing" } },
-      { kind: "tool", name: "Search", call: { kind: "search", query: "TODO" }, state: "running" },
-    ],
-    omitted: 0,
-  });
-
-  const bounded = foldActivitySnapshot([
-    { sequence: 1, event: { type: "tool", phase: "started", id: "open", name: "Bash", call: { kind: "run", command: "long" } } },
+test("activity fold pairs tools and snapshot selection keeps in-flight work", () => {
+  const folded = foldActivity([
+    { sequence: 1, bodySequence: 1, at: "2026-08-08T00:00:00.000Z", event: { type: "tool", phase: "started", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" } } },
+    { sequence: 2, bodySequence: 1, at: "2026-08-08T00:00:01.000Z", event: { type: "note", text: "checking" } },
+    { sequence: 3, bodySequence: 1, at: "2026-08-08T00:00:02.000Z", event: { type: "tool", phase: "completed", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" }, result: { status: "ok" } } },
+    { sequence: 4, bodySequence: 1, at: "2026-08-08T00:00:03.000Z", event: { type: "tool", phase: "completed", id: "orphan", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } } },
+    { sequence: 5, bodySequence: 1, at: "2026-08-08T00:00:04.000Z", event: { type: "tool", phase: "started", id: "open", name: "Search", call: { kind: "search", query: "TODO" } } },
+  ]);
+  assert.equal(folded.length, 4);
+  assert.equal(folded[0]?.kind, "tool");
+  assert.equal(folded[0]?.kind === "tool" && folded[0].state.status, "ok");
+  assert.equal(folded[1]?.kind, "note");
+  assert.equal(folded[2]?.kind, "tool");
+  assert.equal(folded[3]?.kind === "tool" && folded[3].state, "running");
+  const snapshot = selectActivitySnapshot([
     ...Array.from({ length: 10 }, (_, index) => ({
-      sequence: index + 2,
+      sequence: index + 1,
+      bodySequence: 1,
+      at: `2026-08-08T00:00:${String(index).padStart(2, "0")}.000Z`,
       event: { type: "note", text: `note-${index + 1}` },
     })),
   ]);
-  assert.equal(bounded.omitted, 2);
-  assert.deepEqual(bounded.rows, [
-    { kind: "tool", name: "Bash", call: { kind: "run", command: "long" }, state: "running" },
-    ...Array.from({ length: 8 }, (_, index) => ({ kind: "note" as const, text: `note-${index + 3}` })),
-  ]);
+  assert.equal(snapshot.omitted, 2);
+  assert.equal(snapshot.rows.length, 8);
 });
 
 test("wait timeout returns the same running status carrier", async () => {
@@ -170,7 +166,7 @@ test("fork publishes a sleeping child with lineage and its native birth session"
       options: { model: "fixture-model" },
       admittedAt: snapshot.latestSession?.admittedAt,
     });
-    assert.deepEqual(readHistory(childPaths), []);
+    assert.deepEqual(readTurns(childPaths), []);
   } finally {
     mutable.fork = originalFork;
     rmSync(root, { recursive: true, force: true });
@@ -269,27 +265,22 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.equal(status.answer, "public answer");
     assert.deepEqual(status.pending, []);
     assert.equal("history" in status, false);
-    assert.deepEqual(handle.history()[0]?.outcome, {
+    assert.deepEqual(handle.history().turns[0]?.outcome, {
       kind: "answered",
       answer: "public answer",
       historyId: "public-history",
       session: { sessionId: "public-session" },
     });
-    assert.deepEqual(status.activity, { rows: [{ kind: "said", text: "working" }], omitted: 0 });
+    assert.deepEqual(status.activity.rows.map(({ kind, text }) => ({ kind, text })), [{ kind: "said", text: "working" }]);
+    assert.equal(status.activity.omitted, 0);
     assert.deepEqual(await handle.wait((candidate) => candidate.answer === "public answer"), status);
-    const events = [];
-    for await (const event of handle.follow()) events.push(event);
-    assert.deepEqual(events.slice(0, 2), [
-      { type: "session", coordinate: { sessionId: "public-session" } },
-      { type: "assistant", text: "working" },
-    ]);
     assert.equal(await handle.kill(), "killed");
     assert.equal(handle.status().life, "dead");
     assert.equal(handle.status().answer, "public answer");
     assert.equal(await handle.kill(), "already-dead");
     assert.deepEqual(await handle.interrupt("late"), { kind: "dead" });
     assert.equal(pauseRequested(allocated.paths), false);
-    assert.deepEqual(readHistory(allocated.paths)[0]?.outcome, {
+    assert.deepEqual(readTurns(allocated.paths)[0]?.outcome, {
       kind: "answered",
       answer: "public answer",
       historyId: "public-history",
@@ -554,6 +545,18 @@ test("list distinguishes sealed residue from an unclaimed birth", () => {
   }
 });
 
+test("list silently omits a corrupt fleet member without hiding healthy members", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-list-isolation-"));
+  try {
+    const healthy = await answeredSource(root, "abcdef13");
+    const corrupt = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "abcdef14" });
+    const heart = new DatabaseSync(corrupt.paths.heart);
+    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 4)");
+    heart.close();
+    assert.deepEqual(Akuma.at({ path: root }).list().rows.map((row) => row.id), [healthy.id]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("a failed turn is durable public evidence and never masquerades as provider activity", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-failed-turn-"));
   try {
@@ -591,37 +594,24 @@ test("a failed turn is durable public evidence and never masquerades as provider
     assert.equal(settled.life, "stranded");
     assert.equal(settled.failure, "native failed");
     assert.deepEqual(settled.pending, []);
-    assert.deepEqual(handle.history().map((turn) => turn.outcome), [
+    assert.deepEqual(handle.history().turns.map((turn) => turn.outcome), [
       { kind: "failed", diagnostic: "native failed" },
     ]);
-    const events = [];
-    for await (const event of handle.follow()) events.push(event);
-    assert.deepEqual(events, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("activity is disposable narration and old raw events fail the public hard cut", async () => {
+test("activity is persistent narration and old raw events fail the public hard cut", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-activity-law-"));
   try {
     const source = await answeredSource(root, "ac710001");
     const handle = Akuma.at({ path: root }).of({ id: source.id });
-    const before = handle.status();
-    const heart = new DatabaseSync(source.paths.heart);
-    try { heart.prepare("DELETE FROM activity").run(); } finally { heart.close(); }
-    assert.deepEqual(handle.status(), { ...before, activity: { rows: [], omitted: 0 } });
-    const afterDeletion = [];
-    for await (const event of handle.follow()) afterDeletion.push(event);
-    assert.deepEqual(afterDeletion, []);
-
     appendActivity(source.paths, {
+      bodySequence: 1,
       event: { type: "activity", event: { provider: "legacy", secret: "raw" } },
       at: "2026-08-08T00:00:01.000Z",
     });
-    await assert.rejects(async () => {
-      for await (const _event of handle.follow()) { /* drain */ }
-    }, /invalid event shape/);
     assert.throws(() => handle.status(), /invalid event shape/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
