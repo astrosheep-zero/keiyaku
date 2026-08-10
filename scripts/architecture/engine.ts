@@ -117,9 +117,21 @@ function normalized(value: string): string {
 }
 
 function matches(pattern: string, candidate: string): boolean {
-  if (pattern === "**") return true;
-  if (pattern.endsWith("/**")) return candidate.startsWith(pattern.slice(0, -3));
-  return pattern === candidate;
+  const patternSegments = pattern.split("/");
+  const candidateSegments = candidate.split("/");
+  const visit = (patternIndex: number, candidateIndex: number): boolean => {
+    const segment = patternSegments[patternIndex];
+    if (segment === undefined) return candidateIndex === candidateSegments.length;
+    if (segment !== "**") {
+      return segment === candidateSegments[candidateIndex] && visit(patternIndex + 1, candidateIndex + 1);
+    }
+    if (patternIndex === patternSegments.length - 1) return true;
+    for (let next = candidateIndex; next <= candidateSegments.length; next += 1) {
+      if (visit(patternIndex + 1, next)) return true;
+    }
+    return false;
+  };
+  return visit(0, 0);
 }
 
 function location(sourceFile: ts.SourceFile, node: ts.Node): Readonly<{ line: number; column: number }> {

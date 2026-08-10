@@ -365,3 +365,27 @@ test("architecture policy uses specific zone before catch-all for library facade
   });
   assert.deepEqual(diagnostics, []);
 });
+
+test("architecture policy matches recursive wildcards between exact path segments", () => {
+  const policy = {
+    ...KEIYAKU_ARCHITECTURE_POLICY,
+    zones: [
+      { source: "feature/**/adapter.ts", allow: [{ target: "shared/**/types.ts" }] },
+      { source: "**", allow: [] },
+    ],
+  };
+  const accepted = checkArchitecture([
+    { path: "feature/adapter.ts", source: 'import type { Value } from "../shared/types.js"; export type Result = Value;' },
+    { path: "feature/nested/adapter.ts", source: 'import type { Value } from "../../shared/nested/types.js"; export type Result = Value;' },
+    { path: "shared/types.ts", source: "export type Value = string;" },
+    { path: "shared/nested/types.ts", source: "export type Value = string;" },
+  ], policy);
+  assert.deepEqual(accepted.diagnostics, []);
+
+  const rejected = checkArchitecture([
+    { path: "featurex/nested/adapter.ts", source: 'import type { Value } from "../../shared/nested/types.js"; export type Result = Value;' },
+    { path: "feature/nested/other.ts", source: "export type Value = string;" },
+    { path: "shared/nested/types.ts", source: "export type Value = string;" },
+  ], policy);
+  assert.deepEqual(rules(rejected.diagnostics), ["architecture/dependency-direction"]);
+});
