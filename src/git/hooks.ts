@@ -1,15 +1,9 @@
-import {
-  closeSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { runProcess, type ProcessOutcome } from "../runtime/proc/run.js";
+import { fileURLToPath } from "node:url";
+import { replaceFileDurably } from "../coordination/durable-file.js";
+import { acquireSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
+import { runProcess, runProcessToExit, type ProcessOutcome } from "../runtime/proc/run.js";
 
 export type HookCommand = Readonly<{ argv: readonly string[]; timeoutMs: number }>;
 export type WorktreeHooks = Readonly<{
@@ -153,19 +147,7 @@ function readMarker(administrationDirectory: string): HookMarker | null {
 function writeMarker(administrationDirectory: string, marker: HookMarker): void {
   const path = hookMarkerPath(administrationDirectory);
   mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp`;
-  let descriptor: number | undefined;
-  try {
-    descriptor = openSync(temporary, "w", 0o600);
-    writeFileSync(descriptor, `${JSON.stringify(marker)}\n`);
-    fsyncSync(descriptor);
-    closeSync(descriptor);
-    descriptor = undefined;
-    renameSync(temporary, path);
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-    try { unlinkSync(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  }
+  replaceFileDurably(path, `${JSON.stringify(marker)}\n`);
 }
 
 function freshMarker(commands: WorktreeHooks, createPending: boolean): HookMarker {
@@ -194,6 +176,83 @@ function withProgress(marker: HookMarker, phase: HookPhase, progress: HookProgre
   return { ...marker, [phase]: progress };
 }
 
+type HookRunnerInput = Readonly<{
+  administrationDirectory: string;
+  worktree: string;
+  phase: HookPhase;
+  command: number;
+}>;
+
+function hookExecutionLockPath(administrationDirectory: string): string {
+  return join(administrationDirectory, "keiyaku", "hook-execution.sqlite");
+}
+
+function decodeRunnerInput(encoded: string): HookRunnerInput {
+  const value = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as unknown;
+  if (!object(value)) throw new Error("Hook runner input must be an object");
+  exactKeys(value, ["administrationDirectory", "worktree", "phase", "command"], "Hook runner input");
+  if (typeof value.administrationDirectory !== "string" || value.administrationDirectory.length === 0) {
+    throw new Error("Hook runner administrationDirectory must be nonempty");
+  }
+  if (typeof value.worktree !== "string" || value.worktree.length === 0) {
+    throw new Error("Hook runner worktree must be nonempty");
+  }
+  if (value.phase !== "create" && value.phase !== "destroy") throw new Error("Hook runner phase is invalid");
+  if (!Number.isSafeInteger(value.command) || (value.command as number) < 0) {
+    throw new Error("Hook runner command must be a nonnegative safe integer");
+  }
+  return {
+    administrationDirectory: value.administrationDirectory,
+    worktree: value.worktree,
+    phase: value.phase,
+    command: value.command as number,
+  };
+}
+
+async function executePendingCommand(input: HookRunnerInput): Promise<void> {
+  const held = await acquireSqliteTransactionLock({
+    path: hookExecutionLockPath(input.administrationDirectory),
+    mode: "immediate",
+  });
+  try {
+    const marker = readMarker(input.administrationDirectory);
+    if (marker === null) throw new Error("worktree hook marker disappeared before execution");
+    const progress = marker[input.phase];
+    if (progress.status !== "pending" || progress.next !== input.command) return;
+    const command = marker.commands[input.phase][input.command];
+    if (command === undefined) throw new Error("worktree hook marker pending index is out of range");
+    const failure = failedOutcome(await runProcess({
+      argv: command.argv,
+      timeoutMs: command.timeoutMs,
+      cwd: input.worktree,
+    }));
+    const next = input.command + 1;
+    writeMarker(input.administrationDirectory, withProgress(marker, input.phase, failure === null
+      ? next === marker.commands[input.phase].length ? { status: "ok" } : { status: "pending", next }
+      : { status: "failed", command: input.command, failure }));
+  } finally {
+    held.close();
+  }
+}
+
+function runnerFailure(outcome: ProcessOutcome): Error {
+  if (outcome.kind === "terminal") {
+    const detail = outcome.stderr.trim() || outcome.stdout.trim();
+    return new Error(detail.length === 0 ? `Hook runner exited ${outcome.code}` : `Hook runner exited ${outcome.code}: ${detail}`);
+  }
+  if (outcome.kind === "spawn-error") return new Error(`Hook runner failed to spawn: ${outcome.diagnostic}`);
+  return new Error(`Hook runner ended with ${outcome.kind}`);
+}
+
+async function runPendingCommand(input: HookRunnerInput): Promise<void> {
+  const encoded = Buffer.from(JSON.stringify(input), "utf8").toString("base64url");
+  const outcome = await runProcessToExit({
+    argv: [process.execPath, ...process.execArgv, fileURLToPath(import.meta.url), "--run-hook", encoded],
+    cwd: dirname(fileURLToPath(import.meta.url)),
+  });
+  if (outcome.kind !== "terminal" || outcome.code !== 0) throw runnerFailure(outcome);
+}
+
 async function runPhase(
   worktree: string,
   administrationDirectory: string,
@@ -206,31 +265,26 @@ async function runPhase(
     marker = freshMarker(hooks, phase === "create");
     writeMarker(administrationDirectory, marker);
   }
-  let progress = marker[phase];
-  if (progress.status === "ok") return null;
-  if (progress.status === "failed" && !retryHooks) {
-    return { kind: "worktree-hook-failed", phase, path: worktree, command: progress.command, failure: progress.failure };
-  }
-  let index = progress.status === "failed" ? progress.command : progress.next;
-  if (progress.status === "failed") {
-    marker = withProgress(marker, phase, { status: "pending", next: index });
-    writeMarker(administrationDirectory, marker);
-  }
-  const commands = marker.commands[phase];
-  while (index < commands.length) {
-    const command = commands[index]!;
-    const failure = failedOutcome(await runProcess({ argv: command.argv, timeoutMs: command.timeoutMs, cwd: worktree }));
-    if (failure !== null) {
-      marker = withProgress(marker, phase, { status: "failed", command: index, failure });
-      writeMarker(administrationDirectory, marker);
-      return { kind: "worktree-hook-failed", phase, path: worktree, command: index, failure };
+  let retryFailure = retryHooks && marker[phase].status === "failed";
+  for (;;) {
+    marker = readMarker(administrationDirectory);
+    if (marker === null) throw new Error("worktree hook marker disappeared during execution");
+    const progress = marker[phase];
+    if (progress.status === "ok") return null;
+    if (progress.status === "failed") {
+      if (!retryFailure) {
+        return { kind: "worktree-hook-failed", phase, path: worktree, command: progress.command, failure: progress.failure };
+      }
+      retryFailure = false;
+      writeMarker(administrationDirectory, withProgress(marker, phase, { status: "pending", next: progress.command }));
+      continue;
     }
-    index += 1;
-    marker = withProgress(marker, phase, index === commands.length ? { status: "ok" } : { status: "pending", next: index });
-    writeMarker(administrationDirectory, marker);
+    if (progress.next === marker.commands[phase].length) {
+      writeMarker(administrationDirectory, withProgress(marker, phase, { status: "ok" }));
+      continue;
+    }
+    await runPendingCommand({ administrationDirectory, worktree, phase, command: progress.next });
   }
-  if (marker[phase].status !== "ok") writeMarker(administrationDirectory, withProgress(marker, phase, { status: "ok" }));
-  return null;
 }
 
 export function runCreateHooks(worktree: string, administrationDirectory: string, hooks: WorktreeHooks, retryHooks: boolean): Promise<WorktreeHookLag | null> {
@@ -239,4 +293,10 @@ export function runCreateHooks(worktree: string, administrationDirectory: string
 
 export function runDestroyHooks(worktree: string, administrationDirectory: string, hooks: WorktreeHooks, retryHooks: boolean): Promise<WorktreeHookLag | null> {
   return runPhase(worktree, administrationDirectory, hooks, "destroy", retryHooks);
+}
+
+if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1] && process.argv[2] === "--run-hook") {
+  const encoded = process.argv[3];
+  if (encoded === undefined) throw new Error("Hook runner input is missing");
+  await executePendingCommand(decodeRunnerInput(encoded));
 }

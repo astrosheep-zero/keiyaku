@@ -1,9 +1,8 @@
-import { randomBytes } from "node:crypto";
 import {
-  closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync,
-  renameSync, unlinkSync, writeFileSync,
+  lstatSync, mkdirSync, readFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { replaceFileDurably } from "../coordination/durable-file.js";
 import { normalizeIdentityStem } from "../identity/normalize.js";
 
 export type NamespaceContextRead = readonly string[] | "absent" | "malformed";
@@ -34,38 +33,18 @@ export function readNamespaceContext(root: string): NamespaceContextRead {
   return validNamespaceSegments(segments) ? segments : "malformed";
 }
 
-function replaceFile(path: string, bytes: string): void {
-  const parent = dirname(path);
-  for (;;) {
-    const temporary = join(parent, `.tmp-${randomBytes(8).toString("hex")}`);
-    let descriptor: number | undefined;
-    try {
-      descriptor = openSync(temporary, "wx", 0o600);
-      writeFileSync(descriptor, bytes); fsyncSync(descriptor); closeSync(descriptor); descriptor = undefined;
-      renameSync(temporary, path);
-      const directoryDescriptor = openSync(parent, "r");
-      try { fsyncSync(directoryDescriptor); } finally { closeSync(directoryDescriptor); }
-      return;
-    } catch (error) {
-      if (descriptor !== undefined) closeSync(descriptor);
-      try { unlinkSync(temporary); } catch { /* best effort */ }
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
-  }
-}
-
 export function installNamespaceContext(root: string, segments: readonly string[]): void {
   if (!validNamespaceSegments(segments)) throw new TypeError("namespace must contain normalized segments");
   const parent = directory(root); mkdirSync(parent, { recursive: true });
   installIgnore(root);
-  replaceFile(currentPath(root), `${segments.join("/")}\n`);
+  replaceFileDurably(currentPath(root), `${segments.join("/")}\n`);
 }
 
 function installIgnore(root: string): void {
   const ignore = ignorePath(root);
   const stat = lstatSync(ignore, { throwIfNoEntry: false });
   if (stat !== undefined && (!stat.isFile() || stat.isSymbolicLink())) throw new Error(`namespace ignore is not a regular file: ${ignore}`);
-  if (stat === undefined || readFileSync(ignore, "utf8") !== "*\n") replaceFile(ignore, "*\n");
+  if (stat === undefined || readFileSync(ignore, "utf8") !== "*\n") replaceFileDurably(ignore, "*\n");
 }
 
 export function repairNamespaceContext(root: string, segments: readonly string[]): "kept" | "installed" {

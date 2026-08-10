@@ -114,6 +114,12 @@ candidate, Verification plan, Akuma
 projection, lease, mailbox, or public cancellation field. Callers normalize
 paths before invoking it.
 
+`runProcessToExit` is the separate unbounded wait for a detached supervisor
+process whose owned operation already enforces its own finite timeout. It takes
+the same argv, cwd, and environment but no timeout and returns the same process
+outcome without a `timeout` arm in practice. It never runs an unbounded user
+command directly; managed-worktree Hook runners are its sole consumer.
+
 The same domain-free runtime owns detached spawn and process-tree custody for
 long-lived callers. `spawnDetachedProcess` returns a collar containing pid,
 process group, and observed start identity. `probeProcessTree` returns `gone`,

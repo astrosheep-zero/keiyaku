@@ -4,10 +4,13 @@ import { closeSync, openSync } from "node:fs";
 const TERMINATION_GRACE_MS = 250;
 const STREAM_TAIL_BYTES = 16 * 1024;
 
-export type ProcessInput = Readonly<{
+type ProcessLaunch = Readonly<{
   readonly argv: readonly string[];
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
+}>;
+
+export type ProcessInput = ProcessLaunch & Readonly<{
   readonly timeoutMs: number;
 }>;
 
@@ -189,7 +192,7 @@ export async function putDownProcessTree(collar: ProcessCollar): Promise<PutDown
   return after.kind === "alive" ? "alive-after-sigkill" : "unavailable";
 }
 
-export async function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
+async function executeProcess(input: ProcessLaunch, timeoutMs: number | undefined): Promise<ProcessOutcome> {
   const child = spawn(input.argv[0]!, input.argv.slice(1), {
     cwd: input.cwd,
     env: input.env,
@@ -209,7 +212,7 @@ export async function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
     timedOut = true;
     termination = terminateProcessTree(child.pid);
   };
-  const timeout = setTimeout(requestStop, input.timeoutMs);
+  const timeout = timeoutMs === undefined ? undefined : setTimeout(requestStop, timeoutMs);
 
   const terminal = await new Promise<
     | Readonly<{ readonly kind: "closed"; readonly code: number | null }>
@@ -218,7 +221,7 @@ export async function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
     child.once("close", (code) => resolve({ kind: "closed", code }));
     child.once("error", (error) => resolve({ kind: "spawn-error", error }));
   });
-  clearTimeout(timeout);
+  if (timeout !== undefined) clearTimeout(timeout);
   await termination;
 
   if (terminal.kind === "spawn-error") return { kind: "spawn-error", diagnostic: terminal.error.message };
@@ -233,4 +236,12 @@ export async function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
     stderr: capturedStderr.text,
     truncated: capturedStdout.truncated || capturedStderr.truncated,
   };
+}
+
+export function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
+  return executeProcess(input, input.timeoutMs);
+}
+
+export function runProcessToExit(input: ProcessLaunch): Promise<ProcessOutcome> {
+  return executeProcess(input, undefined);
 }

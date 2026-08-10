@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { contractLocator } from "../src/git/identity.js";
-import { hookMarkerPath, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
+import { hookMarkerPath, runCreateHooks, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
 import { deliveryWorktreePath } from "../src/git/reconcile.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -71,6 +73,14 @@ function lockPath(repository: ReturnType<typeof repositoryAt>, id: Parameters<ty
 function lines(path: string): readonly string[] {
   if (!existsSync(path)) return [];
   return readFileSync(path, "utf8").trim().split("\n").filter((line) => line.length > 0);
+}
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = performance.now() + 5_000;
+  while (!existsSync(path)) {
+    if (performance.now() >= deadline) throw new Error(`timed out waiting for ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 test("concurrent reconcile runs one frozen hook sequence and destroy removes only worktree administration", async () => {
@@ -162,4 +172,53 @@ test("failed create hooks remain stopped until explicit retry resumes the frozen
   const retried = await bound.keiyaku.reconcile({ retryHooks: true });
   assert.deepEqual(retried.lag, []);
   assert.deepEqual(lines(attempts), ["attempt", "attempt"]);
+});
+
+test("a Hook runner outlives its killed reconcile caller and fences immediate replay", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-hook-caller-death-"));
+  const worktree = join(directory, "worktree");
+  const administration = join(directory, "administration");
+  const started = join(directory, "started");
+  const log = join(directory, "hook.log");
+  const source = [
+    'const fs = require("node:fs");',
+    `fs.appendFileSync(${JSON.stringify(log)}, "start\\n");`,
+    `fs.writeFileSync(${JSON.stringify(started)}, "started\\n");`,
+    `setTimeout(() => fs.appendFileSync(${JSON.stringify(log)}, "end\\n"), 700);`,
+  ].join(" ");
+  const hooks: WorktreeHooks = {
+    create: [{ argv: [process.execPath, "-e", source], timeoutMs: 5_000 }],
+    destroy: [],
+  };
+  mkdirSync(worktree);
+  const module = pathToFileURL(join(process.cwd(), "src", "git", "hooks.ts")).href;
+  const input = Buffer.from(JSON.stringify({ worktree, administration, hooks }), "utf8").toString("base64url");
+  const callerSource = [
+    `const { runCreateHooks } = await import(${JSON.stringify(module)});`,
+    `const input = JSON.parse(Buffer.from(${JSON.stringify(input)}, "base64url").toString("utf8"));`,
+    "await runCreateHooks(input.worktree, input.administration, input.hooks, false);",
+  ].join(" ");
+  const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
+  const caller = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", callerSource], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let callerStderr = "";
+  caller.stderr.setEncoding("utf8");
+  caller.stderr.on("data", (chunk: string) => { callerStderr += chunk; });
+  try {
+    await Promise.race([
+      waitForFile(started),
+      new Promise<never>((_resolve, reject) => caller.once("exit", (code, signal) => {
+        reject(new Error(`reconcile caller exited before Hook start (${code ?? signal}): ${callerStderr.trim()}`));
+      })),
+    ]);
+    caller.kill("SIGKILL");
+    const lag = await runCreateHooks(worktree, administration, hooks, false);
+    assert.equal(lag, null);
+    assert.deepEqual(lines(log), ["start", "end"]);
+  } finally {
+    if (caller.exitCode === null && caller.signalCode === null) caller.kill("SIGKILL");
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

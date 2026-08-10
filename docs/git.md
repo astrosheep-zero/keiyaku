@@ -151,7 +151,12 @@ Callers supply the Contract identity, never a previously folded state. The lock
 contains no domain fact and is never removed with a managed worktree. Different
 Contracts do not share this lock. Lock acquisition waits for the current effect
 decision to finish rather than imposing a timeout shorter than a configured
-hook command; process death releases the SQLite transaction.
+hook command; process death releases the SQLite transaction. A Hook command has
+one additional marker-local execution lock held by its detached Git runner for
+the command's complete process lifetime. The runner, not the calling reconcile
+process, reads the frozen command and durably records its resulting progress
+before releasing that lock. Thus caller death may release the Contract lock but
+cannot let a later reconcile overlap the still-running Hook command.
 
 Admission does not take the effect lock. A public mutation that admits a newer
 fact performs its mandatory reconciliation through the same serialized entry,
@@ -204,9 +209,10 @@ type WorktreeHooks = Readonly<{
 Each command runs directly, without a shell, in the managed worktree and
 inherits the invocation environment. The shared process runtime bounds
 stdout/stderr tails, enforces `timeoutMs`, and terminates the command process
-tree on timeout. Commands must be reentrant. The guarantee is at-least-once:
-after a command exits successfully and before its progress is atomically
-recorded, process death can make replay execute that command again.
+tree on timeout. Commands must be serially replay-safe. The guarantee is
+at-least-once: runner death after a command produces its effect and before its
+progress is durably recorded can make a later runner execute that command
+again. Concurrent replay is not required.
 
 Immediately after creating a worktree, Git atomically writes
 `keiyaku/hooks.json` beneath that linked worktree's Git administration
@@ -214,9 +220,9 @@ directory. The marker is outside candidate content and disappears only when
 Git removes that managed worktree. The current hard-cut marker has version
 `1`, freezes the complete create/destroy command pair, and records each phase
 as `pending` with its next command index, `failed` with its command index and
-typed process failure, or `ok`. Progress is replaced through a temporary file
-and rename after every successful command and after a failure. Empty command
-arrays advance directly to `ok`.
+typed process failure, or `ok`. Every marker replacement uses a unique
+same-directory temporary file, fsyncs the file, renames it, and fsyncs the
+parent directory. Empty command arrays advance directly to `ok`.
 
 An active worktree with no marker freezes the current supplied pair and runs
 create commands. A `pending` create phase resumes from its stored next index.
@@ -224,6 +230,11 @@ An `ok` create phase never runs again. A `failed` phase reports its stored lag
 without running during ordinary reconciliation. Explicit
 `reconcile({ retryHooks: true })` resumes that failed phase from its stored
 command, still using the frozen pair; retry never recaptures current settings.
+For each pending index, the detached runner takes the execution lock, rereads
+the marker, and runs only when that exact index is still pending. A runner that
+queued behind an earlier caller therefore observes the earlier progress and
+does not repeat it. No running marker, pid lease, heartbeat, or age-based
+recovery state exists.
 
 The create order is worktree add, marker freeze, then create commands. A create
 failure retains the worktree and does not reverse or abandon the accepted
