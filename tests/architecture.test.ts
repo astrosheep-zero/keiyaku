@@ -24,7 +24,7 @@ test("production TypeScript has a hard 20000-line architecture budget", () => {
     { path: "core/over.ts", source: "x\n".repeat(20_001) },
   ]);
   assert.equal(overLimit?.rule, "architecture/production-line-budget");
-  assert.match(overLimit?.detail ?? "", /20001 lines; limit is 20000/);
+  assert.equal(overLimit?.detail, "production TypeScript is 20001 lines; limit is 20000");
 });
 
 test("architecture policy accepts public command adapters", () => {
