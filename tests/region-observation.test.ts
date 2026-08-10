@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keiyaku, KeiyakuReconcileFailed, Repo } from "../src/index.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithHead(): TestGitRepository {
@@ -41,43 +41,38 @@ async function bind(repository: TestGitRepository, title: string, region: readon
     markdown: document(title, region),
     workspace: "here",
   });
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("bind was not accepted");
   return result;
 }
 
 test("bind and amend expose only live-peer Region witnesses from one document read", async () => {
   const repository = repositoryWithHead();
   const first = await bind(repository, "First", ["src/**"]);
-  const firstId = (await first.value.state()).id;
+  const firstId = (await first.keiyaku.state()).id;
 
   const second = await bind(repository, "Second", ["src/api/**"]);
-  const secondId = (await second.value.state()).id;
+  const secondId = (await second.keiyaku.state()).id;
   assert.deepEqual(second.overlaps, [{
     contract: firstId,
     patterns: [{ mine: "src/api/**", theirs: "src/**" }],
   }]);
   assert.equal("overlapFailure" in second, false);
 
-  const abandoned = await first.value.abandon();
-  assert.equal(abandoned.kind, "accepted");
+  await first.keiyaku.abandon();
 
   const third = await bind(repository, "Third", ["src/api/internal/**"]);
-  const thirdId = (await third.value.state()).id;
+  const thirdId = (await third.keiyaku.state()).id;
   assert.deepEqual(third.overlaps, [{
     contract: secondId,
     patterns: [{ mine: "src/api/internal/**", theirs: "src/api/**" }],
   }]);
 
-  const amended = await second.value.amend({ markdown: [
+  const amended = await second.keiyaku.amend({ markdown: [
     "## Replace: Region",
     "~~~",
     "src/api/internal/**",
     "~~~",
     "",
   ].join("\n") });
-  assert.equal(amended.kind, "accepted");
-  if (amended.kind !== "accepted") throw new Error("amend was not accepted");
   assert.deepEqual(amended.overlaps, [{
     contract: thirdId,
     patterns: [{ mine: "src/api/internal/**", theirs: "src/api/internal/**" }],
@@ -85,32 +80,51 @@ test("bind and amend expose only live-peer Region witnesses from one document re
   assert.equal("overlapFailure" in amended, false);
 });
 
-test("post-admission document observation failure stays in the accepted Region arm", async () => {
+test("post-admission observation failure preserves the admitted Contract without abandonment", async () => {
   const repository = repositoryWithHead();
   await bind(repository, "Existing", ["src/**"]);
   const marker = `${repository.path}/region-observation-admitted`;
-  const result = await withGitShim(
-    [
-      "if [ \"$1\" = \"update-ref\" ] && [ ! -e \"$KEIYAKU_REGION_MARKER\" ]; then",
-      "  \"$KEIYAKU_REAL_GIT\" \"$@\" || exit $?",
-      "  touch \"$KEIYAKU_REGION_MARKER\"",
-      "  exit 0",
-      "fi",
-      "if [ \"$1\" = \"cat-file\" ] && [ -e \"$KEIYAKU_REGION_MARKER\" ]; then",
-      "  printf 'post-admission document read failed\\n' >&2",
-      "  exit 1",
-      "fi",
-      "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
-    ].join("\n"),
-    { KEIYAKU_REGION_MARKER: marker },
-    () => Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
-      markdown: document("Observed failure", ["docs/**"]),
-      workspace: "here",
-    }),
+  let failure: KeiyakuReconcileFailed | undefined;
+  await assert.rejects(
+    withGitShim(
+      [
+        "if [ \"$1\" = \"update-ref\" ] && [ ! -e \"$KEIYAKU_REGION_MARKER\" ]; then",
+        "  \"$KEIYAKU_REAL_GIT\" \"$@\" || exit $?",
+        "  touch \"$KEIYAKU_REGION_MARKER\"",
+        "  exit 0",
+        "fi",
+        "if [ \"$1\" = \"cat-file\" ] && [ -e \"$KEIYAKU_REGION_MARKER\" ]; then",
+        "  printf 'post-admission document read failed\\n' >&2",
+        "  exit 1",
+        "fi",
+        "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+      ].join("\n"),
+      { KEIYAKU_REGION_MARKER: marker },
+      () => Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+        markdown: document("Observed failure", ["docs/**"]),
+        workspace: "here",
+      }),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof KeiyakuReconcileFailed);
+      failure = error;
+      assert.deepEqual(error.admission.facts.map((fact) => fact.kind), ["bind", "bound"]);
+      assert.notEqual(error.admission.head, null);
+      assert.equal(error.report.kind, "failed");
+      assert.equal(error.report.failure.kind, "reconcile-failed");
+      assert.equal(error.report.failure.stage, "observation");
+      assert.match(error.report.failure.diagnostic, /post-admission document read failed/);
+      assert.deepEqual(error.report.effects, []);
+      assert.deepEqual(error.report.lag, []);
+      return true;
+    },
   );
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("bind was not accepted");
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind", "bound"]);
-  assert.equal("overlaps" in result, false);
-  assert.match(result.overlapFailure, /post-admission document read failed/);
+
+  assert.ok(failure);
+  const state = await failure.admission.keiyaku.state();
+  assert.equal(state.id, failure.admission.facts[0]?.contract);
+  assert.equal(state.head, failure.admission.head);
+  assert.equal(state.terminal, null);
+  const observed = await Keiyaku.observe({ repo: Repo.at({ path: repository.path }), id: state.id });
+  assert.equal(observed.kind, "present");
 });

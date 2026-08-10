@@ -1,0 +1,12 @@
+{
+  "name": "keiyaku",
+  "interface": { "displayName": "Keiyaku" },
+  "plugins": [
+    {
+      "name": "keiyaku",
+      "source": { "source": "local", "path": "./plugins/keiyaku" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}

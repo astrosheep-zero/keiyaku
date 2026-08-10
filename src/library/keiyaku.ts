@@ -1,25 +1,26 @@
 import { documentDiff } from "../markdown/diff.js";
 import { applyAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
-import { decodeContractDocument, verificationDefinition } from "../body/decode.js";
+import { decodeContractDocument } from "../body/decode.js";
 import type { DecodedContractDocument } from "../body/types.js";
+import {
+  actorOption,
+  contractTerms,
+  documentDerivation,
+  normalizedGates,
+  normalizedList,
+  optionalNonblank,
+  requireInput,
+  requireMarkdown,
+} from "./input.js";
 import { observeRegion, type RegionObservation, type RegionOverlap } from "./region.js";
 import type { Gate } from "./gates.js";
 import {
-  prepareVerificationDeclaration,
-  type VerificationDeclarationPreparation,
-} from "../verification/declaration.js";
-import {
   contractId,
-  actorId,
-  gate,
-  gateWord,
-  type ActorId as CoreActorId,
   type ChangeId,
+  type ContractHead,
   type ContractId,
   type ContractState,
-  type ContractTerms,
-  type Gate as CoreGate,
   type JournalEntry,
   type SnapshotId,
 } from "../core/facts/types.js";
@@ -51,7 +52,6 @@ import {
   type ContractPhase,
   type ContractRow,
   type DeliverValue,
-  type DocumentDerivation,
   type FactKind,
   type IntentOutcome,
   type IntentRefusal,
@@ -91,17 +91,65 @@ export type Fact = JournalEntry;
 export type ActorId = string;
 export type AttestationVerdict = "satisfied" | "unsatisfied";
 export type Review = ReviewValue;
-export type TypedRefusal = IntentRefusal;
-export type TypedRetry = IntentRetry;
+export type KeiyakuRefusal = IntentRefusal;
+export type KeiyakuRetryReason = IntentRetry;
 export type { PlacementStop, VerificationStop };
 
-export type Outcome<A, Observation extends object = Record<never, never>> =
-  | (Extract<IntentOutcome<A>, { kind: "accepted" }> & Observation)
-  | Exclude<IntentOutcome<A>, { kind: "accepted" }>;
+export type TopologyEffect = ProtocolReconcileReport["effects"][number];
+export type Lag = ProtocolReconcileReport["lag"][number];
+export type FailedReconcileReport = Extract<ProtocolReconcileReport, { kind: "failed" }>;
+export type MutationAdmission = Readonly<{
+  keiyaku: Keiyaku;
+  facts: readonly Fact[];
+  head: ContractHead;
+}>;
+export type MutationResult<Value> = Readonly<{
+  facts: readonly Fact[];
+  head: ContractHead;
+  value: Value;
+  effects: readonly TopologyEffect[];
+  lags: readonly Lag[];
+}>;
 
-export type BindResult = Outcome<Keiyaku, RegionObservation>;
-export type AmendResult = Outcome<void, RegionObservation & Readonly<{ documentDiff: string }>>;
+export type BindResult = Readonly<Omit<MutationResult<Keiyaku>, "value"> & { keiyaku: Keiyaku } & RegionObservation>;
+export type AmendResult = Readonly<MutationResult<void> & RegionObservation & { documentDiff: string }>;
 export type ReconcileReport = ProtocolReconcileReport;
+
+export class KeiyakuRefused extends Error {
+  constructor(readonly refusal: KeiyakuRefusal) {
+    super(`Keiyaku refused: ${refusal.kind}`);
+    this.name = "KeiyakuRefused";
+  }
+
+  get code(): KeiyakuRefusal["kind"] {
+    return this.refusal.kind;
+  }
+}
+
+export class KeiyakuRetry extends Error {
+  constructor(readonly reason: KeiyakuRetryReason) {
+    super(reason.kind === "publication-failed" ? reason.diagnostic : `Keiyaku retry required: ${reason.kind}`);
+    this.name = "KeiyakuRetry";
+  }
+
+  get code(): KeiyakuRetryReason["kind"] {
+    return this.reason.kind;
+  }
+}
+
+export class KeiyakuReconcileFailed extends Error {
+  constructor(
+    readonly admission: MutationAdmission,
+    readonly report: FailedReconcileReport,
+  ) {
+    super(report.failure.diagnostic);
+    this.name = "KeiyakuReconcileFailed";
+  }
+
+  get code(): FailedReconcileReport["failure"]["kind"] {
+    return this.report.failure.kind;
+  }
+}
 
 export type BindInput = Readonly<{
   repo: Repo;
@@ -135,101 +183,40 @@ export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
 export type DeliverInput = ActorOptions & Readonly<{ message?: string }>;
 export type AuditInput = ActorOptions;
 
-function actorOption(actor: unknown): Readonly<{ actor?: CoreActorId }> {
-  if (actor === undefined) return {};
-  if (typeof actor !== "string" || actor.trim().length === 0) {
-    throw new TypeError("actor must be a nonblank string");
-  }
-  return { actor: actorId(actor) };
+type AcceptedIntent<Value> = Readonly<{
+  kind: "accepted";
+  facts: readonly Fact[];
+  head: ContractHead;
+  value: Value;
+}>;
+
+function requireAccepted<Value, Refusal extends KeiyakuRefusal>(result: IntentOutcome<Value, Refusal>): AcceptedIntent<Value> {
+  if (result.kind === "refused") throw new KeiyakuRefused(result.refusal);
+  if (result.kind === "retry") throw new KeiyakuRetry(result.reason);
+  return result;
 }
 
-function requireMarkdown(value: unknown, label = "markdown"): string {
-  if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
-  return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function requireInput(value: unknown, label: string): Record<string, unknown> {
-  if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
-  return value;
-}
-
-function optionalNonblank(value: unknown, label: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`${label} must be a nonblank string`);
-  }
-  return value;
-}
-
-function normalizedList<T>(
-  values: unknown,
-  label: string,
-  brand: (value: string) => T,
-): readonly T[] {
-  if (values === undefined) return [];
-  if (!Array.isArray(values)) throw new TypeError(`${label} must be an array`);
-  return values.map((value, index) => {
-    if (typeof value !== "string") throw new TypeError(`${label}[${index}] must be a string`);
-    try {
-      return brand(value);
-    } catch (error) {
-      throw new TypeError(error instanceof Error ? error.message : `${label}[${index}] is invalid`);
-    }
-  });
-}
-
-function normalizedGates(values: unknown): readonly CoreGate[] {
-  if (values === undefined) return [];
-  if (!Array.isArray(values)) throw new TypeError("gates must be an array");
-  const normalized = values.map((value, index) => {
-    if (!gateWord(value)) {
-      throw new TypeError(`gates[${index}] must match ^[a-z][a-z0-9-]{0,63}$`);
-    }
-    return gate(value);
-  });
-  if (new Set(normalized).size !== normalized.length) throw new TypeError("gates must not contain duplicates");
-  return normalized;
-}
-
-function contractTerms(
-  document: DecodedContractDocument,
-  gates: readonly CoreGate[],
-  after: readonly ContractId[],
-): ContractTerms {
-  return {
-    document: document.document,
-    segments: document.segments,
-    gates,
-    after,
-  };
-}
-
-function documentDerivation(
-  document: DecodedContractDocument,
-  gates: readonly CoreGate[],
-  contractId?: ContractId,
-): DocumentDerivation {
-  return {
-    document: document.document.key,
-    title: document.title,
-    verification: prepareVerificationDeclaration({
-      gates,
-      definition: verificationDefinition(document),
-      ...(contractId === undefined ? {} : { contractId }),
-    }),
-  };
-}
-
-function mapOutcome<Value, PublicValue>(
-  result: IntentOutcome<Value>,
+function mutationResult<Value, PublicValue>(
+  scope: RepositoryScope,
+  id: ContractId,
+  accepted: AcceptedIntent<Value>,
   value: (result: Value) => PublicValue,
-): Outcome<PublicValue> {
-  if (result.kind !== "accepted") return result;
-  return { ...result, value: value(result.value) };
+): MutationResult<PublicValue> {
+  const reconciled = reconcileOperation({ scope, contractId: id });
+  if (reconciled.kind === "failed") {
+    throw new KeiyakuReconcileFailed({
+      keiyaku: new KeiyakuHandle(id, scope),
+      facts: accepted.facts,
+      head: accepted.head,
+    }, reconciled);
+  }
+  return {
+    facts: accepted.facts,
+    head: accepted.head,
+    value: value(accepted.value),
+    effects: reconciled.effects,
+    lags: reconciled.lag,
+  };
 }
 
 function resolvePinnedScope(path?: string): RepositoryScope {
@@ -294,8 +281,8 @@ class KeiyakuHandle {
       : normalizedList(values.after, "after", contractId);
     const current = readStateOperation({ scope: this.scope, contractId: this.id });
     let document: DecodedContractDocument | undefined;
-    let terms: ContractTerms | undefined;
-    let verification: VerificationDeclarationPreparation | undefined;
+    let terms: ReturnType<typeof contractTerms> | undefined;
+    let verification: ReturnType<typeof documentDerivation>["verification"] | undefined;
     if (current !== null) {
       const before = current.terms.document.bytes;
       const currentDocument = decodeContractDocument(before);
@@ -305,30 +292,29 @@ class KeiyakuHandle {
         gates ?? current.terms.gates,
         prerequisites ?? current.terms.after,
       );
-      verification = prepareVerificationDeclaration({
-        gates: terms.gates,
-        definition: verificationDefinition(document),
-        contractId: this.id,
-      });
+      verification = documentDerivation(document, terms.gates, this.id).verification;
     }
-    const outcome = mapOutcome(amendOperation({
+    const accepted = requireAccepted(amendOperation({
       scope: this.scope,
       contractId: this.id,
       ...actor,
       ...(current === null || terms === undefined || verification === undefined
         ? {}
         : { amendment: { source: current.terms, terms, verification } }),
-    }), () => undefined);
-    if (outcome.kind !== "accepted") return outcome;
+    }));
     if (document === undefined || current === null) {
       throw new Error("accepted amendment is missing its document derivation");
     }
     const before = current.terms.document.bytes;
     const after = document.document.bytes;
-    return { ...outcome, documentDiff: documentDiff("before", "after", before, after), ...observeRegion(this.scope, this.id, document.region) };
+    return {
+      ...mutationResult(this.scope, this.id, accepted, () => undefined),
+      documentDiff: documentDiff("before", "after", before, after),
+      ...observeRegion(this.scope, this.id, document.region),
+    };
   }
 
-  async deliver(input?: DeliverInput): Promise<Outcome<Delivery>> {
+  async deliver(input?: DeliverInput): Promise<MutationResult<Delivery>> {
     const values = input === undefined ? undefined : requireInput(input, "deliver input");
     const message = optionalNonblank(values?.message, "deliver message");
     const actor = actorOption(values?.actor);
@@ -336,7 +322,7 @@ class KeiyakuHandle {
     const derivation = state === null
       ? undefined
       : documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
-    return mapOutcome(
+    const accepted = requireAccepted(
       await deliverOperation({
         scope: this.scope,
         contractId: this.id,
@@ -344,64 +330,67 @@ class KeiyakuHandle {
         ...actor,
         ...(message === undefined ? {} : { message }),
       }),
-      (delivery) => this.deliveryHandle(delivery),
     );
+    return mutationResult(this.scope, this.id, accepted, (delivery) => this.deliveryHandle(delivery));
   }
 
-  async review(input: ReviewInput): Promise<Outcome<Review>> {
+  async review(input: ReviewInput): Promise<MutationResult<Review>> {
     const values = requireInput(input, "review input");
     const verdict = values.verdict;
     if (verdict !== "satisfied" && verdict !== "unsatisfied") {
       throw new TypeError("verdict must be satisfied or unsatisfied");
     }
     const summary = optionalNonblank(values.summary, "review summary");
-    return mapOutcome(reviewOperation({
+    const accepted = requireAccepted(reviewOperation({
       scope: this.scope,
       contractId: this.id,
       verdict,
       ...(summary === undefined ? {} : { summary }),
       ...actorOption(values.actor),
-    }), (value) => value);
+    }));
+    return mutationResult(this.scope, this.id, accepted, (value) => value);
   }
 
-  async abandon(input?: AbandonInput): Promise<Outcome<void>> {
+  async abandon(input?: AbandonInput): Promise<MutationResult<void>> {
     const values = input === undefined ? undefined : requireInput(input, "abandon input");
     const note = optionalNonblank(values?.note, "abandon note");
-    return mapOutcome(abandonOperation({
+    const accepted = requireAccepted(abandonOperation({
       scope: this.scope,
       contractId: this.id,
       ...actorOption(values?.actor),
       ...(note === undefined ? {} : { note }),
-    }), () => undefined);
+    }));
+    return mutationResult(this.scope, this.id, accepted, () => undefined);
   }
 
-  async arc(input: ArcInput): Promise<Outcome<void>> {
+  async arc(input: ArcInput): Promise<MutationResult<void>> {
     const values = requireInput(input, "arc input");
     const chapter = decodeArcDocument(requireMarkdown(values.markdown));
-    return mapOutcome(arcOperation({
+    const accepted = requireAccepted(arcOperation({
       scope: this.scope,
       contractId: this.id,
       ...actorOption(values.actor),
       chapter,
-    }), () => undefined);
+    }));
+    return mutationResult(this.scope, this.id, accepted, () => undefined);
   }
 
-  async audit(input?: AuditInput): Promise<Outcome<AuditReport>> {
+  async audit(input?: AuditInput): Promise<MutationResult<AuditReport>> {
     const values = input === undefined ? undefined : requireInput(input, "audit input");
     const actor = actorOption(values?.actor);
     const state = readStateOperation({ scope: this.scope, contractId: this.id });
     const derivation = state === null
       ? undefined
       : documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
-    return mapOutcome(
+    const accepted = requireAccepted(
       await auditOperation({
         scope: this.scope,
         contractId: this.id,
         ...(derivation === undefined ? {} : { derivation }),
         ...actor,
       }),
-      (report) => report,
     );
+    return mutationResult(this.scope, this.id, accepted, (report) => report);
   }
 
   async reconcile(): Promise<ReconcileReport> {
@@ -500,18 +489,22 @@ async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     scope,
     title: document.title,
     terms,
-    verification: prepareVerificationDeclaration({
-      gates: terms.gates,
-      definition: verificationDefinition(document),
-    }),
+    verification: documentDerivation(document, terms.gates).verification,
     workspace,
     ...(target === undefined ? {} : { target }),
     ...actor,
   });
-  const outcome = mapOutcome(admitted, ({ contractId: id }) => new KeiyakuHandle(id, scope));
-  if (outcome.kind !== "accepted") return outcome;
-  if (admitted.kind !== "accepted") throw new Error("accepted bind is missing its contract identity");
-  return { ...outcome, ...observeRegion(scope, admitted.value.contractId, document.region) };
+  const accepted = requireAccepted(admitted);
+  const id = accepted.value.contractId;
+  const result = mutationResult(scope, id, accepted, ({ contractId: contract }) => new KeiyakuHandle(contract, scope));
+  return {
+    facts: result.facts,
+    head: result.head,
+    keiyaku: result.value,
+    effects: result.effects,
+    lags: result.lags,
+    ...observeRegion(scope, id, document.region),
+  };
 }
 
 export const Keiyaku = Object.freeze({

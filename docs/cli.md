@@ -51,7 +51,7 @@ The command vocabulary is:
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
 | `settings` | Constructs and observes the shared read-only Settings resource. |
-| `install` | Installs the bundled Keiyaku skill through one or more native harness installers. |
+| `install` | Installs the bundled Keiyaku skills through one or more native harness installers. |
 | `task ...` | Calls the separate `./task` public surface described below. |
 | `call`, `wait`, `tell`, `interrupt`, `history`, `fork`, `kill` | Call the corresponding separate `./akuma` capability as root verbs. |
 
@@ -81,7 +81,7 @@ reconcile [<contract>|@<contract>] [--json]
 settings [--json]
 install <codex|claude|opencode|pi> [--json]
        install --all [--json]
-call --persona <name> [--cwd <path>] [--contract <contract-id>] [--json] -
+call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -
 wait <aku/...> [--timeout <duration>] [--json]
 tell <aku/...> [--json] -
 interrupt <aku/...> [--json] -
@@ -144,9 +144,18 @@ no reason flag or hidden reason classification. `arc` and `audit` accept
 `--json` is output-only.
 
 `install` is the one edge command that does not read a repository or Git. It
-installs the bundled `skills/keiyaku/SKILL.md` into `codex`, `claude`,
-`opencode`, or `pi` using each harness's native installer and its default user
-scope. `--all` runs the fixed order `codex`, `claude`, `opencode`, `pi`; a
+installs the bundled `keiyaku`, `keiyaku-task`, `keiyaku-workflow`, and
+`keiyaku-akuma` skills into `codex`, `claude`, `opencode`, or `pi` using each
+harness's native installer and its default user scope. A successful install is
+convergent: rerunning one bundle version leaves an equivalent usable
+installation, while installing a newer bundle makes that bundle installed or
+directly visible to the harness. It does not promise that native cache,
+metadata, or timestamps remain byte-for-byte unchanged. One bundle version
+identifies one content release, all harness manifests carry that same version,
+and a changed release increments it. The CLI does not preflight or duplicate a
+harness's native installation judgment.
+
+`--all` runs the fixed order `codex`, `claude`, `opencode`, `pi`; a
 failure is recorded, remaining harnesses still run, and no cross-harness
 rollback occurs. Text prints one result per harness. JSON returns
 `{ kind: "install", results: [...] }`, with each result typed as `installed` or
@@ -199,7 +208,7 @@ expresses the running work.
 
 ```text
 ── ● aku/worker/1234abcd ── kei/delivery ──────────────────
-   ⋮ earlier · keiyaku history aku/worker/1234abcd
+      ⋮ +12
 09:31 │ say      narrowing the failing suite
       │ run      $ npm test — 41s · exit 1
 09:32 │ edit     src/akuma.ts — +12 -3
@@ -240,8 +249,9 @@ caller intent, and every recoverable omission line contains a complete command.
 
 A page that reaches a pruned lower boundary prints exactly `⋮ earlier history
 no longer kept`. A `--since` page with no rows prints exactly `⋮ no activity
-since <index>`. Exact status uses `⋮ earlier · keiyaku history <id>` when its
-snapshot omits semantic rows. No text asks the caller to calculate a cursor.
+since <index>`. Exact status prints `⋮ +<count>` at the spine column when its
+snapshot omits semantic rows; it does not invent a history cursor. No text asks
+the caller to calculate a cursor.
 `history --last` bypasses this frame and writes only exact answer bytes.
 
 ## Help
@@ -291,11 +301,19 @@ Every invocation renders exactly one plain result object:
 | `accepted` | `verb`, `contract`, public `head` and `facts`, observed `effects`, flat `lag`, optional independent obligation stops, presentation diff, and audit `report` when applicable | 0 |
 | `refused` | typed refusal and observed grounds | 1 |
 | `retry` | exhausted, collision, or publication-failed detail; caller-addressed verbs use the caller's contract coordinate, while bind has no contract segment | 2 |
+| `failed` | post-admission failure with the existing Contract coordinate, admitted `head` and `facts`, completed reconcile effects, and typed reconcile failure | 3 |
 | `observation` | view data, including observed effects when present | 0 |
 
 Text and `--json` render this same object. Both write to stdout; JSON serializes
 it without another output schema. A corrupted authority or other exception
 writes its verbatim diagnostic to stderr and exits `3`.
+
+`failed` is reserved for a public mutation whose journal admission succeeded
+but whose mandatory reconciliation did not complete. Text starts with
+`failed <verb> <contract>`, then renders the admitted facts, completed effects,
+and reconcile diagnostic. JSON exposes the same flat result object. It is not
+a refusal or retry, and its Contract coordinate names the existing Contract;
+the adapter never hides it or automatically abandons it.
 
 Accepted facts name at least their contract, entry, and kind. Effects render as
 transport data:

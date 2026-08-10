@@ -1,16 +1,17 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { gatesFrom, Keiyaku, Repo, settings, SettingsError, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Outcome, type Settings, type SnapshotId } from "../index.js";
+import { gatesFrom, Keiyaku, Repo, settings, SettingsError, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId } from "../index.js";
 import { kanshi, selectKanshi } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
-import { resultFromOutcome } from "./accepted.js";
+import { resultFromMutationCall } from "./accepted.js";
 import { amendFromCommand } from "./commands/amend.js";
 import { invokeAkuma, invokeAkumaStatus, type AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import { isParsedAkumaCommand, type ParsedAkumaCommand } from "./commands/akuma.js";
 import { bindFromCommand } from "./commands/bind.js";
+import { installHarnesses, type InstallInvocationResult } from "./commands/install.js";
 import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js";
 import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
-import type { AcceptedResult, DiffUnavailable, InvocationResult } from "./result.js";
+import type { DiffUnavailable, InvocationResult } from "./result.js";
 import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
 
 export type { AcceptedFact, DiffUnavailable, InvocationResult, Lag } from "./result.js";
@@ -21,7 +22,8 @@ type InvokeRuntime = Readonly<{
   readStdin?: () => string;
 }>;
 
-type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "reconcile" | "settings" | "task" }>;
+type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "reconcile" | "settings" | "task" | "install" }>;
+type NonInstallExecution = Readonly<{ cwd?: string; command: Exclude<ParsedCommand, { command: "install" }> }>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin: () => string;
@@ -62,16 +64,6 @@ async function selectContract(repo: Repo, selector: string | undefined, scope: s
   return contractFromInput(repo, id);
 }
 
-async function resultForExisting<A>(
-  verb: string,
-  outcome: Outcome<A>,
-  contract: KeiyakuContract,
-  id: ContractId,
-  obligations: Pick<AcceptedResult, "verification" | "placement" | "leak"> = {},
-): Promise<InvocationResult> {
-  return resultFromOutcome(verb, outcome, { coordinate: id, reconcile: contract, obligations });
-}
-
 async function invokeBind(
   parsed: Extract<ParsedCommand, { command: "bind" }>,
   repo: Repo,
@@ -79,8 +71,10 @@ async function invokeBind(
 ): Promise<InvocationResult> {
   const markdown = edge.readStdin();
   const gates = selectedGates(settingsAt(repo.root, edge.environment), parsed.gates);
-  const outcome = await bindFromCommand(parsed, repo, markdown, gates, actorFromEdge(parsed.actor, edge.environment));
-  return resultFromOutcome("bind", outcome, outcome.kind === "accepted" ? { reconcile: outcome.value } : {});
+  return resultFromMutationCall(
+    "bind",
+    () => bindFromCommand(parsed, repo, markdown, gates, actorFromEdge(parsed.actor, edge.environment)),
+  );
 }
 
 function unavailableDiff(delivery: { snapshotId: SnapshotId; changeId: ChangeId }): DiffUnavailable {
@@ -101,16 +95,19 @@ async function invokeDeliver(
   parsed: Extract<ExistingCommand, { command: "deliver" }>,
   seat: ExistingSeat,
 ): Promise<InvocationResult> {
-  const outcome = await seat.contract.deliver({
+  return resultFromMutationCall("deliver", () => seat.contract.deliver({
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
     ...(parsed.message === undefined ? {} : { message: parsed.message }),
+  }), {
+    coordinate: seat.id,
+    project: (result) => ({
+      obligations: {
+        ...(result.value.verification === undefined ? {} : { verification: result.value.verification }),
+        ...(result.value.placement === undefined ? {} : { placement: result.value.placement }),
+        ...(result.value.leak === undefined ? {} : { leak: result.value.leak }),
+      },
+    }),
   });
-  const obligations = outcome.kind !== "accepted" ? {} : {
-    ...(outcome.value.verification === undefined ? {} : { verification: outcome.value.verification }),
-    ...(outcome.value.placement === undefined ? {} : { placement: outcome.value.placement }),
-    ...(outcome.value.leak === undefined ? {} : { leak: outcome.value.leak }),
-  };
-  return resultForExisting("deliver", outcome, seat.contract, seat.id, obligations);
 }
 
 async function invokeReview(
@@ -119,15 +116,16 @@ async function invokeReview(
   readStdin: () => string,
 ): Promise<InvocationResult> {
   const summary = parsed.summaryFromStdin === true ? readStdin() : parsed.summary;
-  const outcome = await seat.contract.review({
+  return resultFromMutationCall("review", () => seat.contract.review({
     verdict: parsed.verdict,
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
     ...(summary === undefined ? {} : { summary }),
+  }), {
+    coordinate: seat.id,
+    project: (result) => ({
+      obligations: result.value.placement === undefined ? {} : { placement: result.value.placement },
+    }),
   });
-  const obligations = outcome.kind !== "accepted" || outcome.value.placement === undefined
-    ? {}
-    : { placement: outcome.value.placement };
-  return resultForExisting("review", outcome, seat.contract, seat.id, obligations);
 }
 
 async function invokeAudit(
@@ -135,16 +133,24 @@ async function invokeAudit(
   seat: ExistingSeat,
 ): Promise<InvocationResult> {
   const delivery = parsed.showDiffBody ? await seat.contract.delivery() : null;
-  const outcome = await seat.contract.audit(seat.actor === undefined ? {} : { actor: seat.actor });
-  let renderedDiff: string | DiffUnavailable | undefined;
-  if (parsed.showDiffBody && delivery !== null && outcome.kind === "accepted") {
-    const diff = await delivery.diff();
-    renderedDiff = diff === null ? unavailableDiff(delivery) : diff;
-  }
-  const result = outcome.kind === "accepted"
-    ? await resultFromOutcome("audit", outcome, { coordinate: seat.id, report: outcome.value })
-    : await resultFromOutcome("audit", outcome, { coordinate: seat.id });
-  return result.kind === "accepted" && renderedDiff !== undefined ? { ...result, diff: renderedDiff } : result;
+  return resultFromMutationCall(
+    "audit",
+    () => seat.contract.audit(seat.actor === undefined ? {} : { actor: seat.actor }),
+    {
+      coordinate: seat.id,
+      project: async (result) => {
+        let renderedDiff: string | DiffUnavailable | undefined;
+        if (parsed.showDiffBody && delivery !== null) {
+          const diff = await delivery.diff();
+          renderedDiff = diff === null ? unavailableDiff(delivery) : diff;
+        }
+        return {
+          report: result.value,
+          ...(renderedDiff === undefined ? {} : { diff: renderedDiff }),
+        };
+      },
+    },
+  );
 }
 
 async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: InvocationEdge, scope: string): Promise<InvocationResult> {
@@ -158,8 +164,11 @@ async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: Invocat
       const gates = parsed.gates === undefined
         ? undefined
         : selectedGates(settingsAt(repo.root, edge.environment), parsed.gates);
-      const outcome = await amendFromCommand({ command: parsed, repo, contract, markdown, gates, ...(actor === undefined ? {} : { actor }) });
-      return resultFromOutcome("amend", outcome, { coordinate: id, reconcile: contract });
+      return resultFromMutationCall(
+        "amend",
+        () => amendFromCommand({ command: parsed, repo, contract, markdown, gates, ...(actor === undefined ? {} : { actor }) }),
+        { coordinate: id },
+      );
     }
     case "deliver":
       return invokeDeliver(parsed, seat);
@@ -167,16 +176,16 @@ async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: Invocat
       return invokeReview(parsed, seat, edge.readStdin);
     case "arc": {
       const markdown = edge.readStdin();
-      return resultForExisting("arc", await contract.arc({
-        markdown,
-        ...(actor === undefined ? {} : { actor }),
-      }), contract, id);
+      return resultFromMutationCall("arc", () => contract.arc({
+          markdown,
+          ...(actor === undefined ? {} : { actor }),
+        }), { coordinate: id });
     }
     case "abandon":
-      return resultForExisting("abandon", await contract.abandon({
+      return resultFromMutationCall("abandon", () => contract.abandon({
         ...(actor === undefined ? {} : { actor }),
         ...(parsed.note === undefined ? {} : { note: parsed.note }),
-      }), contract, id);
+      }), { coordinate: id });
     case "audit":
       return invokeAudit(parsed, seat);
     default:
@@ -184,7 +193,7 @@ async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: Invocat
   }
 }
 
-async function invokeParsed(invocation: ParsedExecution, runtime: InvokeRuntime): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
+async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRuntime): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
   const coordinate = invocation.cwd ?? runtime.cwd;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
@@ -220,7 +229,8 @@ async function invokeParsed(invocation: ParsedExecution, runtime: InvokeRuntime)
         return { kind: "observation", command: "reconcile", ...await repo.reconcile() };
       }
       const { contract } = await selectContract(repo, parsed.contract, scope);
-      return { kind: "observation", command: "reconcile", ...await contract.reconcile() };
+      const { kind: reconciliation, ...report } = await contract.reconcile();
+      return { kind: "observation", command: "reconcile", reconciliation, ...report };
     }
     case "bind":
       return invokeBind(parsed, repo, edge);
@@ -229,9 +239,15 @@ async function invokeParsed(invocation: ParsedExecution, runtime: InvokeRuntime)
   }
 }
 
-export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
+async function invokeInstall(command: Extract<ParsedCommand, { command: "install" }>, runtime: InvokeRuntime): Promise<InstallInvocationResult> {
+  return installHarnesses(command.harnesses, runtime.environment ?? process.env);
+}
+
+export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime = {}): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult | InstallInvocationResult> {
   try {
-    return await invokeParsed(invocation, runtime);
+    const command = invocation.command;
+    if (command.command === "install") return await invokeInstall(command, runtime);
+    return await invokeParsed({ ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }), command }, runtime);
   } catch (error) {
     if (error instanceof CliUsageError && error.projection === undefined) {
       throw new CliUsageError(error.diagnostic, renderCommandUsage(invocation.command));

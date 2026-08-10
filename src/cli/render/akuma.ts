@@ -86,16 +86,16 @@ function statusItems(status: AkumaStatus): readonly SpineItem[] {
   ];
 }
 
-function omission(id: string, status: AkumaStatus): string[] {
+function omission(status: AkumaStatus): string[] {
   return status.activity.omitted === 0
     ? []
-    : [`   ⋮ earlier · keiyaku history ${id}`];
+    : [`      ⋮ +${status.activity.omitted}`];
 }
 
 function statusText(status: AkumaStatus): string {
   return [
     ruler([`${mark(status.life)} ${status.id}`, ...(status.contract === undefined ? [] : [status.contract])]),
-    ...omission(status.id, status),
+    ...omission(status),
     ...renderSpine(statusItems(status)),
   ].join("\n");
 }
@@ -155,8 +155,7 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
       if (receipt.kind === "dead") return `${result.akuma} interrupt dead`;
       if (receipt.kind === "unstoppable") return `${result.akuma} interrupt unstoppable ${receipt.evidence}`;
       if ("kind" in receipt.tell) return `${result.akuma} interrupted ${receipt.putDown}`;
-      const wake = typeof receipt.tell.wake === "string" ? "recorded" : `failed ${receipt.tell.wake.diagnostic}`;
-      return `${result.akuma} interrupted ${receipt.putDown}\ntell ${receipt.tell.id} ${wake}`;
+      return `${result.akuma} interrupted ${receipt.putDown}`;
     }
     case "history": return historyText(command as Extract<ParsedCommand, { command: "history" }>, result);
     case "fork": {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { Keiyaku, Repo, type ContractId } from "../src/index.js";
+import { Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId, type KeiyakuRefusal } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { contractJournalPath } from "../src/carrier/identity.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
@@ -16,6 +16,14 @@ function repositoryWithMain(): TestGitRepository {
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   return repository;
+}
+
+function refused(expected: KeiyakuRefusal): (error: unknown) => boolean {
+  return (error) => {
+    assert.ok(error instanceof KeiyakuRefused);
+    assert.deepEqual(error.refusal, expected);
+    return true;
+  };
 }
 
 function document(verification?: string): string {
@@ -56,9 +64,7 @@ async function bind(repository: TestGitRepository, verification?: string) {
     workspace: "here",
     gates: verification === undefined ? ["reviewed"] : ["verified"],
   });
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("bind was not accepted");
-  return result.value;
+  return result.keiyaku;
 }
 
 function commitCandidate(repository: TestGitRepository): void {
@@ -87,8 +93,6 @@ test("Delivery.diff freshly reads its pinned candidate diff", async () => {
   const contract = await bind(repository);
   commitCandidate(repository);
   const delivered = await contract.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
 
   const log = resolve(repository.path, "delivery-diff.log");
   writeFileSync(log, "");
@@ -126,7 +130,6 @@ test("one public handle reuses its resolved repository scope", async () => {
   const [state, delivered] = await Promise.all(operations);
 
   assert.equal(state.id, id);
-  assert.equal(delivered.kind, "accepted");
   assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["discovery"]);
 });
 
@@ -145,13 +148,10 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
     "Keep the change bounded.",
     "",
   ].join("\n") });
-  assert.equal(arc.kind, "accepted");
   assert.equal((await contract.state()).currentArc?.data.seq, 1);
 
   commitCandidate(repository);
   const delivered = await contract.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
   const recovered = await contract.delivery();
   assert.equal(recovered?.snapshotId, delivered.value.snapshotId);
   assert.equal(recovered?.changeId, delivered.value.changeId);
@@ -159,7 +159,6 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
   const reviewed = await contract.review({ verdict: "unsatisfied",
     summary: "The candidate still needs one correction.",
   });
-  assert.equal(reviewed.kind, "accepted");
   assert.equal((await contract.state()).attestations.at(-1)?.data.summary, "The candidate still needs one correction.");
 
   await assert.rejects(
@@ -168,30 +167,28 @@ test("public review, abandon, and Arc preserve their ruled testimony", async () 
     /abandon input must be an object/,
   );
   const abandoned = await contract.abandon({ note: "Return the task to planning." });
-  assert.equal(abandoned.kind, "accepted");
   assert.equal((await contract.state()).terminal?.kind, "abandoned");
   assert.deepEqual((await contract.state()).terminal?.data, { note: "Return the task to planning." });
   const terminalDelivery = await contract.delivery();
   assert.equal(terminalDelivery?.snapshotId, delivered.value.snapshotId);
-  assert.deepEqual(await contract.review({ verdict: "satisfied" }), {
-    kind: "refused",
-    refusal: { kind: "terminal", contractId: (await contract.state()).id },
-  });
+  await assert.rejects(
+    contract.review({ verdict: "satisfied" }),
+    refused({ kind: "terminal", contractId: (await contract.state()).id }),
+  );
 
-  const terminalArc = await contract.arc({ markdown: [
-    "# Late",
-    "",
-    "## Objective",
-    "Too late.",
-    "",
-    "## Brief",
-    "Must refuse.",
-    "",
-  ].join("\n") });
-  assert.deepEqual(terminalArc, {
-    kind: "refused",
-    refusal: { kind: "terminal", contractId: (await contract.state()).id },
-  });
+  await assert.rejects(
+    contract.arc({ markdown: [
+      "# Late",
+      "",
+      "## Objective",
+      "Too late.",
+      "",
+      "## Brief",
+      "Must refuse.",
+      "",
+    ].join("\n") }),
+    refused({ kind: "terminal", contractId: (await contract.state()).id }),
+  );
 });
 
 test("delivery terminal refusal outranks a missing managed worktree", async () => {
@@ -204,97 +201,74 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
     gates: ["reviewed"],
     after: [prerequisiteId],
   });
-  assert.equal(dependent.kind, "accepted");
-  if (dependent.kind !== "accepted") throw new Error("dependent bind was not accepted");
-  assert.equal((await dependent.value.state()).bound, null);
-  assert.equal((await dependent.value.abandon()).kind, "accepted");
+  assert.equal((await dependent.keiyaku.state()).bound, null);
+  await dependent.keiyaku.abandon();
   const status = await Keiyaku.list({ repo: Repo.at({ path: repository.path }) });
-  const dependentId = (await dependent.value.state()).id;
+  const dependentId = (await dependent.keiyaku.state()).id;
   const path = status.rows.find((contract) => contract.id === dependentId)?.worktreePath;
   assert.ok(path);
   assert.equal(existsSync(path), false);
 
-  assert.deepEqual(await dependent.value.deliver(), {
-    kind: "refused",
-    refusal: { kind: "terminal", contractId: (await dependent.value.state()).id },
-  });
+  await assert.rejects(
+    dependent.keiyaku.deliver(),
+    refused({ kind: "terminal", contractId: (await dependent.keiyaku.state()).id }),
+  );
 });
 
 test("review records before delivery and the same patch can be placed", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
 
-  const reviewed = await result.value.review({ verdict: "satisfied" });
-  assert.equal(reviewed.kind, "accepted");
-  if (reviewed.kind !== "accepted") throw new Error("review was not accepted");
+  const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
   assert.equal(reviewed.value.placement?.refusal.kind, "delivery-missing");
-  const subject = (await result.value.state()).attestations.at(-1)?.data.subject;
+  const subject = (await result.keiyaku.state()).attestations.at(-1)?.data.subject;
 
-  const delivered = await result.value.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
+  const delivered = await result.keiyaku.deliver();
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "claimed"]);
-  assert.equal((await result.value.state()).attestations.at(-1)?.data.subject, subject);
-  assert.equal((await result.value.state()).terminal?.kind, "claimed");
+  assert.equal((await result.keiyaku.state()).attestations.at(-1)?.data.subject, subject);
+  assert.equal((await result.keiyaku.state()).terminal?.kind, "claimed");
 });
 
 test("a changed worktree patch leaves the reviewed placement pending", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "first\n");
-  const reviewed = await result.value.review({ verdict: "satisfied" });
-  assert.equal(reviewed.kind, "accepted");
+  const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
   writeFileSync(`${repository.path}/candidate.txt`, "second\n");
 
-  const delivered = await result.value.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
+  const delivered = await result.keiyaku.deliver();
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver"]);
   assert.equal(delivered.value.placement?.refusal.kind, "gates-unsatisfied");
-  assert.equal((await result.value.state()).terminal, null);
+  assert.equal((await result.keiyaku.state()).terminal, null);
 });
 
 test("a changed document leaves an otherwise unchanged reviewed patch pending", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
-  const reviewed = await result.value.review({ verdict: "satisfied" });
-  assert.equal(reviewed.kind, "accepted");
+  const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
 
-  const amended = await result.value.amend({
+  const amended = await result.keiyaku.amend({
     markdown: "## Replace: Objective\nRequire review of the current contract document.\n",
   });
-  assert.equal(amended.kind, "accepted");
 
-  const delivered = await result.value.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
+  const delivered = await result.keiyaku.deliver();
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver"]);
   assert.equal(delivered.value.placement?.refusal.kind, "gates-unsatisfied");
-  assert.equal((await result.value.state()).terminal, null);
+  assert.equal((await result.keiyaku.state()).terminal, null);
 });
 
 test("review testimony is recorded when reviewed is not a placement gate", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: [] });
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
 
-  const reviewed = await result.value.review({ verdict: "unsatisfied" });
-  assert.equal(reviewed.kind, "accepted");
-  if (reviewed.kind !== "accepted") throw new Error("review was not accepted");
+  const reviewed = await result.keiyaku.review({ verdict: "unsatisfied" });
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
   assert.equal(reviewed.value.placement, undefined);
-  assert.equal((await result.value.state()).attestations.at(-1)?.data.gate, "reviewed");
+  assert.equal((await result.keiyaku.state()).attestations.at(-1)?.data.gate, "reviewed");
 });
 
 test("public deliver keeps its Verification admission in accepted facts", async () => {
@@ -303,8 +277,6 @@ test("public deliver keeps its Verification admission in accepted facts", async 
   commitCandidate(repository);
 
   const delivered = await contract.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
   assert.equal(delivered.head, (await contract.state()).head);
   assert.equal(delivered.value.expectedPredecessor, (await contract.state()).delivery?.data.expectedPredecessor);
@@ -321,13 +293,10 @@ test("status and audit expose only current Verification testimony", async () => 
     workspace: "here",
     gates: ["reviewed", "verified"],
   });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   commitCandidate(repository);
 
-  const delivered = await bound.value.deliver();
-  assert.equal(delivered.kind, "accepted");
-  const state = await bound.value.state();
+  const delivered = await bound.keiyaku.deliver();
+  const state = await bound.keiyaku.state();
   const expected = {
     verdict: "satisfied" as const,
     summary: "[1 bash exit 0]\nstdout:\nchecked\nstderr:\nwarning",
@@ -343,18 +312,15 @@ test("status and audit expose only current Verification testimony", async () => 
     satisfied: false,
   });
 
-  const audited = await bound.value.audit();
-  assert.equal(audited.kind, "accepted");
-  if (audited.kind !== "accepted") throw new Error("audit was not accepted");
+  const audited = await bound.keiyaku.audit();
   assert.deepEqual(audited.value.timeline.at(-1)?.attestation, {
     gate: "verified",
     ...expected,
   });
 
-  const amended = await bound.value.amend({
+  const amended = await bound.keiyaku.amend({
     markdown: "## Replace: Verification\n~~~bash\nprintf changed\n~~~\n",
   });
-  assert.equal(amended.kind, "accepted");
   const after = await Keiyaku.observe({ repo, id: state.id });
   assert.equal(after.kind, "present");
   if (after.kind !== "present") throw new Error("contract was not observed");
@@ -374,22 +340,16 @@ test("amend preserves untouched Verification bytes and currentness", async () =>
     workspace: "here",
     gates: ["reviewed", "verified"],
   });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
-  const verificationSegment = (await bound.value.state()).terms.segments.at(-1);
+  const verificationSegment = (await bound.keiyaku.state()).terms.segments.at(-1);
   commitCandidate(repository);
-  const delivered = await bound.value.deliver();
-  assert.equal(delivered.kind, "accepted");
+  const delivered = await bound.keiyaku.deliver();
 
-  const amended = await bound.value.amend({ markdown: "## Replace: Objective\nA narrower objective.\n" });
-  assert.equal(amended.kind, "accepted");
-  const after = await bound.value.state();
+  const amended = await bound.keiyaku.amend({ markdown: "## Replace: Objective\nA narrower objective.\n" });
+  const after = await bound.keiyaku.state();
   assert.equal(after.terms.segments.at(-1), verificationSegment);
   assert.match(after.terms.document.bytes, /~~~bash\nexit 0\n~~~/);
 
-  const reviewed = await bound.value.review({ verdict: "satisfied" });
-  assert.equal(reviewed.kind, "accepted");
-  if (reviewed.kind !== "accepted") throw new Error("review was not accepted");
+  const reviewed = await bound.keiyaku.review({ verdict: "satisfied" });
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation", "claimed"]);
 });
 
@@ -400,16 +360,12 @@ test("Verification timeout never suppresses placement", async () => {
     workspace: "here",
     gates: [],
   });
-  assert.equal(open.kind, "accepted");
-  if (open.kind !== "accepted") throw new Error("open contract was not accepted");
   commitCandidate(openRepository);
-  const openDelivery = await withImmediateVerificationTimeout(() => open.value.deliver());
-  assert.equal(openDelivery.kind, "accepted");
-  if (openDelivery.kind !== "accepted") throw new Error("open delivery was not accepted");
+  const openDelivery = await withImmediateVerificationTimeout(() => open.keiyaku.deliver());
   assert.deepEqual(openDelivery.facts.map((fact) => fact.kind), ["deliver", "claimed"]);
   assert.deepEqual(openDelivery.value.verification, { failure: "timeout" });
   assert.equal(openDelivery.value.placement, undefined);
-  assert.equal((await open.value.state()).terminal?.kind, "claimed");
+  assert.equal((await open.keiyaku.state()).terminal?.kind, "claimed");
 
   const gatedRepository = repositoryWithMain();
   const gated = await Keiyaku.bind({ repo: Repo.at({ path: gatedRepository.path }),
@@ -417,16 +373,12 @@ test("Verification timeout never suppresses placement", async () => {
     workspace: "here",
     gates: ["verified"],
   });
-  assert.equal(gated.kind, "accepted");
-  if (gated.kind !== "accepted") throw new Error("gated contract was not accepted");
   commitCandidate(gatedRepository);
-  const gatedDelivery = await withImmediateVerificationTimeout(() => gated.value.deliver());
-  assert.equal(gatedDelivery.kind, "accepted");
-  if (gatedDelivery.kind !== "accepted") throw new Error("gated delivery was not accepted");
+  const gatedDelivery = await withImmediateVerificationTimeout(() => gated.keiyaku.deliver());
   assert.deepEqual(gatedDelivery.facts.map((fact) => fact.kind), ["deliver"]);
   assert.deepEqual(gatedDelivery.value.verification, { failure: "timeout" });
   assert.deepEqual(gatedDelivery.value.placement, {
-    refusal: { kind: "gates-unsatisfied", contractId: (await gated.value.state()).id },
+    refusal: { kind: "gates-unsatisfied", contractId: (await gated.keiyaku.state()).id },
   });
 });
 
@@ -445,9 +397,6 @@ test("public deliver preserves admission when Verification cleanup leaks a workt
     {},
     () => contract.deliver(),
   );
-
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") return;
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
   assert.equal(delivered.value.leak?.path.startsWith("/"), true);
   assert.match(delivered.value.leak?.diagnostic ?? "", /worktree remove --force .*forced verification cleanup failure/);
@@ -501,9 +450,6 @@ test("public amend returns the recovered journal head after unknown recovery", a
     },
     () => contract.amend({ markdown: replacement }),
   );
-
-  assert.equal(amended.kind, "accepted");
-  if (amended.kind !== "accepted") throw new Error("amend was not accepted");
   assert.deepEqual(amended.facts.map((fact) => fact.kind), ["amend"]);
   const live = await contract.state();
   assert.equal(live.currentArc?.data.title, "Recovered race");
@@ -526,11 +472,12 @@ test("a concurrent amend redecides and returns terms-moved without replaying old
     "A's D0 amendment must not be replayed against D1B.",
     "",
   ].join("\n");
-  const amended = await withGitShim(
-    [
+  await assert.rejects(
+    withGitShim(
+      [
       "if [ \"$1\" = \"update-ref\" ] && [ ! -e \"$KEIYAKU_AMEND_RACE_MARKER\" ]; then",
       "  touch \"$KEIYAKU_AMEND_RACE_MARKER\"",
-      "  node --import \"$KEIYAKU_AMEND_RACE_LOADER\" --input-type=module -e 'const { Keiyaku, Repo } = await import(process.env.KEIYAKU_AMEND_RACE_MODULE); const result = await Keiyaku.of({ repo: Repo.at({ path: process.env.KEIYAKU_AMEND_RACE_REPO }), id: process.env.KEIYAKU_AMEND_RACE_ID }).amend({ markdown: process.env.KEIYAKU_AMEND_RACE_MARKDOWN }); if (result.kind !== \"accepted\") process.exit(1);' || exit $?",
+      "  node --import \"$KEIYAKU_AMEND_RACE_LOADER\" --input-type=module -e 'const { Keiyaku, Repo } = await import(process.env.KEIYAKU_AMEND_RACE_MODULE); await Keiyaku.of({ repo: Repo.at({ path: process.env.KEIYAKU_AMEND_RACE_REPO }), id: process.env.KEIYAKU_AMEND_RACE_ID }).amend({ markdown: process.env.KEIYAKU_AMEND_RACE_MARKDOWN });' || exit $?",
       "fi",
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
@@ -542,13 +489,10 @@ test("a concurrent amend redecides and returns terms-moved without replaying old
       KEIYAKU_AMEND_RACE_REPO: repository.path,
       KEIYAKU_AMEND_RACE_MARKDOWN: B,
     },
-    () => contract.amend({ markdown: A }),
+      () => contract.amend({ markdown: A }),
+    ),
+    refused({ kind: "terms-moved", contractId: initial.id }),
   );
-
-  assert.deepEqual(amended, {
-    kind: "refused",
-    refusal: { kind: "terms-moved", contractId: initial.id },
-  });
   const current = await contract.state();
   const initialBody = decodeContractDocument(initial.terms.document.bytes);
   const currentBody = decodeContractDocument(current.terms.document.bytes);
@@ -562,8 +506,10 @@ test("a hard publication failure is returned without replaying the operation", a
   const contract = await bind(repository);
   const attempts = `${repository.path}/publication-attempts`;
 
-  const amended = await withGitShim(
-    [
+  let retry: KeiyakuRetry | undefined;
+  await assert.rejects(
+    withGitShim(
+      [
       'if [ "$1" = "update-ref" ]; then',
       '  cat >/dev/null',
       '  printf "attempt\\n" >> "$KEIYAKU_ATTEMPTS"',
@@ -573,15 +519,16 @@ test("a hard publication failure is returned without replaying the operation", a
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     { KEIYAKU_ATTEMPTS: attempts },
-    () => contract.amend({ markdown: "## Replace: Context\nNo coordinate moved.\n" }),
+      () => contract.amend({ markdown: "## Replace: Context\nNo coordinate moved.\n" }),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof KeiyakuRetry);
+      retry = error;
+      return true;
+    },
   );
-
-  assert.equal(amended.kind, "retry");
-  if (amended.kind !== "retry") return;
-  assert.equal(amended.reason.kind, "publication-failed");
-  if (amended.reason.kind === "publication-failed") {
-    assert.match(amended.reason.diagnostic, /forced hard publication failure/);
-  }
+  assert.equal(retry?.code, "publication-failed");
+  if (retry?.reason.kind === "publication-failed") assert.match(retry.reason.diagnostic, /forced hard publication failure/);
   assert.deepEqual(readFileSync(attempts, "utf8").trim().split("\n"), ["attempt"]);
 });
 
@@ -631,9 +578,6 @@ test("accepted head excludes an append made after admission", async () => {
     },
     () => contract.amend({ markdown: replacement }),
   );
-
-  assert.equal(amended.kind, "accepted", JSON.stringify(amended));
-  if (amended.kind !== "accepted") throw new Error("amend was not accepted");
   assert.deepEqual(amended.facts.map((fact) => fact.kind), ["amend"]);
   assert.equal((await contract.state()).currentArc?.data.title, "Concurrent");
 });
@@ -645,13 +589,9 @@ test("eligibility placement observes and binds every waiting dependent", async (
     workspace: "here",
     gates: ["reviewed"],
   });
-  assert.equal(sourceResult.kind, "accepted");
-  if (sourceResult.kind !== "accepted") throw new Error("source bind was not accepted");
-  const source = sourceResult.value;
+  const source = sourceResult.keiyaku;
   commitCandidate(repository);
   const delivered = await source.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("delivery was not accepted");
 
   const dependents: Keiyaku[] = [];
   for (let index = 0; index < 4; index += 1) {
@@ -660,13 +600,10 @@ test("eligibility placement observes and binds every waiting dependent", async (
       workspace: "here",
       after: [(await source.state()).id],
     });
-    assert.equal(bound.kind, "accepted");
-    if (bound.kind !== "accepted") throw new Error("dependent bind was not accepted");
-    dependents.push(bound.value);
+    dependents.push(bound.keiyaku);
   }
 
   const reviewed = await source.review({ verdict: "satisfied" });
-  assert.equal(reviewed.kind, "accepted");
   assert.equal((await source.state()).terminal?.kind, "claimed");
   for (const dependent of dependents) {
     assert.equal((await dependent.state()).bound?.kind, "bound");
@@ -682,12 +619,8 @@ test("review exhausts placement after its target premise moves", async () => {
     workspace: "here",
     gates: ["reviewed"],
   });
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("bind was not accepted");
   commitCandidate(repository);
-  const delivered = await result.value.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
+  const delivered = await result.keiyaku.deliver();
 
   const failed = `${repository.path}/publication-failed.marker`;
   const shim = [
@@ -708,16 +641,13 @@ test("review exhausts placement after its target premise moves", async () => {
   ].join("\n");
   const reviewed = await withGitShim(shim, {
     KEIYAKU_PUBLICATION_FAILED: failed,
-  }, () => result.value.review({ verdict: "satisfied" }));
-  assert.equal(reviewed.kind, "accepted");
-  if (reviewed.kind === "accepted") {
-    assert.ok(reviewed.value.placement?.retry);
-    assert.equal("kind" in reviewed.value.placement!, false);
-    const retry = reviewed.value.placement!.retry!;
-    assert.equal(retry.kind, "exhausted");
-    assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
-  }
-  const state = await result.value.state();
+  }, () => result.keiyaku.review({ verdict: "satisfied" }));
+  assert.ok(reviewed.value.placement?.retry);
+  assert.equal("kind" in reviewed.value.placement!, false);
+  const placementRetry = reviewed.value.placement!.retry!;
+  assert.equal(placementRetry.kind, "exhausted");
+  assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
+  const state = await result.keiyaku.state();
   assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");
   assert.equal(state.terminal, null);
 });
@@ -728,10 +658,7 @@ test("public audit exposes admitted verified attestations through facts", async 
   commitCandidate(repository);
 
   const delivered = await contract.deliver();
-  assert.equal(delivered.kind, "accepted");
   const audited = await contract.audit();
-  assert.equal(audited.kind, "accepted");
-  if (audited.kind !== "accepted") throw new Error("audit was not accepted");
   assert.deepEqual(audited.facts.map((fact) => fact.kind), ["attestation"]);
   assert.equal(audited.value.reworks, 1);
   assert.equal(audited.value.reviews, 0);
@@ -751,24 +678,27 @@ test("audit keeps its leading observation when the delivery candidate is unavail
     workspace: "here",
     gates: ["reviewed"],
   });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   commitCandidate(repository);
-  const delivered = await bound.value.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("deliver was not accepted");
-  repository.run(["reset", "--hard", delivered.value.expectedPredecessor]);
-  repository.run(["reflog", "expire", "--expire=now", "--all"]);
-  repository.run(["prune", "--expire=now"]);
+  await bound.keiyaku.deliver();
 
-  const audited = await bound.value.audit();
-  assert.equal(audited.kind, "accepted");
-  if (audited.kind !== "accepted") throw new Error("audit was not accepted");
+  const audited = await withGitShim(
+    [
+      'if [ "$1" = "worktree" ] && [ "$2" = "add" ] && [ "$3" = "--detach" ]; then',
+      '  case "$4" in',
+      '    */keiyaku-v4-verify-*) printf "forced candidate materialization failure\\n" >&2; exit 1 ;;',
+      "  esac",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    () => bound.keiyaku.audit(),
+  );
   assert.deepEqual(audited.facts, []);
   assert.equal(audited.value.attempt?.failure, "candidate-unavailable");
-  if (audited.value.attempt && "diagnostic" in audited.value.attempt) {
-    assert.match(audited.value.attempt.diagnostic, /worktree add --detach/);
-  }
+  const attempt = audited.value.attempt;
+  assert.ok(attempt && "diagnostic" in attempt);
+  if (attempt === undefined || !("diagnostic" in attempt)) throw new Error("candidate materialization failure is missing its diagnostic");
+  assert.match(attempt.diagnostic, /worktree add --detach .*forced candidate materialization failure/);
   assert.equal(audited.value.timeline.some((entry) => entry.kind === "deliver"), true);
 });
 
@@ -778,22 +708,19 @@ test("public read-only audit returns empty facts without a second outcome kind",
   commitCandidate(repository);
 
   const delivered = await contract.deliver();
-  assert.equal(delivered.kind, "accepted");
   const audited = await contract.audit();
-  assert.equal(audited.kind, "accepted");
-  if (audited.kind !== "accepted") throw new Error("audit was not accepted");
   assert.deepEqual(audited.facts, []);
   assert.deepEqual(audited.value.attempt, {
     refusal: { kind: "terminal", contractId: (await contract.state()).id },
   });
 });
 
-test("public audit refuses a missing contract without escaping Outcome", async () => {
+test("public audit rejects a missing contract with a typed refusal", async () => {
   const repository = repositoryWithMain();
   const contract = Keiyaku.of({ repo: Repo.at({ path: repository.path }), id: "kei/missing" as ContractId });
 
-  assert.deepEqual(await contract.audit(), {
-    kind: "refused",
-    refusal: { kind: "contract-missing", contractId: "kei/missing" },
-  });
+  await assert.rejects(
+    contract.audit(),
+    refused({ kind: "contract-missing", contractId: "kei/missing" as ContractId }),
+  );
 });

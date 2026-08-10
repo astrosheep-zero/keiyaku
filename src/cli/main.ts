@@ -10,6 +10,7 @@ import { renderText } from "./render/text.js";
 import { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } from "./render/task.js";
 import { akumaExitCode, renderAkumaJson, renderAkumaText } from "./render/akuma.js";
 import { isParsedAkumaCommand, renderAkumaHelp } from "./commands/akuma.js";
+import { installExitCode, renderInstallHelp, renderInstallText, type InstallInvocationResult } from "./commands/install.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import { renderTaskHelp, type ParsedTaskCommand } from "./commands/task.js";
 import type { TaskInvocationResult } from "./commands/task-invoke.js";
@@ -39,11 +40,17 @@ function renderHelp(coordinate: CliHelpCoordinate): string {
     case "root": return renderRootHelp();
     case "contract": return renderContractHelp(coordinate.command);
     case "task": return renderTaskHelp(coordinate.action);
+    case "install": return renderInstallHelp();
     case "akuma": return renderAkumaHelp(coordinate.action);
   }
 }
 
 function writeResult(command: ParsedCommand, result: unknown): number {
+  if (command.command === "install") {
+    const value = result as InstallInvocationResult;
+    process.stdout.write(`${command.output === "json" ? JSON.stringify(value) : renderInstallText(value)}\n`);
+    return installExitCode(value);
+  }
   if (command.command === "task") return writeTask(command, result as TaskInvocationResult);
   if (command.command === "settings") {
     const value = (result as SettingsInvocationResult).value;
@@ -62,7 +69,7 @@ function writeResult(command: ParsedCommand, result: unknown): number {
       color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
     });
   process.stdout.write(`${output}\n`);
-  return contractResult.kind === "refused" ? 1 : contractResult.kind === "retry" ? 2 : 0;
+  return contractResult.kind === "refused" ? 1 : contractResult.kind === "retry" ? 2 : contractResult.kind === "failed" ? 3 : 0;
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {

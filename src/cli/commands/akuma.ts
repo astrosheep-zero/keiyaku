@@ -24,10 +24,10 @@ type AkumaCommandSpec = Readonly<{
 
 const AKUMA_COMMAND_SPECS = {
   call: {
-    arity: 0,
+    arity: 1,
     stdin: true,
-    flags: { persona: "value", cwd: "value", contract: "value", json: "boolean" },
-    usage: "call --persona <name> [--cwd <path>] [--contract <contract-id>] [--json] -",
+    flags: { cwd: "value", contract: "value", json: "boolean" },
+    usage: "call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -",
     purpose: "Summon an Akuma from a Persona and stdin body.",
   },
   wait: {
@@ -191,10 +191,9 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   if (stdin !== spec.stdin) fail(`${action} ${spec.stdin ? "requires" : "reads no"} stdin`);
   const output = flags.json === true ? "json" as const : "text" as const;
   if (action === "call") {
-    const persona = stringFlag(flags.persona, "call requires --persona <name>", fail);
     return {
       command: action,
-      persona,
+      persona: positionals[0]!,
       ...(typeof flags.cwd === "string" ? { cwd: flags.cwd } : {}),
       ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
       output,

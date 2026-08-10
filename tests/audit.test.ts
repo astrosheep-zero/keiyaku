@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import test from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keiyaku, KeiyakuRefused, Repo, type KeiyakuRefusal } from "../src/index.js";
 import { decodeContractDocument, verificationDefinition } from "../src/body/decode.js";
 import { repositoryAt } from "../src/carrier/repository.js";
 import { entryUlid, gate } from "../src/core/facts/types.js";
@@ -20,6 +20,14 @@ function repositoryWithMain(): TestGitRepository {
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   return repository;
+}
+
+function refused(expected: KeiyakuRefusal): (error: unknown) => boolean {
+  return (error) => {
+    assert.ok(error instanceof KeiyakuRefused);
+    assert.deepEqual(error.refusal, expected);
+    return true;
+  };
 }
 
 function verificationBody(script: string | null = "exit 1"): string {
@@ -61,47 +69,42 @@ async function failedStoredVerification(): Promise<Readonly<{
 }>> {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(), workspace: "here", gates: ["verified"] });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
   repository.run(["add", "candidate.txt"]);
   repository.run(["commit", "--quiet", "-m", "candidate"]);
-  const delivered = await bound.value.deliver();
-  assert.equal(delivered.kind, "accepted");
-  const state = await bound.value.state();
+  const delivered = await bound.keiyaku.deliver();
+  const state = await bound.keiyaku.state();
   assert.equal(state.attestations.at(-1)?.data.verdict, "unsatisfied");
   assert.equal(state.attestations.at(-1)?.data.summary, "[1 bash exit 1]");
-  return { repository, contract: bound.value, state };
+  return { repository, contract: bound.keiyaku, state };
 }
 
 test("a verified placement gate without a Verification declaration is refused at bind", async () => {
   const repository = repositoryWithMain();
-  assert.deepEqual(await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
-    markdown: verificationBody(null),
-    workspace: "here",
-    gates: ["verified"],
-  }), {
-    kind: "refused",
-    refusal: { kind: "verification-declaration-invalid" },
-  });
+  await assert.rejects(
+    Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
+      markdown: verificationBody(null),
+      workspace: "here",
+      gates: ["verified"],
+    }),
+    refused({ kind: "verification-declaration-invalid" }),
+  );
 });
 
 test("an active amend cannot admit verified terms without a Verification declaration", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
-  const before = await bound.value.state();
+  const before = await bound.keiyaku.state();
 
-  assert.deepEqual(await bound.value.amend({
-    markdown: "## Replace: Objective\nKeep declaration admission at the document edge.\n\n",
-    gates: ["verified"],
-  }), {
-    kind: "refused",
-    refusal: { kind: "verification-declaration-invalid", contractId: before.id },
-  });
+  await assert.rejects(
+    bound.keiyaku.amend({
+      markdown: "## Replace: Objective\nKeep declaration admission at the document edge.\n\n",
+      gates: ["verified"],
+    }),
+    refused({ kind: "verification-declaration-invalid", contractId: before.id }),
+  );
 
-  const after = await bound.value.state();
+  const after = await bound.keiyaku.state();
   assert.equal(after.head, before.head);
   assert.deepEqual(after.terms, before.terms);
 });
@@ -109,26 +112,22 @@ test("an active amend cannot admit verified terms without a Verification declara
 test("terminal amend refusal outranks a missing Verification declaration", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
-  const id = (await bound.value.state()).id;
-  assert.equal((await bound.value.abandon()).kind, "accepted");
+  const id = (await bound.keiyaku.state()).id;
+  await bound.keiyaku.abandon();
 
-  assert.deepEqual(await bound.value.amend({
-    markdown: "## Replace: Objective\nNo longer actionable.\n\n",
-    gates: ["verified"],
-  }), {
-    kind: "refused",
-    refusal: { kind: "terminal", contractId: id },
-  });
+  await assert.rejects(
+    bound.keiyaku.amend({
+      markdown: "## Replace: Objective\nNo longer actionable.\n\n",
+      gates: ["verified"],
+    }),
+    refused({ kind: "terminal", contractId: id }),
+  );
 });
 
 test("amend between document derivation and attempt returns document-moved", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
-  const state = await bound.value.state();
+  const state = await bound.keiyaku.state();
   const decoded = decodeContractDocument(state.terms.document.bytes);
   const derivation = {
     document: decoded.document.key,
@@ -139,8 +138,7 @@ test("amend between document derivation and attempt returns document-moved", asy
       contractId: state.id,
     }),
   };
-  const amended = await bound.value.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
-  assert.equal(amended.kind, "accepted");
+  const amended = await bound.keiyaku.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
   const scope = scopeOperation({ coordinate: repository.path });
   const refusal = { kind: "document-moved", contractId: state.id };
 
@@ -154,11 +152,9 @@ test("read-only audit returns its initial observation when verification is skipp
     markdown: verificationBody(null),
     workspace: "here",
   });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
 
   const scope = scopeOperation({ coordinate: repository.path });
-  const contractId = (await bound.value.state()).id;
+  const contractId = (await bound.keiyaku.state()).id;
   const initial = readAudit(scope, contractId, gate("reviewed"));
   const decoded = decodeContractDocument(initial.state!.terms.document.bytes);
   const pending = auditOperation({
@@ -176,13 +172,12 @@ test("read-only audit returns its initial observation when verification is skipp
   });
   const amendment = new Promise<void>((resolve, reject) => {
     process.nextTick(() => {
-      void bound.value.amend({ markdown: [
+      void bound.keiyaku.amend({ markdown: [
         "## Replace: Objective",
         "Keep the original audit observation.",
         "",
       ].join("\n") }).then((result) => {
         try {
-          assert.equal(result.kind, "accepted");
           resolve();
         } catch (error) {
           reject(error);
@@ -193,8 +188,6 @@ test("read-only audit returns its initial observation when verification is skipp
 
   const result = await pending;
   await amendment;
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("audit was not accepted");
   assert.deepEqual(result.value, initial.report);
   assert.deepEqual(result.facts, []);
   assert.equal(result.head, initial.state.head);
@@ -231,14 +224,12 @@ test("audit accepts an attestation refusal as a typed attempt without facts", as
     "~~~",
     "",
   ].join("\n") });
-  assert.equal(amended.kind, "accepted");
 
   const pending = contract.audit();
   const abandoned = new Promise<void>((resolve, reject) => {
     setTimeout(() => {
       void contract.abandon().then((result) => {
         try {
-          assert.equal(result.kind, "accepted");
           resolve();
         } catch (error) {
           reject(error);
@@ -248,8 +239,6 @@ test("audit accepts an attestation refusal as a typed attempt without facts", as
   });
   const result = await pending;
   await abandoned;
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("audit was not accepted");
   assert.deepEqual(result.facts, []);
   assert.deepEqual(result.value.attempt, {
     refusal: { kind: "terminal", contractId: (await contract.state()).id },
@@ -265,7 +254,6 @@ test("audit admits Verification testimony for its captured old subject", async (
     "~~~",
     "",
   ].join("\n") });
-  assert.equal(delayed.kind, "accepted");
   const state = await contract.state();
   const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes));
   if (state.delivery === null || definition === null) throw new Error("audit inputs are absent");
@@ -281,7 +269,6 @@ test("audit admits Verification testimony for its captured old subject", async (
         "",
       ].join("\n") }).then((result) => {
         try {
-          assert.equal(result.kind, "accepted");
           resolve();
         } catch (error) {
           reject(error);
@@ -291,8 +278,6 @@ test("audit admits Verification testimony for its captured old subject", async (
   });
   const audited = await pending;
   await amended;
-  assert.equal(audited.kind, "accepted");
-  if (audited.kind !== "accepted") throw new Error("audit was not accepted");
   assert.deepEqual(audited.facts.map((fact) => fact.kind), ["attestation"]);
   assert.equal((await contract.state()).attestations.at(-1)?.data.subject, dependencyKeySet([
     { kind: "snapshot", value: state.delivery.data.candidate },
@@ -318,7 +303,6 @@ test("stored Verification records a result captured before its declaration chang
         "~~~",
         "",
       ].join("\n") });
-      assert.equal(amended.kind, "accepted");
       return produceVerification(input);
     },
   });

@@ -25,8 +25,10 @@ Caller value-shape and Markdown errors throw `TypeError` before repository
 observation, including when an addressed contract does not exist. Persisted
 authority that cannot be decoded or legally folded throws the exported
 `AuthorityCorruptionError`. Other unexpected infrastructure and private
-invariant failures remain ordinary exceptions; none is converted into an
-`Outcome` arm.
+invariant failures remain ordinary exceptions. Domain refusal throws
+`KeiyakuRefused`; a terminal attempt that admitted no fact throws
+`KeiyakuRetry`. Both carry a closed machine-readable code derived from their
+single structured detail value.
 
 ## Construction And Scope
 
@@ -174,18 +176,18 @@ keiyaku.amend(input: {
 keiyaku.deliver(input?: {
   actor?: ActorId
   message?: string
-}): Promise<Outcome<Delivery>>
+}): Promise<MutationResult<Delivery>>
 keiyaku.review(input: {
   verdict: AttestationVerdict
   actor?: ActorId
   summary?: string
-}): Promise<Outcome<Review>>
+}): Promise<MutationResult<Review>>
 keiyaku.abandon(input?: {
   actor?: ActorId
   note?: string
-}): Promise<Outcome<void>>
-keiyaku.arc(input: { markdown: string; actor?: ActorId }): Promise<Outcome<void>>
-keiyaku.audit(input?: { actor?: ActorId }): Promise<Outcome<AuditReport>>
+}): Promise<MutationResult<void>>
+keiyaku.arc(input: { markdown: string; actor?: ActorId }): Promise<MutationResult<void>>
+keiyaku.audit(input?: { actor?: ActorId }): Promise<MutationResult<AuditReport>>
 keiyaku.reconcile(): Promise<ReconcileReport>
 
 delivery.diff(): Promise<string | null>
@@ -217,18 +219,27 @@ Delivery has no review operation. `message` overrides only a mechanically
 materialized commit message; omitting it uses the transport template in
 [transport.md](transport.md).
 
-## Outcomes And Reports
+## Mutation Results And Errors
 
-The three-arm outcome union has one structural definition in protocol. The
-package root re-exports that definition as `Outcome`; its only library-side
-type operation is to intersect presentation observations into the accepted
-arm. Refused and retry arms pass through unchanged, and accepted-value mapping
-may replace only `value`. `TypedRefusal` is a direct alias of protocol's
-`IntentRefusal`, never a duplicate or widened union. No shared-types module or
-second outcome definition exists.
+Protocol owns its internal three-arm outcome and uses it only to compose an
+invocation. The package root does not export that control-flow structure.
+Library is the sole public facade: it projects accepted protocol outcomes into
+success values, throws typed domain failures, and performs the mandatory
+post-admission reconciliation before returning. A failed reconciliation makes
+the public invocation fail even though admission already established the
+Contract; the typed failure carries that admission so the caller can inspect
+or repair the existing Contract instead of minting another one. CLI calls this
+same facade; it does not interpret protocol outcomes or reconcile accepted
+mutations itself.
+
+`MutationResult` is invocation-scoped observation, never Contract state or a
+durable receipt. `facts` and `head` come only from the accepted protocol
+admission. `effects` and `lags` come only from the one mandatory library
+reconciliation. There is no nested `receipt`, duplicate fact field, or result
+stored on a `Keiyaku` handle.
 
 ```ts
-type TypedRetry =
+type KeiyakuRetryReason =
   | Readonly<{ kind: "exhausted" }>
   | Readonly<{ kind: "collision" }>
   | Readonly<{
@@ -236,15 +247,35 @@ type TypedRetry =
       diagnostic: string
     }>
 
-type Outcome<A, Observation extends object = Record<never, never>> =
-  | ({
-      kind: "accepted"
-      facts: readonly Fact[]
-      head: ContractHead
-      value: A
-    } & Observation)
-  | { kind: "refused"; refusal: TypedRefusal }
-  | { kind: "retry"; reason: TypedRetry }
+type MutationResult<A> = Readonly<{
+  facts: readonly Fact[]
+  head: ContractHead
+  value: A
+  effects: readonly TopologyEffect[]
+  lags: readonly Lag[]
+}>
+
+type MutationAdmission = Readonly<{
+  keiyaku: Keiyaku
+  facts: readonly Fact[]
+  head: ContractHead
+}>
+
+class KeiyakuReconcileFailed extends Error {
+  readonly admission: MutationAdmission
+  readonly report: Extract<ReconcileReport, { kind: "failed" }>
+  readonly code: "reconcile-failed" // derived from report.failure.kind
+}
+
+class KeiyakuRefused extends Error {
+  readonly refusal: KeiyakuRefusal
+  readonly code: KeiyakuRefusal["kind"] // derived getter over refusal.kind
+}
+
+class KeiyakuRetry extends Error {
+  readonly reason: KeiyakuRetryReason
+  readonly code: KeiyakuRetryReason["kind"] // derived getter over reason.kind
+}
 
 type WorktreeLeak = Readonly<{
   path: string
@@ -261,16 +292,21 @@ type RegionObservation = Readonly<
   | { overlapFailure: string; overlaps?: never }
 >
 
-type BindResult = Outcome<Keiyaku, RegionObservation>
+type BindResult = Readonly<
+  Omit<MutationResult<Keiyaku>, "value"> &
+  { keiyaku: Keiyaku } &
+  RegionObservation
+>
 
-type AmendResult = Outcome<
-  void,
-  RegionObservation & Readonly<{ documentDiff: string }>
+type AmendResult = Readonly<
+  MutationResult<void> &
+  RegionObservation &
+  { documentDiff: string }
 >
 
 type StepStop<R> = Readonly<
   | { refusal: R; retry?: never }
-  | { retry: TypedRetry; refusal?: never }
+  | { retry: KeiyakuRetryReason; refusal?: never }
 >
 
 type AttestationRefusal = Readonly<{
@@ -326,12 +362,12 @@ type Review = Readonly<{
 }>
 ```
 
-`RegionObservation` is structural notation for the accepted arms of `bind` and
-`amend`, not another package-root export. Exactly one property is present.
+`RegionObservation` is structural notation for successful `bind` and `amend`
+results, not another package-root export. Exactly one property is present.
 `overlaps`, including `[]`, means the observation completed. `overlapFailure`
 means admission succeeded but the non-authoritative observation did not
-complete; it contains the verbatim diagnostic and does not change the accepted
-outcome. `RegionOverlap` is the only exported Region result type.
+complete; it contains the verbatim diagnostic and does not change the mutation
+result. `RegionOverlap` is the only exported Region result type.
 
 The Region report remains a library-edge observation. It is not passed to
 protocol, core, or transport, and it never crosses those layers as Region
@@ -349,12 +385,12 @@ derive its complete replacement no longer matches the attempt observation.
 `deliver` and audit's read-only methodology selection expose
 `DocumentMovedRefusal` for their key-stamped document derivation. Review receives no decoded-document
 derivation and does not expose `document-moved`; its testimony remains keyed to
-the subject actually reviewed. `TypedRefusal` therefore includes
+the subject actually reviewed. `KeiyakuRefusal` therefore includes
 `terms-moved` for amend and `DocumentMovedRefusal` for deliver and audit. That
 refusal ends the invocation; it does not trigger a reread, auto-retry, or
 adoption of a new document revision.
 
-`TargetInputRefusal` is the `TypedRefusal` member for `Keiyaku.bind` target
+`TargetInputRefusal` is the `KeiyakuRefusal` member for `Keiyaku.bind` target
 validation and existence. It has no contract coordinate because a rejected
 target establishes no contract identity.
 
@@ -364,15 +400,15 @@ exact whole-document before and after bytes. It is presentation data only: it
 is not document-body law, a journal fact, a receipt, cache state, or a gate
 input, and it does not cross below the library boundary.
 
-An accepted outcome contains every fact admitted by that invocation and the
-resulting contract-head scalar. Successful Verification attestation and
+Every successful mutation result contains every fact admitted by that
+invocation and the resulting contract-head scalar. Successful Verification attestation and
 placement therefore appear only in `facts`; their named stop channels are
-absent. Package-root outcomes expose no `Receipt`, `prior`, or folded `snapshot`.
+absent. Package-root results expose no `Receipt`, `prior`, or folded `snapshot`.
 Protocol may retain prior and snapshot values while composing one invocation,
 but they are process-local implementation data with no public or persistent
 reader.
 
-An unsuccessful trailing obligation does not change the outer accepted outcome.
+An unsuccessful trailing obligation does not change the successful leading act.
 The `verification` or `placement` channel contains the typed reason why that
 obligation admitted no fact. Verification process outcomes and attestation
 admission stops share `VerificationStop`; placement admission stops use
@@ -381,8 +417,22 @@ present on one Delivery. A channel is absent exactly when its obligation was
 not applicable or admitted its fact; callers distinguish those cases through
 `facts`. These values remain process-local and non-authoritative; the journal
 is the sole lifecycle authority.
-Programmer value-shape errors throw; domain refusals and carrier races use the
-closed `Outcome` union.
+
+`KeiyakuRefused` stores the complete structured `KeiyakuRefusal`; its `code`
+getter derives from `refusal.kind`. `KeiyakuRetry` does the same for
+`KeiyakuRetryReason`. The getters are not second stored discriminants. Callers
+can switch exhaustively on `code` and inspect the structured value when the
+refusal carries a contract coordinate or the retry carries a diagnostic.
+`KeiyakuReconcileFailed` stores the durable admission and transport's complete
+failed reconcile report; its `code` derives from `report.failure.kind`.
+Programmer value-shape errors and authority corruption retain their distinct
+exception types.
+
+`KeiyakuReconcileFailed` is a user-visible failed invocation, not a successful
+result with a warning. Its `admission.keiyaku` is nevertheless real and
+addresses the Contract already written by the journal. `KeiyakuRefused` and
+`KeiyakuRetry` remain reserved for invocations that admitted no fact. The
+facade never abandons an admitted Contract as error recovery.
 
 Retry details are process-local and non-authoritative. Exhaustion and canonical
 entry collisions carry no admission, contract, journal, or byte payload. A
@@ -390,13 +440,13 @@ known failed atomic transaction carries only `publication-failed` and its
 verbatim diagnostic. It does not claim which asserted ref moved; a later
 invocation prepares from a fresh observation.
 
-Outcome identity has one source per arm. An accepted result carries the
-contract born or addressed by its value, facts, and head. A refusal carries a
-contract identity only when its typed refusal concerns an existing contract.
-A retry never carries contract identity: it asserts that no new identity was
-established, and retrying bind mints a new identity. A caller addressing an
-existing contract already owns that coordinate and adapters use that input;
-they do not mine a second identity from an outcome.
+Result identity has one source. A successful bind names the born Contract only
+through `keiyaku` and its facts; later mutation results address the handle the
+caller already owns. A refusal carries a contract identity only when its
+structured refusal concerns an existing contract. A retry never carries
+contract identity: it asserts that no new identity was established, and
+retrying bind mints a new identity. Adapters keep their addressed input instead
+of mining another coordinate from an error.
 
 ```ts
 type AuditReport = Readonly<{
@@ -428,13 +478,14 @@ Attestation timeline entries copy their gate, verdict, and optional bounded
 summary from that fact. Reports contain no journal entries, body snapshots,
 detached raw logs, artifacts, or evidence bytes.
 
-`audit()` always returns `Outcome<AuditReport>`. Its leading act is the report
-observation, so a read-only audit and any Verification stop remain accepted with
-zero facts. A successful Verification attestation appears in `facts`; a process
-nonterminal or attestation refusal/retry appears in `report.attempt`. Audit's
-top-level refused/retry arms come only from its leading observation, such as a
-missing contract. None of these cases creates a second observation authority or
-duplicate boolean flag.
+`audit()` returns `MutationResult<AuditReport>` when its leading observation and
+mandatory reconciliation complete. A read-only audit and any Verification stop
+remain a successful result with zero facts. A successful Verification
+attestation appears in `facts`; a process nonterminal or attestation
+refusal/retry appears in `report.attempt`. A leading refusal or retry, such as a
+missing contract, uses the same `KeiyakuRefused` or `KeiyakuRetry` rejection as
+every other public mutation. None of these cases creates a second observation
+authority or duplicate boolean flag.
 
 Verification may use one process-local disposable worktree. Failure to remove
 it after a fact was admitted cannot change the accepted arm, facts, or exit

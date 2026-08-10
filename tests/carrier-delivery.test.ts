@@ -10,7 +10,7 @@ import { observeContract } from "../src/carrier/observe.js";
 import { materializeVerificationCandidate, readDeliveryDiff } from "../src/carrier/verification.js";
 import { deliveryWorktreePath, reconcile } from "../src/carrier/reconcile.js";
 import { contractId } from "../src/core/facts/types.js";
-import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId } from "../src/index.js";
+import { AuthorityCorruptionError, Keiyaku, KeiyakuReconcileFailed, Repo, type ContractId } from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
@@ -48,9 +48,7 @@ async function boundContract(): Promise<Readonly<{ repository: TestGitRepository
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was refused");
-  return { repository, id: (await bound.value.state()).id };
+  return { repository, id: (await bound.keiyaku.state()).id };
 }
 
 function preparedDelivery(repository: TestGitRepository, id: ContractId) {
@@ -103,11 +101,10 @@ test("delivery preparation refuses an unregistered directory at the managed work
   const repository = makeGitRepository();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was refused");
-  const state = await bound.value.state();
+  const state = await bound.keiyaku.state();
   const carrier = repositoryAt(repository.path);
   const path = deliveryWorktreePath(carrier, state.id);
+  repository.run(["worktree", "remove", path]);
   mkdirSync(path, { recursive: true });
   repository.run(["-C", path, "init", "--quiet"]);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "foreign"]);
@@ -126,16 +123,55 @@ test("reconcile recreates a registered managed worktree whose directory disappea
   const repository = makeGitRepository();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was refused");
-  await bound.value.reconcile();
-  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.value.state()).id);
+  await bound.keiyaku.reconcile();
+  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   renameSync(path, `${path}-moved`);
 
-  const repaired = await bound.value.reconcile();
+  const repaired = await bound.keiyaku.reconcile();
 
   assert.equal(existsSync(path), true);
   assert.equal(repaired.effects.some((effect) => effect.kind === "worktree" && effect.action === "created"), true);
+});
+
+test("managed bind preserves its admitted Contract when worktree reconciliation fails", async () => {
+  const repository = makeGitRepository();
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  let failure: KeiyakuReconcileFailed | undefined;
+
+  await assert.rejects(
+    withGitShim(
+      [
+        'if [ "$1" = "worktree" ] && [ "$2" = "add" ]; then',
+        '  printf "forced managed worktree failure\\n" >&2',
+        "  exit 1",
+        "fi",
+        'exec "$KEIYAKU_REAL_GIT" "$@"',
+      ].join("\n"),
+      {},
+      () => Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" }),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof KeiyakuReconcileFailed);
+      failure = error;
+      assert.deepEqual(error.admission.facts.map((fact) => fact.kind), ["bind", "bound"]);
+      assert.notEqual(error.admission.head, null);
+      assert.equal(error.report.kind, "failed");
+      assert.equal(error.report.failure.kind, "reconcile-failed");
+      assert.equal(error.report.failure.stage, "effect");
+      assert.match(error.report.failure.diagnostic, /forced managed worktree failure/);
+      assert.deepEqual(error.report.effects.map((effect) => [effect.kind, effect.action]), [["ref", "created"]]);
+      assert.deepEqual(error.report.lag, []);
+      return true;
+    },
+  );
+
+  assert.ok(failure);
+  const state = await failure.admission.keiyaku.state();
+  assert.equal(state.id, failure.admission.facts[0]?.contract);
+  assert.equal(state.head, failure.admission.head);
+  assert.equal(state.terminal, null);
+  const observation = await Keiyaku.observe({ repo: Repo.at({ path: repository.path }), id: state.id });
+  assert.equal(observation.kind, "present");
 });
 
 test("distinct no-op candidates share the empty patch ChangeId", async () => {
@@ -285,29 +321,23 @@ test("a terminal cleanup can leave a delivery diff unavailable after Git prunes 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const predecessor = repository.run(["rev-parse", "HEAD"]).trim();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was refused");
 
-  await bound.value.reconcile();
-  const worktreePath = deliveryWorktreePath(repositoryAt(repository.path), (await bound.value.state()).id);
+  await bound.keiyaku.reconcile();
+  const worktreePath = deliveryWorktreePath(repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   writeFileSync(join(worktreePath, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktreePath, "add", "candidate.txt"]);
   repository.run(["-C", worktreePath, "commit", "--quiet", "-m", "candidate"]);
-  const delivered = await bound.value.deliver();
-  assert.equal(delivered.kind, "accepted");
-  if (delivered.kind !== "accepted") throw new Error("deliver was refused");
-  await bound.value.reconcile();
+  await bound.keiyaku.deliver();
+  await bound.keiyaku.reconcile();
 
-  const reviewed = await bound.value.review({ verdict: "satisfied" });
-  assert.equal(reviewed.kind, "accepted");
-  assert.ok((await bound.value.state()).terminal);
-  const reconciled = await bound.value.reconcile();
-  assert.equal(reconciled.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"), true);
+  const reviewed = await bound.keiyaku.review({ verdict: "satisfied" });
+  assert.ok((await bound.keiyaku.state()).terminal);
+  assert.equal(reviewed.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"), true);
 
   repository.run(["reflog", "expire", "--expire=now", "--all"]);
   repository.run(["gc", "--prune=now"]);
 
-  const recovered = await bound.value.delivery();
+  const recovered = await bound.keiyaku.delivery();
   assert.ok(recovered);
   assert.equal(await recovered.diff(), null);
 });
@@ -318,25 +348,21 @@ test("terminal reconcile retains an untracked managed worktree and its reachabil
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was refused");
-  await bound.value.reconcile();
-  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.value.state()).id);
+  await bound.keiyaku.reconcile();
+  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "tendered candidate"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
-  const delivered = await bound.value.deliver();
-  assert.equal(delivered.kind, "accepted");
+  await bound.keiyaku.deliver();
   writeFileSync(join(path, "untracked-agent-work.txt"), "retain me\n");
-  const abandoned = await bound.value.abandon();
-  assert.equal(abandoned.kind, "accepted");
+  await bound.keiyaku.abandon();
 
-  const reconciled = await bound.value.reconcile();
+  const reconciled = await bound.keiyaku.reconcile();
 
   assert.deepEqual(reconciled.lag, [{ kind: "worktree-retained", path }]);
   assert.equal(existsSync(path), true);
   assert.equal(repository.run(["-C", path, "status", "--porcelain", "--untracked-files=all"]), "?? untracked-agent-work.txt\n");
-  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor((await bound.value.state()).id)), candidate);
-  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor((await bound.value.state()).id)), candidate);
+  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor((await bound.keiyaku.state()).id)), candidate);
+  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor((await bound.keiyaku.state()).id)), candidate);
 });
 
 test("terminal reconcile retains a clean managed worktree whose HEAD is not the tender", async () => {
@@ -345,26 +371,22 @@ test("terminal reconcile retains a clean managed worktree whose HEAD is not the 
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was refused");
-  await bound.value.reconcile();
-  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.value.state()).id);
+  await bound.keiyaku.reconcile();
+  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "tendered candidate"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
-  const delivered = await bound.value.deliver();
-  assert.equal(delivered.kind, "accepted");
+  await bound.keiyaku.deliver();
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "later agent work"]);
   const later = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
-  const abandoned = await bound.value.abandon();
-  assert.equal(abandoned.kind, "accepted");
+  await bound.keiyaku.abandon();
 
-  const reconciled = await bound.value.reconcile();
+  const reconciled = await bound.keiyaku.reconcile();
 
   assert.deepEqual(reconciled.lag, [{ kind: "worktree-retained", path }]);
   assert.equal(repository.run(["-C", path, "status", "--porcelain", "--untracked-files=all"]), "");
   assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), later);
-  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor((await bound.value.state()).id)), candidate);
-  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor((await bound.value.state()).id)), candidate);
+  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor((await bound.keiyaku.state()).id)), candidate);
+  assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor((await bound.keiyaku.state()).id)), candidate);
 });
 
 test("a clean no-delivery abandonment releases the managed worktree from its start", async () => {
@@ -373,20 +395,15 @@ test("a clean no-delivery abandonment releases the managed worktree from its sta
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was refused");
   const start = repository.run(["rev-parse", "HEAD"]).trim();
-  await bound.value.reconcile();
-  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.value.state()).id);
-  const abandoned = await bound.value.abandon();
-  assert.equal(abandoned.kind, "accepted");
+  await bound.keiyaku.reconcile();
+  const path = deliveryWorktreePath(repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const abandoned = await bound.keiyaku.abandon();
 
-  const reconciled = await bound.value.reconcile();
-
-  assert.deepEqual(reconciled.lag, []);
-  assert.equal(reconciled.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"), true);
+  assert.deepEqual(abandoned.lags, []);
+  assert.equal(abandoned.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"), true);
   assert.equal(existsSync(path), false);
-  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor((await bound.value.state()).id)), null);
+  assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor((await bound.keiyaku.state()).id)), null);
   assert.equal(repository.run(["cat-file", "-e", `${start}^{commit}`]), "");
 });
 

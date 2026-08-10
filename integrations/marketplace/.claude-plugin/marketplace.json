@@ -1,0 +1,5 @@
+{
+  "name": "keiyaku",
+  "owner": { "name": "Keiyaku" },
+  "plugins": [{ "name": "keiyaku", "source": "./plugins/keiyaku" }]
+}

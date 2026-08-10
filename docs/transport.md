@@ -140,6 +140,12 @@ fresh external observation. It is idempotent without process-local receipt data
 and across a process restart. It writes no journal fact, never reverses
 admission, and is the only repair primitive for accepted-but-lagged effects.
 
+Failure to observe or apply the requested topology is an explicit reconcile
+result, not an untyped Git exception. The failed result retains every effect
+that completed before the failure and identifies whether observation or effect
+application failed. It makes no claim that an unreported effect did or did not
+happen. Authority corruption and internal invariant failure remain exceptions.
+
 For an active worktree contract, reconciliation creates the deterministic
 linked worktree only when it is missing, and repairs only its Keiyaku-owned
 refs and pins. It never resets, switches, or detaches an existing worktree.
@@ -163,10 +169,17 @@ accepted outcome.
 type ReconcileResult = Readonly<{
   effects: readonly Effect[]
   lag: readonly ReconcileLag[]
-  namespaceContext?:
-    | Readonly<{ kind: "installed" | "kept" }>
-    | Readonly<{ kind: "failed"; diagnostic: string }>
-}>
+}> & Readonly<
+  | { kind: "complete" }
+  | {
+      kind: "failed"
+      failure: Readonly<{
+        kind: "reconcile-failed"
+        stage: "observation" | "effect"
+        diagnostic: string
+      }>
+    }
+>
 
 type ReconcileLag = Readonly<{
   kind: "worktree-retained"
@@ -186,36 +199,47 @@ type Effect =
       after: GitObjectId | null
       action: "created" | "updated" | "removed" | "unchanged"
     }>
+  | Readonly<{
+      kind: "namespace-context"
+      path: string
+      action: "installed" | "kept"
+    }>
 ```
 
 `keiyaku.reconcile()` returns the contract's `ReconcileResult` as its public
 `ReconcileReport`. World reconciliation returns:
 
 ```ts
-type RepoReconcileItem =
-  | Readonly<{ contractId: ContractId; kind: "reconciled"; report: ReconcileReport }>
-  | Readonly<{ contractId: ContractId; kind: "failed"; diagnostic: string }>
+type RepoReconcileItem = Readonly<{
+  contractId: ContractId
+  report: ReconcileReport
+}>
 
 type RepoReconcileReport = Readonly<{
   contracts: readonly RepoReconcileItem[]
 }>
 ```
 
-It contains one typed item for every observed contract. A failed item does not
-discard successful reports or become an aggregate exception.
+It contains one typed report for every observed contract. A failed report does
+not discard successful reports or become an aggregate exception. Contract and
+world reconciliation use the same failure channel; world reconciliation does
+not wrap observation failure in a second item-level discriminant.
 
 For an active managed worktree, reconciliation installs or repairs the local
 Task namespace context from the admitted ContractId contract segment after the
 worktree exists. It rewrites only an absent or malformed marker and preserves a
-valid override. A context failure is reported by `namespaceContext` and never
-reverses or gates journal admission. Reconcile is the idempotent repair path.
-Here workspaces have no transport-owned context duty.
+valid override. A successful operation is a `namespace-context` effect; a
+failure is the report's single `reconcile-failed` channel and never reverses or
+gates journal admission. Reconcile is the idempotent repair path. Here
+workspaces have no transport-owned context duty.
 
 Effects and lag are transparent data. `changed` is derivable from effect
 actions, resource coordinates are already in each effect, and lifecycle state
 remains a journal projection. Commands and public reports expose only effects
 actually observed in that operation and the flat `lag` array above; lag is not
-nested in an effect or a second cleanup report.
+nested in an effect or a second cleanup report. A failed report is safe to
+retry because every later reconcile starts from durable facts and fresh
+topology rather than an in-memory receipt.
 
 ## Identities And Bytes
 

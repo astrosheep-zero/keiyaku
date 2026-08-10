@@ -10,6 +10,7 @@ import {
   type GitRepository,
 } from "./repository.js";
 import { contractId, contractSegment, type ContractId, type ContractState, type SnapshotId } from "../core/facts/types.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectIdForSnapshot } from "./identity.js";
 import { repairNamespaceContext } from "../namespace-context.js";
 
@@ -26,24 +27,32 @@ export type Effect =
       before: GitOid | null;
       after: GitOid | null;
       action: "created" | "updated" | "removed" | "unchanged";
+    }>
+  | Readonly<{
+      kind: "namespace-context";
+      path: string;
+      action: "installed" | "kept";
     }>;
 type ReconcileInput = Readonly<{ repository: GitRepository; state: ContractState | null }>;
 export type ReconcileLag = Readonly<{
   kind: "worktree-retained";
   path: string;
 }>;
-export type ReconcileResult = Readonly<{
+type ReconcileObservation = Readonly<{
   effects: readonly Effect[];
   lag: readonly ReconcileLag[];
-  namespaceContext?: NamespaceContextResult;
 }>;
-export type NamespaceContextResult =
-  | Readonly<{ kind: "installed" | "kept" }>
-  | Readonly<{ kind: "failed"; diagnostic: string }>;
+export type ReconcileFailure = Readonly<{
+  kind: "reconcile-failed";
+  stage: "observation" | "effect";
+  diagnostic: string;
+}>;
+export type ReconcileResult = ReconcileObservation & Readonly<
+  | { kind: "complete" }
+  | { kind: "failed"; failure: ReconcileFailure }
+>;
 type ReconcileBatchContract = Readonly<{ id: ContractId; state: ContractState | null }>;
-type ReconcileBatchItem =
-  | Readonly<{ kind: "reconciled"; contract: ContractId; result: ReconcileResult }>
-  | Readonly<{ kind: "failed"; contract: ContractId; error: unknown }>;
+type ReconcileBatchItem = Readonly<{ contract: ContractId; result: ReconcileResult }>;
 
 type WorktreeTopology = Readonly<{ paths: Set<string> }>;
 
@@ -69,9 +78,26 @@ function acquireWorktreeTopology(repository: GitRepository): WorktreeTopology {
 function fromPrimaryWorktree(repository: GitRepository): GitRepository {
   return { ...repository, effectiveCwd: repository.primaryWorktree };
 }
-function reconcileNamespaceContext(path: string, contract: ContractId): NamespaceContextResult {
-  try { return { kind: repairNamespaceContext(path, [contractSegment(contract)]) }; }
-  catch (error) { return { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) }; }
+function diagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function rethrowNonReconcileFailure(error: unknown): void {
+  if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
+}
+
+function complete(effects: readonly Effect[] = [], lag: readonly ReconcileLag[] = []): ReconcileResult {
+  return { kind: "complete", effects, lag };
+}
+
+function failed(
+  stage: ReconcileFailure["stage"],
+  error: unknown,
+  effects: readonly Effect[] = [],
+  lag: readonly ReconcileLag[] = [],
+): ReconcileResult {
+  rethrowNonReconcileFailure(error);
+  return { kind: "failed", effects, lag, failure: { kind: "reconcile-failed", stage, diagnostic: diagnostic(error) } };
 }
 
 function worktree(repository: GitRepository, topology: WorktreeTopology, path: string, desired: SnapshotId): Effect {
@@ -122,41 +148,50 @@ function removeWorktree(
 }
 
 function reconcileWithTopology({ repository, state }: ReconcileInput, topology: WorktreeTopology): ReconcileResult {
-  if (!state) return { effects: [], lag: [] };
-  const ref = deliveryRefFor(state.id), pin = candidatePinRefFor(state.id), path = deliveryWorktreePath(repository, state.id);
-  if (state.coordinates.workspace === "here") {
+  const effects: Effect[] = [];
+  const lag: ReconcileLag[] = [];
+  try {
+    if (!state) return complete(effects, lag);
+    const ref = deliveryRefFor(state.id), pin = candidatePinRefFor(state.id), path = deliveryWorktreePath(repository, state.id);
+    if (state.coordinates.workspace === "here") {
+      if (state.terminal) effects.push(removeRef(repository, pin));
+      else if (state.bound) effects.push(state.delivery === null
+        ? removeRef(repository, pin)
+        : updateRef(repository, pin, state.delivery.data.candidate));
+      return complete(effects, lag);
+    }
     if (state.terminal) {
-      const effects = [removeRef(repository, pin)];
-      return { effects, lag: [] };
+      const expected = state.delivery === null
+        ? [state.coordinates.start]
+        : [state.delivery.data.candidate, state.coordinates.start];
+      const primary = fromPrimaryWorktree(repository);
+      const removal = removeWorktree(primary, topology, path, expected);
+      if (removal.retained) {
+        effects.push(updateRef(primary, ref, state.delivery?.data.candidate ?? state.coordinates.start));
+        effects.push(state.delivery === null ? removeRef(primary, pin) : updateRef(primary, pin, state.delivery.data.candidate));
+        effects.push(removal.effect);
+        lag.push({ kind: "worktree-retained", path });
+        return complete(effects, lag);
+      }
+      effects.push(removal.effect);
+      effects.push(removeRef(primary, ref));
+      effects.push(removeRef(primary, pin));
+      return complete(effects, lag);
     }
-    if (!state.bound) return { effects: [], lag: [] };
-    const effects = [state.delivery === null ? removeRef(repository, pin) : updateRef(repository, pin, state.delivery.data.candidate)];
-    return { effects, lag: [] };
+    if (!state.bound) return complete(effects, lag);
+    const desired = state.delivery?.data.candidate ?? state.coordinates.start;
+    effects.push(updateRef(repository, ref, desired));
+    effects.push(worktree(repository, topology, path, desired));
+    effects.push(state.delivery ? updateRef(repository, pin, state.delivery.data.candidate) : removeRef(repository, pin));
+    effects.push({
+      kind: "namespace-context",
+      path,
+      action: repairNamespaceContext(path, [contractSegment(state.id)]),
+    });
+    return complete(effects, lag);
+  } catch (error) {
+    return failed("effect", error, effects, lag);
   }
-  if (state.terminal) {
-    const expected = state.delivery === null
-      ? [state.coordinates.start]
-      : [state.delivery.data.candidate, state.coordinates.start];
-    const primary = fromPrimaryWorktree(repository);
-    const removal = removeWorktree(primary, topology, path, expected);
-    if (removal.retained) {
-      return {
-        effects: [
-          updateRef(primary, ref, state.delivery?.data.candidate ?? state.coordinates.start),
-          state.delivery === null ? removeRef(primary, pin) : updateRef(primary, pin, state.delivery.data.candidate),
-          removal.effect,
-        ],
-        lag: [{ kind: "worktree-retained", path }],
-      };
-    }
-    const effects = [removal.effect, removeRef(primary, ref), removeRef(primary, pin)];
-    return { effects, lag: [] };
-  }
-  if (!state.bound) return { effects: [], lag: [] };
-  const desired = state.delivery?.data.candidate ?? state.coordinates.start;
-  const effects = [updateRef(repository, ref, desired), worktree(repository, topology, path, desired)];
-  if (state.delivery) effects.push(updateRef(repository, pin, state.delivery.data.candidate)); else effects.push(removeRef(repository, pin));
-  return { effects, lag: [], namespaceContext: reconcileNamespaceContext(path, state.id) };
 }
 
 function needsWorktreeTopology(state: ContractState | null): boolean {
@@ -164,10 +199,18 @@ function needsWorktreeTopology(state: ContractState | null): boolean {
 }
 
 export function reconcile(input: ReconcileInput): ReconcileResult {
-  const topology = needsWorktreeTopology(input.state)
-    ? acquireWorktreeTopology(input.repository)
-    : { paths: new Set<string>() };
-  return reconcileWithTopology(input, topology);
+  try {
+    const topology = needsWorktreeTopology(input.state)
+      ? acquireWorktreeTopology(input.repository)
+      : { paths: new Set<string>() };
+    return reconcileWithTopology(input, topology);
+  } catch (error) {
+    return failed("observation", error);
+  }
+}
+
+export function reconcileObservationFailure(error: unknown): ReconcileResult {
+  return failed("observation", error);
 }
 
 function reconcileBatchItem(
@@ -175,11 +218,7 @@ function reconcileBatchItem(
   topology: WorktreeTopology,
   contract: ReconcileBatchContract,
 ): ReconcileBatchItem {
-  try {
-    return { kind: "reconciled", contract: contract.id, result: reconcileWithTopology({ repository, state: contract.state }, topology) };
-  } catch (error) {
-    return { kind: "failed", contract: contract.id, error };
-  }
+  return { contract: contract.id, result: reconcileWithTopology({ repository, state: contract.state }, topology) };
 }
 
 /** Reconcile one carrier observation against one mutable, process-local worktree topology. */
@@ -196,9 +235,10 @@ export function reconcileBatch(
     const topology = acquireWorktreeTopology(repository);
     return observed.map((contract) => reconcileBatchItem(repository, topology, contract));
   } catch (error) {
+    const failure = reconcileObservationFailure(error);
     const emptyTopology: WorktreeTopology = { paths: new Set<string>() };
     return observed.map((contract) => needsWorktreeTopology(contract.state)
-      ? { kind: "failed", contract: contract.id, error }
+      ? { contract: contract.id, result: failure }
       : reconcileBatchItem(repository, emptyTopology, contract));
   }
 }

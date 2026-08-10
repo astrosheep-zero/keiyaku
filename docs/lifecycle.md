@@ -289,3 +289,11 @@ cleanup after an accepted admission never throws over that result, changes its
 arm, or changes its exit status. A caller may receive the transient residue
 report defined by the owning public surface, but cleanup is not lifecycle
 authority and does not create a journal, recovery, or reconcile duty.
+
+The public facade adds a separate user-completion boundary after protocol
+admission: mandatory reconciliation of the requested physical topology. A
+failed reconciliation makes that public invocation fail while preserving its
+admitted facts and Contract handle. It does not change the protocol outcome to
+`refused` or `retry`; those arms still mean that no journal fact was admitted.
+The facade never turns infrastructure failure into an automatic `abandoned`
+fact. Repair, inspection, and abandonment remain explicit caller choices.

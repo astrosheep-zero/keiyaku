@@ -46,9 +46,7 @@ async function populatedWorld() {
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind failed");
-  const contract = await bound.value.state();
+  const contract = await bound.keiyaku.state();
   const tasks = Tasks.at({ path: repository.path });
   const added = await tasks.add({ title: "Render status", priority: 0, contractId: contract.id });
   assert.equal(added.kind, "accepted");

@@ -181,8 +181,7 @@ function publishMalformedUnrelatedJournal(repository: ReturnType<typeof reposito
 test("batches full-carrier journal observation into one Git invocation", async () => {
   const repository = repositoryWithHead();
   for (let index = 0; index < 4; index += 1) {
-    const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
-    assert.equal(bound.kind, "accepted");
+    await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   }
 
   const carrier = readCarrier(repositoryAt(repository.path));
@@ -214,9 +213,7 @@ function gitProcessCounts(invocations: readonly string[]): Record<string, number
 test("contract-local admission scopes ancestor discovery to its journal path", async () => {
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
-  const id = (await bound.value.state()).id;
+  const id = (await bound.keiyaku.state()).id;
   const carrier = repositoryAt(repository.path);
   const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] };
   const log = join(repository.path, "ls-tree.log");
@@ -250,9 +247,7 @@ test("contract-local admission scopes ancestor discovery to its journal path", a
 test("known publication failure is returned without a post-result ref read", async () => {
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
-  const id = (await bound.value.state()).id;
+  const id = (await bound.keiyaku.state()).id;
   const carrier = repositoryAt(repository.path);
   const observation = observeContractsForAdmission(carrier, [id]);
   const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] };
@@ -369,9 +364,7 @@ test("single-contract amend object I/O stays fixed as the carrier grows", () => 
 test("runProtocol observes only watched contracts", async () => {
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
-  const id = (await bound.value.state()).id;
+  const id = (await bound.keiyaku.state()).id;
 
   const carrier = readCarrier(repositoryAt(repository.path));
   const malformed = writeBlob(repositoryAt(repository.path), "not a journal\n");
@@ -401,9 +394,7 @@ test("runProtocol observes only watched contracts", async () => {
 test("contract-local intent ignores an unrelated malformed journal", async () => {
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
-  const id = (await bound.value.state()).id;
+  const id = (await bound.keiyaku.state()).id;
   const carrier = repositoryAt(repository.path);
   publishMalformedUnrelatedJournal(carrier);
 
@@ -482,9 +473,7 @@ test("admission reuses frozen journal bytes for a multi-contract placement offer
 test("admission observation retains canonical journal validation", async () => {
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind did not succeed");
-  const id = (await bound.value.state()).id;
+  const id = (await bound.keiyaku.state()).id;
   const carrier = repositoryAt(repository.path);
   const snapshot = readCarrier(carrier);
   const path = contractJournalPath(id);
@@ -769,9 +758,7 @@ test("placement redecides after a world advance and binds a new dependent", asyn
 test("delivery preparation ignores an unrelated malformed journal", async () => {
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
-  const id = (await bound.value.state()).id;
+  const id = (await bound.keiyaku.state()).id;
   const carrier = repositoryAt(repository.path);
   publishMalformedUnrelatedJournal(carrier);
 

@@ -11,7 +11,7 @@ import {
   observeContractsForAdmission,
   type CarrierDecisionObservation,
 } from "../carrier/observe.js";
-import { reconcile, reconcileBatch, type ReconcileResult } from "../carrier/reconcile.js";
+import { reconcile, reconcileBatch, reconcileObservationFailure, type ReconcileResult } from "../carrier/reconcile.js";
 import { NoGitWorldError, repositoryAt, type GitRepository } from "../carrier/repository.js";
 import { readDeliveryDiff } from "../carrier/verification.js";
 import type { WorktreeLeak } from "../carrier/verification.js";
@@ -475,24 +475,23 @@ export async function auditOperation(
 export type ReconcileReport = ReconcileResult;
 
 export function reconcileOperation(input: OperationInput): ReconcileReport {
-  return reconcile({ repository: input.scope, state: observeContract(input.scope, input.contractId).state });
+  try {
+    return reconcile({ repository: input.scope, state: observeContract(input.scope, input.contractId).state });
+  } catch (error) {
+    return reconcileObservationFailure(error);
+  }
 }
 
-type RepoReconcileItem =
-  | Readonly<{ contractId: ContractId; kind: "reconciled"; report: ReconcileReport }>
-  | Readonly<{ contractId: ContractId; kind: "failed"; diagnostic: string }>;
+type RepoReconcileItem = Readonly<{ contractId: ContractId; report: ReconcileReport }>;
 
 export type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>;
-
-function reconcileError(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 export function reconcileAllOperation(input: Readonly<{ scope: RepositoryScope }>): RepoReconcileReport {
   const carrier = input.scope;
   const observation = observeCarrier(carrier);
-  const contracts = reconcileBatch(carrier, [...observation.contracts].map(([id, record]) => ({ id, state: record.state }))).map((item): RepoReconcileItem => (
-    item.kind === "reconciled"
-      ? { contractId: item.contract, kind: "reconciled", report: item.result }
-      : { contractId: item.contract, kind: "failed", diagnostic: reconcileError(item.error) }
-  ));
+  const contracts = reconcileBatch(
+    carrier,
+    [...observation.contracts].map(([id, record]) => ({ id, state: record.state })),
+  ).map((item): RepoReconcileItem => ({ contractId: item.contract, report: item.result }));
   return { contracts };
 }

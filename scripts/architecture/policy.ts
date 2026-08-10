@@ -18,9 +18,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "akuma/heart/index.ts", allow: [types("akuma/identity.ts"), any("akuma/heart/facts.ts"), any("akuma/heart/schema.ts"), any("akuma/heart/rows.ts")] },
     { source: "akuma/provider.ts", allow: [types("akuma/heart/index.ts")] },
     { source: "akuma/activity.ts", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts")] },
-    { source: "akuma/providers/index.ts", allow: [types("akuma/heart/index.ts"), types("akuma/provider.ts"), any("akuma/providers/claude.ts"), any("akuma/providers/codex-app-server.ts")] },
-    { source: "akuma/providers/codex-app-server.ts", allow: [any("akuma/providers/codex-app-server-events.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts"), any("runtime/proc/line-rpc.ts")] },
-    { source: "akuma/providers/codex-app-server-events.ts", allow: [any("akuma/provider.ts"), types("runtime/proc/line-rpc.ts")] },
+    { source: "akuma/providers/index.ts", allow: [types("akuma/heart/index.ts"), types("akuma/provider.ts"), any("akuma/providers/claude.ts"), any("akuma/providers/codex-app-server/index.ts")] },
+    { source: "akuma/providers/codex-app-server/index.ts", allow: [any("akuma/providers/codex-app-server/events.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts"), any("runtime/proc/line-rpc.ts")] },
+    { source: "akuma/providers/codex-app-server/events.ts", allow: [any("akuma/provider.ts"), types("runtime/proc/line-rpc.ts")] },
     { source: "akuma/providers/**", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts"), any("runtime/proc/line-rpc.ts")] },
     { source: "akuma/persona.ts", allow: [types("akuma/heart/index.ts"), any("akuma/identity.ts"), any("akuma/provider.ts", ["ProviderAdapter", "ProviderOptions", "decodeProviderOptions"]), any("akuma/providers/index.ts"), types("settings.ts")] },
     {
@@ -136,7 +136,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "carrier/reconcile.ts",
-      allow: [any("carrier/identity.ts"), any("carrier/repository.ts"), any("core/facts/types.ts"), any("namespace-context.ts")],
+      allow: [any("carrier/identity.ts"), any("carrier/repository.ts"), any("core/facts/errors.ts", ["AuthorityCorruptionError"]), any("core/facts/types.ts"), any("namespace-context.ts")],
     },
     {
       source: "carrier/verification.ts",
@@ -275,13 +275,20 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/errors.ts"),
         any("core/facts/types.ts"),
         any("protocol/operations.ts"),
-        any("verification/declaration.ts", [
-          "VerificationDeclarationPreparation",
-          "prepareVerificationDeclaration",
-        ]),
+        any("library/input.ts"),
         any("library/region.ts"),
         any("library/gates.ts"),
         any("settings.ts"),
+      ],
+    },
+    {
+      source: "library/input.ts",
+      allow: [
+        any("body/decode.ts", ["verificationDefinition"]),
+        types("body/types.ts"),
+        any("core/facts/types.ts", ["ActorId", "ContractId", "ContractTerms", "Gate", "actorId", "gate", "gateWord"]),
+        types("protocol/operations.ts", ["DocumentDerivation"]),
+        any("verification/declaration.ts", ["prepareVerificationDeclaration"]),
       ],
     },
     { source: "library/gates.ts", allow: [any("core/facts/types.ts", ["gateWord"]), types("settings.ts")] },
@@ -341,6 +348,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [any("akuma/index.ts"), types("cli/commands/akuma.ts"), types("settings.ts")],
     },
     {
+      source: "cli/commands/install.ts",
+      allow: [any("cli/usage.ts"), any("runtime/proc/run.ts")],
+    },
+    {
       source: "cli/commands/task.ts",
       allow: [any("cli/usage.ts")],
     },
@@ -349,10 +360,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [types("cli/commands/task.ts"), any("task/index.ts")],
     },
     { source: "cli/render/akuma-tool.ts", allow: [types("akuma/index.ts")] },
-    {
-      source: "cli/render/akuma.ts",
-      allow: [types("akuma/index.ts"), types("cli/commands/akuma-invoke.ts"), types("cli/parse.ts"), any("cli/render/akuma-tool.ts")],
-    },
+    { source: "cli/render/akuma.ts", allow: [types("akuma/index.ts"), types("cli/commands/akuma-invoke.ts"), types("cli/parse.ts"), any("cli/render/akuma-tool.ts")] },
     {
       source: "cli/**",
       allow: [
@@ -457,10 +465,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       detail: "Heart index owns adjudication and must execute SQL through schema.ts or rows.ts",
     },
   ],
-  forbiddenModules: [
-    "better-sqlite3",
-    "sqlite3",
-  ],
+  forbiddenModules: ["better-sqlite3", "sqlite3"],
   capabilityRules: [
     { capability: "dynamic-import-nonliteral", owners: [] },
     { capability: "eval", owners: [] },
@@ -471,11 +476,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "new-date-current", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/publication.ts", "protocol/bind.ts", "protocol/operations.ts", "task/compose.ts", "task/operations.ts"] },
     { capability: "process-argv", owners: ["akuma/body.ts", "cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-cwd", owners: ["carrier/repository.ts", "cli/main.ts", "kanshi/read.ts", "library/keiyaku.ts", "task/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
-    { capability: "process-environment", owners: ["akuma/providers/claude.ts", "akuma/providers/codex-app-server.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "carrier/repository.ts", "protocol/operations.ts", "runtime/proc/**"] },
+    { capability: "process-environment", owners: ["akuma/providers/claude.ts", "akuma/providers/codex-app-server/index.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "carrier/repository.ts", "protocol/operations.ts", "runtime/proc/**"] },
     { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },
-    { capability: "type-error-construction", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/persona.ts", "akuma/provider.ts", "akuma/providers/index.ts", "body/**", "cli/actor.ts", "kanshi/**", "library/gates.ts", "library/keiyaku.ts", "identity/coordinates.ts", "namespace-context.ts", "settings.ts", "task/**"] },
+    { capability: "type-error-construction", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/persona.ts", "akuma/provider.ts", "akuma/providers/index.ts", "body/**", "cli/actor.ts", "kanshi/**", "library/gates.ts", "library/input.ts", "library/keiyaku.ts", "identity/coordinates.ts", "namespace-context.ts", "settings.ts", "task/**"] },
   ],
   forbiddenFileNames: [
     "approval-preparation.ts",

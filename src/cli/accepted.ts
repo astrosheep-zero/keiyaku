@@ -1,7 +1,9 @@
 import {
+  KeiyakuReconcileFailed,
+  KeiyakuRefused,
+  KeiyakuRetry,
   type ContractId,
-  type Keiyaku,
-  type Outcome,
+  type MutationResult,
   type RegionOverlap,
 } from "../index.js";
 import type { AcceptedFact, AcceptedResult, InvocationResult } from "./result.js";
@@ -18,56 +20,99 @@ function hasDocumentDiff(value: object): value is Readonly<{ documentDiff: strin
   return "documentDiff" in value && typeof value.documentDiff === "string";
 }
 
+type MutationObservation = Pick<MutationResult<unknown>, "facts" | "head" | "effects" | "lags">;
+
 type ResultOptions = Readonly<{
   coordinate?: ContractId;
-  reconcile?: Keiyaku;
   report?: import("../index.js").AuditReport;
   obligations?: Pick<AcceptedResult, "verification" | "placement" | "leak">;
+  diff?: AcceptedResult["diff"];
 }>;
 
-export async function resultFromOutcome<A, Observation extends object = Record<never, never>>(
-  verb: string,
-  outcome: Outcome<A, Observation>,
-  options: ResultOptions = {},
-): Promise<InvocationResult> {
-  if (outcome.kind === "refused") {
-    return {
-      kind: "refused",
-      verb,
-      ...(options.coordinate === undefined ? {} : { contract: options.coordinate }),
-      refusal: outcome.refusal,
-    };
-  }
-  if (outcome.kind === "retry") {
-    return {
-      kind: "retry",
-      verb,
-      ...(options.coordinate === undefined ? {} : { contract: options.coordinate }),
-      detail: outcome.reason,
-    };
-  }
+type MutationCallOptions<Result extends MutationObservation> = Readonly<{
+  coordinate?: ContractId;
+  project?: (result: Result) => ResultOptions | Promise<ResultOptions>;
+}>;
 
-  const acceptedContract = options.coordinate ?? outcome.facts[0]?.contract;
-  if (acceptedContract === undefined) throw new Error("accepted outcome is missing its contract identity");
-  const reconciled = options.reconcile === undefined
-    ? { effects: [], lag: [] }
-    : await options.reconcile.reconcile();
+function resultFromMutation(
+  verb: string,
+  result: MutationObservation & object,
+  options: ResultOptions,
+): InvocationResult {
+  const acceptedContract = options.coordinate ?? result.facts[0]?.contract;
+  if (acceptedContract === undefined) throw new Error("accepted mutation is missing its contract identity");
   return {
     kind: "accepted",
     verb,
     contract: acceptedContract,
-    head: outcome.head,
-    facts: outcome.facts.map((fact): AcceptedFact => ({
+    head: result.head,
+    facts: result.facts.map((fact): AcceptedFact => ({
       contract: fact.contract,
       entry: fact.entry,
       kind: fact.kind,
     })),
-    effects: reconciled.effects,
+    effects: result.effects,
     ...options.obligations,
-    ...(hasOverlaps(outcome) ? { overlaps: outcome.overlaps } : {}),
-    ...(hasOverlapFailure(outcome) ? { overlapFailure: outcome.overlapFailure } : {}),
-    ...(hasDocumentDiff(outcome) ? { diff: outcome.documentDiff } : {}),
+    ...(hasOverlaps(result) ? { overlaps: result.overlaps } : {}),
+    ...(hasOverlapFailure(result) ? { overlapFailure: result.overlapFailure } : {}),
+    ...(hasDocumentDiff(result) ? { diff: result.documentDiff } : {}),
     ...(options.report === undefined ? {} : { report: options.report }),
-    ...(reconciled.lag.length === 0 ? {} : { lag: reconciled.lag }),
+    ...(options.diff === undefined ? {} : { diff: options.diff }),
+    ...(result.lags.length === 0 ? {} : { lag: result.lags }),
   };
+}
+
+function acceptedFacts(facts: MutationObservation["facts"]): readonly AcceptedFact[] {
+  return facts.map((fact): AcceptedFact => ({
+    contract: fact.contract,
+    entry: fact.entry,
+    kind: fact.kind,
+  }));
+}
+
+export async function resultFromMutationCall<Result extends MutationObservation & object>(
+  verb: string,
+  call: () => Promise<Result>,
+  options: MutationCallOptions<Result> = {},
+): Promise<InvocationResult> {
+  try {
+    const result = await call();
+    const projected = options.project === undefined ? {} : await options.project(result);
+    return resultFromMutation(verb, result, {
+      ...projected,
+      ...(options.coordinate === undefined ? {} : { coordinate: options.coordinate }),
+    });
+  } catch (error) {
+    if (error instanceof KeiyakuReconcileFailed) {
+      const contract = options.coordinate ?? error.admission.facts[0]?.contract;
+      if (contract === undefined) throw new Error("failed mutation is missing its contract identity");
+      return {
+        kind: "failed",
+        verb,
+        contract,
+        head: error.admission.head,
+        facts: acceptedFacts(error.admission.facts),
+        effects: error.report.effects,
+        ...(error.report.lag.length === 0 ? {} : { lag: error.report.lag }),
+        failure: error.report.failure,
+      };
+    }
+    if (error instanceof KeiyakuRefused) {
+      return {
+        kind: "refused",
+        verb,
+        ...(options.coordinate === undefined ? {} : { contract: options.coordinate }),
+        refusal: error.refusal,
+      };
+    }
+    if (error instanceof KeiyakuRetry) {
+      return {
+        kind: "retry",
+        verb,
+        ...(options.coordinate === undefined ? {} : { contract: options.coordinate }),
+        detail: error.reason,
+      };
+    }
+    throw error;
+  }
 }

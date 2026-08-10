@@ -3,6 +3,7 @@ import type {
   ChangeId,
   ContractId,
   Fact,
+  FailedReconcileReport,
   PlacementStop,
   ReconcileReport,
   RegionOverlap,
@@ -58,6 +59,17 @@ export type RetryResult = Readonly<{
   detail: unknown;
 }>;
 
+export type FailedResult = Readonly<{
+  kind: "failed";
+  verb: string;
+  contract: ContractId;
+  head: string | null;
+  facts: readonly AcceptedFact[];
+  effects: readonly Effect[];
+  lag?: readonly Lag[];
+  failure: FailedReconcileReport["failure"];
+}>;
+
 export type ObservationResult = Readonly<{
   kind: "observation";
   command: string;
@@ -66,4 +78,4 @@ export type ObservationResult = Readonly<{
 
 export type StatusResult = Readonly<{ kind: "status"; report: KanshiReport }>;
 
-export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | ObservationResult | StatusResult;
+export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | FailedResult | ObservationResult | StatusResult;

@@ -13,6 +13,7 @@ import {
   type AkumaAction,
   type ParsedAkumaCommand,
 } from "./commands/akuma.js";
+import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
 import { CliUsageError, usageLine } from "./usage.js";
 export { CliUsageError } from "./usage.js";
 
@@ -108,6 +109,8 @@ export function renderRootHelp(): string {
     "",
     "commands:",
     ...Object.values(CONTRACT_COMMAND_SPECS).flatMap((spec) => [`  ${spec.usage}`, `    ${spec.purpose}`]),
+    `  ${INSTALL_USAGE}`,
+    "    Install the Keiyaku skills into an agent harness.",
     "  task ...",
     "    Task coordination; see `keiyaku-v4 task --help`.",
     ...renderAkumaRootRows(),
@@ -124,6 +127,7 @@ function contractUsage(command: Command): string {
 }
 
 export function renderCommandUsage(command: ParsedCommand): string {
+  if (command.command === "install") return renderInstallHelp();
   if (command.command === "task") return renderTaskUsage(command.action);
   if (isAkumaAction(command.command)) return renderAkumaUsage(command.command);
   return contractUsage(command.command);
@@ -191,6 +195,7 @@ export type ParsedCommand =
   | ParsedAudit
   | ParsedReconcile
   | ParsedSettings
+  | ParsedInstallCommand
   | ParsedAkumaCommand
   | ParsedTaskCommand;
 
@@ -198,6 +203,7 @@ export type CliHelpCoordinate =
   | Readonly<{ kind: "root" }>
   | Readonly<{ kind: "contract"; command: Command }>
   | Readonly<{ kind: "task"; action?: TaskAction }>
+  | Readonly<{ kind: "install" }>
   | Readonly<{ kind: "akuma"; action: AkumaAction }>;
 
 export type ParsedExecution = Readonly<{ cwd?: string; command: ParsedCommand }>;
@@ -410,6 +416,7 @@ function helpCoordinate(argv: readonly string[]): CliHelpCoordinate | null {
     const action = isTaskAction(words[1]) ? words[1] : undefined;
     return { kind: "task", ...(action === undefined ? {} : { action }) };
   }
+  if (root === "install") return { kind: "install" };
   if (isAkumaAction(root)) return { kind: "akuma", action: root };
   if (root !== undefined && Object.hasOwn(CONTRACT_COMMAND_SPECS, root)) {
     return { kind: "contract", command: root as Command };
@@ -451,11 +458,14 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const task = invocation.commandArgv[0] === "task"
     ? parseTaskCommand(invocation.commandArgv.slice(1))
     : undefined;
+  const install = invocation.commandArgv[0] === "install"
+    ? parseInstallCommand(invocation.commandArgv.slice(1))
+    : undefined;
   const akuma = isAkumaAction(invocation.commandArgv[0])
     ? parseAkumaCommand(invocation.commandArgv)
     : undefined;
   return {
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
-    command: task ?? akuma ?? parseCommand(scanArgv(invocation.commandArgv)),
+    command: task ?? akuma ?? install ?? parseCommand(scanArgv(invocation.commandArgv)),
   };
 }

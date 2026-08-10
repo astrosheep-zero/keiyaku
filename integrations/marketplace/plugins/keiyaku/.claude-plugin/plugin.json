@@ -1,0 +1,7 @@
+{
+  "name": "keiyaku",
+  "version": "0.1.0",
+  "description": "Use the Keiyaku v4 contract, task, and Akuma CLI.",
+  "author": { "name": "Keiyaku" },
+  "skills": "./skills/"
+}

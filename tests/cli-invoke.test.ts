@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { CARRIER_REF, readRef, repositoryAt } from "../src/carrier/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
-import { Delivery, Keiyaku, Repo, type ContractId } from "../src/index.js";
+import { Delivery, Keiyaku, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
 import { observeContract } from "../src/carrier/observe.js";
 import { deliveryWorktreePath, reconcile } from "../src/carrier/reconcile.js";
 import { invoke } from "../src/cli/invoke.js";
@@ -129,7 +129,7 @@ test("addressed retry renders the selected contract coordinate", async () => {
   const id = acceptedContract(bound);
   const amend = Keiyaku.prototype.amend;
   const reason = { kind: "exhausted" as const };
-  Keiyaku.prototype.amend = async () => ({ kind: "retry", reason });
+  Keiyaku.prototype.amend = async () => { throw new KeiyakuRetry(reason); };
   try {
     const result = await invokeWithDocument(
       repository.path,
@@ -140,6 +140,36 @@ test("addressed retry renders the selected contract coordinate", async () => {
   } finally {
     Keiyaku.prototype.amend = amend;
   }
+});
+
+test("post-admission reconcile failure renders the failed invoke shape", async () => {
+  const repository = repositoryWithMain();
+  const result = await withGitShim(
+    [
+      'if [ "$1" = "worktree" ] && [ "$2" = "add" ]; then',
+      '  printf "forced CLI worktree failure\\n" >&2',
+      "  exit 1",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    () => invokeWithDocument(repository.path, ["bind", "-"], contractDocument("CLI reconcile failure")),
+  );
+
+  assert.equal(result.kind, "failed");
+  if (result.kind !== "failed") throw new Error("post-admission failure did not reach the failed CLI arm");
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind", "bound"]);
+  assert.notEqual(result.head, null);
+  assert.deepEqual(result.effects.map((effect) => [effect.kind, effect.action]), [["ref", "created"]]);
+  assert.equal("lag" in result, false);
+  assert.equal(result.failure.kind, "reconcile-failed");
+  assert.equal(result.failure.stage, "effect");
+  assert.match(result.failure.diagnostic, /forced CLI worktree failure/);
+
+  const state = await Keiyaku.of({ repo: Repo.at({ path: repository.path }), id: result.contract }).state();
+  assert.equal(state.id, result.contract);
+  assert.equal(state.head, result.head);
+  assert.equal(state.terminal, null);
 });
 
 test("journal-writing commands preserve optional actor testimony", async () => {
@@ -331,11 +361,10 @@ test("concurrent amend diff uses the accepted predecessor after a competing amen
   Keiyaku.prototype.amend = async function(input) {
     if (!injected) {
       injected = true;
-      const intervening = await amend.call(this, {
+      await amend.call(this, {
         ...input,
         markdown: "## Replace: Context\nIntervening context.\n",
       });
-      assert.equal(intervening.kind, "accepted");
     }
     return amend.call(this, input);
   };
@@ -402,8 +431,7 @@ test("audit --show-diff-body retains its Delivery across a terminal transition",
     return delivery.call(this);
   };
   Keiyaku.prototype.audit = async function(options) {
-    const reviewed = await this.review({ verdict: "satisfied", ...options });
-    assert.equal(reviewed.kind, "accepted");
+    await this.review({ verdict: "satisfied", ...options });
     return audit.call(this, options);
   };
   try {

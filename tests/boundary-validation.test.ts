@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
 test("package boundary rejects malformed runtime inputs before journal mutation", async () => {
@@ -62,22 +62,22 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = Repo.at({ path: repository.path });
-  const invalidTarget = await Keiyaku.bind({ repo,
-    markdown: ["# T", "", "## Context", "C", "", "## Objective", "O", "", "## Design", "D", "", "## Region", "~~~", "src/**", "~~~", "", "## Criteria", "### C", "C", ""].join("\n"),
-    target: "bad\0target",
-    workspace: "here",
-  });
-  assert.deepEqual(invalidTarget, { kind: "refused", refusal: { kind: "invalid-target" } });
+  await assert.rejects(
+    Keiyaku.bind({ repo,
+      markdown: ["# T", "", "## Context", "C", "", "## Objective", "O", "", "## Design", "D", "", "## Region", "~~~", "src/**", "~~~", "", "## Criteria", "### C", "C", ""].join("\n"),
+      target: "bad\0target",
+      workspace: "here",
+    }),
+    (error: unknown) => error instanceof KeiyakuRefused && error.code === "invalid-target",
+  );
 
   const bound = await Keiyaku.bind({ repo,
     markdown: ["# T", "", "## Context", "C", "", "## Objective", "O", "", "## Design", "D", "", "## Region", "~~~", "src/**", "~~~", "", "## Criteria", "### C", "C", ""].join("\n"),
     workspace: "here",
     gates: ["security-audited"],
   });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => bound.value.deliver({ actor: " " })),
+    () => withGitShim("exit 99", {}, () => bound.keiyaku.deliver({ actor: " " })),
     (error: unknown) => error instanceof TypeError && error.message === "actor must be a nonblank string",
   );
 });

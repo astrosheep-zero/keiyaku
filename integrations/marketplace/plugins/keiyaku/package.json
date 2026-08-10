@@ -1,0 +1,8 @@
+{
+  "name": "keiyaku-v4-harness",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./opencode.js",
+  "keywords": ["pi-package"],
+  "pi": { "skills": ["./skills"] }
+}

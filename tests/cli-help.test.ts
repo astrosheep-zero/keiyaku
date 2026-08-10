@@ -30,15 +30,19 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
   assert.match(renderTaskHelp("compose"), /usage: keiyaku-v4 task compose \[--json\] -/u);
   assert.match(renderRootHelp(), /interrupt <aku\/\.\.\.>/u);
-  assert.match(renderAkumaHelp("call"), /--contract <contract-id>/u);
+  assert.equal(renderAkumaHelp("call"), [
+    "Summon an Akuma from a Persona and stdin body.",
+    "",
+    "usage: keiyaku-v4 call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -",
+  ].join("\n"));
 });
 
 test("syntax refusal retains the deepest reached grammar", () => {
   assert.throws(
     () => parseArgv(["call", "--cwd", "/tmp", "-"]),
     (error: unknown) => error instanceof CliUsageError
-      && error.message.includes("usage: keiyaku-v4 call --persona <name>")
-      && !error.message.includes("<command>"),
+      && error.diagnostic === "call has invalid positional arguments"
+      && error.projection === "usage: keiyaku-v4 call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -",
   );
   assert.throws(
     () => parseArgv(["task", "unknown"]),
