@@ -470,7 +470,7 @@ test("admission reuses frozen journal bytes for a multi-contract placement offer
   assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 1);
 });
 
-test("admission observation retains canonical journal validation", async () => {
+test("public reconcile and admission observation retain canonical journal validation", async () => {
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   const id = (await bound.keiyaku.state()).id;
@@ -493,6 +493,11 @@ test("admission observation retains canonical journal validation", async () => {
 
   assert.throws(
     () => observeContractsForAdmission(carrier, [id]),
+    (error: unknown) => error instanceof AuthorityCorruptionError
+      && /journal entry is not canonical/.test(error.message),
+  );
+  await assert.rejects(
+    () => bound.keiyaku.reconcile(),
     (error: unknown) => error instanceof AuthorityCorruptionError
       && /journal entry is not canonical/.test(error.message),
   );

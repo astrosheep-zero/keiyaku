@@ -1,5 +1,4 @@
 import {
-  KeiyakuReconcileFailed,
   KeiyakuRefused,
   KeiyakuRetry,
   type ContractId,
@@ -20,7 +19,7 @@ function hasDocumentDiff(value: object): value is Readonly<{ documentDiff: strin
   return "documentDiff" in value && typeof value.documentDiff === "string";
 }
 
-type MutationObservation = Pick<MutationResult<unknown>, "facts" | "head" | "effects" | "lags">;
+type MutationObservation = Pick<MutationResult<unknown>, "facts" | "head" | "effects" | "lags" | "settlement">;
 
 type ResultOptions = Readonly<{
   coordinate?: ContractId;
@@ -52,6 +51,7 @@ function resultFromMutation(
       kind: fact.kind,
     })),
     effects: result.effects,
+    settlement: result.settlement,
     ...options.obligations,
     ...(hasOverlaps(result) ? { overlaps: result.overlaps } : {}),
     ...(hasOverlapFailure(result) ? { overlapFailure: result.overlapFailure } : {}),
@@ -60,14 +60,6 @@ function resultFromMutation(
     ...(options.diff === undefined ? {} : { diff: options.diff }),
     ...(result.lags.length === 0 ? {} : { lag: result.lags }),
   };
-}
-
-function acceptedFacts(facts: MutationObservation["facts"]): readonly AcceptedFact[] {
-  return facts.map((fact): AcceptedFact => ({
-    contract: fact.contract,
-    entry: fact.entry,
-    kind: fact.kind,
-  }));
 }
 
 export async function resultFromMutationCall<Result extends MutationObservation & object>(
@@ -83,20 +75,6 @@ export async function resultFromMutationCall<Result extends MutationObservation 
       ...(options.coordinate === undefined ? {} : { coordinate: options.coordinate }),
     });
   } catch (error) {
-    if (error instanceof KeiyakuReconcileFailed) {
-      const contract = options.coordinate ?? error.admission.facts[0]?.contract;
-      if (contract === undefined) throw new Error("failed mutation is missing its contract identity");
-      return {
-        kind: "failed",
-        verb,
-        contract,
-        head: error.admission.head,
-        facts: acceptedFacts(error.admission.facts),
-        effects: error.report.effects,
-        ...(error.report.lag.length === 0 ? {} : { lag: error.report.lag }),
-        failure: error.report.failure,
-      };
-    }
     if (error instanceof KeiyakuRefused) {
       return {
         kind: "refused",

@@ -142,7 +142,7 @@ test("addressed retry renders the selected contract coordinate", async () => {
   }
 });
 
-test("post-admission reconcile failure renders the failed invoke shape", async () => {
+test("post-admission reconcile failure remains accepted with a physical lag", async () => {
   const repository = repositoryWithMain();
   const result = await withGitShim(
     [
@@ -156,15 +156,17 @@ test("post-admission reconcile failure renders the failed invoke shape", async (
     () => invokeWithDocument(repository.path, ["bind", "-"], contractDocument("CLI reconcile failure")),
   );
 
-  assert.equal(result.kind, "failed");
-  if (result.kind !== "failed") throw new Error("post-admission failure did not reach the failed CLI arm");
+  assert.equal(result.kind, "accepted");
+  if (result.kind !== "accepted") throw new Error("post-admission result was not accepted");
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind", "bound"]);
   assert.notEqual(result.head, null);
   assert.deepEqual(result.effects.map((effect) => [effect.kind, effect.action]), [["ref", "created"]]);
-  assert.equal("lag" in result, false);
-  assert.equal(result.failure.kind, "reconcile-failed");
-  assert.equal(result.failure.stage, "effect");
-  assert.match(result.failure.diagnostic, /forced CLI worktree failure/);
+  assert.equal(result.lag?.[0]?.kind, "reconcile-failed");
+  if (result.lag?.[0]?.kind === "reconcile-failed") {
+    assert.equal(result.lag[0].stage, "effect");
+    assert.match(result.lag[0].diagnostic, /forced CLI worktree failure/);
+  }
+  assert.deepEqual(result.settlement, { actions: [], lags: [] });
 
   const state = await Keiyaku.of({ repo: Repo.at({ path: repository.path }), id: result.contract }).state();
   assert.equal(state.id, result.contract);

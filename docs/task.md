@@ -38,8 +38,9 @@ context-consuming Task operations as `invalid-namespace-context`. `add`,
 operations (`show`, `tree`, `update`, and lifecycle) never consult it.
 `doctor` is always world-scoped. `setNamespace` atomically replaces it.
 
-Installation of this marker in a managed Contract worktree is owned by
-[transport](transport.md), not by Task.
+The byte law and read/write primitive belong to Task. Installation in a
+managed Contract worktree is driven only by [settlement](settlement.md), which
+derives the default from Contract state and calls the Task-owned primitive.
 
 ## Authority And Document
 
@@ -79,6 +80,11 @@ resume  on_hold                      -> open
 done    open | in_progress | on_hold -> done
 drop    open | in_progress | on_hold -> drop
 ```
+
+Settlement alone may apply the coordination-only transition `done -> open`
+when the Task's retained `contractId` names an `abandoned` Contract. It is not
+a public Task verb. Task itself does not observe Contract state or decide when
+that transition applies.
 
 Both terminal states release dependents. A task is ready when it is `open` and
 all `needs` targets are terminal. `blocked` contains open or in-progress tasks
@@ -240,3 +246,5 @@ sole write adjudicator against manual editors. Byte movement returns
 A task may retain one optional nonblank string named `contractId`. Task stores
 and displays it verbatim. It does not validate a Contract coordinate, observe
 Contract state, import `Repo`, or mutate Contract authority or lifecycle.
+[Settlement](settlement.md) is the sole external interpreter of this opaque
+association and uses only Task-owned write adjudication.

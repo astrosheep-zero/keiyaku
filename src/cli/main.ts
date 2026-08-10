@@ -69,7 +69,7 @@ function writeResult(command: ParsedCommand, result: unknown): number {
       color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
     });
   process.stdout.write(`${output}\n`);
-  return contractResult.kind === "refused" ? 1 : contractResult.kind === "retry" ? 2 : contractResult.kind === "failed" ? 3 : 0;
+  return contractResult.kind === "refused" ? 1 : contractResult.kind === "retry" ? 2 : 0;
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {

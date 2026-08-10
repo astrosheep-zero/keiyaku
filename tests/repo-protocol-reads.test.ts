@@ -129,13 +129,13 @@ test("batch reconcile isolates a failed contract and retains successful reports"
   assert.equal(report.contracts.length, 2);
 
   const failed = report.contracts.find((contract) => contract.contractId === blocked);
-  assert.equal(failed?.report.kind, "failed");
-  if (failed?.report.kind === "failed") {
-    assert.equal(failed.report.failure.stage, "effect");
-    assert.match(failed.report.failure.diagnostic, /delivery worktree path is occupied/);
+  assert.equal(failed?.report.lag[0]?.kind, "reconcile-failed");
+  if (failed?.report.lag[0]?.kind === "reconcile-failed") {
+    assert.equal(failed.report.lag[0].stage, "effect");
+    assert.match(failed.report.lag[0].diagnostic, /delivery worktree path is occupied/);
   }
 
   const reconciled = report.contracts.find((contract) => contract.contractId === healthy);
-  assert.equal(reconciled?.report.kind, "complete");
+  assert.deepEqual(reconciled?.report.lag, []);
   assert.equal(existsSync(deliveryWorktreePath(carrier, healthy)), true);
 });

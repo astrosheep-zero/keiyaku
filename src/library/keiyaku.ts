@@ -57,13 +57,13 @@ import {
   type IntentRefusal,
   type IntentRetry,
   type PlacementStop,
-  type RepoReconcileReport,
   type ReconcileReport as ProtocolReconcileReport,
   type RepositoryScope,
   type ReviewValue,
   type TimelineEntry,
   type VerificationStop,
 } from "../protocol/operations.js";
+import { settle, type SettlementReport } from "../settlement/settle.js";
 export { NoGitWorldError };
 export { gatesFrom, SettingsError } from "./gates.js";
 export type { Gate, GatesFromInput } from "./gates.js";
@@ -81,7 +81,6 @@ export type {
   ContractPhase,
   ContractRow,
   FactKind,
-  RepoReconcileReport,
   SnapshotId,
   TimelineEntry,
 };
@@ -97,23 +96,22 @@ export type { PlacementStop, VerificationStop };
 
 export type TopologyEffect = ProtocolReconcileReport["effects"][number];
 export type Lag = ProtocolReconcileReport["lag"][number];
-export type FailedReconcileReport = Extract<ProtocolReconcileReport, { kind: "failed" }>;
-export type MutationAdmission = Readonly<{
-  keiyaku: Keiyaku;
-  facts: readonly Fact[];
-  head: ContractHead;
-}>;
 export type MutationResult<Value> = Readonly<{
   facts: readonly Fact[];
   head: ContractHead;
   value: Value;
   effects: readonly TopologyEffect[];
   lags: readonly Lag[];
+  settlement: SettlementReport;
 }>;
 
 export type BindResult = Readonly<Omit<MutationResult<Keiyaku>, "value"> & { keiyaku: Keiyaku } & RegionObservation>;
 export type AmendResult = Readonly<MutationResult<void> & RegionObservation & { documentDiff: string }>;
-export type ReconcileReport = ProtocolReconcileReport;
+export type ReconcileReport = Readonly<ProtocolReconcileReport & { settlement: SettlementReport }>;
+export type RepoReconcileReport = Readonly<{
+  contracts: readonly Readonly<{ contractId: ContractId; report: ReconcileReport }>[];
+}>;
+export type { SettlementAction, SettlementLag, SettlementReport } from "../settlement/settle.js";
 
 export class KeiyakuRefused extends Error {
   constructor(readonly refusal: KeiyakuRefusal) {
@@ -134,20 +132,6 @@ export class KeiyakuRetry extends Error {
 
   get code(): KeiyakuRetryReason["kind"] {
     return this.reason.kind;
-  }
-}
-
-export class KeiyakuReconcileFailed extends Error {
-  constructor(
-    readonly admission: MutationAdmission,
-    readonly report: FailedReconcileReport,
-  ) {
-    super(report.failure.diagnostic);
-    this.name = "KeiyakuReconcileFailed";
-  }
-
-  get code(): FailedReconcileReport["failure"]["kind"] {
-    return this.report.failure.kind;
   }
 }
 
@@ -196,26 +180,21 @@ function requireAccepted<Value, Refusal extends KeiyakuRefusal>(result: IntentOu
   return result;
 }
 
-function mutationResult<Value, PublicValue>(
+async function mutationResult<Value, PublicValue>(
   scope: RepositoryScope,
   id: ContractId,
   accepted: AcceptedIntent<Value>,
   value: (result: Value) => PublicValue,
-): MutationResult<PublicValue> {
+): Promise<MutationResult<PublicValue>> {
   const reconciled = reconcileOperation({ scope, contractId: id });
-  if (reconciled.kind === "failed") {
-    throw new KeiyakuReconcileFailed({
-      keiyaku: new KeiyakuHandle(id, scope),
-      facts: accepted.facts,
-      head: accepted.head,
-    }, reconciled);
-  }
+  const settlement = await settle({ taskRoot: scope.primaryWorktree, state: reconciled.state, effects: reconciled.report.effects });
   return {
     facts: accepted.facts,
     head: accepted.head,
     value: value(accepted.value),
-    effects: reconciled.effects,
-    lags: reconciled.lag,
+    effects: reconciled.report.effects,
+    lags: reconciled.report.lag,
+    settlement,
   };
 }
 
@@ -308,7 +287,7 @@ class KeiyakuHandle {
     const before = current.terms.document.bytes;
     const after = document.document.bytes;
     return {
-      ...mutationResult(this.scope, this.id, accepted, () => undefined),
+      ...await mutationResult(this.scope, this.id, accepted, () => undefined),
       documentDiff: documentDiff("before", "after", before, after),
       ...observeRegion(this.scope, this.id, document.region),
     };
@@ -394,7 +373,11 @@ class KeiyakuHandle {
   }
 
   async reconcile(): Promise<ReconcileReport> {
-    return reconcileOperation({ scope: this.scope, contractId: this.id });
+    const reconciled = reconcileOperation({ scope: this.scope, contractId: this.id });
+    return {
+      ...reconciled.report,
+      settlement: await settle({ taskRoot: this.scope.primaryWorktree, state: reconciled.state, effects: reconciled.report.effects }),
+    };
   }
 
   private deliveryHandle(delivery: DeliverValue): Delivery {
@@ -432,7 +415,17 @@ export class Repo {
   }
 
   async reconcile(): Promise<RepoReconcileReport> {
-    return reconcileAllOperation({ scope: scopeForRepo(this) });
+    const scope = scopeForRepo(this);
+    const reconciled = reconcileAllOperation({ scope });
+    return {
+      contracts: await Promise.all(reconciled.contracts.map(async (contract) => ({
+        contractId: contract.contractId,
+        report: {
+          ...contract.report,
+          settlement: await settle({ taskRoot: scope.primaryWorktree, state: contract.state, effects: contract.report.effects }),
+        },
+      }))),
+    };
   }
 }
 
@@ -496,13 +489,14 @@ async function bindKeiyaku(input: BindInput): Promise<BindResult> {
   });
   const accepted = requireAccepted(admitted);
   const id = accepted.value.contractId;
-  const result = mutationResult(scope, id, accepted, ({ contractId: contract }) => new KeiyakuHandle(contract, scope));
+  const result = await mutationResult(scope, id, accepted, ({ contractId: contract }) => new KeiyakuHandle(contract, scope));
   return {
     facts: result.facts,
     head: result.head,
     keiyaku: result.value,
     effects: result.effects,
     lags: result.lags,
+    settlement: result.settlement,
     ...observeRegion(scope, id, document.region),
   };
 }

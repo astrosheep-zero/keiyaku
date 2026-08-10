@@ -1,9 +1,14 @@
-import type { AcceptedResult, Effect, FailedResult, RetryResult } from "../result.js";
+import type { AcceptedResult, Effect, Lag, RetryResult } from "../result.js";
 
 function effectLine(effect: Effect): string {
   if (effect.kind === "worktree") return `effect worktree ${effect.action} ${effect.path}`.trimEnd();
-  if (effect.kind === "namespace-context") return `effect namespace-context ${effect.action} ${effect.path}`;
   return `effect ref ${effect.action} ${effect.name} ${effect.before ?? "null"} -> ${effect.after ?? "null"}`;
+}
+
+function lagLine(lag: Lag): string {
+  return lag.kind === "worktree-retained"
+    ? `lag worktree-retained ${lag.path}`
+    : `lag reconcile-failed ${lag.stage} ${lag.diagnostic}`;
 }
 
 function leakLine(leak: AcceptedResult["leak"]): string | undefined {
@@ -38,20 +43,17 @@ export function renderAccepted(result: AcceptedResult): string {
   if (result.report !== undefined) lines.push(`report ${JSON.stringify(result.report)}`);
   if (result.diff !== undefined) lines.push(typeof result.diff === "string" ? result.diff : JSON.stringify(result.diff));
   for (const effect of result.effects) lines.push(effectLine(effect));
-  for (const lag of result.lag ?? []) lines.push(`lag ${lag.kind} ${lag.path}`);
+  for (const lag of result.lag ?? []) lines.push(lagLine(lag));
+  for (const action of result.settlement.actions) {
+    lines.push(action.kind === "task"
+      ? `settlement task ${action.action} ${action.taskId}`
+      : `settlement namespace-context ${action.action} ${action.path}`);
+  }
+  for (const lag of result.settlement.lags) lines.push(`settlement lag ${JSON.stringify(lag)}`);
   return lines.join("\n");
 }
 
 export function renderRetry(result: RetryResult): string {
   const contract = result.contract === undefined ? "" : ` ${result.contract}`;
   return `retry ${result.verb}${contract} ${JSON.stringify(result.detail)}`;
-}
-
-export function renderFailed(result: FailedResult): string {
-  const lines = [`failed ${result.verb} ${result.contract} head=${result.head ?? "null"}`];
-  for (const fact of result.facts) lines.push(`fact ${fact.contract} ${fact.entry} ${fact.kind}`);
-  for (const effect of result.effects) lines.push(effectLine(effect));
-  for (const lag of result.lag ?? []) lines.push(`lag ${lag.kind} ${lag.path}`);
-  lines.push(`reconcile failed ${result.failure.stage} ${result.failure.diagnostic}`);
-  return lines.join("\n");
 }

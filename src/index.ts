@@ -1,4 +1,4 @@
-export { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuReconcileFailed, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, SettingsError } from "./library/keiyaku.js";
+export { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, SettingsError } from "./library/keiyaku.js";
 export { settings } from "./settings.js";
 export type {
   Settings,
@@ -35,7 +35,6 @@ export type {
   DeliverInput,
   Fact,
   FactKind,
-  FailedReconcileReport,
   Gate,
   GatesFromInput,
   KeiyakuOfInput,
@@ -43,7 +42,6 @@ export type {
   KeiyakuRetryReason,
   Lag,
   MutationResult,
-  MutationAdmission,
   PlacementStop,
   RegionOverlap,
   RepoReconcileReport,
@@ -53,6 +51,9 @@ export type {
   RepoAtInput,
   AuditInput,
   SnapshotId,
+  SettlementAction,
+  SettlementLag,
+  SettlementReport,
   TimelineEntry,
   TopologyEffect,
   VerificationStop,

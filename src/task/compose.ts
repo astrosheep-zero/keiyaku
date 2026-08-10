@@ -1,5 +1,5 @@
 import { documentDiff } from "../markdown/diff.js";
-import { readNamespaceContext } from "../namespace-context.js";
+import { readNamespaceContext } from "./context.js";
 import { relationProblem, type TaskBoard } from "./board.js";
 import { serializeTaskDocument, type TaskDocument, type TaskPriority } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";

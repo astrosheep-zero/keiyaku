@@ -16,6 +16,7 @@ import { NoGitWorldError, repositoryAt, type GitRepository } from "../carrier/re
 import { readDeliveryDiff } from "../carrier/verification.js";
 import type { WorktreeLeak } from "../carrier/verification.js";
 import { dependencyKeySet } from "../core/subject.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState, documentIsCurrent } from "../core/facts/observation.js";
 import type { ActorId, AmendData, ArcData, AttestationData, ChangeId, ContractId, ContractState, ContractTerms, DocumentKey, SnapshotId } from "../core/facts/types.js";
 import { gate } from "../core/facts/types.js";
@@ -473,16 +474,19 @@ export async function auditOperation(
 }
 
 export type ReconcileReport = ReconcileResult;
+export type ReconcileObservation = Readonly<{ state: ContractState | null; report: ReconcileReport }>;
 
-export function reconcileOperation(input: OperationInput): ReconcileReport {
+export function reconcileOperation(input: OperationInput): ReconcileObservation {
   try {
-    return reconcile({ repository: input.scope, state: observeContract(input.scope, input.contractId).state });
+    const state = observeContract(input.scope, input.contractId).state;
+    return { state, report: reconcile({ repository: input.scope, state }) };
   } catch (error) {
-    return reconcileObservationFailure(error);
+    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
+    return { state: null, report: reconcileObservationFailure(error) };
   }
 }
 
-type RepoReconcileItem = Readonly<{ contractId: ContractId; report: ReconcileReport }>;
+type RepoReconcileItem = Readonly<{ contractId: ContractId; state: ContractState | null; report: ReconcileReport }>;
 
 export type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>;
 
@@ -492,6 +496,10 @@ export function reconcileAllOperation(input: Readonly<{ scope: RepositoryScope }
   const contracts = reconcileBatch(
     carrier,
     [...observation.contracts].map(([id, record]) => ({ id, state: record.state })),
-  ).map((item): RepoReconcileItem => ({ contractId: item.contract, report: item.result }));
+  ).map((item): RepoReconcileItem => ({
+    contractId: item.contract,
+    state: observation.contracts.get(item.contract)?.state ?? null,
+    report: item.result,
+  }));
   return { contracts };
 }

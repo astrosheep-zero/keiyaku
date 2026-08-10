@@ -169,22 +169,15 @@ accepted outcome.
 type ReconcileResult = Readonly<{
   effects: readonly Effect[]
   lag: readonly ReconcileLag[]
-}> & Readonly<
-  | { kind: "complete" }
-  | {
-      kind: "failed"
-      failure: Readonly<{
-        kind: "reconcile-failed"
-        stage: "observation" | "effect"
-        diagnostic: string
-      }>
-    }
->
-
-type ReconcileLag = Readonly<{
-  kind: "worktree-retained"
-  path: string
 }>
+
+type ReconcileLag =
+  | Readonly<{ kind: "worktree-retained"; path: string }>
+  | Readonly<{
+      kind: "reconcile-failed"
+      stage: "observation" | "effect"
+      diagnostic: string
+    }>
 
 type Effect =
   | Readonly<{
@@ -198,11 +191,6 @@ type Effect =
       before: GitObjectId | null
       after: GitObjectId | null
       action: "created" | "updated" | "removed" | "unchanged"
-    }>
-  | Readonly<{
-      kind: "namespace-context"
-      path: string
-      action: "installed" | "kept"
     }>
 ```
 
@@ -220,24 +208,17 @@ type RepoReconcileReport = Readonly<{
 }>
 ```
 
-It contains one typed report for every observed contract. A failed report does
-not discard successful reports or become an aggregate exception. Contract and
-world reconciliation use the same failure channel; world reconciliation does
-not wrap observation failure in a second item-level discriminant.
-
-For an active managed worktree, reconciliation installs or repairs the local
-Task namespace context from the admitted ContractId contract segment after the
-worktree exists. It rewrites only an absent or malformed marker and preserves a
-valid override. A successful operation is a `namespace-context` effect; a
-failure is the report's single `reconcile-failed` channel and never reverses or
-gates journal admission. Reconcile is the idempotent repair path. Here
-workspaces have no transport-owned context duty.
+It contains one typed report for every observed contract. A failure lag does
+not discard successful effects or reports and never becomes an aggregate
+exception. Contract and world reconciliation use the same lag vocabulary.
+Transport owns no Task namespace bytes or ContractId-to-namespace policy; that
+post-physical projection belongs to [settlement](settlement.md).
 
 Effects and lag are transparent data. `changed` is derivable from effect
 actions, resource coordinates are already in each effect, and lifecycle state
 remains a journal projection. Commands and public reports expose only effects
 actually observed in that operation and the flat `lag` array above; lag is not
-nested in an effect or a second cleanup report. A failed report is safe to
+nested in an effect or a second cleanup report. A report with lag is safe to
 retry because every later reconcile starts from durable facts and fresh
 topology rather than an in-memory receipt.
 

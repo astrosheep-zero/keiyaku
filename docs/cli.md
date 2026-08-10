@@ -298,22 +298,19 @@ Every invocation renders exactly one plain result object:
 
 | Kind | Product content | Exit |
 | --- | --- | --- |
-| `accepted` | `verb`, `contract`, public `head` and `facts`, observed `effects`, flat `lag`, optional independent obligation stops, presentation diff, and audit `report` when applicable | 0 |
+| `accepted` | `verb`, `contract`, public `head` and `facts`, observed `effects`, flat physical `lag`, `settlement`, optional independent obligation stops, presentation diff, and audit `report` when applicable | 0 |
 | `refused` | typed refusal and observed grounds | 1 |
 | `retry` | exhausted, collision, or publication-failed detail; caller-addressed verbs use the caller's contract coordinate, while bind has no contract segment | 2 |
-| `failed` | post-admission failure with the existing Contract coordinate, admitted `head` and `facts`, completed reconcile effects, and typed reconcile failure | 3 |
 | `observation` | view data, including observed effects when present | 0 |
 
 Text and `--json` render this same object. Both write to stdout; JSON serializes
 it without another output schema. A corrupted authority or other exception
 writes its verbatim diagnostic to stderr and exits `3`.
 
-`failed` is reserved for a public mutation whose journal admission succeeded
-but whose mandatory reconciliation did not complete. Text starts with
-`failed <verb> <contract>`, then renders the admitted facts, completed effects,
-and reconcile diagnostic. JSON exposes the same flat result object. It is not
-a refusal or retry, and its Contract coordinate names the existing Contract;
-the adapter never hides it or automatically abandons it.
+Post-admission physical or settlement failures remain inside the accepted
+object as typed lags. Text and JSON expose them without changing the Contract
+fact, command kind, or exit status. The adapter never hides the existing
+Contract or automatically abandons it.
 
 Accepted facts name at least their contract, entry, and kind. Effects render as
 transport data:

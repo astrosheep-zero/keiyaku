@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Keiyaku, KeiyakuReconcileFailed, Repo } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithHead(): TestGitRepository {
@@ -84,9 +84,7 @@ test("post-admission observation failure preserves the admitted Contract without
   const repository = repositoryWithHead();
   await bind(repository, "Existing", ["src/**"]);
   const marker = `${repository.path}/region-observation-admitted`;
-  let failure: KeiyakuReconcileFailed | undefined;
-  await assert.rejects(
-    withGitShim(
+  const result = await withGitShim(
       [
         "if [ \"$1\" = \"update-ref\" ] && [ ! -e \"$KEIYAKU_REGION_MARKER\" ]; then",
         "  \"$KEIYAKU_REAL_GIT\" \"$@\" || exit $?",
@@ -104,26 +102,17 @@ test("post-admission observation failure preserves the admitted Contract without
         markdown: document("Observed failure", ["docs/**"]),
         workspace: "here",
       }),
-    ),
-    (error: unknown) => {
-      assert.ok(error instanceof KeiyakuReconcileFailed);
-      failure = error;
-      assert.deepEqual(error.admission.facts.map((fact) => fact.kind), ["bind", "bound"]);
-      assert.notEqual(error.admission.head, null);
-      assert.equal(error.report.kind, "failed");
-      assert.equal(error.report.failure.kind, "reconcile-failed");
-      assert.equal(error.report.failure.stage, "observation");
-      assert.match(error.report.failure.diagnostic, /post-admission document read failed/);
-      assert.deepEqual(error.report.effects, []);
-      assert.deepEqual(error.report.lag, []);
-      return true;
-    },
   );
-
-  assert.ok(failure);
-  const state = await failure.admission.keiyaku.state();
-  assert.equal(state.id, failure.admission.facts[0]?.contract);
-  assert.equal(state.head, failure.admission.head);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind", "bound"]);
+  assert.notEqual(result.head, null);
+  assert.equal(result.lags[0]?.kind, "reconcile-failed");
+  if (result.lags[0]?.kind === "reconcile-failed") {
+    assert.equal(result.lags[0].stage, "observation");
+    assert.match(result.lags[0].diagnostic, /post-admission document read failed/);
+  }
+  const state = await result.keiyaku.state();
+  assert.equal(state.id, result.facts[0]?.contract);
+  assert.equal(state.head, result.head);
   assert.equal(state.terminal, null);
   const observed = await Keiyaku.observe({ repo: Repo.at({ path: repository.path }), id: state.id });
   assert.equal(observed.kind, "present");

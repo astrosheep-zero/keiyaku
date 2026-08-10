@@ -1,5 +1,5 @@
 import { documentDiff } from "../markdown/diff.js";
-import { installNamespaceContext, readNamespaceContext } from "../namespace-context.js";
+import { installNamespaceContext, readNamespaceContext } from "./context.js";
 import { relationProblem, projectBlocked, projectReady, projectRows, type BlockedTaskRow, type TaskBoard, type TaskRow } from "./board.js";
 import { parseTaskCreationDocument, serializeTaskDocument, type TaskCreationDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
@@ -21,6 +21,12 @@ export type TaskMutationResult = TaskOutcome<TaskView>;
 export type TaskUpdateResult = TaskOutcome<Readonly<{ task: TaskView; documentDiff: string }>>;
 export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | "drop";
 export type TaskBatchResult = Readonly<{ items: readonly Readonly<{ id: TaskId; outcome: TaskMutationResult }>[] }>;
+export type AssociatedTaskAction = "done" | "reopened";
+export type AssociatedTaskResult =
+  | Readonly<{ kind: "changed"; task: TaskView; action: AssociatedTaskAction }>
+  | Readonly<{ kind: "unchanged" }>
+  | Readonly<{ kind: "refused"; refusal: TaskRefusal }>
+  | Readonly<{ kind: "retry"; reason: TaskRetry }>;
 export type AddTaskInput = Readonly<{
   title: string; namespace?: readonly string[]; body?: string; note?: string; state?: TaskState; priority?: TaskPriority; needs?: readonly TaskId[];
   parent?: TaskId | null; supersedes?: readonly TaskId[]; relates?: readonly TaskId[]; contractId?: string | null; signal?: AbortSignal;
@@ -149,6 +155,37 @@ export async function batchTasks(world: TaskWorld, verb: "done" | "drop" | "hold
   const items = [];
   for (const id of ids) { signal?.throwIfAborted(); items.push({ id, outcome: await lifecycleTask(world, id, verb, signal, note) }); }
   return { items };
+}
+
+export function associatedTaskIds(world: TaskWorld, contractId: string): readonly TaskId[] {
+  return [...readBoard(world).board.tasks.values()]
+    .filter((task) => task.contractId === contractId)
+    .map((task) => task.id);
+}
+
+export async function settleAssociatedTask(
+  world: TaskWorld,
+  id: TaskId,
+  contractId: string,
+  desired: "done" | "open-from-done",
+): Promise<AssociatedTaskResult> {
+  const result = await withTaskLocks({ world, allocation: false, ids: [id] }, async (): Promise<AssociatedTaskResult> => {
+    const snapshot = readBoard(world), current = snapshot.board.tasks.get(id);
+    if (current === undefined || current.contractId !== contractId) return { kind: "unchanged" };
+    if (desired === "done") {
+      if (current.state === "done") return { kind: "unchanged" };
+      if (current.state === "drop") {
+        return { kind: "refused", refusal: { kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb: "done" } };
+      }
+    } else if (current.state !== "done") return { kind: "unchanged" };
+    const state: TaskState = desired === "done" ? "done" : "open";
+    const next = { ...current, state, updatedAt: advancedTimestamp(current.updatedAt) };
+    const replaced = replaceAuthority({ path: authorityPath(world, id), expected: snapshot.bytes.get(id)!, next: serializeTaskDocument(next) });
+    return replaced === "replaced"
+      ? { kind: "changed", task: taskView(next), action: desired === "done" ? "done" : "reopened" }
+      : { kind: "retry", reason: "concurrent-modification" };
+  });
+  return result === "busy" ? { kind: "retry", reason: "busy" } : result;
 }
 
 function readScope(world: TaskWorld, scope: "namespace" | "world" | undefined): readonly string[] | null | TaskRefusal {

@@ -19,6 +19,7 @@ test("accepted text keeps facts before observed effect facts", () => {
       before: "1111111111111111111111111111111111111111",
       after: "2222222222222222222222222222222222222222",
     }],
+    settlement: { actions: [], lags: [] },
   };
 
   assert.equal(renderText(result), [
@@ -79,6 +80,7 @@ test("accepted text preserves named obligation stops after facts", () => {
     placement: { retry: { kind: "exhausted" } },
     leak: { path: "/tmp/keiyaku-v4-verify-leak", diagnostic: "worktree remove failed" },
     effects: [{ kind: "ref", name: "refs/heads/main", action: "unchanged", before: null, after: null }],
+    settlement: { actions: [], lags: [] },
   };
 
   assert.equal(renderText(result), [
@@ -101,6 +103,7 @@ test("accepted text renders Region witnesses and unavailable observations", () =
     head: null,
     facts: [],
     effects: [],
+    settlement: { actions: [], lags: [] },
     overlaps: [{
       contract: contractId("kei/peer"),
       patterns: [
@@ -123,6 +126,7 @@ test("accepted text renders Region witnesses and unavailable observations", () =
     head: null,
     facts: [],
     effects: [],
+    settlement: { actions: [], lags: [] },
     overlapFailure: "kei/peer: malformed document",
   };
   assert.equal(renderText(unavailable), [

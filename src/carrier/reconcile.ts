@@ -9,10 +9,8 @@ import {
   type GitOid,
   type GitRepository,
 } from "./repository.js";
-import { contractId, contractSegment, type ContractId, type ContractState, type SnapshotId } from "../core/facts/types.js";
-import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import { contractId, type ContractId, type ContractState, type SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot } from "./identity.js";
-import { repairNamespaceContext } from "../namespace-context.js";
 
 const WORKTREE_DIRECTORY = [".keiyaku-v4", "worktrees"] as const;
 export type Effect =
@@ -27,30 +25,22 @@ export type Effect =
       before: GitOid | null;
       after: GitOid | null;
       action: "created" | "updated" | "removed" | "unchanged";
-    }>
-  | Readonly<{
-      kind: "namespace-context";
-      path: string;
-      action: "installed" | "kept";
     }>;
 type ReconcileInput = Readonly<{ repository: GitRepository; state: ContractState | null }>;
-export type ReconcileLag = Readonly<{
+type WorktreeRetained = Readonly<{
   kind: "worktree-retained";
   path: string;
-}>;
-type ReconcileObservation = Readonly<{
-  effects: readonly Effect[];
-  lag: readonly ReconcileLag[];
 }>;
 export type ReconcileFailure = Readonly<{
   kind: "reconcile-failed";
   stage: "observation" | "effect";
   diagnostic: string;
 }>;
-export type ReconcileResult = ReconcileObservation & Readonly<
-  | { kind: "complete" }
-  | { kind: "failed"; failure: ReconcileFailure }
->;
+export type ReconcileLag = WorktreeRetained | ReconcileFailure;
+export type ReconcileResult = Readonly<{
+  effects: readonly Effect[];
+  lag: readonly ReconcileLag[];
+}>;
 type ReconcileBatchContract = Readonly<{ id: ContractId; state: ContractState | null }>;
 type ReconcileBatchItem = Readonly<{ contract: ContractId; result: ReconcileResult }>;
 
@@ -82,12 +72,8 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function rethrowNonReconcileFailure(error: unknown): void {
-  if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
-}
-
 function complete(effects: readonly Effect[] = [], lag: readonly ReconcileLag[] = []): ReconcileResult {
-  return { kind: "complete", effects, lag };
+  return { effects, lag };
 }
 
 function failed(
@@ -96,8 +82,8 @@ function failed(
   effects: readonly Effect[] = [],
   lag: readonly ReconcileLag[] = [],
 ): ReconcileResult {
-  rethrowNonReconcileFailure(error);
-  return { kind: "failed", effects, lag, failure: { kind: "reconcile-failed", stage, diagnostic: diagnostic(error) } };
+  if (error instanceof TypeError) throw error;
+  return { effects, lag: [...lag, { kind: "reconcile-failed", stage, diagnostic: diagnostic(error) }] };
 }
 
 function worktree(repository: GitRepository, topology: WorktreeTopology, path: string, desired: SnapshotId): Effect {
@@ -183,11 +169,6 @@ function reconcileWithTopology({ repository, state }: ReconcileInput, topology: 
     effects.push(updateRef(repository, ref, desired));
     effects.push(worktree(repository, topology, path, desired));
     effects.push(state.delivery ? updateRef(repository, pin, state.delivery.data.candidate) : removeRef(repository, pin));
-    effects.push({
-      kind: "namespace-context",
-      path,
-      action: repairNamespaceContext(path, [contractSegment(state.id)]),
-    });
     return complete(effects, lag);
   } catch (error) {
     return failed("effect", error, effects, lag);

@@ -4,7 +4,7 @@ import {
   renameSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { normalizeIdentityStem } from "./identity/normalize.js";
+import { normalizeIdentityStem } from "../identity/normalize.js";
 
 export type NamespaceContextRead = readonly string[] | "absent" | "malformed";
 

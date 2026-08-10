@@ -112,9 +112,7 @@ export type ArchitectureResult = Readonly<{
   diagnostics: readonly Diagnostic[];
 }>;
 
-function normalized(value: string): string {
-  return value.replaceAll("\\", "/").replace(/^\.\//, "").replace(/^src\//, "");
-}
+function normalized(value: string): string { return value.replaceAll("\\", "/").replace(/^\.\//, "").replace(/^src\//, ""); }
 
 function matches(pattern: string, candidate: string): boolean {
   const patternSegments = pattern.split("/");
@@ -122,26 +120,17 @@ function matches(pattern: string, candidate: string): boolean {
   const visit = (patternIndex: number, candidateIndex: number): boolean => {
     const segment = patternSegments[patternIndex];
     if (segment === undefined) return candidateIndex === candidateSegments.length;
-    if (segment !== "**") {
-      return segment === candidateSegments[candidateIndex] && visit(patternIndex + 1, candidateIndex + 1);
-    }
+    if (segment !== "**") return segment === candidateSegments[candidateIndex] && visit(patternIndex + 1, candidateIndex + 1);
     if (patternIndex === patternSegments.length - 1) return true;
-    for (let next = candidateIndex; next <= candidateSegments.length; next += 1) {
-      if (visit(patternIndex + 1, next)) return true;
-    }
-    return false;
+    return candidateSegments.slice(candidateIndex).some((_, offset) => visit(patternIndex + 1, candidateIndex + offset))
+      || visit(patternIndex + 1, candidateSegments.length);
   };
   return visit(0, 0);
 }
 
-function location(sourceFile: ts.SourceFile, node: ts.Node): Readonly<{ line: number; column: number }> {
-  const result = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-  return { line: result.line + 1, column: result.character + 1 };
-}
+function location(sourceFile: ts.SourceFile, node: ts.Node): Readonly<{ line: number; column: number }> { const result = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)); return { line: result.line + 1, column: result.character + 1 }; }
 
-function pushSymbol(target: string[], symbol: string): void {
-  if (!target.includes(symbol)) target.push(symbol);
-}
+function pushSymbol(target: string[], symbol: string): void { if (!target.includes(symbol)) target.push(symbol); }
 
 function importDeclarationSymbols(node: ts.ImportDeclaration): ImportedSymbols {
   const runtime: string[] = [];

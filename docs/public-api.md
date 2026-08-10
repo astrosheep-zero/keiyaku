@@ -224,19 +224,18 @@ materialized commit message; omitting it uses the transport template in
 Protocol owns its internal three-arm outcome and uses it only to compose an
 invocation. The package root does not export that control-flow structure.
 Library is the sole public facade: it projects accepted protocol outcomes into
-success values, throws typed domain failures, and performs the mandatory
-post-admission reconciliation before returning. A failed reconciliation makes
-the public invocation fail even though admission already established the
-Contract; the typed failure carries that admission so the caller can inspect
-or repair the existing Contract instead of minting another one. CLI calls this
-same facade; it does not interpret protocol outcomes or reconcile accepted
-mutations itself.
+success values, throws typed pre-admission domain failures, and performs the
+mandatory post-admission transport reconciliation and settlement before
+returning. Post-admission failure is reported as lag without hiding or
+rejecting the admitted Contract. CLI calls this same facade; it does not
+interpret protocol outcomes or repeat either follow-up stage.
 
 `MutationResult` is invocation-scoped observation, never Contract state or a
 durable receipt. `facts` and `head` come only from the accepted protocol
-admission. `effects` and `lags` come only from the one mandatory library
-reconciliation. There is no nested `receipt`, duplicate fact field, or result
-stored on a `Keiyaku` handle.
+admission. `effects` and `lags` come only from the one mandatory transport
+reconciliation; `settlement` comes only from the one settlement invocation.
+There is no nested `receipt`, duplicate fact field, or result stored on a
+`Keiyaku` handle.
 
 ```ts
 type KeiyakuRetryReason =
@@ -253,19 +252,8 @@ type MutationResult<A> = Readonly<{
   value: A
   effects: readonly TopologyEffect[]
   lags: readonly Lag[]
+  settlement: SettlementReport
 }>
-
-type MutationAdmission = Readonly<{
-  keiyaku: Keiyaku
-  facts: readonly Fact[]
-  head: ContractHead
-}>
-
-class KeiyakuReconcileFailed extends Error {
-  readonly admission: MutationAdmission
-  readonly report: Extract<ReconcileReport, { kind: "failed" }>
-  readonly code: "reconcile-failed" // derived from report.failure.kind
-}
 
 class KeiyakuRefused extends Error {
   readonly refusal: KeiyakuRefusal
@@ -423,16 +411,13 @@ getter derives from `refusal.kind`. `KeiyakuRetry` does the same for
 `KeiyakuRetryReason`. The getters are not second stored discriminants. Callers
 can switch exhaustively on `code` and inspect the structured value when the
 refusal carries a contract coordinate or the retry carries a diagnostic.
-`KeiyakuReconcileFailed` stores the durable admission and transport's complete
-failed reconcile report; its `code` derives from `report.failure.kind`.
 Programmer value-shape errors and authority corruption retain their distinct
 exception types.
 
-`KeiyakuReconcileFailed` is a user-visible failed invocation, not a successful
-result with a warning. Its `admission.keiyaku` is nevertheless real and
-addresses the Contract already written by the journal. `KeiyakuRefused` and
-`KeiyakuRetry` remain reserved for invocations that admitted no fact. The
-facade never abandons an admitted Contract as error recovery.
+`KeiyakuRefused` and `KeiyakuRetry` remain reserved for invocations that
+admitted no fact. Recoverable post-admission physical and settlement failures
+are visible in the successful result's typed lags. The facade never abandons
+an admitted Contract as error recovery.
 
 Retry details are process-local and non-authoritative. Exhaustion and canonical
 entry collisions carry no admission, contract, journal, or byte payload. A

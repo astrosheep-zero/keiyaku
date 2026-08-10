@@ -229,8 +229,7 @@ async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRunt
         return { kind: "observation", command: "reconcile", ...await repo.reconcile() };
       }
       const { contract } = await selectContract(repo, parsed.contract, scope);
-      const { kind: reconciliation, ...report } = await contract.reconcile();
-      return { kind: "observation", command: "reconcile", reconciliation, ...report };
+      return { kind: "observation", command: "reconcile", ...await contract.reconcile() };
     }
     case "bind":
       return invokeBind(parsed, repo, edge);

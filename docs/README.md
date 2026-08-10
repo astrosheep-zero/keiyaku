@@ -15,6 +15,7 @@ operating guidance; none can introduce product law.
 | [lifecycle.md](lifecycle.md) | Verb decisions, eligibility, phases, terminals, gates, review, protocol, and admission. |
 | [verification.md](verification.md) | Verification declarations, execution, result admission, and shared process runtime. |
 | [transport.md](transport.md) | Git world, worktrees, refs, pins, delivery-byte custody, and reconciliation. |
+| [settlement.md](settlement.md) | Post-admission cross-product settlement, Task associations, namespace projection, and replay. |
 | [cli.md](cli.md) | `keiyaku-v4` argv, edge adaptation, selectors, rendering, exit codes, status board, and audit presentation. |
 | [task.md](task.md) | Separate in-package task product: document authority, identity, lifecycle, associations, concurrency, and persistence. |
 | [akuma.md](akuma.md) | Separate Akuma product: identity, heart facts, life, detached bodies, providers, lifecycle verbs, and persistence. |

@@ -10,7 +10,7 @@ import { observeContract } from "../src/carrier/observe.js";
 import { materializeVerificationCandidate, readDeliveryDiff } from "../src/carrier/verification.js";
 import { deliveryWorktreePath, reconcile } from "../src/carrier/reconcile.js";
 import { contractId } from "../src/core/facts/types.js";
-import { AuthorityCorruptionError, Keiyaku, KeiyakuReconcileFailed, Repo, type ContractId } from "../src/index.js";
+import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
@@ -136,39 +136,29 @@ test("reconcile recreates a registered managed worktree whose directory disappea
 test("managed bind preserves its admitted Contract when worktree reconciliation fails", async () => {
   const repository = makeGitRepository();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  let failure: KeiyakuReconcileFailed | undefined;
-
-  await assert.rejects(
-    withGitShim(
-      [
-        'if [ "$1" = "worktree" ] && [ "$2" = "add" ]; then',
-        '  printf "forced managed worktree failure\\n" >&2',
-        "  exit 1",
-        "fi",
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      {},
-      () => Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" }),
-    ),
-    (error: unknown) => {
-      assert.ok(error instanceof KeiyakuReconcileFailed);
-      failure = error;
-      assert.deepEqual(error.admission.facts.map((fact) => fact.kind), ["bind", "bound"]);
-      assert.notEqual(error.admission.head, null);
-      assert.equal(error.report.kind, "failed");
-      assert.equal(error.report.failure.kind, "reconcile-failed");
-      assert.equal(error.report.failure.stage, "effect");
-      assert.match(error.report.failure.diagnostic, /forced managed worktree failure/);
-      assert.deepEqual(error.report.effects.map((effect) => [effect.kind, effect.action]), [["ref", "created"]]);
-      assert.deepEqual(error.report.lag, []);
-      return true;
-    },
+  const result = await withGitShim(
+    [
+      'if [ "$1" = "worktree" ] && [ "$2" = "add" ]; then',
+      '  printf "forced managed worktree failure\\n" >&2',
+      "  exit 1",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    () => Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" }),
   );
-
-  assert.ok(failure);
-  const state = await failure.admission.keiyaku.state();
-  assert.equal(state.id, failure.admission.facts[0]?.contract);
-  assert.equal(state.head, failure.admission.head);
+  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind", "bound"]);
+  assert.notEqual(result.head, null);
+  assert.deepEqual(result.effects.map((effect) => [effect.kind, effect.action]), [["ref", "created"]]);
+  assert.equal(result.lags[0]?.kind, "reconcile-failed");
+  if (result.lags[0]?.kind === "reconcile-failed") {
+    assert.equal(result.lags[0].stage, "effect");
+    assert.match(result.lags[0].diagnostic, /forced managed worktree failure/);
+  }
+  assert.deepEqual(result.settlement, { actions: [], lags: [] });
+  const state = await result.keiyaku.state();
+  assert.equal(state.id, result.facts[0]?.contract);
+  assert.equal(state.head, result.head);
   assert.equal(state.terminal, null);
   const observation = await Keiyaku.observe({ repo: Repo.at({ path: repository.path }), id: state.id });
   assert.equal(observation.kind, "present");
