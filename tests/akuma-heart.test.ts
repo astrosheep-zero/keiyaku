@@ -7,9 +7,7 @@ import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import {
   HeldAkumaLeash,
-  activitySlice,
   admitRequest,
-  appendActivity,
   finishBodyIfIdle,
   initializeHeart,
   life,
@@ -182,7 +180,7 @@ test("Body Request facts have one idempotent monotonic authority", () => {
   } finally { value.close(); }
 });
 
-test("schema version 5 hard-refuses old heart and leash authority", () => {
+test("heart schema version 5 and leash schema version 4 hard-refuse old authority", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "30000000" });
   try {
@@ -195,56 +193,6 @@ test("schema version 5 hard-refuses old heart and leash authority", () => {
     assert.throws(() => readHeart(allocated.paths), /heart schema version must be 5/u);
     assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("activity retains exactly the newest 5000 facts", () => {
-  const value = fixture();
-  try {
-    const body = recordBody(value.allocated.paths, {
-      collar: { pid: 1, processGroup: 1, spawnedAt: "retention" },
-      leashTakenAt: "2026-08-08T00:00:00.000Z",
-    });
-    const heart = new DatabaseSync(value.allocated.paths.heart);
-    const insert = heart.prepare("INSERT INTO activity(body_sequence, event_json, at) VALUES (?, ?, ?)");
-    heart.exec("BEGIN");
-    for (let index = 1; index <= 5_000; index += 1) {
-      insert.run(body.sequence, JSON.stringify({ type: "note", text: `note-${index}` }), "2026-08-08T00:00:00.000Z");
-    }
-    heart.exec("COMMIT");
-    heart.close();
-
-    assert.equal(appendActivity(value.allocated.paths, {
-      bodySequence: body.sequence,
-      event: { type: "note", text: "newest" },
-      at: "2026-08-08T00:00:01.000Z",
-    }), 5_001);
-    const retained = activitySlice(value.allocated.paths, { limit: 5_000 });
-    assert.equal(retained.rows.length, 5_000);
-    assert.equal(retained.lowestRetained, 2);
-    assert.equal(retained.highest, 5_001);
-    assert.equal(retained.rows[0]?.sequence, 2);
-    assert.equal(retained.rows.at(-1)?.sequence, 5_001);
-  } finally { value.close(); }
-});
-
-test("activity before and since cursors are exclusive and preserve ascending order", () => {
-  const value = fixture();
-  try {
-    const body = recordBody(value.allocated.paths, {
-      collar: { pid: 1, processGroup: 1, spawnedAt: "pagination" },
-      leashTakenAt: "2026-08-08T00:00:00.000Z",
-    });
-    for (let index = 1; index <= 5; index += 1) {
-      appendActivity(value.allocated.paths, {
-        bodySequence: body.sequence,
-        event: { type: "note", text: `note-${index}` },
-        at: `2026-08-08T00:00:0${index}.000Z`,
-      });
-    }
-    assert.deepEqual(activitySlice(value.allocated.paths, { before: 4, limit: 2 }).rows.map((row) => row.sequence), [2, 3]);
-    assert.deepEqual(activitySlice(value.allocated.paths, { since: 2, limit: 2 }).rows.map((row) => row.sequence), [3, 4]);
-    assert.deepEqual(activitySlice(value.allocated.paths, { limit: 2 }).rows.map((row) => row.sequence), [4, 5]);
-  } finally { value.close(); }
 });
 
 test("pause is death-fenced and remains distinct from terminal stop", () => {

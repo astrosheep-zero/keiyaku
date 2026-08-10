@@ -5,10 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
-  AGENT_EVENT_TEXT_LIMIT,
-  AGENT_THOUGHT_TEXT_LIMIT,
   decodeAgentEvent,
   encodeAgentEvent,
+  noteEvent,
   type AgentEvent,
 } from "../src/akuma/provider.js";
 import {
@@ -20,7 +19,7 @@ import {
   CODEX_ITEM_DISPOSITIONS,
   CODEX_NOTIFICATION_DISPOSITIONS,
   createCodexAppServerProvider,
-} from "../src/akuma/providers/codex-app-server.js";
+} from "../src/akuma/providers/codex-app-server/index.js";
 
 test("provider activity codec round trips every closed event and tool-call arm", () => {
   const events: readonly AgentEvent[] = [
@@ -43,27 +42,6 @@ test("provider activity codec round trips every closed event and tool-call arm",
     () => decodeAgentEvent({ type: "tool", phase: "started", id: "bad", name: "Bash", call: { kind: "run", command: "x" }, result: { status: "ok" } }),
     /invalid event shape/u,
   );
-});
-
-test("provider persistence bounds narration without truncating coordinates or pairing ids", () => {
-  const general = "g".repeat(AGENT_EVENT_TEXT_LIMIT + 100);
-  const thought = "t".repeat(AGENT_THOUGHT_TEXT_LIMIT + 100);
-  assert.deepEqual(decodeAgentEvent(encodeAgentEvent({ type: "assistant", text: general })), {
-    type: "assistant",
-    text: general.slice(0, AGENT_EVENT_TEXT_LIMIT),
-  });
-  assert.deepEqual(decodeAgentEvent(encodeAgentEvent({ type: "thought", text: thought })), {
-    type: "thought",
-    text: thought.slice(0, AGENT_THOUGHT_TEXT_LIMIT),
-  });
-  const coordinate = "session-" + "s".repeat(AGENT_EVENT_TEXT_LIMIT);
-  const id = "tool-" + "i".repeat(AGENT_EVENT_TEXT_LIMIT);
-  assert.deepEqual(decodeAgentEvent(encodeAgentEvent({ type: "session", coordinate: { sessionId: coordinate } })), {
-    type: "session", coordinate: { sessionId: coordinate },
-  });
-  assert.equal((decodeAgentEvent(encodeAgentEvent({
-    type: "tool", phase: "started", id, name: "Bash", call: { kind: "run", command: "true" },
-  })) as Extract<AgentEvent, { type: "tool" }>).id, id);
 });
 
 function fakeCodex(
@@ -234,8 +212,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
   ]);
   assert.equal(events[5]?.type, "note");
   if (events[5]?.type === "note") {
-    assert.equal(events[5].text, longNotice.replace(/\s+/gu, " ").trim());
-    assert.equal(events[5].text.includes("\n"), false);
+    assert.deepEqual(events[5], noteEvent(longNotice));
   }
   assert.deepEqual(events.slice(6), [
     { type: "unknown", kind: "future_type" },

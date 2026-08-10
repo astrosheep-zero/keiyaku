@@ -52,7 +52,8 @@ requests -> {heart, identity, provider, providers(map), publication}
 publication -> {heart, identity, runtime/proc}
 provider -> heart types
 providers/* -> {provider, runtime/proc/line-rpc}
-providers/codex-app-server -> {providers/codex-app-server-events, provider, heart, runtime/proc/line-rpc}
+providers/codex-app-server/index -> {events, provider, heart, runtime/proc/line-rpc}
+providers/codex-app-server/events -> {provider, runtime/proc/line-rpc(type)}
 kanshi -> akuma public values
 ```
 
@@ -150,8 +151,9 @@ configuration. It is call-time input at exactly one path:
 The file begins with one strict YAML mapping. `provider` is required;
 `model`, `effort`, `access`, `network`, and `description` are optional.
 `access` is `read | write | auto`; `network` is `disabled | enabled`; every
-other present value is a nonblank string. Unknown keys are refused. The
-Markdown body after frontmatter is the system prompt, including an empty one.
+other consumed value is a nonblank string. Additional top-level keys are
+ignored and never enter Persona options or the soul snapshot. The Markdown body
+after frontmatter is the system prompt, including an empty one.
 
 `Akuma.at({ path, settings? })` normalizes the world once. It uses the injected
 Settings snapshot when present and otherwise constructs one Settings value for
@@ -763,11 +765,11 @@ event-type switches make a union change fail typecheck until the codec changes
 with it. Heart remains the opaque persistence owner and does not import provider
 semantics.
 
-The Codex adapter has two coherent owners: `codex-app-server.ts` drives the
-line-RPC process, native session admission, fork, and interrupt; the adjacent
-`codex-app-server-events.ts` owns native notification/item dispositions and the
-pure `AgentEvent` codec. The driver consumes that codec and does not reinterpret
-native event payloads.
+The Codex adapter is one directory with two coherent owners. Its `index.ts`
+drives line-RPC, native session admission, fork, and interrupt; `events.ts` owns
+native notification/item dispositions and the pure `AgentEvent` translation.
+The driver consumes the typed translation result and does not reinterpret native
+event payloads.
 
 `session` is authored when the native harness grants a resumable coordinate
 (v3's `onSessionAdmission`). The pump records that coordinate immediately as
@@ -1008,7 +1010,9 @@ src/akuma/
   activity.ts         pure semantic fold, history page, snapshot selection
   providers/index.ts  provider-execution codec and closed kind composition map
   providers/claude.ts Claude Agent SDK translation
-  providers/codex-app-server.ts Codex stdio JSON-RPC translation
+  providers/codex-app-server/
+    index.ts          Codex stdio JSON-RPC lifecycle and provider composition
+    events.ts         Codex notification/item disposition and event translation
   publication.ts      allocate, initialize, launch, await birth, local sealing
   requests.ts         drive-local transport, heart admission, service, settlement
   body.ts             detached composition root, pump, stop, exit

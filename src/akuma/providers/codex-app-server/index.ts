@@ -1,10 +1,4 @@
-import { LineRpcProcess } from "../../runtime/proc/line-rpc.js";
-import {
-  codexNotificationResult,
-  codexObject as object,
-  codexText as text,
-  type CodexTurnState as TurnState,
-} from "./codex-app-server-events.js";
+import { LineRpcProcess } from "../../../runtime/proc/line-rpc.js";
 import {
   AgentEventChannel,
   AKUMA_REQUESTS_ENV,
@@ -12,10 +6,16 @@ import {
   type ProviderAdapter,
   type ProviderOptions,
   type TurnResult,
-} from "../provider.js";
-import type { ProviderExecution } from "../heart/index.js";
+} from "../../provider.js";
+import type { ProviderExecution } from "../../heart/index.js";
+import {
+  codexNotificationResult,
+  codexObject,
+  codexText,
+  type CodexTurnState,
+} from "./events.js";
 
-export { CODEX_ITEM_DISPOSITIONS, CODEX_NOTIFICATION_DISPOSITIONS } from "./codex-app-server-events.js";
+export { CODEX_ITEM_DISPOSITIONS, CODEX_NOTIFICATION_DISPOSITIONS } from "./events.js";
 
 type StartInput = Parameters<ProviderAdapter["start"]>[0];
 type ForkInput = Parameters<NonNullable<ProviderAdapter["fork"]>>[0];
@@ -34,17 +34,17 @@ async function initialize(server: LineRpcProcess): Promise<void> {
 }
 
 function threadId(result: unknown, fallback?: string): string {
-  const value = object(result);
-  const thread = object(value?.thread) ?? value;
-  const id = text(thread?.id) ?? fallback;
+  const value = codexObject(result);
+  const thread = codexObject(value?.thread) ?? value;
+  const id = codexText(thread?.id) ?? fallback;
   if (id === undefined) throw new Error("codex app-server did not return a thread id");
   return id;
 }
 
 function turnId(result: unknown): string {
-  const value = object(result);
-  const turn = object(value?.turn) ?? value;
-  const id = text(turn?.id);
+  const value = codexObject(result);
+  const turn = codexObject(value?.turn) ?? value;
+  const id = codexText(turn?.id);
   if (id === undefined) throw new Error("codex app-server did not return a turn id");
   return id;
 }
@@ -62,7 +62,7 @@ function sandbox(cwd: string, options: ProviderOptions, requests?: Readonly<{ di
 async function admitTurn(
   server: LineRpcProcess,
   input: StartInput,
-  state: TurnState,
+  state: CodexTurnState,
   events: AgentEventChannel,
   config?: Readonly<Record<string, unknown>>,
 ): Promise<void> {
@@ -110,7 +110,7 @@ async function forkCodex(execution: ProviderExecution, input: ForkInput): Promis
 
 async function abortTurn(
   server: LineRpcProcess,
-  state: TurnState,
+  state: CodexTurnState,
   completion: Promise<TurnResult>,
   finish: Finish,
 ): Promise<void> {
@@ -136,7 +136,7 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
       ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
     } }),
   });
-  const state: TurnState = { answers: [], settled: false, tools: new Map() };
+  const state: CodexTurnState = { answers: [], settled: false, tools: new Map() };
   let settle!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
   const finish: Finish = (result) => {

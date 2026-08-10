@@ -1,12 +1,14 @@
-import type { LineRpcNotification } from "../../runtime/proc/line-rpc.js";
+import type { LineRpcNotification } from "../../../runtime/proc/line-rpc.js";
 import {
   AgentEventChannel,
+  boundedEventText,
+  boundedThoughtText,
   noteEvent,
   unknownEvent,
   type ToolCall,
   type ToolResult,
   type TurnResult,
-} from "../provider.js";
+} from "../../provider.js";
 
 export type CodexTurnState = {
   threadId?: string;
@@ -180,7 +182,11 @@ function itemChanges(item: Readonly<Record<string, unknown>>): Extract<ToolCall,
     const op = fileChangeOp(change?.kind);
     if (path === undefined || op === undefined) return [];
     const diffstat = typeof change?.diff === "string" ? diffstatFromUnifiedPatch(change.diff) : undefined;
-    return [{ op, path, ...(diffstat === undefined ? {} : { diffstat }) }];
+    return [{
+      op,
+      path: boundedEventText(path),
+      ...(diffstat === undefined ? {} : { diffstat }),
+    }];
   });
 }
 
@@ -196,20 +202,20 @@ function reasoningSummary(item: Readonly<Record<string, unknown>>): string | und
 
 function itemToolCall(item: Readonly<Record<string, unknown>>, kind: string): ToolCall {
   if (kind === "commandExecution") {
-    return { kind: "run", command: codexText(item.command) ?? "command" };
+    return { kind: "run", command: boundedEventText(codexText(item.command) ?? "command") };
   }
   if (kind === "imageView") {
     const path = codexText(item.path);
-    return path === undefined ? { kind: "other", display: "image view" } : { kind: "read", path };
+    return path === undefined ? { kind: "other", display: "image view" } : { kind: "read", path: boundedEventText(path) };
   }
   if (kind === "webSearch") {
-    return { kind: "search", query: codexText(item.query) ?? "web search" };
+    return { kind: "search", query: boundedEventText(codexText(item.query) ?? "web search") };
   }
   if (kind === "fileChange") {
     const changes = itemChanges(item);
     return changes.length === 0 ? { kind: "other", display: "fileChange" } : { kind: "fileChange", changes };
   }
-  return { kind: "other", display: itemToolName(item, kind) };
+  return { kind: "other", display: boundedEventText(itemToolName(item, kind)) };
 }
 
 function itemToolResult(item: Readonly<Record<string, unknown>>): ToolResult {
@@ -220,7 +226,7 @@ function itemToolResult(item: Readonly<Record<string, unknown>>): ToolResult {
   const exitCode = typeof item.exitCode === "number" && Number.isSafeInteger(item.exitCode) ? item.exitCode : undefined;
   return {
     status: failed || (exitCode !== undefined && exitCode !== 0) ? "error" : "ok",
-    ...(detail === undefined ? {} : { message: detail }),
+    ...(detail === undefined ? {} : { message: boundedEventText(detail) }),
     ...(exitCode === undefined ? {} : { exitCode }),
   };
 }
@@ -237,7 +243,7 @@ function emitItem(item: Readonly<Record<string, unknown>>, completed: boolean, e
     const message = codexText(item.text);
     if (message !== undefined) {
       state.answers.push(message);
-      events.emit({ type: "assistant", text: message });
+      events.emit({ type: "assistant", text: boundedEventText(message) });
     }
     return;
   }
@@ -248,7 +254,7 @@ function emitItem(item: Readonly<Record<string, unknown>>, completed: boolean, e
   if (disposition === "thought") {
     if (!completed) return;
     const summary = reasoningSummary(item);
-    if (summary !== undefined) events.emit({ type: "thought", text: summary });
+    if (summary !== undefined) events.emit({ type: "thought", text: boundedThoughtText(summary) });
     return;
   }
   if (disposition === "note") {
@@ -268,7 +274,10 @@ function emitItem(item: Readonly<Record<string, unknown>>, completed: boolean, e
     return;
   }
   const started = state.tools.get(id);
-  const observed = { name: started?.name ?? itemToolName(item, kind), call: itemToolCall(item, kind) };
+  const observed = {
+    name: started?.name ?? itemToolName(item, kind),
+    call: itemToolCall(item, kind),
+  };
   state.tools.delete(id);
   events.emit({ type: "tool", phase: "completed", id, ...observed, result: itemToolResult(item) });
 }
@@ -315,7 +324,6 @@ function terminalResult(params: Readonly<Record<string, unknown>>, state: CodexT
     ? { kind: "answered", answer: state.answers.join("\n\n"), historyId: completedId }
     : { kind: "failed", diagnostic: turnError(turn?.error) ?? state.error ?? `codex app-server turn ended ${status}` };
 }
-
 export function codexNotificationResult(
   notification: LineRpcNotification,
   state: CodexTurnState,

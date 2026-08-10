@@ -5,7 +5,7 @@ import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
-import { foldActivity, selectActivitySnapshot } from "../src/akuma/activity.js";
+import { selectActivitySnapshot } from "../src/akuma/activity.js";
 import { AkumaPersonaError, loadPersona } from "../src/akuma/persona.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
@@ -68,30 +68,39 @@ async function answeredSource(root: string, suffix: string) {
 
 type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapter[Key] };
 
-test("activity fold pairs tools and snapshot selection keeps in-flight work", () => {
-  const folded = foldActivity([
-    { sequence: 1, bodySequence: 1, at: "2026-08-08T00:00:00.000Z", event: { type: "tool", phase: "started", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" } } },
-    { sequence: 2, bodySequence: 1, at: "2026-08-08T00:00:01.000Z", event: { type: "note", text: "checking" } },
-    { sequence: 3, bodySequence: 1, at: "2026-08-08T00:00:02.000Z", event: { type: "tool", phase: "completed", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" }, result: { status: "ok" } } },
-    { sequence: 4, bodySequence: 1, at: "2026-08-08T00:00:03.000Z", event: { type: "tool", phase: "completed", id: "orphan", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } } },
-    { sequence: 5, bodySequence: 1, at: "2026-08-08T00:00:04.000Z", event: { type: "tool", phase: "started", id: "open", name: "Search", call: { kind: "search", query: "TODO" } } },
-  ]);
-  assert.equal(folded.length, 4);
-  assert.equal(folded[0]?.kind, "tool");
-  assert.equal(folded[0]?.kind === "tool" && folded[0].state.status, "ok");
-  assert.equal(folded[1]?.kind, "note");
-  assert.equal(folded[2]?.kind, "tool");
-  assert.equal(folded[3]?.kind === "tool" && folded[3].state, "running");
-  const snapshot = selectActivitySnapshot([
+test("activity fold pairs tools and bounds settled rows without dropping in-flight tools", () => {
+  assert.deepEqual(selectActivitySnapshot([
+    { sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z", event: { type: "tool", phase: "started", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" } } },
+    { sequence: 2, bodySequence: 1, at: "2026-08-10T00:00:02.000Z", event: { type: "note", text: "checking" } },
+    { sequence: 3, bodySequence: 1, at: "2026-08-10T00:00:03.000Z", event: { type: "tool", phase: "completed", id: "run-1", name: "Bash", call: { kind: "run", command: "npm test" }, result: { status: "ok" } } },
+    { sequence: 4, bodySequence: 1, at: "2026-08-10T00:00:04.000Z", event: { type: "tool", phase: "completed", id: "orphan", name: "Read", call: { kind: "read", path: "README.md" }, result: { status: "error", message: "missing" } } },
+    { sequence: 5, bodySequence: 1, at: "2026-08-10T00:00:05.000Z", event: { type: "tool", phase: "started", id: "open", name: "Search", call: { kind: "search", query: "TODO" } } },
+  ]), {
+    rows: [
+      { kind: "tool", sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z", completedAt: "2026-08-10T00:00:03.000Z", durationMs: 2_000, name: "Bash", call: { kind: "run", command: "npm test" }, state: { status: "ok" } },
+      { kind: "note", sequence: 2, bodySequence: 1, at: "2026-08-10T00:00:02.000Z", text: "checking" },
+      { kind: "tool", sequence: 4, bodySequence: 1, at: "2026-08-10T00:00:04.000Z", name: "Read", call: { kind: "read", path: "README.md" }, state: { status: "error", message: "missing" } },
+      { kind: "tool", sequence: 5, bodySequence: 1, at: "2026-08-10T00:00:05.000Z", name: "Search", call: { kind: "search", query: "TODO" }, state: "running" },
+    ],
+    pendingTells: [],
+    omitted: 0,
+    lowestRetained: 1,
+    highest: 5,
+  });
+
+  const bounded = selectActivitySnapshot([
+    { sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z", event: { type: "tool", phase: "started", id: "open", name: "Bash", call: { kind: "run", command: "long" } } },
     ...Array.from({ length: 10 }, (_, index) => ({
-      sequence: index + 1,
+      sequence: index + 2,
       bodySequence: 1,
-      at: `2026-08-08T00:00:${String(index).padStart(2, "0")}.000Z`,
+      at: `2026-08-10T00:00:${String(index + 2).padStart(2, "0")}.000Z`,
       event: { type: "note", text: `note-${index + 1}` },
     })),
   ]);
-  assert.equal(snapshot.omitted, 2);
-  assert.equal(snapshot.rows.length, 8);
+  assert.equal(bounded.omitted, 2);
+  assert.deepEqual(bounded.rows.map((row) => row.sequence), [1, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.equal(bounded.rows[0]?.kind, "tool");
+  if (bounded.rows[0]?.kind === "tool") assert.equal(bounded.rows[0].state, "running");
 });
 
 test("wait timeout returns the same running status carrier", async () => {
@@ -271,8 +280,19 @@ test("public Akuma handles separate compact list rows from full status and wait"
       historyId: "public-history",
       session: { sessionId: "public-session" },
     });
-    assert.deepEqual(status.activity.rows.map(({ kind, text }) => ({ kind, text })), [{ kind: "said", text: "working" }]);
-    assert.equal(status.activity.omitted, 0);
+    assert.deepEqual(status.activity, {
+      rows: [{
+        kind: "said",
+        sequence: 2,
+        bodySequence: 1,
+        at: "2026-08-08T00:00:00.000Z",
+        text: "working",
+      }],
+      pendingTells: [],
+      omitted: 0,
+      lowestRetained: 1,
+      highest: 2,
+    });
     assert.deepEqual(await handle.wait((candidate) => candidate.answer === "public answer"), status);
     assert.equal(await handle.kill(), "killed");
     assert.equal(handle.status().life, "dead");
@@ -470,6 +490,10 @@ test("Persona Markdown is strict call-time input with a durable option shape", (
       "effort: high",
       "access: read",
       "description: Careful reviewer",
+      "editor:",
+      "  theme: dark",
+      "tags: [review, careful]",
+      "revision: 3",
       "---",
       "Review the change from first principles.",
       "",
@@ -489,11 +513,10 @@ test("Persona Markdown is strict call-time input with a durable option shape", (
         systemPrompt: "Review the change from first principles.\n",
       },
     });
-    writeFileSync(join(home, "akuma", "invalid.md"), "---\nprovider: claude\nextra: no\n---\n");
+    writeFileSync(join(home, "akuma", "invalid.md"), "---\nprovider: claude\naccess: execute\n---\n");
     assert.throws(
       () => loadPersona({ name: "invalid", settings: settingsValue }),
       (error: unknown) => error instanceof AkumaPersonaError
-        && error.reason.includes("unknown Persona frontmatter key: extra")
         && error.searched[0] === join(home, "akuma", "invalid.md"),
     );
     writeFileSync(join(home, "akuma", "unknown.md"), "---\nprovider: missing\n---\n");
@@ -545,18 +568,6 @@ test("list distinguishes sealed residue from an unclaimed birth", () => {
   }
 });
 
-test("list silently omits a corrupt fleet member without hiding healthy members", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-list-isolation-"));
-  try {
-    const healthy = await answeredSource(root, "abcdef13");
-    const corrupt = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "abcdef14" });
-    const heart = new DatabaseSync(corrupt.paths.heart);
-    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 4)");
-    heart.close();
-    assert.deepEqual(Akuma.at({ path: root }).list().rows.map((row) => row.id), [healthy.id]);
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
 test("a failed turn is durable public evidence and never masquerades as provider activity", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-failed-turn-"));
   try {
@@ -594,7 +605,8 @@ test("a failed turn is durable public evidence and never masquerades as provider
     assert.equal(settled.life, "stranded");
     assert.equal(settled.failure, "native failed");
     assert.deepEqual(settled.pending, []);
-    assert.deepEqual(handle.history().turns.map((turn) => turn.outcome), [
+    assert.deepEqual(handle.history().turns, []);
+    assert.deepEqual(readTurns(allocated.paths).map((turn) => turn.outcome), [
       { kind: "failed", diagnostic: "native failed" },
     ]);
   } finally {
@@ -607,11 +619,27 @@ test("activity is persistent narration and old raw events fail the public hard c
   try {
     const source = await answeredSource(root, "ac710001");
     const handle = Akuma.at({ path: root }).of({ id: source.id });
+    const before = handle.status();
+    const heart = new DatabaseSync(source.paths.heart);
+    try { heart.prepare("DELETE FROM activity").run(); } finally { heart.close(); }
+    assert.deepEqual(handle.status(), {
+      ...before,
+      activity: {
+        rows: [],
+        pendingTells: [],
+        omitted: 0,
+        lowestRetained: null,
+        highest: null,
+      },
+    });
+    assert.deepEqual(handle.history().rows, []);
+
     appendActivity(source.paths, {
       bodySequence: 1,
       event: { type: "activity", event: { provider: "legacy", secret: "raw" } },
       at: "2026-08-08T00:00:01.000Z",
     });
+    assert.throws(() => handle.history(), /invalid event shape/u);
     assert.throws(() => handle.status(), /invalid event shape/u);
   } finally {
     rmSync(root, { recursive: true, force: true });

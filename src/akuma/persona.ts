@@ -18,8 +18,6 @@ type DecodedPersona = Readonly<{
 type PersonaDefinition = DecodedPersona & Readonly<{ adapter: ProviderAdapter }>;
 type AdmittedPersona = Omit<PersonaDefinition, "provider"> & Readonly<{ provider: ProviderExecution }>;
 
-const PERSONA_KEYS = new Set(["provider", "model", "access", "network", "effort", "description"]);
-
 export class AkumaPersonaError extends Error {
   readonly kind = "akuma-persona";
   constructor(
@@ -68,8 +66,6 @@ function decodePersona(name: string, path: string, markdown: string): DecodedPer
     throw new TypeError("Persona frontmatter must be one mapping");
   }
   const values = decoded as Readonly<Record<string, unknown>>;
-  const unknown = Object.keys(values).find((key) => !PERSONA_KEYS.has(key));
-  if (unknown !== undefined) throw new TypeError(`unknown Persona frontmatter key: ${unknown}`);
   const provider = personaField(values, "provider", true)!;
   const model = personaField(values, "model");
   const effort = personaField(values, "effort");

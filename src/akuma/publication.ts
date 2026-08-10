@@ -68,8 +68,12 @@ async function awaitAsleepBirth(paths: AkumaPaths, collar: ProcessCollar): Promi
   for (;;) {
     const probe = probeProcessTree(collar);
     if (probe.kind === "gone") return;
-    if (probe.kind === "unverifiable") throw new Error(`Forked Akuma birth collar is unverifiable: ${probe.diagnostic}`);
-    if (performance.now() >= deadline) throw new Error("Forked Akuma birth process did not exit");
+    if (performance.now() >= deadline) {
+      if (probe.kind === "unverifiable") {
+        throw new Error(`Forked Akuma birth collar is unverifiable: ${probe.diagnostic}`);
+      }
+      throw new Error("Forked Akuma birth process did not exit");
+    }
     await wait(POLL_MS);
   }
 }

@@ -160,7 +160,8 @@ export function selectActivitySnapshot(
   };
 }
 
-function visibleRows(folded: readonly ActivityRow[], since: boolean, limit: number): readonly ActivityRow[] {
+function visibleRows(facts: readonly ActivityFact[], since: boolean, limit: number): readonly ActivityRow[] {
+  const folded = foldActivity(facts);
   return since ? folded.slice(0, limit) : folded.slice(-limit);
 }
 
@@ -171,13 +172,11 @@ export function projectActivityHistory(
   input: Readonly<{ since?: boolean; limit: number }>,
 ): ActivityHistory {
   const all = foldActivity(slice.rows);
-  const rows = visibleRows(all, input.since === true, input.limit);
+  const rows = visibleRows(slice.rows, input.since === true, input.limit);
   const bodySequences = new Set(rows.map((row) => row.bodySequence));
   return {
     rows,
-    // A failed turn may have no provider activity at all; its TurnFact remains
-    // the durable boundary and must still be visible in history.
-    turns: bodySequences.size === 0 ? turns : turns.filter((turn) => bodySequences.has(turn.bodySequence)),
+    turns: turns.filter((turn) => bodySequences.has(turn.bodySequence)),
     omitted: Math.max(0, all.length - rows.length),
     hasEarlier: input.since !== true && all.length > rows.length,
     hasLater: input.since === true && all.length > rows.length,

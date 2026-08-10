@@ -2,6 +2,7 @@ import type { Confinement, ProviderOptions, ResumeCoordinate } from "./heart/ind
 export type { ProviderOptions, ResumeCoordinate } from "./heart/index.js";
 
 export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
+
 export const AGENT_EVENT_TEXT_LIMIT = 16_384;
 export const AGENT_THOUGHT_TEXT_LIMIT = 4_000;
 
@@ -191,7 +192,10 @@ function boundedToolCall(call: ToolCall): ToolCall {
     case "search": return { kind: call.kind, query: boundedEventText(call.query) };
     case "fileChange": return {
       kind: call.kind,
-      changes: call.changes.map((change) => ({ ...change, path: boundedEventText(change.path) })),
+      changes: call.changes.map((change) => ({
+        ...change,
+        path: boundedEventText(change.path),
+      })),
     };
     case "other": return { kind: call.kind, display: boundedEventText(call.display) };
     default: return call satisfies never;
@@ -214,24 +218,35 @@ export function encodeAgentEvent(event: AgentEvent): unknown {
     case "note": return { type: event.type, text: boundedEventText(event.text) };
     case "unknown": return { type: event.type, kind: boundedEventText(event.kind) };
     case "tool": return event.phase === "started"
-      ? { type: event.type, id: event.id, phase: event.phase,
-          name: boundedEventText(event.name), call: boundedToolCall(event.call) }
-      : { type: event.type, id: event.id, phase: event.phase,
-          name: boundedEventText(event.name), call: boundedToolCall(event.call),
-          result: boundedToolResult(event.result) };
+      ? {
+          type: event.type,
+          id: event.id,
+          phase: event.phase,
+          name: boundedEventText(event.name),
+          call: boundedToolCall(event.call),
+        }
+      : {
+          type: event.type,
+          id: event.id,
+          phase: event.phase,
+          name: boundedEventText(event.name),
+          call: boundedToolCall(event.call),
+          result: boundedToolResult(event.result),
+        };
     default: return event satisfies never;
   }
 }
 
-function boundedEventText(value: string): string {
+export function boundedEventText(value: string): string {
   return value.slice(0, AGENT_EVENT_TEXT_LIMIT);
 }
-function boundedThoughtText(value: string): string {
+
+export function boundedThoughtText(value: string): string {
   return value.slice(0, AGENT_THOUGHT_TEXT_LIMIT);
 }
 
 export function noteEvent(note: string): Extract<AgentEvent, { type: "note" }> {
-  return { type: "note", text: note.replace(/\s+/g, " ").trim() };
+  return { type: "note", text: boundedEventText(note.replace(/\s+/g, " ").trim()) };
 }
 
 export function unknownEvent(kind: string): Extract<AgentEvent, { type: "unknown" }> {

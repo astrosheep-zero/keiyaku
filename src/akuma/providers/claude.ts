@@ -1,6 +1,8 @@
 import type { Options, Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   AgentEventChannel,
+  boundedEventText,
+  boundedThoughtText,
   noteEvent,
   unknownEvent,
   type Drive,
@@ -125,18 +127,18 @@ const CLAUDE_SYSTEM_NOTES = {
 function toolCall(name: string, input: unknown): ToolCall {
   const value = object(input) ?? {};
   const command = nonblank(value.command);
-  if (command !== undefined) return { kind: "run", command };
+  if (command !== undefined) return { kind: "run", command: boundedEventText(command) };
   const path = nonblank(value.file_path) ?? nonblank(value.path);
-  if (/^(?:read|view)/iu.test(name) && path !== undefined) return { kind: "read", path };
+  if (/^(?:read|view)/iu.test(name) && path !== undefined) return { kind: "read", path: boundedEventText(path) };
   const query = nonblank(value.query) ?? nonblank(value.pattern);
-  if (/search|grep|glob/iu.test(name) && query !== undefined) return { kind: "search", query };
+  if (/search|grep|glob/iu.test(name) && query !== undefined) return { kind: "search", query: boundedEventText(query) };
   if (/write/iu.test(name) && path !== undefined) {
-    return { kind: "fileChange", changes: [{ op: "add", path }] };
+    return { kind: "fileChange", changes: [{ op: "add", path: boundedEventText(path) }] };
   }
   if (/edit|notebook/iu.test(name) && path !== undefined) {
-    return { kind: "fileChange", changes: [{ op: "update", path }] };
+    return { kind: "fileChange", changes: [{ op: "update", path: boundedEventText(path) }] };
   }
-  return { kind: "other", display: name };
+  return { kind: "other", display: boundedEventText(name) };
 }
 
 function assistantEvents(
@@ -150,11 +152,11 @@ function assistantEvents(
     return;
   }
   const text = assistantText(message);
-  if (text !== null) events.emit({ type: "assistant", text });
+  if (text !== null) events.emit({ type: "assistant", text: boundedEventText(text) });
   for (const block of message.message.content) {
     const value = object(block);
     if (value?.type === "thinking" && typeof value.thinking === "string" && value.thinking.trim().length > 0) {
-      events.emit({ type: "thought", text: value.thinking });
+      events.emit({ type: "thought", text: boundedThoughtText(value.thinking) });
       continue;
     }
     if (block.type !== "tool_use") continue;
