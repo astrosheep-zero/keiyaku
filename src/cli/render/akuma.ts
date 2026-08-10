@@ -1,7 +1,8 @@
-import type { ActivityHistory, ActivityRow, AkumaStatus } from "../../akuma/index.js";
+import type { ActivityHistory, ActivityRow, AkumaStatus, TellReceipt } from "../../akuma/index.js";
 import { toolRepr } from "./akuma-tool.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
+import { safeText } from "./terminal.js";
 
 type SpineItem = Readonly<{ at?: string; index?: number; label: string; text: string }>;
 
@@ -144,18 +145,28 @@ function waitText(status: AkumaStatus): string {
   return statusText(status);
 }
 
+function wakeFailure(receipt: TellReceipt): string | null {
+  return typeof receipt.wake === "string" ? null : `wake failed: ${safeText(receipt.wake.diagnostic)}`;
+}
+
+function tellText(status: AkumaStatus, receipt: TellReceipt): string {
+  const failure = wakeFailure(receipt);
+  return failure === null ? statusText(status) : `${statusText(status)}\n${failure}`;
+}
+
 export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationResult): string {
   switch (result.action) {
     case "call": return result.id;
     case "status": return statusText(result.status);
     case "wait": return waitText(result.status);
-    case "tell": return statusText(result.status);
+    case "tell": return tellText(result.status, result.receipt);
     case "interrupt": {
       const receipt = result.receipt;
       if (receipt.kind === "dead") return `${result.akuma} interrupt dead`;
       if (receipt.kind === "unstoppable") return `${result.akuma} interrupt unstoppable ${receipt.evidence}`;
-      if ("kind" in receipt.tell) return `${result.akuma} interrupted ${receipt.putDown}`;
-      return `${result.akuma} interrupted ${receipt.putDown}`;
+      if ("kind" in receipt.tell) return `${result.akuma} interrupted ${receipt.putDown} · tell refused: dead`;
+      const failure = wakeFailure(receipt.tell);
+      return `${result.akuma} interrupted ${receipt.putDown}${failure === null ? "" : ` · ${failure}`}`;
     }
     case "history": return historyText(command as Extract<ParsedCommand, { command: "history" }>, result);
     case "fork": {

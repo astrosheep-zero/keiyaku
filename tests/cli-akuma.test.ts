@@ -93,6 +93,12 @@ test("Akuma status aligns and counts omitted activity", () => {
     akuma: status.id,
     receipt: { id: "tell-1", state: "recorded", wake: "spawned" },
   }), renderAkumaText(command, result));
+  assert.equal(renderAkumaText(command, {
+    ...result,
+    action: "tell",
+    akuma: status.id,
+    receipt: { id: "tell-1", state: "recorded", wake: { kind: "failed", diagnostic: "spawn\nfailed" } },
+  }), `${renderAkumaText(command, result)}\nwake failed: spawn failed`);
 });
 
 test("Akuma follow remains outside the unsettled CLI vocabulary", () => {
@@ -184,14 +190,18 @@ test("akuma interrupt invokes the public receipt and maps every exit class", asy
     };
     assert.equal(renderAkumaText(parsed.command, interrupted), `${allocated.id} interrupted self-aborted`);
     assert.equal(akumaExitCode(interrupted), 0);
-    assert.equal(akumaExitCode({
+    const wakeFailed = {
       ...interrupted,
       receipt: { ...interrupted.receipt, tell: { id: "tell-1", state: "recorded", wake: { kind: "failed", diagnostic: "spawn" } } },
-    }), 2);
-    assert.equal(akumaExitCode({
+    };
+    assert.equal(renderAkumaText(parsed.command, wakeFailed), `${allocated.id} interrupted self-aborted · wake failed: spawn`);
+    assert.equal(akumaExitCode(wakeFailed), 2);
+    const refusedDead = {
       ...interrupted,
       receipt: { kind: "interrupted", putDown: "collar", tell: { kind: "refused-dead" } },
-    }), 1);
+    } as const;
+    assert.equal(renderAkumaText(parsed.command, refusedDead), `${allocated.id} interrupted collar · tell refused: dead`);
+    assert.equal(akumaExitCode(refusedDead), 1);
     assert.equal(akumaExitCode({
       ...interrupted,
       receipt: { kind: "unstoppable", evidence: "leash-held-after-put-down" },

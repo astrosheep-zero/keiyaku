@@ -545,9 +545,11 @@ The package root exports the operation value names `Delivery` and `Review`.
 
 Task products may retain returned identity bytes as an opaque association.
 Their association, persistence, failure policy, and mutations are their own
-authority; the contract library has no task coordinate or settlement effect.
-The separate task subpath shipped in this package neither imports package-root
-values nor observes, validates, writes, or folds Contract facts.
+authority. The package-root facade reaches them only through the sole
+post-admission coordinator defined by [settlement.md](settlement.md); Contract
+protocol and Git do not gain Task coordinates or write operations. The separate
+task subpath shipped in this package neither imports package-root values nor
+observes, validates, writes, or folds Contract facts.
 
 ## Akuma Subpath
 

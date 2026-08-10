@@ -361,7 +361,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [types("cli/commands/task.ts"), any("task/index.ts")],
     },
     { source: "cli/render/akuma-tool.ts", allow: [types("akuma/index.ts")] },
-    { source: "cli/render/akuma.ts", allow: [types("akuma/index.ts"), types("cli/commands/akuma-invoke.ts"), types("cli/parse.ts"), any("cli/render/akuma-tool.ts")] },
+    { source: "cli/render/akuma.ts", allow: [types("akuma/index.ts"), types("cli/commands/akuma-invoke.ts"), types("cli/parse.ts"), any("cli/render/akuma-tool.ts"), any("cli/render/terminal.ts", ["safeText"])] },
     {
       source: "cli/**",
       allow: [

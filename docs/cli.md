@@ -487,7 +487,11 @@ snapshot. JSON returns that public value without reshaping it. History text
 renders the requested persistent activity page and its completed-turn
 boundaries; `--last` emits only the final selected answer bytes. Tell text
 renders the subsequent exact status, whose untimestamped `⧗ tell` row is the
-write receipt's useful projection; JSON carries both receipt and status values.
+write receipt's useful projection. A failed detached wake appends its diagnostic
+to that status. Interrupt text distinguishes `dead`, every `unstoppable`
+evidence, a successful interrupted tell, `refused-dead`, and a failed wake;
+materially different receipt arms never share success text. JSON carries the
+complete public receipt and status values.
 `unavailable` and
 `alive-after-sigkill` exit `1`; a recorded tell whose detached wake failed exits
 `2`. Fork text renders the child id for
@@ -508,9 +512,10 @@ package-root Contract surface and the separate `./task` and `./akuma` product
 surfaces; it does not define their library behavior or obtain a raw scope,
 token, registry, or orchestrator.
 
-Contract commands accept no task coordinate and produce no task mutation or
-settlement effect. Task coordination and its associations are owned by the
-external task product.
+Contract commands accept no task coordinate and never interpret or perform a
+Task mutation. Their package-root operations may return the post-admission
+coordination defined only by [settlement.md](settlement.md); the CLI merely
+renders that public result.
 
 The surface has no interactive mode, input envelope, independent JSON schema,
 per-command JSON payload, configurable attempt count, command alias, or other
