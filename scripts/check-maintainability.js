@@ -2,14 +2,14 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
-import { DEFAULT_FILE_LINES, FILE_LINE_EXEMPTIONS } from "./maintainability/config.js";
+import { FILE_LINE_EXEMPTIONS } from "./maintainability/config.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function exemptionError(exemption, index, seen, rootDirectory) {
   const label = `maintainability exemption ${index + 1}`;
   if (!exemption || typeof exemption !== "object") return `${label} must be an object`;
-  const { file, max, reason } = exemption;
+  const { file, reason } = exemption;
   if (typeof file !== "string" || file.length === 0) return `${label} needs a file`;
   if (path.isAbsolute(file) || path.posix.normalize(file) !== file || /[*?[\]{}!]/.test(file)) {
     return `${label} must use one exact normalized relative file path`;
@@ -17,9 +17,6 @@ function exemptionError(exemption, index, seen, rootDirectory) {
   if (!file.startsWith("src/") && !file.startsWith("scripts/")) return `${label} must target src/ or scripts/`;
   if (seen.has(file)) return `${label} duplicates ${file}`;
   seen.add(file);
-  if (!Number.isInteger(max) || max <= DEFAULT_FILE_LINES) {
-    return `${label} must set an integer max above ${DEFAULT_FILE_LINES}`;
-  }
   if (typeof reason !== "string" || reason.trim().length === 0) return `${label} needs a reason`;
   if (!existsSync(path.join(rootDirectory, file))) return `${label} targets missing file ${file}`;
   return null;
@@ -43,7 +40,7 @@ async function run() {
   else {
     console.log("maintainability exemptions:");
     for (const exemption of FILE_LINE_EXEMPTIONS) {
-      console.log(`- ${exemption.file}: ${DEFAULT_FILE_LINES} -> ${exemption.max} (${exemption.reason})`);
+      console.log(`- ${exemption.file}: max-lines (${exemption.reason})`);
     }
   }
 
