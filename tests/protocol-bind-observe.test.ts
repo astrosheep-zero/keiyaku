@@ -4,27 +4,27 @@ import { join } from "node:path";
 import test from "node:test";
 import { AuthorityCorruptionError, Keiyaku, Repo } from "../src/index.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
-import { prepareDelivery } from "../src/carrier/delivery.js";
-import { admit } from "../src/carrier/admission.js";
+import { prepareDelivery } from "../src/git/delivery.js";
+import { admit } from "../src/git/admission.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
-  CARRIER_REF,
+  GIT_REF,
   DELIVERY_REF_NAMESPACE,
   readBlob,
-  readCarrier,
+  readGit,
   repositoryAt,
-  updateCarrierTree,
+  updateGitTree,
   updateRefsAtomically,
   writeBlob,
   writeCommit,
-} from "../src/carrier/repository.js";
+} from "../src/git/repository.js";
 import {
   observeBindCoordinates,
-  observeCarrier,
+  observeGit,
   observeContract,
   observeContractsForAdmission,
-} from "../src/carrier/observe.js";
-import { contractJournalPath } from "../src/carrier/identity.js";
+} from "../src/git/observe.js";
+import { contractJournalPath } from "../src/git/identity.js";
 import { bindOperation as rawBindOperation, amendOperation as rawAmendOperation } from "../src/protocol/operations.js";
 import { contractId, documentKey, entryUlid, gate, type AmendData, type ContractId, type ContractTerms, type JournalEntry, type SnapshotId } from "../src/core/facts/types.js";
 import { decideArc } from "../src/core/verbs/arc.js";
@@ -99,7 +99,7 @@ test("observes a missing explicit bind target without inventing coordinates", ()
 test("refuses targets that name Keiyaku-owned refs", () => {
   const repository = repositoryWithHead();
   const ownedTargets = [
-    CARRIER_REF,
+    GIT_REF,
     DELIVERY_REF_NAMESPACE,
     `${DELIVERY_REF_NAMESPACE}/contract`,
     CANDIDATE_PIN_REF_NAMESPACE,
@@ -161,16 +161,16 @@ function contractBody(): string {
 }
 
 function publishMalformedJournal(repository: ReturnType<typeof repositoryAt>, path: string): void {
-  const carrier = readCarrier(repository);
+  const git = readGit(repository);
   const malformed = writeBlob(repository, "not a journal\n");
-  const tree = updateCarrierTree(repository, carrier.tree, new Map([
+  const tree = updateGitTree(repository, git.tree, new Map([
     [path, { oid: malformed }],
   ]));
-  const commit = writeCommit({ repository, tree, parent: carrier.commit });
+  const commit = writeCommit({ repository, tree, parent: git.commit });
   assert.equal(updateRefsAtomically(repository, [{
-    ref: CARRIER_REF,
+    ref: GIT_REF,
     newOid: commit,
-    expectedOid: carrier.commit,
+    expectedOid: git.commit,
   }]).kind, "published");
 }
 
@@ -178,20 +178,20 @@ function publishMalformedUnrelatedJournal(repository: ReturnType<typeof reposito
   publishMalformedJournal(repository, "contracts/unrelated.jsonl");
 }
 
-test("batches full-carrier journal observation into one Git invocation", async () => {
+test("batches full-Git journal observation into one Git invocation", async () => {
   const repository = repositoryWithHead();
   for (let index = 0; index < 4; index += 1) {
     await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   }
 
-  const carrier = readCarrier(repositoryAt(repository.path));
-  const journals = [...carrier.paths.keys()].filter((path) => path.startsWith("contracts/") && path.endsWith(".jsonl"));
+  const git = readGit(repositoryAt(repository.path));
+  const journals = [...git.paths.keys()].filter((path) => path.startsWith("contracts/") && path.endsWith(".jsonl"));
   assert.equal(journals.length, 4);
   const log = join(repository.path, "cat-file.log");
   const observed = withGitShim(
     "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_READ_LOG: log },
-    () => observeCarrier(repositoryAt(repository.path)),
+    () => observeGit(repositoryAt(repository.path)),
   );
 
   assert.equal(observed.contracts.size, journals.length);
@@ -214,14 +214,14 @@ test("contract-local admission scopes ancestor discovery to its journal path", a
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   const id = (await bound.keiyaku.state()).id;
-  const carrier = repositoryAt(repository.path);
+  const git = repositoryAt(repository.path);
   const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] };
   const log = join(repository.path, "ls-tree.log");
   const admission = withGitShim(
     "printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_READ_LOG: log },
     () => {
-      const observation = observeContractsForAdmission(carrier, [id]);
+      const observation = observeContractsForAdmission(git, [id]);
       const decision = decideArc({
         input: {
           contractId: id,
@@ -233,7 +233,7 @@ test("contract-local admission scopes ancestor discovery to its journal path", a
       });
       assert.equal(decision.kind, "offer");
       if (decision.kind !== "offer") throw new Error("arc decision was not an offer");
-      return admit(carrier, decision.offer, observation.admission);
+      return admit(git, decision.offer, observation.admission);
     },
   );
 
@@ -248,8 +248,8 @@ test("known publication failure is returned without a post-result ref read", asy
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   const id = (await bound.keiyaku.state()).id;
-  const carrier = repositoryAt(repository.path);
-  const observation = observeContractsForAdmission(carrier, [id]);
+  const git = repositoryAt(repository.path);
+  const observation = observeContractsForAdmission(git, [id]);
   const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] };
   const decision = decideArc({
     input: {
@@ -279,7 +279,7 @@ test("known publication failure is returned without a post-result ref read", asy
   ].join("\n"), {
     KEIYAKU_PUBLICATION_FAILED: failed,
     KEIYAKU_POST_FAILURE_READ: postRead,
-  }, () => admit(carrier, decision.offer, observation.admission));
+  }, () => admit(git, decision.offer, observation.admission));
 
   assert.equal(result.kind, "publication-failed");
   if (result.kind !== "publication-failed") throw new Error("publication failure was not preserved");
@@ -287,15 +287,15 @@ test("known publication failure is returned without a post-result ref read", asy
   assert.equal(existsSync(postRead), false);
 });
 
-function appendUnrelatedCarrierJournals(
+function appendUnrelatedGitJournals(
   repository: ReturnType<typeof repositoryAt>,
   count: number,
   start: SnapshotId,
 ): void {
-  const snapshot = readCarrier(repository);
+  const snapshot = readGit(repository);
   const changes = new Map();
   for (let index = 0; index < count; index += 1) {
-    const id = contractId(`kei/carrier-load-${index}`);
+    const id = contractId(`kei/git-load-${index}`);
     const entry: JournalEntry = {
       v: 1,
       kind: "bind",
@@ -309,10 +309,10 @@ function appendUnrelatedCarrierJournals(
     };
     changes.set(contractJournalPath(id), { oid: writeBlob(repository, encodeEntry(entry)) });
   }
-  const tree = updateCarrierTree(repository, snapshot.tree, changes);
+  const tree = updateGitTree(repository, snapshot.tree, changes);
   const commit = writeCommit({ repository, tree, parent: snapshot.commit });
   assert.equal(updateRefsAtomically(repository, [{
-    ref: CARRIER_REF,
+    ref: GIT_REF,
     newOid: commit,
     expectedOid: snapshot.commit,
   }]).kind, "published");
@@ -339,24 +339,24 @@ function amendObjectIo(
   return gitProcessCounts(readFileSync(log, "utf8").split("\n").filter(Boolean));
 }
 
-test("single-contract amend object I/O stays fixed as the carrier grows", () => {
+test("single-contract amend object I/O stays fixed as the git grows", () => {
   const one = repositoryWithHead();
-  const oneCarrier = repositoryAt(one.path);
-  const oneBound = bindOperation({ scope: oneCarrier, terms: terms([]), workspace: "here" });
+  const oneGit = repositoryAt(one.path);
+  const oneBound = bindOperation({ scope: oneGit, terms: terms([]), workspace: "here" });
   assert.equal(oneBound.kind, "accepted");
   if (oneBound.kind !== "accepted") throw new Error("one-contract bind was not accepted");
 
   const many = repositoryWithHead();
-  const manyCarrier = repositoryAt(many.path);
-  const manyBound = bindOperation({ scope: manyCarrier, terms: terms([]), workspace: "here" });
+  const manyGit = repositoryAt(many.path);
+  const manyBound = bindOperation({ scope: manyGit, terms: terms([]), workspace: "here" });
   assert.equal(manyBound.kind, "accepted");
   if (manyBound.kind !== "accepted") throw new Error("many-contract bind was not accepted");
-  const manyState = observeContract(manyCarrier, manyBound.value.contractId).state;
+  const manyState = observeContract(manyGit, manyBound.value.contractId).state;
   if (manyState === null) throw new Error("many-contract bound state was not observed");
-  appendUnrelatedCarrierJournals(manyCarrier, 32, manyState.coordinates.start);
+  appendUnrelatedGitJournals(manyGit, 32, manyState.coordinates.start);
 
-  const oneIo = amendObjectIo(oneCarrier, oneBound.value.contractId);
-  const manyIo = amendObjectIo(manyCarrier, manyBound.value.contractId);
+  const oneIo = amendObjectIo(oneGit, oneBound.value.contractId);
+  const manyIo = amendObjectIo(manyGit, manyBound.value.contractId);
   assert.deepEqual(manyIo, oneIo);
   assert.equal(oneIo.mktree, 1);
 });
@@ -366,16 +366,16 @@ test("runProtocol observes only watched contracts", async () => {
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   const id = (await bound.keiyaku.state()).id;
 
-  const carrier = readCarrier(repositoryAt(repository.path));
+  const git = readGit(repositoryAt(repository.path));
   const malformed = writeBlob(repositoryAt(repository.path), "not a journal\n");
-  const tree = updateCarrierTree(repositoryAt(repository.path), carrier.tree, new Map([
+  const tree = updateGitTree(repositoryAt(repository.path), git.tree, new Map([
     ["contracts/unrelated.jsonl", { oid: malformed }],
   ]));
-  const commit = writeCommit({ repository: repositoryAt(repository.path), tree, parent: carrier.commit });
+  const commit = writeCommit({ repository: repositoryAt(repository.path), tree, parent: git.commit });
   assert.equal(updateRefsAtomically(repositoryAt(repository.path), [{
-    ref: CARRIER_REF,
+    ref: GIT_REF,
     newOid: commit,
-    expectedOid: carrier.commit,
+    expectedOid: git.commit,
   }]).kind, "published");
 
   const result = runProtocol({
@@ -395,10 +395,10 @@ test("contract-local intent ignores an unrelated malformed journal", async () =>
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   const id = (await bound.keiyaku.state()).id;
-  const carrier = repositoryAt(repository.path);
-  publishMalformedUnrelatedJournal(carrier);
+  const git = repositoryAt(repository.path);
+  publishMalformedUnrelatedJournal(git);
 
-  const result = admitIntent(carrier, {
+  const result = admitIntent(git, {
     contractId: id,
     at: "2026-08-06T00:00:00Z",
     data: { title: "Observation", objective: "Observe one journal", brief: "Keep the intent local." },
@@ -418,7 +418,7 @@ function terms(after: readonly ContractId[]) {
   } as const;
 }
 
-test("carrier journal depth is independent of contract identity length", () => {
+test("Git journal depth is independent of contract identity length", () => {
   const short = contractJournalPath(contractId("kei/alpha"));
   const long = contractJournalPath(contractId(`kei/${"可读".repeat(1_000)}`));
 
@@ -429,26 +429,26 @@ test("carrier journal depth is independent of contract identity length", () => {
 
 test("admission reuses frozen journal bytes for a multi-contract placement offer", () => {
   const repository = repositoryWithHead();
-  const carrier = repositoryAt(repository.path);
-  const source = bindOperation({ scope: carrier, terms: terms([]), workspace: "here" });
+  const git = repositoryAt(repository.path);
+  const source = bindOperation({ scope: git, terms: terms([]), workspace: "here" });
   assert.equal(source.kind, "accepted");
   if (source.kind !== "accepted") throw new Error("source bind was not accepted");
   const dependent = bindOperation({
-    scope: carrier,
+    scope: git,
     terms: terms([source.value.contractId]),
     workspace: "here",
   });
   assert.equal(dependent.kind, "accepted");
   if (dependent.kind !== "accepted") throw new Error("dependent bind was not accepted");
 
-  const sourceState = observeContract(carrier, source.value.contractId).state;
+  const sourceState = observeContract(git, source.value.contractId).state;
   if (sourceState === null) throw new Error("source state was not observed");
-  const prepared = prepareDelivery(carrier, preparationCoordinates(sourceState), {
+  const prepared = prepareDelivery(git, preparationCoordinates(sourceState), {
     title: "Frozen journal bytes",
   });
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind !== "prepared") throw new Error("source delivery was not prepared");
-  const delivered = admitIntent(carrier, {
+  const delivered = admitIntent(git, {
     contractId: source.value.contractId,
     at: "2026-08-07T00:00:00Z",
     preparation: { kind: "prepared", document: sourceState.terms.document.key, data: prepared.data },
@@ -459,7 +459,7 @@ test("admission reuses frozen journal bytes for a multi-contract placement offer
   const claimed = withGitShim(
     "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_READ_LOG: log },
-    () => admitPlacement(carrier, { contractId: source.value.contractId, at: "2026-08-07T00:00:01Z" }),
+    () => admitPlacement(git, { contractId: source.value.contractId, at: "2026-08-07T00:00:01Z" }),
   );
 
   assert.equal(claimed.kind, "accepted");
@@ -474,25 +474,25 @@ test("public reconcile and admission observation retain canonical journal valida
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   const id = (await bound.keiyaku.state()).id;
-  const carrier = repositoryAt(repository.path);
-  const snapshot = readCarrier(carrier);
+  const git = repositoryAt(repository.path);
+  const snapshot = readGit(git);
   const path = contractJournalPath(id);
   const journal = snapshot.paths.get(path);
   if (journal === undefined) throw new Error("bound journal was not observed");
   const noncanonical = writeBlob(
-    carrier,
-    Buffer.concat([readBlob(carrier, journal.oid).subarray(0, -1), Buffer.from(" \n")]),
+    git,
+    Buffer.concat([readBlob(git, journal.oid).subarray(0, -1), Buffer.from(" \n")]),
   );
-  const tree = updateCarrierTree(carrier, snapshot.tree, new Map([[path, { oid: noncanonical }]]));
-  const commit = writeCommit({ repository: carrier, tree, parent: snapshot.commit });
-  assert.equal(updateRefsAtomically(carrier, [{
-    ref: CARRIER_REF,
+  const tree = updateGitTree(git, snapshot.tree, new Map([[path, { oid: noncanonical }]]));
+  const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(updateRefsAtomically(git, [{
+    ref: GIT_REF,
     newOid: commit,
     expectedOid: snapshot.commit,
   }]).kind, "published");
 
   assert.throws(
-    () => observeContractsForAdmission(carrier, [id]),
+    () => observeContractsForAdmission(git, [id]),
     (error: unknown) => error instanceof AuthorityCorruptionError
       && /journal entry is not canonical/.test(error.message),
   );
@@ -505,30 +505,30 @@ test("public reconcile and admission observation retain canonical journal valida
 
 test("bind and amend eligibility read only self and their after contracts", () => {
   const repository = repositoryWithHead();
-  const carrier = repositoryAt(repository.path);
+  const git = repositoryAt(repository.path);
   const dependency = bindOperation({
-    scope: carrier,
+    scope: git,
     terms: terms([]),
     workspace: "here",
   });
   assert.equal(dependency.kind, "accepted");
   if (dependency.kind !== "accepted") throw new Error("dependency bind was not accepted");
   const dependencyId = dependency.value.contractId;
-  publishMalformedUnrelatedJournal(carrier);
+  publishMalformedUnrelatedJournal(git);
 
   const result = bindOperation({
-    scope: carrier,
+    scope: git,
     terms: terms([dependencyId]),
     workspace: "here",
   });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("targeted bind was not accepted");
   assert.deepEqual(result.facts.map((entry) => entry.kind), ["bind"]);
-  const resultState = observeContract(carrier, result.value.contractId).state;
+  const resultState = observeContract(git, result.value.contractId).state;
   if (resultState === null) throw new Error("bound contract state was not observed");
 
   const amended = amendOperation({
-    scope: carrier,
+    scope: git,
     contractId: result.value.contractId,
     source: resultState.terms,
     terms: terms([dependencyId]),
@@ -540,23 +540,23 @@ test("bind and amend eligibility read only self and their after contracts", () =
 
 test("amend replacement does not observe a removed prerequisite closure", () => {
   const repository = repositoryWithHead();
-  const carrier = repositoryAt(repository.path);
-  const dependency = bindOperation({ scope: carrier, terms: terms([]), workspace: "here" });
+  const git = repositoryAt(repository.path);
+  const dependency = bindOperation({ scope: git, terms: terms([]), workspace: "here" });
   assert.equal(dependency.kind, "accepted");
   if (dependency.kind !== "accepted") throw new Error("dependency bind was not accepted");
   const waiting = bindOperation({
-    scope: carrier,
+    scope: git,
     terms: terms([dependency.value.contractId]),
     workspace: "here",
   });
   assert.equal(waiting.kind, "accepted");
   if (waiting.kind !== "accepted") throw new Error("waiting bind was not accepted");
-  const before = observeContract(carrier, waiting.value.contractId).state;
+  const before = observeContract(git, waiting.value.contractId).state;
   if (before === null) throw new Error("waiting contract was not observed");
-  publishMalformedJournal(carrier, contractJournalPath(dependency.value.contractId));
+  publishMalformedJournal(git, contractJournalPath(dependency.value.contractId));
 
   const amended = amendOperation({
-    scope: carrier,
+    scope: git,
     contractId: waiting.value.contractId,
     source: before.terms,
     terms: terms([]),
@@ -569,22 +569,22 @@ test("amend replacement does not observe a removed prerequisite closure", () => 
 
 test("amend refuses a stale complete-terms replacement when document bytes did not move", () => {
   const repository = repositoryWithHead();
-  const carrier = repositoryAt(repository.path);
-  const bound = bindOperation({ scope: carrier, terms: terms([]), workspace: "here" });
+  const git = repositoryAt(repository.path);
+  const bound = bindOperation({ scope: git, terms: terms([]), workspace: "here" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
-  const before = observeContract(carrier, bound.value.contractId).state;
+  const before = observeContract(git, bound.value.contractId).state;
   if (before === null) throw new Error("contract state was not observed");
   const reviewed = { ...before.terms, gates: [gate("reviewed")] };
   assert.equal(amendOperation({
-    scope: carrier,
+    scope: git,
     contractId: before.id,
     source: before.terms,
     terms: reviewed,
   }).kind, "accepted");
 
   const stale = amendOperation({
-    scope: carrier,
+    scope: git,
     contractId: before.id,
     source: before.terms,
     terms: before.terms,
@@ -597,10 +597,10 @@ test("amend refuses a stale complete-terms replacement when document bytes did n
 
 test("bind rejects unresolved after and bound amend prioritizes consumed prerequisites", () => {
   const repository = repositoryWithHead();
-  const carrier = repositoryAt(repository.path);
+  const git = repositoryAt(repository.path);
   const missing = contractId("kei/missing-prerequisite");
   const bound = bindOperation({
-    scope: carrier,
+    scope: git,
     terms: terms([missing]),
     workspace: "here",
   });
@@ -609,16 +609,16 @@ test("bind rejects unresolved after and bound amend prioritizes consumed prerequ
   assert.equal(bound.refusal.kind, "unknown-prerequisite");
 
   const existing = bindOperation({
-    scope: carrier,
+    scope: git,
     terms: terms([]),
     workspace: "here",
   });
   assert.equal(existing.kind, "accepted");
   if (existing.kind !== "accepted") throw new Error("existing bind was not accepted");
-  const existingState = observeContract(carrier, existing.value.contractId).state;
+  const existingState = observeContract(git, existing.value.contractId).state;
   if (existingState === null) throw new Error("existing contract state was not observed");
   const amended = amendOperation({
-    scope: carrier,
+    scope: git,
     contractId: existing.value.contractId,
     source: existingState.terms,
     terms: terms([missing]),
@@ -653,26 +653,26 @@ test("amend emits bound atomically when its resulting after set is claimed", () 
   });
   assert.equal(claimedDependency.kind, "accepted");
   if (claimedDependency.kind !== "accepted") throw new Error("claimable dependency bind was not accepted");
-  const carrier = repositoryAt(repository.path);
-  const state = observeCarrier(carrier).contracts.get(claimedDependency.value.contractId)?.state;
+  const git = repositoryAt(repository.path);
+  const state = observeGit(git).contracts.get(claimedDependency.value.contractId)?.state;
   if (state === undefined || state === null) throw new Error("claimable dependency state was not observed");
-  const delivery = prepareDelivery(carrier, preparationCoordinates(state), { title: "Targeted" });
+  const delivery = prepareDelivery(git, preparationCoordinates(state), { title: "Targeted" });
   assert.equal(delivery.kind, "prepared");
   if (delivery.kind !== "prepared") throw new Error("claimable dependency delivery was not prepared");
-  const delivered = admitIntent(carrier, {
+  const delivered = admitIntent(git, {
     contractId: claimedDependency.value.contractId,
     at: "2026-08-06T00:00:00Z",
     preparation: { kind: "prepared", document: state.terms.document.key, data: delivery.data },
   }, decideDeliver);
   assert.equal(delivered.kind, "accepted");
-  const claimed = admitPlacement(carrier, {
+  const claimed = admitPlacement(git, {
     contractId: claimedDependency.value.contractId,
     at: "2026-08-06T00:00:01Z",
   });
   assert.equal(claimed.kind, "accepted");
 
   const immediatelyBound = bindOperation({
-    scope: carrier,
+    scope: git,
     terms: terms([claimedDependency.value.contractId]),
     workspace: "here",
   });
@@ -680,11 +680,11 @@ test("amend emits bound atomically when its resulting after set is claimed", () 
   if (immediatelyBound.kind !== "accepted") throw new Error("claimed prerequisite bind was not accepted");
   assert.deepEqual(immediatelyBound.facts.map((entry) => entry.kind), ["bind", "bound"]);
 
-  const waitingState = observeContract(carrier, waiting.value.contractId).state;
+  const waitingState = observeContract(git, waiting.value.contractId).state;
   if (waitingState === null) throw new Error("waiting contract state was not observed");
 
   const amended = amendOperation({
-    scope: carrier,
+    scope: git,
     contractId: waiting.value.contractId,
     source: waitingState.terms,
     terms: terms([claimedDependency.value.contractId]),
@@ -704,13 +704,13 @@ test("placement redecides after a world advance and binds a new dependent", asyn
   assert.equal(source.kind, "accepted");
   if (source.kind !== "accepted") throw new Error("source bind was not accepted");
 
-  const carrier = repositoryAt(repository.path);
-  const sourceState = observeContract(carrier, source.value.contractId).state;
+  const git = repositoryAt(repository.path);
+  const sourceState = observeContract(git, source.value.contractId).state;
   if (sourceState === null) throw new Error("source state was not observed");
-  const prepared = prepareDelivery(carrier, preparationCoordinates(sourceState), { title: "Concurrent placement" });
+  const prepared = prepareDelivery(git, preparationCoordinates(sourceState), { title: "Concurrent placement" });
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind !== "prepared") throw new Error("source delivery was not prepared");
-  const delivered = admitIntent(carrier, {
+  const delivered = admitIntent(git, {
     contractId: source.value.contractId,
     at: "2026-08-06T00:00:00Z",
     preparation: { kind: "prepared", document: sourceState.terms.document.key, data: prepared.data },
@@ -751,23 +751,23 @@ test("placement redecides after a world advance and binds a new dependent", asyn
   const claimed = withGitShim(
     shim,
     { KEIYAKU_RACE_MARKER: marker, KEIYAKU_RACE_JOURNAL: dependentJournal },
-    () => admitPlacement(carrier, { contractId: source.value.contractId, at: "2026-08-06T00:00:02Z" }),
+    () => admitPlacement(git, { contractId: source.value.contractId, at: "2026-08-06T00:00:02Z" }),
   );
   assert.equal(claimed.kind, "accepted");
   if (claimed.kind !== "accepted") throw new Error("placement was not accepted after redecision");
   assert.deepEqual(claimed.facts.map((fact) => fact.kind), ["bound", "claimed"]);
-  assert.equal(observeContract(carrier, source.value.contractId).state?.terminal?.kind, "claimed");
-  assert.equal(observeContract(carrier, dependent).state?.bound?.kind, "bound");
+  assert.equal(observeContract(git, source.value.contractId).state?.terminal?.kind, "claimed");
+  assert.equal(observeContract(git, dependent).state?.bound?.kind, "bound");
 });
 
 test("delivery preparation ignores an unrelated malformed journal", async () => {
   const repository = repositoryWithHead();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
   const id = (await bound.keiyaku.state()).id;
-  const carrier = repositoryAt(repository.path);
-  publishMalformedUnrelatedJournal(carrier);
+  const git = repositoryAt(repository.path);
+  publishMalformedUnrelatedJournal(git);
 
-  const state = observeContract(carrier, id).state;
+  const state = observeContract(git, id).state;
   if (state === null) throw new Error("bound contract state was not observed");
-  assert.equal(prepareDelivery(carrier, preparationCoordinates(state), { title: "Observation" }).kind, "prepared");
+  assert.equal(prepareDelivery(git, preparationCoordinates(state), { title: "Observation" }).kind, "prepared");
 });

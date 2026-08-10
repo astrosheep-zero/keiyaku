@@ -3,18 +3,18 @@ import {
   prepareReview,
   type DeliveryPreparationRefusal,
   type ReviewPreparationRefusal,
-} from "../carrier/delivery.js";
+} from "../git/delivery.js";
 import {
   extendContractsForAdmission,
-  observeCarrier,
+  observeGit,
   observeContract,
   observeContractsForAdmission,
-  type CarrierDecisionObservation,
-} from "../carrier/observe.js";
-import { reconcile, reconcileBatch, reconcileObservationFailure, type ReconcileResult } from "../carrier/reconcile.js";
-import { NoGitWorldError, repositoryAt, type GitRepository } from "../carrier/repository.js";
-import { readDeliveryDiff } from "../carrier/verification.js";
-import type { WorktreeLeak } from "../carrier/verification.js";
+  type GitDecisionObservation,
+} from "../git/observe.js";
+import { reconcile, reconcileBatch, reconcileObservationFailure, type ReconcileResult } from "../git/reconcile.js";
+import { NoGitWorldError, repositoryAt, type GitRepository } from "../git/repository.js";
+import { readDeliveryDiff } from "../git/verification.js";
+import type { WorktreeLeak } from "../git/verification.js";
 import { dependencyKeySet } from "../core/subject.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState, documentIsCurrent } from "../core/facts/observation.js";
@@ -124,7 +124,7 @@ export function deliveryOperation(input: OperationInput): DeliveryIdentity | nul
 function observePrerequisiteClosure(
   repository: GitRepository,
   contracts: readonly ContractId[],
-): CarrierDecisionObservation {
+): GitDecisionObservation {
   let observation = observeContractsForAdmission(repository, contracts);
   let frontier = contracts.slice(1);
   while (frontier.length > 0) {
@@ -392,7 +392,7 @@ function reviewAttempt(
 export function reviewOperation(
   input: ReviewOperationInput,
 ): IntentOutcome<ReviewValue, ReviewRefusal> {
-  const carrier = input.scope;
+  const git = input.scope;
   const attempts = mintAttempts({ entryCount: 2 });
   let review: Extract<AttemptDecision<void, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
@@ -408,7 +408,7 @@ export function reviewOperation(
   if (review.kind !== "accepted") return review;
   if (input.verdict !== "satisfied") return admitted(review, {});
 
-  const placement = admitPlacement(carrier, {
+  const placement = admitPlacement(git, {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
@@ -421,8 +421,8 @@ export function reviewOperation(
 export async function auditOperation(
   input: OperationInput & Readonly<{ derivation?: DocumentDerivation }>,
 ): Promise<IntentOutcome<AuditReport>> {
-  const carrier = input.scope;
-  const initial = readAudit(carrier, input.contractId, REVIEWED);
+  const git = input.scope;
+  const initial = readAudit(git, input.contractId, REVIEWED);
   if (initial.state === null) return { kind: "refused", refusal: { kind: "contract-missing", contractId: input.contractId } };
   const derivation = input.derivation;
   if (derivation === undefined) {
@@ -441,7 +441,7 @@ export async function auditOperation(
   }
 
   const verification = await verifyDelivery({
-    repository: carrier,
+    repository: git,
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
@@ -491,10 +491,10 @@ type RepoReconcileItem = Readonly<{ contractId: ContractId; state: ContractState
 export type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>;
 
 export function reconcileAllOperation(input: Readonly<{ scope: RepositoryScope }>): RepoReconcileReport {
-  const carrier = input.scope;
-  const observation = observeCarrier(carrier);
+  const git = input.scope;
+  const observation = observeGit(git);
   const contracts = reconcileBatch(
-    carrier,
+    git,
     [...observation.contracts].map(([id, record]) => ({ id, state: record.state })),
   ).map((item): RepoReconcileItem => ({
     contractId: item.contract,

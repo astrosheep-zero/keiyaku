@@ -17,7 +17,7 @@ export function validPath(path: string): void {
   if (
     path.length === 0 || path.startsWith("/") || path.endsWith("/") || path.includes("\0")
     || path.split("/").some((part) => part.length === 0 || part === "." || part === "..")
-  ) throw new Error(`invalid carrier path: ${path}`);
+  ) throw new Error(`invalid Git path: ${path}`);
 }
 
 function addEntry(root: MutableTreeNode, path: string, change: TreeChange): void {
@@ -25,7 +25,7 @@ function addEntry(root: MutableTreeNode, path: string, change: TreeChange): void
   const parts = path.split("/");
   let node = root;
   for (const part of parts.slice(0, -1)) {
-    if (node.files.has(part)) throw new Error(`carrier path is both file and directory: ${path}`);
+    if (node.files.has(part)) throw new Error(`Git path is both file and directory: ${path}`);
     let child = node.directories.get(part);
     if (child === undefined) {
       child = { files: new Map(), directories: new Map() };
@@ -35,7 +35,7 @@ function addEntry(root: MutableTreeNode, path: string, change: TreeChange): void
   }
   const name = parts.at(-1);
   if (name === undefined || node.directories.has(name)) {
-    throw new Error(`carrier path is both file and directory: ${path}`);
+    throw new Error(`Git path is both file and directory: ${path}`);
   }
   node.files.set(name, change);
 }
@@ -121,7 +121,7 @@ function prepareNode(
   for (const [name, child] of node.directories) {
     const prior = entries.get(name);
     if (prior !== undefined && prior.type !== "tree") {
-      throw new Error(`carrier path is both file and directory: ${name}`);
+      throw new Error(`Git path is both file and directory: ${name}`);
     }
     const childPath = path.length === 0 ? name : `${path}/${name}`;
     const oid = prepareNode(child, childPath, bases, oidBytes, prepared);

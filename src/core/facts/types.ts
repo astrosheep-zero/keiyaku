@@ -62,12 +62,12 @@ export function contractHead(value: string): ContractHead {
   return requireOpaqueId(value, "contract head") as ContractHead;
 }
 
-/** Validate an opaque persisted snapshot value; only a carrier may mint one. */
+/** Validate an opaque persisted snapshot value; only Git may mint one. */
 export function snapshotId(value: string): SnapshotId {
   return requireOpaqueId(value, "snapshot ID") as SnapshotId;
 }
 
-/** Validate an opaque persisted change value; only a carrier may mint one. */
+/** Validate an opaque persisted change value; only Git may mint one. */
 export function changeId(value: string): ChangeId {
   return requireOpaqueId(value, "change ID") as ChangeId;
 }

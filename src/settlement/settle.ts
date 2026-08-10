@@ -1,5 +1,5 @@
 import { contractSegment, type ContractId, type ContractState } from "../core/facts/types.js";
-import type { Effect } from "../carrier/reconcile.js";
+import type { Effect } from "../git/reconcile.js";
 import { repairNamespaceContext } from "../task/context.js";
 import { associatedTaskIds, settleAssociatedTask } from "../task/operations.js";
 import type { TaskId } from "../task/identity.js";

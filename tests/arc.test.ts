@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeArcDocument } from "../src/body/arc.js";
 import { renderContractBody } from "../src/body/render.js";
-import { observeContract } from "../src/carrier/observe.js";
-import { repositoryAt } from "../src/carrier/repository.js";
+import { observeContract } from "../src/git/observe.js";
+import { repositoryAt } from "../src/git/repository.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
 import {

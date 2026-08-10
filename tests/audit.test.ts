@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, Repo, type KeiyakuRefusal } from "../src/index.js";
 import { decodeContractDocument, verificationDefinition } from "../src/body/decode.js";
-import { repositoryAt } from "../src/carrier/repository.js";
+import { repositoryAt } from "../src/git/repository.js";
 import { entryUlid, gate } from "../src/core/facts/types.js";
 import { dependencyKeySet } from "../src/core/subject.js";
 import { verifyDelivery } from "../src/protocol/intent.js";

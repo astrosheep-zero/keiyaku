@@ -2,7 +2,7 @@
 
 This chapter owns the Keiyaku Markdown methodology at the library edge. It is
 a pure document boundary: it decides edge syntax and private document values,
-never lifecycle legality, journal admission, or transport effects. A decoded
+never lifecycle legality, journal admission, or Git effects. A decoded
 document remains library-private. Core retains only the opaque whole-document
 bytes, their key, and ordered opaque segment keys defined by [model.md](model.md);
 it knows no section name or Markdown grammar.
@@ -67,7 +67,7 @@ patterns are typed document refusals.
 The dialect computes exact intersection between two patterns from this closed
 grammar. It does not use a conservative approximation. This interpretation is
 pure body methodology: only the opaque source document terms may persist below
-the library edge; core, protocol, and carrier never receive the decoded body.
+the library edge; core, protocol, and Git never receive the decoded body.
 
 The title has no content before the first H2. The document has no nonblank
 bytes outside its H1 and H2 sections, no duplicate top-level H2, and no

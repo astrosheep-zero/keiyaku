@@ -1,6 +1,6 @@
-import { observeCarrier, observeContract } from "../../carrier/observe.js";
-import { deliveryWorktreePath } from "../../carrier/reconcile.js";
-import type { GitRepository } from "../../carrier/repository.js";
+import { observeGit, observeContract } from "../../git/observe.js";
+import { deliveryWorktreePath } from "../../git/reconcile.js";
+import type { GitRepository } from "../../git/repository.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import type { ContractId, ContractState, SnapshotId } from "../../core/facts/types.js";
 
@@ -60,9 +60,9 @@ function rowFor(repository: GitRepository, state: ContractState): ContractRow {
   };
 }
 
-/** Build the Contract board from one immutable carrier observation. */
+/** Build the Contract board from one immutable git observation. */
 export function readContractBoard(repository: GitRepository): ContractBoard {
-  const observed = observeCarrier(repository);
+  const observed = observeGit(repository);
   const rows: ContractRow[] = [];
   for (const value of observed.contracts.values()) {
     if (value.state === null) continue;

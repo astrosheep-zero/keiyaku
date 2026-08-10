@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { deliveryWorktreePath } from "../src/carrier/reconcile.js";
-import { repositoryAt } from "../src/carrier/repository.js";
+import { deliveryWorktreePath } from "../src/git/reconcile.js";
+import { repositoryAt } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import {
   bindOperation,
@@ -35,7 +35,7 @@ function terms(title: string) {
     "Expose one pinned scope and snapshot-backed status.",
     "",
     "## Design",
-    "The protocol owns carrier observation and effects.",
+    "The protocol owns git observation and effects.",
     "",
     "## Region",
     "```",
@@ -63,12 +63,12 @@ function bind(repository: TestGitRepository, title: string, workspace: "worktree
   return result.value.contractId;
 }
 
-test("carrier repository resolution rejects omitted and empty coordinates", () => {
+test("git repository resolution rejects omitted and empty coordinates", () => {
   assert.throws(() => Reflect.apply(repositoryAt, undefined, []), /repository path must be a nonempty string/);
   assert.throws(() => repositoryAt(""), /repository path must be a nonempty string/);
 });
 
-test("Contract reads return plain pinned data from one carrier snapshot", () => {
+test("Contract reads return plain pinned data from one git snapshot", () => {
   const repository = repositoryWithMain();
   const first = bind(repository, "First status row", "here");
   const second = bind(repository, "Second status row", "worktree");
@@ -81,13 +81,13 @@ test("Contract reads return plain pinned data from one carrier snapshot", () => 
     { KEIYAKU_STATUS_READ_LOG: log },
     () => contractsOperation({ scope }),
   );
-  const carrier = repositoryAt(repository.path);
+  const git = repositoryAt(repository.path);
 
   assert.equal(report.rows.length, 2);
   assert.equal(scope.effectiveCwd, resolve(repository.path));
-  assert.equal(scope.primaryWorktree, carrier.primaryWorktree);
-  assert.equal(carrier.effectiveCwd, resolve(repository.path));
-  assert.equal(report.root, carrier.primaryWorktree);
+  assert.equal(scope.primaryWorktree, git.primaryWorktree);
+  assert.equal(git.effectiveCwd, resolve(repository.path));
+  assert.equal(report.root, git.primaryWorktree);
   assert.deepEqual(report.rows.find((contract) => contract.id === first), {
     id: first,
     phase: "bound",
@@ -103,7 +103,7 @@ test("Contract reads return plain pinned data from one carrier snapshot", () => 
     phase: "bound",
     disposition: "active",
     workspace: "worktree",
-    worktreePath: deliveryWorktreePath(carrier, second),
+    worktreePath: deliveryWorktreePath(git, second),
     target: null,
     candidate: null,
     gates: { reports: [], satisfied: true },
@@ -122,8 +122,8 @@ test("batch reconcile isolates a failed contract and retains successful reports"
   const repository = repositoryWithMain();
   const blocked = bind(repository, "Blocked reconcile", "worktree");
   const healthy = bind(repository, "Healthy reconcile", "worktree");
-  const carrier = repositoryAt(repository.path);
-  mkdirSync(deliveryWorktreePath(carrier, blocked), { recursive: true });
+  const git = repositoryAt(repository.path);
+  mkdirSync(deliveryWorktreePath(git, blocked), { recursive: true });
 
   const report = reconcileAllOperation({ scope: scopeOperation({ coordinate: repository.path }) });
   assert.equal(report.contracts.length, 2);
@@ -137,5 +137,5 @@ test("batch reconcile isolates a failed contract and retains successful reports"
 
   const reconciled = report.contracts.find((contract) => contract.contractId === healthy);
   assert.deepEqual(reconciled?.report.lag, []);
-  assert.equal(existsSync(deliveryWorktreePath(carrier, healthy)), true);
+  assert.equal(existsSync(deliveryWorktreePath(git, healthy)), true);
 });

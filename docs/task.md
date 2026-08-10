@@ -2,7 +2,7 @@
 
 Task is a directory-context planning product shipped from the same npm package
 under `./task`. It answers what work exists, what can begin, and what blocks it.
-It is not part of contract core, protocol, carrier, or contract lifecycle.
+It is not part of contract core, protocol, Git, or contract lifecycle.
 Contract modules never import Task modules. Task does not import `Repo`, read
 Contract authority, or interpret a retained contract association.
 

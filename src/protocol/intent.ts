@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { observeCarrierForAdmission, type CarrierDecisionObservation } from "../carrier/observe.js";
-import type { GitRepository } from "../carrier/repository.js";
-import { materializeVerificationCandidate } from "../carrier/verification.js";
-import type { WorktreeLeak } from "../carrier/verification.js";
+import { observeGitForAdmission, type GitDecisionObservation } from "../git/observe.js";
+import type { GitRepository } from "../git/repository.js";
+import { materializeVerificationCandidate } from "../git/verification.js";
+import type { WorktreeLeak } from "../git/verification.js";
 import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
 import { dependencyKeySet } from "../core/subject.js";
 import type { ActorId, ContractId, ContractState, DependencyKeySet } from "../core/facts/types.js";
@@ -46,10 +46,10 @@ export function mintAttempts(input: Readonly<{ entryCount: number }>): readonly 
 
 type IntentAdmissionOptions = Readonly<{
   observedContracts?: readonly ContractId[];
-  observe?: (repository: GitRepository, contracts: readonly ContractId[]) => CarrierDecisionObservation;
+  observe?: (repository: GitRepository, contracts: readonly ContractId[]) => GitDecisionObservation;
 }>;
 
-/** Observe, decide, and atomically admit one intent with bounded carrier retries. */
+/** Observe, decide, and atomically admit one intent with bounded Git retries. */
 export function admitIntent<Input extends Readonly<{ contractId: ContractId }>, Refusal>(
   repository: GitRepository,
   input: Input,
@@ -78,7 +78,7 @@ export function admitPlacement(
     repository,
     contracts: [input.contractId],
     attempts: mintAttempts({ entryCount: 2 }),
-    observe: observeCarrierForAdmission,
+    observe: observeGitForAdmission,
     extendAttempt: (attempt, observedContractCount) => ({
       ...attempt,
       entryUlids: [

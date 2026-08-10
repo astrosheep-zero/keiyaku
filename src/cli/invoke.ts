@@ -79,7 +79,7 @@ async function invokeBind(
 
 function unavailableDiff(delivery: { snapshotId: SnapshotId; changeId: ChangeId }): DiffUnavailable {
   return {
-    reason: "transport-unavailable",
+    reason: "git-unavailable",
     snapshotId: delivery.snapshotId,
     changeId: delivery.changeId,
   };

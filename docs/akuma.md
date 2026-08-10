@@ -25,7 +25,7 @@ and go; the heart stays.
   provider execution, provider options, summon cwd, origin, confinement, and
   optional Contract association.
   The association is opaque `kei/...` identity bytes meaning "summoned for";
-  it carries no Contract lifecycle or carrier behavior. The cwd is the akuma's
+  it carries no Contract lifecycle or Git behavior. The cwd is the akuma's
   seat, not a native resume coordinate; resumability remains a session fact.
 - **body** — the detached, unsandboxed process currently driving the akuma.
   At most one body at a time; most of the time, none.
@@ -207,7 +207,7 @@ Hearts live in the primary world:
 <world>/.keiyaku/akuma/run/<name>-<hex8>/{heart.db, leash.db, stdio.log}
 ```
 
-- Never inside a contract worktree. Transport reconcile removes clean
+- Never inside a contract worktree. Git reconcile removes clean
   worktrees lawfully; the akuma pillar must not bleed when that pillar acts.
 - `run/.gitignore` containing `*` is written when `run/` is created — the
   ledger ignores itself; the user does nothing.
@@ -1048,7 +1048,7 @@ Natural-death terminals. Blind sweeps and age-based adjudication — the
 leash and the seal judge; age is evidence. Placement laws that claim to
 confine unconfined processes. Confinement gates — confinement facts are
 evidence, never admission control. Anti-forgery machinery of any kind —
-malice is outside the threat model. Contract lifecycle or carrier knowledge
+malice is outside the threat model. Contract lifecycle or Git knowledge
 inside `src/akuma` — structural validation and opaque association bytes are the
 whole edge. There is no Task endpoint field, generic metadata bag, binding
 registry, existence validation, implicit Body Request inheritance, Contract or

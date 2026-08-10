@@ -18,7 +18,7 @@ test("namespace context stores root and nested namespaces in canonical bytes", (
   assert.deepEqual(readNamespaceContext(root), []);
   assert.equal(readFileSync(join(root, ".keiyaku", "namespace", "current"), "utf8"), "\n");
 });
-test("repair preserves a valid override and repairs the ignored carrier", () => {
+test("repair preserves a valid override and repairs the ignored Git", () => {
   const root = temporary();
   installNamespaceContext(root, ["override"]);
   const current = join(root, ".keiyaku", "namespace", "current"), inode = lstatSync(current).ino;

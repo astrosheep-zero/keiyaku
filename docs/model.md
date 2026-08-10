@@ -1,6 +1,6 @@
 # Contract Model
 
-The journal is the sole lifecycle authority. Carrier storage, target refs,
+The journal is the sole lifecycle authority. Git storage, target refs,
 worktrees, runtime results, and folded state are derived from or effects of the
 journal; none is a second state store. v4 has no compatibility or migration
 layer.
@@ -14,7 +14,7 @@ Each component answers one class of question and has one legal consumer:
 | `core` (pact) | facts to state; intent to decision | every layer, as pure functions and types |
 | `markdown` | text to AST | `library` |
 | `body` | edge document methodology to private values | `library` |
-| `carrier` | fact observation, admission, persistence, and Git effects | `protocol` |
+| `git` | fact observation, admission, persistence, and Git effects | `protocol` |
 | `runtime/proc` | process execution to typed outcome | `verification` |
 | `verification` | declarations to attempt and result | `protocol` |
 | `protocol` | observe, decide, admit, and public reads | `library` |
@@ -26,7 +26,7 @@ Imports follow those edges without skipping a layer. `core` is readable as
 pure functions and types throughout the graph. Pact has no repository handle,
 Git execution, ref/worktree effect, process, clock, current directory, or
 physical object-format validator. Protocol is the only join between pure pact
-decisions and carrier observation/admission. Execution-side producers consume
+decisions and Git observation/admission. Execution-side producers consume
 the shared process runtime without making either part of pact. Core knows no
 Markdown grammar, section name, or producer-specific declaration.
 
@@ -34,15 +34,15 @@ A core `ContractsObservation` carries only the contract map that pure decisions
 actually read: every requested identity maps to its folded `ContractState` or
 to explicit `null` absence. A missing map key is a broken observation invariant,
 not another spelling of contract absence. Raw journal entries belong to the
-carrier/protocol observation used for audit and unknown-admission recovery; they
-do not enter the pact decision projection. Carrier snapshot identity and
-physical provenance likewise remain carrier concerns.
+Git/protocol observation used for audit and unknown-admission recovery; they
+do not enter the pact decision projection. Git snapshot identity and
+physical provenance likewise remain Git concerns.
 
-`SnapshotId` names a work snapshot and `ChangeId` names patch content. Carrier
+`SnapshotId` names a work snapshot and `ChangeId` names patch content. Git
 mints both and is the sole physical Git object-ID validator; pact validates only
 their opaque nonblank values. Every tender has both identities. A producer or
 operation may include either identity in its dependency-key set when its own law
-requires it. A carrier may make them equal and thereby choose stricter
+requires it. Git may make them equal and thereby choose stricter
 freshness.
 
 ## Identity Coordinates
@@ -72,7 +72,7 @@ locale-independent lowercasing, retaining Unicode letters, numbers, and
 complete emoji graphemes, and collapsing every intervening run to one hyphen.
 The transformation is pure and idempotent: normalizing an already normalized
 stem returns the same bytes. Its output uses a portable filename character form;
-platform-specific physical names remain the carrier's concern.
+platform-specific physical names remain Git's concern.
 
 Fitting is a separate pure operation. It truncates only at a grapheme boundary
 under an owner-selected UTF-8 byte budget and may reserve room for a suffix. Each
@@ -91,7 +91,7 @@ Bind derives the first ContractId as `kei/<fitted-normalized-title>`. Admission
 is the sole uniqueness adjudicator. An existing unsuffixed identity causes bind
 to mint one random collision suffix, refit the same normalized stem with space
 reserved for that suffix, and make one new identity attempt. Suffixing is not
-part of normalization. Other carrier movement retries reuse the selected
+part of normalization. Other Git movement retries reuse the selected
 identity; they never silently remint it. A second identity collision remains the
 typed `contract-exists` refusal. An empty normalized stem uses `contract` before
 the same collision rule. Readers, folds, and gates compare the whole
@@ -104,9 +104,9 @@ persisted.
 Actor is optional testimony, not lifecycle identity or gate input. `ActorId` is
 an opaque nonblank brand. A library write records it only when the caller
 supplies it; its absence is legal. The CLI selects an explicit nonblank
-`--actor`, then `KEIYAKU_PROJECTION_ID`, then no signature. Carrier uses a
+`--actor`, then `KEIYAKU_PROJECTION_ID`, then no signature. Git uses a
 neutral Git author when testimony is absent. Contract facts retain full `kei/`
-identities; carrier paths may privately strip that prefix but never reconstruct
+identities; Git paths may privately strip that prefix but never reconstruct
 public identity from a path.
 
 ## Values And Facts
@@ -241,12 +241,12 @@ in [lifecycle.md](lifecycle.md); their producer-specific Verification use is
 defined in [verification.md](verification.md). Core derives none of those rules
 from Markdown section names or Git objects.
 
-The carrier checks `meta/format.json` on every nonempty carrier read. A
-contract's `ContractHead` is its journal blob identity, so unrelated carrier
+Git checks `meta/format.json` on every nonempty Git read. A
+contract's `ContractHead` is its journal blob identity, so unrelated Git
 movement does not change that contract. The journal's canonical bytes and entry
 ULIDs identify accepted facts. A partial match of a multi-entry admission is
 corrupted authority. Invalid canonical journal bytes, an impossible journal
-fold, a malformed carrier format, and a partial unknown-admission match throw
+fold, a malformed Git format, and a partial unknown-admission match throw
 the package-root `AuthorityCorruptionError`. This exception identifies durable
 authority that cannot be interpreted; it is not a programmer `TypeError`, a
 lifecycle refusal, or a retry classification.

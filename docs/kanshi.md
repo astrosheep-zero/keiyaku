@@ -36,7 +36,7 @@ are never collapsed into `missing`.
 The join is one hop. Kanshi does not validate associations, infer them from cwd
 or origin, follow Task associations to derive an Akuma association, or persist
 the joined view. Task and Akuma products do not import Contract lifecycle or
-carrier behavior.
+Git behavior.
 
 ## Selection
 

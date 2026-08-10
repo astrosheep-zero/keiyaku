@@ -61,13 +61,13 @@ test("architecture policy keeps invoke and contract commands off the private lif
 
 test("architecture policy keeps the library facade on protocol-owned operations", () => {
   const diagnostics = check({
-    "carrier/repository.ts": "export function repositoryAt(): void {}",
+    "git/repository.ts": "export function repositoryAt(): void {}",
     "core/verbs/attestation.ts": "export function decideAttestation(): void {}",
     "protocol/run.ts": "export function runProtocol(): void {}",
     "protocol/intent.ts": "export function admitPlacement(): void {}",
     "protocol/operations.ts": "export function reviewOperation(): void {}",
     "library/keiyaku.ts": [
-      'import { repositoryAt } from "../carrier/repository.js";',
+      'import { repositoryAt } from "../git/repository.js";',
       'import { decideAttestation } from "../core/verbs/attestation.js";',
       'import { runProtocol } from "../protocol/run.js";',
       'import { admitPlacement } from "../protocol/intent.js";',
@@ -167,34 +167,34 @@ test("architecture policy rejects dependency cycles including type-only cycles",
   assert.ok(rules(diagnostics).includes("architecture/dependency-cycle"));
 });
 
-test("architecture policy keeps pure facts independent of Git transport", () => {
+test("architecture policy keeps pure facts independent of Git", () => {
   const diagnostics = check({
-    "carrier/repository.ts": "export type GitRepository = {};",
-    "core/facts/fold.ts": 'import type { GitRepository } from "../../carrier/repository.js"; export function fold(repository: GitRepository): void {}',
+    "git/repository.ts": "export type GitRepository = {};",
+    "core/facts/fold.ts": 'import type { GitRepository } from "../../git/repository.js"; export function fold(repository: GitRepository): void {}',
   });
   assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
 
 test("architecture policy keeps verbs away from admission and repository", () => {
   const diagnostics = check({
-    "carrier/admission.ts": "export type Offer = {};",
-    "carrier/repository.ts": "export type GitRepository = {};",
+    "git/admission.ts": "export type Offer = {};",
+    "git/repository.ts": "export type GitRepository = {};",
     "core/verbs/deliver.ts": [
-      'import type { Offer } from "../../carrier/admission.js";',
-      'import type { GitRepository } from "../../carrier/repository.js";',
+      'import type { Offer } from "../../git/admission.js";',
+      'import type { GitRepository } from "../../git/repository.js";',
       "export function decideDeliver(offer: Offer, repository: GitRepository): void {}",
     ].join("\n"),
   });
   assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/dependency-direction").length, 2);
 });
 
-test("architecture policy permits protocol to join pact with carrier", () => {
+test("architecture policy permits protocol to join pact with Git", () => {
   const diagnostics = check({
     "core/decide.ts": "export type AttemptContext = {};",
-    "carrier/repository.ts": "export type GitRepository = {};",
-    "carrier/observe.ts": 'import type { GitRepository } from "./repository.js"; export function observeContractsForAdmission(repository: GitRepository): void { void repository; }',
+    "git/repository.ts": "export type GitRepository = {};",
+    "git/observe.ts": 'import type { GitRepository } from "./repository.js"; export function observeContractsForAdmission(repository: GitRepository): void { void repository; }',
     "protocol/attempt.ts": "export function admitDecidedOffer(): void {}",
-    "protocol/run.ts": 'import { observeContractsForAdmission } from "../carrier/observe.js"; import type { GitRepository } from "../carrier/repository.js"; import type { AttemptContext } from "../core/decide.js"; import { admitDecidedOffer } from "./attempt.js"; export function run(repository: GitRepository, attempt: AttemptContext): void { observeContractsForAdmission(repository); void attempt; admitDecidedOffer(); }',
+    "protocol/run.ts": 'import { observeContractsForAdmission } from "../git/observe.js"; import type { GitRepository } from "../git/repository.js"; import type { AttemptContext } from "../core/decide.js"; import { admitDecidedOffer } from "./attempt.js"; export function run(repository: GitRepository, attempt: AttemptContext): void { observeContractsForAdmission(repository); void attempt; admitDecidedOffer(); }',
   });
   assert.deepEqual(diagnostics, []);
 });
@@ -202,7 +202,7 @@ test("architecture policy permits protocol to join pact with carrier", () => {
 test("architecture policy rejects former unread admission and fold readers", () => {
   const diagnostics = check({
     "core/facts/fold.ts": "export function foldJournal(): void {}",
-    "carrier/admission.ts": 'import { foldJournal } from "../core/facts/fold.js"; export function admit(): void { foldJournal(); }',
+    "git/admission.ts": 'import { foldJournal } from "../core/facts/fold.js"; export function admit(): void { foldJournal(); }',
     "protocol/run.ts": 'import { foldJournal } from "../core/facts/fold.js"; export function run(): void { foldJournal(); }',
   });
   assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/dependency-direction").length, 2);
@@ -220,9 +220,9 @@ test("architecture policy permits the aggregate status read path", () => {
   const diagnostics = check({
     "core/facts/types.ts": "export type ContractId = string; export type ContractState = {}; export type SnapshotId = string;",
     "core/facts/gate.ts": "export function gateReports(): void {} export function gatesSatisfied(): void {}",
-    "carrier/reconcile.ts": "export function deliveryWorktreePath(): string { return \"\"; }",
+    "git/reconcile.ts": "export function deliveryWorktreePath(): string { return \"\"; }",
     "protocol/read/status.ts": [
-      'import { deliveryWorktreePath } from "../../carrier/reconcile.js";',
+      'import { deliveryWorktreePath } from "../../git/reconcile.js";',
       'import { gateReports } from "../../core/facts/gate.js";',
       'import type { ContractId, ContractState, SnapshotId } from "../../core/facts/types.js";',
       "export type ContractRow = { id: ContractId; candidate: SnapshotId | null };",
@@ -246,14 +246,14 @@ test("architecture policy permits the aggregate status read path", () => {
 
 test("architecture policy limits publication retry observation to asserted refs", () => {
   const accepted = check({
-    "carrier/repository.ts": "export const CARRIER_REF = ''; export function readRef(): void {} export function runGit(): void {} export type GitRepository = {};",
-    "protocol/attempt.ts": 'import { CARRIER_REF, readRef, type GitRepository } from "../carrier/repository.js"; export function classify(repository: GitRepository): void { void CARRIER_REF; readRef(); void repository; }',
+    "git/repository.ts": "export const GIT_REF = ''; export function readRef(): void {} export function runGit(): void {} export type GitRepository = {};",
+    "protocol/attempt.ts": 'import { GIT_REF, readRef, type GitRepository } from "../git/repository.js"; export function classify(repository: GitRepository): void { void GIT_REF; readRef(); void repository; }',
   });
   assert.deepEqual(accepted, []);
 
   const rejected = check({
-    "carrier/repository.ts": "export function runGit(): void {}",
-    "protocol/attempt.ts": 'import { runGit } from "../carrier/repository.js"; export function classify(): void { runGit(); }',
+    "git/repository.ts": "export function runGit(): void {}",
+    "protocol/attempt.ts": 'import { runGit } from "../git/repository.js"; export function classify(): void { runGit(); }',
   });
   assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
 });

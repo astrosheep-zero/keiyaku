@@ -10,7 +10,7 @@ requested surface. `SOUL.md` defines the product stance; the documents under
 | [`SOUL.md`](SOUL.md) | [`docs/README.md`](docs/README.md), then the single owner chapter for each affected surface. |
 
 The index is the authority registry. It directs public API, document, model,
-lifecycle, verification, transport, and CLI questions to their one law home.
+lifecycle, verification, Git, and CLI questions to their one law home.
 
 Keiyaku v4 is a clean implementation; `../keiyaku` is read-only source
 evidence, not architecture authority. Skills are operating guides and never a

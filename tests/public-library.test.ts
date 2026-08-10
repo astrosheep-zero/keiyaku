@@ -281,20 +281,20 @@ test("bind canonicalizes branch targets and refuses invalid names before birth",
   const bound = await Keiyaku.bind({ repo, markdown: markdown("Short target"), target: "main", workspace: "here" });
   assert.equal((await bound.keiyaku.state()).coordinates.target, "refs/heads/main");
 
-  const carrierBefore = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
+  const gitBefore = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
   for (const target of ["bad..name", "keiyaku-state", "refs/tags/main"]) {
     await assert.rejects(
       Keiyaku.bind({ repo, markdown: markdown("Invalid target"), target, workspace: "here" }),
       (error: unknown) => error instanceof KeiyakuRefused && error.code === "invalid-target",
     );
-    assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), carrierBefore);
+    assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), gitBefore);
   }
 
   await assert.rejects(
     Keiyaku.bind({ repo, markdown: markdown("Missing target"), target: "missing", workspace: "here" }),
     (error: unknown) => error instanceof KeiyakuRefused && error.code === "target-missing",
   );
-  assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), carrierBefore);
+  assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), gitBefore);
   assert.equal(repository.run(["for-each-ref", "--format=%(refname)", "refs/heads/missing"]), "");
 });
 
@@ -379,7 +379,7 @@ test("arc decodes its Markdown input and worktree paths are computed", async () 
   assert.equal(typeof status.rows.find((contract) => contract.id === managedState.id)?.worktreePath, "string");
 });
 
-test("Delivery.diff remains a nullable Promise-backed transport read", async () => {
+test("Delivery.diff remains a nullable Promise-backed Git read", async () => {
   const repository = repositoryWithInitialCommit();
   const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: markdown("Diff input"), workspace: "here" });
   writeFileSync(join(repository.path, "candidate.txt"), "candidate\n");

@@ -92,8 +92,8 @@ there is no DWIM resolution or coupling to the current branch. A valid target
 must already exist when `bind` observes it. An absent branch returns the typed
 `target-missing` refusal; Keiyaku never creates it or substitutes the caller's
 current `HEAD`. The canonical full ref is the only target value persisted in
-contract coordinates; its transport meaning is defined in
-[transport.md](transport.md).
+contract coordinates; its Git meaning is defined in
+[git.md](git.md).
 
 `Repo.at` resolves and pins its repository coordinate before it returns. An
 omitted `path` uses the caller's current working directory. The library has
@@ -115,7 +115,7 @@ while retaining the construction coordinate needed by `workspace: "here"`.
 `Keiyaku.list` enumerates the Contract world; `Keiyaku.observe` performs one
 targeted journal observation without enumerating it. Both project the same row
 shape. The return contract and behavior of `reconcile` are defined by
-[transport.md](transport.md).
+[git.md](git.md).
 
 `Keiyaku` has a private constructor. It is born only through `Keiyaku.of` or a
 successful `Keiyaku.bind`, and is a stateless handle containing its contract
@@ -200,8 +200,8 @@ path getter.
 `amend` takes an H2 operation document, and `arc` takes an arc document. Their
 input grammars are owned by [document.md](document.md). `deliver`, `review`,
 `abandon`, and `audit` apply the lifecycle rules in
-[lifecycle.md](lifecycle.md). `reconcile` requests the transport operation
-defined in [transport.md](transport.md). `ReconcileReport` is that chapter's
+[lifecycle.md](lifecycle.md). `reconcile` requests the Git operation
+defined in [git.md](git.md). `ReconcileReport` is that chapter's
 exact `ReconcileResult`, including its flat cleanup lag; this chapter does not
 define a second result shape.
 
@@ -216,8 +216,8 @@ It returns `null` only when the contract has never tendered. A returned
 Delivery is pinned to public `snapshotId`, `changeId`, and
 `expectedPredecessor`; `deliver()` and `delivery()` are its two birth paths. A
 Delivery has no review operation. `message` overrides only a mechanically
-materialized commit message; omitting it uses the transport template in
-[transport.md](transport.md).
+materialized commit message; omitting it uses the Git template in
+[git.md](git.md).
 
 ## Mutation Results And Errors
 
@@ -225,14 +225,14 @@ Protocol owns its internal three-arm outcome and uses it only to compose an
 invocation. The package root does not export that control-flow structure.
 Library is the sole public facade: it projects accepted protocol outcomes into
 success values, throws typed pre-admission domain failures, and performs the
-mandatory post-admission transport reconciliation and settlement before
+mandatory post-admission Git reconciliation and settlement before
 returning. Post-admission failure is reported as lag without hiding or
 rejecting the admitted Contract. CLI calls this same facade; it does not
 interpret protocol outcomes or repeat either follow-up stage.
 
 `MutationResult` is invocation-scoped observation, never Contract state or a
 durable receipt. `facts` and `head` come only from the accepted protocol
-admission. `effects` and `lags` come only from the one mandatory transport
+admission. `effects` and `lags` come only from the one mandatory Git
 reconciliation; `settlement` comes only from the one settlement invocation.
 There is no nested `receipt`, duplicate fact field, or result stored on a
 `Keiyaku` handle.
@@ -358,13 +358,13 @@ complete; it contains the verbatim diagnostic and does not change the mutation
 result. `RegionOverlap` is the only exported Region result type.
 
 The Region report remains a library-edge observation. It is not passed to
-protocol, core, or transport, and it never crosses those layers as Region
+protocol, core, or Git, and it never crosses those layers as Region
 vocabulary. After admission, the library makes one internal protocol document
-read. That read observes the carrier once, folds every contract, filters
+read. That read observes Git once, folds every contract, filters
 terminal contracts, and returns only `{ contract, documentBytes }`; it neither
 decodes a document nor names Region. The library removes self, decodes the
 opaque peer bytes through the same body methodology, and computes overlap at
-the edge. It never imports carrier directly, loops over per-contract `state()`
+the edge. It never imports Git directly, loops over per-contract `state()`
 reads, reuses an admission receipt as a world snapshot, or caches or persists a
 second Region value.
 
@@ -480,9 +480,9 @@ facts, cleanup authority, or reconcile input.
 
 ## Delivery Diff
 
-`Delivery.diff()` asks transport to resolve the pinned predecessor and
+`Delivery.diff()` asks Git to resolve the pinned predecessor and
 candidate identities each time. It returns their diff text when both bytes are
-available, including `""` for an empty patch. It returns `null` when transport
+available, including `""` for an empty patch. It returns `null` when Git
 cannot resolve either recorded byte sequence, including a pruning race during
 the lookup. It never exposes a raw Git lookup error. `snapshotId` and
 `changeId` remain available on the Delivery in either result.
@@ -490,10 +490,10 @@ the lookup. It never exposes a raw Git lookup error. `snapshotId` and
 Diff text is presentation data. It is never persisted, folded, admitted,
 cached, supplied to a gate, or retained through a Keiyaku-owned ref. Terminal
 cleanup may release delivery refs, candidate pins, and managed worktrees only
-under the transport-owned cleanup rule; byte availability remains transport
+under the Git-owned cleanup rule; byte availability remains Git
 custody. The CLI renders a `null` result for
 `--show-diff-body` as
-`{ reason: "transport-unavailable", snapshotId, changeId }`, without a raw Git
+`{ reason: "git-unavailable", snapshotId, changeId }`, without a raw Git
 diagnostic and with observation exit status `0`.
 
 ## Document Boundary
@@ -502,7 +502,7 @@ Document decoding and amendment are internal library work. Public callers pass
 Markdown to the construction and amendment operations above. The library owns
 the Keiyaku Markdown methodology at this edge and may expose only the opaque
 document keys needed by core. It does not expose a structured `ContractBody`, a
-render function, a carrier handle, direct journal writer, placement operation,
+render function, a Git handle, direct journal writer, placement operation,
 or verification-run operation.
 
 The package root exports the operation value names `Delivery` and `Review`.
@@ -516,7 +516,7 @@ values nor observes, validates, writes, or folds Contract facts.
 
 ## Akuma Subpath
 
-`./akuma` is a separate product subpath and imports no Contract or Carrier
+`./akuma` is a separate product subpath and imports no Contract or Git
 domain. Its identity, construction, exported values, handle capabilities, and
 result behavior are owned only by [akuma.md](akuma.md); this package-root
 chapter does not duplicate that law.

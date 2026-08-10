@@ -67,10 +67,10 @@ last 16 KiB of stdout and stderr; the producer renders at most 32 KiB across the
 ordered run into the attestation `summary`, including executor and exit status.
 Silent successful runs omit the summary. `candidate-unavailable`, `timeout`,
 `spawn-error`, and `unknown-exit` admit no attestation. Candidate materialization
-is transport custody needed only to run the selected declarations; its failure
+is Git custody needed only to run the selected declarations; its failure
 is not a new fact about the contract or candidate. `candidate-unavailable` and
 `spawn-error` carry their verbatim diagnostic through the transient public
-attempt so a failed transport or executable is not reported without its cause.
+attempt so a failed Git executable is not reported without its cause.
 Placement is still attempted afterward. The
 candidate remains pending only when its declared gates are unsatisfied.
 

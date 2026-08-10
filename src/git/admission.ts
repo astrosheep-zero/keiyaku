@@ -2,16 +2,16 @@ import {
   encodeEntry,
 } from "../core/facts/codec.js";
 import type { ContractJournalAppend, Offer, RefOperation } from "../core/facts/offer.js";
-import type { CarrierAdmissionSnapshot } from "./observe.js";
+import type { GitAdmissionSnapshot } from "./observe.js";
 import {
-  CARRIER_FORMAT_BYTES,
-  CARRIER_FORMAT_PATH,
-  CARRIER_REF,
-  type CarrierSnapshot,
+  GIT_FORMAT_BYTES,
+  GIT_FORMAT_PATH,
+  GIT_REF,
+  type GitSnapshot,
   type GitRepository,
   type RefPublication,
   type TreeChange,
-  updateCarrierTree,
+  updateGitTree,
   updateRefsAtomically,
   writeBlob,
   writeCommit,
@@ -59,7 +59,7 @@ function assertAppendStructure(
 }
 
 function readCanonicalJournal(
-  admission: CarrierAdmissionSnapshot,
+  admission: GitAdmissionSnapshot,
   id: ContractId,
 ): Buffer {
   const snapshot = admission.snapshot;
@@ -74,7 +74,7 @@ function readCanonicalJournal(
 
 function buildOffer(
   repository: GitRepository,
-  admission: CarrierAdmissionSnapshot,
+  admission: GitAdmissionSnapshot,
   appends: readonly ContractJournalAppend[],
 ): { readonly changes: ReadonlyMap<string, TreeChange>; readonly heads: Readonly<Record<string, ContractHead>> } {
   const snapshot = admission.snapshot;
@@ -82,7 +82,7 @@ function buildOffer(
   const heads: Record<string, ContractHead> = {};
 
   if (snapshot.commit === null) {
-    changes.set(CARRIER_FORMAT_PATH, { oid: writeBlob(repository, CARRIER_FORMAT_BYTES), mode: "100644", type: "blob" });
+    changes.set(GIT_FORMAT_PATH, { oid: writeBlob(repository, GIT_FORMAT_BYTES), mode: "100644", type: "blob" });
   }
 
   for (const append of appends) {
@@ -98,18 +98,18 @@ function buildOffer(
 
 function publishOffer(
   repository: GitRepository,
-  snapshot: CarrierSnapshot,
+  snapshot: GitSnapshot,
   target: RefOperation | null,
   changes: ReadonlyMap<string, TreeChange>,
 ): RefPublication {
-  const carrierTree = updateCarrierTree(repository, snapshot.tree, changes);
-  const carrierCommit = mintSnapshotId(writeCommit({
+  const gitTree = updateGitTree(repository, snapshot.tree, changes);
+  const gitCommit = mintSnapshotId(writeCommit({
     repository,
-    tree: carrierTree,
+    tree: gitTree,
     parent: snapshot.commit,
   }));
   return updateRefsAtomically(repository, [
-    { ref: CARRIER_REF, newOid: gitObjectIdForSnapshot(carrierCommit), expectedOid: snapshot.commit },
+    { ref: GIT_REF, newOid: gitObjectIdForSnapshot(gitCommit), expectedOid: snapshot.commit },
     ...(target === null
       ? []
       : [{
@@ -123,7 +123,7 @@ function publishOffer(
 export function admit(
   repository: GitRepository,
   offer: Offer,
-  admission: CarrierAdmissionSnapshot,
+  admission: GitAdmissionSnapshot,
 ): Admission {
   if (!Array.isArray(offer.facts) || offer.facts.length === 0) {
     throw new Error("facts must be a nonempty array");

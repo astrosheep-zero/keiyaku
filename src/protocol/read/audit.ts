@@ -1,5 +1,5 @@
-import { observeContract } from "../../carrier/observe.js";
-import type { GitRepository } from "../../carrier/repository.js";
+import { observeContract } from "../../git/observe.js";
+import type { GitRepository } from "../../git/repository.js";
 import type { ContractId, ContractState, FactKind, Gate, JournalEntry } from "../../core/facts/types.js";
 
 export type { FactKind } from "../../core/facts/types.js";

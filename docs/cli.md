@@ -2,7 +2,7 @@
 
 `keiyaku-v4` turns argv and acquired input into public package calls, then
 renders their public results. It owns neither
-document decoding, lifecycle decisions, carrier discovery, delivery preparation,
+document decoding, lifecycle decisions, Git discovery, delivery preparation,
 Verification execution, or reconciliation semantics.
 
 ## Invocation And Scope
@@ -313,7 +313,7 @@ fact, command kind, or exit status. The adapter never hides the existing
 Contract or automatically abandons it.
 
 Accepted facts name at least their contract, entry, and kind. Effects render as
-transport data:
+Git data:
 
 ```text
 effects: [
@@ -323,7 +323,7 @@ effects: [
 ```
 
 The flat `lag` array is the public `ReconcileResult` shape defined in
-[transport.md](transport.md); the CLI does not wrap or translate it. Its text
+[git.md](git.md); the CLI does not wrap or translate it. Its text
 form is one direct line per member:
 
 ```text
@@ -379,7 +379,7 @@ Delivery from the public handle and renders diff text when available. A `null`
 public diff renders:
 
 ```text
-{ reason: "transport-unavailable", snapshotId, changeId }
+{ reason: "git-unavailable", snapshotId, changeId }
 ```
 
 This is an observation with exit `0`, contains no raw Git error, and is not
@@ -469,7 +469,7 @@ wake, a `forked` fork, and settled kill exit `0`. Interrupt `dead` or
 interrupted tell refused by concurrent death, exit `1`; an interrupted tell
 whose detached wake failed exits `2`. Exact status renders current state, the
 latest complete answer or failure, and the public activity snapshot. Wait uses
-the same carrier: when its predicate is satisfied it renders the complete
+the same status carrier: when its predicate is satisfied it renders the complete
 answer or failure; when its timeout arrives while still running it renders the
 snapshot. JSON returns that public value without reshaping it. History text
 renders the requested persistent activity page and its completed-turn

@@ -7,9 +7,9 @@ Contract journal facts and Task Markdown remain their products' sole
 authorities.
 
 No other module may import both Contract write-side facts and Task write
-operations. Protocol, carrier, Task, and Akuma do not import settlement. CLI
+operations. Protocol, Git, Task, and Akuma do not import settlement. CLI
 never invokes it directly. The package-root library invokes settlement after
-transport reconciliation for every accepted mutation and for both contract and
+Git reconciliation for every accepted mutation and for both contract and
 world reconciliation. Kanshi remains read-only and never settles.
 
 ## Rules
@@ -23,7 +23,7 @@ Settlement has exactly these rules:
    coordination-only transition is not a public Task verb. It applies equally
    when the Task was completed manually; clearing `contractId` opts the Task
    out before settlement.
-3. An active managed Contract worktree reported as present by transport has
+3. An active managed Contract worktree reported as present by Git has
    its Task namespace context installed or repaired. The default namespace is
    the ContractId's human contract segment. A valid local override is kept.
 
@@ -72,20 +72,20 @@ worktree path. Settlement continues independent rules after a lag.
 The package-root flow is:
 
 ```text
-protocol admission -> transport reconcile -> settlement -> public result
+protocol admission -> Git reconcile -> settlement -> public result
 ```
 
-Admission is the irreversible point. Transport or settlement failure never
+Admission is the irreversible point. Git or settlement failure never
 changes an accepted fact, creates `abandoned`, or rejects the public mutation.
-The result returns the admitted facts and head, the transport effects and lags
+The result returns the admitted facts and head, the Git effects and lags
 actually observed, and the complete `SettlementReport`. Settlement is
 synchronous in that public Promise; a lag reports incomplete follow-up without
 blocking the Contract lifecycle fact.
 
 Settlement derives desired work from the current Contract facts, current Task
-Markdown, and the current transport report on every invocation. It records no
+Markdown, and the current Git report on every invocation. It records no
 completed bit. Re-running `keiyaku.reconcile()` or world reconciliation repeats
-transport reconciliation and the same settlement rules, making both the
+Git reconciliation and the same settlement rules, making both the
 normal recovery paths. Task predecessor-byte comparison remains the write
 adjudicator; a concurrent movement becomes a lag and is reconsidered later.
 
@@ -93,7 +93,7 @@ adjudicator; a concurrent movement becomes a lag and is reconsidered later.
 
 Task settlement is not a hook. A hook is an external command attached to a
 typed physical effect and is owned by that effect's product. The only current
-hooks are transport-owned managed-worktree create and destroy commands. Future
+hooks are Git-owned managed-worktree create and destroy commands. Future
 non-worktree behavior requires a concrete settlement rule here; settlement
 does not expose Contract, Task, or Akuma lifecycle events as configurable
 hooks.

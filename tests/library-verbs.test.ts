@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId, type KeiyakuRefusal } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
-import { contractJournalPath } from "../src/carrier/identity.js";
+import { contractJournalPath } from "../src/git/identity.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { entryUlid, type JournalEntry } from "../src/core/facts/types.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";

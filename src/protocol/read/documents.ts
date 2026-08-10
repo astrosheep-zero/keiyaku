@@ -1,5 +1,5 @@
-import { observeCarrier } from "../../carrier/observe.js";
-import type { GitRepository } from "../../carrier/repository.js";
+import { observeGit } from "../../git/observe.js";
+import type { GitRepository } from "../../git/repository.js";
 import type { ContractId } from "../../core/facts/types.js";
 
 export type ContractDocumentProjection = Readonly<{
@@ -7,11 +7,11 @@ export type ContractDocumentProjection = Readonly<{
   documentBytes: string;
 }>;
 
-/** Read every live contract document from one immutable carrier snapshot. */
+/** Read every live contract document from one immutable Git snapshot. */
 export function readDocuments(
   repository: GitRepository,
 ): readonly ContractDocumentProjection[] {
-  const observed = observeCarrier(repository);
+  const observed = observeGit(repository);
   const documents: ContractDocumentProjection[] = [];
   for (const [contract, observation] of observed.contracts) {
     const state = observation.state;

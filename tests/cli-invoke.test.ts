@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { CARRIER_REF, readRef, repositoryAt } from "../src/carrier/repository.js";
+import { GIT_REF, readRef, repositoryAt } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { Delivery, Keiyaku, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
-import { observeContract } from "../src/carrier/observe.js";
-import { deliveryWorktreePath, reconcile } from "../src/carrier/reconcile.js";
+import { observeContract } from "../src/git/observe.js";
+import { deliveryWorktreePath, reconcile } from "../src/git/reconcile.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { Tasks } from "../src/task/index.js";
@@ -201,12 +201,12 @@ test("journal-writing commands preserve optional actor testimony", async () => {
   assert.equal(persisted, explicitActor);
   assert.deepEqual(Buffer.from(persisted ?? "", "utf8"), Buffer.from(explicitActor, "utf8"));
 
-  const beforeBlank = readRef(repositoryAt(repository.path), CARRIER_REF);
+  const beforeBlank = readRef(repositoryAt(repository.path), GIT_REF);
   await assert.rejects(
     () => command(["bind", "--actor", " \t", "-"], { KEIYAKU_PROJECTION_ID: "aku/environment" }),
     (error: unknown) => error instanceof CliUsageError && /actor must be a nonblank string/.test(error.message),
   );
-  assert.equal(readRef(repositoryAt(repository.path), CARRIER_REF), beforeBlank);
+  assert.equal(readRef(repositoryAt(repository.path), GIT_REF), beforeBlank);
 });
 
 test("bind decodes Markdown and records a targetless current snapshot", async () => {
@@ -318,7 +318,7 @@ test("amend refuses changed prerequisites after bound without appending", async 
     contractDocument("Consumed prerequisites"),
   );
   const id = acceptedContract(bound);
-  const before = readRef(repositoryAt(repository.path), CARRIER_REF);
+  const before = readRef(repositoryAt(repository.path), GIT_REF);
 
   const amended = await invokeWithDocument(
     repository.path,
@@ -332,7 +332,7 @@ test("amend refuses changed prerequisites after bound without appending", async 
     contract: id,
     refusal: { kind: "prerequisites-already-consumed", contractId: id },
   });
-  assert.equal(readRef(repositoryAt(repository.path), CARRIER_REF), before);
+  assert.equal(readRef(repositoryAt(repository.path), GIT_REF), before);
 
   const selfDependent = await invokeWithDocument(
     repository.path,
@@ -345,7 +345,7 @@ test("amend refuses changed prerequisites after bound without appending", async 
     contract: id,
     refusal: { kind: "prerequisites-already-consumed", contractId: id },
   });
-  assert.equal(readRef(repositoryAt(repository.path), CARRIER_REF), before);
+  assert.equal(readRef(repositoryAt(repository.path), GIT_REF), before);
 });
 
 test("concurrent amend diff uses the accepted predecessor after a competing amend", async () => {
@@ -478,7 +478,7 @@ test("audit renders an unavailable public delivery diff as accepted", async () =
     assert.equal(result.kind, "accepted");
     if (result.kind !== "accepted") return;
     assert.deepEqual(result.diff, {
-      reason: "transport-unavailable",
+      reason: "git-unavailable",
       snapshotId: delivery.snapshotId,
       changeId: delivery.changeId,
     });

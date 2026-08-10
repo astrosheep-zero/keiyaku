@@ -43,9 +43,9 @@ invokes placement.
 
 `deliver` tenders the selected current worktree content. Its fact records the
 observed predecessor, candidate, and patch identity. A later tender replaces
-the current delivery on the read model. The tender's transport preparation and
+the current delivery on the read model. The tender's Git preparation and
 target update rules live in
-[transport.md](transport.md).
+[git.md](git.md).
 
 `review` is a contract operation and may record testimony before any `deliver`.
 It captures the current worktree patch identity and the document key projected
@@ -180,13 +180,13 @@ law. Amend, deliver, placement, attestation, abandon, and arc begin their legal
 decision with that guard and then apply only their verb-specific rules. The
 guard returns the active state or the typed `contract-missing` or `terminal`
 refusal for the addressed contract. Bind does not use it because bind owns the
-opposite `contract-exists` law. Protocol, carrier, and the library do not
+opposite `contract-exists` law. Protocol, Git, and the library do not
 repeat this lifecycle judgment as a pre-check, base class, middleware, or
 runner.
 
 A decision receives plain data, its one observation, and fresh attempt ULIDs.
 It returns a typed refusal or an `Offer`; it has no clock, randomness, current
-directory, process, callback, decoded document, Git handle, carrier effect, or
+directory, process, callback, decoded document, Git handle, Git effect, or
 protocol-body import. The document derivation boundary is defined in
 [document.md](document.md).
 
@@ -207,10 +207,10 @@ operation.
 
 ## Protocol And Admission
 
-Protocol is the sole layer that joins pact decisions to carrier observation and
+Protocol is the sole layer that joins pact decisions to Git observation and
 admission. Its decision projection contains only the readers of that one legal
-decision. Snapshot identity remains carrier-private; pact does not name a
-carrier commit.
+decision. Snapshot identity remains Git-private; pact does not name a
+Git commit.
 
 An attempt may be staged as one state-only projection, mechanical preparation,
 and a completed `decide`, but those stages remain one judge: the state-only
@@ -222,12 +222,12 @@ the core `StampedPreparation` union. Attestations use ordinary `Preparation`
 because their captured subject already names exactly what was judged. A document or other lifecycle refusal from the
 completed decision takes priority over a mechanical preparation failure.
 
-The one decision submits at most one offer. Carrier admission owns raw Git
+The one decision submits at most one offer. Git admission owns raw Git
 object construction and one atomic `update-ref --stdin --no-deref` operation;
 it does not parse Git prose. Admission's expected-head assertions remain the
 only currentness adjudicator for that offer.
 
-After a known rejected transaction, protocol compares the carrier and optional
+After a known rejected transaction, protocol compares the Git and optional
 target ref with the coordinates asserted by that attempt. Any movement discards
 the offer; the next bounded semantic attempt observes, folds, and decides
 afresh. A newly
@@ -290,7 +290,7 @@ arm, or changes its exit status. A caller may receive the transient residue
 report defined by the owning public surface, but cleanup is not lifecycle
 authority and does not create a journal, recovery, or reconcile duty.
 
-After protocol admission, the public facade runs mandatory transport
+After protocol admission, the public facade runs mandatory Git
 reconciliation and [settlement](settlement.md). Their failures are typed lags
 on the successful public result, never a different lifecycle outcome. They do
 not change the protocol result to `refused` or `retry`, automatically append an

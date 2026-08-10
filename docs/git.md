@@ -1,61 +1,61 @@
-# Transport
+# Git
 
-Transport owns the Git world that carries contract journals, candidate bytes,
+Git owns the Git world that carries contract journals, candidate bytes,
 target refs, managed worktrees, and Keiyaku-owned pins. Keiyaku owns the
 deterministic managed path, ref, and pin topology; the agent owns the working
-content; and the journal owns only the tendered candidate. Transport is the
+content; and the journal owns only the tendered candidate. Git is the
 custody layer for physical object availability and the sole owner of
 reconciliation behavior.
 
 ## Git World
 
-One Git repository carries the private carrier map, target refs, and worktrees.
+One Git repository carries the private Git map, target refs, and worktrees.
 The physical map and its layout are implementation-private and reachable under
-one carrier ref. A contract's journal blob is its `ContractHead`; unrelated
-carrier movement does not change that contract. Discovery follows worktree
+one Git ref. A contract's journal blob is its `ContractHead`; unrelated
+Git movement does not change that contract. Discovery follows worktree
 identity to the common repository. Scope resolution pins both the caller
 worktree and the primary worktree for the one Git world.
 
 Targeted observation and admission are
 `O(touched journal size + bounded ancestor depth)`, never `O(world)`. A
-full-world observation is `O(N)`. The private carrier map has no cache,
-current-state snapshot, second or per-contract carrier ref, or in-repository
+full-world observation is `O(N)`. The private Git map has no cache,
+current-state snapshot, second or per-contract Git ref, or in-repository
 fact index. The deterministic managed refs and pins are topology and
-reachability only; they are not a carrier-state index or a second fact store.
-Variable-length public identities do not determine carrier depth. A journal
+reachability only; they are not a Git-state index or a second fact store.
+Variable-length public identities do not determine Git depth. A journal
 locator uses a fixed-width strong digest of the complete ContractId as a
 bounded-fanout Git tree path, while the journal bytes retain and canonically
 verify the complete identity. The digest is a private locator, never contract
 identity or a second uniqueness authority.
 
-The transport mints `ContractCoordinates.start` at bind. With a target it is
+Git mints `ContractCoordinates.start` at bind. With a target it is
 the resolved target head; without a target it is the caller worktree's current
 `HEAD`. It is the initial managed-worktree commit and the original comparison
 point for a `here` workspace. It does not constrain which branch that workspace
 has checked out.
 
 An explicit target must exist at bind observation. Absence is returned to the
-library as `target-missing` before any journal or ref publication. Transport
+library as `target-missing` before any journal or ref publication. Git
 never creates the target branch and never substitutes another ref or the
 caller's current `HEAD` for it.
 
 A target is an optional Git ref because a claimed placement may move it. The
 target and a workspace branch are independent. `workspace: "worktree"` gives
-transport ownership of one deterministic delivery ref and linked worktree.
+Git ownership of one deterministic delivery ref and linked worktree.
 `workspace: "here"` uses the pinned caller worktree in place. It never takes
 ownership of that worktree or its branch.
 
-The carrier ref, managed delivery namespace, and candidate-pin namespace have
-this one transport owner. The library boundary rejects a target that names any
+The Git ref, managed delivery namespace, and candidate-pin namespace have
+this one Git owner. The library boundary rejects a target that names any
 of them before coordinates are recorded; target input and canonicalization are
 defined only in [public-api.md](public-api.md).
 
-Transport derives each managed delivery-ref leaf, candidate-pin leaf, and
+Git derives each managed delivery-ref leaf, candidate-pin leaf, and
 worktree basename from the complete ContractId using one private physical-name
 projection. It replaces the validated coordinate's structural `/` separator
 with `-`; for example, `kei/example` materializes as `kei-example`. The family
 prefix comes from the identity itself and is neither added nor reconstructed by
-transport. This stable projection does not reuse title normalization. These
+Git. This stable projection does not reuse title normalization. These
 names are deterministic topology, not public identity or a second legality
 authority.
 
@@ -72,8 +72,8 @@ identity and there is no target ref operation.
 Preparation uses the one core mechanical-result primitive. Delivery returns
 `Preparation<DeliverData, DeliveryPreparationFailure>` and review returns
 `Preparation<ChangeId, ReviewPreparationFailure>`; the prepared payload field
-is always `data`. Carrier defines neither bespoke delivery/review preparation
-unions nor an adapter or wrapper supertype. Delivery's data contains the
+is always `data`. Git defines neither bespoke delivery/review preparation
+unions nor a wrapper supertype. Delivery's data contains the
 candidate, patch, and predecessor identities; review's data is the captured
 patch identity. A mechanical preparation failure is data for the attempt's
 completed legal decision, not a lifecycle refusal. The candidate is the selected workspace content: the
@@ -86,7 +86,7 @@ worktree. Its commit message defaults to `<contract-id>: <title>` followed by
 message bytes only; candidate tree, parent, identity rules, and lifecycle
 meaning do not change.
 
-The Git carrier uses commit identity for `SnapshotId` and one stable patch-ID
+Git uses commit identity for `SnapshotId` and one stable patch-ID
 method for `ChangeId`. Review captures that patch identity from current
 worktree content against the contract `start`; deliver records it against its
 observed delivery predecessor. Without target drift, those two computations
@@ -100,12 +100,12 @@ candidate is a valid assertion. Target drift ends that attempt; only a later,
 explicitly started attempt may prepare from the new target head. A targetless
 claimed admission appends the same fact without a ref operation.
 
-Carrier admission builds raw Git objects and uses one
+Git admission builds raw Git objects and uses one
 `update-ref --stdin --no-deref` transaction. It recognizes canonical admitted
 entry bytes and may classify an unknown result from durable facts, but it never
 redecides an offer. A known rejection preserves its diagnostic and lets
 protocol compare freshly observed asserted coordinates with the failed
-attempt. Movement of the carrier or target coordinate invalidates that offer
+attempt. Movement of the Git or target coordinate invalidates that offer
 and begins a fresh semantic attempt; the old offer bytes are never rebuilt or
 replayed. With no coordinate movement the rejection is a hard
 `publication-failed`. No layer parses Git prose, silently
@@ -114,22 +114,22 @@ second acceptance authority.
 
 ## Document Boundary
 
-Transport and protocol have no document callback, decoded-document import, or
+Git and protocol have no document callback, decoded-document import, or
 document interpretation. They receive no raw document projection for a write
 attempt. Bind protocol receives the title scalar only to mint the normalized
-ContractId defined in [model.md](model.md); carrier receives only the resulting
-identity. The only document-derived transport input to delivery preparation is
+ContractId defined in [model.md](model.md); Git receives only the resulting
+identity. The only document-derived Git input to delivery preparation is
 the title scalar stamped by its `DocumentKey`, as defined in
-[document.md](document.md); transport does not persist or cache either
+[document.md](document.md); Git does not persist or cache either
 derivation. Review preparation receives no document-derived value. Protocol
 combines its mechanical patch identity with the document key from the attempt
-observation to form the testimony subject. Carrier does not judge whether that
+observation to form the testimony subject. Git does not judge whether that
 subject is current.
 
 The one internal post-admission document read is a protocol projection over one
-full-world carrier observation. It folds and filters nonterminal contracts and
+full-world Git observation. It folds and filters nonterminal contracts and
 returns exactly `{ contract, documentBytes }` for the library's Region reader.
-It exposes no `DocumentKey`, decoded field, Region token, carrier snapshot, or
+It exposes no `DocumentKey`, decoded field, Region token, Git snapshot, or
 public method. This read is not an admission handoff or receipt and does not
 alter the result of the write that preceded it.
 
@@ -211,7 +211,7 @@ type RepoReconcileReport = Readonly<{
 It contains one typed report for every observed contract. A failure lag does
 not discard successful effects or reports and never becomes an aggregate
 exception. Contract and world reconciliation use the same lag vocabulary.
-Transport owns no Task namespace bytes or ContractId-to-namespace policy; that
+Git owns no Task namespace bytes or ContractId-to-namespace policy; that
 post-physical projection belongs to [settlement](settlement.md).
 
 Effects and lag are transparent data. `changed` is derivable from effect
@@ -225,8 +225,8 @@ topology rather than an in-memory receipt.
 ## Identities And Bytes
 
 Keiyaku records delivery identity in durable facts: predecessor, candidate, and
-patch identity. Transport stores and resolves the Git bytes behind those
-identities. A journal entry is not a Git reachability edge. Transport retains
+patch identity. Git stores and resolves the Git bytes behind those
+identities. A journal entry is not a Git reachability edge. Git retains
 no additional Keiyaku diff blob, permanent ref, or state index solely to
 preserve a tender.
 
@@ -234,8 +234,8 @@ Terminal cleanup releases the delivery ref, candidate pin, and managed
 worktree only after the applicable cleanup rule succeeds. A retained worktree
 retains its reachability topology. Once the topology is released, Git pruning
 may make a recorded predecessor or candidate unavailable. That availability is
-transport state, while delivery identities remain durable contract facts. The
-public `Delivery.diff()` contract and its transport-unavailable result are
+Git state, while delivery identities remain durable contract facts. The
+public `Delivery.diff()` contract and its git-unavailable result are
 defined in [public-api.md](public-api.md).
 
 No cleanup operation rewrites a target ref. A targetless claimed contract and a

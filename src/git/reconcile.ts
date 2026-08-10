@@ -202,7 +202,7 @@ function reconcileBatchItem(
   return { contract: contract.id, result: reconcileWithTopology({ repository, state: contract.state }, topology) };
 }
 
-/** Reconcile one carrier observation against one mutable, process-local worktree topology. */
+/** Reconcile one Git observation against one mutable, process-local worktree topology. */
 export function reconcileBatch(
   repository: GitRepository,
   contracts: Iterable<ReconcileBatchContract>,

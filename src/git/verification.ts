@@ -69,7 +69,7 @@ export function readDeliveryDiff(repository: GitRepository, predecessor: Snapsho
       gitObjectIdForSnapshot(candidate),
     ]).toString("utf8");
   } catch (error) {
-    // A pruning race after the probes is still transport absence, not a Git error for callers.
+    // A pruning race after the probes is still Git absence, not a Git error for callers.
     if (deliverySnapshotAvailability(repository, predecessor, candidate) === "unavailable") return null;
     throw error;
   }

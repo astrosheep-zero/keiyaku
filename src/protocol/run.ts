@@ -1,5 +1,5 @@
-import { observeContractsForAdmission, type CarrierDecisionObservation } from "../carrier/observe.js";
-import type { GitRepository } from "../carrier/repository.js";
+import { observeContractsForAdmission, type GitDecisionObservation } from "../git/observe.js";
+import type { GitRepository } from "../git/repository.js";
 import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
 import {
   type ContractId,
@@ -22,7 +22,7 @@ type RunProtocolInput<Input extends Readonly<{ contractId: ContractId }>, Refusa
   attempts: readonly AttemptContext[];
   decide: (input: DecideInput<Input>) => OfferDecision<Refusal>;
   /** Override the targeted observer only for intents that need a full snapshot. */
-  observe?: (repository: GitRepository, contracts: readonly ContractId[]) => CarrierDecisionObservation;
+  observe?: (repository: GitRepository, contracts: readonly ContractId[]) => GitDecisionObservation;
   /** Mint verb-owned entries from the exact size of this attempt's observation. */
   extendAttempt?: (attempt: AttemptContext, observedContractCount: number) => AttemptContext;
 }>;

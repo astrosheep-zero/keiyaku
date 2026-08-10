@@ -22,7 +22,7 @@ The registry currently routes readers to:
 - [`docs/model.md`](../../../docs/model.md)
 - [`docs/lifecycle.md`](../../../docs/lifecycle.md)
 - [`docs/verification.md`](../../../docs/verification.md)
-- [`docs/transport.md`](../../../docs/transport.md)
+- [`docs/git.md`](../../../docs/git.md)
 - [`docs/cli.md`](../../../docs/cli.md)
 
 The registry, not this list, decides ownership when the chapters change.

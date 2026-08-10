@@ -23,7 +23,7 @@ export type AcceptedFact = Readonly<{
 export type Lag = ReconcileReport["lag"][number];
 
 export type DiffUnavailable = Readonly<{
-  reason: "transport-unavailable";
+  reason: "git-unavailable";
   snapshotId: SnapshotId;
   changeId: ChangeId;
 }>;

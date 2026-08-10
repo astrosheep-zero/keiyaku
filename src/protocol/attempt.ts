@@ -1,7 +1,7 @@
 import { encodeEntry } from "../core/facts/codec.js";
-import { admit, type PublicationFailed } from "../carrier/admission.js";
-import { observeContracts, type CarrierDecisionObservation } from "../carrier/observe.js";
-import { CARRIER_REF, readRef, type GitRepository } from "../carrier/repository.js";
+import { admit, type PublicationFailed } from "../git/admission.js";
+import { observeContracts, type GitDecisionObservation } from "../git/observe.js";
+import { GIT_REF, readRef, type GitRepository } from "../git/repository.js";
 import type { AttemptContext } from "../core/decide.js";
 import { foldJournal } from "../core/facts/fold.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -62,7 +62,7 @@ function validateOffer(offer: Offer, attempt: AttemptContext): void {
 
 function snapshotFor(
   append: ContractJournalAppend,
-  journals: CarrierDecisionObservation["journals"],
+  journals: GitDecisionObservation["journals"],
   head: ContractHead,
 ): ContractState {
   const record = journals.get(append.contractId);
@@ -72,7 +72,7 @@ function snapshotFor(
 
 function journalFor(
   append: ContractJournalAppend,
-  journals: CarrierDecisionObservation["journals"],
+  journals: GitDecisionObservation["journals"],
 ): readonly JournalEntry[] {
   const record = journals.get(append.contractId);
   if (record === undefined) throw new Error("accepted offer contract is missing from its observation");
@@ -98,10 +98,10 @@ function recoveredAcceptance(
 
 function publicationPremiseMoved(
   repository: GitRepository,
-  observation: CarrierDecisionObservation,
+  observation: GitDecisionObservation,
   offer: Offer,
 ): boolean {
-  if (readRef(repository, CARRIER_REF) !== observation.admission.snapshot.commit) return true;
+  if (readRef(repository, GIT_REF) !== observation.admission.snapshot.commit) return true;
   return offer.target !== undefined
     && readRef(repository, offer.target.target) !== offer.target.expectedOid;
 }
@@ -109,7 +109,7 @@ function publicationPremiseMoved(
 /** Admit one decided offer without making another legal decision. */
 export function admitDecidedOffer(
   repository: GitRepository,
-  decisionObservation: CarrierDecisionObservation,
+  decisionObservation: GitDecisionObservation,
   attempt: AttemptContext,
   offer: Offer,
   primaryContract: ContractId,
@@ -136,9 +136,9 @@ export function admitDecidedOffer(
   return classification.kind === "collision" ? { kind: "collision" } : { kind: "redecide" };
 }
 
-/** Classify an unknown atomic-publication outcome using only a captured carrier observation. */
+/** Classify an unknown atomic-publication outcome using only a captured Git observation. */
 export function classifyUnknownAttempt(
-  observation: Readonly<{ contracts: CarrierDecisionObservation["journals"] }>,
+  observation: Readonly<{ contracts: GitDecisionObservation["journals"] }>,
   offer: Offer,
 ): UnknownAttemptClassification {
   let exact = 0;

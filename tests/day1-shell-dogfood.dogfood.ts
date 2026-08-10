@@ -174,7 +174,7 @@ function journalEntries(repository: string, id: string): Array<Readonly<{
     if (first === undefined || first.length === 0) return false;
     return (JSON.parse(first) as { contract?: unknown }).contract === id;
   });
-  assert.ok(journal, `carrier journal for ${id} is absent`);
+  assert.ok(journal, `git journal for ${id} is absent`);
   return git(repository, ["show", `refs/heads/keiyaku-state:${journal}`])
     .trimEnd()
     .split("\n")
