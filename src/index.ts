@@ -1,4 +1,4 @@
-export { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, SettingsError } from "./library/keiyaku.js";
+export { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, NoGitWorldError, Repo, SettingsError, worktreeHooksFrom } from "./library/keiyaku.js";
 export { settings } from "./settings.js";
 export type {
   Settings,
@@ -37,6 +37,7 @@ export type {
   FactKind,
   Gate,
   GatesFromInput,
+  HookCommand,
   KeiyakuOfInput,
   KeiyakuRefusal,
   KeiyakuRetryReason,
@@ -44,6 +45,7 @@ export type {
   MutationResult,
   PlacementStop,
   RegionOverlap,
+  ReconcileInput,
   RepoReconcileReport,
   Review,
   ReconcileReport,
@@ -57,4 +59,6 @@ export type {
   TimelineEntry,
   TopologyEffect,
   VerificationStop,
+  WorktreeHooks,
+  WorktreeHooksFromInput,
 } from "./library/keiyaku.js";

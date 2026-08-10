@@ -118,14 +118,18 @@ test("Contract reads return plain pinned data from one git snapshot", () => {
   });
 });
 
-test("batch reconcile isolates a failed contract and retains successful reports", () => {
+test("batch reconcile isolates a failed contract and retains successful reports", async () => {
   const repository = repositoryWithMain();
   const blocked = bind(repository, "Blocked reconcile", "worktree");
   const healthy = bind(repository, "Healthy reconcile", "worktree");
   const git = repositoryAt(repository.path);
   mkdirSync(deliveryWorktreePath(git, blocked), { recursive: true });
 
-  const report = reconcileAllOperation({ scope: scopeOperation({ coordinate: repository.path }) });
+  const report = await reconcileAllOperation({
+    scope: scopeOperation({ coordinate: repository.path }),
+    hooks: { create: [], destroy: [] },
+    retryHooks: false,
+  });
   assert.equal(report.contracts.length, 2);
 
   const failed = report.contracts.find((contract) => contract.contractId === blocked);

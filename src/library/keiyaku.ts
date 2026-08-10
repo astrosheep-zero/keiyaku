@@ -14,7 +14,12 @@ import {
   requireMarkdown,
 } from "./input.js";
 import { observeRegion, type RegionObservation, type RegionOverlap } from "./region.js";
-import type { Gate } from "./gates.js";
+import {
+  EMPTY_WORKTREE_HOOKS,
+  normalizedWorktreeHooks,
+  type Gate,
+  type WorktreeHooks,
+} from "./configuration.js";
 import {
   contractId,
   type ChangeId,
@@ -66,8 +71,8 @@ import {
 } from "../protocol/operations.js";
 import { settle, type SettlementReport } from "../settlement/settle.js";
 export { NoGitWorldError };
-export { gatesFrom, SettingsError } from "./gates.js";
-export type { Gate, GatesFromInput } from "./gates.js";
+export { gatesFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
+export type { Gate, GatesFromInput, HookCommand, WorktreeHooks, WorktreeHooksFromInput } from "./configuration.js";
 
 export type {
   AuditReport,
@@ -144,6 +149,7 @@ export type BindInput = Readonly<{
   actor?: ActorId;
   after?: readonly ContractId[];
   gates?: readonly Gate[];
+  hooks?: WorktreeHooks;
 }>;
 
 export type AmendInput = Readonly<{
@@ -151,14 +157,17 @@ export type AmendInput = Readonly<{
   actor?: ActorId;
   after?: readonly ContractId[];
   gates?: readonly Gate[];
+  hooks?: WorktreeHooks;
 }>;
 
 export type ArcInput = Readonly<{
   markdown: string;
   actor?: ActorId;
+  hooks?: WorktreeHooks;
 }>;
 
-type ActorOptions = Readonly<{ actor?: ActorId }>;
+type HookOptions = Readonly<{ hooks?: WorktreeHooks }>;
+type ActorOptions = Readonly<{ actor?: ActorId }> & HookOptions;
 export type RepoAtInput = Readonly<{ path?: string }>;
 export type ContractListInput = Readonly<{ repo: Repo }>;
 export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
@@ -167,6 +176,7 @@ export type ReviewInput = ActorOptions & Readonly<{ verdict: AttestationVerdict;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
 export type DeliverInput = ActorOptions & Readonly<{ message?: string }>;
 export type AuditInput = ActorOptions;
+export type ReconcileInput = HookOptions & Readonly<{ retryHooks?: boolean }>;
 
 type AcceptedIntent<Value> = Readonly<{
   kind: "accepted";
@@ -186,8 +196,9 @@ async function mutationResult<Value, PublicValue>(
   id: ContractId,
   accepted: AcceptedIntent<Value>,
   value: (result: Value) => PublicValue,
+  hooks: WorktreeHooks,
 ): Promise<MutationResult<PublicValue>> {
-  const reconciled = reconcileOperation({ scope, contractId: id });
+  const reconciled = await reconcileOperation({ scope, contractId: id, hooks, retryHooks: false });
   const settlement = await settle({ taskRoot: scope.primaryWorktree, state: reconciled.state, effects: reconciled.report.effects });
   return {
     facts: accepted.facts,
@@ -197,6 +208,18 @@ async function mutationResult<Value, PublicValue>(
     lags: reconciled.report.lag,
     settlement,
   };
+}
+
+function hooksFrom(value: unknown): WorktreeHooks {
+  return value === undefined ? EMPTY_WORKTREE_HOOKS : normalizedWorktreeHooks(value);
+}
+
+function reconcileInput(input: ReconcileInput | undefined): Readonly<{ hooks: WorktreeHooks; retryHooks: boolean }> {
+  const values = input === undefined ? undefined : requireInput(input, "reconcile input");
+  if (values?.retryHooks !== undefined && typeof values.retryHooks !== "boolean") {
+    throw new TypeError("retryHooks must be a boolean");
+  }
+  return { hooks: hooksFrom(values?.hooks), retryHooks: values?.retryHooks ?? false };
 }
 
 function resolvePinnedScope(path?: string): RepositoryScope {
@@ -253,6 +276,7 @@ class KeiyakuHandle {
 
   async amend(input: AmendInput): Promise<AmendResult> {
     const values = requireInput(input, "amend input");
+    const hooks = hooksFrom(values.hooks);
     const markdown = requireMarkdown(values.markdown);
     const actor = actorOption(values.actor);
     const gates = values.gates === undefined ? undefined : normalizedGates(values.gates);
@@ -288,7 +312,7 @@ class KeiyakuHandle {
     const before = current.terms.document.bytes;
     const after = document.document.bytes;
     return {
-      ...await mutationResult(this.scope, this.id, accepted, () => undefined),
+      ...await mutationResult(this.scope, this.id, accepted, () => undefined, hooks),
       documentDiff: documentDiff("before", "after", before, after),
       ...observeRegion(this.scope, this.id, document.region),
     };
@@ -296,6 +320,7 @@ class KeiyakuHandle {
 
   async deliver(input?: DeliverInput): Promise<MutationResult<Delivery>> {
     const values = input === undefined ? undefined : requireInput(input, "deliver input");
+    const hooks = hooksFrom(values?.hooks);
     const message = optionalNonblank(values?.message, "deliver message");
     const actor = actorOption(values?.actor);
     const state = readStateOperation({ scope: this.scope, contractId: this.id });
@@ -311,11 +336,12 @@ class KeiyakuHandle {
         ...(message === undefined ? {} : { message }),
       }),
     );
-    return mutationResult(this.scope, this.id, accepted, (delivery) => this.deliveryHandle(delivery));
+    return mutationResult(this.scope, this.id, accepted, (delivery) => this.deliveryHandle(delivery), hooks);
   }
 
   async review(input: ReviewInput): Promise<MutationResult<Review>> {
     const values = requireInput(input, "review input");
+    const hooks = hooksFrom(values.hooks);
     const verdict = values.verdict;
     if (verdict !== "satisfied" && verdict !== "unsatisfied") {
       throw new TypeError("verdict must be satisfied or unsatisfied");
@@ -328,11 +354,12 @@ class KeiyakuHandle {
       ...(summary === undefined ? {} : { summary }),
       ...actorOption(values.actor),
     }));
-    return mutationResult(this.scope, this.id, accepted, (value) => value);
+    return mutationResult(this.scope, this.id, accepted, (value) => value, hooks);
   }
 
   async abandon(input?: AbandonInput): Promise<MutationResult<void>> {
     const values = input === undefined ? undefined : requireInput(input, "abandon input");
+    const hooks = hooksFrom(values?.hooks);
     const note = optionalNonblank(values?.note, "abandon note");
     const accepted = requireAccepted(abandonOperation({
       scope: this.scope,
@@ -340,11 +367,12 @@ class KeiyakuHandle {
       ...actorOption(values?.actor),
       ...(note === undefined ? {} : { note }),
     }));
-    return mutationResult(this.scope, this.id, accepted, () => undefined);
+    return mutationResult(this.scope, this.id, accepted, () => undefined, hooks);
   }
 
   async arc(input: ArcInput): Promise<MutationResult<void>> {
     const values = requireInput(input, "arc input");
+    const hooks = hooksFrom(values.hooks);
     const chapter = decodeArcDocument(requireMarkdown(values.markdown));
     const accepted = requireAccepted(arcOperation({
       scope: this.scope,
@@ -352,11 +380,12 @@ class KeiyakuHandle {
       ...actorOption(values.actor),
       chapter,
     }));
-    return mutationResult(this.scope, this.id, accepted, () => undefined);
+    return mutationResult(this.scope, this.id, accepted, () => undefined, hooks);
   }
 
   async audit(input?: AuditInput): Promise<MutationResult<AuditReport>> {
     const values = input === undefined ? undefined : requireInput(input, "audit input");
+    const hooks = hooksFrom(values?.hooks);
     const actor = actorOption(values?.actor);
     const state = readStateOperation({ scope: this.scope, contractId: this.id });
     const derivation = state === null
@@ -370,11 +399,12 @@ class KeiyakuHandle {
         ...actor,
       }),
     );
-    return mutationResult(this.scope, this.id, accepted, (report) => report);
+    return mutationResult(this.scope, this.id, accepted, (report) => report, hooks);
   }
 
-  async reconcile(): Promise<ReconcileReport> {
-    const reconciled = reconcileOperation({ scope: this.scope, contractId: this.id });
+  async reconcile(input?: ReconcileInput): Promise<ReconcileReport> {
+    const options = reconcileInput(input);
+    const reconciled = await reconcileOperation({ scope: this.scope, contractId: this.id, ...options });
     return {
       ...reconciled.report,
       settlement: await settle({ taskRoot: this.scope.primaryWorktree, state: reconciled.state, effects: reconciled.report.effects }),
@@ -419,9 +449,9 @@ export class Repo {
     return currentBranchOperation({ scope: scopeForRepo(this) });
   }
 
-  async reconcile(): Promise<RepoReconcileReport> {
+  async reconcile(input?: ReconcileInput): Promise<RepoReconcileReport> {
     const scope = scopeForRepo(this);
-    const reconciled = reconcileAllOperation({ scope });
+    const reconciled = await reconcileAllOperation({ scope, ...reconcileInput(input) });
     return {
       contracts: await Promise.all(reconciled.contracts.map(async (contract) => ({
         contractId: contract.contractId,
@@ -470,6 +500,7 @@ async function observeKeiyaku(input: ContractObservationInput): Promise<Contract
 
 async function bindKeiyaku(input: BindInput): Promise<BindResult> {
   const values = requireInput(input, "Keiyaku.bind input");
+  const hooks = hooksFrom(values.hooks);
   const scope = scopeForRepo(values.repo);
   const markdown = requireMarkdown(values.markdown);
   const document = decodeContractDocument(markdown);
@@ -494,7 +525,7 @@ async function bindKeiyaku(input: BindInput): Promise<BindResult> {
   });
   const accepted = requireAccepted(admitted);
   const id = accepted.value.contractId;
-  const result = await mutationResult(scope, id, accepted, ({ contractId: contract }) => new KeiyakuHandle(contract, scope));
+  const result = await mutationResult(scope, id, accepted, ({ contractId: contract }) => new KeiyakuHandle(contract, scope), hooks);
   return {
     facts: result.facts,
     head: result.head,

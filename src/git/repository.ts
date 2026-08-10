@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectId } from "./identity.js";
 import {
@@ -124,6 +124,21 @@ export function repositoryAt(cwd: string): GitRepository {
     throw error;
   }
   return { effectiveCwd, primaryWorktree };
+}
+
+function absoluteGitPath(repository: GitRepository, args: readonly string[], label: string): string {
+  const value = runGit(repository, ["rev-parse", "--path-format=absolute", ...args]).toString("utf8").trim();
+  if (value.length === 0) throw new Error(`${label} is empty`);
+  return resolve(isAbsolute(value) ? value : resolve(repository.effectiveCwd, value));
+}
+
+export function commonGitDirectory(repository: GitRepository): string {
+  return absoluteGitPath(repository, ["--git-common-dir"], "common Git directory");
+}
+
+export function worktreeGitDirectory(repository: GitRepository, worktree: string): string {
+  const scoped = { ...repository, effectiveCwd: worktree };
+  return absoluteGitPath(scoped, ["--git-dir"], "worktree Git directory");
 }
 
 function commandError(command: readonly string[], error: unknown): GitPlumbingError {

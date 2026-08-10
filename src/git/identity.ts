@@ -15,9 +15,13 @@ declare const gitObjectIdBrand: unique symbol;
 export type GitObjectId = string & { readonly [gitObjectIdBrand]: "GitObjectId" };
 
 const GIT_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-export function contractJournalPath(contract: ContractId): string {
+export function contractLocator(contract: ContractId): string {
   const id = contractId(contract);
-  const digest = createHash("sha256").update(id, "utf8").digest("hex");
+  return createHash("sha256").update(id, "utf8").digest("hex");
+}
+
+export function contractJournalPath(contract: ContractId): string {
+  const digest = contractLocator(contract);
   return `contracts/${digest.slice(0, 2)}/${digest.slice(2, 4)}/${digest.slice(4)}.jsonl`;
 }
 

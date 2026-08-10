@@ -86,8 +86,8 @@ const CONTRACT_COMMAND_SPECS = {
   reconcile: {
     positional: "optional",
     stdin: "none",
-    flags: { json: "boolean" },
-    usage: "reconcile [<contract>|@<contract>] [--json]",
+    flags: { "retry-hooks": "boolean", json: "boolean" },
+    usage: "reconcile [<contract>|@<contract>] [--retry-hooks] [--json]",
     purpose: "Reconcile one Contract or the invocation world.",
   },
   settings: {
@@ -181,7 +181,7 @@ export type ParsedAudit = Output & Readonly<{
   showDiffBody: boolean;
   actor?: string;
 }>;
-type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string }>;
+type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
 export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
 
 export type ParsedCommand =
@@ -445,7 +445,12 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
     }
     case "reconcile": {
       const contract = parts.positionals[0];
-      return { command: "reconcile", ...(contract === undefined ? {} : { contract }), output: parts.output };
+      return {
+        command: "reconcile",
+        ...(contract === undefined ? {} : { contract }),
+        retryHooks: parts.flags["retry-hooks"] === true,
+        output: parts.output,
+      };
     }
     case "settings": return { command: "settings", output: parts.output };
   }

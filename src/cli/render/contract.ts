@@ -6,9 +6,11 @@ function effectLine(effect: Effect): string {
 }
 
 function lagLine(lag: Lag): string {
-  return lag.kind === "worktree-retained"
-    ? `lag worktree-retained ${lag.path}`
-    : `lag reconcile-failed ${lag.stage} ${lag.diagnostic}`;
+  if (lag.kind === "worktree-retained") return `lag worktree-retained ${lag.path}`;
+  if (lag.kind === "worktree-hook-failed") {
+    return `lag worktree-hook-failed ${lag.phase} ${lag.path} command=${lag.command} ${JSON.stringify(lag.failure)}`;
+  }
+  return `lag reconcile-failed ${lag.stage} ${lag.diagnostic}`;
 }
 
 function leakLine(leak: AcceptedResult["leak"]): string | undefined {

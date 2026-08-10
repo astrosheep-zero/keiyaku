@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { gatesFrom, Keiyaku, Repo, settings, SettingsError, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId } from "../index.js";
+import { gatesFrom, Keiyaku, Repo, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
 import { kanshi, selectKanshi } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromMutationCall } from "./accepted.js";
@@ -44,6 +44,14 @@ function selectedGates(value: Settings, name?: string) {
   }
 }
 
+function selectedHooks(value: Settings): WorktreeHooks {
+  try { return worktreeHooksFrom({ settings: value }); }
+  catch (error) {
+    if (error instanceof SettingsError) throw new CliUsageError(error.message);
+    throw error;
+  }
+}
+
 function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
   let resolved: ActorId | undefined;
   try {
@@ -68,12 +76,22 @@ async function invokeBind(
   parsed: Extract<ParsedCommand, { command: "bind" }>,
   repo: Repo,
   edge: InvocationEdge,
+  configuration: Settings,
+  hooks: WorktreeHooks,
 ): Promise<InvocationResult> {
   const markdown = edge.readStdin();
-  const gates = selectedGates(settingsAt(repo.root, edge.environment), parsed.gates);
+  const gates = selectedGates(configuration, parsed.gates);
+  const actor = actorFromEdge(parsed.actor, edge.environment);
   return resultFromMutationCall(
     "bind",
-    () => bindFromCommand(parsed, repo, markdown, gates, actorFromEdge(parsed.actor, edge.environment)),
+    () => bindFromCommand({
+      command: parsed,
+      repo,
+      markdown,
+      gates,
+      ...(actor === undefined ? {} : { actor }),
+      hooks,
+    }),
     {
       project: (result) => {
         const bound = result.facts.find((fact) => fact.kind === "bind");
@@ -96,6 +114,7 @@ type ExistingSeat = Readonly<{
   contract: KeiyakuContract;
   id: ContractId;
   actor?: ActorId;
+  hooks: WorktreeHooks;
 }>;
 
 async function invokeDeliver(
@@ -105,6 +124,7 @@ async function invokeDeliver(
   return resultFromMutationCall("deliver", () => seat.contract.deliver({
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
     ...(parsed.message === undefined ? {} : { message: parsed.message }),
+    hooks: seat.hooks,
   }), {
     coordinate: seat.id,
     project: (result) => ({
@@ -127,6 +147,7 @@ async function invokeReview(
     verdict: parsed.verdict,
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
     ...(summary === undefined ? {} : { summary }),
+    hooks: seat.hooks,
   }), {
     coordinate: seat.id,
     project: (result) => ({
@@ -142,7 +163,7 @@ async function invokeAudit(
   const delivery = parsed.showDiffBody ? await seat.contract.delivery() : null;
   return resultFromMutationCall(
     "audit",
-    () => seat.contract.audit(seat.actor === undefined ? {} : { actor: seat.actor }),
+    () => seat.contract.audit({ ...(seat.actor === undefined ? {} : { actor: seat.actor }), hooks: seat.hooks }),
     {
       coordinate: seat.id,
       project: async (result) => {
@@ -160,20 +181,29 @@ async function invokeAudit(
   );
 }
 
-async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: InvocationEdge, scope: string): Promise<InvocationResult> {
+type ExistingInvocation = Readonly<{
+  parsed: ExistingCommand;
+  repo: Repo;
+  edge: InvocationEdge;
+  scope: string;
+  configuration: Settings;
+  hooks: WorktreeHooks;
+}>;
+
+async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks }: ExistingInvocation): Promise<InvocationResult> {
   const { id, contract } = await selectContract(repo, parsed.contract, scope);
   const actor = actorFromEdge(parsed.actor, edge.environment);
-  const seat: ExistingSeat = { contract, id, ...(actor === undefined ? {} : { actor }) };
+  const seat: ExistingSeat = { contract, id, ...(actor === undefined ? {} : { actor }), hooks };
 
   switch (parsed.command) {
     case "amend": {
       const markdown = edge.readStdin();
       const gates = parsed.gates === undefined
         ? undefined
-        : selectedGates(settingsAt(repo.root, edge.environment), parsed.gates);
+        : selectedGates(configuration, parsed.gates);
       return resultFromMutationCall(
         "amend",
-        () => amendFromCommand({ command: parsed, repo, contract, markdown, gates, ...(actor === undefined ? {} : { actor }) }),
+        () => amendFromCommand({ command: parsed, repo, contract, markdown, gates, ...(actor === undefined ? {} : { actor }), hooks }),
         { coordinate: id },
       );
     }
@@ -186,12 +216,14 @@ async function invokeExisting(parsed: ExistingCommand, repo: Repo, edge: Invocat
       return resultFromMutationCall("arc", () => contract.arc({
           markdown,
           ...(actor === undefined ? {} : { actor }),
+          hooks,
         }), { coordinate: id });
     }
     case "abandon":
       return resultFromMutationCall("abandon", () => contract.abandon({
         ...(actor === undefined ? {} : { actor }),
         ...(parsed.note === undefined ? {} : { note: parsed.note }),
+        hooks,
       }), { coordinate: id });
     case "audit":
       return invokeAudit(parsed, seat);
@@ -229,19 +261,21 @@ async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRunt
   }
   const repo = repoAt(coordinate);
   const scope = coordinate ?? repo.root;
+  const configuration = settingsAt(repo.root, edge.environment);
+  const hooks = selectedHooks(configuration);
 
   switch (parsed.command) {
     case "reconcile": {
       if (parsed.contract === undefined) {
-        return { kind: "observation", command: "reconcile", ...await repo.reconcile() };
+        return { kind: "observation", command: "reconcile", ...await repo.reconcile({ hooks, retryHooks: parsed.retryHooks }) };
       }
       const { contract } = await selectContract(repo, parsed.contract, scope);
-      return { kind: "observation", command: "reconcile", ...await contract.reconcile() };
+      return { kind: "observation", command: "reconcile", ...await contract.reconcile({ hooks, retryHooks: parsed.retryHooks }) };
     }
     case "bind":
-      return invokeBind(parsed, repo, edge);
+      return invokeBind(parsed, repo, edge, configuration, hooks);
     default:
-      return invokeExisting(parsed, repo, edge, scope);
+      return invokeExisting({ parsed, repo, edge, scope, configuration, hooks });
   }
 }
 

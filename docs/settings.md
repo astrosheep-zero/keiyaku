@@ -72,6 +72,31 @@ selected missing name is usage failure. Bind and amend continue to accept
 concrete Gate arrays. Admission freezes that array into Contract terms; later
 settings edits never alter an existing Contract or its status.
 
+The Contract product also provides `worktreeHooksFrom({ settings })`. It reads
+the `worktree` namespace and returns one concrete `WorktreeHooks` value. The
+namespace has exactly two optional entries, `create` and `destroy`; an unknown
+entry is a product settings error. Each entry is an ordered array of commands:
+
+```json
+{
+  "worktree": {
+    "create": [
+      { "argv": ["npm", "ci", "--ignore-scripts"], "timeoutMs": 300000 }
+    ],
+    "destroy": [
+      { "argv": ["./scripts/teardown.sh"], "timeoutMs": 60000 }
+    ]
+  }
+}
+```
+
+An omitted entry means an empty command array. `argv` must be a nonempty array
+of strings whose executable is nonblank. `timeoutMs` must be an integer from 1
+through 2,147,483,647. Commands execute directly without a shell; interpolation
+and environment loading are not part of Settings. The returned arrays and
+commands are deeply frozen. Their managed-worktree execution and durable
+freezing rules are owned by [git.md](git.md).
+
 Akuma owns the `providers` interpreter, its record grammar, defaults, and Soul
 freeze in [akuma.md](akuma.md). Settings contributes only the resolved opaque
 entry and its provenance.
@@ -89,6 +114,6 @@ resolved namespace entries with their source and shadow observation. It is
 read-only. Settings files remain user-edited resources; there is no settings
 write command and no redaction under the local-trusted-user threat model.
 
-The Settings module never names `gates`, `providers`, a provider kind, or any
-other product concept. Product modules never read settings file paths. Those
-two checks are the boundary sentinels.
+The Settings module never names `gates`, `worktree`, `providers`, a provider
+kind, or any other product concept. Product modules never read settings file
+paths. Those two checks are the boundary sentinels.

@@ -1,0 +1,165 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
+import { contractLocator } from "../src/git/identity.js";
+import { hookMarkerPath, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
+import { deliveryWorktreePath } from "../src/git/reconcile.js";
+import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
+import { Keiyaku, Repo } from "../src/index.js";
+import { abandonOperation, scopeOperation } from "../src/protocol/operations.js";
+import { makeGitRepository } from "./support/git.js";
+
+const EMPTY_HOOKS: WorktreeHooks = { create: [], destroy: [] };
+
+function contractBody(title: string): string {
+  return [
+    `# ${title}`,
+    "",
+    "## Context",
+    "Exercise managed worktree hooks.",
+    "",
+    "## Objective",
+    "Keep hook effects serialized and recoverable.",
+    "",
+    "## Design",
+    "Use the Git-owned worktree effect marker.",
+    "",
+    "## Region",
+    "```",
+    "src/**",
+    "```",
+    "",
+    "## Criteria",
+    "### Hook result",
+    "Each effect is visible exactly as specified.",
+    "",
+  ].join("\n");
+}
+
+function repositoryWithMain() {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  return repository;
+}
+
+function appendCommand(path: string, value: string, delayMs = 0): HookCommand {
+  const append = `require("node:fs").appendFileSync(${JSON.stringify(path)}, ${JSON.stringify(value)})`;
+  const source = delayMs === 0 ? append : `setTimeout(() => { ${append}; }, ${delayMs})`;
+  return { argv: [process.execPath, "-e", source], timeoutMs: 5_000 };
+}
+
+function guardedCommand(attempts: string, ready: string): HookCommand {
+  const source = [
+    `const fs = require("node:fs");`,
+    `fs.appendFileSync(${JSON.stringify(attempts)}, "attempt\\n");`,
+    `if (!fs.existsSync(${JSON.stringify(ready)})) process.exit(9);`,
+  ].join(" ");
+  return { argv: [process.execPath, "-e", source], timeoutMs: 5_000 };
+}
+
+function lockPath(repository: ReturnType<typeof repositoryAt>, id: Parameters<typeof contractLocator>[0]): string {
+  const locator = contractLocator(id);
+  return join(commonGitDirectory(repository), "keiyaku", "locks", "reconcile", locator.slice(0, 2), `${locator.slice(2)}.sqlite`);
+}
+
+function lines(path: string): readonly string[] {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8").trim().split("\n").filter((line) => line.length > 0);
+}
+
+test("concurrent reconcile runs one frozen hook sequence and destroy removes only worktree administration", async () => {
+  const repository = repositoryWithMain();
+  const git = repositoryAt(repository.path);
+  const log = join(mkdtempSync(join(tmpdir(), "keiyaku-hooks-")), "hooks.log");
+  const bound = await Keiyaku.bind({
+    repo: Repo.at({ path: repository.path }),
+    markdown: contractBody("Concurrent hooks"),
+    hooks: EMPTY_HOOKS,
+  });
+  const id = bound.keiyaku.id;
+  const worktree = deliveryWorktreePath(git, id);
+  const administration = worktreeGitDirectory(git, worktree);
+  unlinkSync(hookMarkerPath(administration));
+  const hooks: WorktreeHooks = {
+    create: [appendCommand(log, "create\n", 100)],
+    destroy: [appendCommand(log, "destroy\n")],
+  };
+
+  const reports = await Promise.all([
+    bound.keiyaku.reconcile({ hooks }),
+    bound.keiyaku.reconcile({ hooks }),
+  ]);
+
+  assert.deepEqual(reports.map((report) => report.lag), [[], []]);
+  assert.deepEqual(lines(log), ["create"]);
+  assert.equal(repository.run(["-C", worktree, "status", "--porcelain", "--untracked-files=all"]), "");
+  assert.equal(existsSync(hookMarkerPath(administration)), true);
+
+  const abandoned = await bound.keiyaku.abandon();
+  assert.deepEqual(abandoned.lags, []);
+  assert.deepEqual(lines(log), ["create", "destroy"]);
+  assert.equal(existsSync(worktree), false);
+  assert.equal(existsSync(administration), false);
+
+  const held = await acquireSqliteTransactionLock({ path: lockPath(git, id), mode: "immediate", timeoutMs: 100 });
+  held.close();
+});
+
+test("a reconcile queued on the effect lock reobserves terminal state before applying topology", async () => {
+  const repository = repositoryWithMain();
+  const git = repositoryAt(repository.path);
+  const bound = await Keiyaku.bind({
+    repo: Repo.at({ path: repository.path }),
+    markdown: contractBody("Terminal wins"),
+    hooks: EMPTY_HOOKS,
+  });
+  const id = bound.keiyaku.id;
+  const worktree = deliveryWorktreePath(git, id);
+  const held = await acquireSqliteTransactionLock({ path: lockPath(git, id), mode: "immediate", timeoutMs: 100 });
+  const pending = bound.keiyaku.reconcile();
+
+  const terminal = abandonOperation({
+    scope: scopeOperation({ coordinate: repository.path }),
+    contractId: id,
+  });
+  assert.equal(terminal.kind, "accepted");
+  repository.run(["worktree", "remove", worktree]);
+  held.close();
+
+  const report = await pending;
+  assert.equal(report.lag.length, 0);
+  assert.equal(report.effects.some((effect) => effect.kind === "worktree" && effect.action === "created"), false);
+  assert.equal(existsSync(worktree), false);
+  assert.equal((await bound.keiyaku.state()).terminal?.kind, "abandoned");
+});
+
+test("failed create hooks remain stopped until explicit retry resumes the frozen command", async () => {
+  const repository = repositoryWithMain();
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-hook-retry-"));
+  const attempts = join(directory, "attempts.log");
+  const ready = join(directory, "ready");
+  const hooks: WorktreeHooks = { create: [guardedCommand(attempts, ready)], destroy: [] };
+
+  const bound = await Keiyaku.bind({
+    repo: Repo.at({ path: repository.path }),
+    markdown: contractBody("Retry hooks"),
+    hooks,
+  });
+  assert.equal(bound.lags[0]?.kind, "worktree-hook-failed");
+  assert.deepEqual(lines(attempts), ["attempt"]);
+
+  const ordinary = await bound.keiyaku.reconcile();
+  assert.equal(ordinary.lag[0]?.kind, "worktree-hook-failed");
+  assert.deepEqual(lines(attempts), ["attempt"]);
+
+  writeFileSync(ready, "ready\n");
+  const retried = await bound.keiyaku.reconcile({ retryHooks: true });
+  assert.deepEqual(retried.lag, []);
+  assert.deepEqual(lines(attempts), ["attempt", "attempt"]);
+});

@@ -34,12 +34,13 @@ single structured detail value.
 
 Settings construction and generic resource behavior are owned by
 [settings.md](settings.md). This package root exports `settings`, `Settings`,
-its observation value types, and the Contract-owned pure consumer
-`gatesFrom({ settings, name? })`. `gatesFrom` returns concrete public Gate values;
-it does not make bind or amend depend on a mutable resource. Its selected-entry
-and resource-view failures throw the exported Contract-owned `SettingsError`;
-generic Settings construction represents its own failures as scope and
-namespace states and never produces that error.
+its observation value types, and the Contract-owned pure consumers
+`gatesFrom({ settings, name? })` and `worktreeHooksFrom({ settings })`. They
+return concrete immutable values; no Contract operation reads a settings file
+or retains a Settings observation. Their selected-entry and resource-view
+failures throw the exported Contract-owned `SettingsError`; generic Settings
+construction represents its own failures as scope and namespace states and
+never produces that error.
 
 `Repo.at` is the only public construction point for a Git world. Its public
 surface is exactly:
@@ -53,12 +54,28 @@ type BindInput = Readonly<{
   actor?: ActorId
   after?: readonly ContractId[]
   gates?: readonly Gate[]
+  hooks?: WorktreeHooks
+}>
+
+type HookCommand = Readonly<{
+  argv: readonly string[]
+  timeoutMs: number
+}>
+
+type WorktreeHooks = Readonly<{
+  create: readonly HookCommand[]
+  destroy: readonly HookCommand[]
+}>
+
+type ReconcileInput = Readonly<{
+  hooks?: WorktreeHooks
+  retryHooks?: boolean
 }>
 
 Repo.at(input?: { path?: string }): Repo
 repo.root: string
 repo.currentBranch(): Promise<string | null>
-repo.reconcile(): Promise<RepoReconcileReport>
+repo.reconcile(input?: ReconcileInput): Promise<RepoReconcileReport>
 Keiyaku.of(input: { repo: Repo; id: ContractId }): Keiyaku
 Keiyaku.bind(input: BindInput): Promise<BindResult>
 Keiyaku.list(input: { repo: Repo }): Promise<ContractBoard>
@@ -67,7 +84,7 @@ Keiyaku.observe(input: { repo: Repo; id: ContractId }): Promise<ContractObservat
 
 `markdown` is the complete contract document and is decoded at the library
 edge. `workspace` defaults to `"worktree"`. `target`, `workspace`, `actor`,
-`after`, and `gates` are structured construction inputs. The edge mints opaque
+`after`, `gates`, and `hooks` are structured construction inputs. The edge mints opaque
 document keys, while `gates` and `after` remain machine terms; their ownership
 is defined by [document.md](document.md) and [lifecycle.md](lifecycle.md).
 
@@ -178,23 +195,27 @@ keiyaku.amend(input: {
   actor?: ActorId
   after?: readonly ContractId[]
   gates?: readonly Gate[]
+  hooks?: WorktreeHooks
 }): Promise<AmendResult>
 keiyaku.deliver(input?: {
   actor?: ActorId
   message?: string
+  hooks?: WorktreeHooks
 }): Promise<MutationResult<Delivery>>
 keiyaku.review(input: {
   verdict: AttestationVerdict
   actor?: ActorId
   summary?: string
+  hooks?: WorktreeHooks
 }): Promise<MutationResult<Review>>
 keiyaku.abandon(input?: {
   actor?: ActorId
   note?: string
+  hooks?: WorktreeHooks
 }): Promise<MutationResult<void>>
-keiyaku.arc(input: { markdown: string; actor?: ActorId }): Promise<MutationResult<void>>
-keiyaku.audit(input?: { actor?: ActorId }): Promise<MutationResult<AuditReport>>
-keiyaku.reconcile(): Promise<ReconcileReport>
+keiyaku.arc(input: { markdown: string; actor?: ActorId; hooks?: WorktreeHooks }): Promise<MutationResult<void>>
+keiyaku.audit(input?: { actor?: ActorId; hooks?: WorktreeHooks }): Promise<MutationResult<AuditReport>>
+keiyaku.reconcile(input?: ReconcileInput): Promise<ReconcileReport>
 
 delivery.diff(): Promise<string | null>
 ```
@@ -210,6 +231,14 @@ input grammars are owned by [document.md](document.md). `deliver`, `review`,
 defined in [git.md](git.md). `ReconcileReport` is that chapter's
 exact `ReconcileResult`, including its flat cleanup lag; this chapter does not
 define a second result shape.
+
+Every accepted mutation makes one mandatory reconciliation attempt with the
+supplied `hooks`, if any. Omitting them means empty commands only when Git must
+freeze a marker for a worktree that has no marker; it never replaces commands
+already frozen in that marker. `retryHooks` exists only on explicit reconcile,
+is a boolean programmer input, and retries a stored failed phase with its
+frozen commands. No mutation input carries `retryHooks`, so an ordinary later
+mutation cannot silently retry a failed external command.
 
 `review` is a contract operation. It does not require a Delivery handle or an
 existing delivery fact. It captures the current worktree patch identity against

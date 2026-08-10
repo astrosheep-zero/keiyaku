@@ -77,7 +77,7 @@ abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
 status [<contract>|@<contract>|<aku/...>] [--json]
 audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
-reconcile [<contract>|@<contract>] [--json]
+reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
 install <codex|claude|opencode|pi> [--json]
        install --all [--json]
@@ -117,6 +117,13 @@ and `--gates` to `keiyaku.amend`. Its omitted `after` leaves the current value
 unchanged, while `--clear-after` maps to `after: []`; it is mutually exclusive
 with `--after`. `bind`, `amend`, and `arc` require their final `-` document
 input.
+
+Every Contract mutation and `reconcile` reads one Settings observation at the
+CLI edge and derives one `WorktreeHooks` value through the package-root
+consumer. It passes that pure value into the public operation; the CLI never
+runs hook commands or reads marker files. `reconcile --retry-hooks` maps to
+`retryHooks: true`. It retries only a failed marker phase with its frozen
+commands and does not recapture edited settings for an existing worktree.
 
 Repository `.keiyaku/settings.json` may supply named gate snapshots for the
 `--gates <name>` edge flag:
@@ -332,6 +339,7 @@ form is one direct line per member:
 
 ```text
 lag worktree-retained <path>
+lag worktree-hook-failed <create|destroy> <path> command=<index> <failure-json>
 ```
 
 JSON exposes that same `lag` array. A `worktree-retained` lag does not turn an

@@ -13,6 +13,7 @@ import {
   type GitDecisionObservation,
 } from "../git/observe.js";
 import { reconcile, reconcileBatch, reconcileObservationFailure, type ReconcileResult } from "../git/reconcile.js";
+import type { WorktreeHooks } from "../git/hooks.js";
 import { NoGitWorldError, repositoryAt, type GitRepository } from "../git/repository.js";
 import { readDeliveryDiff } from "../git/verification.js";
 import type { WorktreeLeak } from "../git/verification.js";
@@ -480,11 +481,17 @@ export async function auditOperation(
 
 export type ReconcileReport = ReconcileResult;
 export type ReconcileObservation = Readonly<{ state: ContractState | null; report: ReconcileReport }>;
+type ReconcileOptions = Readonly<{ hooks: WorktreeHooks; retryHooks: boolean }>;
 
-export function reconcileOperation(input: OperationInput): ReconcileObservation {
+export async function reconcileOperation(input: OperationInput & ReconcileOptions): Promise<ReconcileObservation> {
   try {
-    const state = observeContract(input.scope, input.contractId).state;
-    return { state, report: reconcile({ repository: input.scope, state }) };
+    const observation = await reconcile({
+      repository: input.scope,
+      contractId: input.contractId,
+      hooks: input.hooks,
+      retryHooks: input.retryHooks,
+    });
+    return { state: observation.state, report: observation.result };
   } catch (error) {
     if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
     return { state: null, report: reconcileObservationFailure(error) };
@@ -495,15 +502,19 @@ type RepoReconcileItem = Readonly<{ contractId: ContractId; state: ContractState
 
 export type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>;
 
-export function reconcileAllOperation(input: Readonly<{ scope: RepositoryScope }>): RepoReconcileReport {
+export async function reconcileAllOperation(
+  input: Readonly<{ scope: RepositoryScope }> & ReconcileOptions,
+): Promise<RepoReconcileReport> {
   const git = input.scope;
   const observation = observeGit(git);
-  const contracts = reconcileBatch(
+  const contracts = (await reconcileBatch(
     git,
-    [...observation.contracts].map(([id, record]) => ({ id, state: record.state })),
-  ).map((item): RepoReconcileItem => ({
+    observation.contracts.keys(),
+    input.hooks,
+    input.retryHooks,
+  )).map((item): RepoReconcileItem => ({
     contractId: item.contract,
-    state: observation.contracts.get(item.contract)?.state ?? null,
+    state: item.state,
     report: item.result,
   }));
   return { contracts };

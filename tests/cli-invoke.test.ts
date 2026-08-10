@@ -523,8 +523,13 @@ test("managed delivery reads without realigning its deterministic worktree", asy
   assert.equal(audit.report?.attempt, undefined);
 
   repository.run(["-C", path, "reset", "--hard", target]);
-  const reconciled = reconcile({ repository: repositoryAt(repository.path), state });
-  assert.equal(reconciled.effects.some((effect) => effect.kind === "worktree" && effect.action === "unchanged"), true);
+  const reconciled = await reconcile({
+    repository: repositoryAt(repository.path),
+    contractId: id,
+    hooks: { create: [], destroy: [] },
+    retryHooks: false,
+  });
+  assert.equal(reconciled.result.effects.some((effect) => effect.kind === "worktree" && effect.action === "unchanged"), true);
   assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), target);
 
   const satisfiedReview = await fromManaged(["review", id, "--satisfied", "--actor", "external-test"]);
@@ -679,8 +684,13 @@ test("--here delivers the caller worktree without owning it or its branch", asyn
   assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), candidate);
   assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)), null);
   assert.equal(existsSync(deliveryWorktreePath(repositoryAt(repository.path), id)), false);
-  const reconciled = reconcile({ repository: repositoryAt(repository.path), state });
-  assert.equal(reconciled.effects.some((effect) => effect.kind === "worktree"), false);
+  const reconciled = await reconcile({
+    repository: repositoryAt(repository.path),
+    contractId: id,
+    hooks: { create: [], destroy: [] },
+    retryHooks: false,
+  });
+  assert.equal(reconciled.result.effects.some((effect) => effect.kind === "worktree"), false);
 
   const changesRequested = await command(
     ["review", id, "--unsatisfied", "--actor", "external-test", "-"],

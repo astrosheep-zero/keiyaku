@@ -133,10 +133,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("core/facts/types.ts"),
       ],
     },
-    {
-      source: "git/reconcile.ts",
-      allow: [any("git/identity.ts"), any("git/repository.ts"), any("core/facts/types.ts")],
-    },
+    { source: "git/reconcile.ts", allow: [any("coordination/sqlite-transaction-lock.ts"), any("core/facts/errors.ts"), any("core/facts/types.ts"), any("git/hooks.ts"), any("git/identity.ts"), any("git/observe.ts"), any("git/repository.ts")] },
+    { source: "git/hooks.ts", allow: [any("runtime/proc/run.ts")] },
     {
       source: "git/verification.ts",
       allow: [any("git/identity.ts"), any("git/repository.ts"), any("core/facts/errors.ts"), types("core/facts/types.ts")],
@@ -206,6 +204,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "protocol/operations.ts",
       allow: [
         any("git/delivery.ts"),
+        types("git/hooks.ts"),
         any("git/identity.ts"),
         any("git/observe.ts"),
         any("git/reconcile.ts"),
@@ -277,7 +276,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/operations.ts"),
         any("library/input.ts"),
         any("library/region.ts"),
-        any("library/gates.ts"),
+        any("library/configuration.ts"),
         any("settlement/settle.ts"),
         any("settings.ts"),
       ],
@@ -292,7 +291,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("verification/declaration.ts", ["prepareVerificationDeclaration"]),
       ],
     },
-    { source: "library/gates.ts", allow: [any("core/facts/types.ts", ["gateWord"]), types("settings.ts")] },
+    { source: "library/configuration.ts", allow: [any("core/facts/types.ts", ["gateWord"]), types("settings.ts")] },
     {
       source: "library/region.ts",
       allow: [
@@ -414,6 +413,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "cli/invoke.ts", symbols: ["readFileSync"] },
         { source: "settings.ts", symbols: ["readFileSync"] },
         { source: "git/reconcile.ts", symbols: ["existsSync", "mkdirSync", "realpathSync"] },
+        { source: "git/hooks.ts", symbols: ["closeSync", "fsyncSync", "mkdirSync", "openSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"] },
         { source: "git/delivery.ts", symbols: ["existsSync", "mkdtempSync", "rmSync"] },
         { source: "task/context.ts", symbols: ["closeSync", "fsyncSync", "lstatSync", "mkdirSync", "openSync", "readFileSync", "renameSync", "unlinkSync", "writeFileSync"] },
         { source: "task/store.ts", symbols: ["closeSync", "existsSync", "fsyncSync", "lstatSync", "mkdirSync", "openSync", "readFileSync", "readdirSync", "renameSync", "unlinkSync", "writeFileSync"] },
@@ -482,7 +482,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },
-    { capability: "type-error-construction", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/persona.ts", "akuma/provider.ts", "akuma/providers/index.ts", "body/**", "cli/actor.ts", "kanshi/**", "library/gates.ts", "library/input.ts", "library/keiyaku.ts", "identity/coordinates.ts", "settings.ts", "task/**"] },
+    { capability: "type-error-construction", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/persona.ts", "akuma/provider.ts", "akuma/providers/index.ts", "body/**", "cli/actor.ts", "kanshi/**", "library/configuration.ts", "library/input.ts", "library/keiyaku.ts", "identity/coordinates.ts", "settings.ts", "task/**"] },
   ],
   forbiddenFileNames: [
     "approval-preparation.ts",

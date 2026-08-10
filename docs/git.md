@@ -143,6 +143,24 @@ fresh external observation. It is idempotent without process-local receipt data
 and across a process restart. It writes no journal fact, never reverses
 admission, and is the only repair primitive for accepted-but-lagged effects.
 
+Each Contract reconciliation is one serialized Git effect decision. Git takes
+one per-Contract coordination lock in the common Git directory, then observes
+that Contract's current journal and worktree topology while holding the lock,
+applies every ref, worktree, marker, and hook effect, and releases the lock.
+Callers supply the Contract identity, never a previously folded state. The lock
+contains no domain fact and is never removed with a managed worktree. Different
+Contracts do not share this lock. Lock acquisition waits for the current effect
+decision to finish rather than imposing a timeout shorter than a configured
+hook command; process death releases the SQLite transaction.
+
+Admission does not take the effect lock. A public mutation that admits a newer
+fact performs its mandatory reconciliation through the same serialized entry,
+where it observes that newer state. Thus a reconcile that began from an active
+state may finish its effects after a terminal fact is admitted, but the
+terminal mutation's queued reconcile observes terminal state and is the later
+effect decision. If that process dies after admission, the ordinary
+accepted-but-lagged recovery rule applies.
+
 Failure to observe or apply the requested topology is an explicit reconcile
 result, not an untyped Git exception. The failed result retains every effect
 that completed before the failure and identifies whether observation or effect
@@ -168,6 +186,56 @@ Keiyaku-owned reachability refs and pins, then reports the typed
 `worktree-retained` cleanup lag. Retention never reverses or changes an
 accepted outcome.
 
+### Managed Worktree Hooks
+
+Managed-worktree hooks are part of the typed worktree effect, not Contract
+lifecycle facts or cross-product settlement. Git receives only this opaque
+pure value from the library; it never reads Settings or interprets command
+meaning:
+
+```ts
+type HookCommand = Readonly<{ argv: readonly string[]; timeoutMs: number }>
+type WorktreeHooks = Readonly<{
+  create: readonly HookCommand[]
+  destroy: readonly HookCommand[]
+}>
+```
+
+Each command runs directly, without a shell, in the managed worktree and
+inherits the invocation environment. The shared process runtime bounds
+stdout/stderr tails, enforces `timeoutMs`, and terminates the command process
+tree on timeout. Commands must be reentrant. The guarantee is at-least-once:
+after a command exits successfully and before its progress is atomically
+recorded, process death can make replay execute that command again.
+
+Immediately after creating a worktree, Git atomically writes
+`keiyaku/hooks.json` beneath that linked worktree's Git administration
+directory. The marker is outside candidate content and disappears only when
+Git removes that managed worktree. The current hard-cut marker has version
+`1`, freezes the complete create/destroy command pair, and records each phase
+as `pending` with its next command index, `failed` with its command index and
+typed process failure, or `ok`. Progress is replaced through a temporary file
+and rename after every successful command and after a failure. Empty command
+arrays advance directly to `ok`.
+
+An active worktree with no marker freezes the current supplied pair and runs
+create commands. A `pending` create phase resumes from its stored next index.
+An `ok` create phase never runs again. A `failed` phase reports its stored lag
+without running during ordinary reconciliation. Explicit
+`reconcile({ retryHooks: true })` resumes that failed phase from its stored
+command, still using the frozen pair; retry never recaptures current settings.
+
+The create order is worktree add, marker freeze, then create commands. A create
+failure retains the worktree and does not reverse or abandon the accepted
+Contract. The destroy order is the existing cleanliness and HEAD/tree gate,
+then frozen destroy commands, worktree removal, and ref cleanup. A destroy
+failure retains the worktree and all reachability refs. Settings changes affect
+only a future worktree whose marker has not yet been frozen. Git does not expose
+a generic hook registry, lifecycle event bus, backend interface, or hook fact.
+Hook commands must not recursively invoke a mutation or reconciliation for the
+same Contract: the outer effect decision owns that Contract's lock until the
+command returns.
+
 ```ts
 type ReconcileResult = Readonly<{
   effects: readonly Effect[]
@@ -177,10 +245,29 @@ type ReconcileResult = Readonly<{
 type ReconcileLag =
   | Readonly<{ kind: "worktree-retained"; path: string }>
   | Readonly<{
+      kind: "worktree-hook-failed"
+      phase: "create" | "destroy"
+      path: string
+      command: number
+      failure: HookFailure
+    }>
+  | Readonly<{
       kind: "reconcile-failed"
       stage: "observation" | "effect"
       diagnostic: string
     }>
+
+type HookFailure =
+  | Readonly<{
+      kind: "exit"
+      code: number
+      stdout: string
+      stderr: string
+      truncated: boolean
+    }>
+  | Readonly<{ kind: "timeout" }>
+  | Readonly<{ kind: "spawn-error"; diagnostic: string }>
+  | Readonly<{ kind: "unknown-exit" }>
 
 type Effect =
   | Readonly<{

@@ -1,16 +1,27 @@
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { acquireSqliteTransactionLock, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
+  commonGitDirectory,
   DELIVERY_REF_NAMESPACE,
   readRef,
   registeredWorktreePaths,
   runGit,
+  worktreeGitDirectory,
   type GitOid,
   type GitRepository,
 } from "./repository.js";
 import { contractId, type ContractId, type ContractState, type SnapshotId } from "../core/facts/types.js";
-import { gitObjectIdForSnapshot } from "./identity.js";
+import { contractLocator, gitObjectIdForSnapshot } from "./identity.js";
+import { observeContract } from "./observe.js";
+import {
+  runCreateHooks,
+  runDestroyHooks,
+  type WorktreeHookLag,
+  type WorktreeHooks,
+} from "./hooks.js";
 
 const WORKTREE_DIRECTORY = [".keiyaku-v4", "worktrees"] as const;
 export type Effect =
@@ -26,7 +37,12 @@ export type Effect =
       after: GitOid | null;
       action: "created" | "updated" | "removed" | "unchanged";
     }>;
-type ReconcileInput = Readonly<{ repository: GitRepository; state: ContractState | null }>;
+type ReconcileInput = Readonly<{
+  repository: GitRepository;
+  contractId: ContractId;
+  hooks: WorktreeHooks;
+  retryHooks: boolean;
+}>;
 type WorktreeRetained = Readonly<{
   kind: "worktree-retained";
   path: string;
@@ -36,13 +52,13 @@ export type ReconcileFailure = Readonly<{
   stage: "observation" | "effect";
   diagnostic: string;
 }>;
-export type ReconcileLag = WorktreeRetained | ReconcileFailure;
+export type ReconcileLag = WorktreeRetained | WorktreeHookLag | ReconcileFailure;
 export type ReconcileResult = Readonly<{
   effects: readonly Effect[];
   lag: readonly ReconcileLag[];
 }>;
-type ReconcileBatchContract = Readonly<{ id: ContractId; state: ContractState | null }>;
-type ReconcileBatchItem = Readonly<{ contract: ContractId; result: ReconcileResult }>;
+type ReconcileBatchItem = Readonly<{ contract: ContractId; state: ContractState | null; result: ReconcileResult }>;
+export type GitReconcileObservation = Readonly<{ state: ContractState | null; result: ReconcileResult }>;
 
 type WorktreeTopology = Readonly<{ paths: Set<string> }>;
 
@@ -82,8 +98,13 @@ function failed(
   effects: readonly Effect[] = [],
   lag: readonly ReconcileLag[] = [],
 ): ReconcileResult {
-  if (error instanceof TypeError) throw error;
+  if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
   return { effects, lag: [...lag, { kind: "reconcile-failed", stage, diagnostic: diagnostic(error) }] };
+}
+
+function reconcileLockPath(repository: GitRepository, contract: ContractId): string {
+  const locator = contractLocator(contract);
+  return join(commonGitDirectory(repository), "keiyaku", "locks", "reconcile", locator.slice(0, 2), `${locator.slice(2)}.sqlite`);
 }
 
 function worktree(repository: GitRepository, topology: WorktreeTopology, path: string, desired: SnapshotId): Effect {
@@ -112,7 +133,6 @@ function removeWorktree(
   repository: GitRepository,
   topology: WorktreeTopology,
   path: string,
-  expected: readonly SnapshotId[],
 ): Readonly<{ effect: Effect; retained: boolean }> {
   const registered = topology.paths.has(path);
   if (!registered) return { effect: { kind: "worktree", path, action: "unchanged" }, retained: false };
@@ -120,9 +140,6 @@ function removeWorktree(
     runGit(repository, ["worktree", "remove", path]);
     topology.paths.delete(path);
     return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
-  }
-  if (!canRemoveWorktree(repository, path, expected)) {
-    return { effect: { kind: "worktree", path, action: "unchanged" }, retained: true };
   }
   try {
     runGit(repository, ["worktree", "remove", path]);
@@ -133,7 +150,11 @@ function removeWorktree(
   return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
 }
 
-function reconcileWithTopology({ repository, state }: ReconcileInput, topology: WorktreeTopology): ReconcileResult {
+async function reconcileWithTopology(
+  { repository, hooks, retryHooks }: ReconcileInput,
+  state: ContractState | null,
+  topology: WorktreeTopology,
+): Promise<ReconcileResult> {
   const effects: Effect[] = [];
   const lag: ReconcileLag[] = [];
   try {
@@ -151,14 +172,21 @@ function reconcileWithTopology({ repository, state }: ReconcileInput, topology: 
         ? [state.coordinates.start]
         : [state.delivery.data.candidate, state.coordinates.start];
       const primary = fromPrimaryWorktree(repository);
-      const removal = removeWorktree(primary, topology, path, expected);
-      if (removal.retained) {
+      const retain = (retainedLag: ReconcileLag): ReconcileResult => {
         effects.push(updateRef(primary, ref, state.delivery?.data.candidate ?? state.coordinates.start));
         effects.push(state.delivery === null ? removeRef(primary, pin) : updateRef(primary, pin, state.delivery.data.candidate));
-        effects.push(removal.effect);
-        lag.push({ kind: "worktree-retained", path });
+        effects.push({ kind: "worktree", path, action: "unchanged" });
+        lag.push(retainedLag);
         return complete(effects, lag);
+      };
+      const registered = topology.paths.has(path);
+      if (registered && existsSync(path)) {
+        if (!canRemoveWorktree(primary, path, expected)) return retain({ kind: "worktree-retained", path });
+        const hookLag = await runDestroyHooks(path, worktreeGitDirectory(primary, path), hooks, retryHooks);
+        if (hookLag !== null) return retain(hookLag);
       }
+      const removal = removeWorktree(primary, topology, path);
+      if (removal.retained) return retain({ kind: "worktree-retained", path });
       effects.push(removal.effect);
       effects.push(removeRef(primary, ref));
       effects.push(removeRef(primary, pin));
@@ -168,6 +196,8 @@ function reconcileWithTopology({ repository, state }: ReconcileInput, topology: 
     const desired = state.delivery?.data.candidate ?? state.coordinates.start;
     effects.push(updateRef(repository, ref, desired));
     effects.push(worktree(repository, topology, path, desired));
+    const hookLag = await runCreateHooks(path, worktreeGitDirectory(repository, path), hooks, retryHooks);
+    if (hookLag !== null) lag.push(hookLag);
     effects.push(state.delivery ? updateRef(repository, pin, state.delivery.data.candidate) : removeRef(repository, pin));
     return complete(effects, lag);
   } catch (error) {
@@ -179,47 +209,81 @@ function needsWorktreeTopology(state: ContractState | null): boolean {
   return state !== null && state.coordinates.workspace === "worktree" && (state.terminal !== null || state.bound !== null);
 }
 
-export function reconcile(input: ReconcileInput): ReconcileResult {
+function releaseFailure(
+  held: HeldSqliteTransactionLock,
+  observation: GitReconcileObservation | undefined,
+): GitReconcileObservation | undefined {
   try {
-    const topology = needsWorktreeTopology(input.state)
+    held.close();
+    return observation;
+  } catch (error) {
+    const prior = observation?.result;
+    return {
+      state: observation?.state ?? null,
+      result: failed("effect", error, prior?.effects, prior?.lag),
+    };
+  }
+}
+
+export async function reconcile(input: ReconcileInput): Promise<GitReconcileObservation> {
+  let held: HeldSqliteTransactionLock;
+  try {
+    held = await acquireSqliteTransactionLock({
+      path: reconcileLockPath(input.repository, input.contractId),
+      mode: "immediate",
+    });
+  } catch (error) {
+    return { state: null, result: failed("observation", error) };
+  }
+
+  let observation: GitReconcileObservation | undefined;
+  let exceptional: unknown;
+  try {
+    const state = observeContract(input.repository, input.contractId).state;
+    const topology = needsWorktreeTopology(state)
       ? acquireWorktreeTopology(input.repository)
       : { paths: new Set<string>() };
-    return reconcileWithTopology(input, topology);
+    observation = {
+      state,
+      result: await reconcileWithTopology(input, state, topology),
+    };
   } catch (error) {
-    return failed("observation", error);
+    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) exceptional = error;
+    else observation = { state: null, result: failed("observation", error) };
   }
+
+  observation = releaseFailure(held, observation);
+  if (exceptional !== undefined) throw exceptional;
+  if (observation === undefined) throw new Error("reconcile produced no observation");
+  return observation;
 }
 
 export function reconcileObservationFailure(error: unknown): ReconcileResult {
   return failed("observation", error);
 }
 
-function reconcileBatchItem(
+async function reconcileBatchItem(
   repository: GitRepository,
-  topology: WorktreeTopology,
-  contract: ReconcileBatchContract,
-): ReconcileBatchItem {
-  return { contract: contract.id, result: reconcileWithTopology({ repository, state: contract.state }, topology) };
+  contract: ContractId,
+  hooks: WorktreeHooks,
+  retryHooks: boolean,
+): Promise<ReconcileBatchItem> {
+  const observation = await reconcile({ repository, contractId: contract, hooks, retryHooks });
+  return {
+    contract,
+    state: observation.state,
+    result: observation.result,
+  };
 }
 
-/** Reconcile one Git observation against one mutable, process-local worktree topology. */
-export function reconcileBatch(
+/** Reconcile each discovered Contract through its own serialized, fresh observation. */
+export async function reconcileBatch(
   repository: GitRepository,
-  contracts: Iterable<ReconcileBatchContract>,
-): readonly ReconcileBatchItem[] {
-  const observed = [...contracts];
-  if (!observed.some((contract) => needsWorktreeTopology(contract.state))) {
-    const emptyTopology: WorktreeTopology = { paths: new Set<string>() };
-    return observed.map((contract) => reconcileBatchItem(repository, emptyTopology, contract));
-  }
-  try {
-    const topology = acquireWorktreeTopology(repository);
-    return observed.map((contract) => reconcileBatchItem(repository, topology, contract));
-  } catch (error) {
-    const failure = reconcileObservationFailure(error);
-    const emptyTopology: WorktreeTopology = { paths: new Set<string>() };
-    return observed.map((contract) => needsWorktreeTopology(contract.state)
-      ? { contract: contract.id, result: failure }
-      : reconcileBatchItem(repository, emptyTopology, contract));
-  }
+  contracts: Iterable<ContractId>,
+  hooks: WorktreeHooks,
+  retryHooks: boolean,
+): Promise<readonly ReconcileBatchItem[]> {
+  const items: ReconcileBatchItem[] = [];
+  for (const contract of contracts) items.push(await reconcileBatchItem(repository, contract, hooks, retryHooks));
+  return items;
 }
