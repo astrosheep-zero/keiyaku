@@ -10,6 +10,7 @@ import {
 import type { ContractsObservation } from "../core/facts/observation.js";
 import { contractJournalPath, mintContractHead, mintSnapshotId } from "./identity.js";
 import {
+  GitPlumbingError,
   isKeiyakuOwnedRef,
   extendGitPaths,
   readBlobs,
@@ -49,6 +50,33 @@ export type GitDecisionObservation = Readonly<{
 type BindCoordinatesObservation = Readonly<{ start: SnapshotId; target?: string }>;
 
 const TARGET_COORDINATES_FORMAT = "%(refname)%00%(objectname)%00";
+
+export function normalizeTargetBranch(repository: GitRepository, input: string): string | null {
+  if (input.includes("\0")) return null;
+  const prefix = "refs/heads/";
+  if (input.startsWith("refs/") && !input.startsWith(prefix)) return null;
+  const branch = input.startsWith(prefix) ? input.slice(prefix.length) : input;
+  const target = `${prefix}${branch}`;
+  if (branch.length === 0 || branch.startsWith("-") || isKeiyakuOwnedRef(target)) return null;
+  try {
+    const checked = runGit(repository, ["check-ref-format", "--branch", branch]).toString("utf8").trim();
+    return checked === branch ? target : null;
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status !== null) return null;
+    throw error;
+  }
+}
+
+/** Read the effective worktree's attached branch, or null for detached HEAD. */
+export function currentBranch(repository: GitRepository): string | null {
+  try {
+    const ref = runGit(repository, ["symbolic-ref", "--quiet", "HEAD"]).toString("utf8").trim();
+    return ref.startsWith("refs/heads/") ? ref : null;
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 1) return null;
+    throw error;
+  }
+}
 
 function malformedBindCoordinatesOutput(): never {
   throw new Error("malformed structured Git output while observing bind coordinates");

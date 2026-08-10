@@ -36,6 +36,7 @@ export type AcceptedResult = Readonly<{
   facts: readonly AcceptedFact[];
   effects: readonly Effect[];
   settlement: SettlementReport;
+  target?: string | null;
   verification?: VerificationStop;
   placement?: PlacementStop;
   leak?: NonNullable<AuditReport["leak"]>;

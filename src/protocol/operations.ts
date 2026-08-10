@@ -5,6 +5,7 @@ import {
   type ReviewPreparationRefusal,
 } from "../git/delivery.js";
 import {
+  currentBranch,
   extendContractsForAdmission,
   observeGit,
   observeContract,
@@ -90,6 +91,10 @@ type ScopeOperationInput = Readonly<{ coordinate: string }>;
 export type RepositoryScope = GitRepository;
 export { NoGitWorldError };
 export function scopeOperation(input: ScopeOperationInput): RepositoryScope { return repositoryAt(input.coordinate); }
+
+export function currentBranchOperation(input: Readonly<{ scope: RepositoryScope }>): string | null {
+  return currentBranch(input.scope);
+}
 
 export function contractsOperation(input: Readonly<{ scope: RepositoryScope }>): ContractBoard { return readContractBoard(input.scope); }
 

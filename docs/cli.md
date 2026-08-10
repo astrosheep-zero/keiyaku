@@ -105,8 +105,12 @@ uses exit `3`; it is not converted into a usage error. A genuine
 `CliUsageError` raised by syntax or edge validation remains a usage refusal.
 
 `bind` maps `--target`, `--here`, repeated `--after`, `--gates`, and `--actor`
-to `Keiyaku.bind`. `--target` remains literal input for the public target boundary;
-the parser does not DWIM-resolve it or inspect the current branch. `--here`
+to `Keiyaku.bind`. An explicit `--target` remains literal input for the public
+target boundary. When it is omitted, the adapter supplies
+`repo.currentBranch()`; an attached branch therefore becomes the canonical
+target, while detached HEAD remains explicitly targetless. The parser itself
+does not inspect Git. An accepted bind result exposes the persisted canonical
+target, or `null`, so this default is never hidden. `--here`
 maps to `workspace: "here"`; the omitted form maps to its public default.
 `amend` maps Markdown, `--actor`, repeated `--after`,
 and `--gates` to `keiyaku.amend`. Its omitted `after` leaves the current value

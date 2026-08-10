@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { observeBindCoordinates } from "../git/observe.js";
-import { normalizeTargetBranch, type GitRepository } from "../git/repository.js";
+import { normalizeTargetBranch, observeBindCoordinates } from "../git/observe.js";
+import type { GitRepository } from "../git/repository.js";
 import type { BindData, ActorId, ContractId } from "../core/facts/types.js";
 import { contractIdFromSegment } from "../core/facts/types.js";
 import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";

@@ -23,6 +23,7 @@ type MutationObservation = Pick<MutationResult<unknown>, "facts" | "head" | "eff
 
 type ResultOptions = Readonly<{
   coordinate?: ContractId;
+  target?: string | null;
   report?: import("../index.js").AuditReport;
   obligations?: Pick<AcceptedResult, "verification" | "placement" | "leak">;
   diff?: AcceptedResult["diff"];
@@ -52,6 +53,7 @@ function resultFromMutation(
     })),
     effects: result.effects,
     settlement: result.settlement,
+    ...(options.target === undefined ? {} : { target: options.target }),
     ...options.obligations,
     ...(hasOverlaps(result) ? { overlaps: result.overlaps } : {}),
     ...(hasOverlapFailure(result) ? { overlapFailure: result.overlapFailure } : {}),

@@ -74,6 +74,13 @@ async function invokeBind(
   return resultFromMutationCall(
     "bind",
     () => bindFromCommand(parsed, repo, markdown, gates, actorFromEdge(parsed.actor, edge.environment)),
+    {
+      project: (result) => {
+        const bound = result.facts.find((fact) => fact.kind === "bind");
+        if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
+        return { target: bound.data.coordinates.target ?? null };
+      },
+    },
   );
 }
 

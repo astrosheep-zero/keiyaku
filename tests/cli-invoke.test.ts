@@ -209,7 +209,7 @@ test("journal-writing commands preserve optional actor testimony", async () => {
   assert.equal(readRef(repositoryAt(repository.path), GIT_REF), beforeBlank);
 });
 
-test("bind decodes Markdown and records a targetless current snapshot", async () => {
+test("bind defaults its target to the invocation worktree's current branch", async () => {
   const repository = repositoryWithMain();
   const start = repository.run(["rev-parse", "refs/heads/main"]).trim();
   const source = contractDocument("Markdown Bind", "## Rollout Notes\nfirst\n\n- second\n");
@@ -223,8 +223,10 @@ test("bind decodes Markdown and records a targetless current snapshot", async ()
   const state = observeContract(repositoryAt(repository.path), acceptedContract(result)).state;
   assert.deepEqual(state?.coordinates, {
     start,
+    target: "refs/heads/main",
     workspace: "worktree",
   });
+  assert.equal(result.kind === "accepted" ? result.target : undefined, "refs/heads/main");
   assert.equal(state?.terms?.document.bytes, source);
   const decoded = state?.terms === null || state?.terms === undefined
     ? null
@@ -248,6 +250,7 @@ test("bind observes an explicit target rather than the checked-out branch", asyn
     observeContract(repositoryAt(repository.path), acceptedContract(result)).state?.coordinates,
     { start, target: "refs/heads/release", workspace: "worktree" },
   );
+  assert.equal(result.kind === "accepted" ? result.target : undefined, "refs/heads/release");
 });
 
 test("targetless bind accepts detached HEAD without a reward operation", async () => {
@@ -261,6 +264,7 @@ test("targetless bind accepts detached HEAD without a reward operation", async (
   );
   const coordinates = observeContract(repositoryAt(repository.path), acceptedContract(result)).state?.coordinates;
   assert.equal(coordinates?.target, undefined);
+  assert.equal(result.kind === "accepted" ? result.target : undefined, null);
 });
 
 test("amend applies H2 operations into a complete Markdown replacement", async () => {
@@ -416,8 +420,6 @@ test("audit --show-diff-body retains its Delivery across a terminal transition",
   );
   const id = acceptedContract(bound);
   writeFileSync(resolve(repository.path, "candidate.txt"), "candidate\n");
-  repository.run(["add", "candidate.txt"]);
-  repository.run(["commit", "--quiet", "-m", "candidate"]);
   const delivered = await invokeWithDocument(repository.path, ["deliver", id, "--actor", "external-test"], "");
   assert.equal(delivered.kind, "accepted");
 

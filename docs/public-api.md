@@ -57,6 +57,7 @@ type BindInput = Readonly<{
 
 Repo.at(input?: { path?: string }): Repo
 repo.root: string
+repo.currentBranch(): Promise<string | null>
 repo.reconcile(): Promise<RepoReconcileReport>
 Keiyaku.of(input: { repo: Repo; id: ContractId }): Keiyaku
 Keiyaku.bind(input: BindInput): Promise<BindResult>
@@ -102,6 +103,11 @@ exactly one `process.cwd()` call, in the private scope resolver used by
 capability; they accept neither a path nor an ambient repository default. No
 raw scope, token, registry, or orchestrator is public. Instance operations
 accept no repository coordinate.
+
+`currentBranch()` observes the invocation worktree through that pinned Repo and
+returns its canonical `refs/heads/...` symbolic `HEAD`, or `null` for detached
+HEAD. It does not choose a target or change `Keiyaku.bind`'s explicit
+targetless semantics; the CLI consumes this mechanical fact for its default.
 
 `Repo` is the pinned Git-world capability. It owns reconciliation and the
 coordinate needed by Contract operations, not Contract reads or construction.

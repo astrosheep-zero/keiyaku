@@ -234,7 +234,8 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   assert.deepEqual(Object.getOwnPropertyNames(Keiyaku).filter((name) => !["length", "name", "prototype"].includes(name)).sort(), ["bind", "list", "observe", "of"]);
   assert.deepEqual(Object.getOwnPropertyNames(Delivery).filter((name) => !["length", "name", "prototype"].includes(name)), []);
   assert.deepEqual(Object.getOwnPropertyNames(Repo).filter((name) => !["length", "name", "prototype"].includes(name)), ["at"]);
-  assert.deepEqual(Object.getOwnPropertyNames(Repo.prototype).filter((name) => name !== "constructor").sort(), ["reconcile"]);
+  assert.deepEqual(Object.getOwnPropertyNames(Repo.prototype).filter((name) => name !== "constructor").sort(), ["currentBranch", "reconcile"]);
+  assert.equal(await repo.currentBranch(), "refs/heads/main");
   await assert.rejects(
     Keiyaku.bind({ repo, markdown: markdown("Invalid gate"), workspace: "here", gates: ["Edge-owned"] }),
     (error: unknown) => error instanceof TypeError && error.message === "gates[0] must match ^[a-z][a-z0-9-]{0,63}$",

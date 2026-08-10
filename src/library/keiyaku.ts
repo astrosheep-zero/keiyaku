@@ -34,6 +34,7 @@ import {
   NoGitWorldError,
   contractObservationOperation,
   contractsOperation,
+  currentBranchOperation,
   deliveryDiffOperation,
   deliverOperation,
   deliveryOperation,
@@ -412,6 +413,10 @@ export class Repo {
     const values = input === undefined ? undefined : requireInput(input, "Repo.at input");
     const scope = resolvePinnedScope(optionalNonblank(values?.path, "repository path"));
     return new Repo(scope);
+  }
+
+  async currentBranch(): Promise<string | null> {
+    return currentBranchOperation({ scope: scopeForRepo(this) });
   }
 
   async reconcile(): Promise<RepoReconcileReport> {

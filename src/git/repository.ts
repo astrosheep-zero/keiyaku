@@ -28,22 +28,6 @@ export function isKeiyakuOwnedRef(ref: string): boolean {
     || ref.startsWith(`${CANDIDATE_PIN_REF_NAMESPACE}/`);
 }
 
-export function normalizeTargetBranch(repository: GitRepository, input: string): string | null {
-  if (input.includes("\0")) return null;
-  const prefix = "refs/heads/";
-  if (input.startsWith("refs/") && !input.startsWith(prefix)) return null;
-  const branch = input.startsWith(prefix) ? input.slice(prefix.length) : input;
-  const target = `${prefix}${branch}`;
-  if (branch.length === 0 || branch.startsWith("-") || isKeiyakuOwnedRef(target)) return null;
-  try {
-    const checked = runGit(repository, ["check-ref-format", "--branch", branch]).toString("utf8").trim();
-    return checked === branch ? target : null;
-  } catch (error) {
-    if (error instanceof GitPlumbingError && error.status !== null) return null;
-    throw error;
-  }
-}
-
 export type GitOid = string;
 
 export type RefPublication =
@@ -74,7 +58,7 @@ export class NoGitWorldError extends Error {
   }
 }
 
-class GitPlumbingError extends Error {
+export class GitPlumbingError extends Error {
   readonly stderr: Buffer;
   readonly status: number | null;
   readonly pid: number | null;

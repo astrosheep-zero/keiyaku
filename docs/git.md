@@ -22,6 +22,9 @@ full-world observation is `O(N)`. The private Git map has no cache,
 current-state snapshot, second or per-contract Git ref, or in-repository
 fact index. The deterministic managed refs and pins are topology and
 reachability only; they are not a Git-state index or a second fact store.
+Git also owns observation of the invocation worktree's current branch. It
+returns the canonical `refs/heads/...` symbolic `HEAD`, or absence when that
+worktree is detached; no higher layer runs or interprets Git for this fact.
 Variable-length public identities do not determine Git depth. A journal
 locator uses a fixed-width strong digest of the complete ContractId as a
 bounded-fanout Git tree path, while the journal bytes retain and canonically

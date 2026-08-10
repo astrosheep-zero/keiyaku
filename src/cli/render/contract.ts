@@ -30,6 +30,7 @@ export function obligationLines(value: Pick<AcceptedResult, "verification" | "pl
 
 export function renderAccepted(result: AcceptedResult): string {
   const lines = [`accepted ${result.verb} ${result.contract} head=${result.head ?? "null"}`];
+  if (result.target !== undefined) lines.push(`target ${result.target ?? "null"}`);
   for (const fact of result.facts) lines.push(`fact ${fact.contract} ${fact.entry} ${fact.kind}`);
   lines.push(...obligationLines(result));
   const reportLeak = leakLine(result.report?.leak);

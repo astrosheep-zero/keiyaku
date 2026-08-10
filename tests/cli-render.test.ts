@@ -104,6 +104,7 @@ test("accepted text renders Region witnesses and unavailable observations", () =
     facts: [],
     effects: [],
     settlement: { actions: [], lags: [] },
+    target: "refs/heads/main",
     overlaps: [{
       contract: contractId("kei/peer"),
       patterns: [
@@ -114,6 +115,7 @@ test("accepted text renders Region witnesses and unavailable observations", () =
   };
   assert.equal(renderText(witnesses), [
     `accepted bind ${contract} head=null`,
+    "target refs/heads/main",
     "overlap kei/peer src/** ~ src/api/**",
     "overlap kei/peer docs/** ~ docs/**",
   ].join("\n"));

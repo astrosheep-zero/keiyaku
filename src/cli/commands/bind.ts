@@ -2,7 +2,7 @@ import { Keiyaku, type ActorId, type BindResult, type ContractId, type Gate, typ
 import type { ParsedBind } from "../parse.js";
 import { contractFromInput } from "../selectors.js";
 
-export function bindFromCommand(
+export async function bindFromCommand(
   command: ParsedBind,
   repo: Repo,
   markdown: string,
@@ -10,10 +10,11 @@ export function bindFromCommand(
   actor?: ActorId,
 ): Promise<BindResult> {
   const after: readonly ContractId[] | undefined = command.after?.map((id) => contractFromInput(repo, id).id);
+  const target = command.target ?? await repo.currentBranch();
   return Keiyaku.bind({
     repo,
     markdown,
-    ...(command.target === undefined ? {} : { target: command.target }),
+    ...(target === null ? {} : { target }),
     ...(command.workspace === undefined ? {} : { workspace: command.workspace }),
     ...(actor === undefined ? {} : { actor }),
     ...(after === undefined ? {} : { after }),
