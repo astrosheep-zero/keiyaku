@@ -33,21 +33,31 @@ Use the task board for decomposition and dependencies. A task is open,
 in-progress, done, or dropped; it is never a contract binding. Create a new
 task for a new bounded concern instead of silently enlarging an unrelated task.
 The v4 task loop is `task add` → `task start` → implementation/review → `task
-done` (or `task stop`/`task drop`); there is no `bind` step.
+done` (or `task stop`/`task drop`). When delivery needs a Contract, `bind
+--task <task/...>` atomically installs the Settlement-owned TaskHolder; Contract
+claim settles the current held Task to `done`, while abandon releases it.
+
+Contract gates come from the Settings `gates` namespace. Omitting `--gates`
+selects `gates.default`, or freezes `[]` when that entry is absent. `--gates
+<name>` selects one named gate set; it does not name a literal gate word.
 
 ## Akuma dispatch
 
 Delegated implementation, review, scanning, and design work must use the
 `keiyaku akuma` command surface, not an ad-hoc subagent lane or a contract
-workflow. Every dispatch uses `-C` (or `--cwd`) for the v4 repository, uses
-`--bare`, and has an explicit bounded brief:
+workflow. Every dispatch uses `-C` (or `--cwd`) for the v4 repository and has
+an explicit bounded brief:
 
 ```bash
 keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 call worker \
-  --bare --detach --alias <alias> - <<'EOF'
+  --detach --alias @<alias> --workdir <path> - <<'EOF'
 <bounded implementation brief, exact files, tests, and forbidden scope>
 EOF
 ```
+
+Add `--contract <kei/...>` when Dispatch evidence should associate the Akuma
+with one Contract. `call` waits up to five minutes by default; use `--detach`
+only when the coordinator intends to observe it separately with `wait`.
 
 ### Authority-grounded briefs
 
@@ -85,6 +95,26 @@ write surfaces: for example, implementation, independent review, and a broad
 scan can run together. Give each lane one bounded responsibility and one
 observable handoff; serialize only the part that truly depends on another
 lane's result.
+
+To finish a Contract that declares the `reviewed` gate:
+
+1. Send an independent reviewer the exact Contract worktree and wait for its
+   completed report.
+2. If it reports blocking findings, fix the worktree and review the changed
+   patch again. Use `review --unsatisfied --summary <text>` only when retaining
+   that negative judgment in Contract history is useful.
+3. When it reports no blocking findings, run `review --satisfied --summary
+   <text>`. If the same patch is already delivered and all other gates pass,
+   the receipt shows placement and the Contract becomes `claimed`. If no
+   candidate is delivered yet, the receipt keeps the review and shows the
+   placement stop; delivering those same bytes can then complete placement.
+4. Read exact Contract `status`: `✓` is current satisfied testimony, `!` is
+   current unsatisfied testimony, `?` is stale testimony after the document or
+   patch changed, and `○` is missing testimony. For `?` or `○`, review the
+   current patch and record its result.
+
+The reviewer answer remains review input; the coordinator runs the Contract
+`review` command that changes the gate-visible journal.
 
 Akuma may call another Akuma when it has an independent, bounded subtask. It
 must still use `keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 ...`, keep the

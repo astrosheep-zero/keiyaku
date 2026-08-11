@@ -7,7 +7,9 @@ description: "Use when planning work in a Keiyaku v4 repo: add tasks, wire depen
 
 Task is a directory-context planning product. It is separate from Contract
 delivery and Akuma execution. A task records intent; `start` does not execute
-it and no task command binds a Contract.
+it and no task command binds a Contract. Contract `bind --task <task/...>` is a
+Settlement-owned association: claim settles the current held Task to `done`,
+and abandon releases it. Task Markdown carries no Contract field.
 
 ## Lifecycle
 

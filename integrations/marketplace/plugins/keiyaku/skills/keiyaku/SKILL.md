@@ -14,12 +14,16 @@ read `<command> --help` before using flags.
 - A Contract is delivery authority; see `keiyaku-workflow`.
 - An Akuma is a callable worker; see `keiyaku-akuma`.
 
+Settings owns named gate sets. Omitting `--gates` selects `gates.default`, or
+freezes an empty gate list when that entry is absent. `--gates <name>` selects
+one configured set; it does not add a literal gate word.
+
 ## Quick Start
 
 ```bash
 keiyaku -C <repo> task add "title"
 keiyaku -C <repo> task start <task-id>
-keiyaku -C <repo> bind -
+keiyaku -C <repo> bind [--task <task-id>] -
 keiyaku -C <repo> status
 keiyaku -C <repo> deliver [<contract>|@<contract>]
 keiyaku -C <repo> review [<contract>|@<contract>] --satisfied
