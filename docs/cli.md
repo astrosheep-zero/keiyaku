@@ -510,10 +510,11 @@ stale and missing reports. Bare status omits opaque gate summaries so testimony
 prose cannot drown the world board; exact Contract status renders each
 available current summary beneath the chain and names its gate.
 
-The Task heading counts only nonterminal Tasks and carries the exact `ready`
-and `on_hold` counts; there is no separate inventory summary line. Text expands
-`in_progress` and `blocked` rows, with blocked rows first and source order stable inside each
-class.
+The Task heading block counts only nonterminal Tasks and carries the exact
+`ready` and `on_hold` counts; at narrow widths those counts continue on an
+indented heading line rather than becoming a separate inventory summary. Text
+expands `in_progress` and `blocked` rows, with blocked rows first and source
+order stable inside each class.
 Terminal `done` and `drop` Tasks contribute neither rows nor counts; their
 complete inventory belongs to `task ls --closed` and `task ls --all`. A visible
 row starts with its mark, complete TaskId, and adjacent disposition word, then
@@ -541,11 +542,16 @@ Status keeps one stable visual grammar, with adjacent words remaining the
 authoritative state: `●` active, `○` idle or ready, `⧗` waiting or blocked,
 `‖` held, `✓` satisfied, `!` failed or unsatisfied, `?` without a current
 verdict, lost, or unknown, and `×` ended. Marks accelerate scanning; they never
-replace the copied lifecycle, gate, Task, or Akuma discriminant. Text wraps by
-display columns at both narrow and wide terminal widths. It applies no
-arbitrary line cap, does not truncate a Contract-and-gates block, and does not
-truncate a complete identity or current Task title. Historical Task inventory
-and opaque testimony stay on their owning detail surfaces.
+replace the copied lifecycle, gate, Task, or Akuma discriminant. Text wraps at
+semantic or prose-word boundaries according to display columns at both narrow
+and wide terminal widths. A scan head containing a mark, complete identity,
+and state stays indivisible, as do copyable refs, paths, and gate names; one of
+these units may exceed the requested width rather than being split or
+truncated. Divisible headings, prose, and fact chains do not use that exception.
+The renderer applies no arbitrary line cap, does not truncate a
+Contract-and-gates block, and does not truncate a complete identity or current
+Task title. Historical Task inventory and opaque testimony stay on their
+owning detail surfaces.
 
 Akuma call, exact status, wait, history, an `interrupted` interrupt, successful
 wake, a `forked` fork, and settled kill exit `0`. Interrupt `dead` or

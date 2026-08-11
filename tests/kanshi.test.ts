@@ -335,12 +335,53 @@ test("Kanshi wraps complete Task titles and neutralizes continuation facts", () 
   const priority = lines.indexOf("  P0", task + 1);
   const titleLines = lines.slice(task + 1, priority);
 
+  assert.match(text, /^task 4 · 1 ready$/mu);
+  assert.match(text, /^  1 held$/mu);
   assert.deepEqual(titleLines, ["  Trace narrow title", "  wrapping exactly"]);
   assert.ok(titleLines.every((line) => displayColumns(line) <= 20));
   assert.equal(titleLines.map((line) => line.trim()).join(" "), title);
   assert.match(text, /writes \/repo\/�\[31m forged/u);
   assert.equal(text.includes("\u001b"), false);
   assert.equal(text.includes("\nforged"), false);
+  assert.deepEqual(narrowReport, before);
+});
+
+test("Kanshi narrow wrapping exceeds columns only for indivisible scan and coordinate units", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
+  const longId = "kei/a-very-long-contract-identity";
+  const longRef = "refs/heads/a-very-long-target-name";
+  const longGate = "a-very-long-gate-name";
+  const narrowReport: KanshiReport = {
+    ...report,
+    root: "/repository/with/a/long/root",
+    contracts: {
+      ...report.contracts,
+      value: {
+        ...report.contracts.value,
+        rows: report.contracts.value.rows.map((row) => row.id === "kei/active-contract"
+          ? { ...row, id: longId, target: longRef, gates: { ...row.gates, reports: [{ gate: longGate, current: { kind: "missing" } }] } }
+          : row),
+      },
+    },
+  } as KanshiReport;
+  const before = structuredClone(narrowReport);
+  const text = renderKanshiText(narrowReport, { columns: 20, color: false });
+  const overflow = text.split("\n").filter((line) => displayColumns(line) > 20);
+
+  assert.match(text, /^task 4 · 1 ready$/mu);
+  assert.match(text, /^  1 held$/mu);
+  assert.ok(overflow.length > 0);
+  assert.ok(overflow.every((line) =>
+    /^kanshi \/repository/u.test(line)
+    || /^[●○⧗✓!?×] /u.test(line)
+    || line.includes(longRef)
+    || line.includes(longGate)
+    || /keiyaku kei\//u.test(line)
+    || /writes \//u.test(line)));
+  assert.equal(text.includes(longId), true);
+  assert.equal(text.includes(longRef), true);
+  assert.equal(text.includes(longGate), true);
   assert.deepEqual(narrowReport, before);
 });
 

@@ -48,6 +48,21 @@ function wrapChain(parts: readonly string[], columns: number): readonly string[]
   return lines;
 }
 
+function wrapHeading(primary: string, facts: readonly string[], columns: number): readonly string[] {
+  const head = safeText(primary);
+  const lines: string[] = [];
+  let current = head;
+  for (const fact of facts.map(safeText)) {
+    const candidate = `${current} · ${fact}`;
+    if (displayColumns(candidate) > columns) {
+      lines.push(current);
+      current = `  ${fact}`;
+    } else current = candidate;
+  }
+  lines.push(current);
+  return lines;
+}
+
 function renderGates(
   reports: readonly ContractGateReport[],
   context: TextRenderContext,
@@ -97,7 +112,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): string {
     active.filter((row) => row.disposition === "in_progress" || row.disposition === "blocked"),
     (row) => row.disposition === "blocked",
   );
-  const lines = [`task ${active.length} · ${ready} ready · ${onHold} held`];
+  const lines = [...wrapHeading(`task ${active.length}`, [`${ready} ready`, `${onHold} held`], context.columns)];
   for (const row of visible) {
     const contract = row.contract === undefined ? [] : [`keiyaku ${row.contract.id} (${row.contract.observed})`];
     lines.push(`${taskMark(row)} ${safeText(row.id)} ${row.disposition}`);
