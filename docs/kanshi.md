@@ -41,14 +41,18 @@ the joined view. A malformed or unreadable holder fails only the Task section;
 Contract and Akuma sections remain independently observable. Task and Akuma
 products do not import Contract lifecycle or Git behavior.
 
-Akuma rows have no Contract endpoint in this cut. Kanshi copies the Akuma fleet
-without joining or inferring an association.
+Kanshi reads Dispatch and Alias through their concrete owners after the compact
+Akuma fleet read. Each Akuma row carries its current world-local Alias list and,
+when a Dispatch exists, one `{ id, observed }` Contract endpoint using the same
+disposition join as Task endpoints. A malformed Alias or Dispatch fails only
+the Akuma section. Kanshi does not infer association through Task, cwd, origin,
+or Contract lifecycle, and never changes or repairs either authority.
 
 ## Selection
 
 `selectKanshi({ report, contract })` projects an assembled report without new
-reads. It keeps the addressed Contract row and Task rows whose joined endpoint
-id exactly matches the selector; the selected Akuma section has no rows because
-there is no Akuma endpoint. Section presence, absence, and
+reads. It keeps the addressed Contract row, Task rows whose joined endpoint id
+exactly matches the selector, and Akuma rows whose Dispatch endpoint names that
+Contract. Section presence, absence, and
 failure remain unchanged. The text renderer consumes only this public report
 and renders each present endpoint as `keiyaku <id> (<observed>)`.

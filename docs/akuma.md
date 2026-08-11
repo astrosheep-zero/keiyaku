@@ -977,8 +977,10 @@ The provider-observation law and rendering semantics are defined in Provider
 boundary above; the public surface does not reinterpret native events.
 
 The CLI exposes Akuma operations as root verbs: `call`, `wait`,
-`tell`, `interrupt`, `history`, `fork`, and `kill`. The shared root
-`status` verb addresses an exact `aku/...`; bare `status` already carries the
+`tell`, `interrupt`, `history`, `fork`, and `kill`. The package-root facade
+resolves Alias, glob, and Dispatch selectors before constructing these public
+Akuma handles; this module still receives only complete AkuIds. The shared root
+`status` verb addresses one AkuId or Alias; bare `status` already carries the
 fleet through Kanshi and no second raw-roster flag exists. Call, tell, and
 interrupt read their bodies from a final `-`; `--json`
 changes

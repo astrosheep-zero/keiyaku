@@ -7,6 +7,15 @@ import {
   type Keiyaku as KeiyakuType,
 } from "./contract.js";
 import { callKeiyaku, forkKeiyaku } from "./akuma-creation.js";
+import {
+  historyAkuma,
+  interruptAkuma,
+  killAkuma,
+  statusAkuma,
+  tellAkuma,
+  waitAkuma,
+} from "./fleet.js";
+import { listCatalog } from "./catalog.js";
 
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 export {
@@ -96,7 +105,26 @@ export type {
 export type { AliasBinding } from "../alias/index.js";
 export type { Dispatch, DispatchFailure } from "../dispatch/index.js";
 export type { AkumaAlias } from "../identity/selector.js";
+export type { AkumaGlob } from "../identity/selector.js";
 export type { AkuId } from "../akuma/identity.js";
+export type { Catalog, CatalogInput, CatalogSection } from "./catalog.js";
+export type {
+  AkumaAddressInput,
+  AkumaSetAddressInput,
+  DirectAkumaSelector,
+  SetAkumaSelector,
+} from "./address.js";
+export type {
+  AkumaHistoryInput,
+  AkumaHistoryResult,
+  AkumaInterruptInput,
+  AkumaInterruptResult,
+  AkumaKillResult,
+  AkumaTellInput,
+  AkumaTellResult,
+  AkumaWaitInput,
+  AkumaWaitResult,
+} from "./fleet.js";
 
 export type Keiyaku = KeiyakuType;
 
@@ -106,7 +134,14 @@ export const Keiyaku = Object.freeze({
   bind: bindKeiyaku,
   call: callKeiyaku,
   fork: forkKeiyaku,
+  history: historyAkuma,
+  interrupt: interruptAkuma,
+  kill: killAkuma,
+  ls: listCatalog,
   list: listKeiyaku,
   observe: observeKeiyaku,
   of: keiyakuOf,
+  status: statusAkuma,
+  tell: tellAkuma,
+  wait: waitAkuma,
 });

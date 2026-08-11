@@ -108,6 +108,14 @@ selector value. Alias persistence and movement are owned by
 [alias.md](alias.md); selector expansion is a Library concern and never changes
 the complete `aku/...` identity stored by an owner.
 
+An Akuma glob is the input-only selector
+`aku/<archetype-pattern>/<hex-pattern>`. Each nonempty pattern uses only the
+corresponding identity alphabet plus `*`, and at least one `*` is required.
+`src/identity/selector.ts` alone parses and matches this grammar. A Contract
+worker selector is one complete `kei/...` identity. Alias, glob, and Contract
+worker expansion are read-time Library snapshots; none is persisted as Akuma
+identity or interpreted by Akuma.
+
 Actor is optional testimony, not lifecycle identity or gate input. `ActorId` is
 an opaque nonblank brand. A library write records it only when the caller
 supplies it; its absence is legal. The CLI selects an explicit nonblank

@@ -17,6 +17,7 @@ import type { TaskInvocationResult } from "./commands/task-invoke.js";
 import type { InvocationResult } from "./result.js";
 import type { SettingsInvocationResult } from "./invoke.js";
 import { renderSettingsText, settingsJsonValue } from "./render/settings.js";
+import { renderCatalogText } from "./render/catalog.js";
 
 function writeTask(command: ParsedTaskCommand, result: TaskInvocationResult): number {
   if (command.output === "json") process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -62,6 +63,10 @@ function writeResult(command: ParsedCommand, result: unknown): number {
     return writeAkuma(command, result as AkumaInvocationResult);
   }
   const contractResult = result as InvocationResult;
+  if (contractResult.kind === "catalog") {
+    process.stdout.write(`${command.output === "json" ? JSON.stringify(contractResult.catalog) : renderCatalogText(contractResult.catalog)}\n`);
+    return 0;
+  }
   const output = command.output === "json"
     ? JSON.stringify(contractResult.kind === "status" ? contractResult.report : contractResult)
     : renderText(contractResult, {

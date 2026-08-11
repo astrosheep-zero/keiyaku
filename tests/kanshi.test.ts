@@ -21,6 +21,8 @@ import {
 } from "../src/git/repository.js";
 import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
 import { Tasks } from "../src/task/index.js";
+import { moveAlias } from "../src/alias/index.js";
+import { publishDispatch } from "../src/dispatch/index.js";
 import { makeGitRepository } from "./support/git.js";
 
 function document(): string {
@@ -31,7 +33,7 @@ function document(): string {
   ].join("\n");
 }
 
-function bornAkuma(root: string, suffix: string): string {
+function bornAkuma(root: string, suffix: string) {
   const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "watcher", draw: () => suffix });
   initializeHeart(allocated.paths);
   const leash = HeldAkumaLeash.try(allocated.paths)!;
@@ -64,10 +66,12 @@ async function populatedWorld() {
   assert.equal(renamed.kind, "accepted");
   await tasks.task({ id: added.value.id }).start();
   const akumaId = bornAkuma(repository.path, "a0000001");
+  assert.equal(publishDispatch({ repository: repositoryAt(repository.path), akuId: akumaId, contractId: contract.id }).kind, "dispatched");
+  await moveAlias({ world: repository.path, alias: "@watch", akuId: akumaId });
   return { repository, contract, taskId: added.value.id, akumaId };
 }
 
-test("kanshi joins Task endpoints and independently copies Akuma public rows", async () => {
+test("kanshi joins TaskHolder, Dispatch, and Alias without moving their authorities", async () => {
   const { repository, contract, taskId, akumaId } = await populatedWorld();
   const report = await kanshi({ path: repository.path });
   assert.equal(report.contracts.kind, "present");
@@ -76,7 +80,8 @@ test("kanshi joins Task endpoints and independently copies Akuma public rows", a
   if (report.akuma.kind === "present") {
     const row = report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
     assert.equal(row?.id, akumaId);
-    assert.equal(row === undefined ? false : "contract" in row, false);
+    assert.deepEqual(row?.aliases, ["@watch"]);
+    assert.deepEqual(row?.contract, { id: contract.id, observed: "active" });
   }
   if (report.contracts.kind !== "present" || report.tasks.kind !== "present") return;
   assert.equal(report.contracts.value.rows.some((row) => row.id === contract.id), true);
@@ -138,6 +143,32 @@ test("a malformed TaskHolder root fails only the Kanshi Task section", async () 
   assert.equal(report.tasks.kind, "failed");
   assert.equal(report.akuma.kind, "present");
   if (report.tasks.kind === "failed") assert.match(report.tasks.failure.message, /TaskHolder authority root is not a tree/u);
+});
+
+test("malformed Alias fails only the Kanshi Akuma section", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-bad-alias-"));
+  bornAkuma(root, "a0000003");
+  mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "not alias authority\n");
+  const report = await kanshi({ path: root });
+  assert.deepEqual(report.contracts, { kind: "absent" });
+  assert.equal(report.tasks.kind, "present");
+  assert.equal(report.akuma.kind, "failed");
+});
+
+test("malformed Dispatch fails only the Kanshi Akuma section", async () => {
+  const { repository } = await populatedWorld();
+  const git = repositoryAt(repository.path);
+  const snapshot = readGit(git);
+  const tree = updateGitTree(git, snapshot.tree, new Map([
+    ["dispatch", { oid: writeBlob(git, "not dispatch authority\n") }],
+  ]));
+  const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
+  const report = await kanshi({ path: repository.path });
+  assert.equal(report.contracts.kind, "present");
+  assert.equal(report.tasks.kind, "present");
+  assert.equal(report.akuma.kind, "failed");
 });
 
 test("Kanshi text keeps complete identities in the new fixed section grammar", async () => {
@@ -424,7 +455,7 @@ test("Kanshi selection is a projection that preserves source presence", async ()
   if (selected.contracts.kind !== "present" || selected.tasks.kind !== "present" || selected.akuma.kind !== "present") return;
   assert.deepEqual(selected.contracts.value.rows.map((row) => row.id), [contract.id]);
   assert.deepEqual(selected.tasks.value.rows.map((row) => row.id), [taskId]);
-  assert.deepEqual(selected.akuma.value.rows, []);
+  assert.deepEqual(selected.akuma.value.rows.map((row) => row.id), [report.akuma.value.rows[0]!.id]);
 });
 
 test("Kanshi text neutralizes control characters from source diagnostics", () => {

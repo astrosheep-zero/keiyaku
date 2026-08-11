@@ -240,7 +240,7 @@ type CallInput = Readonly<{
 
 type ForkInput = Readonly<{
   path: string
-  akuma: AkuId
+  akuma: string
   at: string
   settings?: Settings
   repo?: Repo
@@ -261,8 +261,8 @@ the Akuma-owned concept even though the CLI presents its positional as
 handle and supplies both the complete ContractId and its already pinned Git
 world. `repo` on fork is optional because an independent Akuma world may have
 no Git world; when present it selects the one Dispatch authority to inspect and
-propagate. `akuma` is one complete `AkuId` and is validated by the Akuma
-identity owner at runtime. Neither operation invents a repository coordinate
+propagate. `akuma` is one complete `AkuId` or Alias and is resolved once by the
+Address facet before native fork. Neither operation invents a repository coordinate
 or makes `Repo` an Akuma capability.
 
 All caller-shaped values, including an optional Alias, are validated before
@@ -308,12 +308,13 @@ type CallResult = Readonly<{
 }>
 
 type ForkResult =
-  | Readonly<{ kind: "forked"; child: AkuId; dispatch: DispatchStage }>
-  | Readonly<{ kind: "provider-cannot-fork"; provider: string }>
-  | Readonly<{ kind: "unknown-history"; at: string }>
-  | Readonly<{ kind: "fork-failed"; diagnostic: string }>
+  | Readonly<{ kind: "forked"; parent: AkuId; child: AkuId; dispatch: DispatchStage }>
+  | Readonly<{ kind: "provider-cannot-fork"; parent: AkuId; provider: string }>
+  | Readonly<{ kind: "unknown-history"; parent: AkuId; at: string }>
+  | Readonly<{ kind: "fork-failed"; parent: AkuId; diagnostic: string }>
   | Readonly<{
       kind: "upstream-forked"
+      parent: AkuId
       childSession: ResumeCoordinate
       diagnostic: string
     }>
@@ -332,6 +333,58 @@ decision. `IntegrationFailure` exists only after an irreversible Akuma result:
 it preserves an owner exception's category and verbatim diagnostic so the
 already born child remains visible. The same exception before birth or native
 fork retains the ordinary package-root exception behavior.
+
+## Akuma Address And Fleet Facets
+
+`library/address.ts` is the sole package-root selector expansion facet.
+Complete AkuIds and Alias select one Akuma. Set operations additionally accept
+Akuma globs and complete ContractIds; a Contract selector expands immutable
+Dispatch facts against one supplied Repo. Set expansion first parses every
+selector, then reads each required owner at most once: compact fleet for globs,
+Alias map for aliases, and the supplied Repo's Dispatch set for Contract
+selectors. An unused or failed product cannot suppress an exact selector. It unions
+duplicates, and returns AkuIds in byte order. Dispatch membership does not
+depend on compact-fleet visibility; a corrupt skipped member therefore remains
+an addressed worker and its operation reports its own failure. An empty set,
+unknown Alias, invalid selector, or Contract selector without a Repo is caller
+input failure. Akuma remains unaware of Alias, Dispatch, Contract, glob, and
+Repo.
+
+`library/fleet.ts` composes only public Akuma handles after that expansion:
+
+```ts
+Keiyaku.status(input: AkumaAddressInput): AkumaStatus
+Keiyaku.tell(input: AkumaTellInput): Promise<AkumaTellResult>
+Keiyaku.interrupt(input: AkumaInterruptInput): Promise<AkumaInterruptResult>
+Keiyaku.history(input: AkumaHistoryInput): AkumaHistoryResult
+Keiyaku.wait(input: AkumaWaitInput): Promise<AkumaWaitResult>
+Keiyaku.kill(input: AkumaSetAddressInput): Promise<AkumaKillResult>
+```
+
+Wait and kill freeze their subject set at entry. A one-member wait defaults to
+`all`; a multi-member wait requires `completion: "any" | "all"`. Any returns
+after one member satisfies the ordinary Akuma wait predicate; all returns after
+every member does. Timeout returns one complete aggregate of fresh statuses
+and is not a streaming or partial result. Kill returns one evidence member per
+selected AkuId in the same stable order. Tell returns its receipt with the one
+subsequent public status observation. Direct verbs accept only AkuId or Alias.
+Their result carries the resolved AkuId, so an adapter never resolves a movable
+Alias twice. `history({ last: true })` is the distinct last-answer arm: it reads
+only the last answered turn and never reads status or activity history.
+
+`library/catalog.ts` owns the shallow package-root catalog:
+
+```ts
+Keiyaku.ls(input: CatalogInput): Promise<Catalog>
+```
+
+It independently lists the Task world, Contract board, Archetype names, and
+compact Akuma fleet. Every section is present, absent, or failed; one section
+cannot suppress another. An optional exact Contract, exact AkuId, or `@name`
+selector is adjudicated by `library/address.ts` and filters the corresponding
+catalog. When `@name` names both an active
+Contract short reference and an Akuma Alias, selection fails explicitly as
+ambiguous. `ls` performs no Kanshi joins and no activity/history reads.
 
 ## Contract Operations
 

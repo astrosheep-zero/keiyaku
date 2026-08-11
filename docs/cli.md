@@ -51,13 +51,14 @@ The command vocabulary is:
 | `abandon` | Calls `keiyaku.abandon`. |
 | `arc` | Calls `keiyaku.arc` with arc Markdown. |
 | `status` | Calls Kanshi or one exact Akuma status according to its selector. |
+| `ls` | Calls the package-root shallow Task, Contract, Archetype, and Akuma catalog. |
 | `audit` | Calls `keiyaku.audit`. |
 | `reconcile` | Calls the selected public reconciliation method. |
 | `settings` | Constructs and observes the shared read-only Settings resource. |
 | `install` | Installs the bundled Keiyaku skills through one or more native harness installers. |
 | `task ...` | Calls the separate `./task` public surface described below. |
 | `call`, `fork` | Call the package-root Akuma facet so Dispatch and Alias integration is not reimplemented at the edge. |
-| `wait`, `tell`, `interrupt`, `history`, `kill` | Call the corresponding separate `./akuma` capability as root verbs. |
+| `wait`, `tell`, `interrupt`, `history`, `kill` | Call the corresponding package-root Akuma facade capability as root verbs. |
 
 `bind` accepts no contract positional. Commands addressing an existing contract
 accept a full `kei/<contract-segment>` identity or an active short
@@ -79,19 +80,20 @@ deliver [<contract>|@<contract>] [--message <text>] [--actor <actor>] [--json]
 review [<contract>|@<contract>] (--satisfied | --unsatisfied) [--summary <text>] [--actor <actor>] [--json] [-]
 abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
-status [<contract>|@<contract>|<aku/...>] [--json]
+status [<contract>|@name|<aku/...>] [--json]
+ls [<contract>|@name|<aku/...>] [--json]
 audit [<contract>|@<contract>] [--show-diff-body] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
 install <codex|claude|opencode|pi> [--json]
        install --all [--json]
 call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -
-wait <aku/...> [--timeout <duration>] [--json]
-tell <aku/...> [--json] -
-interrupt <aku/...> [--json] -
-history <aku/...> [--before <index> | --since <index> | --last] [--json]
-fork <aku/...> --at <historyId> [--json]
-kill <aku/...> [--json]
+wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]
+tell <aku/...|@alias> [--json] -
+interrupt <aku/...|@alias> [--json] -
+history <aku/...|@alias> [--before <index> | --since <index> | --last] [--json]
+fork <aku/...|@alias> --at <historyId> [--json]
+kill <akuma-selector>... [--json]
 ```
 
 ## Inputs And Flags
@@ -199,12 +201,18 @@ status carrier when it stops running or after five minutes. `--wait` explicitly
 selects that default mode, while `--timeout` replaces the five-minute duration.
 `-d` and `--detach` are identical and return after birth plus Dispatch and Alias
 integration. Detach is mutually exclusive with `--wait` and `--timeout`.
-`wait`, `tell`, `interrupt`, `history`,
-`fork`, and `kill` require a complete
-`aku/<archetype>/<hex8>`. `status <aku/...>` addresses the same exact handle.
+`tell`, `interrupt`, `history`, `fork`, and exact `status` accept a complete
+`aku/<archetype>/<hex8>` or world-local `@alias`. `wait` and `kill` additionally
+accept Akuma globs and complete `kei/...` worker selectors. Their positional
+set is expanded once, deduplicated, and byte-sorted before the operation.
+Multiple wait members require exactly one of `--any` or `--all`; a single
+member needs neither. Kill always applies to the complete frozen set.
 Bare `status` already exposes the Akuma fleet through Kanshi; there is no
 second raw-roster flag. Library `world.of()`
 constructs the addressed handle and has no CLI command of its own.
+Bare `ls` is the shallow four-product catalog and reads neither activity nor
+history. `status @name` and `ls @name` refuse explicitly when the spelling is
+both an active Contract short selector and an Akuma Alias.
 CLI `wait` uses the public default predicate (`life !== "running"`). Its
 optional duration matches exactly `^(0|[1-9][0-9]*)(ms|s|m|h)$`: integers and
 units are required, leading zeroes are refused except for zero itself, and the

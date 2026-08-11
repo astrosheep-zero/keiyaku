@@ -152,11 +152,16 @@ function truncateDisplay(value: string, columns: number): string {
 }
 
 function bornFacts(row: AkumaKanshiRow): readonly string[] {
-  if (!("pending" in row) || (row.life !== "running" && !isLost(row.life))) return [];
+  const association = [
+    ...(row.aliases ?? []).map((alias) => `alias ${alias}`),
+    ...(row.contract === undefined ? [] : [`keiyaku ${row.contract.id} (${row.contract.observed})`]),
+  ];
+  if (!("pending" in row) || (row.life !== "running" && !isLost(row.life))) return association;
   const confinement = row.confinement.kind === "unconfined"
     ? ["unconfined"]
     : row.confinement.writableRoots.map((root, index) => index === 0 ? `writes ${root}` : root);
   return [
+    ...association,
     ...(row.pending.length === 0 ? [] : [`pending ${row.pending.length}`]),
     ...confinement,
   ];

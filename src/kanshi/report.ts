@@ -1,6 +1,7 @@
-import type { ContractBoard, ContractDisposition } from "../index.js";
+import type { ContractBoard, ContractDisposition } from "../library/contract.js";
 import type { TaskRow } from "../task/index.js";
 import type { AkumaList, AkumaListRow, UnbornAkumaListRow } from "../akuma/index.js";
+import type { AkumaAlias } from "../identity/selector.js";
 
 export type Section<Value> =
   | Readonly<{ kind: "present"; value: Value }>
@@ -18,7 +19,10 @@ export type TaskKanshiWorld = Readonly<{
   rows: readonly TaskKanshiRow[];
 }>;
 
-export type AkumaKanshiRow = AkumaListRow | UnbornAkumaListRow;
+export type AkumaKanshiRow = (AkumaListRow | UnbornAkumaListRow) & Readonly<{
+  aliases: readonly AkumaAlias[];
+  contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
+}>;
 
 export type AkumaKanshiWorld = Omit<AkumaList, "rows"> & Readonly<{
   rows: readonly AkumaKanshiRow[];

@@ -119,6 +119,7 @@ function historyItems(history: ActivityHistory): readonly SpineItem[] {
 function historyText(command: Extract<ParsedCommand, { command: "history" }>, result: Extract<AkumaInvocationResult, { action: "history" }>): string {
   if (command.last) return result.answer ?? "";
   const history = result.history;
+  if (history === undefined) throw new Error("history result lacks its activity page");
   const scope = command.before === undefined && command.since === undefined
     ? "history"
     : `history ── ${command.before === undefined ? `since ${command.since}` : `before ${command.before}`}`;
@@ -193,7 +194,7 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
   switch (result.action) {
     case "call": return callText(result);
     case "status": return statusText(result.status);
-    case "wait": return waitText(result.status);
+    case "wait": return result.result.statuses.map(waitText).join("\n\n");
     case "tell": return tellText(result.status, result.receipt);
     case "interrupt": {
       const receipt = result.receipt;
@@ -212,7 +213,7 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
       if (receipt.kind === "fork-failed") return receipt.diagnostic;
       return `session ${receipt.childSession.sessionId}\n${receipt.diagnostic}`;
     }
-    case "kill": return `${result.id} ${result.evidence}`;
+    case "kill": return result.result.results.map((member) => `${member.id} ${member.evidence}`).join("\n");
   }
 }
 
@@ -221,7 +222,8 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
     && (result.result.dispatch.kind === "failed"
       || result.result.alias.kind === "failed"
       || result.result.observation.kind === "failed")) return 2;
-  if (result.action === "kill" && (result.evidence === "unavailable" || result.evidence === "alive-after-sigkill")) return 1;
+  if (result.action === "kill" && result.result.results.some((member) =>
+    member.evidence === "unavailable" || member.evidence === "alive-after-sigkill")) return 1;
   if (result.action === "tell" && typeof result.receipt.wake !== "string") return 2;
   if (result.action === "interrupt") {
     if (result.receipt.kind !== "interrupted" || "kind" in result.receipt.tell) return 1;
@@ -237,7 +239,8 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
 export function akumaJsonValue(command: ParsedCommand, result: AkumaInvocationResult): unknown {
   if (result.action === "call") return result.result;
   if (result.action === "fork") return result.receipt;
-  if (result.action === "status" || result.action === "wait") return result.status;
+  if (result.action === "status") return result.status;
+  if (result.action === "wait") return result.result;
   if (result.action === "tell") return { receipt: result.receipt, status: result.status };
   if (result.action === "history") return command.command === "history" && command.last ? result.answer ?? "" : result.history;
   return result;

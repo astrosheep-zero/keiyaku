@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { Akuma, type AkumaStatus, type ForkReceipt } from "../akuma/akuma.js";
-import { parseAkuId, type AkuId } from "../akuma/identity.js";
+import type { AkuId } from "../akuma/identity.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
   publishDispatch,
@@ -12,6 +12,7 @@ import {
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import type { Settings } from "../settings.js";
 import { requireInput } from "./input.js";
+import { addressAkuma } from "./address.js";
 import { seatForKeiyaku, type Keiyaku } from "./contract.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
@@ -60,15 +61,15 @@ export type CallResult = Readonly<{
 
 export type ForkInput = Readonly<{
   path: string;
-  akuma: AkuId;
+  akuma: string;
   at: string;
   settings?: Settings;
   repo?: Repo;
 }>;
 
 export type ForkResult =
-  | Readonly<{ kind: "forked"; child: AkuId; dispatch: DispatchStage }>
-  | Exclude<ForkReceipt, Readonly<{ kind: "forked"; child: AkuId }>>;
+  | Readonly<{ kind: "forked"; parent: AkuId; child: AkuId; dispatch: DispatchStage }>
+  | (Exclude<ForkReceipt, Readonly<{ kind: "forked"; child: AkuId }>> & Readonly<{ parent: AkuId }>);
 
 function nonblank(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -211,18 +212,21 @@ export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
   const values = requireInput(input, "Keiyaku.fork input");
   onlyKeys(values, ["path", "akuma", "at", "settings", "repo"], "Keiyaku.fork input");
   const path = resolve(nonblank(values.path, "path"));
-  if (typeof values.akuma !== "string") throw new TypeError("akuma must be an AkuId");
-  const akuma = parseAkuId(values.akuma).id;
   const at = nonblank(values.at, "at");
   const settings = settingsOption(values.settings);
+  const akuma = addressAkuma({
+    path,
+    akuma: nonblank(values.akuma, "akuma"),
+    ...(settings === undefined ? {} : { settings }),
+  }).id;
   const repository = values.repo === undefined ? undefined : scopeForRepo(values.repo);
 
   const receipt = await Akuma.at({ path, ...(settings === undefined ? {} : { settings }) })
     .of({ id: akuma })
     .fork({ at });
-  if (receipt.kind !== "forked") return receipt;
+  if (receipt.kind !== "forked") return { ...receipt, parent: akuma };
   const dispatch = repository === undefined
     ? { kind: "none" as const }
     : forkDispatchStage({ repository, parent: akuma, child: receipt.child });
-  return { kind: "forked", child: receipt.child, dispatch };
+  return { kind: "forked", parent: akuma, child: receipt.child, dispatch };
 }

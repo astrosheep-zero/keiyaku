@@ -41,20 +41,27 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.throws(() => parseArgv(["call", "claude", "--timeout", "5m", "-d", "-"]), /mutually exclusive/u);
   assert.throws(() => parseArgv(["call", "claude", "--alias", "review", "-"]), /Akuma alias must match/u);
   assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--json", "-"]), {
-    command: { command: "tell", id: "aku/claude/1234abcd", output: "json" },
+    command: { command: "tell", akuma: "aku/claude/1234abcd", output: "json" },
   });
   assert.deepEqual(parseArgv(["interrupt", "aku/claude/1234abcd", "-"]), {
-    command: { command: "interrupt", id: "aku/claude/1234abcd", output: "text" },
+    command: { command: "interrupt", akuma: "aku/claude/1234abcd", output: "text" },
   });
   assert.deepEqual(parseArgv(["fork", "aku/claude/1234abcd", "--at", "history-1", "--json"]), {
-    command: { command: "fork", id: "aku/claude/1234abcd", at: "history-1", output: "json" },
+    command: { command: "fork", akuma: "aku/claude/1234abcd", at: "history-1", output: "json" },
   });
   assert.deepEqual(parseArgv(["status", "aku/claude/1234abcd"]), {
     command: { command: "status", contract: "aku/claude/1234abcd", akuma: true, output: "text" },
   });
-  assert.deepEqual(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "25ms", "--json"]), {
-    command: { command: "wait", id: "aku/claude/1234abcd", timeoutMs: 25, output: "json" },
+  assert.deepEqual(parseArgv(["ls", "@review", "--json"]), {
+    command: { command: "ls", selector: "@review", output: "json" },
   });
+  assert.deepEqual(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "25ms", "--json"]), {
+    command: { command: "wait", akuma: ["aku/claude/1234abcd"], timeoutMs: 25, output: "json" },
+  });
+  assert.deepEqual(parseArgv(["wait", "aku/claude/*", "kei/review", "--any"]), {
+    command: { command: "wait", akuma: ["aku/claude/*", "kei/review"], completion: "any", output: "text" },
+  });
+  assert.throws(() => parseArgv(["wait", "aku/claude/*", "kei/review"]), /requires --any or --all/u);
   assert.equal(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "50s"]).command.timeoutMs, 50_000);
   assert.equal(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "10m"]).command.timeoutMs, 600_000);
   assert.equal(parseArgv(["wait", "aku/claude/1234abcd", "--timeout", "2h"]).command.timeoutMs, 7_200_000);
@@ -109,7 +116,11 @@ test("Akuma status aligns and counts omitted activity", () => {
 
   const complete = { ...result, status: { ...status, activity: { ...status.activity, omitted: 0 } } };
   assert.equal(renderAkumaText(command, complete).split("\n").length, lines.length - 1);
-  assert.equal(renderAkumaText(command, { ...result, action: "wait" }), renderAkumaText(command, result));
+  assert.equal(renderAkumaText(command, {
+    kind: "akuma",
+    action: "wait",
+    result: { completion: "all", statuses: [status] },
+  }), renderAkumaText(command, result));
   assert.equal(renderAkumaText(command, {
     ...result,
     action: "tell",
@@ -212,14 +223,15 @@ test("akuma call renders optional integration stages and maps partial success", 
 
 test("akuma fork renders the public receipt and maps every exit class", () => {
   const command = parseArgv(["fork", "aku/claude/1234abcd", "--at", "history-1"]).command;
+  const parent = "aku/claude/1234abcd" as import("../src/akuma/index.js").AkuId;
   const result = (receipt: import("../src/index.js").ForkResult) => ({
     kind: "akuma" as const,
     action: "fork" as const,
-    akuma: "aku/claude/1234abcd",
     receipt,
   });
   const forked = result({
     kind: "forked",
+    parent,
     child: "aku/claude/87654321" as import("../src/akuma/index.js").AkuId,
     dispatch: { kind: "none" },
   });
@@ -228,6 +240,7 @@ test("akuma fork renders the public receipt and maps every exit class", () => {
   assert.deepEqual(akumaJsonValue(command, forked), forked.receipt);
   const dispatched = result({
     kind: "forked",
+    parent,
     child: "aku/claude/87654321" as import("../src/akuma/index.js").AkuId,
     dispatch: {
       kind: "dispatched",
@@ -240,16 +253,16 @@ test("akuma fork renders the public receipt and maps every exit class", () => {
   });
   assert.equal(renderAkumaText(command, dispatched), "aku/claude/87654321\ndispatch kei/work");
 
-  const incapable = result({ kind: "provider-cannot-fork", provider: "claude" });
+  const incapable = result({ kind: "provider-cannot-fork", provider: "claude", parent });
   assert.equal(renderAkumaText(command, incapable), "claude cannot fork");
   assert.equal(akumaExitCode(incapable), 1);
-  const unknown = result({ kind: "unknown-history", at: "history-1" });
+  const unknown = result({ kind: "unknown-history", at: "history-1", parent });
   assert.equal(renderAkumaText(command, unknown), "history-1 has no matching retained answered turn");
   assert.equal(akumaExitCode(unknown), 1);
-  const failed = result({ kind: "fork-failed", diagnostic: "native refused" });
+  const failed = result({ kind: "fork-failed", diagnostic: "native refused", parent });
   assert.equal(renderAkumaText(command, failed), "native refused");
   assert.equal(akumaExitCode(failed), 1);
-  const partial = result({ kind: "upstream-forked", childSession: { sessionId: "native-child" }, diagnostic: "local failed" });
+  const partial = result({ kind: "upstream-forked", childSession: { sessionId: "native-child" }, diagnostic: "local failed", parent });
   assert.equal(renderAkumaText(command, partial), "session native-child\nlocal failed");
   assert.equal(akumaExitCode(partial), 2);
 });
@@ -396,7 +409,7 @@ test("Akuma status, wait, and history share public observations without embeddin
     });
     assert.equal("kind" in waitResult && waitResult.kind, "akuma");
     if (!("kind" in waitResult) || waitResult.kind !== "akuma" || waitResult.action !== "wait") return;
-    assert.deepEqual(waitResult.status, statusResult.status);
+    assert.deepEqual(waitResult.result.statuses, [statusResult.status]);
 
     recordTurn(allocated.paths, {
       bodySequence: 1,
@@ -435,8 +448,7 @@ test("Akuma status, wait, and history share public observations without embeddin
     assert.deepEqual(forkResult, {
       kind: "akuma",
       action: "fork",
-      akuma: allocated.id,
-      receipt: { kind: "unknown-history", at: "missing-history" },
+      receipt: { kind: "unknown-history", at: "missing-history", parent: allocated.id },
     });
   } finally {
     rmSync(root, { recursive: true, force: true });

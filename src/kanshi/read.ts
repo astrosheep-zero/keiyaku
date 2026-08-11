@@ -4,6 +4,9 @@ import { NoGitWorldError, Repo } from "../library/repo.js";
 import type { ContractBoard, ContractDisposition } from "../library/contract.js";
 import { Tasks, type TaskRow } from "../task/index.js";
 import { Akuma } from "../akuma/index.js";
+import { readAliases } from "../alias/index.js";
+import { readDispatches } from "../dispatch/index.js";
+import { scopeForRepo } from "../library/repo.js";
 import type { AkumaKanshiWorld, KanshiReport, Section, TaskKanshiRow, TaskKanshiWorld } from "./report.js";
 
 export type KanshiInput = Readonly<{ path?: string }>;
@@ -79,10 +82,38 @@ async function readTasks(path: string, contracts: Section<ContractBoard>, repo?:
   }
 }
 
-function readAkuma(path: string): Section<AkumaKanshiWorld> {
+function readAkuma(path: string, contracts: Section<ContractBoard>, repo?: Repo): Section<AkumaKanshiWorld> {
   try {
     const source = Akuma.at({ path }).list();
-    return { kind: "present", value: source };
+    const aliases = readAliases(path);
+    const dispatches = repo === undefined ? [] : readDispatches(scopeForRepo(repo));
+    const dispositions = contracts.kind === "present"
+      ? new Map(contracts.value.rows.map((row) => [row.id, row.disposition]))
+      : null;
+    const aliasById = new Map<string, typeof aliases>();
+    for (const binding of aliases) aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
+    const dispatchById = new Map(dispatches.map((dispatch) => [dispatch.akuId, dispatch]));
+    return {
+      kind: "present",
+      value: {
+        ...source,
+        rows: source.rows.map((row) => {
+          const dispatch = dispatchById.get(row.id);
+          return {
+            ...row,
+            aliases: (aliasById.get(row.id) ?? []).map((binding) => binding.alias),
+            ...(dispatch === undefined ? {} : {
+              contract: {
+                id: dispatch.contractId,
+                observed: contracts.kind !== "present"
+                  ? "unavailable" as const
+                  : dispositions?.get(dispatch.contractId) ?? "missing" as const,
+              },
+            }),
+          };
+        }),
+      },
+    };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
   }
@@ -93,5 +124,5 @@ export async function kanshi(input?: KanshiInput): Promise<KanshiReport> {
   const contractRead = await readContracts(path);
   const contracts = contractRead.section;
   const tasks = await readTasks(path, contracts, contractRead.repo);
-  return { root: path, contracts, tasks, akuma: readAkuma(path) };
+  return { root: path, contracts, tasks, akuma: readAkuma(path, contracts, contractRead.repo) };
 }

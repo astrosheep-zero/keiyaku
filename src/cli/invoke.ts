@@ -22,7 +22,7 @@ type InvokeRuntime = Readonly<{
   readStdin?: () => string;
 }>;
 
-type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "reconcile" | "settings" | "task" | "install" }>;
+type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "ls" | "reconcile" | "settings" | "task" | "install" }>;
 type NonInstallExecution = Readonly<{ cwd?: string; command: Exclude<ParsedCommand, { command: "install" }> }>;
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
@@ -247,7 +247,7 @@ async function invokeAkumaCommand(
       readStdin: edge.readStdin,
     });
   }
-  if (parsed.command === "fork") {
+  if (parsed.command === "fork" || parsed.command === "wait" || parsed.command === "kill") {
     let repo: Repo | undefined;
     try { repo = repoAt(path); }
     catch (error) { if (!(error instanceof NoGitWorldError)) throw error; }
@@ -259,6 +259,55 @@ async function invokeAkumaCommand(
     });
   }
   return await invokeAkuma(parsed, { path, settings: configuration, readStdin: edge.readStdin });
+}
+
+async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, path: string, configuration: Settings, edge: InvocationEdge) {
+  try { return await invokeAkumaCommand(parsed, path, configuration, edge); }
+  catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
+}
+
+async function invokeCatalog(parsed: Extract<ParsedCommand, { command: "ls" }>, path: string, edge: InvocationEdge) {
+  try {
+    return {
+      kind: "catalog" as const,
+      catalog: await Keiyaku.ls({
+        path,
+        settings: settingsAt(path, edge.environment),
+        ...(parsed.selector === undefined ? {} : { selector: parsed.selector }),
+      }),
+    };
+  } catch (error) {
+    if (error instanceof TypeError) throw new CliUsageError(error.message);
+    throw error;
+  }
+}
+
+async function invokeStatus(parsed: Extract<ParsedCommand, { command: "status" }>, coordinate: string | undefined, edge: InvocationEdge) {
+  const path = resolve(coordinate ?? ".");
+  const configuration = settingsAt(path, edge.environment);
+  if (parsed.akuma === true) return invokeAkumaStatus(path, parsed.contract, configuration);
+  if (parsed.contract === undefined) {
+    const report = await kanshi(coordinate === undefined ? {} : { path: coordinate });
+    return { kind: "status" as const, report, selection: "world" as const };
+  }
+  if (parsed.contract.startsWith("@")) {
+    try {
+      const catalog = await Keiyaku.ls({ path, settings: configuration, selector: parsed.contract });
+      const selectedAkuma = catalog.akuma.kind === "present" ? catalog.akuma.value.rows : [];
+      if (selectedAkuma.length === 1) return invokeAkumaStatus(path, selectedAkuma[0]!.id, configuration);
+      const selectedContracts = catalog.contracts.kind === "present" ? catalog.contracts.value.rows : [];
+      if (selectedContracts.length === 1) {
+        const report = await kanshi(coordinate === undefined ? {} : { path: coordinate });
+        return { kind: "status" as const, report: selectKanshi({ report, contract: selectedContracts[0]!.id }), selection: "contract" as const };
+      }
+    } catch (error) {
+      if (error instanceof TypeError) throw new CliUsageError(error.message);
+      throw error;
+    }
+  }
+  const report = await kanshi(coordinate === undefined ? {} : { path: coordinate });
+  const contract = resolveKanshiContract(report, parsed.contract);
+  return { kind: "status" as const, report: selectKanshi({ report, contract }), selection: "contract" as const };
 }
 
 async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRuntime): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
@@ -278,17 +327,10 @@ async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRunt
   if (isParsedAkumaCommand(parsed)) {
     const path = resolve(coordinate ?? ".");
     const configuration = settingsAt(path, edge.environment);
-    return await invokeAkumaCommand(parsed, path, configuration, edge);
+    return await invokeAkumaFromEdge(parsed, path, configuration, edge);
   }
-  if (parsed.command === "status") {
-    if (parsed.akuma === true) {
-      return invokeAkumaStatus(coordinate ?? ".", parsed.contract);
-    }
-    const report = await kanshi(coordinate === undefined ? {} : { path: coordinate });
-    if (parsed.contract === undefined) return { kind: "status", report, selection: "world" };
-    const contract = resolveKanshiContract(report, parsed.contract);
-    return { kind: "status", report: selectKanshi({ report, contract }), selection: "contract" };
-  }
+  if (parsed.command === "ls") return await invokeCatalog(parsed, resolve(coordinate ?? "."), edge);
+  if (parsed.command === "status") return await invokeStatus(parsed, coordinate, edge);
   const repo = repoAt(coordinate);
   const scope = coordinate ?? repo.root;
   const configuration = settingsAt(repo.root, edge.environment);

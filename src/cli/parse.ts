@@ -73,8 +73,15 @@ const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { json: "boolean" },
-    usage: "status [<contract>|@<contract>|<aku/...>] [--json]",
+    usage: "status [<contract>|@name|<aku/...>] [--json]",
     purpose: "Read the world status board or one Contract projection.",
+  },
+  ls: {
+    positional: "optional",
+    stdin: "none",
+    flags: { json: "boolean" },
+    usage: "ls [<contract>|@name|<aku/...>] [--json]",
+    purpose: "Read the shallow Task, Contract, Archetype, and Akuma catalog.",
   },
   audit: {
     positional: "optional",
@@ -179,6 +186,7 @@ type ParsedStatus = Output & (
   | Readonly<{ command: "status"; contract?: string; akuma?: never }>
   | Readonly<{ command: "status"; contract: string; akuma: true }>
 );
+export type ParsedLs = Output & Readonly<{ command: "ls"; selector?: string }>;
 export type ParsedAudit = Output & Readonly<{
   command: "audit";
   contract?: string;
@@ -196,6 +204,7 @@ export type ParsedCommand =
   | ParsedArc
   | ParsedAbandon
   | ParsedStatus
+  | ParsedLs
   | ParsedAudit
   | ParsedReconcile
   | ParsedSettings
@@ -454,6 +463,10 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
     case "arc": return parseArc(parts);
     case "abandon": return parseAbandon(parts);
     case "status": return parseStatus(parts);
+    case "ls": {
+      const selector = parts.positionals[0];
+      return { command: "ls", ...(selector === undefined ? {} : { selector }), output: parts.output };
+    }
     case "audit": {
       const contract = parts.positionals[0];
       return {

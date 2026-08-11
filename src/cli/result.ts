@@ -11,6 +11,7 @@ import type {
   VerificationStop,
 } from "../index.js";
 import type { KanshiReport } from "../kanshi/index.js";
+import type { Catalog } from "../index.js";
 
 export type Effect = ReconcileReport["effects"][number];
 
@@ -73,4 +74,6 @@ export type StatusResult = Readonly<{
   selection: "world" | "contract";
 }>;
 
-export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | ObservationResult | StatusResult;
+export type CatalogResult = Readonly<{ kind: "catalog"; catalog: Catalog }>;
+
+export type InvocationResult = AcceptedResult | RefusedResult | RetryResult | ObservationResult | StatusResult | CatalogResult;

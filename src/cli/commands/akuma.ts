@@ -1,9 +1,9 @@
 import { CliUsageError, usageLine } from "../usage.js";
-import { parseAkumaAlias, type AkumaAlias } from "../../identity/selector.js";
-import { parseAkuId, type AkuId } from "../../akuma/identity.js";
+import { parseAkuId } from "../../akuma/identity.js";
+import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
 
 type Output = Readonly<{ output: "text" | "json" }>;
-type Addressed = Readonly<{ id: AkuId }>;
+type Addressed = Readonly<{ akuma: string }>;
 
 export type ParsedAkumaCommand = Output & (
   | Readonly<{
@@ -15,9 +15,10 @@ export type ParsedAkumaCommand = Output & (
       mode: "wait" | "detach";
       timeoutMs?: number;
     }>
-  | (Readonly<{ command: "kill" }> & Addressed)
-  | (Readonly<{ command: "wait"; timeoutMs?: number }> & Addressed)
-  | (Readonly<{ command: "tell" | "interrupt" }> & Addressed)
+  | Readonly<{ command: "kill"; akuma: readonly string[] }>
+  | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
+  | (Readonly<{ command: "tell" }> & Addressed)
+  | (Readonly<{ command: "interrupt" }> & Addressed)
   | (Readonly<{ command: "history"; last: boolean; before?: number; since?: number }> & Addressed)
   | (Readonly<{ command: "fork"; at: string }> & Addressed)
 );
@@ -25,7 +26,7 @@ export type ParsedAkumaCommand = Output & (
 export type AkumaAction = ParsedAkumaCommand["command"];
 type FlagValue = string | true;
 type AkumaCommandSpec = Readonly<{
-  arity: number;
+  arity: number | "one-or-more";
   stdin: boolean;
   flags: Readonly<Record<string, "boolean" | "value">>;
   usage: string;
@@ -49,11 +50,11 @@ const AKUMA_COMMAND_SPECS = {
     purpose: "Call an Akuma from an Archetype and stdin body.",
   },
   wait: {
-    arity: 1,
+    arity: "one-or-more",
     stdin: false,
-    flags: { timeout: "value", json: "boolean" },
-    usage: "wait <aku/...> [--timeout <duration>] [--json]",
-    purpose: "Wait for one Akuma or return its current snapshot at the timeout.",
+    flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
+    usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]",
+    purpose: "Wait for one Akuma or an explicitly selected Akuma set.",
   },
   tell: {
     arity: 1,
@@ -84,11 +85,11 @@ const AKUMA_COMMAND_SPECS = {
     purpose: "Fork one Akuma at a retained answered history point.",
   },
   kill: {
-    arity: 1,
+    arity: "one-or-more",
     stdin: false,
     flags: { json: "boolean" },
-    usage: "kill <aku/...> [--json]",
-    purpose: "Record death and put down one Akuma.",
+    usage: "kill <akuma-selector>... [--json]",
+    purpose: "Record death and put down an Akuma selector snapshot.",
   },
 } as const satisfies Readonly<Record<string, AkumaCommandSpec>>;
 
@@ -170,41 +171,83 @@ function positiveIndex(raw: FlagValue, option: string, fail: (message: string) =
   return value;
 }
 
-function parseAddressed(
-  action: Exclude<AkumaAction, "call">,
-  rawId: string,
+function validateDirect(value: string, fail: (message: string) => never): string {
+  try {
+    if (value.startsWith("@")) parseAkumaAlias(value);
+    else parseAkuId(value);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : "invalid Akuma selector");
+  }
+  return value;
+}
+
+function validateSet(value: string, fail: (message: string) => never): string {
+  if (value.startsWith("kei/")) return value;
+  if (value.includes("*")) {
+    try { parseAkumaGlob(value); }
+    catch (error) { fail(error instanceof Error ? error.message : `invalid Akuma glob: ${value}`); }
+    return value;
+  }
+  return validateDirect(value, fail);
+}
+
+function parseWait(
+  rawSelectors: readonly string[],
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
   fail: (message: string) => never,
 ): ParsedAkumaCommand {
-  let id: AkuId;
-  try { id = parseAkuId(rawId).id; }
-  catch (error) { fail(error instanceof Error ? error.message : "invalid Akuma identity"); }
-  if (action === "tell" || action === "interrupt" || action === "kill") {
-    return { command: action, id, output };
+  if (flags.any === true && flags.all === true) fail("wait --any and --all are mutually exclusive");
+  if (rawSelectors.length > 1 && flags.any !== true && flags.all !== true) {
+    fail("wait requires --any or --all when selecting multiple Akuma");
   }
-  if (action === "wait") {
-    const raw = flags.timeout;
-    if (raw === undefined) return { command: action, id, output };
-    return { command: action, id, timeoutMs: parseDuration(raw, fail), output };
+  const completion = flags.any === true ? "any" as const : flags.all === true ? "all" as const : undefined;
+  return {
+    command: "wait",
+    akuma: rawSelectors.map((value) => validateSet(value, fail)),
+    ...(completion === undefined ? {} : { completion }),
+    ...(flags.timeout === undefined ? {} : { timeoutMs: parseDuration(flags.timeout, fail) }),
+    output,
+  };
+}
+
+function parseHistory(
+  akuma: string,
+  flags: Readonly<Record<string, FlagValue>>,
+  output: "text" | "json",
+  fail: (message: string) => never,
+): ParsedAkumaCommand {
+  if (flags.before !== undefined && flags.since !== undefined) fail("history --before and --since are mutually exclusive");
+  if (flags.last === true && (flags.before !== undefined || flags.since !== undefined)) {
+    fail("history --last cannot be combined with --before or --since");
   }
-  if (action === "history") {
-    if (flags.before !== undefined && flags.since !== undefined) fail("history --before and --since are mutually exclusive");
-    if (flags.last === true && (flags.before !== undefined || flags.since !== undefined)) {
-      fail("history --last cannot be combined with --before or --since");
-    }
-    return {
-      command: action,
-      id,
-      last: flags.last === true,
-      ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
-      ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),
-      output,
-    };
+  return {
+    command: "history",
+    akuma,
+    last: flags.last === true,
+    ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
+    ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),
+    output,
+  };
+}
+
+function parseAddressed(
+  action: Exclude<AkumaAction, "call">,
+  rawSelectors: readonly string[],
+  flags: Readonly<Record<string, FlagValue>>,
+  output: "text" | "json",
+  fail: (message: string) => never,
+): ParsedAkumaCommand {
+  if (action === "kill") return { command: action, akuma: rawSelectors.map((value) => validateSet(value, fail)), output };
+  if (action === "tell" || action === "interrupt") {
+    return { command: action, akuma: validateDirect(rawSelectors[0]!, fail), output };
   }
+  if (action === "wait") return parseWait(rawSelectors, flags, output, fail);
+  const akuma = validateDirect(rawSelectors[0]!, fail);
+  if (action === "history") return parseHistory(akuma, flags, output, fail);
   const at = stringFlag(flags.at, "fork requires --at <historyId>", fail);
   if (at.trim().length === 0) fail("fork requires --at <historyId>");
-  return { command: action, id, at, output };
+  return { command: action, akuma, at, output };
 }
 
 function parseCall(
@@ -241,9 +284,11 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   const spec = AKUMA_COMMAND_SPECS[action];
   const fail = (message: string): never => { throw new CliUsageError(message, renderAkumaUsage(action)); };
   const { flags, positionals, stdin } = scanAkuma(action, argv, fail);
-  if (positionals.length !== spec.arity) fail(`${action} has invalid positional arguments`);
+  if (spec.arity === "one-or-more" ? positionals.length === 0 : positionals.length !== spec.arity) {
+    fail(`${action} has invalid positional arguments`);
+  }
   if (stdin !== spec.stdin) fail(`${action} ${spec.stdin ? "requires" : "reads no"} stdin`);
   const output = flags.json === true ? "json" as const : "text" as const;
   if (action === "call") return parseCall(flags, positionals, output, fail);
-  return parseAddressed(action, positionals[0]!, flags, output, fail);
+  return parseAddressed(action, positionals, flags, output, fail);
 }
