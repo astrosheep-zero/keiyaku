@@ -50,6 +50,12 @@ The sole Task authority is canonical Markdown at:
 .keiyaku/tasks/<namespace...>/<local-id>.md
 ```
 
+Task authority is ordinary repository-visible content. A repository-level
+ignore policy must leave `.keiyaku/tasks/**` visible to Git so Task state can
+be reviewed and shared; runtime siblings such as locks, Akuma runs, responses,
+and dispatch state remain ignored. Task itself still never stages, commits, or
+changes Git refs.
+
 The path owns identity. Closed front matter repeats the full `id` as an
 integrity witness and contains `title`, `state`, `priority`, `needs`, `parent`,
 `supersedes`, `relates`, `note`, `createdAt`, `updatedAt`, and optional

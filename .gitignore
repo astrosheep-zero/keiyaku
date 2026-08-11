@@ -2,4 +2,6 @@ node_modules/
 build/
 coverage/
 *.log
-.keiyaku/
+.keiyaku/*
+!.keiyaku/tasks/
+!.keiyaku/tasks/**
