@@ -29,10 +29,10 @@ judgment without claiming. `audit` observes and never places.
 Write one canonical Contract document to stdin and bind it:
 
 ```bash
-keiyaku-v4 bind -
-keiyaku-v4 bind --target <ref> -
-keiyaku-v4 bind --here -
-keiyaku-v4 bind --after <kei/...> --gates <name> -
+keiyaku bind -
+keiyaku bind --target <ref> -
+keiyaku bind --here -
+keiyaku bind --after <kei/...> --gates <name> -
 ```
 
 The document owns the delivery objective, design, scope, criteria, and optional
@@ -43,14 +43,14 @@ Contract coordinate and any managed worktree facts.
 ## Work And Acceptance
 
 ```bash
-keiyaku-v4 status [<contract>|@<contract>]
-keiyaku-v4 amend [<contract>|@<contract>] -
-keiyaku-v4 arc [<contract>|@<contract>] -
-keiyaku-v4 deliver [<contract>|@<contract>]
-keiyaku-v4 review [<contract>|@<contract>] --satisfied
-keiyaku-v4 review [<contract>|@<contract>] --unsatisfied
-keiyaku-v4 audit [<contract>|@<contract>] [--show-diff-body]
-keiyaku-v4 reconcile [<contract>|@<contract>]
+keiyaku status [<contract>|@<contract>]
+keiyaku amend [<contract>|@<contract>] -
+keiyaku arc [<contract>|@<contract>] -
+keiyaku deliver [<contract>|@<contract>]
+keiyaku review [<contract>|@<contract>] --satisfied
+keiyaku review [<contract>|@<contract>] --unsatisfied
+keiyaku audit [<contract>|@<contract>] [--show-diff-body]
+keiyaku reconcile [<contract>|@<contract>]
 ```
 
 Use complete `kei/...` IDs or `@...` managed-worktree references. Omitted

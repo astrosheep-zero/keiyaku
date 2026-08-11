@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import { renderAkumaUsage } from "../src/cli/commands/akuma.js";
 import {
   installAssetsRoot,
   installExitCode,
@@ -79,8 +80,20 @@ test("--all records failure and continues in fixed harness order", async () => {
 test("the bundled plugin contains all four v4 skills", () => {
   for (const name of ["keiyaku", "keiyaku-task", "keiyaku-workflow", "keiyaku-akuma"]) {
     const path = join(installAssetsRoot(), "plugins", "keiyaku", "skills", name, "SKILL.md");
-    assert.match(readFileSync(path, "utf8"), new RegExp(`^name: ${name}$`, "m"));
+    const markdown = readFileSync(path, "utf8");
+    assert.match(markdown, new RegExp(`^name: ${name}$`, "m"));
+    assert.doesNotMatch(markdown, /keiyaku-v4/u);
   }
+});
+
+test("bundled Akuma instructions use the current hard-cut call surface", () => {
+  const plugin = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
+  const call = renderAkumaUsage("call").slice("usage: ".length);
+  const rootSkill = readFileSync(join(plugin, "keiyaku", "SKILL.md"), "utf8");
+  const akumaSkill = readFileSync(join(plugin, "keiyaku-akuma", "SKILL.md"), "utf8");
+  assert.equal(rootSkill.includes(call), true);
+  assert.equal(akumaSkill.includes(call), true);
+  assert.doesNotMatch(akumaSkill, /\bpersona\b|--persona|Contract association/iu);
 });
 
 test("all harness manifests identify the same bundle version", () => {

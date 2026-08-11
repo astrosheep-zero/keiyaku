@@ -5,7 +5,7 @@ description: Use the Keiyaku v4 CLI for contract delivery, task coordination, an
 
 # Keiyaku
 
-Use `keiyaku-v4` as an agent-facing ledger. Keep decisions with the flagship;
+Use `keiyaku` as an agent-facing ledger. Keep decisions with the flagship;
 read `<command> --help` before using flags.
 
 ## Model
@@ -17,18 +17,18 @@ read `<command> --help` before using flags.
 ## Quick Start
 
 ```bash
-keiyaku-v4 task add "title"
-keiyaku-v4 task start <task-id>
-keiyaku-v4 bind -
-keiyaku-v4 status
-keiyaku-v4 deliver [<contract>|@<contract>]
-keiyaku-v4 review [<contract>|@<contract>] --satisfied
+keiyaku task add "title"
+keiyaku task start <task-id>
+keiyaku bind -
+keiyaku status
+keiyaku deliver [<contract>|@<contract>]
+keiyaku review [<contract>|@<contract>] --satisfied
 ```
 
 ```bash
-keiyaku-v4 call --persona <name> -
-keiyaku-v4 wait <aku/...>
-keiyaku-v4 tell <aku/...> -
+keiyaku call <akuma> [--cwd <path>] [--json] -
+keiyaku wait <aku/...>
+keiyaku tell <aku/...> -
 ```
 
 Use text by default; add `--json` when a script needs structured output.

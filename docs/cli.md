@@ -218,7 +218,7 @@ tell, `✂` interrupted, and `✓` answered. Text never prints the storage words
 expresses the running work.
 
 ```text
-── ● aku/worker/1234abcd ── kei/delivery ──────────────────
+── ● aku/worker/1234abcd ──────────────────────────────────
       ⋮ +12
 09:31 │ say      narrowing the failing suite
       │ run      $ npm test — 41s · exit 1

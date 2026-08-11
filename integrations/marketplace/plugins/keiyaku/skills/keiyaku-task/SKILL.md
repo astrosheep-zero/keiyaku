@@ -25,17 +25,17 @@ world and never repairs it.
 ## Common Commands
 
 ```bash
-keiyaku-v4 task add "title"
-keiyaku-v4 task add "title" --priority 1 --needs <task-id>
-keiyaku-v4 task add --namespace <ns> -
-keiyaku-v4 task show <task-id>
-keiyaku-v4 task ls
-keiyaku-v4 task ls --closed
-keiyaku-v4 task ls --all --world
-keiyaku-v4 task ready
-keiyaku-v4 task blocked
-keiyaku-v4 task tree <task-id> [--full]
-keiyaku-v4 task doctor
+keiyaku task add "title"
+keiyaku task add "title" --priority 1 --needs <task-id>
+keiyaku task add --namespace <ns> -
+keiyaku task show <task-id>
+keiyaku task ls
+keiyaku task ls --closed
+keiyaku task ls --all --world
+keiyaku task ready
+keiyaku task blocked
+keiyaku task tree <task-id> [--full]
+keiyaku task doctor
 ```
 
 `ls`, `ready`, and `blocked` use the current namespace; add `--world` to
@@ -45,14 +45,14 @@ commands require a complete TaskId and never infer namespace.
 ## Mutations
 
 ```bash
-keiyaku-v4 task start <task-id>
-keiyaku-v4 task stop <task-id>
-keiyaku-v4 task hold <task-id>
-keiyaku-v4 task resume <task-id>
-keiyaku-v4 task done <task-id>...
-keiyaku-v4 task drop <task-id>... [--note <text>]
-keiyaku-v4 task update <task-id> --title <text>
-keiyaku-v4 task namespace [<namespace>]
+keiyaku task start <task-id>
+keiyaku task stop <task-id>
+keiyaku task hold <task-id>
+keiyaku task resume <task-id>
+keiyaku task done <task-id>...
+keiyaku task drop <task-id>... [--note <text>]
+keiyaku task update <task-id> --title <text>
+keiyaku task namespace [<namespace>]
 ```
 
 Use `--json` on any command when a script must inspect the typed result. Use
