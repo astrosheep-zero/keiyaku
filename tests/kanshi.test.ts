@@ -6,6 +6,7 @@ import test from "node:test";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
+import { displayColumns } from "../src/cli/render/terminal.js";
 import { HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -139,22 +140,19 @@ test("a malformed TaskHolder root fails only the Kanshi Task section", async () 
   if (report.tasks.kind === "failed") assert.match(report.tasks.failure.message, /TaskHolder authority root is not a tree/u);
 });
 
-test("Kanshi text keeps the ruler, dense facts, and complete identities", async () => {
+test("Kanshi text keeps complete identities in the new fixed section grammar", async () => {
   const { repository, contract, taskId } = await populatedWorld();
   const report = await kanshi({ path: repository.path });
   const text = renderKanshiText(report, { columns: 20, color: false });
-  assert.match(text, /^kanshi ─+ 現世$/mu);
-  assert.match(text, /marks ● active · ○ idle\/ready\/missing · ⧗ waiting\/blocked · ‖ held/u);
+  assert.match(text, new RegExp(`^kanshi ${repository.path.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "mu"));
+  assert.doesNotMatch(text, /marks |root |─/u);
   assert.equal(text.includes(contract.id), true);
   assert.equal(text.includes(taskId), true);
-  assert.match(text, /● P0 .*task\/render-status/u);
-  assert.match(text, /Investigate status rendering/u);
-  assert.match(text, /in progress/u);
+  assert.match(text, new RegExp(`^● ${taskId} in_progress$`, "mu"));
+  assert.match(text, /Investigate status\s+rendering/u);
   assert.match(text, /keiyaku kei\/.*\(active\)/u);
   assert.match(text, /akuma 1/u);
-  assert.match(text, /\? aku\/watcher\/a0000001/u);
-  assert.match(text, /stranded/u);
-  assert.match(text, /keiyaku kei\/kanshi-contract \(active\)/u);
+  assert.match(text, /\? aku\/watcher\/a0000001 stranded/u);
 });
 
 function attentionReport(): KanshiReport {
@@ -165,6 +163,21 @@ function attentionReport(): KanshiReport {
       value: {
         root: "/repo",
         rows: [
+          {
+            id: "kei/terminal-contract",
+            phase: "claimed",
+            disposition: "terminal",
+            workspace: "worktree",
+            worktreePath: "/repo/.keiyaku/worktrees/terminal-contract",
+            target: "refs/heads/main",
+            candidate: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            gates: {
+              satisfied: true,
+              reports: [
+                { gate: "reviewed", current: { kind: "attested", verdict: "satisfied", summary: "terminal review summary" } },
+              ],
+            },
+          },
           {
             id: "kei/active-contract",
             phase: "pending-delivery",
@@ -183,21 +196,6 @@ function attentionReport(): KanshiReport {
               ],
             },
           },
-          {
-            id: "kei/terminal-contract",
-            phase: "claimed",
-            disposition: "terminal",
-            workspace: "worktree",
-            worktreePath: "/repo/.keiyaku/worktrees/terminal-contract",
-            target: "refs/heads/main",
-            candidate: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            gates: {
-              satisfied: true,
-              reports: [
-                { gate: "reviewed", current: { kind: "attested", verdict: "satisfied", summary: "terminal review summary" } },
-              ],
-            },
-          },
         ],
       },
     },
@@ -206,8 +204,8 @@ function attentionReport(): KanshiReport {
       value: {
         root: "/repo",
         rows: [
-          { id: "task/running", title: "Investigate failed Linux verification", state: "in_progress", priority: 0, disposition: "in_progress" },
           { id: "task/blocked", title: "Blocked by release evidence", state: "open", priority: 0, disposition: "blocked" },
+          { id: "task/running", title: "Investigate failed Linux verification", state: "in_progress", priority: 0, disposition: "in_progress" },
           { id: "task/held", title: "Held", state: "on_hold", priority: 1, disposition: "on_hold" },
           { id: "task/ready", title: "Ready", state: "open", priority: 1, disposition: "ready" },
           { id: "task/done", title: "Done", state: "done", priority: 2, disposition: "done" },
@@ -223,54 +221,155 @@ function attentionReport(): KanshiReport {
           { id: "aku/worker/a0000001", archetype: "worker", life: "running", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: [] },
           { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: [] },
           { id: "aku/worker/a0000003", archetype: "worker", life: "dead", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: [] },
-          { id: "aku/worker/a0000004", life: "stillborn" },
+          { id: "aku/worker/a0000004", life: "stillborn", seal: { at: "2026-08-10T00:00:00.000Z", evidence: "\u001b[31mstillborn seal evidence is deliberately much longer than a narrow terminal\nsecond line must not render" } },
           { id: "aku/worker/a0000005", life: "unborn" },
+          { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", collar: { kind: "gone", end: null }, confinement: { kind: "unconfined" }, pending: ["pending"] },
+          { id: "aku/worker/a0000007", archetype: "worker", life: "headless", collar: { kind: "alive" }, confinement: { kind: "unconfined" }, pending: [] },
         ],
       },
     },
   } as unknown as KanshiReport;
 }
 
-test("bare Kanshi text keeps Contract and Akuma discovery while compressing Task inventory", () => {
-  const text = renderKanshiText(attentionReport(), { columns: 120, color: false });
+test("bare Kanshi text triages every section without changing its report", () => {
+  const report = attentionReport();
+  const before = structuredClone(report);
+  const text = renderKanshiText(report, { columns: 120, color: false });
 
+  assert.match(text, /^kanshi \/repo$/mu);
+  assert.doesNotMatch(text, /marks |root |─/u);
   assert.match(text, /keiyaku 2/u);
-  assert.match(text, /kei\/active-contract/u);
-  assert.match(text, /kei\/terminal-contract/u);
-  assert.match(text, /✓ reviewed\s+satisfied/u);
-  assert.match(text, /! verified\s+unsatisfied/u);
-  assert.match(text, /\? security\s+stale · was satisfied/u);
-  assert.match(text, /○ manual\s+missing/u);
+  assert.match(text, /^⧗ kei\/active-contract pending-delivery$/mu);
+  assert.match(text, /^  worktree · candidate aaaaaaaa · -> refs\/heads\/main$/mu);
+  assert.match(text, /^  ✓ reviewed · ! verified · \? security · \? manual$/mu);
+  assert.ok(text.indexOf("kei/active-contract") < text.indexOf("kei/terminal-contract"));
+  assert.doesNotMatch(text, /candidate a{9}/u);
+  assert.doesNotMatch(text, /stale|missing/u);
   assert.doesNotMatch(text, /world summary should stay hidden/u);
+  assert.doesNotMatch(text, /terminal review summary/u);
 
-  assert.match(text, /task 4/u);
-  assert.match(text, /task\/running/u);
-  assert.match(text, /task\/blocked/u);
+  assert.match(text, /^task 4 · 1 ready · 1 held$/mu);
+  assert.match(text, /^⧗ task\/blocked blocked$/mu);
+  assert.match(text, /^● task\/running in_progress$/mu);
+  assert.ok(text.indexOf("task/blocked") < text.indexOf("task/running"));
   assert.match(text, /Investigate failed Linux verification/u);
   assert.match(text, /Blocked by release evidence/u);
-  assert.match(text, /\+ 1 ready · 1 held/u);
+  assert.doesNotMatch(text, /^\+ /mu);
   assert.doesNotMatch(text, /task\/held/u);
   assert.doesNotMatch(text, /task\/ready/u);
   assert.doesNotMatch(text, /task\/done/u);
   assert.doesNotMatch(text, /task\/dropped/u);
 
-  assert.match(text, /akuma 5/u);
-  assert.match(text, /● aku\/worker\/a0000001/u);
-  assert.match(text, /○ aku\/worker\/a0000002\s+asleep/u);
-  assert.match(text, /○ aku\/worker\/a0000003\s+dead/u);
-  assert.match(text, /! aku\/worker\/a0000004/u);
+  assert.match(text, /akuma 7/u);
+  assert.match(text, /^! aku\/worker\/a0000004 stillborn$/mu);
+  assert.match(text, /^\? aku\/worker\/a0000006 stranded$/mu);
+  assert.match(text, /^\? aku\/worker\/a0000007 headless$/mu);
+  assert.match(text, /^● aku\/worker\/a0000001 running$/mu);
+  assert.match(text, /^○ aku\/worker\/a0000002 asleep$/mu);
+  assert.match(text, /^○ aku\/worker\/a0000003 dead$/mu);
+  assert.ok(text.indexOf("a0000004") < text.indexOf("a0000006"));
+  assert.ok(text.indexOf("a0000006") < text.indexOf("a0000007"));
+  assert.ok(text.indexOf("a0000007") < text.indexOf("a0000001"));
+  assert.match(text, /^  pending 1 · unconfined$/mu);
+  assert.match(text, /^  unconfined$/mu);
   assert.match(text, /\? aku\/worker\/a0000005\s+unborn/u);
   assert.doesNotMatch(text, /searched \/repo/u);
+  assert.deepEqual(report, before);
 });
 
 test("exact Contract Kanshi text keeps terminal gates and testimony summaries", () => {
   const selected = selectKanshi({ report: attentionReport(), contract: "kei/terminal-contract" });
   const text = renderKanshiText(selected, { columns: 80, color: false }, "contract");
 
-  assert.match(text, /✓ kei\/terminal-contract/u);
-  assert.match(text, /✓ reviewed\s+satisfied/u);
-  assert.match(text, /terminal review summary/u);
+  assert.match(text, /^✓ kei\/terminal-contract claimed$/mu);
+  assert.match(text, /^  ✓ reviewed$/mu);
+  assert.match(text, /^  reviewed: terminal review summary$/mu);
   assert.doesNotMatch(text, /kei\/active-contract/u);
+});
+
+test("Kanshi wraps gates and bounded stillborn evidence by display columns", () => {
+  const report = attentionReport();
+  const before = structuredClone(report);
+  const text = renderKanshiText(report, { columns: 20, color: false });
+  const lines = text.split("\n");
+  const seal = lines.find((line) => line.startsWith("  seal "));
+
+  assert.match(text, /^  ✓ reviewed$/mu);
+  assert.match(text, /^  ! verified$/mu);
+  assert.match(text, /^  \? security$/mu);
+  assert.match(text, /^  \? manual$/mu);
+  assert.notEqual(seal, undefined);
+  assert.ok(displayColumns(seal!) <= 20);
+  assert.equal(text.includes("\u001b"), false);
+  assert.equal(text.includes("second line must not render"), false);
+  assert.deepEqual(report, before);
+});
+
+test("Kanshi wraps complete Task titles and neutralizes continuation facts", () => {
+  const report = attentionReport();
+  if (report.tasks.kind !== "present" || report.akuma.kind !== "present") throw new Error("fixture sections must be present");
+  const title = "Trace narrow title wrapping exactly";
+  const narrowReport: KanshiReport = {
+    ...report,
+    tasks: {
+      ...report.tasks,
+      value: {
+        ...report.tasks.value,
+        rows: report.tasks.value.rows.map((row) => row.id === "task/running" ? { ...row, title } : row),
+      },
+    },
+    akuma: {
+      ...report.akuma,
+      value: {
+        ...report.akuma.value,
+        rows: report.akuma.value.rows.map((row) => row.life === "headless"
+          ? { ...row, confinement: { kind: "declared", writableRoots: ["/repo/\u001b[31m\nforged"] } }
+          : row),
+      },
+    },
+  } as KanshiReport;
+  const before = structuredClone(narrowReport);
+  const text = renderKanshiText(narrowReport, { columns: 20, color: false });
+  const lines = text.split("\n");
+  const task = lines.indexOf("● task/running in_progress");
+  const priority = lines.indexOf("  P0", task + 1);
+  const titleLines = lines.slice(task + 1, priority);
+
+  assert.deepEqual(titleLines, ["  Trace narrow title", "  wrapping exactly"]);
+  assert.ok(titleLines.every((line) => displayColumns(line) <= 20));
+  assert.equal(titleLines.map((line) => line.trim()).join(" "), title);
+  assert.match(text, /writes \/repo\/�\[31m forged/u);
+  assert.equal(text.includes("\u001b"), false);
+  assert.equal(text.includes("\nforged"), false);
+  assert.deepEqual(narrowReport, before);
+});
+
+test("Kanshi has no Contract gate-block cap", () => {
+  const report = attentionReport();
+  if (report.contracts.kind !== "present") throw new Error("fixture contracts must be present");
+  const gates = Array.from({ length: 24 }, (_, index) => ({
+    gate: `gate-${String(index).padStart(2, "0")}`,
+    current: { kind: "missing" as const },
+  }));
+  const active = report.contracts.value.rows.find((row) => row.id === "kei/active-contract");
+  if (active === undefined) throw new Error("fixture Contract must be present");
+  const cappedReport: KanshiReport = {
+    ...report,
+    contracts: {
+      ...report.contracts,
+      value: {
+        ...report.contracts.value,
+        rows: report.contracts.value.rows.map((row) => row === active
+          ? { ...row, gates: { ...row.gates, reports: gates } }
+          : row),
+      },
+    },
+  } as KanshiReport;
+  const before = structuredClone(cappedReport);
+  const text = renderKanshiText(cappedReport, { columns: 20, color: false });
+
+  for (const gate of gates) assert.match(text, new RegExp(`\\? ${gate.gate}`, "u"));
+  assert.deepEqual(cappedReport, before);
 });
 
 test("Kanshi selection is a projection that preserves source presence", async () => {

@@ -492,41 +492,60 @@ Its Akuma section is supplied by `Akuma.list()` as specified by
 confinement, and searched coordinates
 without probing, reading history, or reclassifying them.
 
-JSON serializes that complete report. Text chooses density without hiding a
-product identity that has no other text discovery surface. Bare status renders
-every Contract row. Every rendered Contract copies all of its declared gates in
-declaration order. The gate marks are `✓` current satisfied, `!` current
-unsatisfied, `?` stale with its prior verdict, and `○` missing. Bare status omits
-opaque gate summaries so testimony prose cannot drown the world board; exact
-Contract status renders each available current summary under its gate.
+JSON serializes that complete report without a text-specific projection or
+shortened value. Text chooses density without hiding a product identity that
+has no other text discovery surface. Its first line is `kanshi <root>`; it has
+no ruler, separate root line, or mark legend. The fixed `keiyaku`, `task`, and
+`akuma` sections follow in that order.
 
-The Task heading counts only nonterminal Tasks. Text expands `in_progress` and
-`blocked` rows, then reports exact `ready` and `on_hold` counts on one summary
-line. Terminal `done` and `drop` Tasks contribute neither rows nor counts;
-their complete inventory belongs to `task ls --closed` and `task ls --all`.
-A visible row prints its copyable TaskId, current title, priority, disposition,
-and optional Contract endpoint. Identity and description stay distinct: a
-title update does not move the immutable TaskId, so the coordinate cannot stand
-in for the current title.
+Bare status renders every Contract row. Waiting and pending-delivery rows come
+before other Contracts, with source order stable inside each class. A row starts
+with its mark, complete ContractId, and adjacent phase word. Incremental facts
+continue beneath it: workspace, an eight-character textual candidate, and a
+target expressed as `-> <ref>`. Every rendered Contract copies all of its
+declared gates in declaration order as one compact icon-and-name chain. The
+gate marks are `✓` for a current satisfied attestation, `!` for a current
+unsatisfied attestation, and `?` when there is no current verdict, including
+stale and missing reports. Bare status omits opaque gate summaries so testimony
+prose cannot drown the world board; exact Contract status renders each
+available current summary beneath the chain and names its gate.
+
+The Task heading counts only nonterminal Tasks and carries the exact `ready`
+and `on_hold` counts; there is no separate inventory summary line. Text expands
+`in_progress` and `blocked` rows, with blocked rows first and source order stable inside each
+class.
+Terminal `done` and `drop` Tasks contribute neither rows nor counts; their
+complete inventory belongs to `task ls --closed` and `task ls --all`. A visible
+row starts with its mark, complete TaskId, and adjacent disposition word, then
+prints the current title, priority, and optional Contract endpoint as
+incremental facts. Identity and description stay distinct: a title update does
+not move the immutable TaskId, so the coordinate cannot stand in for the
+current title.
 
 The Akuma section renders every public fleet row because bare status is its text
-discovery surface in this cut. Its mark reports activity, while the adjacent
-life word preserves the domain state: `running` is active, `asleep` and `dead`
-are idle, `stranded` and `headless` are lost, `unborn` is unknown, and
-`stillborn` is failed. Pending count and confinement remain compact row facts.
-Future Akuma facts may extend that fact tail only after the Akuma public row
-owns them; Kanshi and CLI never infer activity age, answer availability, or
-attention from the current fields. Empty fleet search coordinates remain in
-the report and JSON but do not turn normal text absence into a diagnostic.
+discovery surface in this cut. Lost and failed rows come first, running rows
+next, and idle or terminal rows last, with source order stable inside each
+class. Each row starts with its mark, complete AkuId, and adjacent life word:
+`running` is active, `asleep` and `dead` are idle, `stranded` and `headless` are
+lost, `unborn` is unknown, and `stillborn` is failed. Running and lost rows may
+continue with pending count and confinement. Asleep and dead rows are always
+single-line. A stillborn row may continue with its public seal evidence after
+control-character neutralization, first-line extraction, and display-width
+truncation. Future Akuma facts may extend this presentation only after the
+Akuma public row owns them; Kanshi and CLI never infer activity age, answer
+availability, or attention from the current fields. Empty fleet search
+coordinates remain in the report and JSON but do not turn normal text absence
+into a diagnostic.
 
 Status keeps one stable visual grammar, with adjacent words remaining the
-authoritative state: `●` active, `○` idle, ready, or missing, `⧗` waiting or
-blocked, `‖` held, `✓` satisfied, `!` failed or unsatisfied, `?` stale, lost,
-or unknown, and `×` ended. Marks accelerate scanning; they never replace the
-copied lifecycle, gate, Task, or Akuma discriminant. The renderer applies no
-arbitrary line cap and never cuts a Contract-and-gates block in half.
-Historical Task inventory and opaque testimony stay on their owning detail
-surfaces.
+authoritative state: `●` active, `○` idle or ready, `⧗` waiting or blocked,
+`‖` held, `✓` satisfied, `!` failed or unsatisfied, `?` without a current
+verdict, lost, or unknown, and `×` ended. Marks accelerate scanning; they never
+replace the copied lifecycle, gate, Task, or Akuma discriminant. Text wraps by
+display columns at both narrow and wide terminal widths. It applies no
+arbitrary line cap, does not truncate a Contract-and-gates block, and does not
+truncate a complete identity or current Task title. Historical Task inventory
+and opaque testimony stay on their owning detail surfaces.
 
 Akuma call, exact status, wait, history, an `interrupted` interrupt, successful
 wake, a `forked` fork, and settled kill exit `0`. Interrupt `dead` or

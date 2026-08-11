@@ -1,11 +1,6 @@
 import type { ContractGateReport, ContractPhase } from "../../index.js";
-import type { KanshiReport, Section, TaskKanshiRow } from "../../kanshi/index.js";
-import { displayColumns, renderFacts, renderTextBlock, renderVoiceRuler, safeText, tone, type TextRenderContext } from "./terminal.js";
-
-const MARKS = [
-  "marks ● active · ○ idle/ready/missing · ⧗ waiting/blocked · ‖ held",
-  "      ✓ satisfied · ! failed/unsatisfied · ? stale/lost/unknown · × ended",
-].join("\n");
+import type { AkumaKanshiRow, KanshiReport, Section, TaskKanshiRow } from "../../kanshi/index.js";
+import { displayColumns, renderTextBlock, safeText, tone, type TextRenderContext } from "./terminal.js";
 
 function contractMark(phase: ContractPhase): string {
   if (phase === "claimed") return "✓";
@@ -29,13 +24,28 @@ function akumaMark(life: string): string {
   return "?";
 }
 
-function gatePresentation(report: ContractGateReport): Readonly<{ mark: string; facts: readonly string[] }> {
-  const { current } = report;
-  if (current.kind === "missing") return { mark: "○", facts: ["missing"] };
-  if (current.kind === "stale") return { mark: "?", facts: ["stale", `was ${current.priorVerdict}`] };
-  return current.verdict === "satisfied"
-    ? { mark: "✓", facts: ["satisfied"] }
-    : { mark: "!", facts: ["unsatisfied"] };
+function gateMark(report: ContractGateReport): string {
+  if (report.current.kind !== "attested") return "?";
+  return report.current.verdict === "satisfied" ? "✓" : "!";
+}
+
+function hotFirst<Row>(rows: readonly Row[], hot: (row: Row) => boolean): readonly Row[] {
+  return [...rows.filter(hot), ...rows.filter((row) => !hot(row))];
+}
+
+function wrapChain(parts: readonly string[], columns: number): readonly string[] {
+  if (parts.length === 0) return [];
+  const lines: string[] = [];
+  let current = "  ";
+  for (const part of parts.map(safeText)) {
+    const candidate = current === "  " ? `${current}${part}` : `${current} · ${part}`;
+    if (current !== "  " && displayColumns(candidate) > columns) {
+      lines.push(current);
+      current = `  ${part}`;
+    } else current = candidate;
+  }
+  lines.push(current);
+  return lines;
 }
 
 function renderGates(
@@ -43,19 +53,12 @@ function renderGates(
   context: TextRenderContext,
   includeSummaries: boolean,
 ): readonly string[] {
-  if (reports.length === 0) return [];
-  const names = reports.map((report) => safeText(report.gate));
-  const nameColumns = Math.max(...names.map(displayColumns));
-  const lines: string[] = [];
+  const lines = [...wrapChain(reports.map((report) => `${gateMark(report)} ${safeText(report.gate)}`), context.columns)];
+  if (!includeSummaries) return lines;
   for (const report of reports) {
-    const name = safeText(report.gate);
-    const presentation = gatePresentation(report);
-    const primary = `  ${presentation.mark} ${name}${" ".repeat(nameColumns - displayColumns(name))}`;
-    lines.push(...renderFacts(primary, presentation.facts, context.columns));
-    if (includeSummaries && report.current.kind === "attested" && report.current.summary !== undefined) {
-      lines.push(...renderTextBlock(report.current.summary, "      ", context.columns)
-        .map((line) => tone(line, "dim", context.color)));
-    }
+    if (report.current.kind !== "attested" || report.current.summary === undefined) continue;
+    lines.push(...renderTextBlock(`${safeText(report.gate)}: ${report.current.summary}`, "  ", context.columns)
+      .map((line) => tone(line, "dim", context.color)));
   }
   return lines;
 }
@@ -68,15 +71,16 @@ function renderContracts(report: KanshiReport, context: TextRenderContext, selec
   const section = report.contracts;
   if (section.kind === "absent") return "keiyaku absent";
   if (section.kind === "failed") return failure("keiyaku", section, context);
-  const lines = [`keiyaku ${section.value.rows.length}`];
-  for (const row of section.value.rows) {
+  const rows = hotFirst(section.value.rows, (row) => row.phase === "waiting" || row.phase === "pending-delivery");
+  const lines = [`keiyaku ${rows.length}`];
+  for (const row of rows) {
     const facts = [
-      row.phase,
       row.workspace,
-      ...(row.target === null ? [] : [`target ${row.target}`]),
-      ...(row.candidate === null ? [] : [`candidate ${row.candidate}`]),
+      ...(row.candidate === null ? [] : [`candidate ${safeText(row.candidate).slice(0, 8)}`]),
+      ...(row.target === null ? [] : [`-> ${row.target}`]),
     ];
-    lines.push(...renderFacts(`${contractMark(row.phase)} ${safeText(row.id)}`, facts, context.columns));
+    lines.push(`${contractMark(row.phase)} ${safeText(row.id)} ${row.phase}`);
+    lines.push(...wrapChain(facts, context.columns));
     lines.push(...renderGates(row.gates.reports, context, selection === "contract"));
   }
   return lines.join("\n");
@@ -89,31 +93,83 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): string {
   const active = section.value.rows.filter((row) => row.disposition !== "done" && row.disposition !== "drop");
   const ready = active.filter((row) => row.disposition === "ready").length;
   const onHold = active.filter((row) => row.disposition === "on_hold").length;
-  const lines = [`task ${active.length}`];
-  const visible = active.filter((row) => row.disposition === "in_progress" || row.disposition === "blocked");
+  const visible = hotFirst(
+    active.filter((row) => row.disposition === "in_progress" || row.disposition === "blocked"),
+    (row) => row.disposition === "blocked",
+  );
+  const lines = [`task ${active.length} · ${ready} ready · ${onHold} held`];
   for (const row of visible) {
     const contract = row.contract === undefined ? [] : [`keiyaku ${row.contract.id} (${row.contract.observed})`];
-    lines.push(...renderFacts(`${taskMark(row)} P${row.priority} ${safeText(row.id)}`, [row.title, row.disposition.replaceAll("_", " "), ...contract], context.columns));
+    lines.push(`${taskMark(row)} ${safeText(row.id)} ${row.disposition}`);
+    lines.push(...renderTextBlock(row.title, "  ", context.columns));
+    lines.push(...wrapChain([`P${row.priority}`, ...contract], context.columns));
   }
-  const omitted = [ready > 0 ? `${ready} ready` : undefined, onHold > 0 ? `${onHold} held` : undefined]
-    .filter((fact): fact is string => fact !== undefined);
-  if (omitted.length > 0) lines.push(tone(`+ ${omitted.join(" · ")}`, "dim", context.color));
   return lines.join("\n");
+}
+
+function isLost(life: string): boolean {
+  return life === "stranded" || life === "headless";
+}
+
+function akumaPriority(row: AkumaKanshiRow): number {
+  if (isLost(row.life) || row.life === "stillborn") return 0;
+  return row.life === "running" ? 1 : 2;
+}
+
+function firstLine(value: string): string {
+  return value.split(/[\r\n\u2028\u2029]/u, 1)[0] ?? "";
+}
+
+function truncateDisplay(value: string, columns: number): string {
+  if (displayColumns(value) <= columns) return value;
+  if (columns <= 0) return "";
+  const ellipsis = "…";
+  if (columns <= displayColumns(ellipsis)) return ellipsis;
+  let result = "";
+  let used = 0;
+  for (const character of value) {
+    const width = displayColumns(character);
+    if (used + width + displayColumns(ellipsis) > columns) break;
+    result += character;
+    used += width;
+  }
+  return `${result}${ellipsis}`;
+}
+
+function bornFacts(row: AkumaKanshiRow): readonly string[] {
+  if (!("pending" in row) || (row.life !== "running" && !isLost(row.life))) return [];
+  const confinement = row.confinement.kind === "unconfined"
+    ? "unconfined"
+    : `writes ${row.confinement.writableRoots.join(" ")}`;
+  return [
+    ...(row.pending.length === 0 ? [] : [`pending ${row.pending.length}`]),
+    confinement,
+  ];
+}
+
+function stillbornEvidence(row: AkumaKanshiRow, columns: number): string | null {
+  if (row.life !== "stillborn" || !("seal" in row) || row.seal === undefined) return null;
+  const prefix = "  seal ";
+  const evidence = safeText(firstLine(row.seal.evidence)).trim();
+  if (evidence.length === 0) return null;
+  return `${prefix}${truncateDisplay(evidence, Math.max(0, columns - displayColumns(prefix)))}`;
 }
 
 function renderAkuma(report: KanshiReport, context: TextRenderContext): string {
   const section = report.akuma;
   if (section.kind === "absent") return "akuma absent";
   if (section.kind === "failed") return failure("akuma", section, context);
-  const lines = [`akuma ${section.value.rows.length}`];
-  for (const row of section.value.rows) {
-    const pending = "pending" in row && row.pending.length > 0 ? [`pending ${row.pending.length}`] : [];
-    const confinement = "confinement" in row
-      ? row.confinement.kind === "unconfined"
-        ? ["unconfined"]
-        : [`writes ${row.confinement.writableRoots.join(" ")}`]
-      : [];
-    lines.push(...renderFacts(`${akumaMark(row.life)} ${safeText(row.id)}`, [row.life, ...confinement, ...pending], context.columns));
+  const rows = [
+    ...section.value.rows.filter((row) => akumaPriority(row) === 0),
+    ...section.value.rows.filter((row) => akumaPriority(row) === 1),
+    ...section.value.rows.filter((row) => akumaPriority(row) === 2),
+  ];
+  const lines = [`akuma ${rows.length}`];
+  for (const row of rows) {
+    lines.push(`${akumaMark(row.life)} ${safeText(row.id)} ${row.life}`);
+    lines.push(...wrapChain(bornFacts(row), context.columns));
+    const evidence = stillbornEvidence(row, context.columns);
+    if (evidence !== null) lines.push(evidence);
   }
   return lines.join("\n");
 }
@@ -123,11 +179,8 @@ export function renderKanshiText(
   context: TextRenderContext = { columns: 80, color: false },
   selection: "world" | "contract" = "world",
 ): string {
-  const root = tone(`root ${safeText(report.root)}`, "dim", context.color);
   return [
-    renderVoiceRuler("kanshi", "現世", context.columns),
-    root,
-    MARKS,
+    `kanshi ${safeText(report.root)}`,
     renderContracts(report, context, selection),
     renderTasks(report, context),
     renderAkuma(report, context),
