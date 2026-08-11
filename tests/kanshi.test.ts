@@ -323,7 +323,7 @@ test("Kanshi wraps complete Task titles and neutralizes continuation facts", () 
       value: {
         ...report.akuma.value,
         rows: report.akuma.value.rows.map((row) => row.life === "headless"
-          ? { ...row, confinement: { kind: "declared", writableRoots: ["/repo/\u001b[31m\nforged"] } }
+          ? { ...row, confinement: { kind: "declared", writableRoots: ["/one/12345", "/two/12345", "/repo/\u001b[31m\nforged"] } }
           : row),
       },
     },
@@ -340,7 +340,9 @@ test("Kanshi wraps complete Task titles and neutralizes continuation facts", () 
   assert.deepEqual(titleLines, ["  Trace narrow title", "  wrapping exactly"]);
   assert.ok(titleLines.every((line) => displayColumns(line) <= 20));
   assert.equal(titleLines.map((line) => line.trim()).join(" "), title);
-  assert.match(text, /writes \/repo\/�\[31m forged/u);
+  assert.match(text, /^  writes \/one\/12345$/mu);
+  assert.match(text, /^  \/two\/12345$/mu);
+  assert.match(text, /^  \/repo\/�\[31m forged$/mu);
   assert.equal(text.includes("\u001b"), false);
   assert.equal(text.includes("\nforged"), false);
   assert.deepEqual(narrowReport, before);
@@ -377,8 +379,7 @@ test("Kanshi narrow wrapping exceeds columns only for indivisible scan and coord
     || /^[●○⧗✓!?×] /u.test(line)
     || line.includes(longRef)
     || line.includes(longGate)
-    || /keiyaku kei\//u.test(line)
-    || /writes \//u.test(line)));
+    || /keiyaku kei\//u.test(line)));
   assert.equal(text.includes(longId), true);
   assert.equal(text.includes(longRef), true);
   assert.equal(text.includes(longGate), true);

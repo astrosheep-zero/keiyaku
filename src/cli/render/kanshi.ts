@@ -154,11 +154,11 @@ function truncateDisplay(value: string, columns: number): string {
 function bornFacts(row: AkumaKanshiRow): readonly string[] {
   if (!("pending" in row) || (row.life !== "running" && !isLost(row.life))) return [];
   const confinement = row.confinement.kind === "unconfined"
-    ? "unconfined"
-    : `writes ${row.confinement.writableRoots.join(" ")}`;
+    ? ["unconfined"]
+    : row.confinement.writableRoots.map((root, index) => index === 0 ? `writes ${root}` : root);
   return [
     ...(row.pending.length === 0 ? [] : [`pending ${row.pending.length}`]),
-    confinement,
+    ...confinement,
   ];
 }
 
