@@ -88,11 +88,12 @@ test("the bundled plugin contains all four v4 skills", () => {
 
 test("bundled Akuma instructions use the current hard-cut call surface", () => {
   const plugin = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
-  const call = renderAkumaUsage("call").slice("usage: ".length);
+  const call = renderAkumaUsage("call").slice("usage: keiyaku ".length);
+  const canonical = `keiyaku -C <repo> ${call}`;
   const rootSkill = readFileSync(join(plugin, "keiyaku", "SKILL.md"), "utf8");
   const akumaSkill = readFileSync(join(plugin, "keiyaku-akuma", "SKILL.md"), "utf8");
-  assert.equal(rootSkill.includes(call), true);
-  assert.equal(akumaSkill.includes(call), true);
+  assert.equal(rootSkill.includes(canonical), true);
+  assert.equal(akumaSkill.includes(canonical), true);
   assert.doesNotMatch(akumaSkill, /\bpersona\b|--persona|Contract association/iu);
 });
 

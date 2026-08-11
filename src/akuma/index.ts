@@ -14,8 +14,8 @@ export type {
   UnbornAkumaListRow,
 } from "./akuma.js";
 export type { AgentEvent, ToolCall, ToolEvent, ToolResult } from "./provider.js";
+export type { AkuId } from "./identity.js";
 export type {
-  AkuId,
   Confinement,
   KillEvidence,
   ProviderOptions,

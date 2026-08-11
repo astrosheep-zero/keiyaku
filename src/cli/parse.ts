@@ -107,6 +107,9 @@ export function renderRootHelp(): string {
   return [
     ROOT_USAGE,
     "",
+    "global options:",
+    "  -C, --cwd <path>  Set the invocation working directory.",
+    "",
     "commands:",
     ...Object.values(CONTRACT_COMMAND_SPECS).flatMap((spec) => [`  ${spec.usage}`, `    ${spec.purpose}`]),
     `  ${INSTALL_USAGE}`,
@@ -274,7 +277,6 @@ function scanArgv(argv: readonly string[]): ParsedParts {
 
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index]!;
-    if (token === "-C") refuse(command, "-C is legal only as a global invocation prefix");
     if (token === "-") {
       scanStdin(command, state, index, argv.length);
       continue;
@@ -403,11 +405,27 @@ function parseStatus(parts: ParsedParts): ParsedStatus {
   };
 }
 
-function invocationPrefix(argv: readonly string[]): Readonly<{ cwd?: string; commandArgv: readonly string[] }> {
-  if (argv[0] !== "-C") return { commandArgv: argv };
-  const cwd = argv[1];
-  if (cwd === undefined || cwd === "-C") throw new CliUsageError("-C requires a path", renderRootHelp());
-  return { cwd, commandArgv: argv.slice(2) };
+function invocationOptions(argv: readonly string[]): Readonly<{ cwd?: string; commandArgv: readonly string[] }> {
+  let cwd: string | undefined;
+  let stdinSeen = false;
+  const commandArgv: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]!;
+    if (token !== "-C" && token !== "--cwd") {
+      commandArgv.push(token);
+      if (token === "-") stdinSeen = true;
+      continue;
+    }
+    if (stdinSeen) throw new CliUsageError("stdin marker '-' must be the final argument", renderRootHelp());
+    if (cwd !== undefined) throw new CliUsageError("-C/--cwd may appear only once", renderRootHelp());
+    const value = argv[index + 1];
+    if (value === undefined || value === "-" || value.startsWith("-")) {
+      throw new CliUsageError(`${token} requires a path`, renderRootHelp());
+    }
+    cwd = value;
+    index += 1;
+  }
+  return { ...(cwd === undefined ? {} : { cwd }), commandArgv };
 }
 
 function helpCoordinate(argv: readonly string[]): CliHelpCoordinate | null {
@@ -460,7 +478,7 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
 }
 
 export function parseArgv(argv: readonly string[]): ParsedInvocation {
-  const invocation = invocationPrefix(argv);
+  const invocation = invocationOptions(argv);
   const help = helpCoordinate(invocation.commandArgv);
   if (help !== null) return { help };
   const task = invocation.commandArgv[0] === "task"

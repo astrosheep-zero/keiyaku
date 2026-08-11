@@ -1,8 +1,7 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import type { AkumaPaths } from "../identity.js";
+import type { AkuId, AkumaPaths } from "../identity.js";
 import type {
-  AkuId,
   BodyEnd,
   BodyFact,
   Collar,
@@ -74,7 +73,6 @@ import type { ActivityFact, ActivityFactSlice } from "./rows.js";
 
 export { life } from "./facts.js";
 export type {
-  AkuId,
   AkumaLife,
   AkumaOrigin,
   BodyEnd,

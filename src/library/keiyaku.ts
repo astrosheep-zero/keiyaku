@@ -6,6 +6,7 @@ import {
   observeKeiyaku,
   type Keiyaku as KeiyakuType,
 } from "./contract.js";
+import { callKeiyaku, forkKeiyaku } from "./akuma-creation.js";
 
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 export {
@@ -81,6 +82,21 @@ export type {
   SettlementLag,
   SettlementReport,
 } from "../settlement/settle.js";
+export type {
+  AliasStage,
+  AkumaStatus,
+  CallObservation,
+  CallInput,
+  CallResult,
+  DispatchStage,
+  ForkInput,
+  ForkResult,
+  IntegrationFailure,
+} from "./akuma-creation.js";
+export type { AliasBinding } from "../alias/index.js";
+export type { Dispatch, DispatchFailure } from "../dispatch/index.js";
+export type { AkumaAlias } from "../identity/selector.js";
+export type { AkuId } from "../akuma/identity.js";
 
 export type Keiyaku = KeiyakuType;
 
@@ -88,6 +104,8 @@ export const Keiyaku = Object.freeze({
   prototype: KeiyakuHandle.prototype,
   [Symbol.hasInstance]: (value: unknown): boolean => value instanceof KeiyakuHandle,
   bind: bindKeiyaku,
+  call: callKeiyaku,
+  fork: forkKeiyaku,
   list: listKeiyaku,
   observe: observeKeiyaku,
   of: keiyakuOf,

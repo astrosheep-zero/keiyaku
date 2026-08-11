@@ -249,7 +249,9 @@ export class KeiyakuHandle {
   constructor(
     private readonly id: ContractId,
     private readonly scope: RepositoryScope,
-  ) {}
+  ) {
+    KEIYAKU_SEATS.set(this, { id, scope });
+  }
 
   async state(): Promise<ContractState> {
     return stateOperation({ scope: this.scope, contractId: this.id });
@@ -417,6 +419,16 @@ export class KeiyakuHandle {
     );
   }
 
+}
+
+const KEIYAKU_SEATS = new WeakMap<object, Readonly<{ id: ContractId; scope: RepositoryScope }>>();
+
+/** Internal package composition capability; not exported from the package root. */
+export function seatForKeiyaku(value: unknown): Readonly<{ id: ContractId; scope: RepositoryScope }> {
+  if (!(value instanceof KeiyakuHandle)) throw new TypeError("contract must be a Keiyaku");
+  const seat = KEIYAKU_SEATS.get(value);
+  if (seat === undefined) throw new TypeError("contract must be a Keiyaku");
+  return seat;
 }
 
 export type Keiyaku = KeiyakuHandle;

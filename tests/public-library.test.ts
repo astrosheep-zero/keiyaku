@@ -60,12 +60,28 @@ test("package root exposes only the ruled library values and declarations", () =
   const directory = externalConsumer();
   const source = [
     'import { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, settings, SettingsError, worktreeHooksFrom, type AbandonInput, type ActorId, type AmendInput, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractBoard, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type DeliverInput, type Fact, type FactKind, type Gate, type HookCommand, type KeiyakuRefusal, type KeiyakuRetryReason, type Lag, type MutationResult, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SettlementAction, type SettlementLag, type SettlementReport, type SnapshotId, type TaskId, type TimelineEntry, type TopologyEffect, type WorktreeHooks } from "@astrosheep/keiyaku-v4";',
+    'import type { AkuId, AkumaAlias, AkumaStatus, AliasBinding, AliasStage, CallInput, CallResult, Dispatch, DispatchFailure, DispatchStage, ForkInput, ForkResult, IntegrationFailure } from "@astrosheep/keiyaku-v4";',
     'const repo = Repo.at({ path: "." });',
     'const id = "kei/consumer" as ContractId;',
     'const taskId = "task/consumer" as TaskId;',
     'const input: BindInput = { repo, task: taskId, markdown: "# T\\n\\n## Context\\nC\\n\\n## Objective\\nO\\n\\n## Design\\nD\\n\\n## Region\\n~~~\\nsrc/**\\n~~~\\n\\n## Criteria\\n### C1\\nB\\n", after: [id], gates: ["reviewed"] };',
     'const amendment: AmendInput = { markdown: "## Append: Context\\nMore\\n", after: [id] };',
     'const existing = Keiyaku.of({ repo, id });',
+    'const akuma = "aku/worker/1234abcd" as AkuId;',
+    'const alias = "@worker" as AkumaAlias;',
+    'const callInput: CallInput = { path: ".", archetype: "worker", body: "work", mode: "wait", timeoutMs: 300000, contract: existing, alias };',
+    'const callResult: Promise<CallResult> = Keiyaku.call(callInput);',
+    'const callStatus = null as unknown as AkumaStatus;',
+    'const forkInput: ForkInput = { path: ".", akuma, at: "history-1", repo };',
+    'const forkResult: Promise<ForkResult> = Keiyaku.fork(forkInput);',
+    'const aliasBinding = null as unknown as AliasBinding;',
+    'const aliasStage = null as unknown as AliasStage;',
+    'const dispatch = null as unknown as Dispatch;',
+    'const dispatchFailure = null as unknown as DispatchFailure;',
+    'const dispatchStage = null as unknown as DispatchStage;',
+    'const integrationFailure = null as unknown as IntegrationFailure;',
+    '// @ts-expect-error ForkInput requires a branded AkuId',
+    'const invalidFork: ForkInput = { ...forkInput, akuma: "aku/worker/1234abcd" };',
     'const delivery = null as unknown as Delivery;',
     '// @ts-expect-error Keiyaku has a private constructor',
     'new Keiyaku();',
@@ -178,7 +194,7 @@ test("package root exposes only the ruled library values and declarations", () =
     'type InternalReviewValue = import("@astrosheep/keiyaku-v4").ReviewValue;',
     '// @ts-expect-error legacy DeliverValue alias is not a package-root export',
     'type InternalDeliverValue = import("@astrosheep/keiyaku-v4").DeliverValue;',
-    'void new AuthorityCorruptionError("corrupt"); void new SettingsError("invalid"); void existing; void delivery; void bound; void repo; void taskId; void report; void timeline; void kind; void amendment; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void hook; void selectedHooks; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry; void settlementAction; void settlementLag; void settlementReport;',
+    'void new AuthorityCorruptionError("corrupt"); void new SettingsError("invalid"); void existing; void delivery; void bound; void repo; void taskId; void akuma; void alias; void callResult; void callStatus; void forkResult; void aliasBinding; void aliasStage; void dispatch; void dispatchFailure; void dispatchStage; void integrationFailure; void invalidFork; void report; void timeline; void kind; void amendment; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void hook; void selectedHooks; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry; void settlementAction; void settlementLag; void settlementReport;',
   ].join("\n");
   writeFileSync(join(directory, "consumer.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer.ts"], { cwd: directory, stdio: "ignore" });
@@ -234,7 +250,7 @@ test("built CLI bin keeps its shebang and executes through an installed-style sy
 test("Keiyaku owns contract construction over one pinned Repo capability", async () => {
   const repository = repositoryWithInitialCommit();
   const repo = Repo.at({ path: repository.path });
-  assert.deepEqual(Object.getOwnPropertyNames(Keiyaku).filter((name) => !["length", "name", "prototype"].includes(name)).sort(), ["bind", "list", "observe", "of"]);
+  assert.deepEqual(Object.getOwnPropertyNames(Keiyaku).filter((name) => !["length", "name", "prototype"].includes(name)).sort(), ["bind", "call", "fork", "list", "observe", "of"]);
   assert.deepEqual(Object.getOwnPropertyNames(Delivery).filter((name) => !["length", "name", "prototype"].includes(name)), []);
   assert.deepEqual(Object.getOwnPropertyNames(Repo).filter((name) => !["length", "name", "prototype"].includes(name)), ["at"]);
   assert.deepEqual(Object.getOwnPropertyNames(Repo.prototype).filter((name) => name !== "constructor").sort(), ["currentBranch", "reconcile"]);

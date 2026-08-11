@@ -33,9 +33,9 @@ import {
   parseAkuId,
   pathsForAkuId,
   archetypeName,
+  type AkuId,
   type AkumaPaths,
 } from "./identity.js";
-import type { AkuId } from "./heart/index.js";
 import {
   projectActivityHistory,
   selectActivitySnapshot,

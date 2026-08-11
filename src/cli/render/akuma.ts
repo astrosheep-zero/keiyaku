@@ -3,6 +3,7 @@ import { toolRepr } from "./akuma-tool.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
 import { safeText } from "./terminal.js";
+import type { DispatchStage } from "../../index.js";
 
 type SpineItem = Readonly<{ at?: string; index?: number; label: string; text: string }>;
 
@@ -93,9 +94,10 @@ function omission(status: AkumaStatus): string[] {
     : [`      ⋮ +${status.activity.omitted}`];
 }
 
-function statusText(status: AkumaStatus): string {
+function statusText(status: AkumaStatus, facts: readonly string[] = []): string {
   return [
     ruler([`${mark(status.life)} ${status.id}`]),
+    ...facts,
     ...omission(status),
     ...renderSpine(statusItems(status)),
   ].join("\n");
@@ -154,9 +156,42 @@ function tellText(status: AkumaStatus, receipt: TellReceipt): string {
   return failure === null ? statusText(status) : `${statusText(status)}\n${failure}`;
 }
 
+function dispatchLines(stage: DispatchStage): readonly string[] {
+  if (stage.kind === "none") return [];
+  if (stage.kind === "dispatched") return [`dispatch ${stage.dispatch.contractId}`];
+  const failure = stage.failure;
+  if (failure.kind === "conflict") {
+    return [`dispatch failed conflict ${failure.current.contractId}`];
+  }
+  if (failure.kind === "contention") return ["dispatch failed contention"];
+  return [`dispatch failed ${failure.kind} ${safeText(failure.diagnostic)}`];
+}
+
+function callText(result: Extract<AkumaInvocationResult, { action: "call" }>): string {
+  const called = result.result;
+  const stages = [...dispatchLines(called.dispatch)];
+  if (called.alias.kind === "aliased") stages.push(`alias ${called.alias.alias.alias}`);
+  else if (called.alias.kind === "failed") {
+    stages.push(`alias failed ${called.alias.failure.kind} ${safeText(called.alias.failure.diagnostic)}`);
+  }
+  if (called.observation.kind === "detached") return [called.akuma, ...stages].join("\n");
+  if (called.observation.kind === "failed") {
+    return [
+      called.akuma,
+      ...stages,
+      `wait failed ${called.observation.failure.kind} ${safeText(called.observation.failure.diagnostic)}`,
+    ].join("\n");
+  }
+  const status = called.observation.status;
+  if (status.answer !== undefined || status.failure !== undefined) {
+    return [called.akuma, ...stages, waitText(status)].join("\n");
+  }
+  return statusText(status, stages);
+}
+
 export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationResult): string {
   switch (result.action) {
-    case "call": return result.id;
+    case "call": return callText(result);
     case "status": return statusText(result.status);
     case "wait": return waitText(result.status);
     case "tell": return tellText(result.status, result.receipt);
@@ -171,7 +206,7 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
     case "history": return historyText(command as Extract<ParsedCommand, { command: "history" }>, result);
     case "fork": {
       const receipt = result.receipt;
-      if (receipt.kind === "forked") return receipt.child;
+      if (receipt.kind === "forked") return [receipt.child, ...dispatchLines(receipt.dispatch)].join("\n");
       if (receipt.kind === "provider-cannot-fork") return `${receipt.provider} cannot fork`;
       if (receipt.kind === "unknown-history") return `${receipt.at} has no matching retained answered turn`;
       if (receipt.kind === "fork-failed") return receipt.diagnostic;
@@ -182,6 +217,10 @@ export function renderAkumaText(command: ParsedCommand, result: AkumaInvocationR
 }
 
 export function akumaExitCode(result: AkumaInvocationResult): number {
+  if (result.action === "call"
+    && (result.result.dispatch.kind === "failed"
+      || result.result.alias.kind === "failed"
+      || result.result.observation.kind === "failed")) return 2;
   if (result.action === "kill" && (result.evidence === "unavailable" || result.evidence === "alive-after-sigkill")) return 1;
   if (result.action === "tell" && typeof result.receipt.wake !== "string") return 2;
   if (result.action === "interrupt") {
@@ -189,13 +228,14 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
     if (typeof result.receipt.tell.wake !== "string") return 2;
   }
   if (result.action === "fork") {
-    if (result.receipt.kind === "forked") return 0;
+    if (result.receipt.kind === "forked") return result.receipt.dispatch.kind === "failed" ? 2 : 0;
     return result.receipt.kind === "upstream-forked" ? 2 : 1;
   }
   return 0;
 }
 
 export function akumaJsonValue(command: ParsedCommand, result: AkumaInvocationResult): unknown {
+  if (result.action === "call") return result.result;
   if (result.action === "fork") return result.receipt;
   if (result.action === "status" || result.action === "wait") return result.status;
   if (result.action === "tell") return { receipt: result.receipt, status: result.status };

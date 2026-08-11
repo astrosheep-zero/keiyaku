@@ -101,6 +101,13 @@ the same collision rule. Readers, folds, and gates compare the whole
 `@`; no slash denotes a context-resolved movable reference. Neither form is
 persisted.
 
+An Akuma alias is the input-only selector `@<name>`, where `name` matches
+`[a-z][a-z0-9-]{0,63}`. `src/identity/selector.ts` is the sole parser and
+constructor for this grammar. The complete spelling, including `@`, is the
+selector value. Alias persistence and movement are owned by
+[alias.md](alias.md); selector expansion is a Library concern and never changes
+the complete `aku/...` identity stored by an owner.
+
 Actor is optional testimony, not lifecycle identity or gate input. `ActorId` is
 an opaque nonblank brand. A library write records it only when the caller
 supplies it; its absence is legal. The CLI selects an explicit nonblank

@@ -3,9 +3,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { identityCoordinate, identitySegments } from "../identity/coordinates.js";
 import { normalizeIdentityStem } from "../identity/normalize.js";
-import type { AkuId } from "./heart/facts.js";
+declare const AKU_ID: unique symbol;
 
-export type { AkuId };
+export type AkuId = string & { readonly [AKU_ID]: true };
 
 const HEX8 = /^[0-9a-f]{8}$/u;
 

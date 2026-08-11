@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { AkuId } from "../identity.js";
 import type {
-  AkuId,
   AkumaOrigin,
   BodyEnd,
   BodyFact,

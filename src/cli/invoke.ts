@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { gatesFrom, Keiyaku, Repo, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
+import { gatesFrom, Keiyaku, NoGitWorldError, Repo, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
 import { kanshi, selectKanshi } from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import { resultFromMutationCall } from "./accepted.js";
@@ -232,6 +232,35 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
   }
 }
 
+async function invokeAkumaCommand(
+  parsed: ParsedAkumaCommand,
+  path: string,
+  configuration: Settings,
+  edge: InvocationEdge,
+): Promise<AkumaInvocationResult> {
+  if (parsed.command === "call" && parsed.contract !== undefined) {
+    const selected = contractFromInput(repoAt(path), parsed.contract);
+    return await invokeAkuma(parsed, {
+      path,
+      settings: configuration,
+      contract: selected.contract,
+      readStdin: edge.readStdin,
+    });
+  }
+  if (parsed.command === "fork") {
+    let repo: Repo | undefined;
+    try { repo = repoAt(path); }
+    catch (error) { if (!(error instanceof NoGitWorldError)) throw error; }
+    return await invokeAkuma(parsed, {
+      path,
+      settings: configuration,
+      ...(repo === undefined ? {} : { repo }),
+      readStdin: edge.readStdin,
+    });
+  }
+  return await invokeAkuma(parsed, { path, settings: configuration, readStdin: edge.readStdin });
+}
+
 async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRuntime): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
   const coordinate = invocation.cwd ?? runtime.cwd;
   const edge: InvocationEdge = {
@@ -248,7 +277,8 @@ async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRunt
   }
   if (isParsedAkumaCommand(parsed)) {
     const path = resolve(coordinate ?? ".");
-    return await invokeAkuma(parsed, { path, settings: settingsAt(path, edge.environment), readStdin: edge.readStdin });
+    const configuration = settingsAt(path, edge.environment);
+    return await invokeAkumaCommand(parsed, path, configuration, edge);
   }
   if (parsed.command === "status") {
     if (parsed.akuma === true) {

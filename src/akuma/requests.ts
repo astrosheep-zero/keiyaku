@@ -19,7 +19,6 @@ import {
   reserveRequest,
   serveRequest,
   voidRequest,
-  type AkuId,
   type RequestFact,
   type RequestRecipe,
   type Soul,
@@ -29,6 +28,7 @@ import {
   pathsForAkuId,
   archetypeName,
   worldRootForAkumaPaths,
+  type AkuId,
   type AkumaPaths,
 } from "./identity.js";
 import { BIRTH_TIMEOUT_MS, publishAkuma } from "./publication.js";

@@ -13,14 +13,33 @@ import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { akumaExitCode, akumaJsonValue, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 
 test("Akuma CLI parses root verbs without the removed namespace", () => {
-  assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "--cwd", "/work", "-"]), {
+  assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "--workdir", "/work", "-"]), {
     cwd: "/world",
-    command: { command: "call", archetype: "claude", cwd: "/work", output: "text" },
+    command: { command: "call", archetype: "claude", workdir: "/work", mode: "wait", output: "text" },
   });
-  assert.throws(
-    () => parseArgv(["call", "claude", "--contract", "kei/delivery", "-"]),
-    CliUsageError,
-  );
+  assert.deepEqual(parseArgv(["call", "claude", "--contract", "kei/delivery", "--alias", "@review", "-d", "-"]), {
+    command: {
+      command: "call",
+      archetype: "claude",
+      contract: "kei/delivery",
+      alias: "@review",
+      mode: "detach",
+      output: "text",
+    },
+  });
+  assert.deepEqual(parseArgv(["call", "claude", "--wait", "--timeout", "10m", "--cwd", "/world", "-"]), {
+    cwd: "/world",
+    command: { command: "call", archetype: "claude", mode: "wait", timeoutMs: 600_000, output: "text" },
+  });
+  assert.deepEqual(parseArgv(["call", "claude", "--detach", "-C", "/world", "-"]), {
+    cwd: "/world",
+    command: { command: "call", archetype: "claude", mode: "detach", output: "text" },
+  });
+  assert.throws(() => parseArgv(["-C", "/one", "call", "claude", "--cwd", "/two", "-"]), /may appear only once/u);
+  assert.throws(() => parseArgv(["call", "claude", "-", "--cwd", "/world"]), /stdin marker '-' must be the final argument/u);
+  assert.throws(() => parseArgv(["call", "claude", "--wait", "--detach", "-"]), /mutually exclusive/u);
+  assert.throws(() => parseArgv(["call", "claude", "--timeout", "5m", "-d", "-"]), /mutually exclusive/u);
+  assert.throws(() => parseArgv(["call", "claude", "--alias", "review", "-"]), /Akuma alias must match/u);
   assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--json", "-"]), {
     command: { command: "tell", id: "aku/claude/1234abcd", output: "json" },
   });
@@ -109,18 +128,117 @@ test("Akuma follow remains outside the unsettled CLI vocabulary", () => {
   assert.throws(() => parseArgv(["follow", "aku/claude/1234abcd"]), CliUsageError);
 });
 
+test("akuma call renders optional integration stages and maps partial success", () => {
+  const command = parseArgv(["call", "worker", "-"]).command;
+  const akuma = "aku/worker/1234abcd" as import("../src/index.js").AkuId;
+  const plain = {
+    kind: "akuma" as const,
+    action: "call" as const,
+    result: {
+      kind: "called" as const,
+      akuma,
+      dispatch: { kind: "none" as const },
+      alias: { kind: "none" as const },
+      observation: { kind: "detached" as const },
+    },
+  };
+  assert.equal(renderAkumaText(command, plain), akuma);
+  assert.deepEqual(akumaJsonValue(command, plain), plain.result);
+  assert.equal(akumaExitCode(plain), 0);
+
+  const integrated = {
+    ...plain,
+    result: {
+      ...plain.result,
+      dispatch: {
+        kind: "dispatched" as const,
+        dispatch: { akuId: akuma, contractId: "kei/work" as import("../src/index.js").ContractId, dispatchedAt: "2026-08-11T00:00:00.000Z" },
+      },
+      alias: {
+        kind: "aliased" as const,
+        alias: { alias: "@worker" as import("../src/index.js").AkumaAlias, akuId: akuma },
+        previous: null,
+      },
+    },
+  };
+  assert.equal(renderAkumaText(command, integrated), `${akuma}\ndispatch kei/work\nalias @worker`);
+  assert.equal(akumaExitCode(integrated), 0);
+
+  const partial = {
+    ...plain,
+    result: {
+      ...plain.result,
+      dispatch: { kind: "failed" as const, failure: { kind: "contention" as const } },
+      alias: { kind: "skipped" as const, reason: "dispatch-failed" as const },
+    },
+  };
+  assert.equal(renderAkumaText(command, partial), `${akuma}\ndispatch failed contention`);
+  assert.equal(akumaExitCode(partial), 2);
+
+  const answered = {
+    ...plain,
+    result: {
+      ...plain.result,
+      observation: {
+        kind: "observed" as const,
+        status: {
+          id: akuma,
+          archetype: "worker",
+          life: "asleep" as const,
+          collar: { kind: "gone" as const, end: "exited" as const },
+          confinement: { kind: "unconfined" as const },
+          pending: [],
+          answer: "finished",
+          activity: { rows: [], pendingTells: [], omitted: 0, lowestRetained: null, highest: null },
+        },
+      },
+    },
+  };
+  assert.equal(renderAkumaText(command, answered), `${akuma}\nfinished`);
+
+  const observationFailed = {
+    ...plain,
+    result: {
+      ...plain.result,
+      observation: {
+        kind: "failed" as const,
+        failure: { kind: "infrastructure" as const, diagnostic: "heart unavailable" },
+      },
+    },
+  };
+  assert.equal(renderAkumaText(command, observationFailed), `${akuma}\nwait failed infrastructure heart unavailable`);
+  assert.equal(akumaExitCode(observationFailed), 2);
+});
+
 test("akuma fork renders the public receipt and maps every exit class", () => {
   const command = parseArgv(["fork", "aku/claude/1234abcd", "--at", "history-1"]).command;
-  const result = (receipt: import("../src/akuma/index.js").ForkReceipt) => ({
+  const result = (receipt: import("../src/index.js").ForkResult) => ({
     kind: "akuma" as const,
     action: "fork" as const,
     akuma: "aku/claude/1234abcd",
     receipt,
   });
-  const forked = result({ kind: "forked", child: "aku/claude/87654321" as import("../src/akuma/index.js").AkuId });
+  const forked = result({
+    kind: "forked",
+    child: "aku/claude/87654321" as import("../src/akuma/index.js").AkuId,
+    dispatch: { kind: "none" },
+  });
   assert.equal(renderAkumaText(command, forked), "aku/claude/87654321");
   assert.equal(akumaExitCode(forked), 0);
   assert.deepEqual(akumaJsonValue(command, forked), forked.receipt);
+  const dispatched = result({
+    kind: "forked",
+    child: "aku/claude/87654321" as import("../src/akuma/index.js").AkuId,
+    dispatch: {
+      kind: "dispatched",
+      dispatch: {
+        akuId: "aku/claude/87654321" as import("../src/akuma/index.js").AkuId,
+        contractId: "kei/work" as import("../src/index.js").ContractId,
+        dispatchedAt: "2026-08-11T00:00:00.000Z",
+      },
+    },
+  });
+  assert.equal(renderAkumaText(command, dispatched), "aku/claude/87654321\ndispatch kei/work");
 
   const incapable = result({ kind: "provider-cannot-fork", provider: "claude" });
   assert.equal(renderAkumaText(command, incapable), "claude cannot fork");

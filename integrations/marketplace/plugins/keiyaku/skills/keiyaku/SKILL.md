@@ -17,18 +17,18 @@ read `<command> --help` before using flags.
 ## Quick Start
 
 ```bash
-keiyaku task add "title"
-keiyaku task start <task-id>
-keiyaku bind -
-keiyaku status
-keiyaku deliver [<contract>|@<contract>]
-keiyaku review [<contract>|@<contract>] --satisfied
+keiyaku -C <repo> task add "title"
+keiyaku -C <repo> task start <task-id>
+keiyaku -C <repo> bind -
+keiyaku -C <repo> status
+keiyaku -C <repo> deliver [<contract>|@<contract>]
+keiyaku -C <repo> review [<contract>|@<contract>] --satisfied
 ```
 
 ```bash
-keiyaku call <akuma> [--cwd <path>] [--json] -
-keiyaku wait <aku/...>
-keiyaku tell <aku/...> -
+keiyaku -C <repo> call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -
+keiyaku -C <repo> wait <aku/...>
+keiyaku -C <repo> tell <aku/...> -
 ```
 
 Use text by default; add `--json` when a script needs structured output.

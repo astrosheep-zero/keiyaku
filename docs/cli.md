@@ -7,25 +7,28 @@ Verification execution, or reconciliation semantics.
 
 ## Invocation And Scope
 
-The canonical invocation is:
+The canonical spelling is:
 
 ```text
 keiyaku [-C <path>] <command> [<contract>|@<contract>] [--flag ...] [-]
 ```
 
-`-C <path>` is a global invocation prefix and is never persisted. Contract
-commands supply it to the one `Repo.at` construction point. Task commands use
-it as their task world; Akuma and Settings commands resolve it once as their
-absolute exact world without Git-root climbing. An omitted `-C` uses the
-working-directory coordinate. A Contract invocation constructs exactly one
+`-C <path>` and `--cwd <path>` are two spellings of the one global invocation
+cwd and are never persisted. The canonical examples use `-C`. Either spelling
+may appear before or after the command, but the two spellings may not be
+combined or repeated in one invocation. An omitted value uses the process cwd.
+Contract commands supply the invocation cwd to the one `Repo.at` construction
+point. Task commands use it as their task world; Akuma and Settings commands
+currently resolve it once as their absolute exact world without Git-root
+climbing. A Contract invocation constructs exactly one
 `Repo`. It derives selector reads, contract handles and verbs, and reconciliation
 from that value: `Keiyaku.list({ repo })`, `repo.root`, `Keiyaku.of({ repo, id })`,
 `Keiyaku.bind({ repo, ... })`, and the selected public reconcile method. It
 uses only public `Repo`, `Keiyaku`, and `Delivery` values. Neither Keiyaku
 construction call resolves a path or reads the working directory again.
 
-The parser performs argv lexing and syntax only. It recognizes command words,
-the global prefix, an optional contract positional, flags, and a final `-`; it
+The parser performs argv lexing and syntax only. It extracts the one global cwd,
+then recognizes command words, an optional contract positional, flags, and a final `-`; it
 checks arity, missing values, duplicates, unknown flags, and mutual exclusion.
 It emits pure parsed data without reading Git, folding state, resolving actors,
 or judging a command.
@@ -53,7 +56,8 @@ The command vocabulary is:
 | `settings` | Constructs and observes the shared read-only Settings resource. |
 | `install` | Installs the bundled Keiyaku skills through one or more native harness installers. |
 | `task ...` | Calls the separate `./task` public surface described below. |
-| `call`, `wait`, `tell`, `interrupt`, `history`, `fork`, `kill` | Call the corresponding separate `./akuma` capability as root verbs. |
+| `call`, `fork` | Call the package-root Akuma facet so Dispatch and Alias integration is not reimplemented at the edge. |
+| `wait`, `tell`, `interrupt`, `history`, `kill` | Call the corresponding separate `./akuma` capability as root verbs. |
 
 `bind` accepts no contract positional. Commands addressing an existing contract
 accept a full `kei/<contract-segment>` identity or an active short
@@ -81,7 +85,7 @@ reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
 install <codex|claude|opencode|pi> [--json]
        install --all [--json]
-call <akuma> [--cwd <path>] [--json] -
+call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -
 wait <aku/...> [--timeout <duration>] [--json]
 tell <aku/...> [--json] -
 interrupt <aku/...> [--json] -
@@ -179,8 +183,20 @@ as the public body input. The `call` positional is the Archetype name and names
 Settings-backed provider interpretation. When no same-name Settings entry
 exists, the built-in fallback execution names are `claude` and
 `codex-app-server`. Missing or malformed configuration prints the exact path
-searched. `--cwd` selects the immutable summon seat and is resolved to an
-absolute path at the public boundary. `wait`, `tell`, `interrupt`, `history`,
+searched. `--contract` accepts one complete `kei/...` identity, constructs its
+handle from the invocation Repo, and asks the package-root call to publish
+Dispatch after birth. It is not a lifecycle gate and does not accept an
+omitted or `@` Contract selector. `--alias` accepts the sole `@name` grammar and
+asks that same call to move the world-local Alias after any Dispatch succeeds.
+Both flags are optional. `--workdir` selects the immutable summon seat and is
+resolved to an absolute path against the invocation cwd at the CLI boundary;
+an absolute value remains unchanged, while omission uses the
+invocation cwd. Call waits on the born Akuma by default and returns the public
+status carrier when it stops running or after five minutes. `--wait` explicitly
+selects that default mode, while `--timeout` replaces the five-minute duration.
+`-d` and `--detach` are identical and return after birth plus Dispatch and Alias
+integration. Detach is mutually exclusive with `--wait` and `--timeout`.
+`wait`, `tell`, `interrupt`, `history`,
 `fork`, and `kill` require a complete
 `aku/<archetype>/<hex8>`. `status <aku/...>` addresses the same exact handle.
 Bare `status` already exposes the Akuma fleet through Kanshi; there is no
@@ -199,6 +215,9 @@ positive safe integers, and are mutually exclusive with each other and
 `--last`. `--last` writes the complete answer from the last answered turn,
 skipping later failed turns; it does not read activity or append framing.
 `fork` requires one nonblank `--at` history id and has no stdin body.
+The adapter supplies the invocation Repo to package-root fork when `-C` is
+inside a Git world and supplies no Repo outside Git. The facade alone reads and
+propagates a parent Dispatch; CLI never reads Dispatch or Alias files.
 
 ## Akuma Text Surface
 
@@ -537,14 +556,28 @@ refusals exit `1`. `upstream-forked` renders both
 the public receipt verbatim. Syntax uses exit `1`; corruption and infrastructure
 exceptions use exit `3`.
 
+A detached called result renders the complete AkuId first. A waited result
+renders that identity once together with the same answer, failure, or running
+snapshot projection used by `wait`. A completed Dispatch adds
+`dispatch <ContractId>` and a completed Alias adds `alias <@name>`; absent stages
+add no line. A failed Dispatch, Alias, or post-birth observation stage renders
+its typed diagnostic and exits `2`, because the Akuma already exists. A skipped
+Alias adds no second failure line. JSON serializes the complete call result,
+including its closed observation stage. Fork keeps its existing receipt text; a forked child with a
+completed Dispatch adds the same dispatch line, while a forked child whose
+Dispatch failed renders that failure and exits `2`. JSON serializes the same
+package-root stage values and never exposes a private Repo, Git snapshot, Alias
+file, or Akuma handle.
+
 ## Product Boundary
 
 The CLI package entry is a shebang-only executable with no exports. Every
 build recreates it with POSIX execute permission before packaging or linking. Parser,
 usage errors, renderers, and `main` are not package API. The CLI adapts the
-package-root Contract surface and the separate `./task` and `./akuma` product
-surfaces; it does not define their library behavior or obtain a raw scope,
-token, registry, or orchestrator.
+package-root facade and the separate `./task` and `./akuma` product surfaces;
+it does not define their library behavior or obtain a raw scope, token,
+registry, or orchestrator. Package-root call and fork are not reimplemented
+through direct `Akuma.at` calls at this edge.
 
 Contract commands accept no task coordinate and never interpret or perform a
 Task mutation. Their package-root operations may return the post-admission

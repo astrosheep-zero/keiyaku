@@ -33,6 +33,17 @@ test("bind accepts boolean --here and preserves -C outside the contract command"
   });
 });
 
+test("global cwd has two spellings and is independent of command position", () => {
+  assert.deepEqual(parseArgv(["task", "ls", "-C", "/repo/caller"]), {
+    cwd: "/repo/caller",
+    command: { command: "task", action: "ls", output: "text", positionals: [], flags: {} },
+  });
+  assert.deepEqual(parseArgv(["settings", "--cwd", "/repo/caller"]), {
+    cwd: "/repo/caller",
+    command: { command: "settings", output: "text" },
+  });
+});
+
 test("bind accepts one Task association at the Contract boundary", () => {
   assert.deepEqual(parseArgv(["bind", "--task", "task/example", "-"]), {
     command: {

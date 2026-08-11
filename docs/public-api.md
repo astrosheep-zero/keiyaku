@@ -210,6 +210,121 @@ The aggregate calls the same core judgment as claimed admission. A stale prior
 attestation and a never-attested gate remain distinct. Downstream boards and
 renderers may present these discriminants but never re-evaluate them.
 
+## Akuma Creation Facet
+
+`library/akuma-creation.ts` is the package-root facet for operations that
+produce a new AkuId. It composes Akuma creation with the concrete Dispatch and
+Alias owners without moving any of those authorities into Library. Its public
+operations are:
+
+```ts
+type CallInput = Readonly<{
+  path: string
+  archetype: string
+  body: string
+  cwd?: string
+  mode?: "wait" | "detach"
+  timeoutMs?: number
+  settings?: Settings
+  contract?: Keiyaku
+  alias?: AkumaAlias
+}>
+
+type ForkInput = Readonly<{
+  path: string
+  akuma: AkuId
+  at: string
+  settings?: Settings
+  repo?: Repo
+}>
+
+Keiyaku.call(input: CallInput): Promise<CallResult>
+Keiyaku.fork(input: ForkInput): Promise<ForkResult>
+```
+
+`path` is the exact Akuma world and is normalized once before construction; it
+does not climb to a Git root. `cwd` is the optional summon cwd and defaults to
+that world. `mode` defaults to `"wait"`; wait mode observes the born handle
+until it stops running or `timeoutMs`, which defaults to 300,000 milliseconds.
+Detach mode returns after the post-birth integration stages and rejects a
+supplied `timeoutMs` as contradictory caller input. `archetype` remains the TypeScript input name for
+the Akuma-owned concept even though the CLI presents its positional as
+`<akuma>`. `contract`, when present, must be a genuine package-root Keiyaku
+handle and supplies both the complete ContractId and its already pinned Git
+world. `repo` on fork is optional because an independent Akuma world may have
+no Git world; when present it selects the one Dispatch authority to inspect and
+propagate. `akuma` is one complete `AkuId` and is validated by the Akuma
+identity owner at runtime. Neither operation invents a repository coordinate
+or makes `Repo` an Akuma capability.
+
+All caller-shaped values, including an optional Alias, are validated before
+Akuma birth or native fork. Akuma owns call admission, birth, and native fork.
+After a successful call, Library publishes Dispatch only when `contract` is
+present, then moves Alias only when requested and Dispatch did not fail. A
+contract-free call therefore remains a complete ordinary call and writes no
+Dispatch. After a successful fork, Library reads the parent's Dispatch from
+the supplied `repo`; when one exists it publishes the identical ContractId for
+the child. Fork never inherits Alias.
+
+```ts
+type DispatchStage =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{ kind: "dispatched"; dispatch: Dispatch }>
+  | Readonly<{
+      kind: "failed"
+      failure: DispatchFailure | IntegrationFailure
+    }>
+
+type IntegrationFailure = Readonly<{
+  kind: "authority-corruption" | "infrastructure"
+  diagnostic: string
+}>
+
+type AliasStage =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{ kind: "aliased"; alias: AliasBinding; previous: AkuId | null }>
+  | Readonly<{ kind: "skipped"; reason: "dispatch-failed" }>
+  | Readonly<{ kind: "failed"; failure: IntegrationFailure }>
+
+type CallObservation =
+  | Readonly<{ kind: "detached" }>
+  | Readonly<{ kind: "observed"; status: AkumaStatus }>
+  | Readonly<{ kind: "failed"; failure: IntegrationFailure }>
+
+type CallResult = Readonly<{
+  kind: "called"
+  akuma: AkuId
+  dispatch: DispatchStage
+  alias: AliasStage
+  observation: CallObservation
+}>
+
+type ForkResult =
+  | Readonly<{ kind: "forked"; child: AkuId; dispatch: DispatchStage }>
+  | Readonly<{ kind: "provider-cannot-fork"; provider: string }>
+  | Readonly<{ kind: "unknown-history"; at: string }>
+  | Readonly<{ kind: "fork-failed"; diagnostic: string }>
+  | Readonly<{
+      kind: "upstream-forked"
+      childSession: ResumeCoordinate
+      diagnostic: string
+    }>
+```
+
+The top-level Akuma result reports the irreversible Akuma fact first. Once an
+Akuma was born or forked, a later Dispatch, Alias, or call observation failure stays inside its
+closed stage and never becomes a naked rejection or rollback. A Dispatch
+failure prevents a requested Alias move and produces `skipped`; an Alias
+failure preserves the completed Dispatch. Observation still runs after either
+integration stage because those stages do not stop the born Akuma. A call
+failure before birth and a
+native fork refusal retain the Akuma-owned error or receipt unchanged. Library
+does not retry an owner result, store a receipt, or add another association
+decision. `IntegrationFailure` exists only after an irreversible Akuma result:
+it preserves an owner exception's category and verbatim diagnostic so the
+already born child remains visible. The same exception before birth or native
+fork retains the ordinary package-root exception behavior.
+
 ## Contract Operations
 
 ```ts
@@ -581,4 +696,7 @@ package-root values nor observes, validates, writes, or folds Contract facts.
 `./akuma` is a separate product subpath and imports no Contract or Git
 domain. Its identity, construction, exported values, handle capabilities, and
 result behavior are owned only by [akuma.md](akuma.md); this package-root
-chapter does not duplicate that law.
+chapter does not duplicate that law. Its `Akuma.call` and handle `fork` remain
+the pure Contract-free Akuma capabilities. The package-root Akuma facet above
+is the only higher-level composition and does not create a second Akuma
+mechanism.

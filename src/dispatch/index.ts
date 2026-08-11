@@ -1,0 +1,200 @@
+import { createHash } from "node:crypto";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import { contractId, type ContractId } from "../core/facts/types.js";
+import { parseAkuId, type AkuId } from "../akuma/identity.js";
+import {
+  GIT_FORMAT_BYTES,
+  GIT_FORMAT_PATH,
+  GIT_REF,
+  readBlob,
+  readGit,
+  readGitPaths,
+  updateGitTree,
+  updateRefsAtomically,
+  writeBlob,
+  writeCommit,
+  type GitRepository,
+  type GitSnapshot,
+  type TreeChange,
+} from "../git/repository.js";
+
+const DISPATCH_ROOT = "dispatch";
+const DISPATCH_PREFIX = `${DISPATCH_ROOT}/`;
+const DISPATCH_SUFFIX = ".json";
+const MAX_ATTEMPTS = 3;
+
+export type Dispatch = Readonly<{
+  akuId: AkuId;
+  contractId: ContractId;
+  dispatchedAt: string;
+}>;
+
+export type DispatchFailure =
+  | Readonly<{ kind: "conflict"; current: Dispatch }>
+  | Readonly<{ kind: "contention" }>
+  | Readonly<{ kind: "publication-failed"; diagnostic: string }>;
+
+export type DispatchPublication =
+  | Readonly<{ kind: "dispatched"; dispatch: Dispatch }>
+  | Readonly<{ kind: "failed"; failure: DispatchFailure }>;
+
+function pathFor(akuId: AkuId): string {
+  return `${DISPATCH_PREFIX}${createHash("sha256").update(akuId).digest("hex")}${DISPATCH_SUFFIX}`;
+}
+
+function bytesFor(dispatch: Dispatch): Uint8Array {
+  return Buffer.from(`${JSON.stringify(dispatch)}\n`);
+}
+
+function corruption(message: string, cause?: unknown): never {
+  throw new AuthorityCorruptionError(message, cause === undefined ? {} : { cause });
+}
+
+function decode(path: string, bytes: Uint8Array): Dispatch {
+  let value: unknown;
+  try {
+    const text = Buffer.from(bytes).toString("utf8");
+    if (!text.endsWith("\n") || text.slice(0, -1).includes("\n")) {
+      corruption(`Dispatch is not one canonical JSON line: ${path}`);
+    }
+    value = JSON.parse(text);
+  } catch (error) {
+    if (error instanceof AuthorityCorruptionError) throw error;
+    return corruption(`invalid Dispatch JSON: ${path}`, error);
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    corruption(`Dispatch must be an object: ${path}`);
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length !== 3 || keys.some((key) => !["akuId", "contractId", "dispatchedAt"].includes(key))) {
+    corruption(`Dispatch has invalid fields: ${path}`);
+  }
+  if (typeof record.akuId !== "string" || typeof record.contractId !== "string"
+    || typeof record.dispatchedAt !== "string") {
+    corruption(`Dispatch has invalid values: ${path}`);
+  }
+  let akuId: AkuId;
+  let owner: ContractId;
+  try {
+    akuId = parseAkuId(record.akuId).id;
+    owner = contractId(record.contractId);
+  } catch (error) {
+    return corruption(`Dispatch identity is invalid: ${path}`, error);
+  }
+  const timestamp = new Date(record.dispatchedAt);
+  if (!Number.isFinite(timestamp.getTime()) || timestamp.toISOString() !== record.dispatchedAt) {
+    corruption(`Dispatch timestamp is invalid: ${path}`);
+  }
+  const dispatch: Dispatch = { akuId, contractId: owner, dispatchedAt: record.dispatchedAt };
+  if (pathFor(akuId) !== path) corruption(`Dispatch path does not match akuId: ${path}`);
+  if (!Buffer.from(bytesFor(dispatch)).equals(Buffer.from(bytes))) {
+    corruption(`Dispatch bytes are not canonical: ${path}`);
+  }
+  return dispatch;
+}
+
+function dispatchFromSnapshot(
+  repository: GitRepository,
+  snapshot: GitSnapshot,
+  akuId: AkuId,
+): Dispatch | null {
+  const path = pathFor(akuId);
+  const entry = snapshot.paths.get(path);
+  if (entry === undefined) return null;
+  if (entry.type !== "blob") corruption(`Dispatch path is not a blob: ${path}`);
+  return decode(path, readBlob(repository, entry.oid));
+}
+
+export function readDispatch(repository: GitRepository, value: AkuId): Dispatch | null {
+  const akuId = parseAkuId(value).id;
+  const path = pathFor(akuId);
+  return dispatchFromSnapshot(repository, readGitPaths(repository, [path]), akuId);
+}
+
+export function readDispatches(repository: GitRepository): readonly Dispatch[] {
+  const snapshot = readGit(repository);
+  const dispatches: Dispatch[] = [];
+  const seen = new Set<AkuId>();
+  for (const [path, entry] of snapshot.paths) {
+    if (path === DISPATCH_ROOT) corruption(`Dispatch authority root is not a tree: ${path}`);
+    if (!path.startsWith(DISPATCH_PREFIX)) continue;
+    if (!path.endsWith(DISPATCH_SUFFIX)) corruption(`unexpected Dispatch authority path: ${path}`);
+    if (entry.type !== "blob") corruption(`Dispatch path is not a blob: ${path}`);
+    const dispatch = decode(path, readBlob(repository, entry.oid));
+    if (seen.has(dispatch.akuId)) corruption(`duplicate Dispatch identity: ${dispatch.akuId}`);
+    seen.add(dispatch.akuId);
+    dispatches.push(dispatch);
+  }
+  return dispatches.sort((left, right) => Buffer.compare(Buffer.from(left.akuId), Buffer.from(right.akuId)));
+}
+
+function observedPublication(
+  repository: GitRepository,
+  akuId: AkuId,
+  owner: ContractId,
+): DispatchPublication | null {
+  const current = readDispatch(repository, akuId);
+  if (current === null) return null;
+  return current.contractId === owner
+    ? { kind: "dispatched", dispatch: current }
+    : { kind: "failed", failure: { kind: "conflict", current } };
+}
+
+function diagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function publishDispatch(input: Readonly<{
+  repository: GitRepository;
+  akuId: AkuId;
+  contractId: ContractId;
+}>): DispatchPublication {
+  const akuId = parseAkuId(input.akuId).id;
+  const owner = contractId(input.contractId);
+  const intended: Dispatch = { akuId, contractId: owner, dispatchedAt: new Date().toISOString() };
+  const path = pathFor(akuId);
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const snapshot = readGitPaths(input.repository, [path]);
+    const current = dispatchFromSnapshot(input.repository, snapshot, akuId);
+    if (current !== null) {
+      return current.contractId === owner
+        ? { kind: "dispatched", dispatch: current }
+        : { kind: "failed", failure: { kind: "conflict", current } };
+    }
+
+    const changes = new Map<string, TreeChange>();
+    if (snapshot.commit === null) {
+      changes.set(GIT_FORMAT_PATH, { oid: writeBlob(input.repository, GIT_FORMAT_BYTES) });
+    }
+    changes.set(path, { oid: writeBlob(input.repository, bytesFor(intended)) });
+    const tree = updateGitTree(input.repository, snapshot.tree, changes);
+    const commit = writeCommit({
+      repository: input.repository,
+      tree,
+      parent: snapshot.commit,
+      message: `dispatch ${akuId}`,
+      at: intended.dispatchedAt,
+    });
+    const publication = updateRefsAtomically(input.repository, [{
+      ref: GIT_REF,
+      newOid: commit,
+      expectedOid: snapshot.commit,
+    }]);
+    if (publication.kind === "published") return { kind: "dispatched", dispatch: intended };
+
+    const observed = observedPublication(input.repository, akuId, owner);
+    if (observed !== null) return observed;
+    if (publication.kind === "non-published") {
+      const fresh = readGitPaths(input.repository, [path]);
+      if (fresh.commit === snapshot.commit) {
+        return {
+          kind: "failed",
+          failure: { kind: "publication-failed", diagnostic: diagnostic(publication.error) },
+        };
+      }
+    }
+  }
+  return { kind: "failed", failure: { kind: "contention" } };
+}

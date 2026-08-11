@@ -1,10 +1,20 @@
 import { CliUsageError, usageLine } from "../usage.js";
+import { parseAkumaAlias, type AkumaAlias } from "../../identity/selector.js";
+import { parseAkuId, type AkuId } from "../../akuma/identity.js";
 
 type Output = Readonly<{ output: "text" | "json" }>;
-type Addressed = Readonly<{ id: string }>;
+type Addressed = Readonly<{ id: AkuId }>;
 
 export type ParsedAkumaCommand = Output & (
-  | Readonly<{ command: "call"; archetype: string; cwd?: string }>
+  | Readonly<{
+      command: "call";
+      archetype: string;
+      workdir?: string;
+      contract?: string;
+      alias?: AkumaAlias;
+      mode: "wait" | "detach";
+      timeoutMs?: number;
+    }>
   | (Readonly<{ command: "kill" }> & Addressed)
   | (Readonly<{ command: "wait"; timeoutMs?: number }> & Addressed)
   | (Readonly<{ command: "tell" | "interrupt" }> & Addressed)
@@ -26,9 +36,17 @@ const AKUMA_COMMAND_SPECS = {
   call: {
     arity: 1,
     stdin: true,
-    flags: { cwd: "value", json: "boolean" },
-    usage: "call <akuma> [--cwd <path>] [--json] -",
-    purpose: "Summon an Akuma from an Archetype and stdin body.",
+    flags: {
+      contract: "value",
+      alias: "value",
+      workdir: "value",
+      wait: "boolean",
+      timeout: "value",
+      detach: "boolean",
+      json: "boolean",
+    },
+    usage: "call <akuma> [--contract <kei/...>] [--alias @name] [--workdir <path>] [--wait [--timeout <duration>] | -d | --detach] [--json] -",
+    purpose: "Call an Akuma from an Archetype and stdin body.",
   },
   wait: {
     arity: 1,
@@ -121,6 +139,10 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
     if (token === "-") {
       if (stdin || index !== argv.length - 1 || !spec.stdin) fail(`stdin marker '-' is not valid for ${action}`);
       stdin = true;
+    } else if (token === "-d") {
+      if (action !== "call") fail(`option ${token} is not valid for ${action}`);
+      if (flags.detach !== undefined) fail("duplicate option: --detach");
+      flags.detach = true;
     } else if (!token.startsWith("--")) positionals.push(token);
     else {
       const name = token.slice(2);
@@ -130,7 +152,9 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
       if (kind === "boolean") flags[name] = true;
       else {
         const value = argv[index + 1];
-        if (value === undefined || value === "-" || value.startsWith("--")) fail(`${token} requires a value`);
+        if (value === undefined || value === "-" || value === "-d" || value.startsWith("--")) {
+          fail(`${token} requires a value`);
+        }
         flags[name] = value;
         index += 1;
       }
@@ -148,11 +172,14 @@ function positiveIndex(raw: FlagValue, option: string, fail: (message: string) =
 
 function parseAddressed(
   action: Exclude<AkumaAction, "call">,
-  id: string,
+  rawId: string,
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
   fail: (message: string) => never,
 ): ParsedAkumaCommand {
+  let id: AkuId;
+  try { id = parseAkuId(rawId).id; }
+  catch (error) { fail(error instanceof Error ? error.message : "invalid Akuma identity"); }
   if (action === "tell" || action === "interrupt" || action === "kill") {
     return { command: action, id, output };
   }
@@ -180,6 +207,33 @@ function parseAddressed(
   return { command: action, id, at, output };
 }
 
+function parseCall(
+  flags: Readonly<Record<string, FlagValue>>,
+  positionals: readonly string[],
+  output: "text" | "json",
+  fail: (message: string) => never,
+): Extract<ParsedAkumaCommand, { command: "call" }> {
+  let alias: AkumaAlias | undefined;
+  if (flags.alias !== undefined) {
+    try { alias = parseAkumaAlias(stringFlag(flags.alias, "--alias requires @name", fail)); }
+    catch (error) { fail(error instanceof Error ? error.message : "invalid Akuma alias"); }
+  }
+  if (flags.detach === true && flags.wait === true) fail("call --wait and --detach are mutually exclusive");
+  if (flags.detach === true && flags.timeout !== undefined) fail("call --timeout and --detach are mutually exclusive");
+  const mode = flags.detach === true ? "detach" as const : "wait" as const;
+  const timeoutMs = flags.timeout === undefined ? undefined : parseDuration(flags.timeout, fail);
+  return {
+    command: "call",
+    archetype: positionals[0]!,
+    ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
+    ...(alias === undefined ? {} : { alias }),
+    ...(typeof flags.workdir === "string" ? { workdir: flags.workdir } : {}),
+    mode,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    output,
+  };
+}
+
 export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   const candidate = argv[0];
   if (!isAkumaAction(candidate)) throw new CliUsageError(`unknown command: ${candidate ?? ""}`);
@@ -190,13 +244,6 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   if (positionals.length !== spec.arity) fail(`${action} has invalid positional arguments`);
   if (stdin !== spec.stdin) fail(`${action} ${spec.stdin ? "requires" : "reads no"} stdin`);
   const output = flags.json === true ? "json" as const : "text" as const;
-  if (action === "call") {
-    return {
-      command: action,
-      archetype: positionals[0]!,
-      ...(typeof flags.cwd === "string" ? { cwd: flags.cwd } : {}),
-      output,
-    };
-  }
+  if (action === "call") return parseCall(flags, positionals, output, fail);
   return parseAddressed(action, positionals[0]!, flags, output, fail);
 }

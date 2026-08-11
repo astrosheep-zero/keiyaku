@@ -1,6 +1,4 @@
-declare const AKU_ID: unique symbol;
-
-export type AkuId = string & { readonly [AKU_ID]: true };
+import type { AkuId } from "../identity.js";
 
 export type Confinement =
   | Readonly<{ kind: "unconfined" }>
