@@ -9,6 +9,15 @@ import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { Keiyaku, Repo } from "../src/index.js";
+import {
+  GIT_REF,
+  readGit,
+  repositoryAt,
+  updateGitTree,
+  updateRefsAtomically,
+  writeBlob,
+  writeCommit,
+} from "../src/git/repository.js";
 import { kanshi, selectKanshi } from "../src/kanshi/index.js";
 import { Tasks } from "../src/task/index.js";
 import { makeGitRepository } from "./support/git.js";
@@ -119,6 +128,24 @@ test("kanshi reports malformed Task authority as a failed section", async () => 
   const report = await kanshi({ path: root });
   assert.equal(report.tasks.kind, "failed");
   if (report.tasks.kind === "failed") assert.match(report.tasks.failure.message, /front matter/u);
+});
+
+test("a malformed TaskHolder root fails only the Kanshi Task section", async () => {
+  const { repository } = await populatedWorld();
+  const git = repositoryAt(repository.path);
+  const snapshot = readGit(git);
+  const tree = updateGitTree(git, snapshot.tree, new Map([
+    ["settlement/task-holders", { oid: writeBlob(git, "not holder authority\n") }],
+  ]));
+  const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
+
+  const report = await kanshi({ path: repository.path });
+
+  assert.equal(report.contracts.kind, "present");
+  assert.equal(report.tasks.kind, "failed");
+  assert.equal(report.akuma.kind, "present");
+  if (report.tasks.kind === "failed") assert.match(report.tasks.failure.message, /TaskHolder authority root is not a tree/u);
 });
 
 test("Kanshi text retains the v3 ruler, marks, dense facts, and complete identities", async () => {

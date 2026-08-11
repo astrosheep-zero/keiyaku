@@ -11,7 +11,8 @@ import {
 } from "../git/repository.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 
-const HOLDER_PREFIX = "settlement/task-holders/";
+const HOLDER_ROOT = "settlement/task-holders";
+const HOLDER_PREFIX = `${HOLDER_ROOT}/`;
 const HOLDER_SUFFIX = ".json";
 
 export type TaskHolder = Readonly<{
@@ -71,11 +72,16 @@ function decodeHolder(path: string, bytes: Uint8Array): TaskHolder {
   return holder;
 }
 
-function holderEntries(repository: GitRepository, snapshot: GitSnapshot): readonly TaskHolder[] {
-  const expanded = expandGitSnapshot(repository, snapshot);
+function holderEntries(
+  repository: GitRepository,
+  snapshot: GitSnapshot,
+  scope: "complete" | "targeted",
+): readonly TaskHolder[] {
+  const expanded = scope === "complete" ? snapshot : expandGitSnapshot(repository, snapshot);
   const holders: TaskHolder[] = [];
   const seen = new Set<TaskId>();
   for (const [path, entry] of expanded.paths) {
+    if (path === HOLDER_ROOT) corruption(`TaskHolder authority root is not a tree: ${path}`);
     if (!path.startsWith(HOLDER_PREFIX)) continue;
     if (!path.endsWith(HOLDER_SUFFIX)) corruption(`unexpected TaskHolder authority path: ${path}`);
     if (entry.type !== "blob") corruption(`TaskHolder path is not a blob: ${path}`);
@@ -87,10 +93,17 @@ function holderEntries(repository: GitRepository, snapshot: GitSnapshot): readon
   return holders.sort((left, right) => Buffer.compare(Buffer.from(left.taskId), Buffer.from(right.taskId)));
 }
 
-function holderForOwner(holders: readonly TaskHolder[], owner: ContractId): TaskHolder | null {
-  const matches = holders.filter((holder) => holder.contractId === owner);
-  if (matches.length > 1) corruption(`Contract has multiple current TaskHolders: ${owner}`);
-  return matches[0] ?? null;
+export type TaskHolderProjection = ReadonlyMap<ContractId, TaskHolder>;
+
+function projectTaskHolders(holders: readonly TaskHolder[]): TaskHolderProjection {
+  const projection = new Map<ContractId, TaskHolder>();
+  for (const holder of holders) {
+    if (projection.has(holder.contractId)) {
+      corruption(`Contract has multiple current TaskHolders: ${holder.contractId}`);
+    }
+    projection.set(holder.contractId, holder);
+  }
+  return projection;
 }
 
 function update(holder: TaskHolder): TreeUpdate {
@@ -106,16 +119,16 @@ export function releaseTaskHolder(
   snapshot: GitSnapshot,
   owner: ContractId,
 ): TreeUpdate | null {
-  const current = holderForOwner(holderEntries(repository, snapshot), owner);
+  const current = projectTaskHolders(holderEntries(repository, snapshot, "targeted")).get(owner) ?? null;
   return current === null || current.disposition !== "held"
     ? null
     : update({ ...current, disposition: "released" });
 }
 
 export function readTaskHolders(repository: GitRepository): readonly TaskHolder[] {
-  return holderEntries(repository, readGit(repository));
+  return holderEntries(repository, readGit(repository), "complete");
 }
 
-export function currentTaskHolder(repository: GitRepository, owner: ContractId): TaskHolder | null {
-  return holderForOwner(readTaskHolders(repository), owner);
+export function readTaskHolderProjection(repository: GitRepository): TaskHolderProjection {
+  return projectTaskHolders(readTaskHolders(repository));
 }

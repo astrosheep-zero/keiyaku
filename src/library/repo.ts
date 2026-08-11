@@ -6,7 +6,7 @@ import {
   type ReconcileReport as ProtocolReconcileReport,
   type RepositoryScope,
 } from "../protocol/operations.js";
-import { settle, type SettlementReport } from "../settlement/settle.js";
+import { settleAll, type SettlementReport } from "../settlement/settle.js";
 import { optionalNonblank, requireInput } from "./input.js";
 import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
 import type { ContractId } from "../core/facts/types.js";
@@ -60,18 +60,21 @@ export class Repo {
   async reconcile(input?: ReconcileInput): Promise<RepoReconcileReport> {
     const scope = scopeForRepo(this);
     const reconciled = await reconcileAllOperation({ scope, ...reconcileInput(input) });
+    const settlements = await settleAll({
+      repository: scope,
+      contracts: reconciled.contracts.map((contract) => ({
+        state: contract.state,
+        effects: contract.report.effects,
+      })),
+    });
     return {
-      contracts: await Promise.all(reconciled.contracts.map(async (contract) => ({
+      contracts: reconciled.contracts.map((contract, index) => ({
         contractId: contract.contractId,
         report: {
           ...contract.report,
-          settlement: await settle({
-            repository: scope,
-            state: contract.state,
-            effects: contract.report.effects,
-          }),
+          settlement: settlements[index]!,
         },
-      }))),
+      })),
     };
   }
 }

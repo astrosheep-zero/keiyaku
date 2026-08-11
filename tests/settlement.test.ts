@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { AuthorityCorruptionError, Keiyaku, Repo } from "../src/index.js";
 import { contractJournalPath } from "../src/git/identity.js";
@@ -14,9 +15,10 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { readTaskHolders } from "../src/settlement/holder.js";
+import { settleAll } from "../src/settlement/settle.js";
 import { readNamespaceContext } from "../src/task/context.js";
 import { Tasks } from "../src/task/index.js";
-import { makeGitRepository } from "./support/git.js";
+import { makeGitRepository, withGitShim } from "./support/git.js";
 
 function repository() {
   const value = makeGitRepository();
@@ -129,6 +131,41 @@ test("contract and world reconcile replay settlement from current authority", as
   assert.equal(await taskState(world.path, secondTask), "done");
 });
 
+test("batch settlement reads one holder projection for multiple Contracts", async () => {
+  const world = repository(), repo = Repo.at({ path: world.path });
+  const firstTask = await task(world.path, "First batch holder");
+  const secondTask = await task(world.path, "Second batch holder");
+  const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("First batch"), workspace: "here", gates: [] });
+  writeFileSync(`${world.path}/first-batch.txt`, "first\n");
+  await first.keiyaku.deliver();
+  const second = await Keiyaku.bind({ repo, task: secondTask, markdown: document("Second batch"), workspace: "here", gates: [] });
+  writeFileSync(`${world.path}/second-batch.txt`, "second\n");
+  await second.keiyaku.deliver();
+  const log = join(world.path, "holder-reads.log");
+  const states = await Promise.all([first.keiyaku.state(), second.keiyaku.state()]);
+
+  const reports = await withGitShim(
+    'printf "%s\\n" "$*" >> "$KEIYAKU_READ_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
+    { KEIYAKU_READ_LOG: log },
+    () => settleAll({
+      repository: repositoryAt(world.path),
+      contracts: [
+        { state: states[0]!, effects: [] },
+        { state: states[1]!, effects: [] },
+      ],
+    }),
+  );
+
+  assert.equal(reports.length, 2);
+  const fullTreeReads = readFileSync(log, "utf8").trim().split("\n")
+    .filter((command) => {
+      const args = command.split(" ");
+      return args.includes("ls-tree") && args.includes("-z") && args.includes("-r")
+        && args.includes("--full-tree") && !args.includes("--");
+    });
+  assert.equal(fullTreeReads.length, 1);
+});
+
 test("a superseded Contract cannot release or settle a newer holder", async () => {
   const world = repository(), repo = Repo.at({ path: world.path });
   const taskId = await task(world.path, "Superseded Holder");
@@ -179,7 +216,7 @@ test("TaskHolder reads reject unexpected paths in their authority namespace", as
   const git = repositoryAt(world.path);
   const snapshot = readGit(git);
   const tree = updateGitTree(git, snapshot.tree, new Map([
-    ["settlement/task-holders/README", { oid: writeBlob(git, "not holder authority\n") }],
+    ["settlement/task-holders", { oid: writeBlob(git, "not holder authority\n") }],
   ]));
   const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
   assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
@@ -187,7 +224,7 @@ test("TaskHolder reads reject unexpected paths in their authority namespace", as
   assert.throws(
     () => readTaskHolders(git),
     (error: unknown) => error instanceof AuthorityCorruptionError
-      && error.message === "unexpected TaskHolder authority path: settlement/task-holders/README",
+      && error.message === "TaskHolder authority root is not a tree: settlement/task-holders",
   );
 });
 

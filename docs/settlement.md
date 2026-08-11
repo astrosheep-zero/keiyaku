@@ -121,6 +121,9 @@ invocation. It records no completion bit. Re-running Contract or world
 reconciliation repeats Git reconciliation and the same settlement rules. Task
 predecessor-byte comparison remains the Task write adjudicator; concurrent
 movement becomes a lag and is reconsidered later.
+World reconciliation reads and validates one immutable TaskHolder projection,
+then reuses it across every Contract settlement in that invocation; it does not
+rescan the private Git tree per Contract.
 
 ## Hook Boundary
 
