@@ -7,7 +7,8 @@ Keiyaku.bind({ repo: Repo.at(), markdown, target: "main" });
 Keiyaku is the package-root contract library. It is ESM-only and the package
 root is its sole public import surface. The public objects are `Keiyaku`,
 `Repo`, `Delivery`, the shared `settings` resource constructor, and the
-exported value types defined by their operations.
+exported value types defined by their operations. Consumers import this root
+surface from `@astrosheep/keiyaku`.
 
 ## Composition Boundary
 

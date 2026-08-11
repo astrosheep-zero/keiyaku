@@ -17,7 +17,7 @@ test.before(() => {
 function externalConsumer(): string {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-consumer-"));
   mkdirSync(join(directory, "node_modules", "@astrosheep"), { recursive: true });
-  symlinkSync(root, join(directory, "node_modules", "@astrosheep", "keiyaku-v4"), "dir");
+  symlinkSync(root, join(directory, "node_modules", "@astrosheep", "keiyaku"), "dir");
   return directory;
 }
 
@@ -59,8 +59,8 @@ function repositoryWithInitialCommit() {
 test("package root exposes only the ruled library values and declarations", () => {
   const directory = externalConsumer();
   const source = [
-    'import { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, settings, SettingsError, worktreeHooksFrom, type AbandonInput, type ActorId, type AmendInput, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractBoard, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type DeliverInput, type Fact, type FactKind, type Gate, type HookCommand, type KeiyakuRefusal, type KeiyakuRetryReason, type Lag, type MutationResult, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SettlementAction, type SettlementLag, type SettlementReport, type SnapshotId, type TaskId, type TimelineEntry, type TopologyEffect, type WorktreeHooks } from "@astrosheep/keiyaku-v4";',
-    'import type { AkuId, AkumaAlias, AkumaStatus, AliasBinding, AliasStage, CallInput, CallResult, Dispatch, DispatchFailure, DispatchStage, ForkInput, ForkResult, IntegrationFailure } from "@astrosheep/keiyaku-v4";',
+    'import { AuthorityCorruptionError, Delivery, gatesFrom, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, settings, SettingsError, worktreeHooksFrom, type AbandonInput, type ActorId, type AmendInput, type ArcInput, type AuditInput, type AuditReport, type AttestationVerdict, type BindInput, type BindResult, type ChangeId, type ContractBoard, type ContractDisposition, type ContractGateCurrent, type ContractGateReport, type ContractId, type ContractObservation, type ContractObservationInput, type ContractListInput, type ContractPhase, type ContractRow, type ContractState, type DeliverInput, type Fact, type FactKind, type Gate, type HookCommand, type KeiyakuRefusal, type KeiyakuRetryReason, type Lag, type MutationResult, type ReconcileReport, type RegionOverlap, type RepoAtInput, type RepoReconcileReport, type Review, type ReviewInput, type Settings, type SettingsEntry, type SettingsNamespaceView, type SettingsScopeState, type SettlementAction, type SettlementLag, type SettlementReport, type SnapshotId, type TaskId, type TimelineEntry, type TopologyEffect, type WorktreeHooks } from "@astrosheep/keiyaku";',
+    'import type { AkuId, AkumaAlias, AkumaStatus, AliasBinding, AliasStage, CallInput, CallResult, Dispatch, DispatchFailure, DispatchStage, ForkInput, ForkResult, IntegrationFailure } from "@astrosheep/keiyaku";',
     'const repo = Repo.at({ path: "." });',
     'const id = "kei/consumer" as ContractId;',
     'const taskId = "task/consumer" as TaskId;',
@@ -111,7 +111,7 @@ test("package root exposes only the ruled library values and declarations", () =
     '// @ts-expect-error Repo is not a second contract-construction surface',
     'repo.bind(input);',
     '// @ts-expect-error Receipt was removed from the package-root surface',
-    'type Receipt = import("@astrosheep/keiyaku-v4").Receipt;',
+    'type Receipt = import("@astrosheep/keiyaku").Receipt;',
     'const report = null as unknown as AuditReport;',
     'const timeline = null as unknown as TimelineEntry;',
     'const kind = null as unknown as FactKind;',
@@ -153,59 +153,59 @@ test("package root exposes only the ruled library values and declarations", () =
     'const refusedError = null as unknown as KeiyakuRefused;',
     'const retryError = null as unknown as KeiyakuRetry;',
     '// @ts-expect-error internal journal data is not a package-root export',
-    'type InternalAbandonData = import("@astrosheep/keiyaku-v4").AbandonData;',
+    'type InternalAbandonData = import("@astrosheep/keiyaku").AbandonData;',
     '// @ts-expect-error internal journal data is not a package-root export',
-    'type InternalAbandonedData = import("@astrosheep/keiyaku-v4").AbandonedData;',
+    'type InternalAbandonedData = import("@astrosheep/keiyaku").AbandonedData;',
     '// @ts-expect-error internal journal data is not a package-root export',
-    'type InternalAttestationData = import("@astrosheep/keiyaku-v4").AttestationData;',
+    'type InternalAttestationData = import("@astrosheep/keiyaku").AttestationData;',
     '// @ts-expect-error internal journal data is not a package-root export',
-    'type InternalAmendData = import("@astrosheep/keiyaku-v4").AmendData;',
+    'type InternalAmendData = import("@astrosheep/keiyaku").AmendData;',
     '// @ts-expect-error internal journal data is not a package-root export',
-    'type InternalBindData = import("@astrosheep/keiyaku-v4").BindData;',
+    'type InternalBindData = import("@astrosheep/keiyaku").BindData;',
     '// @ts-expect-error internal journal data is not a package-root export',
-    'type InternalBoundData = import("@astrosheep/keiyaku-v4").BoundData;',
+    'type InternalBoundData = import("@astrosheep/keiyaku").BoundData;',
     '// @ts-expect-error internal journal data is not a package-root export',
-    'type InternalClaimedData = import("@astrosheep/keiyaku-v4").ClaimedData;',
+    'type InternalClaimedData = import("@astrosheep/keiyaku").ClaimedData;',
     '// @ts-expect-error internal journal coordinate is not a package-root export',
-    'type InternalCoordinates = import("@astrosheep/keiyaku-v4").ContractCoordinates;',
+    'type InternalCoordinates = import("@astrosheep/keiyaku").ContractCoordinates;',
     '// @ts-expect-error internal journal body part is not a package-root export',
-    'type InternalCriterion = import("@astrosheep/keiyaku-v4").ContractCriterion;',
+    'type InternalCriterion = import("@astrosheep/keiyaku").ContractCriterion;',
     '// @ts-expect-error internal journal body part is not a package-root export',
-    'type InternalExtension = import("@astrosheep/keiyaku-v4").ContractExtension;',
+    'type InternalExtension = import("@astrosheep/keiyaku").ContractExtension;',
     '// @ts-expect-error internal journal alias is not a package-root export',
-    'type InternalHead = import("@astrosheep/keiyaku-v4").ContractHead;',
+    'type InternalHead = import("@astrosheep/keiyaku").ContractHead;',
     '// @ts-expect-error internal journal data is not a package-root export',
-    'type InternalDeliverData = import("@astrosheep/keiyaku-v4").DeliverData;',
+    'type InternalDeliverData = import("@astrosheep/keiyaku").DeliverData;',
     '// @ts-expect-error internal journal identity is not a package-root export',
-    'type InternalEntryUlid = import("@astrosheep/keiyaku-v4").EntryUlid;',
+    'type InternalEntryUlid = import("@astrosheep/keiyaku").EntryUlid;',
     '// @ts-expect-error internal input helper is not a package-root export',
-    'type InternalActorOptions = import("@astrosheep/keiyaku-v4").ActorOptions;',
+    'type InternalActorOptions = import("@astrosheep/keiyaku").ActorOptions;',
     '// @ts-expect-error internal subject identity is not a package-root export',
-    'type InternalSubject = import("@astrosheep/keiyaku-v4").SubjectKey;',
+    'type InternalSubject = import("@astrosheep/keiyaku").SubjectKey;',
     '// @ts-expect-error internal verification data is not a package-root export',
-    'type InternalVerification = import("@astrosheep/keiyaku-v4").VerificationDeclaration;',
+    'type InternalVerification = import("@astrosheep/keiyaku").VerificationDeclaration;',
     '// @ts-expect-error internal verification data is not a package-root export',
-    'type InternalExecutor = import("@astrosheep/keiyaku-v4").VerificationExecutor;',
+    'type InternalExecutor = import("@astrosheep/keiyaku").VerificationExecutor;',
     '// @ts-expect-error internal verification refusal has no separate package-root name',
-    'type InternalVerificationRefusal = import("@astrosheep/keiyaku-v4").VerificationDeclarationRefusal;',
+    'type InternalVerificationRefusal = import("@astrosheep/keiyaku").VerificationDeclarationRefusal;',
     '// @ts-expect-error legacy ReviewResult alias is not a package-root export',
-    'type InternalReviewResult = import("@astrosheep/keiyaku-v4").ReviewResult;',
+    'type InternalReviewResult = import("@astrosheep/keiyaku").ReviewResult;',
     '// @ts-expect-error legacy ReviewValue alias is not a package-root export',
-    'type InternalReviewValue = import("@astrosheep/keiyaku-v4").ReviewValue;',
+    'type InternalReviewValue = import("@astrosheep/keiyaku").ReviewValue;',
     '// @ts-expect-error legacy DeliverValue alias is not a package-root export',
-    'type InternalDeliverValue = import("@astrosheep/keiyaku-v4").DeliverValue;',
+    'type InternalDeliverValue = import("@astrosheep/keiyaku").DeliverValue;',
     'void new AuthorityCorruptionError("corrupt"); void new SettingsError("invalid"); void existing; void delivery; void bound; void repo; void taskId; void akuma; void alias; void callResult; void callStatus; void forkResult; void aliasBinding; void aliasStage; void dispatch; void dispatchFailure; void dispatchStage; void integrationFailure; void invalidFork; void report; void timeline; void kind; void amendment; void invalidBind; void invalidAmend; void customGate; void settingsValue; void selectedGates; void hook; void selectedHooks; void settingsEntry; void settingsView; void settingsScope; void contractListInput; void contractObservationInput; void contractPhase; void contractDisposition; void contractGateCurrent; void contractGateReport; void statusRow; void statusBoard; void statusObservation; void deliverInput; void fact; void gate; void reconcile; void atInput; void repoReconcile; void reviewInput; void review; void regionOverlap; void snapshot; void refusal; void retry; void settlementAction; void settlementLag; void settlementReport;',
   ].join("\n");
   writeFileSync(join(directory, "consumer.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer.ts"], { cwd: directory, stdio: "ignore" });
-  const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku-v4"); console.log(Object.keys(m).sort().join(","));'], { cwd: directory, encoding: "utf8" });
+  const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku"); console.log(Object.keys(m).sort().join(","));'], { cwd: directory, encoding: "utf8" });
   assert.equal(output.trim(), "AuthorityCorruptionError,Delivery,Keiyaku,KeiyakuRefused,KeiyakuRetry,NoGitWorldError,Repo,SettingsError,gatesFrom,settings,worktreeHooksFrom");
 });
 
 test("package exports reject deep internal imports", () => {
   const directory = externalConsumer();
   assert.throws(
-    () => execFileSync(process.execPath, ["--input-type=module", "-e", 'await import("@astrosheep/keiyaku-v4/build/src/core/facts/types.js")'], { cwd: directory, stdio: ["ignore", "pipe", "pipe"] }),
+    () => execFileSync(process.execPath, ["--input-type=module", "-e", 'await import("@astrosheep/keiyaku/build/src/core/facts/types.js")'], { cwd: directory, stdio: ["ignore", "pipe", "pipe"] }),
     (error: unknown) => {
       const value = error as { stderr?: Buffer };
       return value.stderr?.toString("utf8").includes("ERR_PACKAGE_PATH_NOT_EXPORTED") === true;
@@ -216,7 +216,7 @@ test("package exports reject deep internal imports", () => {
 test("task package export exposes only the Tasks-first native surface", () => {
   const directory = externalConsumer();
   const source = [
-    'import { Tasks, type Task, type TaskId, type TaskMutationResult } from "@astrosheep/keiyaku-v4/task";',
+    'import { Tasks, type Task, type TaskId, type TaskMutationResult } from "@astrosheep/keiyaku/task";',
     'const tasks = Tasks.at({ path: "." });',
     'const task: Task = tasks.task({ id: "task/example" });',
     'const id: TaskId = task.id;',
@@ -231,7 +231,7 @@ test("task package export exposes only the Tasks-first native surface", () => {
   ].join("\n");
   writeFileSync(join(directory, "consumer-task.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer-task.ts"], { cwd: directory, stdio: "ignore" });
-  const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku-v4/task"); console.log(Object.keys(m).sort().join(","));'], { cwd: directory, encoding: "utf8" });
+  const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku/task"); console.log(Object.keys(m).sort().join(","));'], { cwd: directory, encoding: "utf8" });
   assert.equal(output.trim(), "TaskAuthorityCorruptionError,Tasks");
 });
 
@@ -239,7 +239,7 @@ test("built CLI bin keeps its shebang and executes through an installed-style sy
   const repository = repositoryWithInitialCommit();
   const bin = join(root, "build", "src", "cli", "index.js");
   const linkDirectory = mkdtempSync(join(tmpdir(), "keiyaku-v4-bin-"));
-  const link = join(linkDirectory, "keiyaku-v4");
+  const link = join(linkDirectory, "keiyaku");
   assert.equal(readFileSync(bin, "utf8").split("\n", 1)[0], "#!/usr/bin/env node");
   assert.notEqual(statSync(bin).mode & 0o111, 0, "build must make the CLI entry executable");
   symlinkSync(bin, link);

@@ -49,7 +49,7 @@ test.before(() => {
     cache,
     join(packed, archives[0]!),
   ], installed);
-  bin = join(installed, "node_modules", ".bin", "keiyaku-v4");
+  bin = join(installed, "node_modules", ".bin", "keiyaku");
   assert.equal(existsSync(bin), true, "npm did not create the packaged CLI bin");
 });
 

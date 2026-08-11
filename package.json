@@ -1,7 +1,6 @@
 {
-  "name": "@astrosheep/keiyaku-v4",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@astrosheep/keiyaku",
+  "version": "4.0.0",
   "files": [
     "build"
   ],
@@ -26,7 +25,7 @@
     }
   },
   "bin": {
-    "keiyaku-v4": "build/src/cli/index.js"
+    "keiyaku": "build/src/cli/index.js"
   },
   "type": "module",
   "engines": {
@@ -62,5 +61,16 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/astrosheep-zero/keiyaku.git"
+  },
+  "bugs": {
+    "url": "https://github.com/astrosheep-zero/keiyaku/issues"
+  },
+  "homepage": "https://github.com/astrosheep-zero/keiyaku#readme"
 }

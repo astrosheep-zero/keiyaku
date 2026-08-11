@@ -7,3 +7,10 @@ per-contract append-only journals, Git-tree evidence, atomic path-set CAS,
 and tests that prove clone and garbage-collection durability.
 
 No v3 runtime code is wired into this repository.
+
+## Install
+
+```sh
+npm install -g @astrosheep/keiyaku
+keiyaku --help
+```

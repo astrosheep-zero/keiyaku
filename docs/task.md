@@ -114,7 +114,7 @@ lifecycle.
 
 ## Native TypeScript Surface
 
-`@astrosheep/keiyaku-v4/task` is the sole public import. Inputs are readonly
+`@astrosheep/keiyaku/task` is the sole public import. Inputs are readonly
 objects validated at the JavaScript boundary.
 
 ```ts
