@@ -11,7 +11,6 @@ relates:
 note: ""
 createdAt: 2026-08-07T04:48:13.855Z
 updatedAt: 2026-08-07T11:29:07.449Z
-contractId: null
 ---
 Authority boundary correction: public-api.md says Region is library-edge and explicitly requests no protocol document-body reader. Remove protocol documentsOperation/read/documents. Keep the required full-world Region observation at library edge by consuming one carrier observation of opaque accepted state/document bytes, then decode/intersect only in library. Full-world O(N) is legal here; do not push Region vocabulary into carrier/protocol or drop the documented report.
 

@@ -10,5 +10,4 @@ relates: []
 note: Superseded by the approved high-level facade hard-cut slices; retain no stale semantics.
 createdAt: 2026-08-10T06:19:43.873Z
 updatedAt: 2026-08-11T02:05:05.275Z
-contractId: null
 ---

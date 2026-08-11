@@ -10,7 +10,6 @@ relates: []
 note: ""
 createdAt: 2026-08-07T04:49:01.077Z
 updatedAt: 2026-08-07T11:29:07.447Z
-contractId: null
 ---
 Audit report and accepted receipt in one invocation must describe one journal head. The initial read remains the producer/document observation. When Verification admits a fact, do not reread the moving carrier ref; read the immutable journal blob named by receipt.snapshot.head, validate/fold it through carrier observation code, and project AuditReport from exactly those entries. Read-only and nonterminal producer outcomes reuse the initial report. Do not put journal history in the public receipt, increment counters ad hoc, or add a cache.
 

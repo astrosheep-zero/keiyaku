@@ -10,7 +10,6 @@ relates: []
 note: ""
 createdAt: 2026-08-05T08:47:24.981Z
 updatedAt: 2026-08-07T11:29:07.453Z
-contractId: null
 ---
 fold.ts:87–161 与各 verb decide 的整套 phase 门无 act 覆盖：bind first/once；amend 仅 active/awaiting-verdict；seal 仅 active + 非空 delivery；open 仅 active；renew 仅 sealed；petition 仅 sealed + 当前 delivery head；changes-requested 仅 awaiting-verdict。
 

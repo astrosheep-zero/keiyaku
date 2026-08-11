@@ -1,6 +1,6 @@
 # CLI
 
-`keiyaku-v4` turns argv and acquired input into public package calls, then
+`keiyaku` turns argv and acquired input into public package calls, then
 renders their public results. It owns neither
 document decoding, lifecycle decisions, Git discovery, delivery preparation,
 Verification execution, or reconciliation semantics.
@@ -10,7 +10,7 @@ Verification execution, or reconciliation semantics.
 The canonical invocation is:
 
 ```text
-keiyaku-v4 [-C <path>] <command> [<contract>|@<contract>] [--flag ...] [-]
+keiyaku [-C <path>] <command> [<contract>|@<contract>] [--flag ...] [-]
 ```
 
 `-C <path>` is a global invocation prefix and is never persisted. Contract
@@ -69,7 +69,7 @@ typed usage refusal when this test has no unique match.
 The command-specific syntax is:
 
 ```text
-bind [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -
+bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -
 amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] -
 deliver [<contract>|@<contract>] [--message <text>] [--actor <actor>] [--json]
 review [<contract>|@<contract>] (--satisfied | --unsatisfied) [--summary <text>] [--actor <actor>] [--json] [-]
@@ -401,7 +401,7 @@ timestamps.
 
 ## Task Commands
 
-`keiyaku-v4 task` constructs one `Tasks.at` value from the global `-C`
+`keiyaku task` constructs one `Tasks.at` value from the global `-C`
 coordinate. Its parser owns argv shape, stdin selection, mutual exclusion, and
 output selection only. Task Markdown, graph, lifecycle, diff, and compose
 decisions remain in the native Task surface.
@@ -412,7 +412,7 @@ task add <TITLE> [--namespace <ns>] [--priority 0..3]
   [--note <text>]
   [--needs <TaskId>]... [--parent <TaskId>]
   [--supersedes <TaskId>]... [--relates <TaskId>]...
-  [--contract <ContractId>] [--body <text>] [--json]
+  [--body <text>] [--json]
 task add [--namespace <ns>] [--json] -
 task show <TaskId> [--json]
 task ls [--closed | --all] [--world] [--json]
@@ -425,8 +425,7 @@ task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
   [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
   [--parent <TaskId> | --no-parent]
   [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
-  [--relates <TaskId>]... [--drop-relates <TaskId>]...
-  [--contract <ContractId> | --no-contract] [--json]
+  [--relates <TaskId>]... [--drop-relates <TaskId>]... [--json]
 task start <TaskId> [--json]
 task stop <TaskId> [--json]
 task hold <TaskId>... [--json]
@@ -450,8 +449,7 @@ addressed Task in that Task's independent atomic drop mutation.
 
 `ls`, `ready`, and `blocked` use current namespace unless `--world` is present.
 `show`, `tree`, update, and lifecycle use complete IDs and never infer
-from namespace. Text rows are `TaskId - P<n> - <disposition> - title`, with an
-associated ContractId appended when present.
+from namespace. Text rows are `TaskId - P<n> - <disposition> - title`.
 
 `task doctor` scans the complete Task world and renders every graph issue. It
 does not repair authority. A healthy report renders `healthy` and exits `0`; a

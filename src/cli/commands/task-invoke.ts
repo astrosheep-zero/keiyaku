@@ -41,13 +41,12 @@ function invokeAdd(tasks: TaskProduct, command: ParsedTaskCommand, readStdin: ()
   if (command.stdin === "document") return tasks.addDocument({ markdown: readStdin(), ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }) });
   const body = value(command, "body"), note = value(command, "note"), initialState = state(value(command, "state")), selectedPriority = priority(value(command, "priority"));
   const needs = ids(values(command, "needs")), parent = value(command, "parent");
-  const supersedes = ids(values(command, "supersedes")), relates = ids(values(command, "relates")), contractId = value(command, "contract");
+  const supersedes = ids(values(command, "supersedes")), relates = ids(values(command, "relates"));
   return tasks.add({
     title: command.positionals[0]!, ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }),
     ...(body === undefined ? {} : { body }), ...(note === undefined ? {} : { note }), ...(initialState === undefined ? {} : { state: initialState }), ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
     ...(needs === undefined ? {} : { needs }), ...(parent === undefined ? {} : { parent: parent as TaskId }),
     ...(supersedes === undefined ? {} : { supersedes }), ...(relates === undefined ? {} : { relates }),
-    ...(contractId === undefined ? {} : { contractId }),
   });
 }
 
@@ -58,14 +57,13 @@ function invokeUpdate(tasks: TaskProduct, command: ParsedTaskCommand, readStdin:
   const addNeeds = ids(values(command, "needs")), dropNeeds = ids(values(command, "drop-needs"));
   const parent = value(command, "parent"), addSupersedes = ids(values(command, "supersedes"));
   const dropSupersedes = ids(values(command, "drop-supersedes")), addRelates = ids(values(command, "relates"));
-  const dropRelates = ids(values(command, "drop-relates")), contractId = value(command, "contract");
+  const dropRelates = ids(values(command, "drop-relates"));
   return tasks.task({ id: command.positionals[0]! }).update({
     ...(title === undefined ? {} : { title }), ...(body === undefined ? {} : { body }), ...(appendBody === undefined ? {} : { appendBody }), ...(note === undefined ? {} : { note }),
     ...(selectedPriority === undefined ? {} : { priority: selectedPriority }), ...(addNeeds === undefined ? {} : { addNeeds }),
     ...(dropNeeds === undefined ? {} : { dropNeeds }), ...(command.flags["no-parent"] === true ? { parent: null } : parent === undefined ? {} : { parent: parent as TaskId }),
     ...(addSupersedes === undefined ? {} : { addSupersedes }), ...(dropSupersedes === undefined ? {} : { dropSupersedes }),
     ...(addRelates === undefined ? {} : { addRelates }), ...(dropRelates === undefined ? {} : { dropRelates }),
-    ...(command.flags["no-contract"] === true ? { contractId: null } : contractId === undefined ? {} : { contractId }),
   });
 }
 

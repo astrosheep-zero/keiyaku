@@ -10,7 +10,6 @@ relates: []
 note: ""
 createdAt: 2026-08-06T21:54:12.993Z
 updatedAt: 2026-08-07T11:29:07.460Z
-contractId: null
 ---
 依据 docs/document.md Reserved Sections law，收束 complete-document decoder 与 amendment Add 的保留标题判定。可构造缺陷是 Add: Gates|Pipeline|After 被 amend 当 extension 创建，随后 final decoder 才拒绝；合法 ContractBody 不可能已有这些 extension，因此 Update/Remove/Replace/Append 的 unknown-extension 拒绝不是第二可接受路径，不加幽灵门。
 

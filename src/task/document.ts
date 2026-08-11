@@ -15,7 +15,6 @@ export type TaskDocument = Readonly<{
   note: string;
   createdAt: string;
   updatedAt: string;
-  contractId: string | null;
   body: string;
 }>;
 export type TaskCreationDocument = Omit<TaskDocument, "id" | "createdAt" | "updatedAt">;
@@ -25,8 +24,8 @@ export class TaskAuthorityCorruptionError extends Error {
 }
 
 const STATES = new Set<TaskState>(["open", "in_progress", "on_hold", "done", "drop"]);
-const STORED_KEYS = ["id", "title", "state", "priority", "needs", "parent", "supersedes", "relates", "note", "createdAt", "updatedAt", "contractId"] as const;
-const CREATION_KEYS = ["title", "state", "priority", "needs", "parent", "supersedes", "relates", "note", "contractId"] as const;
+const STORED_KEYS = ["id", "title", "state", "priority", "needs", "parent", "supersedes", "relates", "note", "createdAt", "updatedAt"] as const;
+const CREATION_KEYS = ["title", "state", "priority", "needs", "parent", "supersedes", "relates", "note"] as const;
 
 function frontMatter(markdown: string, fail: (message: string, cause?: unknown) => never): Readonly<{ value: Record<string, unknown>; body: string }> {
   if (!markdown.startsWith("---\n")) fail("task document must begin with YAML front matter");
@@ -76,12 +75,6 @@ function taskIds(value: unknown, field: string, fail: (message: string) => never
 function nullableTaskId(value: unknown, field: string, fail: (message: string) => never): TaskId | null {
   return value === null ? null : taskId(value, field, fail);
 }
-function contractId(value: unknown, fail: (message: string) => never): string | null {
-  if (value === null) return null;
-  if (typeof value !== "string" || value.trim().length === 0) fail("contractId must be null or a nonblank string");
-  return value;
-}
-
 function fields(value: Record<string, unknown>, body: string, fail: (message: string) => never): Omit<TaskCreationDocument, "state"> {
   return {
     title: title(value.title, fail),
@@ -91,7 +84,6 @@ function fields(value: Record<string, unknown>, body: string, fail: (message: st
     supersedes: taskIds(value.supersedes, "supersedes", fail),
     relates: taskIds(value.relates, "relates", fail),
     note: typeof value.note === "string" ? value.note : fail("note must be a string"),
-    contractId: contractId(value.contractId, fail),
     body,
   };
 }
@@ -112,7 +104,7 @@ export function parseTaskCreationDocument(markdown: string): TaskCreationDocumen
   const { value, body } = frontMatter(markdown, fail);
   closed(value, CREATION_KEYS, ["title"], fail);
   const complete = {
-    state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], note: "", contractId: null,
+    state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], note: "",
     ...value,
   };
   return { state: state(complete.state, fail), ...fields(complete, body, fail) };
@@ -123,7 +115,7 @@ export function serializeTaskDocument(document: TaskDocument): Uint8Array {
     id: document.id, title: document.title, state: document.state, priority: document.priority,
     needs: [...document.needs], parent: document.parent, supersedes: [...document.supersedes],
     relates: [...document.relates], note: document.note, createdAt: document.createdAt,
-    updatedAt: document.updatedAt, contractId: document.contractId,
+    updatedAt: document.updatedAt,
   };
   return Buffer.from(`---\n${stringify(value, { lineWidth: 0 })}---\n${document.body}`);
 }

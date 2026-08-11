@@ -17,6 +17,7 @@ export async function bindFromCommand({ command, repo, markdown, gates, actor, h
   return Keiyaku.bind({
     repo,
     markdown,
+    ...(command.task === undefined ? {} : { task: command.task as `task/${string}` }),
     ...(target === null ? {} : { target }),
     ...(command.workspace === undefined ? {} : { workspace: command.workspace }),
     ...(actor === undefined ? {} : { actor }),

@@ -115,6 +115,16 @@ replayed. With no coordinate movement the rejection is a hard
 adopts a newer document or target, or treats the recovery observation as a
 second acceptance authority.
 
+The same private-tree commit may contain opaque companion updates alongside
+journal appends. A companion is exactly one validated Git path and byte value;
+paths are unique within the Offer and cannot collide with the format marker or
+a touched journal path. Git validates this generic structure, writes the blobs,
+and publishes them under the same root CAS. It does not decode a companion or
+know TaskHolder semantics. Because the root ref is the atomic commit point,
+unknown-outcome recovery from the admitted journal entries also proves that
+every companion in that Offer landed; a partial publication is authority
+corruption, not a recoverable state.
+
 ## Document Boundary
 
 Git and protocol have no document callback, decoded-document import, or

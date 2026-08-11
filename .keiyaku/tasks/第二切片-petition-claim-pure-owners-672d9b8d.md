@@ -11,7 +11,6 @@ relates: []
 note: ""
 createdAt: 2026-08-04T10:57:39.100Z
 updatedAt: 2026-08-07T11:29:07.460Z
-contractId: null
 ---
 恢复四个已暂停路径（src/core/verbs/petition.ts、claim.ts、tests/verbs-petition.test.ts、tests/verbs-claim.test.ts），按法典 Delivery Laws 5–8 落地：
 

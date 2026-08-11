@@ -16,7 +16,7 @@ import {
   type VerificationTerminalOutcome,
 } from "../verification/producer.js";
 import { VERIFIED, type VerificationDefinition } from "../verification/declaration.js";
-import { runProtocol, type ProtocolResult } from "./run.js";
+import { runProtocol, type CompanionDecorator, type ProtocolResult } from "./run.js";
 
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const VERIFICATION_TIMEOUT_MS = 5 * 60 * 1_000;
@@ -47,6 +47,7 @@ export function mintAttempts(input: Readonly<{ entryCount: number }>): readonly 
 type IntentAdmissionOptions = Readonly<{
   observedContracts?: readonly ContractId[];
   observe?: (repository: GitRepository, contracts: readonly ContractId[]) => GitDecisionObservation;
+  decorateOffer?: CompanionDecorator;
 }>;
 
 /** Observe, decide, and atomically admit one intent with bounded Git retries. */
@@ -64,6 +65,7 @@ export function admitIntent<Input extends Readonly<{ contractId: ContractId }>, 
     attempts: mintAttempts({ entryCount: 2 }),
     decide,
     ...(options.observe === undefined ? {} : { observe: options.observe }),
+    ...(options.decorateOffer === undefined ? {} : { decorateOffer: options.decorateOffer }),
   });
 }
 

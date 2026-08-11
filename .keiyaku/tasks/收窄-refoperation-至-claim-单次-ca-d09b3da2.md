@@ -10,7 +10,6 @@ relates: []
 note: ""
 createdAt: 2026-08-04T06:08:14.163Z
 updatedAt: 2026-08-07T11:29:07.457Z
-contractId: null
 ---
 Square #93 已裁（律三）：RefOperation 唯一合法读者是 claim 的单次 CAS move（一个 ref，expectedOid 与 newOid 皆非空）。
 

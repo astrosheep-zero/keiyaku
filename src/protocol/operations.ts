@@ -49,6 +49,7 @@ export { bindOperation } from "./bind.js";
 import type { BindRefusal, TargetInputRefusal } from "./bind.js";
 import { accepted, admitted, complete, type IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
 import type { ProtocolResult, ProtocolTerminal } from "./run.js";
+import type { CompanionDecorator } from "./run.js";
 
 export type { FactKind, TimelineEntry } from "./read/audit.js";
 export type { ContractDocumentProjection } from "./read/documents.js";
@@ -321,7 +322,7 @@ export async function deliverOperation(
 }
 
 export function abandonOperation(
-  input: OperationInput & Readonly<{ note?: string }>,
+  input: OperationInput & Readonly<{ note?: string; decorateOffer?: CompanionDecorator }>,
 ): IntentOutcome<void, AbandonRefusal> {
   return complete(
     admitIntent(input.scope, {
@@ -329,7 +330,7 @@ export function abandonOperation(
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
       ...(input.note === undefined ? {} : { note: input.note }),
-    }, decideAbandon),
+    }, decideAbandon, input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
     undefined,
   );
 }

@@ -10,7 +10,6 @@ relates: []
 note: ""
 createdAt: 2026-08-07T04:48:14.457Z
 updatedAt: 2026-08-07T11:29:07.455Z
-contractId: null
 ---
 按现行 docs/lifecycle.md、docs/verification.md、docs/public-api.md 做零产品语义变更的内部重塑：
 

@@ -296,6 +296,12 @@ export function extendGitPaths(
   return { ...snapshot, paths: new Map([...snapshot.paths, ...additions]) };
 }
 
+/** Expand a targeted immutable snapshot to its complete already-pinned tree. */
+export function expandGitSnapshot(repository: GitRepository, snapshot: GitSnapshot): GitSnapshot {
+  if (snapshot.tree === null) return snapshot;
+  return { ...snapshot, paths: readTreeEntries(repository, snapshot.tree) };
+}
+
 export function writeBlob(repository: GitRepository, bytes: string | Uint8Array): GitOid {
   const oid = runGit(repository, ["hash-object", "-w", "--stdin"], bytes).toString("utf8").trim();
   assertOid(oid, "written blob");

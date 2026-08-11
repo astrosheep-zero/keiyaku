@@ -10,6 +10,5 @@ relates: []
 note: ""
 createdAt: 2026-08-06T23:09:57.203Z
 updatedAt: 2026-08-07T11:29:07.462Z
-contractId: null
 ---
 Independent review confirmed VerificationDeclarationRefusal currently has four owners: verification defines, protocol re-exports, library unions/re-exports, package root exports, while public-api does not explicitly own the named type. Settle the refusal shape in public-api and export from one package-root owner, or keep the internal name private and include only its documented structural union member.

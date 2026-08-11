@@ -3,7 +3,7 @@ import { parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 
 type TaskRef = Readonly<{ id: TaskId; title: string | null; state: TaskState | "missing" }>;
 type TaskDisposition = "ready" | "blocked" | "in_progress" | "on_hold" | "done" | "drop";
-export type TaskRow = Readonly<{ id: TaskId; title: string; state: TaskState; priority: TaskPriority; disposition: TaskDisposition; contractId: string | null }>;
+export type TaskRow = Readonly<{ id: TaskId; title: string; state: TaskState; priority: TaskPriority; disposition: TaskDisposition }>;
 export type BlockedTaskRow = TaskRow & Readonly<{ blockers: readonly TaskRef[] }>;
 export type TaskDetailFacts = Readonly<{
   task: TaskDocument; needs: readonly (TaskRef & Readonly<{ released: boolean }>)[]; blockers: readonly TaskRef[];
@@ -55,7 +55,7 @@ export function projectRows(board: TaskBoard, scope: readonly string[] | null, s
   return [...board.tasks.values()].filter((task) => inScope(task, scope)).filter((task) => selection === "all"
     || (selection === "closed") === terminal(task.state)).map((task) => ({
       id: task.id, title: task.title, state: task.state, priority: task.priority,
-      disposition: disposition(board, task), contractId: task.contractId,
+      disposition: disposition(board, task),
     })).sort((a, b) => a.priority - b.priority || Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
 }
 export function projectReady(board: TaskBoard, scope: readonly string[] | null): readonly TaskRow[] {

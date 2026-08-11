@@ -25,13 +25,13 @@ type TaskCommandSpec = Readonly<{
 const COMMON = { json: "boolean" } as const;
 const TASK_COMMAND_SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
   add: {
-    arity: [0, 1], stdin: "document", flags: { ...COMMON, namespace: "value", state: "value", priority: "value", needs: "repeat", parent: "value", supersedes: "repeat", relates: "repeat", contract: "value", body: "value", note: "value" },
+    arity: [0, 1], stdin: "document", flags: { ...COMMON, namespace: "value", state: "value", priority: "value", needs: "repeat", parent: "value", supersedes: "repeat", relates: "repeat", body: "value", note: "value" },
     usage: `task add <TITLE> [--namespace <ns>] [--priority 0..3]
   [--state open|in_progress|on_hold|done|drop]
   [--note <text>]
   [--needs <TaskId>]... [--parent <TaskId>]
   [--supersedes <TaskId>]... [--relates <TaskId>]...
-  [--contract <ContractId>] [--body <text>] [--json]
+  [--body <text>] [--json]
 task add [--namespace <ns>] [--json] -`,
     purpose: "Create one Task from flags or a canonical stdin document.",
   },
@@ -42,14 +42,13 @@ task add [--namespace <ns>] [--json] -`,
   tree: { arity: [1, 1], flags: { ...COMMON, full: "boolean" }, usage: "task tree <TaskId> [--full] [--json]", purpose: "Read one Task dependency tree." },
   doctor: { arity: [0, 0], flags: COMMON, usage: "task doctor [--json]", purpose: "Inspect Task authority without repairing it." },
   update: {
-    arity: [1, 1], flags: { ...COMMON, title: "value", body: "value", append: "value", note: "value", priority: "value", needs: "repeat", "drop-needs": "repeat", parent: "value", "no-parent": "boolean", supersedes: "repeat", "drop-supersedes": "repeat", relates: "repeat", "drop-relates": "repeat", contract: "value", "no-contract": "boolean" },
+    arity: [1, 1], flags: { ...COMMON, title: "value", body: "value", append: "value", note: "value", priority: "value", needs: "repeat", "drop-needs": "repeat", parent: "value", "no-parent": "boolean", supersedes: "repeat", "drop-supersedes": "repeat", relates: "repeat", "drop-relates": "repeat" },
     usage: `task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
   [--note <text>|-]
   [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
   [--parent <TaskId> | --no-parent]
   [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
-  [--relates <TaskId>]... [--drop-relates <TaskId>]...
-  [--contract <ContractId> | --no-contract] [--json]`,
+  [--relates <TaskId>]... [--drop-relates <TaskId>]... [--json]`,
     purpose: "Apply one or more patches to a Task.",
   },
   start: { arity: [1, 1], flags: COMMON, usage: "task start <TaskId> [--json]", purpose: "Move one open Task into progress." },
@@ -72,7 +71,7 @@ export function renderTaskHelp(action?: TaskAction): string {
     return `${spec.purpose}\n\n${usageLine(spec.usage)}`;
   }
   return [
-    "usage: keiyaku-v4 task <command> ...",
+    "usage: keiyaku task <command> ...",
     "",
     "commands:",
     ...Object.values(TASK_COMMAND_SPECS).flatMap((spec) => spec.usage.split("\n").map((line) => `  ${line}`).concat(`    ${spec.purpose}`)),
@@ -136,7 +135,6 @@ function validateUpdate(scanned: ScannedTask, fail: (message: string) => never):
   const flags = scanned.flags;
   if (flags.body !== undefined && flags.append !== undefined) fail("--body and --append are mutually exclusive");
   if (flags.parent !== undefined && flags["no-parent"] === true) fail("--parent and --no-parent are mutually exclusive");
-  if (flags.contract !== undefined && flags["no-contract"] === true) fail("--contract and --no-contract are mutually exclusive");
   if (Object.keys(flags).every((name) => name === "json")) fail("task update requires at least one patch option");
 }
 

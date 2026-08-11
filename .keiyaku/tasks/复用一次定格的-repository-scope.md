@@ -10,7 +10,6 @@ relates: []
 note: ""
 createdAt: 2026-08-06T08:15:09.964Z
 updatedAt: 2026-08-07T11:29:07.448Z
-contractId: null
 ---
 Repo/Keiyaku 已保存 PinnedScope 的 coordinate 与 root，但每个 public method 只把 coordinate 传给 protocol；protocol 随即 repositoryAt(coordinate) 并再次执行 git worktree list。一个常见 CLI 写操作会在 selector、handle construction、verb 与 accepted reconcile 路径重复发现同一 repository world。
 

@@ -10,5 +10,4 @@ relates: []
 note: 依据 docs/cli.md text rendering ownership：status/tell/running wait 将 ActivitySnapshot.omitted 显示为与 spine 对齐的 ⋮ +N；JSON 与 history cursor 语义不变。
 createdAt: 2026-08-10T08:57:43.093Z
 updatedAt: 2026-08-10T08:57:43.093Z
-contractId: null
 ---

@@ -9,7 +9,7 @@ export type Section<Value> =
 
 export type ContractEndpointObservation = ContractDisposition | "missing" | "unavailable";
 
-export type TaskKanshiRow = Omit<TaskRow, "contractId"> & Readonly<{
+export type TaskKanshiRow = TaskRow & Readonly<{
   contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
 }>;
 

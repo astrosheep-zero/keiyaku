@@ -63,15 +63,15 @@ test("drop and batch drop replace note while preserving creation time", async ()
   assert.throws(() => tasks.batch({ verb: "done", ids: [two], note: "invalid" }), /valid only for drop/u);
 });
 
-test("Tasks creates root and nested authority and preserves opaque contractId", async () => {
+test("Tasks creates root and nested authority without Contract coupling", async () => {
   const { tasks } = world();
-  const rootId = acceptedId(await tasks.add({ title: "Root task", contractId: "external #42" }));
+  const rootId = acceptedId(await tasks.add({ title: "Root task" }));
   assert.equal(rootId, "task/root-task");
   await tasks.setNamespace({ namespace: ["contract", "inside"] });
   const nestedId = acceptedId(await tasks.add({ title: "Nested task", state: "in_progress" }));
   assert.equal(nestedId, "task/contract/inside/nested-task");
   assert.equal((await tasks.task({ id: nestedId }).read())?.task.state, "in_progress");
-  assert.equal((await tasks.task({ id: rootId }).read())?.task.contractId, "external #42");
+  assert.throws(() => tasks.add({ title: "Coupled", contractId: "kei/forbidden" } as never), /unknown field: contractId/u);
   assert.deepEqual((await tasks.list()).kind === "accepted" ? (await tasks.list() as { kind: "accepted"; value: readonly { id: string }[] }).value.map((row) => row.id) : [], [nestedId]);
   const worldList = await tasks.list({ scope: "world", selection: "all" });
   assert.equal(worldList.kind, "accepted");

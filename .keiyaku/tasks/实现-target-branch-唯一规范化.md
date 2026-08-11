@@ -10,7 +10,6 @@ relates: []
 note: ""
 createdAt: 2026-08-07T05:23:48.299Z
 updatedAt: 2026-08-07T11:29:07.449Z
-contractId: null
 ---
 依据 docs/public-api.md 与 docs/transport.md，证明 library 输入、persisted coordinate 与 target CAS 使用同一个 canonical refs/heads/* 坐标。
 

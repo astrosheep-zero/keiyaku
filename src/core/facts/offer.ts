@@ -13,7 +13,13 @@ export type RefOperation = Readonly<{
   readonly expectedOid: SnapshotId;
 }>;
 
+export type TreeUpdate = Readonly<{
+  readonly path: string;
+  readonly bytes: Uint8Array;
+}>;
+
 export type Offer = Readonly<{
   readonly facts: readonly ContractJournalAppend[];
   readonly target?: RefOperation;
+  readonly companions?: readonly TreeUpdate[];
 }>;

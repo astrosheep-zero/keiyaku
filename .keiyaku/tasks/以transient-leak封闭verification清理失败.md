@@ -10,6 +10,5 @@ relates: []
 note: ""
 createdAt: 2026-08-07T04:47:53.994Z
 updatedAt: 2026-08-07T11:29:07.443Z
-contractId: null
 ---
 按 docs/public-api.md、docs/verification.md、docs/lifecycle.md、docs/cli.md：post-admission dispose 失败保持 accepted，仅报告一次 worktree leak，不进 journal/reconcile。

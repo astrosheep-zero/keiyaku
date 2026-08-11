@@ -10,6 +10,5 @@ relates: []
 note: ""
 createdAt: 2026-08-07T00:46:02.174Z
 updatedAt: 2026-08-07T11:29:07.460Z
-contractId: null
 ---
 将 src/cli/parse.ts 的 COMMANDS、FLAG_SPECS、acceptsStdin() 与通用 usage 收束为一张私有 COMMAND_SPECS。每条命令声明 positional、stdin、flags 与精确 usage，Command 从表键派生。保留现有 typed ParsedCommand 和各命令专用 parser；只参考 v4b 的规格表形状，不引入 generic Map parser。

@@ -30,8 +30,8 @@ const CONTRACT_COMMAND_SPECS = {
   bind: {
     positional: "none",
     stdin: "required",
-    flags: { actor: "value", target: "value", here: "boolean", after: "repeat-value", gates: "value", json: "boolean" },
-    usage: "bind [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -",
+    flags: { actor: "value", task: "value", target: "value", here: "boolean", after: "repeat-value", gates: "value", json: "boolean" },
+    usage: "bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -",
     purpose: "Create one Contract from stdin Markdown.",
   },
   amend: {
@@ -101,7 +101,7 @@ const CONTRACT_COMMAND_SPECS = {
 
 export type Command = keyof typeof CONTRACT_COMMAND_SPECS;
 
-const ROOT_USAGE = "usage: keiyaku-v4 [-C <path>] <command> [<contract>|@<contract>] [--flag ...] [-]";
+const ROOT_USAGE = "usage: keiyaku [-C <path>] <command> [<contract>|@<contract>] [--flag ...] [-]";
 
 export function renderRootHelp(): string {
   return [
@@ -112,7 +112,7 @@ export function renderRootHelp(): string {
     `  ${INSTALL_USAGE}`,
     "    Install the Keiyaku skills into an agent harness.",
     "  task ...",
-    "    Task coordination; see `keiyaku-v4 task --help`.",
+    "    Task coordination; see `keiyaku task --help`.",
     ...renderAkumaRootRows(),
   ].join("\n");
 }
@@ -138,6 +138,7 @@ type Actor = Readonly<{ actor?: string }>;
 
 export type ParsedBind = Output & Actor & Readonly<{
   command: "bind";
+  task?: string;
   target?: string;
   workspace?: "here";
   after?: readonly string[];
@@ -301,11 +302,13 @@ function scanArgv(argv: readonly string[]): ParsedParts {
 }
 
 function parseBind(parts: ParsedParts): ParsedBind {
+  const task = optionalFlag(parts.flags, "task");
   const target = optionalFlag(parts.flags, "target");
   const after = parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
   const gates = optionalFlag(parts.flags, "gates");
   return {
     command: "bind",
+    ...(task === undefined ? {} : { task }),
     ...(target === undefined ? {} : { target }),
     ...(parts.flags.here === true ? { workspace: "here" as const } : {}),
     ...(parts.flags.after === undefined ? {} : { after }),

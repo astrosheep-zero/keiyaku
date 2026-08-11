@@ -9,6 +9,7 @@ import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js
 import type { VerificationDeclarationPreparation, VerificationDeclarationRefusal } from "../verification/declaration.js";
 import { admitIntent } from "./intent.js";
 import { complete, type IntentOutcome } from "./outcome.js";
+import type { CompanionDecorator } from "./run.js";
 
 export type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
@@ -22,6 +23,7 @@ type BindOperationInput = Readonly<{
   target?: string;
   workspace: "worktree" | "here";
   actor?: ActorId;
+  decorateOffer?: CompanionDecorator;
 }>;
 
 const CONTRACT_ID_STEM_BYTES = 72;
@@ -78,7 +80,10 @@ export function bindOperation(
           : { kind: "refused", refusal: input.verification.refusal },
       } satisfies BindInput<VerificationDeclarationRefusal>,
       decideBind,
-      { observedContracts: [id, ...input.terms.after] },
+      {
+        observedContracts: [id, ...input.terms.after],
+        ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
+      },
     ),
     { contractId: id },
   );

@@ -287,6 +287,94 @@ test("known publication failure is returned without a post-result ref read", asy
   assert.equal(existsSync(postRead), false);
 });
 
+test("admission publishes a journal append and opaque companion in one Git snapshot", async () => {
+  const repository = repositoryWithHead();
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
+  const id = (await bound.keiyaku.state()).id;
+  const git = repositoryAt(repository.path);
+  const observation = observeContractsForAdmission(git, [id]);
+  const before = observation.admission.snapshot.paths.get(contractJournalPath(id));
+  assert.ok(before);
+  const decision = decideArc({
+    input: {
+      contractId: id,
+      at: "2026-08-06T00:00:00Z",
+      data: { title: "Atomic companion", objective: "Publish together", brief: "Use one root CAS." },
+    },
+    attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
+    observation: observation.decision,
+  });
+  assert.equal(decision.kind, "offer");
+  if (decision.kind !== "offer") throw new Error("arc decision was not an offer");
+
+  const foreignJournal = contractJournalPath(contractId("kei/foreign-companion-target"));
+  assert.throws(
+    () => admit(git, {
+      ...decision.offer,
+      companions: [{ path: foreignJournal, bytes: Buffer.from("not a journal\n") }],
+    }, observation.admission),
+    (error: unknown) => error instanceof Error
+      && error.message === `companion path collides with admission-owned path: ${foreignJournal}`,
+  );
+
+  const result = admit(git, {
+    ...decision.offer,
+    companions: [{ path: "test/companion.txt", bytes: Buffer.from("companion\n") }],
+  }, observation.admission);
+
+  assert.equal(result.kind, "accepted");
+  const after = readGit(git);
+  assert.equal(after.paths.has("test/companion.txt"), true);
+  assert.notEqual(after.paths.get(contractJournalPath(id))?.oid, before.oid);
+});
+
+test("a failed Git CAS publishes neither its journal append nor its companion", async () => {
+  const repository = repositoryWithHead();
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
+  const id = (await bound.keiyaku.state()).id;
+  const git = repositoryAt(repository.path);
+  const observation = observeContractsForAdmission(git, [id]);
+  const before = observation.admission.snapshot.paths.get(contractJournalPath(id));
+  assert.ok(before);
+  const decision = decideArc({
+    input: {
+      contractId: id,
+      at: "2026-08-06T00:00:00Z",
+      data: { title: "Losing companion", objective: "Lose one CAS", brief: "Leave no partial fact." },
+    },
+    attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
+    observation: observation.decision,
+  });
+  assert.equal(decision.kind, "offer");
+  if (decision.kind !== "offer") throw new Error("arc decision was not an offer");
+
+  const winnerBlob = writeBlob(git, "winner\n");
+  const winnerTree = updateGitTree(git, observation.admission.snapshot.tree, new Map([
+    ["test/winner.txt", { oid: winnerBlob }],
+  ]));
+  const winnerCommit = writeCommit({
+    repository: git,
+    tree: winnerTree,
+    parent: observation.admission.snapshot.commit,
+  });
+  assert.equal(updateRefsAtomically(git, [{
+    ref: GIT_REF,
+    newOid: winnerCommit,
+    expectedOid: observation.admission.snapshot.commit,
+  }]).kind, "published");
+
+  const result = admit(git, {
+    ...decision.offer,
+    companions: [{ path: "test/loser.txt", bytes: Buffer.from("loser\n") }],
+  }, observation.admission);
+
+  assert.equal(result.kind, "publication-failed");
+  const after = readGit(git);
+  assert.equal(after.paths.has("test/winner.txt"), true);
+  assert.equal(after.paths.has("test/loser.txt"), false);
+  assert.equal(after.paths.get(contractJournalPath(id))?.oid, before.oid);
+});
+
 function appendUnrelatedGitJournals(
   repository: ReturnType<typeof repositoryAt>,
   count: number,

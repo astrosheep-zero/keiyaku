@@ -59,7 +59,7 @@ changes Git refs.
 The path owns identity. Closed front matter repeats the full `id` as an
 integrity witness and contains `title`, `state`, `priority`, `needs`, `parent`,
 `supersedes`, `relates`, `note`, `createdAt`, `updatedAt`, and optional
-`contractId`; prose is the body. The ID must equal the path-derived coordinate.
+prose is the body. The ID must equal the path-derived coordinate.
 Unknown keys and malformed documents are authority corruption. Manual editing
 is authoritative; a manual move that breaks the witness is corruption.
 
@@ -69,7 +69,7 @@ duplicate-free full TaskIds. `note` is a string and defaults to empty.
 timestamps. Product creation sets both to one captured time. A product mutation
 that changes Task authority preserves `createdAt` and advances `updatedAt` once;
 a no-op update preserves both. Manual writers own the truth of both timestamps
-when they edit authority. `parent` and `contractId` are nullable. V1 has no
+when they edit authority. `parent` is nullable. V1 has no
 cached readiness, counters, task log, NDJSON trace, private history ref, or
 `history <TaskId>`.
 
@@ -88,9 +88,9 @@ drop    open | in_progress | on_hold -> drop
 ```
 
 Settlement alone may apply the coordination-only transition `done -> open`
-when the Task's retained `contractId` names an `abandoned` Contract. It is not
-a public Task verb. Task itself does not observe Contract state or decide when
-that transition applies.
+for an abandoned current TaskHolder. It is not a public Task verb. Task itself
+does not observe Contract state or TaskHolder authority, or decide when that
+transition applies.
 
 Both terminal states release dependents. A task is ready when it is `open` and
 all `needs` targets are terminal. `blocked` contains open or in-progress tasks
@@ -181,7 +181,7 @@ atomic replacement.
 
 `show <TaskId>` is world-scoped and returns exact fields, body, direct needs
 with released status, unresolved blockers, derived blocks/children/
-supersededBy/related, parent, outgoing supersedes, and the retained `contractId`
+supersededBy/related, parent, and outgoing supersedes
 bytes when present.
 `tree <TaskId> [--full]` follows transitive needs across namespaces, marks
 cycles, and either deduplicates shared nodes or expands every acyclic
@@ -191,8 +191,7 @@ namespace.
 `list` defaults to active tasks in the current namespace. Closed and all are
 explicit selections; `scope: "world"` escapes the current namespace. `ready`
 and `blocked` have the same scope rule. Rows sort by priority then TaskId bytes
-and contain TaskId, priority, disposition, title, and the optional opaque
-contract association.
+and contain TaskId, priority, disposition, and title.
 Blocked rows add unresolved blocker references only. File mtime is never read.
 
 ## Compose
@@ -249,8 +248,8 @@ sole write adjudicator against manual editors. Byte movement returns
 
 ## Contract Boundary
 
-A task may retain one optional nonblank string named `contractId`. Task stores
-and displays it verbatim. It does not validate a Contract coordinate, observe
-Contract state, import `Repo`, or mutate Contract authority or lifecycle.
-[Settlement](settlement.md) is the sole external interpreter of this opaque
-association and uses only Task-owned write adjudication.
+Task Markdown has no Contract association field and Task operations expose no
+association mutation. The current cross-product relationship is the
+TaskHolder authority defined by [settlement.md](settlement.md). Task contributes
+only its complete identity and the Task-owned state transition primitive used
+after settlement has judged that holder.

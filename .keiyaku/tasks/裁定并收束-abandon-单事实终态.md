@@ -11,7 +11,6 @@ relates: []
 note: ""
 createdAt: 2026-08-07T05:25:48.467Z
 updatedAt: 2026-08-07T11:29:07.461Z
-contractId: null
 ---
 依据 docs/model.md 与 docs/lifecycle.md，删除 abandonment 中没有读者的 target 快照。
 

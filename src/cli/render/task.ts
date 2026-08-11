@@ -24,7 +24,7 @@ type TaskFailure =
 
 function row(value: TaskRow | TaskView): string {
   const disposition = "disposition" in value ? value.disposition : value.state;
-  return `${value.id} - P${value.priority} - ${disposition} - ${value.title}${value.contractId === null ? "" : ` - ${value.contractId}`}`;
+  return `${value.id} - P${value.priority} - ${disposition} - ${value.title}`;
 }
 function changes(values: TaskDocumentChanges): string {
   return values.map((change) => change.documentDiff).filter((diff) => diff.length > 0).join("\n");

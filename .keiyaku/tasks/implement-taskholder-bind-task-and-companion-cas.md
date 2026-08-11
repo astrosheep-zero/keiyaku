@@ -11,6 +11,5 @@ relates: []
 note: ""
 createdAt: 2026-08-11T02:06:56.100Z
 updatedAt: 2026-08-11T03:04:17.728Z
-contractId: null
 ---
 Implement settlement/holder.ts as the sole holder owner. Add BindInput.task and CLI bind --task. Publish holder changes with bind/abandon facts in one Offer companions CAS. Remove Task Markdown contractId and task --contract interfaces in one hard cut; update docs/settlement.md, docs/task.md, docs/public-api.md, docs/cli.md and direct fixtures.

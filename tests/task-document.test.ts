@@ -11,9 +11,8 @@ test("task identity normalizes titles, caps local IDs, and supports nested names
   assert.deepEqual(parseTaskId(id), { namespace: ["contract", "internal"], localId: "ship-native-task" });
 });
 
-test("creation and authority documents preserve an opaque nonblank contract association", () => {
-  const creation = parseTaskCreationDocument("---\ntitle: Native task\nstate: in_progress\nnote: Initial note\ncontractId: 'external system #42'\n---\nBody\n");
-  assert.equal(creation.contractId, "external system #42");
+test("creation and authority documents contain no Contract association", () => {
+  const creation = parseTaskCreationDocument("---\ntitle: Native task\nstate: in_progress\nnote: Initial note\n---\nBody\n");
   assert.equal(creation.state, "in_progress");
   assert.equal(creation.note, "Initial note");
   const coordinate = { namespace: ["nested"], localId: "native-task" } as const;
@@ -21,13 +20,13 @@ test("creation and authority documents preserve an opaque nonblank contract asso
   assert.deepEqual(parseTaskDocument(serializeTaskDocument(document), coordinate), document);
   const defaults = parseTaskCreationDocument("---\ntitle: Defaults\n---\n");
   assert.deepEqual({ state: defaults.state, note: defaults.note }, { state: "open", note: "" });
-  assert.throws(() => parseTaskCreationDocument("---\ntitle: Bad\ncontractId: '   '\n---\n"), /nonblank string/u);
+  assert.throws(() => parseTaskCreationDocument("---\ntitle: Bad\ncontractId: null\n---\n"), /unknown task front matter key/u);
   assert.throws(() => parseTaskCreationDocument("---\ntitle: Bad\ncreatedAt: 2026-08-07T01:02:03.004Z\n---\n"), /unknown task front matter key/u);
 });
 
 test("task authority is closed and the path owns identity", () => {
   const coordinate = { namespace: [], localId: "expected" } as const;
-  const bytes = Buffer.from("---\nid: task/other\ntitle: Wrong\nstate: open\npriority: 2\nneeds: []\nparent: null\nsupersedes: []\nrelates: []\nnote: ''\ncreatedAt: 2026-08-07T01:02:03.004Z\nupdatedAt: 2026-08-07T01:02:03.004Z\ncontractId: null\n---\n");
+  const bytes = Buffer.from("---\nid: task/other\ntitle: Wrong\nstate: open\npriority: 2\nneeds: []\nparent: null\nsupersedes: []\nrelates: []\nnote: ''\ncreatedAt: 2026-08-07T01:02:03.004Z\nupdatedAt: 2026-08-07T01:02:03.004Z\n---\n");
   assert.throws(() => parseTaskDocument(bytes, coordinate), TaskAuthorityCorruptionError);
   assert.throws(() => parseTaskCreationDocument("---\ntitle: Bad\nid: task/bad\n---\n"), /unknown task front matter key/u);
 });

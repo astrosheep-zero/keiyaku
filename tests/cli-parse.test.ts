@@ -33,13 +33,23 @@ test("bind accepts boolean --here and preserves -C outside the contract command"
   });
 });
 
+test("bind accepts one Task association at the Contract boundary", () => {
+  assert.deepEqual(parseArgv(["bind", "--task", "task/example", "-"]), {
+    command: {
+      command: "bind",
+      task: "task/example",
+      output: "text",
+    },
+  });
+});
+
 test("unknown command syntax is refused with the exact command usage", () => {
   assert.throws(
     () => parseArgv(["bind", "--workspace", "here", "-"]),
     (error: unknown) => error instanceof CliUsageError
-      && error.message.includes("usage: keiyaku-v4 bind [--target <ref>]"),
+      && error.message.includes("usage: keiyaku bind [--task <task/...>] [--target <ref>]"),
   );
-  assert.throws(() => parseArgv(["unknown"]), /usage: keiyaku-v4 \[-C <path>\] <command>/);
+  assert.throws(() => parseArgv(["unknown"]), /usage: keiyaku \[-C <path>\] <command>/);
 });
 
 test("existing selectors are optional and review stdin is a distinct summary source", () => {

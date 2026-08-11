@@ -10,7 +10,6 @@ relates: []
 note: ""
 createdAt: 2026-08-06T21:45:30.621Z
 updatedAt: 2026-08-07T11:29:07.453Z
-contractId: null
 ---
 依据 docs/cli.md 的 adapter syntax/usage ownership，显式 --target ""、--message ""、--note ""、--summary "" 以及空白 review stdin 必须在 CLI adaptation 边界成为 typed usage exit 1；不得漏到 package-root TypeError exit 3。library 直调仍保留 programmer value validation。
 

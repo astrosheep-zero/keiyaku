@@ -1,36 +1,69 @@
 # Settlement
 
-Settlement is the sole write-side coordinator across Contract and Task. It
-projects an accepted Contract state into the expected state of other products;
-it is not authority, stores no receipt or marker, and owns no lifecycle.
-Contract journal facts and Task Markdown remain their products' sole
-authorities.
+Settlement is the sole owner of Contract-to-Task coordination. It owns the
+TaskHolder fact, judges whether a Contract is the current holder, and projects
+accepted Contract state into Task state. Contract journals and Task Markdown
+remain their products' lifecycle authorities; the holder is only the one
+cross-product association authority.
 
 No other module may import both Contract write-side facts and Task write
-operations. Protocol, Git, Task, and Akuma do not import settlement. CLI
-never invokes it directly. The package-root library invokes settlement after
-Git reconciliation for every accepted mutation and for both contract and
-world reconciliation. Kanshi remains read-only and never settles.
+operations. Core Contract decisions, Git admission, Task, and Akuma do not
+import settlement. The package-root Library composes holder changes into
+Contract admission and invokes settlement after Git reconciliation. CLI never
+invokes it directly. Kanshi may consume its read projection but never settles.
+
+## TaskHolder Authority
+
+There is one canonical holder record per complete `TaskId` in the private Git
+tree:
+
+```text
+settlement/task-holders/<sha256(TaskId)>.json
+```
+
+```ts
+type TaskHolder = Readonly<{
+  version: 1
+  taskId: TaskId
+  contractId: ContractId
+  disposition: "held" | "released"
+}>
+```
+
+The fixed SHA-256 locator bounds Git tree depth; the canonical bytes retain the
+complete TaskId and the reader verifies that it hashes to the path. The record
+is never deleted. A new `bind({ task })` replaces that Task's record with
+`held` for the new Contract. An abandon replaces it with `released` only when
+the abandoning Contract is still the current `held` holder. An older Contract
+therefore cannot release or settle a Task after a newer bind supersedes it.
+
+`settlement/holder.ts` is the sole path, codec, read, and currentness judge.
+Library asks it to attach claim or release bytes to an Offer; Git sees only the
+generic companion path and bytes. The holder mutation and the bind or abandon
+journal entries publish in one private-root CAS. Release is retained rather
+than represented by absence because post-abandon settlement and replay must
+still know which Task to reopen. There is no reverse index, Task-side copy,
+delete operation, compatibility decoder, or independent holder writer.
 
 ## Rules
 
 Settlement has exactly these rules:
 
-1. A `claimed` Contract moves every Task whose `contractId` equals that
-   ContractId from `open`, `in_progress`, or `on_hold` to `done`. An already
-   `done` Task is unchanged. A `drop` Task is not reopened or rewritten.
-2. An `abandoned` Contract moves every associated `done` Task to `open`. This
-   coordination-only transition is not a public Task verb. It applies equally
-   when the Task was completed manually; clearing `contractId` opts the Task
-   out before settlement.
-3. An active managed Contract worktree reported as present by Git has
-   its Task namespace context installed or repaired. The default namespace is
-   the ContractId's human contract segment. A valid local override is kept.
+1. A `claimed` Contract whose current holder is `held` moves that one Task from
+   `open`, `in_progress`, or `on_hold` to `done`. An already `done` Task is
+   unchanged. A `drop` Task refuses the settlement transition and produces a
+   lag.
+2. An `abandoned` Contract whose current holder is `released` moves that one
+   Task from `done` to `open`. Other Task states are unchanged. This
+   coordination-only transition is not a public Task verb.
+3. A terminal Contract with no current matching holder does nothing. This is
+   how superseded holders remain inert under settlement replay.
+4. An active managed Contract worktree reported as present by Git has its Task
+   namespace context installed or repaired. The default namespace is the
+   ContractId's human contract segment. A valid local override is kept.
 
-Association matching is verbatim. Settlement does not impose uniqueness on
-`contractId`; every matching Task is considered independently. It has no Akuma
-rule. New rules require an owner-law change here; there is no event bus,
-registry, provider interface, or generic lifecycle-hook vocabulary.
+It has no Akuma rule. New rules require an owner-law change here; there is no
+event bus, registry, provider interface, or generic lifecycle-hook vocabulary.
 
 ## Reports
 
@@ -49,7 +82,7 @@ type SettlementAction =
 
 type SettlementLag = Readonly<{
   kind: "settlement-failed"
-  surface: "task" | "namespace-context"
+  surface: "task-holder" | "task" | "namespace-context"
   contractId: ContractId
   taskId?: TaskId
   path?: string
@@ -62,10 +95,11 @@ type SettlementReport = Readonly<{
 }>
 ```
 
-Actions contain only completed or directly observed work. An unavailable Task
-board produces one Task lag; an individual Task refusal, retry, or failed write
-produces a lag naming that Task. Namespace failure produces a lag naming the
-worktree path. Settlement continues independent rules after a lag.
+Actions contain only completed or directly observed work. Holder corruption or
+read failure produces one `task-holder` lag. A missing target Task, Task
+refusal, retry, or failed write produces a Task lag naming that Task. Namespace
+failure produces a lag naming the worktree path. Settlement continues
+independent rules after a lag.
 
 ## Execution And Replay
 
@@ -75,19 +109,18 @@ The package-root flow is:
 protocol admission -> Git reconcile -> settlement -> public result
 ```
 
-Admission is the irreversible point. Git or settlement failure never
-changes an accepted fact, creates `abandoned`, or rejects the public mutation.
-The result returns the admitted facts and head, the Git effects and lags
-actually observed, and the complete `SettlementReport`. Settlement is
-synchronous in that public Promise; a lag reports incomplete follow-up without
-blocking the Contract lifecycle fact.
+Admission is the irreversible point. Git or settlement failure never changes
+an accepted fact, creates `abandoned`, or rejects the public mutation. The
+result returns admitted facts and head, observed Git effects and lags, and the
+complete `SettlementReport`. Settlement is synchronous in that public Promise;
+a lag reports incomplete follow-up without hiding the admitted Contract.
 
-Settlement derives desired work from the current Contract facts, current Task
-Markdown, and the current Git report on every invocation. It records no
-completed bit. Re-running `keiyaku.reconcile()` or world reconciliation repeats
-Git reconciliation and the same settlement rules, making both the
-normal recovery paths. Task predecessor-byte comparison remains the write
-adjudicator; a concurrent movement becomes a lag and is reconsidered later.
+Settlement derives desired work from current Contract state, current
+TaskHolder authority, current Task Markdown, and the current Git report on every
+invocation. It records no completion bit. Re-running Contract or world
+reconciliation repeats Git reconciliation and the same settlement rules. Task
+predecessor-byte comparison remains the Task write adjudicator; concurrent
+movement becomes a lag and is reconsidered later.
 
 ## Hook Boundary
 

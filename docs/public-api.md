@@ -67,6 +67,7 @@ surface is exactly:
 type BindInput = Readonly<{
   repo: Repo
   markdown: string
+  task?: TaskId
   target?: string
   workspace?: "worktree" | "here"
   actor?: ActorId
@@ -101,10 +102,16 @@ Keiyaku.observe(input: { repo: Repo; id: ContractId }): Promise<ContractObservat
 ```
 
 `markdown` is the complete contract document and is decoded at the library
-edge. `workspace` defaults to `"worktree"`. `target`, `workspace`, `actor`,
+edge. `workspace` defaults to `"worktree"`. `task`, `target`, `workspace`, `actor`,
 `after`, `gates`, and `hooks` are structured construction inputs. The edge mints opaque
 document keys, while `gates` and `after` remain machine terms; their ownership
 is defined by [document.md](document.md) and [lifecycle.md](lifecycle.md).
+
+`task`, when present, is one complete `TaskId`. The Library composes the
+Contract bind with the TaskHolder claim defined by [settlement.md](settlement.md)
+in the same admission. It validates identity shape but does not require the
+Task Markdown to exist before admission; a missing target Task is reported by
+the mandatory settlement pass after the Contract has been admitted.
 
 `actor` is caller-supplied testimony, not a registered identity. Package-root
 inputs accept nonblank string bytes; the library validates and brands them as
@@ -561,13 +568,13 @@ or verification-run operation.
 The package root exports the operation value names `Delivery` and `Review`.
 `DeliverValue`, `ReviewValue`, and `ReviewResult` are not public aliases.
 
-Task products may retain returned identity bytes as an opaque association.
-Their association, persistence, failure policy, and mutations are their own
-authority. The package-root facade reaches them only through the sole
-post-admission coordinator defined by [settlement.md](settlement.md); Contract
-protocol and Git do not gain Task coordinates or write operations. The separate
-task subpath shipped in this package neither imports package-root values nor
-observes, validates, writes, or folds Contract facts.
+Contract-to-Task association is the TaskHolder fact owned by
+[settlement.md](settlement.md), never a Task Markdown field. The package-root
+facade composes holder changes into bind and abandon admission, then reaches
+Task writes only through the sole post-admission coordinator. Core Contract
+decisions and Git admission do not interpret Task coordinates or Task
+lifecycle. The separate task subpath shipped in this package neither imports
+package-root values nor observes, validates, writes, or folds Contract facts.
 
 ## Akuma Subpath
 

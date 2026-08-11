@@ -11,7 +11,6 @@ relates: []
 note: ""
 createdAt: 2026-08-06T04:53:58.076Z
 updatedAt: 2026-08-07T11:29:07.435Z
-contractId: null
 ---
 Exercise the built `keiyaku-v4` binary through real shell processes using only the current command law.
 

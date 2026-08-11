@@ -45,12 +45,12 @@ async function populatedWorld() {
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), markdown: document(), workspace: "here" });
-  const contract = await bound.keiyaku.state();
   const tasks = Tasks.at({ path: repository.path });
-  const added = await tasks.add({ title: "Render status", priority: 0, contractId: contract.id });
+  const added = await tasks.add({ title: "Render status", priority: 0 });
   assert.equal(added.kind, "accepted");
   if (added.kind !== "accepted") throw new Error("task add failed");
+  const bound = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }), task: added.value.id, markdown: document(), workspace: "here" });
+  const contract = await bound.keiyaku.state();
   await tasks.task({ id: added.value.id }).start();
   const akumaId = bornAkuma(repository.path, "a0000001", contract.id);
   return { repository, contract, taskId: added.value.id, akumaId };
@@ -100,19 +100,16 @@ test("an Akuma association is missing only when a present Contract board lacks i
   });
 });
 
-test("a Task association is unavailable when the Contract world is absent", async () => {
+test("a Task world without Git has no invented Contract endpoint", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-task-only-"));
   const tasks = Tasks.at({ path: root });
-  const added = await tasks.add({ title: "Contract outside this world", contractId: "kei/outside" });
+  const added = await tasks.add({ title: "Standalone Task" });
   assert.equal(added.kind, "accepted");
   const report = await kanshi({ path: root });
   assert.deepEqual(report.contracts, { kind: "absent" });
   assert.equal(report.tasks.kind, "present");
   if (report.tasks.kind !== "present" || added.kind !== "accepted") return;
-  assert.deepEqual(report.tasks.value.rows.find((row) => row.id === added.value.id)?.contract, {
-    id: "kei/outside",
-    observed: "unavailable",
-  });
+  assert.equal(report.tasks.value.rows.find((row) => row.id === added.value.id)?.contract, undefined);
 });
 
 test("kanshi reports malformed Task authority as a failed section", async () => {

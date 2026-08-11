@@ -10,7 +10,6 @@ relates: []
 note: ""
 createdAt: 2026-08-07T04:47:49.837Z
 updatedAt: 2026-08-07T11:29:07.459Z
-contractId: null
 ---
 按 docs/lifecycle.md 的 pact/protocol/admission 单裁判边界收缩 carrier admission：
 

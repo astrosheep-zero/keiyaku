@@ -7,9 +7,9 @@ export class CliUsageError extends Error {
 
 export function usageLine(usage: string): string {
   return usage.split("\n").map((line, index) => {
-    if (index === 0) return `usage: keiyaku-v4 ${line}`;
+    if (index === 0) return `usage: keiyaku ${line}`;
     return line.startsWith("task ")
-      ? `       keiyaku-v4 ${line}`
+      ? `       keiyaku ${line}`
       : `       ${line.trimStart()}`;
   }).join("\n");
 }

@@ -10,6 +10,5 @@ relates: []
 note: ""
 createdAt: 2026-08-06T01:52:46.963Z
 updatedAt: 2026-08-07T11:29:07.431Z
-contractId: null
 ---
 Superseded by Act 324 Repo-first scope tasks; Carrier is not the public scope.

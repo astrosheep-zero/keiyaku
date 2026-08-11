@@ -98,13 +98,18 @@ test("one CLI invocation reuses its Repo for selector, settings, and contract lo
 
 test("an explicit status selector projects one Kanshi report without changing section shape", async () => {
   const repository = repositoryWithMain();
-  const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Targeted status"));
-  const id = acceptedContract(bound);
   const tasks = Tasks.at({ path: repository.path });
-  const associated = await tasks.add({ title: "Associated", contractId: id });
+  const associated = await tasks.add({ title: "Associated" });
   const unrelated = await tasks.add({ title: "Unrelated" });
   assert.equal(associated.kind, "accepted");
   assert.equal(unrelated.kind, "accepted");
+  if (associated.kind !== "accepted") throw new Error("associated Task was not accepted");
+  const bound = await invokeWithDocument(
+    repository.path,
+    ["bind", "--task", associated.value.id, "-"],
+    contractDocument("Targeted status"),
+  );
+  const id = acceptedContract(bound);
 
   const result = await invokeWithDocument(repository.path, ["status", id], "");
 

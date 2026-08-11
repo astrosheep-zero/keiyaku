@@ -21,15 +21,15 @@ export type TaskMutationResult = TaskOutcome<TaskView>;
 export type TaskUpdateResult = TaskOutcome<Readonly<{ task: TaskView; documentDiff: string }>>;
 export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | "drop";
 export type TaskBatchResult = Readonly<{ items: readonly Readonly<{ id: TaskId; outcome: TaskMutationResult }>[] }>;
-export type AssociatedTaskAction = "done" | "reopened";
-export type AssociatedTaskResult =
-  | Readonly<{ kind: "changed"; task: TaskView; action: AssociatedTaskAction }>
+export type SettledTaskAction = "done" | "reopened";
+export type SettledTaskResult =
+  | Readonly<{ kind: "changed"; task: TaskView; action: SettledTaskAction }>
   | Readonly<{ kind: "unchanged" }>
   | Readonly<{ kind: "refused"; refusal: TaskRefusal }>
   | Readonly<{ kind: "retry"; reason: TaskRetry }>;
 export type AddTaskInput = Readonly<{
   title: string; namespace?: readonly string[]; body?: string; note?: string; state?: TaskState; priority?: TaskPriority; needs?: readonly TaskId[];
-  parent?: TaskId | null; supersedes?: readonly TaskId[]; relates?: readonly TaskId[]; contractId?: string | null; signal?: AbortSignal;
+  parent?: TaskId | null; supersedes?: readonly TaskId[]; relates?: readonly TaskId[]; signal?: AbortSignal;
 }>;
 export type AddTaskDocumentInput = Readonly<{ markdown: string; namespace?: readonly string[]; signal?: AbortSignal }>;
 export type UpdateTaskInput = Readonly<{
@@ -37,7 +37,7 @@ export type UpdateTaskInput = Readonly<{
   needs?: readonly TaskId[]; addNeeds?: readonly TaskId[]; dropNeeds?: readonly TaskId[];
   parent?: TaskId | null; supersedes?: readonly TaskId[]; addSupersedes?: readonly TaskId[]; dropSupersedes?: readonly TaskId[];
   relates?: readonly TaskId[]; addRelates?: readonly TaskId[]; dropRelates?: readonly TaskId[];
-  contractId?: string | null; signal?: AbortSignal;
+  signal?: AbortSignal;
 }>;
 
 export function taskView(document: TaskDocument): TaskView {
@@ -82,7 +82,7 @@ export async function addTask(world: TaskWorld, input: AddTaskInput): Promise<Ta
   const namespace = context(world, input.namespace); if (!Array.isArray(namespace)) return refused(namespace as TaskRefusal);
   return create(world, {
     title: input.title, body: input.body ?? "", note: input.note ?? "", state: input.state ?? "open", priority: input.priority ?? 2, needs: input.needs ?? [], parent: input.parent ?? null,
-    supersedes: input.supersedes ?? [], relates: input.relates ?? [], contractId: input.contractId ?? null,
+    supersedes: input.supersedes ?? [], relates: input.relates ?? [],
   }, namespace, input.signal);
 }
 export async function addTaskDocument(world: TaskWorld, input: AddTaskDocumentInput): Promise<TaskMutationResult> {
@@ -113,7 +113,6 @@ function updateDocument(board: TaskBoard, current: TaskDocument, input: UpdateTa
     ...(input.parent === undefined ? {} : { parent: input.parent }),
     supersedes: listChange(current.supersedes, input.supersedes, input.addSupersedes, input.dropSupersedes),
     relates: listChange(current.relates, input.relates, input.addRelates, input.dropRelates),
-    ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
   };
 }
 
@@ -157,21 +156,14 @@ export async function batchTasks(world: TaskWorld, verb: "done" | "drop" | "hold
   return { items };
 }
 
-export function associatedTaskIds(world: TaskWorld, contractId: string): readonly TaskId[] {
-  return [...readBoard(world).board.tasks.values()]
-    .filter((task) => task.contractId === contractId)
-    .map((task) => task.id);
-}
-
-export async function settleAssociatedTask(
+export async function settleTask(
   world: TaskWorld,
   id: TaskId,
-  contractId: string,
   desired: "done" | "open-from-done",
-): Promise<AssociatedTaskResult> {
-  const result = await withTaskLocks({ world, allocation: false, ids: [id] }, async (): Promise<AssociatedTaskResult> => {
+): Promise<SettledTaskResult> {
+  const result = await withTaskLocks({ world, allocation: false, ids: [id] }, async (): Promise<SettledTaskResult> => {
     const snapshot = readBoard(world), current = snapshot.board.tasks.get(id);
-    if (current === undefined || current.contractId !== contractId) return { kind: "unchanged" };
+    if (current === undefined) return { kind: "refused", refusal: { kind: "task-missing", taskId: id } };
     if (desired === "done") {
       if (current.state === "done") return { kind: "unchanged" };
       if (current.state === "drop") {

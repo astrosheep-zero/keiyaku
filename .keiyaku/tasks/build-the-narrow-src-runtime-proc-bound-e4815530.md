@@ -10,6 +10,5 @@ relates: []
 note: ""
 createdAt: 2026-08-05T11:00:36.571Z
 updatedAt: 2026-08-07T11:29:07.422Z
-contractId: null
 ---
 Old task required a Windows Job Object boundary unavailable without a new native addon; replaced by the documented portable process contract.

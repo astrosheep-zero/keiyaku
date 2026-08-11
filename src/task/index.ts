@@ -51,28 +51,22 @@ function state(value: unknown): TaskState | undefined {
   return value;
 }
 function nullableId(value: unknown): TaskId | null | undefined { return value === undefined || value === null ? value : id(value); }
-function contract(value: unknown): string | null | undefined {
-  if (value === undefined || value === null) return value;
-  if (typeof value !== "string" || value.trim().length === 0) throw new TypeError("contractId must be null or a nonblank string");
-  return value;
-}
-
 function addInput(input: unknown): AddTaskInput {
   const v = record(input, "add input");
-  closed(v, ["title", "namespace", "body", "note", "state", "priority", "needs", "parent", "supersedes", "relates", "contractId", "signal"], "add input");
+  closed(v, ["title", "namespace", "body", "note", "state", "priority", "needs", "parent", "supersedes", "relates", "signal"], "add input");
   const title = text(v.title, "title"); if (title === undefined || title.trim() === "") throw new TypeError("title is required");
   const ns = namespace(v.namespace), body = text(v.body, "body"), note = text(v.note, "note"), initialState = state(v.state), pri = priority(v.priority);
   const needs = taskIds(v.needs, "needs"), parent = nullableId(v.parent), supersedes = taskIds(v.supersedes, "supersedes"), relates = taskIds(v.relates, "relates");
-  const contractId = contract(v.contractId), abort = signal(v.signal);
+  const abort = signal(v.signal);
   return { title, ...(ns === undefined ? {} : { namespace: ns }), ...(body === undefined ? {} : { body }), ...(note === undefined ? {} : { note }),
     ...(initialState === undefined ? {} : { state: initialState }), ...(pri === undefined ? {} : { priority: pri }),
     ...(needs === undefined ? {} : { needs }), ...(parent === undefined ? {} : { parent }),
     ...(supersedes === undefined ? {} : { supersedes }), ...(relates === undefined ? {} : { relates }),
-    ...(contractId === undefined ? {} : { contractId }), ...(abort === undefined ? {} : { signal: abort }) };
+    ...(abort === undefined ? {} : { signal: abort }) };
 }
 function updateInput(input: unknown): UpdateTaskInput {
   const v = record(input, "update input");
-  closed(v, ["title", "body", "appendBody", "note", "priority", "needs", "addNeeds", "dropNeeds", "parent", "supersedes", "addSupersedes", "dropSupersedes", "relates", "addRelates", "dropRelates", "contractId", "signal"], "update input");
+  closed(v, ["title", "body", "appendBody", "note", "priority", "needs", "addNeeds", "dropNeeds", "parent", "supersedes", "addSupersedes", "dropSupersedes", "relates", "addRelates", "dropRelates", "signal"], "update input");
   if (v.body !== undefined && v.appendBody !== undefined) throw new TypeError("body and appendBody are mutually exclusive");
   const result: Record<string, unknown> = {};
   const title = text(v.title, "title"); if (title !== undefined) { if (title.trim().length === 0) throw new TypeError("title must be nonblank"); result.title = title; }
@@ -82,7 +76,6 @@ function updateInput(input: unknown): UpdateTaskInput {
   const pri = priority(v.priority); if (pri !== undefined) result.priority = pri;
   for (const [key, value] of [["needs", taskIds(v.needs, "needs")], ["addNeeds", taskIds(v.addNeeds, "addNeeds")], ["dropNeeds", taskIds(v.dropNeeds, "dropNeeds")], ["supersedes", taskIds(v.supersedes, "supersedes")], ["addSupersedes", taskIds(v.addSupersedes, "addSupersedes")], ["dropSupersedes", taskIds(v.dropSupersedes, "dropSupersedes")], ["relates", taskIds(v.relates, "relates")], ["addRelates", taskIds(v.addRelates, "addRelates")], ["dropRelates", taskIds(v.dropRelates, "dropRelates")]] as const) if (value !== undefined) result[key] = value;
   const parent = nullableId(v.parent); if (parent !== undefined) result.parent = parent;
-  const linkedContract = contract(v.contractId); if (linkedContract !== undefined) result.contractId = linkedContract;
   const abort = signal(v.signal); if (abort !== undefined) result.signal = abort;
   const update = result as UpdateTaskInput;
   if (Object.keys(result).filter((key) => key !== "signal").length === 0) throw new TypeError("update requires at least one field change"); return update;

@@ -66,7 +66,7 @@ export class Repo {
         report: {
           ...contract.report,
           settlement: await settle({
-            taskRoot: scope.primaryWorktree,
+            repository: scope,
             state: contract.state,
             effects: contract.report.effects,
           }),

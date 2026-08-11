@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { AuthorityCorruptionError, Keiyaku, Repo } from "../src/index.js";
+import { contractJournalPath } from "../src/git/identity.js";
+import {
+  GIT_REF,
+  readGit,
+  repositoryAt,
+  updateGitTree,
+  updateRefsAtomically,
+  writeBlob,
+  writeCommit,
+} from "../src/git/repository.js";
+import { readTaskHolders } from "../src/settlement/holder.js";
 import { readNamespaceContext } from "../src/task/context.js";
 import { Tasks } from "../src/task/index.js";
 import { makeGitRepository } from "./support/git.js";
@@ -39,11 +51,17 @@ function document(title: string): string {
   ].join("\n");
 }
 
-async function associatedTask(path: string, contractId: string, state: "open" | "done" = "open") {
-  const result = await Tasks.at({ path }).add({ title: `Associated ${state}`, contractId, state });
+async function task(path: string, title: string, state: "open" | "done" = "open") {
+  const result = await Tasks.at({ path }).add({ title, state });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("Task creation was not accepted");
   return result.value.id;
+}
+
+function replaceTaskState(path: string, id: string, before: string, after: string): void {
+  const authority = `${path}/.keiyaku/tasks/${id.slice("task/".length)}.md`;
+  const bytes = readFileSync(authority, "utf8");
+  writeFileSync(authority, bytes.replace(`state: ${before}\n`, `state: ${after}\n`));
 }
 
 async function taskState(path: string, id: string) {
@@ -52,11 +70,19 @@ async function taskState(path: string, id: string) {
   return detail.task.state;
 }
 
-test("accepted claim synchronously settles every associated Task", async () => {
+test("accepted claim synchronously settles its current held Task", async () => {
   const world = repository(), repo = Repo.at({ path: world.path });
-  const bound = await Keiyaku.bind({ repo, markdown: document("Synchronous settlement"), workspace: "here", gates: [] });
+  const taskId = await task(world.path, "Claimed Task");
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Synchronous settlement"), workspace: "here", gates: [] });
   const state = await bound.keiyaku.state();
-  const taskId = await associatedTask(world.path, state.id);
+  const git = repositoryAt(world.path);
+  assert.equal(readGit(git).paths.has(contractJournalPath(state.id)), true);
+  assert.deepEqual(readTaskHolders(git), [{
+    version: 1,
+    taskId,
+    contractId: state.id,
+    disposition: "held",
+  }]);
   writeFileSync(`${world.path}/candidate.txt`, "candidate\n");
 
   const delivered = await bound.keiyaku.deliver();
@@ -67,11 +93,10 @@ test("accepted claim synchronously settles every associated Task", async () => {
   assert.deepEqual(delivered.settlement.lags, []);
 });
 
-test("accepted abandonment reopens every associated done Task", async () => {
+test("accepted abandonment reopens its current released Task", async () => {
   const world = repository(), repo = Repo.at({ path: world.path });
-  const bound = await Keiyaku.bind({ repo, markdown: document("Reopen settlement"), workspace: "here" });
-  const state = await bound.keiyaku.state();
-  const taskId = await associatedTask(world.path, state.id, "done");
+  const taskId = await task(world.path, "Abandoned Task", "done");
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Reopen settlement"), workspace: "here" });
 
   const abandoned = await bound.keiyaku.abandon();
 
@@ -82,25 +107,104 @@ test("accepted abandonment reopens every associated done Task", async () => {
 
 test("contract and world reconcile replay settlement from current authority", async () => {
   const world = repository(), repo = Repo.at({ path: world.path });
-  const first = await Keiyaku.bind({ repo, markdown: document("Contract replay"), workspace: "here", gates: [] });
+  const firstTask = await task(world.path, "Contract Replay Task");
+  const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("Contract replay"), workspace: "here", gates: [] });
   writeFileSync(`${world.path}/first.txt`, "first\n");
   await first.keiyaku.deliver();
-  const firstId = (await first.keiyaku.state()).id;
-  const firstTask = await associatedTask(world.path, firstId);
+  replaceTaskState(world.path, firstTask, "done", "open");
 
   const local = await first.keiyaku.reconcile();
   assert.deepEqual(local.settlement.actions, [{ kind: "task", taskId: firstTask, action: "done" }]);
 
-  const second = await Keiyaku.bind({ repo, markdown: document("World replay"), workspace: "here", gates: [] });
+  const secondTask = await task(world.path, "World Replay Task");
+  const second = await Keiyaku.bind({ repo, task: secondTask, markdown: document("World replay"), workspace: "here", gates: [] });
   writeFileSync(`${world.path}/second.txt`, "second\n");
   await second.keiyaku.deliver();
   const secondId = (await second.keiyaku.state()).id;
-  const secondTask = await associatedTask(world.path, secondId);
+  replaceTaskState(world.path, secondTask, "done", "open");
 
   const report = await repo.reconcile();
   const settled = report.contracts.find((item) => item.contractId === secondId);
   assert.deepEqual(settled?.report.settlement.actions, [{ kind: "task", taskId: secondTask, action: "done" }]);
   assert.equal(await taskState(world.path, secondTask), "done");
+});
+
+test("a superseded Contract cannot release or settle a newer holder", async () => {
+  const world = repository(), repo = Repo.at({ path: world.path });
+  const taskId = await task(world.path, "Superseded Holder");
+  const first = await Keiyaku.bind({ repo, task: taskId, markdown: document("Old holder"), workspace: "here" });
+  const second = await Keiyaku.bind({ repo, task: taskId, markdown: document("Current holder"), workspace: "here", gates: [] });
+
+  const abandoned = await first.keiyaku.abandon();
+  assert.deepEqual(abandoned.settlement.actions, []);
+  assert.equal(await taskState(world.path, taskId), "open");
+
+  writeFileSync(`${world.path}/current.txt`, "current\n");
+  const claimed = await second.keiyaku.deliver();
+  assert.deepEqual(claimed.settlement.actions, [{ kind: "task", taskId, action: "done" }]);
+  assert.equal(await taskState(world.path, taskId), "done");
+});
+
+test("abandon refuses corrupted authority that assigns one Contract multiple TaskHolders", async () => {
+  const world = repository(), repo = Repo.at({ path: world.path });
+  const firstTask = await task(world.path, "First holder");
+  const secondTask = await task(world.path, "Second holder");
+  const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("First holder"), workspace: "here" });
+  await Keiyaku.bind({ repo, task: secondTask, markdown: document("Second holder"), workspace: "here" });
+  const firstId = (await first.keiyaku.state()).id;
+  const git = repositoryAt(world.path);
+  const snapshot = readGit(git);
+  const secondPath = `settlement/task-holders/${createHash("sha256").update(secondTask).digest("hex")}.json`;
+  const duplicate = Buffer.from(`${JSON.stringify({
+    version: 1,
+    taskId: secondTask,
+    contractId: firstId,
+    disposition: "held",
+  })}\n`);
+  const tree = updateGitTree(git, snapshot.tree, new Map([[secondPath, { oid: writeBlob(git, duplicate) }]]));
+  const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
+
+  await assert.rejects(
+    () => first.keiyaku.abandon(),
+    (error: unknown) => error instanceof AuthorityCorruptionError
+      && error.message === `Contract has multiple current TaskHolders: ${firstId}`,
+  );
+  assert.equal((await first.keiyaku.state()).terminal, null);
+});
+
+test("TaskHolder reads reject unexpected paths in their authority namespace", async () => {
+  const world = repository();
+  await Keiyaku.bind({ repo: Repo.at({ path: world.path }), markdown: document("Initialize authority"), workspace: "here" });
+  const git = repositoryAt(world.path);
+  const snapshot = readGit(git);
+  const tree = updateGitTree(git, snapshot.tree, new Map([
+    ["settlement/task-holders/README", { oid: writeBlob(git, "not holder authority\n") }],
+  ]));
+  const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
+
+  assert.throws(
+    () => readTaskHolders(git),
+    (error: unknown) => error instanceof AuthorityCorruptionError
+      && error.message === "unexpected TaskHolder authority path: settlement/task-holders/README",
+  );
+});
+
+test("a missing holder target remains an explicit Task settlement lag", async () => {
+  const world = repository(), repo = Repo.at({ path: world.path });
+  const missing = "task/missing" as const;
+  const bound = await Keiyaku.bind({ repo, task: missing, markdown: document("Missing holder target"), workspace: "here", gates: [] });
+  writeFileSync(`${world.path}/missing.txt`, "missing\n");
+  const claimed = await bound.keiyaku.deliver();
+  assert.equal(claimed.settlement.lags.length, 1);
+  assert.deepEqual(claimed.settlement.lags[0], {
+    kind: "settlement-failed",
+    surface: "task",
+    contractId: (await bound.keiyaku.state()).id,
+    taskId: missing,
+    diagnostic: `Task settlement refused: ${JSON.stringify({ kind: "task-missing", taskId: missing })}`,
+  });
 });
 
 test("managed bind installs Task namespace only after worktree materialization", async () => {

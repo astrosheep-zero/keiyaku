@@ -190,8 +190,10 @@ directory, process, callback, decoded document, Git handle, Git effect, or
 protocol-body import. The document derivation boundary is defined in
 [document.md](document.md).
 
-An `Offer` contains ordered journal appends and expected contract heads. A
-claimed placement offer contains a target ref operation only when the contract
+An `Offer` contains ordered journal appends and expected contract heads. It may
+also carry opaque companion tree updates supplied by the package-root
+composition boundary. Core decisions never create, decode, or judge those
+updates. A claimed placement offer contains a target ref operation only when the contract
 declares a target. Its shape is:
 
 ```ts
@@ -199,6 +201,17 @@ type RefOperation = Readonly<{
   target: string
   expectedOid: SnapshotId
   newOid: SnapshotId
+}>
+
+type TreeUpdate = Readonly<{
+  path: string
+  bytes: Uint8Array
+}>
+
+type Offer = Readonly<{
+  facts: readonly ContractJournalAppend[]
+  target?: RefOperation
+  companions?: readonly TreeUpdate[]
 }>
 ```
 
@@ -226,6 +239,13 @@ The one decision submits at most one offer. Git admission owns raw Git
 object construction and one atomic `update-ref --stdin --no-deref` operation;
 it does not parse Git prose. Admission's expected-head assertions remain the
 only currentness adjudicator for that offer.
+
+An optional companion decorator runs after that attempt's pure decision and before
+admission. It receives the exact immutable Git observation used by the attempt
+and may only add companion updates; it cannot replace journal entries, target
+assertions, or the decision. A retry re-runs the decorator from the fresh
+observation, so a stale companion can never be replayed against a newer Git
+root.
 
 After a known rejected transaction, protocol compares the Git and optional
 target ref with the coordinates asserted by that attempt. Any movement discards

@@ -27,15 +27,19 @@ test("task parser owns subcommand arity, repeat flags, and selected stdin", () =
   assert.throws(() => parseArgv(["task", "ls", "--closed", "--all"]), CliUsageError);
   assert.throws(() => parseArgv(["task", "update", "task/a"]), CliUsageError);
 });
+
+test("Task commands reject the removed Contract association flags", () => {
+  assert.throws(() => parseArgv(["task", "add", "Old association", "--contract", "kei/example"]), /option --contract is not valid for task add/u);
+  assert.throws(() => parseArgv(["task", "update", "task/example", "--no-contract"]), /option --no-contract is not valid for task update/u);
+});
 test("task invocation works outside Git and consumes stdin only when selected", async () => {
   const root = world(); let reads = 0;
-  const add = await invoke(parseArgv(["-C", root, "task", "add", "Native CLI", "--state", "on_hold", "--note", "initial", "--contract", "external #7"]), { readStdin: () => { reads += 1; return "unused"; } }) as TaskInvocationResult;
+  const add = await invoke(parseArgv(["-C", root, "task", "add", "Native CLI", "--state", "on_hold", "--note", "initial"]), { readStdin: () => { reads += 1; return "unused"; } }) as TaskInvocationResult;
   assert.equal((add as { kind: string }).kind, "accepted"); assert.equal(reads, 0);
   const update = await invoke(parseArgv(["-C", root, "task", "update", "task/native-cli", "--body", "-"]), { readStdin: () => { reads += 1; return "body from stdin\n"; } }) as TaskInvocationResult;
   assert.equal((update as { kind: string }).kind, "accepted"); assert.equal(reads, 1);
   const shown = await invoke(parseArgv(["-C", root, "task", "show", "task/native-cli"])) as TaskInvocationResult;
-  assert.equal((shown as { task: { body: string; contractId: string } }).task.body, "body from stdin\n");
-  assert.equal((shown as { task: { body: string; contractId: string } }).task.contractId, "external #7");
+  assert.equal((shown as { task: { body: string } }).task.body, "body from stdin\n");
   assert.equal((shown as { task: { state: string } }).task.state, "on_hold");
   assert.equal((shown as { task: { note: string } }).task.note, "initial");
 

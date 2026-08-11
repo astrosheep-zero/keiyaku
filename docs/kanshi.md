@@ -26,17 +26,20 @@ type KanshiReport = {
 
 ## Contract endpoints
 
-Task and Akuma source rows may each name one Contract. Kanshi outer-joins that
-opaque id against the already-read Contract board and replaces the source
-field with `{ id, observed }` in its own row type. `observed` is the Contract's
+Akuma source rows may name one Contract. Task endpoints come only from current
+`held` TaskHolder facts read through the package-root composition boundary;
+Task Markdown has no association field. Kanshi outer-joins each endpoint id
+against the already-read Contract board and exposes `{ id, observed }` in its
+own row type. `observed` is the Contract's
 public disposition when found, `missing` when a present board lacks the id, and
 `unavailable` when the Contract section is absent or failed. Corruption and IO
 are never collapsed into `missing`.
 
 The join is one hop. Kanshi does not validate associations, infer them from cwd
 or origin, follow Task associations to derive an Akuma association, or persist
-the joined view. Task and Akuma products do not import Contract lifecycle or
-Git behavior.
+the joined view. A malformed or unreadable holder fails only the Task section;
+Contract and Akuma sections remain independently observable. Task and Akuma
+products do not import Contract lifecycle or Git behavior.
 
 ## Selection
 

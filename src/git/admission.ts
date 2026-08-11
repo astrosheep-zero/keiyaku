@@ -1,7 +1,7 @@
 import {
   encodeEntry,
 } from "../core/facts/codec.js";
-import type { ContractJournalAppend, Offer, RefOperation } from "../core/facts/offer.js";
+import type { ContractJournalAppend, Offer, RefOperation, TreeUpdate } from "../core/facts/offer.js";
 import type { GitAdmissionSnapshot } from "./observe.js";
 import {
   GIT_FORMAT_BYTES,
@@ -26,6 +26,7 @@ import {
   mintContractHead,
   mintSnapshotId,
 } from "./identity.js";
+import { validPath } from "./tree.js";
 
 type Accepted = Readonly<{
   kind: "accepted";
@@ -40,6 +41,8 @@ export type PublicationFailed = Readonly<{
 type Unknown = Readonly<{ kind: "unknown" }>;
 
 export type Admission = Accepted | PublicationFailed | Unknown;
+
+const CONTRACT_JOURNAL_PATH = /^contracts\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/u;
 
 function assertAppendStructure(
   appends: readonly ContractJournalAppend[],
@@ -56,6 +59,25 @@ function assertAppendStructure(
     }
   }
   return appends;
+}
+
+function assertCompanionStructure(
+  companions: readonly TreeUpdate[],
+  appends: readonly ContractJournalAppend[],
+): readonly TreeUpdate[] {
+  const reserved = new Set([GIT_FORMAT_PATH, ...appends.map((append) => contractJournalPath(append.contractId))]);
+  const seen = new Set<string>();
+  for (const companion of companions) {
+    if (!companion || typeof companion !== "object") throw new Error("invalid companion update");
+    validPath(companion.path);
+    if (!(companion.bytes instanceof Uint8Array)) throw new Error(`companion bytes must be Uint8Array: ${companion.path}`);
+    if (seen.has(companion.path)) throw new Error(`duplicate companion path: ${companion.path}`);
+    if (reserved.has(companion.path) || CONTRACT_JOURNAL_PATH.test(companion.path)) {
+      throw new Error(`companion path collides with admission-owned path: ${companion.path}`);
+    }
+    seen.add(companion.path);
+  }
+  return companions;
 }
 
 function readCanonicalJournal(
@@ -76,6 +98,7 @@ function buildOffer(
   repository: GitRepository,
   admission: GitAdmissionSnapshot,
   appends: readonly ContractJournalAppend[],
+  companions: readonly TreeUpdate[],
 ): { readonly changes: ReadonlyMap<string, TreeChange>; readonly heads: Readonly<Record<string, ContractHead>> } {
   const snapshot = admission.snapshot;
   const changes = new Map<string, TreeChange>();
@@ -83,6 +106,14 @@ function buildOffer(
 
   if (snapshot.commit === null) {
     changes.set(GIT_FORMAT_PATH, { oid: writeBlob(repository, GIT_FORMAT_BYTES), mode: "100644", type: "blob" });
+  }
+
+  for (const companion of companions) {
+    changes.set(companion.path, {
+      oid: writeBlob(repository, companion.bytes),
+      mode: "100644",
+      type: "blob",
+    });
   }
 
   for (const append of appends) {
@@ -130,9 +161,10 @@ export function admit(
   }
 
   const appends = assertAppendStructure(offer.facts);
+  const companions = assertCompanionStructure(offer.companions ?? [], appends);
   const target = offer.target ?? null;
 
-  const attempt = buildOffer(repository, admission, appends);
+  const attempt = buildOffer(repository, admission, appends, companions);
   const publication = publishOffer(repository, admission.snapshot, target, attempt.changes);
   if (publication.kind === "published") {
     return {

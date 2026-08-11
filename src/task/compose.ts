@@ -101,7 +101,7 @@ function plan(sketch: Sketch, board: TaskBoard, defaultNamespace: readonly strin
     const allocations = new Map<number, TaskDocument>();
     for (const node of sketch.nodes) if (node.kind === "new") {
       const localId = allocateLocalId(deriveLocalStem(node.title!), occupied); occupied.add(localId); const coordinate = { namespace, localId };
-      allocations.set(node.index, { id: formatTaskId(coordinate), title: node.title!, state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], note: "", createdAt: at, updatedAt: at, contractId: null, body: "" });
+      allocations.set(node.index, { id: formatTaskId(coordinate), title: node.title!, state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], note: "", createdAt: at, updatedAt: at, body: "" });
     }
     const all = new Map(board.tasks); for (const allocated of allocations.values()) all.set(allocated.id, allocated);
     const byDepth: TaskId[] = [], addressed = new Set<TaskId>(); const planned: Planned[] = [];

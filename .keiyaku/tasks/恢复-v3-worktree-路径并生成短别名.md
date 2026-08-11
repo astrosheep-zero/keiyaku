@@ -10,6 +10,5 @@ relates: []
 note: ""
 createdAt: 2026-08-10T01:43:27.825Z
 updatedAt: 2026-08-10T01:43:27.825Z
-contractId: null
 ---
 将 managed Contract worktree 根目录恢复为 .keiyaku/wt，并补齐 v3 约定的自动生成短别名；明确短别名的生成、唯一性、解析与持久化/投影边界。

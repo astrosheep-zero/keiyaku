@@ -53,6 +53,7 @@ export type {
   Review,
   ReviewInput,
   TimelineEntry,
+  TaskId,
   TopologyEffect,
   VerificationStop,
 } from "./contract.js";

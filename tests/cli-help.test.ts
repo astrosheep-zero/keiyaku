@@ -25,15 +25,17 @@ test("help resolves the longest legal command-word prefix before syntax scanning
 });
 
 test("each grammar owner renders its own namespace and leaf help", () => {
-  assert.match(renderRootHelp(), /task \.\.\.\n    Task coordination; see `keiyaku-v4 task --help`\./u);
-  assert.match(renderContractHelp("review"), /usage: keiyaku-v4 review .*--satisfied \| --unsatisfied/u);
+  assert.match(renderRootHelp(), /task \.\.\.\n    Task coordination; see `keiyaku task --help`\./u);
+  assert.match(renderContractHelp("bind"), /usage: keiyaku bind \[--task <task\/\.\.\.>\]/u);
+  assert.match(renderContractHelp("review"), /usage: keiyaku review .*--satisfied \| --unsatisfied/u);
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
-  assert.match(renderTaskHelp("compose"), /usage: keiyaku-v4 task compose \[--json\] -/u);
+  assert.doesNotMatch(renderTaskHelp(), /--contract|--no-contract/u);
+  assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--json\] -/u);
   assert.match(renderRootHelp(), /interrupt <aku\/\.\.\.>/u);
   assert.equal(renderAkumaHelp("call"), [
     "Summon an Akuma from a Persona and stdin body.",
     "",
-    "usage: keiyaku-v4 call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -",
+    "usage: keiyaku call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -",
   ].join("\n"));
 });
 
@@ -42,12 +44,12 @@ test("syntax refusal retains the deepest reached grammar", () => {
     () => parseArgv(["call", "--cwd", "/tmp", "-"]),
     (error: unknown) => error instanceof CliUsageError
       && error.diagnostic === "call has invalid positional arguments"
-      && error.projection === "usage: keiyaku-v4 call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -",
+      && error.projection === "usage: keiyaku call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -",
   );
   assert.throws(
     () => parseArgv(["task", "unknown"]),
     (error: unknown) => error instanceof CliUsageError
-      && error.message.includes("usage: keiyaku-v4 task <command>")
+      && error.message.includes("usage: keiyaku task <command>")
       && error.message.includes("task show <TaskId>"),
   );
 });
@@ -66,7 +68,7 @@ test("help is stdout zero and does not enter an absent world", async () => {
     process.stdout.write = writeStdout;
     process.stderr.write = writeStderr;
   }
-  assert.match(stdout, /^usage: keiyaku-v4 task <command>/u);
+  assert.match(stdout, /^usage: keiyaku task <command>/u);
   assert.equal(stderr, "");
   assert.doesNotMatch(stdout, /^\{/u);
 });

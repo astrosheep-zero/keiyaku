@@ -10,5 +10,4 @@ relates: []
 note: CLI 使用 --timeout <duration>；duration 在 Akuma grammar owner 转成 timeoutMs，public wait 只接收毫秒。
 createdAt: 2026-08-09T14:55:07.566Z
 updatedAt: 2026-08-09T15:04:54.973Z
-contractId: null
 ---

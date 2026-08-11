@@ -65,6 +65,8 @@ import {
   type VerificationStop,
 } from "../protocol/operations.js";
 import { settle, type SettlementReport } from "../settlement/settle.js";
+import { claimTaskHolder, readTaskHolders, releaseTaskHolder, type TaskHolder } from "../settlement/holder.js";
+import { parseTaskId, type TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
 export { gatesFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
 export type { Gate, GatesFromInput, HookCommand, WorktreeHooks, WorktreeHooksFromInput } from "./configuration.js";
@@ -85,6 +87,7 @@ export type {
   SnapshotId,
   TimelineEntry,
 };
+export type { TaskId };
 export type { RegionOverlap };
 
 export type Fact = JournalEntry;
@@ -136,6 +139,7 @@ export class KeiyakuRetry extends Error {
 export type BindInput = Readonly<{
   repo: Repo;
   markdown: string;
+  task?: TaskId;
   target?: string;
   workspace?: "worktree" | "here";
   actor?: ActorId;
@@ -181,6 +185,17 @@ function requireAccepted<Value, Refusal extends KeiyakuRefusal>(result: IntentOu
   return result;
 }
 
+function taskOption(value: unknown): TaskId | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new TypeError("task must be a TaskId");
+  try {
+    parseTaskId(value);
+  } catch (error) {
+    throw new TypeError(error instanceof Error ? error.message : "task must be a TaskId");
+  }
+  return value as TaskId;
+}
+
 async function mutationResult<Value, PublicValue>(
   scope: RepositoryScope,
   id: ContractId,
@@ -189,7 +204,7 @@ async function mutationResult<Value, PublicValue>(
   hooks: WorktreeHooks,
 ): Promise<MutationResult<PublicValue>> {
   const reconciled = await reconcileOperation({ scope, contractId: id, hooks, retryHooks: false });
-  const settlement = await settle({ taskRoot: scope.primaryWorktree, state: reconciled.state, effects: reconciled.report.effects });
+  const settlement = await settle({ repository: scope, state: reconciled.state, effects: reconciled.report.effects });
   return {
     facts: accepted.facts,
     head: accepted.head,
@@ -339,6 +354,10 @@ export class KeiyakuHandle {
       contractId: this.id,
       ...actorOption(values?.actor),
       ...(note === undefined ? {} : { note }),
+      decorateOffer: ({ repository, observation, contractId: owner }) => {
+        const companion = releaseTaskHolder(repository, observation.admission.snapshot, owner);
+        return companion === null ? [] : [companion];
+      },
     }));
     return mutationResult(this.scope, this.id, accepted, () => undefined, hooks);
   }
@@ -380,7 +399,7 @@ export class KeiyakuHandle {
     const reconciled = await reconcileOperation({ scope: this.scope, contractId: this.id, ...options });
     return {
       ...reconciled.report,
-      settlement: await settle({ taskRoot: this.scope.primaryWorktree, state: reconciled.state, effects: reconciled.report.effects }),
+      settlement: await settle({ repository: this.scope, state: reconciled.state, effects: reconciled.report.effects }),
     };
   }
 
@@ -434,6 +453,7 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
   const hooks = worktreeHooksOption(values.hooks);
   const scope = scopeForRepo(values.repo);
   const markdown = requireMarkdown(values.markdown);
+  const task = taskOption(values.task);
   const document = decodeContractDocument(markdown);
   const workspace = values.workspace === undefined ? "worktree" : values.workspace;
   if (workspace !== "worktree" && workspace !== "here") throw new TypeError("workspace must be worktree or here");
@@ -452,6 +472,9 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     verification: documentDerivation(document, terms.gates).verification,
     workspace,
     ...(target === undefined ? {} : { target }),
+    ...(task === undefined ? {} : {
+      decorateOffer: ({ contractId: owner }) => [claimTaskHolder(task, owner)],
+    }),
     ...actor,
   });
   const accepted = requireAccepted(admitted);
@@ -466,4 +489,9 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     settlement: result.settlement,
     ...observeRegion(scope, id, document.region),
   };
+}
+
+/** Internal package composition read used by Kanshi; not a package-root export. */
+export function taskHoldersForRepo(repo: Repo): readonly TaskHolder[] {
+  return readTaskHolders(scopeForRepo(repo));
 }

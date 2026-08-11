@@ -11,7 +11,6 @@ relates: []
 note: ""
 createdAt: 2026-08-07T05:43:28.871Z
 updatedAt: 2026-08-07T11:29:07.461Z
-contractId: null
 ---
 依据 docs/document.md、docs/verification.md 与 docs/lifecycle.md，删除 protocol 对 Verification declaration 合法性的第二裁判。
 
