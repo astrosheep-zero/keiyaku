@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { gatesFrom, Keiyaku, NoGitWorldError, Repo, settings, SettingsError, worktreeHooksFrom, type ActorId, type ChangeId, type ContractId, type Keiyaku as KeiyakuContract, type Settings, type SnapshotId, type WorktreeHooks } from "../index.js";
 import { kanshi, selectKanshi } from "../kanshi/index.js";
@@ -13,6 +13,7 @@ import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js
 import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
 import type { DiffUnavailable, InvocationResult } from "./result.js";
 import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
+import { World, WorldError, type WorldRoot } from "../world.js";
 
 export type { AcceptedFact, DiffUnavailable, InvocationResult, Lag } from "./result.js";
 
@@ -31,9 +32,27 @@ type InvocationEdge = Readonly<{
 
 export type SettingsInvocationResult = Readonly<{ kind: "settings"; value: Settings }>;
 
-function settingsAt(root: string, environment: NodeJS.ProcessEnv): Settings {
+function settingsAt(root: WorldRoot | undefined, environment: NodeJS.ProcessEnv): Settings {
   const home = environment.KEIYAKU_HOME?.trim();
-  return settings({ root, ...(home === undefined || home.length === 0 ? {} : { home }) });
+  return settings({ ...(root === undefined ? {} : { root }), ...(home === undefined || home.length === 0 ? {} : { home }) });
+}
+
+function locateWorld(coordinate: string | undefined): WorldRoot | null {
+  try { return World.locate(resolve(coordinate ?? ".")); }
+  catch (error) {
+    if (error instanceof WorldError) throw new CliUsageError(error.message);
+    throw error;
+  }
+}
+
+function establishWorld(coordinate: string | undefined): WorldRoot {
+  const located = locateWorld(coordinate);
+  if (located !== null) return located;
+  try { return World.at(resolve(coordinate ?? ".")); }
+  catch (error) {
+    if (error instanceof WorldError) throw new CliUsageError(error.message);
+    throw error;
+  }
 }
 
 function selectedGates(value: Settings, name?: string) {
@@ -64,6 +83,14 @@ function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv
 
 function repoAt(coordinate: string | undefined): Repo {
   return coordinate === undefined ? Repo.at() : Repo.at({ path: coordinate });
+}
+
+function optionalRepoAt(coordinate: string | undefined): Repo | undefined {
+  try { return repoAt(coordinate); }
+  catch (error) {
+    if (error instanceof NoGitWorldError) return undefined;
+    throw error;
+  }
 }
 
 async function selectContract(repo: Repo, selector: string | undefined, scope: string): Promise<SelectedContract> {
@@ -234,7 +261,8 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
 
 async function invokeAkumaCommand(
   parsed: ParsedAkumaCommand,
-  path: string,
+  path: WorldRoot,
+  executionCwd: string,
   configuration: Settings,
   edge: InvocationEdge,
 ): Promise<AkumaInvocationResult> {
@@ -242,6 +270,7 @@ async function invokeAkumaCommand(
     const selected = contractFromInput(repoAt(path), parsed.contract);
     return await invokeAkuma(parsed, {
       path,
+      executionCwd,
       settings: configuration,
       contract: selected.contract,
       readStdin: edge.readStdin,
@@ -253,26 +282,30 @@ async function invokeAkumaCommand(
     catch (error) { if (!(error instanceof NoGitWorldError)) throw error; }
     return await invokeAkuma(parsed, {
       path,
+      executionCwd,
       settings: configuration,
       ...(repo === undefined ? {} : { repo }),
       readStdin: edge.readStdin,
     });
   }
-  return await invokeAkuma(parsed, { path, settings: configuration, readStdin: edge.readStdin });
+  return await invokeAkuma(parsed, { path, executionCwd, settings: configuration, readStdin: edge.readStdin });
 }
 
-async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, path: string, configuration: Settings, edge: InvocationEdge) {
-  try { return await invokeAkumaCommand(parsed, path, configuration, edge); }
+async function invokeAkumaFromEdge(parsed: ParsedAkumaCommand, path: WorldRoot, executionCwd: string, configuration: Settings, edge: InvocationEdge) {
+  try { return await invokeAkumaCommand(parsed, path, executionCwd, configuration, edge); }
   catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
 }
 
-async function invokeCatalog(parsed: Extract<ParsedCommand, { command: "ls" }>, path: string, edge: InvocationEdge) {
+async function invokeCatalog(parsed: Extract<ParsedCommand, { command: "ls" }>, coordinate: string | undefined, edge: InvocationEdge) {
   try {
+    const world = locateWorld(coordinate);
+    const repo = optionalRepoAt(coordinate);
     return {
       kind: "catalog" as const,
       catalog: await Keiyaku.ls({
-        path,
-        settings: settingsAt(path, edge.environment),
+        path: world,
+        settings: settingsAt(world ?? undefined, edge.environment),
+        ...(repo === undefined ? {} : { repo }),
         ...(parsed.selector === undefined ? {} : { selector: parsed.selector }),
       }),
     };
@@ -283,21 +316,28 @@ async function invokeCatalog(parsed: Extract<ParsedCommand, { command: "ls" }>, 
 }
 
 async function invokeStatus(parsed: Extract<ParsedCommand, { command: "status" }>, coordinate: string | undefined, edge: InvocationEdge) {
-  const path = resolve(coordinate ?? ".");
-  const configuration = settingsAt(path, edge.environment);
-  if (parsed.akuma === true) return invokeAkumaStatus(path, parsed.contract, configuration);
+  const world = locateWorld(coordinate);
+  const repo = optionalRepoAt(coordinate);
+  const configuration = settingsAt(world ?? undefined, edge.environment);
+  if (parsed.akuma === true) {
+    if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
+    return invokeAkumaStatus(world, parsed.contract, configuration);
+  }
   if (parsed.contract === undefined) {
-    const report = await kanshi(coordinate === undefined ? {} : { path: coordinate });
+    const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
     return { kind: "status" as const, report, selection: "world" as const };
   }
   if (parsed.contract.startsWith("@")) {
     try {
-      const catalog = await Keiyaku.ls({ path, settings: configuration, selector: parsed.contract });
+      const catalog = await Keiyaku.ls({ path: world, settings: configuration, ...(repo === undefined ? {} : { repo }), selector: parsed.contract });
       const selectedAkuma = catalog.akuma.kind === "present" ? catalog.akuma.value.rows : [];
-      if (selectedAkuma.length === 1) return invokeAkumaStatus(path, selectedAkuma[0]!.id, configuration);
+      if (selectedAkuma.length === 1) {
+        if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
+        return invokeAkumaStatus(world, selectedAkuma[0]!.id, configuration);
+      }
       const selectedContracts = catalog.contracts.kind === "present" ? catalog.contracts.value.rows : [];
       if (selectedContracts.length === 1) {
-        const report = await kanshi(coordinate === undefined ? {} : { path: coordinate });
+        const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
         return { kind: "status" as const, report: selectKanshi({ report, contract: selectedContracts[0]!.id }), selection: "contract" as const };
       }
     } catch (error) {
@@ -305,7 +345,7 @@ async function invokeStatus(parsed: Extract<ParsedCommand, { command: "status" }
       throw error;
     }
   }
-  const report = await kanshi(coordinate === undefined ? {} : { path: coordinate });
+  const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
   const contract = resolveKanshiContract(report, parsed.contract);
   return { kind: "status" as const, report: selectKanshi({ report, contract }), selection: "contract" as const };
 }
@@ -318,22 +358,31 @@ async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRunt
   };
   const parsed = invocation.command;
   if (parsed.command === "settings") {
-    return { kind: "settings", value: settingsAt(resolve(coordinate ?? "."), edge.environment) };
+    const world = locateWorld(coordinate);
+    return { kind: "settings", value: settingsAt(world ?? undefined, edge.environment) };
   }
   if (parsed.command === "task") {
-    try { return await invokeTask(parsed, { ...(coordinate === undefined ? {} : { path: coordinate }), readStdin: edge.readStdin }); }
+    try {
+      return await invokeTask(parsed, {
+        world: locateWorld(coordinate),
+        establish: () => establishWorld(coordinate),
+        readStdin: edge.readStdin,
+      });
+    }
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
   }
   if (isParsedAkumaCommand(parsed)) {
-    const path = resolve(coordinate ?? ".");
-    const configuration = settingsAt(path, edge.environment);
-    return await invokeAkumaFromEdge(parsed, path, configuration, edge);
+    const world = parsed.command === "call" ? establishWorld(coordinate) : locateWorld(coordinate);
+    if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
+    const configuration = settingsAt(world, edge.environment);
+    return await invokeAkumaFromEdge(parsed, world, realpathSync(resolve(coordinate ?? ".")), configuration, edge);
   }
-  if (parsed.command === "ls") return await invokeCatalog(parsed, resolve(coordinate ?? "."), edge);
+  if (parsed.command === "ls") return await invokeCatalog(parsed, coordinate, edge);
   if (parsed.command === "status") return await invokeStatus(parsed, coordinate, edge);
   const repo = repoAt(coordinate);
   const scope = coordinate ?? repo.root;
-  const configuration = settingsAt(repo.root, edge.environment);
+  const world = locateWorld(coordinate);
+  const configuration = settingsAt(world ?? undefined, edge.environment);
   const hooks = selectedHooks(configuration);
 
   switch (parsed.command) {

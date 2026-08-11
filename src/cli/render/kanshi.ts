@@ -200,7 +200,7 @@ export function renderKanshiText(
   selection: "world" | "contract" = "world",
 ): string {
   return [
-    `kanshi ${safeText(report.root)}`,
+    `kanshi ${report.root === null ? "none" : safeText(report.root)}`,
     renderContracts(report, context, selection),
     renderTasks(report, context),
     renderAkuma(report, context),

@@ -18,9 +18,10 @@ cwd and are never persisted. The canonical examples use `-C`. Either spelling
 may appear before or after the command, but the two spellings may not be
 combined or repeated in one invocation. An omitted value uses the process cwd.
 Contract commands supply the invocation cwd to the one `Repo.at` construction
-point. Task commands use it as their task world; Akuma and Settings commands
-currently resolve it once as their absolute exact world without Git-root
-climbing. A Contract invocation constructs exactly one
+point. Read-only Task, Akuma, Settings, catalog, and status commands call
+`World.locate` once; a missing marker produces an absent or typed-empty section.
+Commands that create Task or Akuma facts call `World.locate` and then
+`World.at` when no marker exists. A Contract invocation constructs exactly one
 `Repo`. It derives selector reads, contract handles and verbs, and reconciliation
 from that value: `Keiyaku.list({ repo })`, `repo.root`, `Keiyaku.of({ repo, id })`,
 `Keiyaku.bind({ repo, ... })`, and the selected public reconcile method. It
@@ -434,8 +435,8 @@ timestamps.
 
 ## Task Commands
 
-`keiyaku task` constructs one `Tasks.at` value from the global `-C`
-coordinate. Its parser owns argv shape, stdin selection, mutual exclusion, and
+`keiyaku task` resolves the global `-C` coordinate once and constructs one
+`Tasks.of` value when a world is present or created. Its parser owns argv shape, stdin selection, mutual exclusion, and
 output selection only. Task Markdown, graph, lifecycle, diff, and compose
 decisions remain in the native Task surface.
 
@@ -616,7 +617,7 @@ usage errors, renderers, and `main` are not package API. The CLI adapts the
 package-root facade and the separate `./task` and `./akuma` product surfaces;
 it does not define their library behavior or obtain a raw scope, token,
 registry, or orchestrator. Package-root call and fork are not reimplemented
-through direct `Akuma.at` calls at this edge.
+through direct Akuma product calls at this edge.
 
 Contract commands accept no task coordinate and never interpret or perform a
 Task mutation. Their package-root operations may return the post-admission

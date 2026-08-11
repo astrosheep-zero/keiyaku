@@ -4,8 +4,8 @@ import type { GitRepository } from "../git/repository.js";
 import { repairNamespaceContext } from "../task/context.js";
 import { settleTask } from "../task/operations.js";
 import type { TaskId } from "../task/identity.js";
-import type { TaskWorld } from "../task/store.js";
 import { readTaskHolderProjection, type TaskHolderProjection } from "./holder.js";
+import { World, type WorldRoot } from "../world.js";
 
 export type SettlementAction =
   | Readonly<{ kind: "task"; taskId: TaskId; action: "done" | "reopened" }>
@@ -52,7 +52,7 @@ function taskFailure(result: Exclude<Awaited<ReturnType<typeof settleTask>>, { k
 
 async function settleTasks(
   observation: SettlementObservation,
-  world: TaskWorld,
+  world: WorldRoot,
   state: ContractState,
   actions: SettlementAction[],
   lags: SettlementLag[],
@@ -88,10 +88,11 @@ function settleNamespace(state: ContractState, effects: readonly Effect[], actio
     effect.kind === "worktree" && effect.action !== "removed");
   for (const effect of worktrees) {
     try {
+      const world = World.at(effect.path);
       actions.push({
         kind: "namespace-context",
         path: effect.path,
-        action: repairNamespaceContext(effect.path, [contractSegment(state.id)]),
+        action: repairNamespaceContext(world, [contractSegment(state.id)]),
       });
     } catch (error) {
       lags.push({
@@ -116,7 +117,11 @@ function observeSettlement(repository: GitRepository): SettlementObservation {
 async function settleObserved(input: SettlementInput, observation: SettlementObservation): Promise<SettlementReport> {
   if (input.state === null) return { actions: [], lags: [] };
   const actions: SettlementAction[] = [], lags: SettlementLag[] = [];
-  await settleTasks(observation, { root: input.repository.primaryWorktree }, input.state, actions, lags);
+  try {
+    await settleTasks(observation, World.at(input.repository.primaryWorktree), input.state, actions, lags);
+  } catch (error) {
+    lags.push({ kind: "settlement-failed", surface: "task", contractId: input.state.id, diagnostic: diagnostic(error) });
+  }
   settleNamespace(input.state, input.effects, actions, lags);
   return { actions, lags };
 }

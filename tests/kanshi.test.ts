@@ -21,9 +21,14 @@ import {
 } from "../src/git/repository.js";
 import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
 import { Tasks } from "../src/task/index.js";
+import { World } from "../src/world.js";
 import { moveAlias } from "../src/alias/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { makeGitRepository } from "./support/git.js";
+
+function observe(path: string, repo?: Repo) {
+  return kanshi({ world: World.at(path), ...(repo === undefined ? {} : { repo }) });
+}
 
 function document(): string {
   return [
@@ -56,7 +61,7 @@ async function populatedWorld() {
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const tasks = Tasks.at({ path: repository.path });
+  const tasks = Tasks.of(World.at(repository.path));
   const added = await tasks.add({ title: "Render status", priority: 0 });
   assert.equal(added.kind, "accepted");
   if (added.kind !== "accepted") throw new Error("task add failed");
@@ -73,7 +78,7 @@ async function populatedWorld() {
 
 test("kanshi joins TaskHolder, Dispatch, and Alias without moving their authorities", async () => {
   const { repository, contract, taskId, akumaId } = await populatedWorld();
-  const report = await kanshi({ path: repository.path });
+  const report = await observe(repository.path, Repo.at({ path: repository.path }));
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.tasks.kind, "present");
   assert.equal(report.akuma.kind, "present");
@@ -94,7 +99,7 @@ test("kanshi joins TaskHolder, Dispatch, and Alias without moving their authorit
 test("kanshi keeps absent Contract and Task worlds explicit", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-no-git-"));
   const akumaId = bornAkuma(root, "a0000002");
-  const report = await kanshi({ path: root });
+  const report = await observe(root);
   assert.deepEqual(report.contracts, { kind: "absent" });
   assert.equal(report.tasks.kind, "present");
   assert.equal(report.akuma.kind, "present");
@@ -108,10 +113,10 @@ test("kanshi keeps absent Contract and Task worlds explicit", async () => {
 
 test("a Task world without Git has no invented Contract endpoint", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-task-only-"));
-  const tasks = Tasks.at({ path: root });
+  const tasks = Tasks.of(World.at(root));
   const added = await tasks.add({ title: "Standalone Task" });
   assert.equal(added.kind, "accepted");
-  const report = await kanshi({ path: root });
+  const report = await observe(root);
   assert.deepEqual(report.contracts, { kind: "absent" });
   assert.equal(report.tasks.kind, "present");
   if (report.tasks.kind !== "present" || added.kind !== "accepted") return;
@@ -122,7 +127,7 @@ test("kanshi reports malformed Task authority as a failed section", async () => 
   const root = mkdtempSync(join(tmpdir(), "keiyaku-kanshi-bad-task-"));
   mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
-  const report = await kanshi({ path: root });
+  const report = await observe(root);
   assert.equal(report.tasks.kind, "failed");
   if (report.tasks.kind === "failed") assert.match(report.tasks.failure.message, /front matter/u);
 });
@@ -137,7 +142,7 @@ test("a malformed TaskHolder root fails only the Kanshi Task section", async () 
   const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
   assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
 
-  const report = await kanshi({ path: repository.path });
+  const report = await observe(repository.path, Repo.at({ path: repository.path }));
 
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.tasks.kind, "failed");
@@ -150,7 +155,7 @@ test("malformed Alias fails only the Kanshi Akuma section", async () => {
   bornAkuma(root, "a0000003");
   mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "not alias authority\n");
-  const report = await kanshi({ path: root });
+  const report = await observe(root);
   assert.deepEqual(report.contracts, { kind: "absent" });
   assert.equal(report.tasks.kind, "present");
   assert.equal(report.akuma.kind, "failed");
@@ -165,7 +170,7 @@ test("malformed Dispatch fails only the Kanshi Akuma section", async () => {
   ]));
   const commit = writeCommit({ repository: git, tree, parent: snapshot.commit });
   assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
-  const report = await kanshi({ path: repository.path });
+  const report = await observe(repository.path, Repo.at({ path: repository.path }));
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.tasks.kind, "present");
   assert.equal(report.akuma.kind, "failed");
@@ -173,9 +178,10 @@ test("malformed Dispatch fails only the Kanshi Akuma section", async () => {
 
 test("Kanshi text keeps complete identities in the new fixed section grammar", async () => {
   const { repository, contract, taskId } = await populatedWorld();
-  const report = await kanshi({ path: repository.path });
+  const report = await observe(repository.path, Repo.at({ path: repository.path }));
   const text = renderKanshiText(report, { columns: 20, color: false });
-  assert.match(text, new RegExp(`^kanshi ${repository.path.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "mu"));
+  const world = World.at(repository.path);
+  assert.match(text, new RegExp(`^kanshi ${world.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "mu"));
   assert.doesNotMatch(text, /marks |root |─/u);
   assert.equal(text.includes(contract.id), true);
   assert.equal(text.includes(taskId), true);
@@ -447,7 +453,7 @@ test("Kanshi has no Contract gate-block cap", () => {
 
 test("Kanshi selection is a projection that preserves source presence", async () => {
   const { repository, contract, taskId } = await populatedWorld();
-  const report = await kanshi({ path: repository.path });
+  const report = await observe(repository.path, Repo.at({ path: repository.path }));
   const selected = selectKanshi({ report, contract: contract.id });
   assert.equal(selected.contracts.kind, "present");
   assert.equal(selected.tasks.kind, "present");

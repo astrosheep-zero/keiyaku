@@ -23,6 +23,7 @@ operating guidance; none can introduce product law.
 | [akuma.md](akuma.md) | Separate Akuma product: identity, heart facts, life, detached bodies, providers, lifecycle verbs, and persistence. |
 | [settings.md](settings.md) | Shared Settings resource: coordinates, scope, shadowing, failure isolation, provenance, and observation. |
 | [kanshi.md](kanshi.md) | Composite world observation: section availability, read-time associations, selection, and public report shape. |
+| [world.md](world.md) | Shared directory coordinate, marker discovery, exact construction, and edge ownership. |
 
 ## Hard-Cut Discipline
 

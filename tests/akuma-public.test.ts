@@ -21,8 +21,13 @@ import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akum
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude.js";
 import { settings } from "../src/settings.js";
+import { World } from "../src/world.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
+
+function akumaAt(root: string, value?: ReturnType<typeof settings>) {
+  return Akuma.of(World.at(root), value);
+}
 
 const provider: ProviderAdapter = {
   confinement: () => ({ kind: "unconfined" }),
@@ -42,7 +47,8 @@ const provider: ProviderAdapter = {
 };
 
 async function answeredSource(root: string, suffix: string) {
-  const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => suffix });
+  const world = World.at(root);
+  const allocated = allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
   initializeHeart(allocated.paths);
   await driveAkumaBody({
     paths: allocated.paths,
@@ -54,7 +60,7 @@ async function answeredSource(root: string, suffix: string) {
       options: { model: "fixture-model" },
       origin: { kind: "direct" },
       confinement: { kind: "unconfined" },
-      cwd: root,
+      cwd: world,
     },
     initialBody: "work",
   }, provider, {
@@ -108,7 +114,7 @@ test("wait timeout returns the same running status carrier", async () => {
     const source = await answeredSource(root, "de1ad100");
     const leash = HeldAkumaLeash.try(source.paths)!;
     try {
-      const handle = Akuma.at({ path: root }).of({ id: source.id });
+      const handle = akumaAt(root).of({ id: source.id });
       const expected = handle.status();
       assert.equal(expected.life, "running");
       assert.deepEqual(await handle.wait(undefined, { timeoutMs: 0 }), expected);
@@ -124,7 +130,7 @@ test("wait refuses invalid public timeoutMs values", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wait-invalid-timeout-"));
   try {
     const source = await answeredSource(root, "de1ad101");
-    const handle = Akuma.at({ path: root }).of({ id: source.id });
+    const handle = akumaAt(root).of({ id: source.id });
     for (const timeoutMs of [-1, Number.POSITIVE_INFINITY, Number.NaN]) {
       await assert.rejects(
         handle.wait(undefined, { timeoutMs }),
@@ -142,7 +148,8 @@ test("fork publishes a sleeping child with lineage and its native birth session"
   const originalFork = mutable.fork;
   try {
     const source = await answeredSource(root, "f0a10001");
-    const world = Akuma.at({ path: root });
+    const world = akumaAt(root);
+    const worldRoot = World.at(root);
     assert.equal(await world.of({ id: source.id }).kill(), "killed");
     let nativeInput: Parameters<NonNullable<ProviderAdapter["fork"]>>[0] | undefined;
     mutable.fork = async (input) => {
@@ -156,7 +163,7 @@ test("fork publishes a sleeping child with lineage and its native birth session"
     assert.deepEqual(nativeInput, {
       session: { sessionId: "public-session" },
       at: "public-history",
-      cwd: root,
+      cwd: worldRoot,
     });
     assert.match(receipt.child, /^aku\/claude\/[0-9a-f]{8}$/u);
     const child = world.of({ id: receipt.child });
@@ -169,7 +176,7 @@ test("fork publishes a sleeping child with lineage and its native birth session"
       sequence: 1,
       provider: "claude",
       coordinate: { sessionId: "fork-child-session" },
-      cwd: root,
+      cwd: worldRoot,
       options: { model: "fixture-model" },
       admittedAt: snapshot.latestSession?.admittedAt,
     });
@@ -186,7 +193,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
   const originalFork = mutable.fork;
   try {
     const source = await answeredSource(root, "f0a10002");
-    const handle = Akuma.at({ path: root }).of({ id: source.id });
+    const handle = akumaAt(root).of({ id: source.id });
 
     mutable.fork = undefined;
     assert.deepEqual(await handle.fork({ at: "missing" }), { kind: "provider-cannot-fork", provider: "claude" });
@@ -217,7 +224,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
     try {
       const unborn = allocateAkumaDirectory({ worldRoot: unbornRoot, archetype: "claude", draw: () => "f0a10003" });
       await assert.rejects(
-        Akuma.at({ path: unbornRoot }).of({ id: unborn.id }).fork({ at: "anything" }),
+        akumaAt(unbornRoot).of({ id: unborn.id }).fork({ at: "anything" }),
         AkumaNotBornError,
       );
     } finally { rmSync(unbornRoot, { recursive: true, force: true }); }
@@ -230,7 +237,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
 test("public Akuma handles separate compact list rows from full status and wait", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-public-"));
   try {
-    const world = Akuma.at({ path: root });
+    const world = akumaAt(root);
     assert.deepEqual(world.list().rows, []);
     const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
     initializeHeart(allocated.paths);
@@ -332,7 +339,7 @@ test("interrupt records a tell only after taking an idle leash", async () => {
     });
     rmSync(seat, { recursive: true, force: true });
 
-    const receipt = await Akuma.at({ path: root }).of({ id: allocated.id }).interrupt("next");
+    const receipt = await akumaAt(root).of({ id: allocated.id }).interrupt("next");
     assert.equal(receipt.kind, "interrupted");
     if (receipt.kind !== "interrupted" || "kind" in receipt.tell) return;
     assert.equal(receipt.putDown, "was-idle");
@@ -394,7 +401,7 @@ test("interrupt waits for a running body to self-abort before recording the tell
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
     rmSync(seat, { recursive: true, force: true });
 
-    const receipt = await Akuma.at({ path: root }).of({ id: allocated.id }).interrupt("replace it");
+    const receipt = await akumaAt(root).of({ id: allocated.id }).interrupt("replace it");
     await body;
     assert.equal(receipt.kind, "interrupted");
     if (receipt.kind !== "interrupted") return;
@@ -424,7 +431,7 @@ test("interrupt leaves pause behind and records no tell when a held leash has no
       createdAt: "2026-08-08T00:00:00.000Z",
     });
     try {
-      assert.deepEqual(await Akuma.at({ path: root }).of({ id: allocated.id }).interrupt("never recorded"), {
+      assert.deepEqual(await akumaAt(root).of({ id: allocated.id }).interrupt("never recorded"), {
         kind: "unstoppable",
         evidence: "no-collar",
       });
@@ -459,7 +466,7 @@ test("physical put-down evidence is not success while the leash remains held", a
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
     try {
-      assert.deepEqual(await Akuma.at({ path: root }).of({ id: allocated.id }).interrupt("never recorded"), {
+      assert.deepEqual(await akumaAt(root).of({ id: allocated.id }).interrupt("never recorded"), {
         kind: "unstoppable",
         evidence: "leash-held-after-put-down",
       });
@@ -536,7 +543,7 @@ test("Archetype catalog lists canonical files in byte order without admitting co
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-catalog-"));
   try {
     const settingsValue = settings({ home });
-    const world = Akuma.at({ path: home, settings: settingsValue });
+    const world = akumaAt(home, settingsValue);
     assert.deepEqual(world.listArchetypes(), []);
 
     mkdirSync(join(home, "akuma"));
@@ -566,7 +573,7 @@ test("list distinguishes sealed residue from an unclaimed birth", () => {
       evidence: "fixture-abandonment",
       at: "2026-08-08T00:00:00.000Z",
     }), "sealed");
-    assert.deepEqual(Akuma.at({ path: root }).list().rows, [{
+    assert.deepEqual(akumaAt(root).list().rows, [{
       id: allocated.id,
       life: "stillborn",
       seal: { evidence: "fixture-abandonment", at: "2026-08-08T00:00:00.000Z" },
@@ -607,7 +614,7 @@ test("a failed turn is durable public evidence and never masquerades as provider
       now: () => "2026-08-08T00:00:00.000Z",
       async putDownOwnTree() {},
     });
-    const handle = Akuma.at({ path: root }).of({ id: allocated.id });
+    const handle = akumaAt(root).of({ id: allocated.id });
     assert.equal(handle.status().failure, "native failed");
     const settled = await handle.wait();
     assert.equal(settled.life, "stranded");
@@ -626,7 +633,7 @@ test("activity is persistent narration and old raw events fail the public hard c
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-activity-law-"));
   try {
     const source = await answeredSource(root, "ac710001");
-    const handle = Akuma.at({ path: root }).of({ id: source.id });
+    const handle = akumaAt(root).of({ id: source.id });
     const before = handle.status();
     const heart = new DatabaseSync(source.paths.heart);
     try { heart.prepare("DELETE FROM activity").run(); } finally { heart.close(); }
@@ -703,7 +710,7 @@ test("kill gives the body a stop grace before putting down its process tree", as
     });
     while (readHeart(allocated.paths).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
 
-    const handle = Akuma.at({ path: root }).of({ id: allocated.id });
+    const handle = akumaAt(root).of({ id: allocated.id });
     const waited = handle.wait();
     assert.equal(await handle.kill(), "killed");
     await body;
@@ -716,11 +723,12 @@ test("kill gives the body a stop grace before putting down its process tree", as
   }
 });
 
-test("Akuma normalizes a relative world before projecting its run root", () => {
+test("Akuma projects the already resolved WorldRoot without a second discovery", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-relative-"));
   try {
     const coordinate = relative(process.cwd(), root);
-    assert.equal(Akuma.at({ path: coordinate }).list().searched[0], resolve(root, ".keiyaku", "akuma", "run"));
+    const world = World.at(coordinate);
+    assert.equal(Akuma.of(world).list().searched[0], resolve(world, ".keiyaku", "akuma", "run"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -729,7 +737,7 @@ test("Akuma normalizes a relative world before projecting its run root", () => {
 test("status reports a missing coordinate as not born without creating heart residue", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-not-born-"));
   try {
-    const handle = Akuma.at({ path: root }).of({ id: "aku/claude/1234abcd" });
+    const handle = akumaAt(root).of({ id: "aku/claude/1234abcd" });
     assert.throws(() => handle.status(), { name: "AkumaNotBornError" });
     assert.equal(existsSync(join(root, ".keiyaku", "akuma", "run", "claude-1234abcd")), false);
   } finally {

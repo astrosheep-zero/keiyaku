@@ -16,6 +16,7 @@ import {
   type Repo,
 } from "../../index.js";
 import type { Settings } from "../../settings.js";
+import type { WorldRoot } from "../../world.js";
 import type { ParsedAkumaCommand } from "./akuma.js";
 
 export type AkumaInvocationResult =
@@ -29,7 +30,8 @@ export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "kill"; result: AkumaKillResult }>;
 
 type InvokeInput = Readonly<{
-  path: string;
+  path: WorldRoot;
+  executionCwd: string;
   settings: Settings;
   contract?: KeiyakuContract;
   repo?: Repo;
@@ -122,7 +124,9 @@ export async function invokeAkuma(
         archetype: command.archetype,
         body: input.readStdin(),
         settings: input.settings,
-        ...(command.workdir === undefined ? {} : { cwd: resolve(input.path, command.workdir) }),
+        cwd: command.workdir === undefined
+          ? input.executionCwd
+          : resolve(input.executionCwd, command.workdir),
         mode: command.mode,
         ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
         ...(input.contract === undefined ? {} : { contract: input.contract }),
@@ -139,6 +143,6 @@ export async function invokeAkuma(
   }
 }
 
-export function invokeAkumaStatus(path: string, akuma: string, settings: Settings): AkumaInvocationResult {
+export function invokeAkumaStatus(path: WorldRoot, akuma: string, settings: Settings): AkumaInvocationResult {
   return { kind: "akuma", action: "status", status: Keiyaku.status({ path, akuma, settings }) };
 }

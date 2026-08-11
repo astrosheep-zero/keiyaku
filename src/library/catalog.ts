@@ -1,14 +1,14 @@
-import { resolve } from "node:path";
 import { Akuma, listArchetypes, type AkumaList } from "../akuma/index.js";
 import type { Settings } from "../settings.js";
 import { Tasks, type TaskRow } from "../task/index.js";
 import { listKeiyaku, type ContractBoard } from "./contract.js";
 import { requireInput } from "./input.js";
-import { NoGitWorldError, Repo } from "./repo.js";
+import { Repo } from "./repo.js";
 import { resolveNamedAddress } from "./address.js";
+import type { WorldRoot } from "../world.js";
 
 export type Catalog = Readonly<{
-  root: string;
+  root: WorldRoot | null;
   contracts: CatalogSection<ContractBoard>;
   tasks: CatalogSection<Readonly<{ root: string; rows: readonly TaskRow[] }>>;
   archetypes: CatalogSection<Readonly<{ rows: readonly string[] }>>;
@@ -21,8 +21,9 @@ export type CatalogSection<Value> =
   | Readonly<{ kind: "failed"; failure: Readonly<{ message: string }> }>;
 
 export type CatalogInput = Readonly<{
-  path: string;
+  path: WorldRoot | null;
   settings: Settings;
+  repo?: Repo;
   selector?: string;
 }>;
 
@@ -31,20 +32,19 @@ function diagnostic(error: unknown): string {
   return text.length <= 240 ? text : `${text.slice(0, 239)}…`;
 }
 
-async function contracts(path: string): Promise<CatalogSection<ContractBoard>> {
+async function contracts(repo?: Repo): Promise<CatalogSection<ContractBoard>> {
+  if (repo === undefined) return { kind: "absent" };
   try {
-    const repo = Repo.at({ path });
     return { kind: "present", value: await listKeiyaku({ repo }) };
   } catch (error) {
-    return error instanceof NoGitWorldError
-      ? { kind: "absent" }
-      : { kind: "failed", failure: { message: diagnostic(error) } };
+    return { kind: "failed", failure: { message: diagnostic(error) } };
   }
 }
 
-async function tasks(path: string): Promise<Catalog["tasks"]> {
+async function tasks(path: WorldRoot | null): Promise<Catalog["tasks"]> {
+  if (path === null) return { kind: "absent" };
   try {
-    const source = Tasks.at({ path });
+    const source = Tasks.of(path);
     const result = await source.list({ selection: "all", scope: "world" });
     return result.kind === "accepted"
       ? { kind: "present", value: { root: source.root, rows: result.value } }
@@ -88,9 +88,11 @@ export function selectCatalog(catalog: Catalog, selector: string): Catalog {
 export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   const values = requireInput(input, "Keiyaku.ls input");
   for (const key of Object.keys(values)) {
-    if (!["path", "settings", "selector"].includes(key)) throw new TypeError(`Keiyaku.ls input has unknown field: ${key}`);
+    if (!["path", "settings", "repo", "selector"].includes(key)) throw new TypeError(`Keiyaku.ls input has unknown field: ${key}`);
   }
-  if (typeof values.path !== "string" || values.path.trim().length === 0) throw new TypeError("path must be a nonblank string");
+  if (values.path !== null && (typeof values.path !== "string" || values.path.trim().length === 0)) {
+    throw new TypeError("path must be a WorldRoot or null");
+  }
   if (typeof values.settings !== "object" || values.settings === null
     || typeof (values.settings as { namespace?: unknown }).namespace !== "function") {
     throw new TypeError("settings must be a Settings");
@@ -98,9 +100,10 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
   if (values.selector !== undefined && (typeof values.selector !== "string" || values.selector.trim().length === 0)) {
     throw new TypeError("selector must be a nonblank string");
   }
-  const path = resolve(values.path);
+  if (values.repo !== undefined && !(values.repo instanceof Repo)) throw new TypeError("repo must be a Repo");
+  const path = values.path as WorldRoot | null;
   const settings = values.settings as Settings;
-  const [contractSection, taskSection] = await Promise.all([contracts(path), tasks(path)]);
+  const [contractSection, taskSection] = await Promise.all([contracts(values.repo as Repo | undefined), tasks(path)]);
   const catalog: Catalog = {
     root: path,
     contracts: contractSection,
@@ -110,7 +113,9 @@ export async function listCatalog(input: CatalogInput): Promise<Catalog> {
       catch (error) { return { kind: "failed" as const, failure: { message: diagnostic(error) } }; }
     })(),
     akuma: (() => {
-      try { return { kind: "present" as const, value: Akuma.at({ path, settings }).list() }; }
+      try { return path === null
+        ? { kind: "absent" as const }
+        : { kind: "present" as const, value: Akuma.of(path, settings).list() }; }
       catch (error) { return { kind: "failed" as const, failure: { message: diagnostic(error) } }; }
     })(),
   };

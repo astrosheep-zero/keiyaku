@@ -7,7 +7,8 @@ reconciles nothing.
 
 ## Report
 
-`kanshi({ path? })` normalizes one world coordinate and independently reads the
+`kanshi({ world, repo? })` consumes one already resolved world coordinate and
+optional Git Repo and independently reads the
 Contract board, complete Task world, and Akuma fleet. Every product remains a
 public source value. A section is `present`, `absent`, or `failed`; absence is a
 lawful missing product world, while corruption and IO are failures with a
@@ -17,7 +18,7 @@ The report is:
 
 ```ts
 type KanshiReport = {
-  root: string;
+  root: WorldRoot | null;
   contracts: Section<ContractBoard>;
   tasks: Section<TaskKanshiWorld>;
   akuma: Section<AkumaKanshiWorld>;

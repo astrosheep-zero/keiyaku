@@ -4,8 +4,9 @@ import { relationProblem, projectBlocked, projectReady, projectRows, type Blocke
 import { parseTaskCreationDocument, serializeTaskDocument, type TaskCreationDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import {
-  authorityPath, readBoard, replaceAuthority, withTaskLocks, type TaskWorld,
+  authorityPath, readBoard, replaceAuthority, withTaskLocks,
 } from "./store.js";
+import type { WorldRoot } from "../world.js";
 
 export type TaskView = Readonly<TaskDocument & { namespace: readonly string[] }>;
 export type TaskRefusal =
@@ -45,10 +46,10 @@ export function taskView(document: TaskDocument): TaskView {
 }
 function refused(refusal: TaskRefusal): TaskMutationResult { return { kind: "refused", refusal }; }
 function retry(reason: TaskRetry): TaskMutationResult { return { kind: "retry", reason }; }
-function context(world: TaskWorld, explicit?: readonly string[]): readonly string[] | TaskRefusal {
+function context(world: WorldRoot, explicit?: readonly string[]): readonly string[] | TaskRefusal {
   if (explicit !== undefined) return explicit;
-  const current = readNamespaceContext(world.root);
-  return current === "malformed" ? { kind: "invalid-namespace-context", path: `${world.root}/.keiyaku/namespace/current` }
+  const current = readNamespaceContext(world);
+  return current === "malformed" ? { kind: "invalid-namespace-context", path: `${world}/.keiyaku/namespace/current` }
     : current === "absent" ? [] : current;
 }
 function occupied(board: TaskBoard, namespace: readonly string[]): Set<string> {
@@ -68,7 +69,7 @@ function addDocument(base: TaskCreationDocument, namespace: readonly string[], b
 function boardWith(board: TaskBoard, document: TaskDocument): TaskBoard {
   const tasks = new Map(board.tasks); tasks.set(document.id, document); return { tasks };
 }
-async function create(world: TaskWorld, base: TaskCreationDocument, namespace: readonly string[], signal?: AbortSignal): Promise<TaskMutationResult> {
+async function create(world: WorldRoot, base: TaskCreationDocument, namespace: readonly string[], signal?: AbortSignal): Promise<TaskMutationResult> {
   const result = await withTaskLocks({ world, allocation: true, ids: [], ...(signal === undefined ? {} : { signal }) }, async () => {
     const snapshot = readBoard(world), next = addDocument(base, namespace, snapshot.board, currentTimestamp()); const problem = relationProblem(boardWith(snapshot.board, next), null, next);
     if (problem !== null) return refused({ kind: "invalid-graph", diagnostic: problem });
@@ -78,14 +79,14 @@ async function create(world: TaskWorld, base: TaskCreationDocument, namespace: r
   return result === "busy" ? retry("busy") : result;
 }
 
-export async function addTask(world: TaskWorld, input: AddTaskInput): Promise<TaskMutationResult> {
+export async function addTask(world: WorldRoot, input: AddTaskInput): Promise<TaskMutationResult> {
   const namespace = context(world, input.namespace); if (!Array.isArray(namespace)) return refused(namespace as TaskRefusal);
   return create(world, {
     title: input.title, body: input.body ?? "", note: input.note ?? "", state: input.state ?? "open", priority: input.priority ?? 2, needs: input.needs ?? [], parent: input.parent ?? null,
     supersedes: input.supersedes ?? [], relates: input.relates ?? [],
   }, namespace, input.signal);
 }
-export async function addTaskDocument(world: TaskWorld, input: AddTaskDocumentInput): Promise<TaskMutationResult> {
+export async function addTaskDocument(world: WorldRoot, input: AddTaskDocumentInput): Promise<TaskMutationResult> {
   const namespace = context(world, input.namespace); if (!Array.isArray(namespace)) return refused(namespace as TaskRefusal);
   return create(world, parseTaskCreationDocument(input.markdown), namespace, input.signal);
 }
@@ -116,7 +117,7 @@ function updateDocument(board: TaskBoard, current: TaskDocument, input: UpdateTa
   };
 }
 
-export async function updateTask(world: TaskWorld, id: TaskId, input: UpdateTaskInput): Promise<TaskUpdateResult> {
+export async function updateTask(world: WorldRoot, id: TaskId, input: UpdateTaskInput): Promise<TaskUpdateResult> {
   const result = await withTaskLocks({ world, allocation: false, ids: [id], ...(input.signal === undefined ? {} : { signal: input.signal }) }, async (): Promise<TaskUpdateResult> => {
     const snapshot = readBoard(world), current = snapshot.board.tasks.get(id);
     if (current === undefined) return { kind: "refused", refusal: { kind: "task-missing", taskId: id } };
@@ -139,7 +140,7 @@ const TRANSITIONS: Readonly<Record<TaskLifecycleVerb, Readonly<Partial<Record<Ta
   resume: { on_hold: "open" }, done: { open: "done", in_progress: "done", on_hold: "done" },
   drop: { open: "drop", in_progress: "drop", on_hold: "drop" },
 };
-export async function lifecycleTask(world: TaskWorld, id: TaskId, verb: TaskLifecycleVerb, signal?: AbortSignal, note?: string): Promise<TaskMutationResult> {
+export async function lifecycleTask(world: WorldRoot, id: TaskId, verb: TaskLifecycleVerb, signal?: AbortSignal, note?: string): Promise<TaskMutationResult> {
   const result = await withTaskLocks({ world, allocation: false, ids: [id], ...(signal === undefined ? {} : { signal }) }, async (): Promise<TaskMutationResult> => {
     const snapshot = readBoard(world), current = snapshot.board.tasks.get(id);
     if (current === undefined) return refused({ kind: "task-missing", taskId: id });
@@ -150,14 +151,14 @@ export async function lifecycleTask(world: TaskWorld, id: TaskId, verb: TaskLife
   });
   return result === "busy" ? retry("busy") : result;
 }
-export async function batchTasks(world: TaskWorld, verb: "done" | "drop" | "hold", ids: readonly TaskId[], signal?: AbortSignal, note?: string): Promise<TaskBatchResult> {
+export async function batchTasks(world: WorldRoot, verb: "done" | "drop" | "hold", ids: readonly TaskId[], signal?: AbortSignal, note?: string): Promise<TaskBatchResult> {
   const items = [];
   for (const id of ids) { signal?.throwIfAborted(); items.push({ id, outcome: await lifecycleTask(world, id, verb, signal, note) }); }
   return { items };
 }
 
 export async function settleTask(
-  world: TaskWorld,
+  world: WorldRoot,
   id: TaskId,
   desired: "done" | "open-from-done",
 ): Promise<SettledTaskResult> {
@@ -180,22 +181,22 @@ export async function settleTask(
   return result === "busy" ? { kind: "retry", reason: "busy" } : result;
 }
 
-function readScope(world: TaskWorld, scope: "namespace" | "world" | undefined): readonly string[] | null | TaskRefusal {
+function readScope(world: WorldRoot, scope: "namespace" | "world" | undefined): readonly string[] | null | TaskRefusal {
   if (scope === "world") return null; return context(world);
 }
-export function listTasks(world: TaskWorld, selection: "active" | "closed" | "all", scope?: "namespace" | "world"): TaskOutcome<readonly TaskRow[]> {
+export function listTasks(world: WorldRoot, selection: "active" | "closed" | "all", scope?: "namespace" | "world"): TaskOutcome<readonly TaskRow[]> {
   const selected = readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
   return { kind: "accepted", value: projectRows(readBoard(world).board, selected as readonly string[] | null, selection) };
 }
-export function readyTasks(world: TaskWorld, scope?: "namespace" | "world"): TaskOutcome<readonly TaskRow[]> {
+export function readyTasks(world: WorldRoot, scope?: "namespace" | "world"): TaskOutcome<readonly TaskRow[]> {
   const selected = readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
   return { kind: "accepted", value: projectReady(readBoard(world).board, selected as readonly string[] | null) };
 }
-export function blockedTasks(world: TaskWorld, scope?: "namespace" | "world"): TaskOutcome<readonly BlockedTaskRow[]> {
+export function blockedTasks(world: WorldRoot, scope?: "namespace" | "world"): TaskOutcome<readonly BlockedTaskRow[]> {
   const selected = readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
   return { kind: "accepted", value: projectBlocked(readBoard(world).board, selected as readonly string[] | null) };
 }
-export function setCurrentNamespace(world: TaskWorld, namespace: readonly string[]): void { installNamespaceContext(world.root, namespace); }
-export function currentNamespace(world: TaskWorld): readonly string[] | TaskRefusal {
+export function setCurrentNamespace(world: WorldRoot, namespace: readonly string[]): void { installNamespaceContext(world, namespace); }
+export function currentNamespace(world: WorldRoot): readonly string[] | TaskRefusal {
   const selected = context(world); return selected;
 }

@@ -18,6 +18,7 @@ import { readTaskHolders } from "../src/settlement/holder.js";
 import { settleAll } from "../src/settlement/settle.js";
 import { readNamespaceContext } from "../src/task/context.js";
 import { Tasks } from "../src/task/index.js";
+import { World } from "../src/world.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
 function repository() {
@@ -54,7 +55,7 @@ function document(title: string): string {
 }
 
 async function task(path: string, title: string, state: "open" | "done" = "open") {
-  const result = await Tasks.at({ path }).add({ title, state });
+  const result = await Tasks.of(World.at(path)).add({ title, state });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("Task creation was not accepted");
   return result.value.id;
@@ -67,7 +68,7 @@ function replaceTaskState(path: string, id: string, before: string, after: strin
 }
 
 async function taskState(path: string, id: string) {
-  const detail = await Tasks.at({ path }).task({ id }).read();
+  const detail = await Tasks.of(World.at(path)).task({ id }).read();
   assert.ok(detail);
   return detail.task.state;
 }

@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { Akuma, type AkumaStatus, type ForkReceipt } from "../akuma/akuma.js";
 import type { AkuId } from "../akuma/identity.js";
@@ -11,6 +10,7 @@ import {
 } from "../dispatch/index.js";
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import type { Settings } from "../settings.js";
+import type { WorldRoot } from "../world.js";
 import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
 import { seatForKeiyaku, type Keiyaku } from "./contract.js";
@@ -35,7 +35,7 @@ export type AliasStage =
   | Readonly<{ kind: "failed"; failure: IntegrationFailure }>;
 
 export type CallInput = Readonly<{
-  path: string;
+  path: WorldRoot;
   archetype: string;
   body: string;
   cwd?: string;
@@ -60,7 +60,7 @@ export type CallResult = Readonly<{
 }>;
 
 export type ForkInput = Readonly<{
-  path: string;
+  path: WorldRoot;
   akuma: string;
   at: string;
   settings?: Settings;
@@ -172,7 +172,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     ["path", "archetype", "body", "cwd", "mode", "timeoutMs", "settings", "contract", "alias"],
     "Keiyaku.call input",
   );
-  const path = resolve(nonblank(values.path, "path"));
+  const path = nonblank(values.path, "path") as WorldRoot;
   const archetype = nonblank(values.archetype, "archetype");
   const body = text(values.body, "body");
   const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
@@ -184,7 +184,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     : parseAkumaAlias(nonblank(values.alias, "alias"));
   const seat = values.contract === undefined ? undefined : seatForKeiyaku(values.contract);
 
-  const handle = await Akuma.at({ path, ...(settings === undefined ? {} : { settings }) }).call({
+  const handle = await Akuma.of(path, settings).call({
     archetype,
     body,
     ...(cwd === undefined ? {} : { cwd }),
@@ -211,7 +211,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
 export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
   const values = requireInput(input, "Keiyaku.fork input");
   onlyKeys(values, ["path", "akuma", "at", "settings", "repo"], "Keiyaku.fork input");
-  const path = resolve(nonblank(values.path, "path"));
+  const path = nonblank(values.path, "path") as WorldRoot;
   const at = nonblank(values.at, "at");
   const settings = settingsOption(values.settings);
   const akuma = addressAkuma({
@@ -221,7 +221,7 @@ export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
   }).id;
   const repository = values.repo === undefined ? undefined : scopeForRepo(values.repo);
 
-  const receipt = await Akuma.at({ path, ...(settings === undefined ? {} : { settings }) })
+  const receipt = await Akuma.of(path, settings)
     .of({ id: akuma })
     .fork({ at });
   if (receipt.kind !== "forked") return { ...receipt, parent: akuma };

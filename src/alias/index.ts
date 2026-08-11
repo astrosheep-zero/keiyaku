@@ -5,6 +5,7 @@ import { replaceFileDurably } from "../coordination/durable-file.js";
 import { acquireSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
+import type { WorldRoot } from "../world.js";
 
 const VERSION = 1;
 
@@ -16,14 +17,13 @@ type AliasFile = Readonly<{
   aliases: Readonly<Record<string, string>>;
 }>;
 
-function paths(world: string): Readonly<{ authority: string; lock: string }> {
+function paths(world: WorldRoot): Readonly<{ authority: string; lock: string }> {
   if (typeof world !== "string" || world.trim().length === 0) {
     throw new TypeError("Alias world must be a nonblank path");
   }
-  const root = resolve(world);
   return {
-    authority: resolve(root, ".keiyaku", "akuma", "alias.json"),
-    lock: resolve(root, ".keiyaku", "locks", "akuma-alias.sqlite"),
+    authority: resolve(world, ".keiyaku", "akuma", "alias.json"),
+    lock: resolve(world, ".keiyaku", "locks", "akuma-alias.sqlite"),
   };
 }
 
@@ -85,17 +85,17 @@ function read(path: string): readonly AliasBinding[] {
   }
 }
 
-export function readAliases(world: string): readonly AliasBinding[] {
+export function readAliases(world: WorldRoot): readonly AliasBinding[] {
   return read(paths(world).authority);
 }
 
-export function resolveAlias(world: string, value: AkumaAlias): AkuId | null {
+export function resolveAlias(world: WorldRoot, value: AkumaAlias): AkuId | null {
   const alias = parseAkumaAlias(value);
   return readAliases(world).find((binding) => binding.alias === alias)?.akuId ?? null;
 }
 
 export async function moveAlias(input: Readonly<{
-  world: string;
+  world: WorldRoot;
   alias: AkumaAlias;
   akuId: AkuId;
 }>): Promise<AliasMove> {

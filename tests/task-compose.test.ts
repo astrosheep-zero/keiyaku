@@ -4,11 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Tasks } from "../src/task/index.js";
+import { World } from "../src/world.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 
 function tasks() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-compose-")); mkdirSync(join(root, ".keiyaku"));
-  return Tasks.at({ path: root });
+  return Tasks.of(World.at(root));
 }
 
 test("compose allocates nested tasks, resolves parents, and returns native diffs", async () => {

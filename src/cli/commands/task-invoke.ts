@@ -15,12 +15,13 @@ import {
   type TaskUpdateResult,
 } from "../../task/index.js";
 import type { ParsedTaskCommand } from "./task.js";
+import type { WorldRoot } from "../../world.js";
 
 export type TaskInvocationResult = TaskMutationResult | TaskUpdateResult | TaskBatchResult | TaskCompositionResult
   | TaskDetail | TaskList | BlockedTaskList | TaskDependencyTree | TaskDoctorReport | TaskNamespaceResult;
 
-type TaskProduct = ReturnType<typeof Tasks.at>;
-type TaskInput = Readonly<{ path?: string; readStdin(): string }>;
+type TaskProduct = ReturnType<typeof Tasks.of>;
+type TaskInput = Readonly<{ world: WorldRoot | null; establish(): WorldRoot; readStdin(): string }>;
 
 function value(command: ParsedTaskCommand, name: string): string | undefined {
   const item = command.flags[name]; return typeof item === "string" ? item : undefined;
@@ -83,8 +84,29 @@ async function invokeRead(tasks: TaskProduct, command: ParsedTaskCommand): Promi
   }
 }
 
+function missingWorld(command: ParsedTaskCommand): TaskInvocationResult {
+  const missing = (id: string): TaskMutationResult => ({
+    kind: "refused",
+    refusal: { kind: "task-missing", taskId: id as TaskId },
+  });
+  if (command.action === "doctor") return { issues: [] };
+  if (command.action === "ls" || command.action === "ready" || command.action === "blocked" || command.action === "namespace") {
+    return { kind: "accepted", value: [] };
+  }
+  if (command.action === "hold" || command.action === "done" || command.action === "drop") {
+    return { items: command.positionals.map((id) => ({ id: id as TaskId, outcome: missing(id) })) };
+  }
+  return missing(command.positionals[0]!);
+}
+
 export async function invokeTask(command: ParsedTaskCommand, input: TaskInput): Promise<TaskInvocationResult> {
-  const tasks = input.path === undefined ? Tasks.at() : Tasks.at({ path: input.path });
+  let world = input.world;
+  if (world === null && (command.action === "add" || command.action === "compose"
+    || (command.action === "namespace" && command.positionals.length > 0))) {
+    world = input.establish();
+  }
+  if (world === null) return missingWorld(command);
+  const tasks = Tasks.of(world);
   if (["show", "ls", "ready", "blocked", "tree", "doctor"].includes(command.action)) return invokeRead(tasks, command);
   if (command.action === "add") return invokeAdd(tasks, command, input.readStdin);
   if (command.action === "update") return invokeUpdate(tasks, command, input.readStdin);

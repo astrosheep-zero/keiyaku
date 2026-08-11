@@ -6,8 +6,9 @@ Keiyaku.bind({ repo: Repo.at(), markdown, target: "main" });
 
 Keiyaku is the package-root contract library. It is ESM-only and the package
 root is its sole public import surface. The public objects are `Keiyaku`,
-`Repo`, `Delivery`, the shared `settings` resource constructor, and the
-exported value types defined by their operations.
+`Repo`, `Delivery`, `World`, the shared `settings` resource constructor, their
+exported errors, and the value types defined by their operations. `World` and
+its branded `WorldRoot` coordinate are defined by [world.md](world.md).
 
 ## Composition Boundary
 
@@ -227,7 +228,7 @@ operations are:
 
 ```ts
 type CallInput = Readonly<{
-  path: string
+  path: WorldRoot
   archetype: string
   body: string
   cwd?: string
@@ -239,7 +240,7 @@ type CallInput = Readonly<{
 }>
 
 type ForkInput = Readonly<{
-  path: string
+  path: WorldRoot
   akuma: string
   at: string
   settings?: Settings
@@ -250,9 +251,10 @@ Keiyaku.call(input: CallInput): Promise<CallResult>
 Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 ```
 
-`path` is the exact Akuma world and is normalized once before construction; it
-does not climb to a Git root. `cwd` is the optional summon cwd and defaults to
-that world. `mode` defaults to `"wait"`; wait mode observes the born handle
+`path` is an already resolved WorldRoot; Library never climbs or normalizes it.
+`cwd` is the optional execution cwd and defaults to that world for direct
+library calls. The CLI always supplies its invocation cwd or the explicit
+`--workdir` override. `mode` defaults to `"wait"`; wait mode observes the born handle
 until it stops running or `timeoutMs`, which defaults to 300,000 milliseconds.
 Detach mode returns after the post-birth integration stages and rejects a
 supplied `timeoutMs` as contradictory caller input. `archetype` remains the TypeScript input name for
@@ -377,6 +379,11 @@ only the last answered turn and never reads status or activity history.
 ```ts
 Keiyaku.ls(input: CatalogInput): Promise<Catalog>
 ```
+
+`CatalogInput` carries `path: WorldRoot | null`, one Settings snapshot, and an
+optional already resolved Repo. A null world makes Task and Akuma sections
+absent without creating a marker; an absent Repo makes the Contract section
+absent. Catalog performs no path or Git discovery.
 
 It independently lists the Task world, Contract board, Archetype names, and
 compact Akuma fleet. Every section is present, absent, or failed; one section

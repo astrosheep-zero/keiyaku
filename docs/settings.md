@@ -19,9 +19,10 @@ type Settings = Readonly<{
 }>
 ```
 
-`root`, when present, is normalized to one absolute project coordinate and
-selects `<root>/.keiyaku/settings.json`. An omitted root means there is no
-project scope; Settings never reads `process.cwd()`. `home` selects
+`root`, when present, is one absolute WorldRoot supplied by the process edge
+and selects `<root>/.keiyaku/settings.json`. An omitted root means there is no
+project scope; Settings never reads `process.cwd()` or discovers a world.
+`home` selects
 `<home>/settings.json`; it defaults to `~/.keiyaku`. A caller-supplied home
 always wins. The library never interprets `KEIYAKU_HOME`; a process edge may
 map that environment value to the explicit `home` input.

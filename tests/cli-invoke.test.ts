@@ -11,6 +11,7 @@ import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { Tasks } from "../src/task/index.js";
+import { World } from "../src/world.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithMain() {
@@ -99,7 +100,7 @@ test("one CLI invocation reuses its Repo for selector, settings, and contract lo
 
 test("an explicit status selector projects one Kanshi report without changing section shape", async () => {
   const repository = repositoryWithMain();
-  const tasks = Tasks.at({ path: repository.path });
+  const tasks = Tasks.of(World.at(repository.path));
   const associated = await tasks.add({ title: "Associated" });
   const unrelated = await tasks.add({ title: "Unrelated" });
   assert.equal(associated.kind, "accepted");

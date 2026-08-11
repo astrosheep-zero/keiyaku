@@ -5,14 +5,14 @@ import {
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { acquireSqliteTransactionLock, SqliteTransactionLockError, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
+import type { WorldRoot } from "../world.js";
 import { parseTaskDocument, type TaskDocument } from "./document.js";
 import { formatTaskId, parseTaskId, taskAuthorityPath, type TaskId } from "./identity.js";
 import type { TaskBoard } from "./board.js";
 
-export type TaskWorld = Readonly<{ root: string }>;
 export type BoardSnapshot = Readonly<{ board: TaskBoard; bytes: ReadonlyMap<TaskId, Uint8Array> }>;
 
-function tasksDirectory(world: TaskWorld): string { return resolve(world.root, ".keiyaku", "tasks"); }
+function tasksDirectory(world: WorldRoot): string { return resolve(world, ".keiyaku", "tasks"); }
 
 function authorityFiles(directory: string): readonly string[] {
   if (!existsSync(directory)) return [];
@@ -32,7 +32,7 @@ function coordinateFromPath(tasksDirectory: string, path: string) {
   return parseTaskId(`task/${local.slice(0, -3).split(sep).join("/")}`);
 }
 
-export function readBoard(world: TaskWorld): BoardSnapshot {
+export function readBoard(world: WorldRoot): BoardSnapshot {
   const directory = tasksDirectory(world);
   const tasks = new Map<TaskId, TaskDocument>(), bytes = new Map<TaskId, Uint8Array>();
   for (const path of authorityFiles(directory)) {
@@ -66,16 +66,16 @@ export function replaceAuthority(input: Readonly<{ path: string; expected: Uint8
   }
 }
 
-function lockPath(world: TaskWorld, id: TaskId): string {
+function lockPath(world: WorldRoot, id: TaskId): string {
   const coordinate = parseTaskId(id);
-  return resolve(world.root, ".keiyaku", "locks", "task", ...coordinate.namespace, `${coordinate.localId}.sqlite`);
+  return resolve(world, ".keiyaku", "locks", "task", ...coordinate.namespace, `${coordinate.localId}.sqlite`);
 }
 
 export async function withTaskLocks<T>(input: Readonly<{
-  world: TaskWorld; allocation: boolean; ids: readonly TaskId[]; signal?: AbortSignal;
+  world: WorldRoot; allocation: boolean; ids: readonly TaskId[]; signal?: AbortSignal;
 }>, action: () => Promise<T>): Promise<T | "busy"> {
   const paths = [
-    ...(input.allocation ? [resolve(input.world.root, ".keiyaku", "locks", "task-allocation.sqlite")] : []),
+    ...(input.allocation ? [resolve(input.world, ".keiyaku", "locks", "task-allocation.sqlite")] : []),
     ...[...new Set(input.ids)].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))).map((id) => lockPath(input.world, id)),
   ];
   const held: HeldSqliteTransactionLock[] = [];
@@ -90,4 +90,4 @@ export async function withTaskLocks<T>(input: Readonly<{
   }
 }
 
-export function authorityPath(world: TaskWorld, id: TaskId): string { return taskAuthorityPath(tasksDirectory(world), parseTaskId(id)); }
+export function authorityPath(world: WorldRoot, id: TaskId): string { return taskAuthorityPath(tasksDirectory(world), parseTaskId(id)); }

@@ -7,6 +7,7 @@ import {
   type TellReceipt,
 } from "../akuma/index.js";
 import type { Settings } from "../settings.js";
+import type { WorldRoot } from "../world.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
 import { requireInput } from "./input.js";
 
@@ -38,8 +39,8 @@ export type AkumaHistoryResult =
   | Readonly<{ kind: "history"; id: AkumaStatus["id"]; history: ActivityHistory }>
   | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer?: string }>;
 
-function source(path: string, settings?: Settings): Akuma {
-  return Akuma.at({ path, ...(settings === undefined ? {} : { settings }) });
+function source(path: WorldRoot, settings?: Settings): Akuma {
+  return Akuma.of(path, settings);
 }
 
 function timeout(value: unknown): number | undefined {
@@ -56,7 +57,7 @@ function delay(milliseconds: number): Promise<void> {
 
 function directAddress(values: Record<string, unknown>): AkumaAddressInput {
   return {
-    path: values.path as string,
+    path: values.path as WorldRoot,
     akuma: values.akuma as string,
     ...(values.settings === undefined ? {} : { settings: values.settings as Settings }),
   };
@@ -64,7 +65,7 @@ function directAddress(values: Record<string, unknown>): AkumaAddressInput {
 
 function setAddress(values: Record<string, unknown>): AkumaSetAddressInput {
   return {
-    path: values.path as string,
+    path: values.path as WorldRoot,
     akuma: values.akuma as readonly string[],
     ...(values.settings === undefined ? {} : { settings: values.settings as Settings }),
     ...(values.repo === undefined ? {} : { repo: values.repo as NonNullable<AkumaSetAddressInput["repo"]> }),

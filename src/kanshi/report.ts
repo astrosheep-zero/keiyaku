@@ -2,6 +2,7 @@ import type { ContractBoard, ContractDisposition } from "../library/contract.js"
 import type { TaskRow } from "../task/index.js";
 import type { AkumaList, AkumaListRow, UnbornAkumaListRow } from "../akuma/index.js";
 import type { AkumaAlias } from "../identity/selector.js";
+import type { WorldRoot } from "../world.js";
 
 export type Section<Value> =
   | Readonly<{ kind: "present"; value: Value }>
@@ -15,7 +16,7 @@ export type TaskKanshiRow = TaskRow & Readonly<{
 }>;
 
 export type TaskKanshiWorld = Readonly<{
-  root: string;
+  root: WorldRoot;
   rows: readonly TaskKanshiRow[];
 }>;
 
@@ -29,7 +30,7 @@ export type AkumaKanshiWorld = Omit<AkumaList, "rows"> & Readonly<{
 }>;
 
 export type KanshiReport = Readonly<{
-  root: string;
+  root: WorldRoot | null;
   contracts: Section<ContractBoard>;
   tasks: Section<TaskKanshiWorld>;
   akuma: Section<AkumaKanshiWorld>;

@@ -1,4 +1,5 @@
-import { resolveContextRoot } from "../context-root.js";
+import type { WorldRoot } from "../world.js";
+export type { WorldRoot } from "../world.js";
 import { buildTree, diagnoseBoard, projectDetailFacts, type BlockedTaskRow, type TaskDetailFacts, type TaskDoctorIssue, type TaskRow, type TaskTreeNode } from "./board.js";
 import { composeTasks, type TaskCompositionResult } from "./compose.js";
 import { TaskAuthorityCorruptionError, type TaskPriority, type TaskState } from "./document.js";
@@ -8,7 +9,7 @@ import {
   setCurrentNamespace, taskView, updateTask, type AddTaskDocumentInput, type AddTaskInput, type TaskBatchResult,
   type TaskMutationResult, type TaskOutcome, type TaskRefusal, type TaskRetry, type TaskUpdateResult, type TaskView, type UpdateTaskInput,
 } from "./operations.js";
-import { readBoard, type TaskWorld } from "./store.js";
+import { readBoard } from "./store.js";
 
 export type TaskDetail = Omit<TaskDetailFacts, "task"> & Readonly<{ task: TaskView }>;
 export type TaskList = TaskOutcome<readonly TaskRow[]>;
@@ -82,7 +83,7 @@ function updateInput(input: unknown): UpdateTaskInput {
 }
 
 class TaskHandle {
-  constructor(readonly id: TaskId, private readonly world: TaskWorld) {}
+  constructor(readonly id: TaskId, private readonly world: WorldRoot) {}
   async read(): Promise<TaskDetail | null> {
     const facts = projectDetailFacts(readBoard(this.world).board, this.id);
     return facts === null ? null : { ...facts, task: taskView(facts.task) };
@@ -109,11 +110,8 @@ class TaskHandle {
 export type Task = TaskHandle;
 
 class TasksHandle {
-  readonly root: string; private readonly world: TaskWorld;
-  constructor(path?: string) {
-    const root = resolveContextRoot({ from: path ?? process.cwd(), marker: ".keiyaku" });
-    this.world = { root }; this.root = root;
-  }
+  readonly root: WorldRoot;
+  constructor(private readonly world: WorldRoot) { this.root = world; }
   async namespace(): Promise<TaskNamespaceResult> { const value = currentNamespace(this.world); return "kind" in value ? { kind: "refused", refusal: value } : { kind: "accepted", value }; }
   async setNamespace(input: Readonly<{ namespace: readonly string[] }>): Promise<void> { const v = record(input, "setNamespace input"); closed(v, ["namespace"], "setNamespace input"); const ns = namespace(v.namespace); if (ns === undefined) throw new TypeError("namespace is required"); setCurrentNamespace(this.world, ns); }
   task(input: Readonly<{ id: string }>): Task { const v = record(input, "task input"); closed(v, ["id"], "task input"); return new TaskHandle(id(v.id), this.world); }
@@ -127,4 +125,9 @@ class TasksHandle {
   compose(input: Readonly<{ markdown: string; signal?: AbortSignal }>): Promise<TaskCompositionResult> { const v = record(input, "compose input"); closed(v, ["markdown", "signal"], "compose input"); const markdown = text(v.markdown, "markdown"); if (markdown === undefined) throw new TypeError("markdown is required"); return composeTasks(this.world, markdown, signal(v.signal)); }
 }
 export type Tasks = TasksHandle;
-export const Tasks = Object.freeze({ at(input?: Readonly<{ path?: string }>): Tasks { if (input === undefined) return new TasksHandle(); const value = record(input, "Tasks.at input"); closed(value, ["path"], "Tasks.at input"); return new TasksHandle(text(value.path, "path")); } });
+export const Tasks = Object.freeze({
+  of(root: WorldRoot): Tasks {
+    if (typeof root !== "string") throw new TypeError("Tasks.of root must be a WorldRoot");
+    return new TasksHandle(root);
+  },
+});

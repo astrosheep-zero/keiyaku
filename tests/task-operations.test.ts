@@ -8,12 +8,13 @@ import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transac
 import { parseTaskDocument, serializeTaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
 import { replaceAuthority, withTaskLocks } from "../src/task/store.js";
+import { World } from "../src/world.js";
 
-function world(): { root: string; tasks: ReturnType<typeof Tasks.at> } {
+function world(): { root: string; tasks: ReturnType<typeof Tasks.of> } {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-tasks-")); mkdirSync(join(root, ".keiyaku"));
-  return { root, tasks: Tasks.at({ path: root }) };
+  return { root, tasks: Tasks.of(World.at(root)) };
 }
-function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Tasks.at>["add"]>>): TaskId {
+function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Tasks.of>["add"]>>): TaskId {
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") throw new Error("task add failed");
   return result.value.id;
@@ -184,8 +185,7 @@ test("task lock cancellation propagates and exceptional actions release held loc
   const pending = tasks.task({ id }).start({ signal: controller.signal }); controller.abort(new Error("cancel task"));
   await assert.rejects(pending, /cancel task/u); held.close();
 
-  const taskWorld = { root: tasks.root };
-  await assert.rejects(withTaskLocks({ world: taskWorld, allocation: false, ids: [id] }, async () => { throw new Error("action failed"); }), /action failed/u);
+  await assert.rejects(withTaskLocks({ world: tasks.root, allocation: false, ids: [id] }, async () => { throw new Error("action failed"); }), /action failed/u);
   assert.equal((await tasks.task({ id }).start()).kind, "accepted");
 });
 
@@ -241,5 +241,5 @@ test("public inputs reject unknown fields before observing authority", async () 
   assert.throws(() => tasks.task({ id }).update({ title: "   " }), /title must be nonblank/u);
   assert.throws(() => tasks.task({ id }).start({ extra: true } as never), /unknown field/u);
   await assert.rejects(tasks.list({ scope: "nearby" } as never), /scope must be namespace or world/u);
-  assert.throws(() => Tasks.at({ path: tasks.root, extra: true } as never), /unknown field/u);
+  assert.throws(() => Tasks.of({ root: tasks.root } as never), /WorldRoot/u);
 });

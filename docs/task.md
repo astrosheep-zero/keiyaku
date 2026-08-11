@@ -8,12 +8,10 @@ Contract authority, or interpret a retained contract association.
 
 ## World, Context, And Identity
 
-A Task world is a directory context. `Tasks.at({ path? })` resolves the input
-directory, searches upward for the nearest `.keiyaku/`, and pins that marker's
-parent as the world root through the shared context-root primitive. If no
-ancestor contains the marker, the resolved
-input directory itself is the root. The discovery reads no Git state. A nearer
-nested marker deliberately starts another Task world.
+A Task world is a directory context. The CLI resolves it with `World.locate`
+or `World.at`; the Task product receives the resulting `WorldRoot` directly.
+`Tasks.of(root)` never searches upward, reads Git state, or inspects the process
+cwd. A nearer nested marker deliberately starts another Task world.
 
 A `TaskId` is `task/<local-id>` at the root or
 `task/<namespace...>/<local-id>` in a nested namespace. Every segment uses the
@@ -118,7 +116,7 @@ lifecycle.
 objects validated at the JavaScript boundary.
 
 ```ts
-Tasks.at(input?: { path?: string }): Tasks
+Tasks.of(root: WorldRoot): Tasks
 tasks.root: string
 tasks.namespace(): Promise<TaskNamespaceResult>
 tasks.setNamespace(input: { namespace: readonly string[] }): Promise<void>

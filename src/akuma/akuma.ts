@@ -48,6 +48,7 @@ import { providerNamed } from "./providers/index.js";
 import { injectedBodyRequests, requestBodyCall } from "./requests.js";
 import { probeProcessTree, putDownProcessTree } from "../runtime/proc/run.js";
 import { settings as readSettings, type Settings } from "../settings.js";
+import type { WorldRoot } from "../world.js";
 
 const POLL_MS = 25;
 const KILL_GRACE_MS = 1_000;
@@ -203,7 +204,7 @@ function diagnostic(error: unknown): string {
 }
 
 export class AkumaHandle {
-  constructor(readonly id: AkuId, private readonly worldPath: string) {}
+  constructor(readonly id: AkuId, private readonly worldPath: WorldRoot) {}
 
   private get paths(): AkumaPaths {
     return pathsForAkuId(this.worldPath, this.id);
@@ -371,11 +372,11 @@ export class AkumaHandle {
 }
 
 export class Akuma {
-  private constructor(private readonly path: string, private readonly settings: Settings) {}
+  private constructor(private readonly path: WorldRoot, private readonly settings: Settings) {}
 
-  static at(input: Readonly<{ path: string; settings?: Settings }>): Akuma {
-    const path = resolve(input.path);
-    return new Akuma(path, input.settings ?? readSettings({ root: path }));
+  static of(root: WorldRoot, settings?: Settings): Akuma {
+    if (typeof root !== "string") throw new TypeError("Akuma.of root must be a WorldRoot");
+    return new Akuma(root, settings ?? readSettings({ root }));
   }
 
   of(input: Readonly<{ id: string }>): AkumaHandle {

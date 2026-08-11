@@ -3,7 +3,8 @@ import { readNamespaceContext } from "./context.js";
 import { relationProblem, type TaskBoard } from "./board.js";
 import { serializeTaskDocument, type TaskDocument, type TaskPriority } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
-import { authorityPath, readBoard, replaceAuthority, withTaskLocks, type TaskWorld } from "./store.js";
+import { authorityPath, readBoard, replaceAuthority, withTaskLocks } from "./store.js";
+import type { WorldRoot } from "../world.js";
 import type { TaskRefusal, TaskRetry } from "./operations.js";
 
 type TaskDocumentChange = Readonly<{ taskId: TaskId; kind: "created" | "updated"; documentDiff: string }>;
@@ -144,11 +145,11 @@ function draft(namespace: readonly string[], remaining: readonly Planned[]): str
   return `${lines.join("\n")}\n`;
 }
 
-export async function composeTasks(world: TaskWorld, markdown: string, signal?: AbortSignal): Promise<TaskCompositionResult> {
+export async function composeTasks(world: WorldRoot, markdown: string, signal?: AbortSignal): Promise<TaskCompositionResult> {
   const sketch = parseSketch(markdown); if ("kind" in sketch) return { kind: "refused", refusal: sketch };
   const at = currentTimestamp();
-  const context = sketch.namespace ?? readNamespaceContext(world.root);
-  if (context === "malformed") return { kind: "refused", refusal: { kind: "invalid-namespace-context", path: `${world.root}/.keiyaku/namespace/current` } };
+  const context = sketch.namespace ?? readNamespaceContext(world);
+  if (context === "malformed") return { kind: "refused", refusal: { kind: "invalid-namespace-context", path: `${world}/.keiyaku/namespace/current` } };
   const namespace = context === "absent" ? [] : context;
   const initial = readBoard(world); const planned = plan(sketch, initial.board, namespace, at); if ("kind" in planned) return { kind: "refused", refusal: planned };
   const ordered = [...planned].sort((a, b) => Buffer.compare(Buffer.from(a.after.id), Buffer.from(b.after.id)));

@@ -23,7 +23,7 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { Keiyaku, Repo, settings } from "../src/index.js";
+import { Keiyaku, Repo, World, settings } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { makeGitRepository } from "./support/git.js";
@@ -101,13 +101,14 @@ function requestPump(root: string) {
 
 test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () => {
   const { raw, repo, git } = repositoryFixture();
-  const configured = archetypeSettings(raw.path);
-  const { pump, leash } = requestPump(raw.path);
+  const world = World.at(raw.path);
+  const configured = archetypeSettings(world);
+  const { pump, leash } = requestPump(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   process.env[AKUMA_REQUESTS_ENV] = pump.directory;
   try {
     const independent = await Keiyaku.call({
-      path: raw.path,
+      path: world,
       archetype: "worker",
       body: "independent",
       settings: configured.value,
@@ -150,13 +151,13 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     });
     assert.equal(associated.observation.kind, "observed");
     assert.equal(
-      readSoul(pathsForAkuId(raw.path, associated.akuma))?.cwd,
-      join(raw.path, "nested-worktree"),
+      readSoul(pathsForAkuId(world, associated.akuma))?.cwd,
+      join(world, "nested-worktree"),
     );
 
     writeFileSync(join(raw.path, ".keiyaku", "akuma", "alias.json"), "broken\n");
     const partial = await Keiyaku.call({
-      path: raw.path,
+      path: world,
       archetype: "worker",
       body: "partial",
       settings: configured.value,
@@ -169,7 +170,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.notEqual(readDispatch(git, partial.akuma), null);
 
     const detached = await Keiyaku.call({
-      path: raw.path,
+      path: world,
       archetype: "worker",
       body: "detached",
       settings: configured.value,
@@ -178,7 +179,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.deepEqual(detached.observation, { kind: "detached" });
     await assert.rejects(
       Keiyaku.call({
-        path: raw.path,
+        path: world,
         archetype: "worker",
         body: "invalid",
         settings: configured.value,
@@ -198,8 +199,9 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
 
 test("Keiyaku.call observes for five minutes by default", async () => {
   const { raw } = repositoryFixture();
-  const configured = archetypeSettings(raw.path);
-  const { pump, leash } = requestPump(raw.path);
+  const world = World.at(raw.path);
+  const configured = archetypeSettings(world);
+  const { pump, leash } = requestPump(world);
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   const originalWait = AkumaHandle.prototype.wait;
   let receivedTimeout: number | undefined;
@@ -210,7 +212,7 @@ test("Keiyaku.call observes for five minutes by default", async () => {
   };
   try {
     const result = await Keiyaku.call({
-      path: raw.path,
+      path: world,
       archetype: "worker",
       body: "observe",
       settings: configured.value,
@@ -231,9 +233,10 @@ type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapt
 
 test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async () => {
   const { raw, repo, git } = repositoryFixture();
+  const world = World.at(raw.path);
   const bound = await Keiyaku.bind({ repo, markdown: markdown("Fork dispatch"), workspace: "here" });
   const owner = (await bound.keiyaku.state()).id;
-  const source = allocateAkumaDirectory({ worldRoot: raw.path, archetype: "claude", draw: () => "face0001" });
+  const source = allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "face0001" });
   initializeHeart(source.paths);
   await driveAkumaBody({
     paths: source.paths,
@@ -264,18 +267,18 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
   });
   publishDispatch({ repository: git, akuId: source.id, contractId: owner });
   const alias = parseAkumaAlias("@parent");
-  await moveAlias({ world: raw.path, alias, akuId: source.id });
+  await moveAlias({ world, alias, akuId: source.id });
 
   const mutable = claudeProvider as MutableProvider;
   const originalFork = mutable.fork;
   try {
     mutable.fork = async () => ({ session: { sessionId: "child-session" } });
-    const result = await Keiyaku.fork({ path: raw.path, akuma: source.id, at: "history-1", repo });
+    const result = await Keiyaku.fork({ path: world, akuma: source.id, at: "history-1", repo });
     assert.equal(result.kind, "forked", JSON.stringify(result));
     if (result.kind !== "forked") return;
     assert.equal(result.dispatch.kind, "dispatched");
     assert.equal(readDispatch(git, result.child)?.contractId, owner);
-    assert.equal(resolveAlias(raw.path, alias), source.id);
+    assert.equal(resolveAlias(world, alias), source.id);
 
     const snapshot = readGit(git);
     const dispatchPath = `dispatch/${createHash("sha256").update(source.id).digest("hex")}.json`;
@@ -289,7 +292,7 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
       at: "2026-08-11T01:00:01.000Z",
     });
     assert.equal(updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]).kind, "published");
-    const partial = await Keiyaku.fork({ path: raw.path, akuma: source.id, at: "history-1", repo });
+    const partial = await Keiyaku.fork({ path: world, akuma: source.id, at: "history-1", repo });
     assert.equal(partial.kind, "forked", JSON.stringify(partial));
     if (partial.kind !== "forked") return;
     assert.equal(partial.dispatch.kind, "failed");

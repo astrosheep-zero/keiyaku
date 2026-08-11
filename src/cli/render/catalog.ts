@@ -6,7 +6,7 @@ function failed(name: string, message: string): readonly string[] {
 }
 
 export function renderCatalogText(catalog: Catalog): string {
-  const lines = [`ls ${safeText(catalog.root)}`];
+  const lines = [`ls ${catalog.root === null ? "none" : safeText(catalog.root)}`];
   if (catalog.tasks.kind === "present") {
     lines.push(`task ${catalog.tasks.value.rows.length}`, ...catalog.tasks.value.rows.map((row) => `  ${safeText(row.id)}`));
   } else if (catalog.tasks.kind === "absent") lines.push("task absent");

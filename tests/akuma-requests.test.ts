@@ -22,9 +22,12 @@ import {
   requestBodyCall,
   settleBodyRequests,
 } from "../src/akuma/requests.js";
+import { World } from "../src/world.js";
+
+function akumaAt(root: string) { return Akuma.of(World.at(root)); }
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-"));
+  const root = World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-")));
   const parent = allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
   initializeHeart(parent.paths);
   const soul: Soul = {
@@ -64,7 +67,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
   });
   try {
     process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-    const childId = (await Akuma.at({ path: value.root }).call({
+    const childId = (await akumaAt(value.root).call({
       archetype: "worker",
       body: "build",
     })).id;
@@ -79,7 +82,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
       requestId,
     });
 
-    const unassociated = (await Akuma.at({ path: value.root }).call({ archetype: "worker", body: "separate" })).id;
+    const unassociated = (await akumaAt(value.root).call({ archetype: "worker", body: "separate" })).id;
     delete process.env[AKUMA_REQUESTS_ENV];
 
     const malformedId = "00000000-0000-4000-8000-000000000001";

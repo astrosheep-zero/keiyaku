@@ -153,7 +153,7 @@ other consumed value is a nonblank string. Additional top-level keys are
 ignored and never enter Archetype options or the soul snapshot. The Markdown body
 after frontmatter is the system prompt, including an empty one.
 
-`Akuma.at({ path, settings? })` normalizes the world once. It uses the injected
+`Akuma.of(root, settings?)` consumes one already resolved WorldRoot. It uses the injected
 Settings snapshot when present and otherwise constructs one Settings value for
 that world. `call({ archetype })` validates the name, reads this one Archetype file,
 resolves its `provider` as an execution name in the Settings `providers`
@@ -857,7 +857,7 @@ composition root used by the public boundary and detached body.
 ## Public surface
 
 ```ts
-const world = Akuma.at({ path, settings? }); // path is the world; no climbing
+const world = Akuma.of(root, settings?); // root is already resolved; no climbing
 
 const a = await world.call({ archetype, body, cwd? }); // returns after birth
 world.of({ id });

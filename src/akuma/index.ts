@@ -1,4 +1,5 @@
 export { Akuma, AkumaHandle, AkumaNotBornError } from "./akuma.js";
+export type { WorldRoot } from "../world.js";
 export { AkumaArchetypeError, listArchetypes } from "./archetype.js";
 export { AkumaBodyRequestError } from "./requests.js";
 export type {

@@ -11,6 +11,7 @@ import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { settings } from "../src/settings.js";
 import { Tasks } from "../src/task/index.js";
+import { World } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 import { matchesAkumaGlob, parseAkumaGlob } from "../src/identity/selector.js";
 import { addressAkumaSet } from "../src/library/address.js";
@@ -99,7 +100,7 @@ test("facade ls is a shallow failure-isolated four-product catalog", async () =>
   try {
     const source = await answered(root, "worker", "00000001");
     await moveAlias({ world: root, alias: "@worker", akuId: source.id });
-    const task = await Tasks.at({ path: root }).add({ title: "Catalog task" });
+    const task = await Tasks.of(World.at(root)).add({ title: "Catalog task" });
     assert.equal(task.kind, "accepted");
     const configuration = settings({ root, home });
     const catalog = await Keiyaku.ls({ path: root, settings: configuration });
@@ -117,11 +118,12 @@ test("facade ls is a shallow failure-isolated four-product catalog", async () =>
 
 test("facade ls refuses an @name shared by a Contract short-id and Alias", async () => {
   const repository = makeGitRepository();
+  const repo = Repo.at({ path: repository.path });
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({
-    repo: Repo.at({ path: repository.path }),
+    repo,
     markdown: [
       "# Review", "", "## Context", "ambiguity", "", "## Objective", "refuse", "",
       "## Design", "one selector judge", "", "## Region", "```", "src/**", "```", "",
@@ -132,7 +134,7 @@ test("facade ls refuses an @name shared by a Contract short-id and Alias", async
   const source = await answered(repository.path, "worker", "00000001");
   await moveAlias({ world: repository.path, alias: "@review", akuId: source.id });
   await assert.rejects(
-    Keiyaku.ls({ path: repository.path, settings: settings({ root: repository.path }), selector: "@review" }),
+    Keiyaku.ls({ path: World.at(repository.path), repo, settings: settings({ root: repository.path }), selector: "@review" }),
     /ambiguous selector matches Contract and Akuma/u,
   );
 });
