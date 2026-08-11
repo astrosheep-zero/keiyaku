@@ -473,6 +473,42 @@ Its Akuma section is supplied by `Akuma.list()` as specified by
 confinement, and searched coordinates
 without probing, reading history, or reclassifying them.
 
+JSON serializes that complete report. Text chooses density without hiding a
+product identity that has no other text discovery surface. Bare status renders
+every Contract row. Every rendered Contract copies all of its declared gates in
+declaration order. The gate marks are `✓` current satisfied, `!` current
+unsatisfied, `?` stale with its prior verdict, and `○` missing. Bare status omits
+opaque gate summaries so testimony prose cannot drown the world board; exact
+Contract status renders each available current summary under its gate.
+
+The Task heading counts only nonterminal Tasks. Text expands `in_progress` and
+`blocked` rows, then reports exact `ready` and `on_hold` counts on one summary
+line. Terminal `done` and `drop` Tasks contribute neither rows nor counts;
+their complete inventory belongs to `task ls --closed` and `task ls --all`.
+A visible row prints its copyable TaskId, current title, priority, disposition,
+and optional Contract endpoint. Identity and description stay distinct: a
+title update does not move the immutable TaskId, so the coordinate cannot stand
+in for the current title.
+
+The Akuma section renders every public fleet row because bare status is its text
+discovery surface in this cut. Its mark reports activity, while the adjacent
+life word preserves the domain state: `running` is active, `asleep` and `dead`
+are idle, `stranded` and `headless` are lost, `unborn` is unknown, and
+`stillborn` is failed. Pending count and confinement remain compact row facts.
+Future Akuma facts may extend that fact tail only after the Akuma public row
+owns them; Kanshi and CLI never infer activity age, answer availability, or
+attention from the current fields. Empty fleet search coordinates remain in
+the report and JSON but do not turn normal text absence into a diagnostic.
+
+Status keeps one stable visual grammar, with adjacent words remaining the
+authoritative state: `●` active, `○` idle, ready, or missing, `⧗` waiting or
+blocked, `‖` held, `✓` satisfied, `!` failed or unsatisfied, `?` stale, lost,
+or unknown, and `×` ended. Marks accelerate scanning; they never replace the
+copied lifecycle, gate, Task, or Akuma discriminant. The renderer applies no
+arbitrary line cap and never cuts a Contract-and-gates block in half.
+Historical Task inventory and opaque testimony stay on their owning detail
+surfaces.
+
 Akuma call, exact status, wait, history, an `interrupted` interrupt, successful
 wake, a `forked` fork, and settled kill exit `0`. Interrupt `dead` or
 `unstoppable`, and an

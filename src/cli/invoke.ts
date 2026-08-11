@@ -255,9 +255,9 @@ async function invokeParsed(invocation: NonInstallExecution, runtime: InvokeRunt
       return invokeAkumaStatus(coordinate ?? ".", parsed.contract);
     }
     const report = await kanshi(coordinate === undefined ? {} : { path: coordinate });
-    if (parsed.contract === undefined) return { kind: "status", report };
+    if (parsed.contract === undefined) return { kind: "status", report, selection: "world" };
     const contract = resolveKanshiContract(report, parsed.contract);
-    return { kind: "status", report: selectKanshi({ report, contract }) };
+    return { kind: "status", report: selectKanshi({ report, contract }), selection: "contract" };
   }
   const repo = repoAt(coordinate);
   const scope = coordinate ?? repo.root;

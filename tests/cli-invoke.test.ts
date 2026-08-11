@@ -115,6 +115,7 @@ test("an explicit status selector projects one Kanshi report without changing se
 
   assert.equal(result.kind, "status");
   if (result.kind !== "status") return;
+  assert.equal(result.selection, "contract");
   assert.equal(result.report.contracts.kind, "present");
   assert.equal(result.report.tasks.kind, "present");
   assert.equal(result.report.akuma.kind, "present");
