@@ -177,6 +177,7 @@ type AcceptedIntent<Value> = Readonly<{
   facts: readonly Fact[];
   head: ContractHead;
   value: Value;
+  physical?: ProtocolReconcileReport;
 }>;
 
 function requireAccepted<Value, Refusal extends KeiyakuRefusal>(result: IntentOutcome<Value, Refusal>): AcceptedIntent<Value> {
@@ -209,8 +210,8 @@ async function mutationResult<Value, PublicValue>(
     facts: accepted.facts,
     head: accepted.head,
     value: value(accepted.value),
-    effects: reconciled.report.effects,
-    lags: reconciled.report.lag,
+    effects: [...(accepted.physical?.effects ?? []), ...reconciled.report.effects],
+    lags: [...(accepted.physical?.lag ?? []), ...reconciled.report.lag],
     settlement,
   };
 }
@@ -337,7 +338,7 @@ export class KeiyakuHandle {
       throw new TypeError("verdict must be satisfied or unsatisfied");
     }
     const summary = optionalNonblank(values.summary, "review summary");
-    const accepted = requireAccepted(reviewOperation({
+    const accepted = requireAccepted(await reviewOperation({
       scope: this.scope,
       contractId: this.id,
       verdict,

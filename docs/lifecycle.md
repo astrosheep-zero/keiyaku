@@ -41,6 +41,15 @@ check. Admitting testimony does not itself invoke placement; `deliver` and a
 satisfied `review` explicitly request it as a later protocol step. Audit never
 invokes placement.
 
+For a targeted offer, Git's checked-out-target preconditions are part of that
+same placement attempt. `checkout-not-followable` is a typed mechanical
+refusal from the target fence, not a lifecycle judgment or post-admission lag.
+It admits no `claimed` fact and moves no target ref. A completed targeted
+placement returns its checkout effects with the accepted step. Once the atomic
+ref transaction is accepted it cannot be reinterpreted as a refusal: a follow
+failure is returned as the recoverable physical lag defined by
+[git.md](git.md), and process death can leave that same recovery shape.
+
 `deliver` tenders the selected current worktree content. Its fact records the
 observed predecessor, candidate, and patch identity. A later tender replaces
 the current delivery on the read model. The tender's Git preparation and
@@ -239,6 +248,13 @@ The one decision submits at most one offer. Git admission owns raw Git
 object construction and one atomic `update-ref --stdin --no-deref` operation;
 it does not parse Git prose. Admission's expected-head assertions remain the
 only currentness adjudicator for that offer.
+
+Placement alone may wrap that decided offer in the Git target fence. The fence
+does not make another legal decision: it checks only whether a registered
+checkout can physically follow the offered predecessor-to-candidate movement,
+then publishes the unchanged offer and performs that follow. A physical
+refusal returns the Git-owned `checkout-not-followable` value. Protocol does
+not publish first and reinterpret checkout state afterward.
 
 An optional companion decorator runs after that attempt's pure decision and before
 admission. It receives the exact immutable Git observation used by the attempt

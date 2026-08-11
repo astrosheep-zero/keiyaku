@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { encodeEntry } from "../core/facts/codec.js";
 import { admit, type PublicationFailed } from "../git/admission.js";
 import { observeContracts, type GitDecisionObservation } from "../git/observe.js";
@@ -12,7 +13,36 @@ import {
   type ContractState,
   type EntryUlid,
   type JournalEntry,
+  entryUlid,
 } from "../core/facts/types.js";
+
+const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const MAX_SEMANTIC_ATTEMPTS = 3;
+
+function nextEntryUlid(): EntryUlid {
+  let value = "";
+  let time = BigInt(Date.now());
+  for (let index = 0; index < 10; index += 1) {
+    value = ALPHABET[Number(time & 31n)]! + value;
+    time >>= 5n;
+  }
+  let random = BigInt(`0x${randomBytes(10).toString("hex")}`);
+  for (let index = 0; index < 16; index += 1) {
+    value += ALPHABET[Number(random & 31n)]!;
+    random >>= 5n;
+  }
+  return entryUlid(value);
+}
+
+export function mintEntryUlids(count: number): readonly EntryUlid[] {
+  return Array.from({ length: count }, nextEntryUlid);
+}
+
+export function mintAttempts(input: Readonly<{ entryCount: number }>): readonly AttemptContext[] {
+  return Array.from({ length: MAX_SEMANTIC_ATTEMPTS }, () => ({
+    entryUlids: mintEntryUlids(input.entryCount),
+  }));
+}
 
 export type UnknownAttemptClassification =
   | Readonly<{ kind: "accepted" }>

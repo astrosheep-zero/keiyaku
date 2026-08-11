@@ -1,0 +1,140 @@
+import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import { contractState } from "../core/facts/observation.js";
+import type { ActorId, ContractId, ContractState } from "../core/facts/types.js";
+import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
+import { observeContract, observeGitForAdmission } from "../git/observe.js";
+import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
+import { GitPlumbingError, type GitRepository } from "../git/repository.js";
+import {
+  acquireTargetPlacementFence,
+  followTargetPlacement,
+  prepareTargetPlacement,
+  type TargetPlacementRefusal,
+} from "../git/target-placement.js";
+import { admitDecidedOffer, mintAttempts, mintEntryUlids, type AcceptedAdmission } from "./attempt.js";
+import {
+  prepareProtocolAttempt,
+  runProtocol,
+  type ProtocolResult,
+  type RunProtocolInput,
+} from "./run.js";
+
+export type PlacementExecutionFailure = Readonly<{
+  kind: "placement-failed";
+  diagnostic: string;
+}>;
+
+export type PlacementProtocolResult =
+  | (AcceptedAdmission & Readonly<{ physical?: ReconcileResult }>)
+  | Exclude<ProtocolResult<PlacementRefusal | TargetPlacementRefusal>, AcceptedAdmission>
+  | PlacementExecutionFailure;
+
+type PlacementProtocolInput = Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
+
+function placementFailure(error: unknown): PlacementExecutionFailure {
+  return { kind: "placement-failed", diagnostic: error instanceof Error ? error.message : String(error) };
+}
+
+function expectedPlacementFailure(error: unknown): PlacementExecutionFailure {
+  if (error instanceof GitPlumbingError || error instanceof SqliteTransactionLockError) return placementFailure(error);
+  throw error;
+}
+
+function runFencedPlacement(
+  repository: GitRepository,
+  input: PlacementProtocolInput,
+  protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal>,
+): PlacementProtocolResult {
+  for (let index = 0; index < protocol.attempts.length; index += 1) {
+    const prepared = prepareProtocolAttempt(protocol, protocol.attempts[index]!);
+    if (prepared.kind === "refused") return prepared;
+    const state = contractState(prepared.observation.decision, input.contractId);
+    if (state === null) throw new Error("placement offer has no contract state");
+    if (prepared.offer.target === undefined) throw new Error("targeted placement offer is missing its target movement");
+    const physical = prepareTargetPlacement(repository, state, prepared.offer.target);
+    if (physical.kind === "refused") return physical;
+    const result = admitDecidedOffer(
+      repository,
+      prepared.observation,
+      prepared.attempt,
+      prepared.offer,
+      input.contractId,
+    );
+    if (result.kind === "accepted") {
+      return { ...result, physical: followTargetPlacement(repository, physical.placement) };
+    }
+    if (result.kind === "publication-failed") return result;
+    if (result.kind === "collision" && index + 1 === protocol.attempts.length) return result;
+  }
+  return { kind: "exhausted" };
+}
+
+/** Run the sole placement adjudicator inside the target's physical fence. */
+export async function admitPlacement(
+  repository: GitRepository,
+  input: PlacementProtocolInput,
+): Promise<PlacementProtocolResult> {
+  const attempts = mintAttempts({ entryCount: 2 });
+  const protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal> = {
+    input,
+    repository,
+    contracts: [input.contractId],
+    attempts,
+    observe: observeGitForAdmission,
+    extendAttempt: (attempt, observedContractCount) => ({
+      ...attempt,
+      entryUlids: [
+        ...attempt.entryUlids,
+        ...mintEntryUlids(Math.max(0, observedContractCount - attempt.entryUlids.length)),
+      ],
+    }),
+    decide: decidePlacement,
+  };
+  const run = (): ProtocolResult<PlacementRefusal | TargetPlacementRefusal> => runProtocol(protocol);
+
+  let state: ContractState | null;
+  try {
+    state = observeContract(repository, input.contractId).state;
+  } catch (error) {
+    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
+    return expectedPlacementFailure(error);
+  }
+  const target = state?.coordinates.target;
+  if (target === undefined) return run();
+
+  let held: Awaited<ReturnType<typeof acquireTargetPlacementFence>>;
+  try {
+    held = await acquireTargetPlacementFence(repository, target);
+  } catch (error) {
+    return placementFailure(error);
+  }
+  let result: PlacementProtocolResult | undefined;
+  let exceptional: unknown;
+  try {
+    result = runFencedPlacement(repository, input, protocol);
+  } catch (error) {
+    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) exceptional = error;
+    else {
+      try {
+        result = expectedPlacementFailure(error);
+      } catch (unexpected) {
+        exceptional = unexpected;
+      }
+    }
+  }
+  let releaseFailure: unknown;
+  try {
+    held.close();
+  } catch (error) {
+    releaseFailure = error;
+  }
+  if (exceptional !== undefined) throw exceptional;
+  if (result === undefined) throw new Error("placement produced no result");
+  if (releaseFailure !== undefined) {
+    return result.kind === "accepted"
+      ? { ...result, physical: reconcileEffectFailure(releaseFailure, result.physical) }
+      : placementFailure(releaseFailure);
+  }
+  return result;
+}

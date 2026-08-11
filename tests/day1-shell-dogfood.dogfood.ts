@@ -329,7 +329,7 @@ test("installed binary dogfoods here verification and gate-controlled placement"
   const here = join(fixture, "caller");
   const marker = join(fixture, "verification-pass");
   const poison = join(fixture, "verification-poison");
-  const target = "refs/heads/main";
+  const target = "refs/heads/caller";
 
   command("git", ["init", "--quiet", "--initial-branch=main", repository], fixture);
   git(repository, ["config", "user.name", "Shell Dogfood"]);
@@ -354,13 +354,15 @@ test("installed binary dogfoods here verification and gate-controlled placement"
   assert.equal(git(here, ["branch", "--show-current"]).trim(), "caller");
   assert.deepEqual(worktreePaths(repository), originalWorktrees);
 
-  const candidate = commit(here, "candidate.txt", "candidate\n", "candidate");
+  writeFileSync(join(here, "candidate.txt"), "candidate\n");
   const preDeliveryReview = succeeds(invokeResult(here, ["review", id, "--satisfied"]));
   assert.deepEqual(acceptedFactKinds(preDeliveryReview, id), ["attestation"]);
   assert.match(preDeliveryReview, /stop placement \{"refusal"/);
 
   const delivered = succeeds(invokeResult(here, ["deliver", id]));
   assert.deepEqual(acceptedFactKinds(delivered, id), ["deliver", "attestation"]);
+  const candidate = journalEntries(repository, id).findLast((entry) => entry.kind === "deliver")?.data.candidate;
+  assert.equal(typeof candidate, "string");
   assert.equal(gitRef(repository, target), originalTarget, "failed Verification must not place the target");
 
   writeFileSync(marker, "pass\n");

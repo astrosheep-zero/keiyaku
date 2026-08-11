@@ -29,7 +29,8 @@ import { bindOperation as rawBindOperation, amendOperation as rawAmendOperation 
 import { contractId, documentKey, entryUlid, gate, type AmendData, type ContractId, type ContractTerms, type JournalEntry, type SnapshotId } from "../src/core/facts/types.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
-import { admitIntent, admitPlacement } from "../src/protocol/intent.js";
+import { admitIntent } from "../src/protocol/intent.js";
+import { admitPlacement } from "../src/protocol/placement.js";
 import { runProtocol } from "../src/protocol/run.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
@@ -515,7 +516,7 @@ test("Git journal depth is independent of contract identity length", () => {
   assert.notEqual(long, short);
 });
 
-test("admission reuses frozen journal bytes for a multi-contract placement offer", () => {
+test("admission reuses frozen journal bytes for a multi-contract placement offer", async () => {
   const repository = repositoryWithHead();
   const git = repositoryAt(repository.path);
   const source = bindOperation({ scope: git, terms: terms([]), workspace: "here" });
@@ -544,7 +545,7 @@ test("admission reuses frozen journal bytes for a multi-contract placement offer
   assert.equal(delivered.kind, "accepted");
 
   const log = join(repository.path, "placement-cat-file.log");
-  const claimed = withGitShim(
+  const claimed = await withGitShim(
     "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_READ_LOG: log },
     () => admitPlacement(git, { contractId: source.value.contractId, at: "2026-08-07T00:00:01Z" }),
@@ -554,8 +555,8 @@ test("admission reuses frozen journal bytes for a multi-contract placement offer
   if (claimed.kind !== "accepted") throw new Error("placement was not accepted");
   assert.deepEqual(claimed.facts.map((entry) => entry.kind), ["bound", "claimed"]);
   const invocations = readFileSync(log, "utf8").trim().split("\n");
-  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 2);
-  assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 1);
+  assert.equal(invocations.filter((command) => command === "cat-file --batch").length, 3);
+  assert.equal(invocations.filter((command) => command.startsWith("cat-file blob ")).length, 2);
 });
 
 test("public reconcile and admission observation retain canonical journal validation", async () => {
@@ -717,7 +718,7 @@ test("bind rejects unresolved after and bound amend prioritizes consumed prerequ
   });
 });
 
-test("amend emits bound atomically when its resulting after set is claimed", () => {
+test("amend emits bound atomically when its resulting after set is claimed", async () => {
   const repository = repositoryWithHead();
   const activeDependency = bindOperation({
     scope: repositoryAt(repository.path),
@@ -753,7 +754,7 @@ test("amend emits bound atomically when its resulting after set is claimed", () 
     preparation: { kind: "prepared", document: state.terms.document.key, data: delivery.data },
   }, decideDeliver);
   assert.equal(delivered.kind, "accepted");
-  const claimed = admitPlacement(git, {
+  const claimed = await admitPlacement(git, {
     contractId: claimedDependency.value.contractId,
     at: "2026-08-06T00:00:01Z",
   });
@@ -836,7 +837,7 @@ test("placement redecides after a world advance and binds a new dependent", asyn
     'exec "$KEIYAKU_REAL_GIT" "$@"',
   ].join("\n");
 
-  const claimed = withGitShim(
+  const claimed = await withGitShim(
     shim,
     { KEIYAKU_RACE_MARKER: marker, KEIYAKU_RACE_JOURNAL: dependentJournal },
     () => admitPlacement(git, { contractId: source.value.contractId, at: "2026-08-06T00:00:02Z" }),

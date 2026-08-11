@@ -115,7 +115,10 @@ target boundary. When it is omitted, the adapter supplies
 target, while detached HEAD remains explicitly targetless. The parser itself
 does not inspect Git. An accepted bind result exposes the persisted canonical
 target, or `null`, so this default is never hidden. `--here`
-maps to `workspace: "here"`; the omitted form maps to its public default.
+maps to `workspace: "here"`; on an attached branch the same default target
+makes it a commit-in-place contract. An explicit foreign target with `--here`
+is a typed bind refusal. The omitted form maps to the public managed-worktree
+default.
 `amend` maps Markdown, `--actor`, repeated `--after`,
 and `--gates` to `keiyaku.amend`. Its omitted `after` leaves the current value
 unchanged, while `--clear-after` maps to `after: []`; it is mutually exclusive
@@ -348,6 +351,7 @@ Git data:
 ```text
 effects: [
   { kind: "worktree", path, action },
+  { kind: "target-checkout", path, target, action },
   { kind: "ref", name, before, after }
 ]
 ```
@@ -358,11 +362,13 @@ form is one direct line per member:
 
 ```text
 lag worktree-retained <path>
+lag target-checkout-retained <target> <path> <diagnostic>
 lag worktree-hook-failed <create|destroy> <path> command=<index> <failure-json>
 ```
 
-JSON exposes that same `lag` array. A `worktree-retained` lag does not turn an
-accepted result into a refusal or alter its exit status.
+JSON exposes that same `lag` array. A `worktree-retained` or
+`target-checkout-retained` lag does not turn an accepted result into a refusal
+or alter its exit status.
 
 Text presents all accepted `facts`, then independent obligation stops, Region
 observation, effects, and flat lag. It does not replace observed data with a

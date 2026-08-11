@@ -5,6 +5,8 @@ import test from "node:test";
 import { Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId, type KeiyakuRefusal } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { contractJournalPath } from "../src/git/identity.js";
+import { deliveryWorktreePath } from "../src/git/workspace.js";
+import { repositoryAt } from "../src/git/repository.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { entryUlid, type JournalEntry } from "../src/core/facts/types.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
@@ -616,11 +618,15 @@ test("review exhausts placement after its target premise moves", async () => {
   const result = await Keiyaku.bind({ repo: Repo.at({ path: repository.path }),
     markdown: document(),
     target: "refs/heads/release",
-    workspace: "here",
+    workspace: "worktree",
     gates: ["reviewed"],
   });
-  commitCandidate(repository);
+  const worktree = deliveryWorktreePath(repositoryAt(repository.path), result.keiyaku.id);
+  writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
   const delivered = await result.keiyaku.deliver();
+  commitCandidate(repository);
 
   const failed = `${repository.path}/publication-failed.marker`;
   const shim = [

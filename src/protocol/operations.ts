@@ -30,7 +30,13 @@ import type { PlacementRefusal } from "../core/verbs/placement.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
 import { produceVerification } from "../verification/producer.js";
 import type { VerificationDeclarationPreparation, VerificationDeclarationRefusal } from "../verification/declaration.js";
-import { admitIntent, admitPlacement, mintAttempts, verifyDelivery, type VerificationRuntimeStop } from "./intent.js";
+import {
+  admitIntent,
+  verifyDelivery,
+  type VerificationRuntimeStop,
+} from "./intent.js";
+import { admitPlacement, type PlacementProtocolResult } from "./placement.js";
+import type { TargetPlacementRefusal } from "../git/target-placement.js";
 import { auditReport, readAudit, type AuditReport as AuditReadReport } from "./read/audit.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import {
@@ -44,10 +50,16 @@ import {
   type ContractPhase,
   type ContractRow,
 } from "./read/status.js";
-import { admitDecidedOffer, type AcceptedAdmission, type DecidedOfferResult } from "./attempt.js";
+import { admitDecidedOffer, mintAttempts, type AcceptedAdmission, type DecidedOfferResult } from "./attempt.js";
 export { bindOperation } from "./bind.js";
 import type { BindRefusal, TargetInputRefusal } from "./bind.js";
-import { accepted, admitted, complete, type IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
+import {
+  accepted,
+  admitted,
+  complete,
+  type AcceptedProtocolStep,
+  type IntentOutcome as ProtocolIntentOutcome,
+} from "./outcome.js";
 import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 import type { CompanionDecorator } from "./run.js";
 
@@ -76,16 +88,32 @@ export type DocumentDerivation = Readonly<{ document: DocumentKey; title: string
 export type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: IntentRetry; refusal?: never }>;
 
 export type VerificationStop = StepStop<AttestationRefusal> | VerificationRuntimeStop;
-export type PlacementStop = StepStop<PlacementRefusal>;
+export type PlacementStop =
+  | StepStop<PlacementRefusal | TargetPlacementRefusal>
+  | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>;
 
 function timestamp(): string { return new Date().toISOString(); }
 
-function mergeAdmissions(current: AcceptedAdmission, next: AcceptedAdmission): AcceptedAdmission {
-  return { ...next, facts: [...current.facts, ...next.facts] };
+function mergeAdmissions(current: AcceptedProtocolStep, next: AcceptedProtocolStep): AcceptedProtocolStep {
+  const effects = [...(current.physical?.effects ?? []), ...(next.physical?.effects ?? [])];
+  const lag = [...(current.physical?.lag ?? []), ...(next.physical?.lag ?? [])];
+  return {
+    ...next,
+    facts: [...current.facts, ...next.facts],
+    ...(effects.length === 0 && lag.length === 0 ? {} : { physical: { effects, lag } }),
+  };
 }
 
 function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> | undefined {
   if (result.kind === "accepted") return undefined;
+  return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
+}
+
+function placementStop(result: PlacementProtocolResult): PlacementStop | undefined {
+  if (result.kind === "accepted") return undefined;
+  if (result.kind === "placement-failed") {
+    return { failure: "target-placement-failed", diagnostic: result.diagnostic };
+  }
   return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
 }
 
@@ -263,7 +291,7 @@ async function completeDelivery(
   if (derivation.verification.kind !== "prepared") {
     throw new Error("accepted delivery is missing its Verification preparation");
   }
-  let admission: AcceptedAdmission = first;
+  let admission: AcceptedProtocolStep = first;
   let verificationValue: VerificationStop | undefined;
   let leak: WorktreeLeak | undefined;
   const verification = await verifyDelivery({
@@ -286,12 +314,12 @@ async function completeDelivery(
       if (verification.step.kind === "accepted") admission = mergeAdmissions(admission, verification.step);
     }
   }
-  const placement = admitPlacement(input.scope, {
+  const placement = await admitPlacement(input.scope, {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
   });
-  const placementValue = stepStop(placement);
+  const placementValue = placementStop(placement);
   if (placement.kind === "accepted") admission = mergeAdmissions(admission, placement);
   return admitted(admission, {
     ...first.value,
@@ -396,9 +424,9 @@ function reviewAttempt(
   return admitted;
 }
 
-export function reviewOperation(
+export async function reviewOperation(
   input: ReviewOperationInput,
-): IntentOutcome<ReviewValue, ReviewRefusal> {
+): Promise<IntentOutcome<ReviewValue, ReviewRefusal>> {
   const git = input.scope;
   const attempts = mintAttempts({ entryCount: 2 });
   let review: Extract<AttemptDecision<void, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
@@ -415,14 +443,14 @@ export function reviewOperation(
   if (review.kind !== "accepted") return review;
   if (input.verdict !== "satisfied") return admitted(review, {});
 
-  const placement = admitPlacement(git, {
+  const placement = await admitPlacement(git, {
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
   });
-  const placementStop = stepStop(placement);
+  const stopped = placementStop(placement);
   const admission = placement.kind === "accepted" ? mergeAdmissions(review, placement) : review;
-  return admitted(admission, placementStop === undefined ? {} : { placement: placementStop });
+  return admitted(admission, stopped === undefined ? {} : { placement: stopped });
 }
 
 export async function auditOperation(

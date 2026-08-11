@@ -1,5 +1,5 @@
 import { observeGit, observeContract } from "../../git/observe.js";
-import { deliveryWorktreePath } from "../../git/reconcile.js";
+import { deliveryWorktreePath } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/repository.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import type { ContractId, ContractState, SnapshotId } from "../../core/facts/types.js";

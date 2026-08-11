@@ -9,7 +9,7 @@ import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { contractLocator } from "../src/git/identity.js";
 import { hookMarkerPath, runCreateHooks, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
-import { deliveryWorktreePath } from "../src/git/reconcile.js";
+import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { abandonOperation, scopeOperation } from "../src/protocol/operations.js";

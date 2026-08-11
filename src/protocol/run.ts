@@ -23,7 +23,7 @@ export type CompanionDecorator = (input: Readonly<{
   offer: Offer;
 }>) => readonly TreeUpdate[];
 
-type RunProtocolInput<Input extends Readonly<{ contractId: ContractId }>, Refusal> = Readonly<{
+export type RunProtocolInput<Input extends Readonly<{ contractId: ContractId }>, Refusal> = Readonly<{
   input: Input;
   repository: GitRepository;
   contracts: readonly ContractId[];
@@ -37,34 +37,57 @@ type RunProtocolInput<Input extends Readonly<{ contractId: ContractId }>, Refusa
   decorateOffer?: CompanionDecorator;
 }>;
 
+export type PreparedProtocolAttempt<Refusal> =
+  | Readonly<{ kind: "refused"; refusal: Refusal }>
+  | Readonly<{
+      kind: "offered";
+      observation: GitDecisionObservation;
+      attempt: AttemptContext;
+      offer: Offer;
+    }>;
+
+/** Form one decided offer without admitting or reinterpreting it. */
+export function prepareProtocolAttempt<Input extends Readonly<{ contractId: ContractId }>, Refusal>(
+  input: RunProtocolInput<Input, Refusal>,
+  baseAttempt: AttemptContext,
+): PreparedProtocolAttempt<Refusal> {
+  const observe = input.observe ?? observeContractsForAdmission;
+  const decisionObservation = observe(input.repository, input.contracts);
+  const observation = decisionObservation.decision;
+  const attempt = input.extendAttempt === undefined
+    ? baseAttempt
+    : input.extendAttempt(baseAttempt, observation.size);
+  const decision = input.decide({ input: input.input, attempt, observation });
+  if (decision.kind === "refused") return decision;
+
+  const companions = input.decorateOffer === undefined
+    ? []
+    : input.decorateOffer({
+        repository: input.repository,
+        observation: decisionObservation,
+        contractId: input.input.contractId,
+        offer: decision.offer,
+      });
+  const offer = companions.length === 0
+    ? decision.offer
+    : { ...decision.offer, companions: [...(decision.offer.companions ?? []), ...companions] };
+  return { kind: "offered", observation: decisionObservation, attempt, offer };
+}
+
 /** Run bounded, verb-neutral attempts and return one real admission on acceptance. */
 export function runProtocol<Input extends Readonly<{ contractId: ContractId }>, Refusal>(input: RunProtocolInput<Input, Refusal>): ProtocolResult<Refusal> {
   const attempts = input.attempts;
-  const contracts = input.contracts;
-  const observe = input.observe ?? observeContractsForAdmission;
 
   for (let index = 0; index < attempts.length; index += 1) {
-    const baseAttempt = attempts[index]!;
-    const decisionObservation = observe(input.repository, contracts);
-    const observation = decisionObservation.decision;
-    const attempt = input.extendAttempt === undefined
-      ? baseAttempt
-      : input.extendAttempt(baseAttempt, observation.size);
-    const decision = input.decide({ input: input.input, attempt, observation });
-    if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
-
-    const companions = input.decorateOffer === undefined
-      ? []
-      : input.decorateOffer({
-          repository: input.repository,
-          observation: decisionObservation,
-          contractId: input.input.contractId,
-          offer: decision.offer,
-        });
-    const offer = companions.length === 0
-      ? decision.offer
-      : { ...decision.offer, companions: [...(decision.offer.companions ?? []), ...companions] };
-    const result = admitDecidedOffer(input.repository, decisionObservation, attempt, offer, input.input.contractId);
+    const prepared = prepareProtocolAttempt(input, attempts[index]!);
+    if (prepared.kind === "refused") return prepared;
+    const result = admitDecidedOffer(
+      input.repository,
+      prepared.observation,
+      prepared.attempt,
+      prepared.offer,
+      input.input.contractId,
+    );
     if (result.kind === "accepted" || result.kind === "publication-failed") return result;
     if (result.kind === "collision" && index + 1 === attempts.length) return result;
   }

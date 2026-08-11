@@ -53,7 +53,7 @@ async function bindAndDeliver(script?: string, gates: readonly string[] = ["veri
   mkdirSync(resolve(setup.raw.path, ".keiyaku"), { recursive: true });
   writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: gates } }));
   const bound = await invoke(parseArgv([
-    "bind", "--target", "refs/heads/main", "--here", "--actor", "external-test", "-",
+    "bind", "--target", "refs/heads/main", "--actor", "external-test", "-",
   ]), {
     cwd: setup.raw.path,
     environment: {},
@@ -98,8 +98,9 @@ test("deliver adapts a failing Verification without a private producer injection
   assert.equal(observeContract(repository, id).state?.attestations.at(-1)?.data.verdict, "unsatisfied");
 });
 
-test("dirty --here delivery materializes the verified candidate without mutating the index", async () => {
+test("dirty --here delivery materializes and lands the verified candidate cleanly", async () => {
   const setup = repositoryWithCandidate();
+  setup.raw.run(["checkout", "--quiet", "main"]);
   writeFileSync(resolve(setup.raw.path, "candidate.txt"), "failing\n");
   setup.raw.run(["add", "candidate.txt"]);
   setup.raw.run(["commit", "--quiet", "-m", "failing candidate"]);
@@ -117,7 +118,9 @@ test("dirty --here delivery materializes the verified candidate without mutating
   if (bound.kind !== "accepted") return;
 
   writeFileSync(resolve(setup.raw.path, "candidate.txt"), "passing\n");
-  const worktreesBefore = setup.raw.run(["worktree", "list", "--porcelain"]);
+  const worktreePathsBefore = setup.raw.run(["worktree", "list", "--porcelain"])
+    .split("\n")
+    .filter((line) => line.startsWith("worktree "));
   const indexBefore = setup.raw.run(["diff", "--cached", "--binary"]);
   const result = await invoke(parseArgv([
     "deliver", bound.contract, "--actor", "external-test", "--message", "Verified dirty candidate",
@@ -131,14 +134,19 @@ test("dirty --here delivery materializes the verified candidate without mutating
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["deliver", "attestation", "claimed"]);
   const state = observeContract(setup.repository, bound.contract).state;
   assert.equal(state?.attestations.at(-1)?.data.verdict, "satisfied");
-  assert.notEqual(state?.delivery?.data.candidate, setup.raw.run(["rev-parse", "HEAD"]).trim());
+  assert.equal(state?.delivery?.data.candidate, setup.raw.run(["rev-parse", "HEAD"]).trim());
   assert.equal(setup.raw.run(["show", `${state?.delivery?.data.candidate}:candidate.txt`]), "passing\n");
   assert.equal(
     setup.raw.run(["show", "-s", "--format=%B", state?.delivery?.data.candidate ?? "HEAD"]),
     `Verified dirty candidate\n\nKeiyaku-Contract: ${bound.contract}\n\n`,
   );
   assert.equal(setup.raw.run(["diff", "--cached", "--binary"]), indexBefore);
-  assert.equal(setup.raw.run(["worktree", "list", "--porcelain"]), worktreesBefore);
+  assert.deepEqual(
+    setup.raw.run(["worktree", "list", "--porcelain"])
+      .split("\n")
+      .filter((line) => line.startsWith("worktree ")),
+    worktreePathsBefore,
+  );
 });
 
 test("audit stays accepted when it admits a verified attestation", async () => {

@@ -1,13 +1,10 @@
-import { randomBytes } from "node:crypto";
-import { observeGitForAdmission, type GitDecisionObservation } from "../git/observe.js";
+import type { GitDecisionObservation } from "../git/observe.js";
 import type { GitRepository } from "../git/repository.js";
 import { materializeVerificationCandidate } from "../git/verification.js";
 import type { WorktreeLeak } from "../git/verification.js";
-import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
+import type { DecideInput, OfferDecision } from "../core/decide.js";
 import { dependencyKeySet } from "../core/subject.js";
 import type { ActorId, ContractId, ContractState, DependencyKeySet } from "../core/facts/types.js";
-import { entryUlid } from "../core/facts/types.js";
-import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
 import {
   type ProduceVerificationInput,
@@ -17,32 +14,9 @@ import {
 } from "../verification/producer.js";
 import { VERIFIED, type VerificationDefinition } from "../verification/declaration.js";
 import { runProtocol, type CompanionDecorator, type ProtocolResult } from "./run.js";
+import { mintAttempts } from "./attempt.js";
 
-const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const VERIFICATION_TIMEOUT_MS = 5 * 60 * 1_000;
-
-function nextEntryUlid(): ReturnType<typeof entryUlid> {
-  let value = "";
-  let time = BigInt(Date.now());
-  for (let index = 0; index < 10; index += 1) {
-    value = ALPHABET[Number(time & 31n)]! + value;
-    time >>= 5n;
-  }
-  let random = BigInt(`0x${randomBytes(10).toString("hex")}`);
-  for (let index = 0; index < 16; index += 1) {
-    value += ALPHABET[Number(random & 31n)]!;
-    random >>= 5n;
-  }
-  return entryUlid(value);
-}
-
-const MAX_SEMANTIC_ATTEMPTS = 3;
-
-export function mintAttempts(input: Readonly<{ entryCount: number }>): readonly AttemptContext[] {
-  return Array.from({ length: MAX_SEMANTIC_ATTEMPTS }, () => ({
-    entryUlids: Array.from({ length: input.entryCount }, nextEntryUlid),
-  }));
-}
 
 type IntentAdmissionOptions = Readonly<{
   observedContracts?: readonly ContractId[];
@@ -69,31 +43,6 @@ export function admitIntent<Input extends Readonly<{ contractId: ContractId }>, 
   });
 }
 
-
-/** Run the sole placement adjudicator; a gates-unsatisfied refusal is normal pending state. */
-export function admitPlacement(
-  repository: GitRepository,
-  input: Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>,
-): ProtocolResult<PlacementRefusal> {
-  return runProtocol({
-    input,
-    repository,
-    contracts: [input.contractId],
-    attempts: mintAttempts({ entryCount: 2 }),
-    observe: observeGitForAdmission,
-    extendAttempt: (attempt, observedContractCount) => ({
-      ...attempt,
-      entryUlids: [
-        ...attempt.entryUlids,
-        ...Array.from(
-          { length: Math.max(0, observedContractCount - attempt.entryUlids.length) },
-          nextEntryUlid,
-        ),
-      ],
-    }),
-    decide: decidePlacement,
-  });
-}
 
 type VerifyDeliveryInput = Readonly<{
   repository: GitRepository;

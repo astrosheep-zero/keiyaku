@@ -30,6 +30,36 @@ test("accepted text keeps facts before observed effect facts", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
 });
 
+test("accepted text exposes target checkout alignment and retention", () => {
+  const contract = contractId("kei/render-target-checkout");
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "deliver",
+    contract,
+    head: "0123456789abcdef0123456789abcdef01234567",
+    facts: [],
+    effects: [{
+      kind: "target-checkout",
+      path: "/repo",
+      target: "refs/heads/main",
+      action: "followed",
+    }],
+    lag: [{
+      kind: "target-checkout-retained",
+      path: "/repo/peer",
+      target: "refs/heads/main",
+      diagnostic: "local bytes overlap",
+    }],
+    settlement: { actions: [], lags: [] },
+  };
+
+  assert.equal(renderText(result), [
+    "accepted deliver kei/render-target-checkout head=0123456789abcdef0123456789abcdef01234567",
+    "effect target-checkout followed refs/heads/main /repo",
+    "lag target-checkout-retained refs/heads/main /repo/peer local bytes overlap",
+  ].join("\n"));
+});
+
 test("typed refusal text preserves the refusal object", () => {
   const contract = contractId("kei/render-refusal");
   const result: InvocationResult = {

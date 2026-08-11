@@ -77,9 +77,11 @@ export class GitPlumbingError extends Error {
   }
 }
 
-function worktreePathsFromPorcelain(output: Buffer): readonly string[] {
+export type RegisteredWorktree = Readonly<{ path: string; branch: string | null }>;
+
+function worktreesFromPorcelain(output: Buffer): readonly RegisteredWorktree[] {
   const fields = output.toString("utf8").split("\0");
-  const paths: string[] = [];
+  const worktrees: RegisteredWorktree[] = [];
   let record: string[] = [];
   const finishRecord = (): void => {
     if (record.length === 0) return;
@@ -89,7 +91,10 @@ function worktreePathsFromPorcelain(output: Buffer): readonly string[] {
     }
     const path = worktree.slice("worktree ".length);
     if (path.length === 0) throw new Error("Git worktree porcelain output has an empty worktree path");
-    paths.push(resolve(path));
+    const branchField = record.find((field) => field.startsWith("branch "));
+    const branch = branchField === undefined ? null : branchField.slice("branch ".length);
+    if (branch !== null && !branch.startsWith("refs/")) throw new Error("Git worktree porcelain output has an invalid branch");
+    worktrees.push({ path: resolve(path), branch });
     record = [];
   };
   for (const field of fields) {
@@ -100,13 +105,15 @@ function worktreePathsFromPorcelain(output: Buffer): readonly string[] {
     record.push(field);
   }
   finishRecord();
-  if (paths.length === 0) throw new Error("Git worktree porcelain output has no worktrees");
-  return paths;
+  if (worktrees.length === 0) throw new Error("Git worktree porcelain output has no worktrees");
+  return worktrees;
 }
 
-export function registeredWorktreePaths(repository: GitRepository): readonly string[] {
-  return worktreePathsFromPorcelain(runGit(repository, ["worktree", "list", "--porcelain", "-z"]));
+export function registeredWorktrees(repository: GitRepository): readonly RegisteredWorktree[] {
+  return worktreesFromPorcelain(runGit(repository, ["worktree", "list", "--porcelain", "-z"]));
 }
+
+export function registeredWorktreePaths(repository: GitRepository): readonly string[] { return registeredWorktrees(repository).map((worktree) => worktree.path); }
 
 export function repositoryAt(cwd: string): GitRepository {
   if (typeof cwd !== "string" || cwd.length === 0) {

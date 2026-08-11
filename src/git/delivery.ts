@@ -1,23 +1,23 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import type { Preparation } from "../core/decide.js";
 import type { ChangeId, ContractCoordinates, ContractId, DeliverData, SnapshotId } from "../core/facts/types.js";
-import { mintChangeId, mintSnapshotId, gitObjectIdForSnapshot, gitObjectId, type GitObjectId } from "./identity.js";
+import { mintChangeId, mintSnapshotId, gitObjectIdForSnapshot, type GitObjectId } from "./identity.js";
 import { readRef, registeredWorktreePaths, runGit, runGitWithEnvironment, type GitRepository } from "./repository.js";
-import { deliveryWorktreePath } from "./reconcile.js";
+import { currentBranch } from "./observe.js";
+import type { WorkspaceNotOnTargetRefusal } from "./target-placement.js";
+import { captureWorkspaceTree, deliveryWorktreePath } from "./workspace.js";
 
-export type DeliveryPreparationRefusal = Readonly<{
-  kind: "target-missing" | "candidate-not-based-on-target" | "worktree-missing";
-  contractId: ContractId;
-}>;
+export type DeliveryPreparationRefusal =
+  | Readonly<{
+      kind: "target-missing" | "candidate-not-based-on-target" | "worktree-missing";
+      contractId: ContractId;
+    }>
+  | WorkspaceNotOnTargetRefusal;
 
 export type ReviewPreparationRefusal = Readonly<{
   kind: "worktree-missing";
   contractId: ContractId;
 }>;
-
-type WorkspaceTree = Readonly<{ tree: GitObjectId; head: SnapshotId; dirty: boolean }>;
 
 export type DeliveryPreparationCoordinates = Readonly<{
   contractId: ContractId;
@@ -27,16 +27,6 @@ export type DeliveryPreparationCoordinates = Readonly<{
 function workspaceExists(repository: GitRepository, workspace: "worktree" | "here", path: string): boolean {
   return workspace === "here"
     || (existsSync(path) && registeredWorktreePaths(repository).includes(path));
-}
-
-function withPrivateGitIndex<Value>(action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value): Value {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-index-"));
-  const index = join(directory, "index");
-  try {
-    return action({ GIT_INDEX_FILE: index });
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
 }
 
 function workspaceFor(repository: GitRepository, id: ContractId, workspace: "worktree" | "here"): string {
@@ -51,27 +41,6 @@ function stablePatchId(repository: GitRepository, predecessor: SnapshotId, tree:
     ? runGit(repository, ["hash-object", "-t", "blob", "--stdin"], diff).toString("utf8").trim()
     : separator < 0 ? output : output.slice(0, separator);
   return mintChangeId(identity);
-}
-
-function workspaceTree(repository: GitRepository, workspace: string): WorkspaceTree {
-  const identities = runGit(repository, ["-C", workspace, "rev-parse", "HEAD", "HEAD^{tree}"])
-    .toString("utf8")
-    .split("\n");
-  if (identities.length !== 3 || identities[0] === undefined || identities[1] === undefined || identities[2] !== "") {
-    throw new Error("workspace HEAD/tree resolution did not return exactly two object IDs");
-  }
-  const head = mintSnapshotId(identities[0]);
-  const tree = gitObjectId(identities[1], "workspace tree");
-  const status = runGit(repository, ["-C", workspace, "status", "--porcelain=v1", "--untracked-files=all"]).toString("utf8");
-  const dirty = status.length > 0;
-  if (!dirty) return { tree, head, dirty };
-
-  return withPrivateGitIndex((environment) => {
-    runGitWithEnvironment(repository, ["-C", workspace, "read-tree", "HEAD"], undefined, environment);
-    runGitWithEnvironment(repository, ["-C", workspace, "add", "--all"], undefined, environment);
-    const tree = gitObjectId(runGitWithEnvironment(repository, ["-C", workspace, "write-tree"], undefined, environment).toString("utf8").trim(), "workspace tree");
-    return { tree, head, dirty };
-  });
 }
 
 type CandidateInput = Readonly<{
@@ -111,7 +80,7 @@ export function prepareReview(
   if (!workspaceExists(repository, input.coordinates.workspace, workspace)) {
     return { kind: "refused", refusal: { kind: "worktree-missing", contractId: input.contractId } };
   }
-  const tree = workspaceTree(repository, workspace);
+  const tree = captureWorkspaceTree(repository, workspace);
   return { kind: "prepared", data: stablePatchId(repository, input.coordinates.start, tree.tree) };
 }
 
@@ -122,6 +91,15 @@ export function prepareDelivery(
 ): Preparation<DeliverData, DeliveryPreparationRefusal> {
   const id = stage.contractId;
   const coordinates = stage.coordinates;
+  if (coordinates.workspace === "here" && coordinates.target !== undefined) {
+    const branch = currentBranch(repository);
+    if (branch !== coordinates.target) {
+      return {
+        kind: "refused",
+        refusal: { kind: "workspace-not-on-target", contractId: id, target: coordinates.target, branch },
+      };
+    }
+  }
   const observedTarget = coordinates.target === undefined ? null : readRef(repository, coordinates.target);
   if (coordinates.target !== undefined && observedTarget === null) {
     return { kind: "refused", refusal: { kind: "target-missing", contractId: id } };
@@ -131,7 +109,7 @@ export function prepareDelivery(
   if (!workspaceExists(repository, coordinates.workspace, workspace)) {
     return { kind: "refused", refusal: { kind: "worktree-missing", contractId: id } };
   }
-  const content = workspaceTree(repository, workspace);
+  const content = captureWorkspaceTree(repository, workspace);
   const candidate = content.dirty
     ? materializeCandidate({ repository, contractId: id, workspace, ...input, tree: content.tree, head: content.head })
     : content.head;

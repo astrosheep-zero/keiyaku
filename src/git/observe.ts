@@ -67,10 +67,15 @@ export function normalizeTargetBranch(repository: GitRepository, input: string):
   }
 }
 
-/** Read the effective worktree's attached branch, or null for detached HEAD. */
-export function currentBranch(repository: GitRepository): string | null {
+/** Read one worktree's attached branch, or null for detached HEAD. */
+export function currentBranch(repository: GitRepository, path?: string): string | null {
   try {
-    const ref = runGit(repository, ["symbolic-ref", "--quiet", "HEAD"]).toString("utf8").trim();
+    const ref = runGit(repository, [
+      ...(path === undefined ? [] : ["-C", path]),
+      "symbolic-ref",
+      "--quiet",
+      "HEAD",
+    ]).toString("utf8").trim();
     return ref.startsWith("refs/heads/") ? ref : null;
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 1) return null;

@@ -138,6 +138,14 @@ current `HEAD`. The canonical full ref is the only target value persisted in
 contract coordinates; its Git meaning is defined in
 [git.md](git.md).
 
+The one coupling is explicit `workspace: "here"`: when it also carries a
+target, the caller worktree's symbolic branch must equal that canonical target.
+A different or detached branch returns `here-target-mismatch` before Contract
+birth. A later deliver from a here workspace rechecks the immutable coordinate;
+`workspace-not-on-target` is a mechanical delivery refusal before a tender fact
+when that branch moved. Both refusals report the expected target and observed
+branch; `null` denotes detached HEAD. Targetless here remains valid.
+
 `Repo.at` resolves and pins its repository coordinate before it returns. An
 omitted `path` uses the caller's current working directory. The library has
 exactly one `process.cwd()` call, in the private scope resolver used by
@@ -406,11 +414,11 @@ rejecting the admitted Contract. CLI calls this same facade; it does not
 interpret protocol outcomes or repeat either follow-up stage.
 
 `MutationResult` is invocation-scoped observation, never Contract state or a
-durable receipt. `facts` and `head` come only from the accepted protocol
-admission. `effects` and `lags` come only from the one mandatory Git
-reconciliation; `settlement` comes only from the one settlement invocation.
-There is no nested `receipt`, duplicate fact field, or result stored on a
-`Keiyaku` handle.
+durable receipt. `facts` and `head` come only from accepted protocol admission.
+`effects` and `lags` first contain any physical result produced inside targeted
+placement's Git fence, then the one mandatory Git reconciliation; `settlement`
+comes only from the one settlement invocation. There is no nested `receipt`,
+duplicate fact field, or result stored on a `Keiyaku` handle.
 
 ```ts
 type KeiyakuRetryReason =
@@ -493,6 +501,22 @@ type PlacementRefusal = Readonly<{
   contractId: ContractId
 }>
 
+type CheckoutNotFollowableRefusal = Readonly<{
+  kind: "checkout-not-followable"
+  contractId: ContractId
+  target: string
+  path: string
+  reason: "staged" | "conflict" | "untracked"
+  paths: readonly string[]
+}>
+
+type DeliveryWorkspaceRefusal = Readonly<{
+  kind: "workspace-not-on-target"
+  contractId: ContractId
+  target: string
+  branch: string | null
+}>
+
 type DocumentMovedRefusal = Readonly<{
   kind: "document-moved"
   contractId: ContractId
@@ -501,6 +525,11 @@ type DocumentMovedRefusal = Readonly<{
 type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
   | Readonly<{ kind: "target-missing" }>
+  | Readonly<{
+      kind: "here-target-mismatch"
+      target: string
+      branch: string | null
+    }>
 
 type VerificationStop =
   | StepStop<AttestationRefusal>
@@ -508,7 +537,9 @@ type VerificationStop =
   | Readonly<{ failure: "timeout" | "unknown-exit" }>
   | Readonly<{ failure: "spawn-error"; diagnostic: string }>
 
-type PlacementStop = StepStop<PlacementRefusal>
+type PlacementStop =
+  | StepStop<PlacementRefusal | CheckoutNotFollowableRefusal | DeliveryWorkspaceRefusal>
+  | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>
 
 type Delivery = Readonly<{
   snapshotId: SnapshotId
@@ -549,13 +580,15 @@ derive its complete replacement no longer matches the attempt observation.
 `DocumentMovedRefusal` for their key-stamped document derivation. Review receives no decoded-document
 derivation and does not expose `document-moved`; its testimony remains keyed to
 the subject actually reviewed. `KeiyakuRefusal` therefore includes
-`terms-moved` for amend and `DocumentMovedRefusal` for deliver and audit. That
-refusal ends the invocation; it does not trigger a reread, auto-retry, or
-adoption of a new document revision.
+`terms-moved` for amend, `DocumentMovedRefusal` for deliver and audit, and
+`DeliveryWorkspaceRefusal` for a here deliver whose caller workspace left its
+target. That refusal ends the invocation; it does not trigger a reread,
+auto-retry, or adoption of a new document revision.
 
 `TargetInputRefusal` is the `KeiyakuRefusal` member for `Keiyaku.bind` target
-validation and existence. It has no contract coordinate because a rejected
-target establishes no contract identity.
+validation, existence, and the targeted-here branch relationship. It has no
+contract coordinate because a rejected target establishes no contract
+identity.
 
 Every accepted `AmendResult` includes its nonoptional `documentDiff`. The
 library computes it exactly once with the JavaScript `diff` package from the

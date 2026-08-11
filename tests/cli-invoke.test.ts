@@ -6,7 +6,8 @@ import { GIT_REF, readRef, repositoryAt } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { Delivery, Keiyaku, KeiyakuRetry, Repo, type ContractId } from "../src/index.js";
 import { observeContract } from "../src/git/observe.js";
-import { deliveryWorktreePath, reconcile } from "../src/git/reconcile.js";
+import { reconcile } from "../src/git/reconcile.js";
+import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { Tasks } from "../src/task/index.js";
@@ -655,9 +656,9 @@ test("reconcile world command adapts the public repository report", async () => 
   assert.ok(Array.isArray(result.contracts));
 });
 
-test("--here delivers the caller worktree without owning it or its branch", async () => {
+test("--here delivers in place without owning a managed worktree", async () => {
   const repository = repositoryWithMain();
-  const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
+  const main = repository.run(["rev-parse", "refs/heads/main"]).trim();
   repository.run(["checkout", "--quiet", "-b", "feature"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "feature candidate"]);
   const candidate = repository.run(["rev-parse", "HEAD"]).trim();
@@ -666,11 +667,11 @@ test("--here delivers the caller worktree without owning it or its branch", asyn
     { environment: {}, readStdin: () => source },
   );
 
-  const bound = await command(["bind", "--target", "refs/heads/main", "--here", "--actor", "external-test", "-"]);
+  const bound = await command(["bind", "--here", "--actor", "external-test", "-"]);
   const id = acceptedContract(bound);
   assert.deepEqual(observeContract(repositoryAt(repository.path), id).state?.coordinates, {
-    start: target,
-    target: "refs/heads/main",
+    start: candidate,
+    target: "refs/heads/feature",
     workspace: "here",
   });
 
@@ -682,10 +683,11 @@ test("--here delivers the caller worktree without owning it or its branch", asyn
   const deliver = await command(["deliver", id, "--actor", "external-test"]);
   assert.equal(deliver.kind, "accepted");
   const state = observeContract(repositoryAt(repository.path), id).state;
-  assert.equal(state?.delivery?.data.expectedPredecessor, target);
+  assert.equal(state?.delivery?.data.expectedPredecessor, candidate);
   assert.equal(state?.delivery?.data.candidate, candidate);
   assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), candidate);
-  assert.equal(readRef(repositoryAt(repository.path), "refs/heads/main"), target);
+  assert.equal(readRef(repositoryAt(repository.path), "refs/heads/main"), main);
+  assert.equal(readRef(repositoryAt(repository.path), "refs/heads/feature"), candidate);
   assert.equal(repository.run(["symbolic-ref", "--short", "HEAD"]).trim(), "feature");
   assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), candidate);
   assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)), null);
@@ -710,7 +712,8 @@ test("--here delivers the caller worktree without owning it or its branch", asyn
   const abandoned = await command(["abandon", id, "--actor", "external-test"]);
   assert.equal(abandoned.kind, "accepted");
   assert.equal(readRef(repositoryAt(repository.path), candidatePinRefFor(id)), null);
-  assert.equal(readRef(repositoryAt(repository.path), "refs/heads/main"), target);
+  assert.equal(readRef(repositoryAt(repository.path), "refs/heads/main"), main);
+  assert.equal(readRef(repositoryAt(repository.path), "refs/heads/feature"), candidate);
   assert.equal(repository.run(["symbolic-ref", "--short", "HEAD"]).trim(), "feature");
   assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), candidate);
   assert.equal(readRef(repositoryAt(repository.path), deliveryRefFor(id)), null);

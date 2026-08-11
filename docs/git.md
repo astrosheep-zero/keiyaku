@@ -34,19 +34,23 @@ identity or a second uniqueness authority.
 Git mints `ContractCoordinates.start` at bind. With a target it is
 the resolved target head; without a target it is the caller worktree's current
 `HEAD`. It is the initial managed-worktree commit and the original comparison
-point for a `here` workspace. It does not constrain which branch that workspace
-has checked out.
+point for a `here` workspace. A targeted here contract is legal only while the
+caller's symbolic `HEAD` is that target.
 
 An explicit target must exist at bind observation. Absence is returned to the
 library as `target-missing` before any journal or ref publication. Git
 never creates the target branch and never substitutes another ref or the
 caller's current `HEAD` for it.
 
-A target is an optional Git ref because a claimed placement may move it. The
-target and a workspace branch are independent. `workspace: "worktree"` gives
-Git ownership of one deterministic delivery ref and linked worktree.
-`workspace: "here"` uses the pinned caller worktree in place. It never takes
-ownership of that worktree or its branch.
+A target is an optional Git ref because a claimed placement may move it.
+`workspace: "worktree"` gives Git ownership of one deterministic delivery ref
+and linked worktree; its branch remains independent from the target.
+`workspace: "here"` uses the pinned caller worktree in place and never takes
+ownership of that worktree or its branch. Here is a commit-in-place capability,
+not a foreign-target delivery mode: bind refuses a targeted here workspace
+whose symbolic `HEAD` differs from that target or is detached. Delivery refuses
+before tender when the workspace no longer names its recorded target. A
+targetless here contract remains legal.
 
 The Git ref, managed delivery namespace, and candidate-pin namespace have
 this one Git owner. The library boundary rejects a target that names any
@@ -96,12 +100,51 @@ observed delivery predecessor. Without target drift, those two computations
 produce the same patch identity. A pure rebase changes the delivery predecessor
 and candidate coordinates but preserves that identity; a conflict resolution
 that changes the patch does not. When a target is declared, the candidate must
-descend from the observed predecessor. Claimed admission atomically asserts
-`target == expectedPredecessor`, moves it to the candidate, and appends
-`claimed` in one repository transaction. Equality between predecessor and
+descend from the observed predecessor. Equality between predecessor and
 candidate is a valid assertion. Target drift ends that attempt; only a later,
 explicitly started attempt may prepare from the new target head. A targetless
 claimed admission appends the same fact without a ref operation.
+
+Targeted claimed placement is one serialized Git operation per canonical
+target ref. Its fence begins before checkout preconditions are observed and
+ends only after the journal and target transaction has been published and the
+target checkout has followed it. Admission atomically asserts
+`target == expectedPredecessor`, moves it to the candidate, and appends
+`claimed`; filesystem materialization remains a second physical write inside
+that same fence.
+
+When the target checkout is not the tender source, placement follows Git merge
+semantics. Before publication, each registered checkout of the target must
+have an index tree equal to the predecessor tree, no worktree modification on
+a predecessor-to-candidate changed path, and no untracked path colliding with
+a candidate addition. Unrelated unstaged and untracked paths are preserved.
+Any staged change refuses regardless of path overlap. Failure returns
+`checkout-not-followable` with the checkout, target, exact implicated paths,
+and reason `staged`, `conflict`, or `untracked`; neither the claimed fact nor
+target ref is written. On success Git performs the predecessor-to-candidate
+two-tree update immediately after publication and reports a followed target
+checkout effect.
+
+When a targeted here workspace is itself the target checkout, placement
+follows Git commit semantics. Its captured dirty bytes are the verified
+candidate, so merge preconditions do not apply. After publication Git sets
+that checkout's index to the candidate tree and does not write its worktree.
+Captured staged, unstaged, and untracked bytes therefore become the clean
+candidate. Bytes edited after capture remain ordinary unstaged changes.
+Staging intent created after capture may be reclassified as unstaged, but its
+worktree bytes are never discarded.
+
+The target fence removes ordinary post-admission projection. Process death or
+a failed follow after ref publication can leave only the current placement's
+unfinished second half. It has no marker and no ancestor search. Recovery
+proceeds only while the target still names the claimed candidate. Each checkout
+is recovered from its own provable shape rather than a remembered arm: an
+index already at the candidate is complete; candidate-equal worktree content
+completes by index-only alignment regardless of the old index; otherwise a
+predecessor index may complete the same two-tree update. Any other shape or
+failed update reports typed target-checkout lag and performs no further mutation.
+A later placement cannot pass its preconditions while that checkout is behind,
+so unfinished placements do not accumulate.
 
 Git admission builds raw Git objects and uses one
 `update-ref --stdin --no-deref` transaction. It recognizes canonical admitted
@@ -168,13 +211,13 @@ process, reads the frozen command and durably records its resulting progress
 before releasing that lock. Thus caller death may release the Contract lock but
 cannot let a later reconcile overlap the still-running Hook command.
 
-Admission does not take the effect lock. A public mutation that admits a newer
-fact performs its mandatory reconciliation through the same serialized entry,
-where it observes that newer state. Thus a reconcile that began from an active
-state may finish its effects after a terminal fact is admitted, but the
-terminal mutation's queued reconcile observes terminal state and is the later
-effect decision. If that process dies after admission, the ordinary
-accepted-but-lagged recovery rule applies.
+Ordinary admission does not take the per-Contract effect lock. Targeted
+placement takes the separate canonical target fence described above. A public
+mutation that admits a newer fact performs its mandatory reconciliation through
+the per-Contract serialized entry, where it observes that newer state. Thus a
+reconcile that began from an active state may finish its effects after a
+terminal fact is admitted, but the terminal mutation's queued reconcile
+observes terminal state and is the later effect decision.
 
 Failure to observe or apply the requested topology is an explicit reconcile
 result, not an untyped Git exception. The failed result retains every effect
@@ -186,8 +229,19 @@ For an active worktree contract, reconciliation creates the deterministic
 linked worktree only when it is missing, and repairs only its Keiyaku-owned
 refs and pins. It never resets, switches, or detaches an existing worktree.
 For a here contract, reconciliation never creates, removes, switches,
-detaches, resets, or aligns the caller-supplied worktree or its branch. A
-pending tender keeps its candidate reachable through a Keiyaku-owned pin in
+detaches, or resets the caller-supplied worktree or its branch.
+
+Target-checkout reconciliation exists only to finish the current claimed
+placement's interrupted follow. It takes the same canonical target fence as
+placement, rereads the claimed delivery and target ref, and applies only the
+shape-proven recovery described above. It never adopts an ancestor as a base,
+projects an older claim after a newer target movement, or retries an ordinary
+pre-publication refusal. A completed checkout produces no effect; a completed
+recovery reports `recovered`; an incompatible shape reports
+`target-checkout-retained` and leaves every byte untouched. A checkout already
+at the candidate needs no recovery effect.
+
+A pending tender keeps its candidate reachable through a Keiyaku-owned pin in
 either workspace mode. Cleanup never moves the target ref.
 
 Terminal removal of a managed worktree is legal only when its status, including
@@ -266,6 +320,12 @@ type ReconcileResult = Readonly<{
 type ReconcileLag =
   | Readonly<{ kind: "worktree-retained"; path: string }>
   | Readonly<{
+      kind: "target-checkout-retained"
+      path: string
+      target: string
+      diagnostic: string
+    }>
+  | Readonly<{
       kind: "worktree-hook-failed"
       phase: "create" | "destroy"
       path: string
@@ -295,6 +355,12 @@ type Effect =
       kind: "worktree"
       path: string
       action: "created" | "removed" | "unchanged"
+    }>
+  | Readonly<{
+      kind: "target-checkout"
+      path: string
+      target: string
+      action: "followed" | "recovered"
     }>
   | Readonly<{
       kind: "ref"

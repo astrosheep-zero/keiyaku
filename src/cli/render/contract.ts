@@ -2,11 +2,17 @@ import type { AcceptedResult, Effect, Lag, RetryResult } from "../result.js";
 
 function effectLine(effect: Effect): string {
   if (effect.kind === "worktree") return `effect worktree ${effect.action} ${effect.path}`.trimEnd();
+  if (effect.kind === "target-checkout") {
+    return `effect target-checkout ${effect.action} ${effect.target} ${effect.path}`;
+  }
   return `effect ref ${effect.action} ${effect.name} ${effect.before ?? "null"} -> ${effect.after ?? "null"}`;
 }
 
 function lagLine(lag: Lag): string {
   if (lag.kind === "worktree-retained") return `lag worktree-retained ${lag.path}`;
+  if (lag.kind === "target-checkout-retained") {
+    return `lag target-checkout-retained ${lag.target} ${lag.path} ${lag.diagnostic}`;
+  }
   if (lag.kind === "worktree-hook-failed") {
     return `lag worktree-hook-failed ${lag.phase} ${lag.path} command=${lag.command} ${JSON.stringify(lag.failure)}`;
   }

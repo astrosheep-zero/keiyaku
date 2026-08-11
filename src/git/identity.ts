@@ -15,9 +15,21 @@ declare const gitObjectIdBrand: unique symbol;
 export type GitObjectId = string & { readonly [gitObjectIdBrand]: "GitObjectId" };
 
 const GIT_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+function locator(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
 export function contractLocator(contract: ContractId): string {
-  const id = contractId(contract);
-  return createHash("sha256").update(id, "utf8").digest("hex");
+  return locator(contractId(contract));
+}
+
+export function gitRefLocator(ref: string): string {
+  if (ref.length === 0) throw new Error("Git ref locator input must be nonempty");
+  return locator(ref);
+}
+
+export function contractPhysicalName(contract: ContractId): string {
+  return contractId(contract).replace("/", "-");
 }
 
 export function contractJournalPath(contract: ContractId): string {

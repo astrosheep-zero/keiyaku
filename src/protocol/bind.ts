@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { normalizeTargetBranch, observeBindCoordinates } from "../git/observe.js";
+import { currentBranch, normalizeTargetBranch, observeBindCoordinates } from "../git/observe.js";
 import type { GitRepository } from "../git/repository.js";
 import type { BindData, ActorId, ContractId } from "../core/facts/types.js";
 import { contractIdFromSegment } from "../core/facts/types.js";
@@ -13,7 +13,12 @@ import type { CompanionDecorator } from "./run.js";
 
 export type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
-  | Readonly<{ kind: "target-missing" }>;
+  | Readonly<{ kind: "target-missing" }>
+  | Readonly<{
+      kind: "here-target-mismatch";
+      target: string;
+      branch: string | null;
+    }>;
 
 type BindOperationInput = Readonly<{
   scope: GitRepository;
@@ -58,6 +63,12 @@ export function bindOperation(
   }
   const observed = observeBindCoordinates(input.scope, target);
   if (observed === null) return { kind: "refused", refusal: { kind: "target-missing" } };
+  if (input.workspace === "here" && target !== undefined) {
+    const branch = currentBranch(input.scope);
+    if (branch !== target) {
+      return { kind: "refused", refusal: { kind: "here-target-mismatch", target, branch } };
+    }
+  }
   const data: BindData = {
     coordinates: {
       start: observed.start,

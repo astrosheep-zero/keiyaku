@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { acquireSqliteTransactionLock, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
@@ -13,23 +13,30 @@ import {
   type GitOid,
   type GitRepository,
 } from "./repository.js";
-import { contractId, type ContractId, type ContractState, type SnapshotId } from "../core/facts/types.js";
-import { contractLocator, gitObjectIdForSnapshot } from "./identity.js";
+import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
+import { contractLocator, contractPhysicalName, gitObjectIdForSnapshot } from "./identity.js";
 import { observeContract } from "./observe.js";
+import {
+  acquireTargetPlacementFence,
+  recoverTargetPlacement,
+  type TargetCheckoutEffect,
+  type TargetCheckoutLag,
+} from "./target-placement.js";
 import {
   runCreateHooks,
   runDestroyHooks,
   type WorktreeHookLag,
   type WorktreeHooks,
 } from "./hooks.js";
+import { deliveryWorktreePath } from "./workspace.js";
 
-const WORKTREE_DIRECTORY = [".keiyaku-v4", "worktrees"] as const;
 export type Effect =
   | Readonly<{
       kind: "worktree";
       path: string;
       action: "created" | "removed" | "unchanged";
     }>
+  | TargetCheckoutEffect
   | Readonly<{
       kind: "ref";
       name: string;
@@ -52,7 +59,7 @@ export type ReconcileFailure = Readonly<{
   stage: "observation" | "effect";
   diagnostic: string;
 }>;
-export type ReconcileLag = WorktreeRetained | WorktreeHookLag | ReconcileFailure;
+export type ReconcileLag = WorktreeRetained | TargetCheckoutLag | WorktreeHookLag | ReconcileFailure;
 export type ReconcileResult = Readonly<{
   effects: readonly Effect[];
   lag: readonly ReconcileLag[];
@@ -62,10 +69,8 @@ export type GitReconcileObservation = Readonly<{ state: ContractState | null; re
 
 type WorktreeTopology = Readonly<{ paths: Set<string> }>;
 
-function materializedName(contract: ContractId): string { return contractId(contract).replace("/", "-"); }
-function deliveryRefFor(contract: ContractId): string { return `${DELIVERY_REF_NAMESPACE}/${materializedName(contract)}`; }
-function candidatePinRefFor(contract: ContractId): string { return `${CANDIDATE_PIN_REF_NAMESPACE}/${materializedName(contract)}`; }
-export function deliveryWorktreePath(repository: GitRepository, contract: ContractId): string { return resolve(realpathSync(repository.primaryWorktree), ...WORKTREE_DIRECTORY, materializedName(contract)); }
+function deliveryRefFor(contract: ContractId): string { return `${DELIVERY_REF_NAMESPACE}/${contractPhysicalName(contract)}`; }
+function candidatePinRefFor(contract: ContractId): string { return `${CANDIDATE_PIN_REF_NAMESPACE}/${contractPhysicalName(contract)}`; }
 function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Effect {
   const before = readRef(repository, ref);
   if (before === desired) return { kind: "ref", name: ref, action: "unchanged", before, after: desired };
@@ -150,6 +155,37 @@ function removeWorktree(
   return { effect: { kind: "worktree", path, action: "removed" }, retained: false };
 }
 
+async function reconcileTargetCheckouts(repository: GitRepository, state: ContractState): Promise<ReconcileResult> {
+  if (state.terminal?.kind !== "claimed" || state.coordinates.target === undefined || state.delivery === null) {
+    return complete();
+  }
+  let held: HeldSqliteTransactionLock;
+  try {
+    held = await acquireTargetPlacementFence(repository, state.coordinates.target);
+  } catch (error) {
+    return failed("effect", error);
+  }
+  let result: ReconcileResult | undefined;
+  let exceptional: unknown;
+  try {
+    const recovered = recoverTargetPlacement(repository, state);
+    result = complete(recovered.effects, recovered.lag);
+  } catch (error) {
+    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) exceptional = error;
+    else result = failed("effect", error);
+  }
+  let releaseFailure: unknown;
+  try {
+    held.close();
+  } catch (error) {
+    releaseFailure = error;
+  }
+  if (exceptional !== undefined) throw exceptional;
+  if (result === undefined) throw new Error("target checkout reconcile produced no result");
+  if (releaseFailure !== undefined) result = failed("effect", releaseFailure, result.effects, result.lag);
+  return result;
+}
+
 async function reconcileWithTopology(
   { repository, hooks, retryHooks }: ReconcileInput,
   state: ContractState | null,
@@ -159,6 +195,9 @@ async function reconcileWithTopology(
   const lag: ReconcileLag[] = [];
   try {
     if (!state) return complete(effects, lag);
+    const targetCheckouts = await reconcileTargetCheckouts(repository, state);
+    effects.push(...targetCheckouts.effects);
+    lag.push(...targetCheckouts.lag);
     const ref = deliveryRefFor(state.id), pin = candidatePinRefFor(state.id), path = deliveryWorktreePath(repository, state.id);
     if (state.coordinates.workspace === "here") {
       if (state.terminal) effects.push(removeRef(repository, pin));
@@ -260,6 +299,10 @@ export async function reconcile(input: ReconcileInput): Promise<GitReconcileObse
 
 export function reconcileObservationFailure(error: unknown): ReconcileResult {
   return failed("observation", error);
+}
+
+export function reconcileEffectFailure(error: unknown, prior?: ReconcileResult): ReconcileResult {
+  return failed("effect", error, prior?.effects, prior?.lag);
 }
 
 async function reconcileBatchItem(

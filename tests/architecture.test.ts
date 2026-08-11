@@ -64,13 +64,13 @@ test("architecture policy keeps the Contract front door on protocol-owned operat
     "git/repository.ts": "export function repositoryAt(): void {}",
     "core/verbs/attestation.ts": "export function decideAttestation(): void {}",
     "protocol/run.ts": "export function runProtocol(): void {}",
-    "protocol/intent.ts": "export function admitPlacement(): void {}",
+    "protocol/placement.ts": "export function admitPlacement(): void {}",
     "protocol/operations.ts": "export function reviewOperation(): void {}",
     "library/contract.ts": [
       'import { repositoryAt } from "../git/repository.js";',
       'import { decideAttestation } from "../core/verbs/attestation.js";',
       'import { runProtocol } from "../protocol/run.js";',
-      'import { admitPlacement } from "../protocol/intent.js";',
+      'import { admitPlacement } from "../protocol/placement.js";',
       'import { reviewOperation } from "../protocol/operations.js";',
       "export function facade(): void { repositoryAt(); decideAttestation(); runProtocol(); admitPlacement(); reviewOperation(); }",
     ].join("\n"),
@@ -233,9 +233,9 @@ test("architecture policy permits the aggregate status read path", () => {
   const diagnostics = check({
     "core/facts/types.ts": "export type ContractId = string; export type ContractState = {}; export type SnapshotId = string;",
     "core/facts/gate.ts": "export function gateReports(): void {} export function gatesSatisfied(): void {}",
-    "git/reconcile.ts": "export function deliveryWorktreePath(): string { return \"\"; }",
+    "git/workspace.ts": "export function deliveryWorktreePath(): string { return \"\"; }",
     "protocol/read/status.ts": [
-      'import { deliveryWorktreePath } from "../../git/reconcile.js";',
+      'import { deliveryWorktreePath } from "../../git/workspace.js";',
       'import { gateReports } from "../../core/facts/gate.js";',
       'import type { ContractId, ContractState, SnapshotId } from "../../core/facts/types.js";',
       "export type ContractRow = { id: ContractId; candidate: SnapshotId | null };",
@@ -347,7 +347,7 @@ test("architecture policy rejects forbidden module imports", () => {
 
 test("architecture policy rejects capability use outside declared owners", () => {
   const accepted = check({
-    "protocol/intent.ts": "export function stamp(): number { return Date.now(); }",
+    "protocol/attempt.ts": "export function stamp(): number { return Date.now(); }",
     "library/contract.ts": "export function reject(): never { throw new TypeError('bad input'); }",
   });
   assert.deepEqual(rules(accepted).filter((r) => r === "architecture/capability-use"), []);
