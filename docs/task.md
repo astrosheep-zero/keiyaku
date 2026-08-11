@@ -144,14 +144,13 @@ task.drop(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutation
 ```
 
 `add` accepts structured title, namespace, body, note, priority, relations,
-optional contract, optional initial state, and signal. `addDocument` accepts
+optional initial state, and signal. `addDocument` accepts
 creation-document Markdown plus an optional namespace and signal. The creation
 document cannot set identity or timestamps but may set note and any persisted
 state; omitted note is empty and omitted state defaults to `open`.
 After creation, product state changes use lifecycle methods. `update` is a
 field-preserving patch: title, mutually exclusive body or append-body, priority,
-relation replace/add/drop, nullable parent, nullable contract, and note
-replacement.
+relation replace/add/drop, nullable parent, and note replacement.
 
 Shape errors throw `TypeError` before world observation. Malformed persisted
 authority throws `TaskAuthorityCorruptionError`. Infrastructure failures stay
