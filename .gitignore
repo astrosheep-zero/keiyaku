@@ -2,6 +2,10 @@ node_modules/
 build/
 coverage/
 *.log
-.keiyaku/*
-!.keiyaku/tasks/
-!.keiyaku/tasks/**
+.keiyaku/akuma/
+.keiyaku/carrier-gates/
+.keiyaku/dispatch/
+.keiyaku/locks/
+.keiyaku/response/
+.keiyaku/runtime/
+.keiyaku/wt/
