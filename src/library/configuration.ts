@@ -98,3 +98,7 @@ export const EMPTY_WORKTREE_HOOKS: WorktreeHooks = Object.freeze({
   create: Object.freeze([]),
   destroy: Object.freeze([]),
 });
+
+export function worktreeHooksOption(value: unknown): WorktreeHooks {
+  return value === undefined ? EMPTY_WORKTREE_HOOKS : normalizedWorktreeHooks(value);
+}

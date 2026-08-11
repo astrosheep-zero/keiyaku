@@ -264,7 +264,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
-      source: "library/keiyaku.ts",
+      source: "library/contract.ts",
       allow: [
         any("body/amend.ts"), any("markdown/diff.ts"),
         any("body/arc.ts"),
@@ -277,8 +277,31 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/input.ts"),
         any("library/region.ts"),
         any("library/configuration.ts"),
+        any("library/repo.ts"),
         any("settlement/settle.ts"),
         any("settings.ts"),
+      ],
+    },
+    {
+      source: "library/repo.ts",
+      allow: [
+        any("core/facts/types.ts"),
+        any("protocol/operations.ts"),
+        any("settlement/settle.ts"),
+        any("library/configuration.ts"),
+        any("library/input.ts"),
+      ],
+    },
+    {
+      source: "library/keiyaku.ts",
+      allow: [
+        any("core/facts/errors.ts"),
+        types("core/facts/types.ts"),
+        any("library/contract.ts"),
+        any("library/repo.ts"),
+        any("library/configuration.ts"),
+        types("library/region.ts"),
+        types("settlement/settle.ts"),
       ],
     },
     {
@@ -477,12 +500,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "date-now", owners: ["protocol/intent.ts"] },
     { capability: "new-date-current", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/publication.ts", "protocol/bind.ts", "protocol/operations.ts", "task/compose.ts", "task/operations.ts"] },
     { capability: "process-argv", owners: ["akuma/body.ts", "cli/main.ts", "cli/index.ts", "git/hooks.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
-    { capability: "process-cwd", owners: ["git/repository.ts", "cli/main.ts", "kanshi/read.ts", "library/keiyaku.ts", "task/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
+    { capability: "process-cwd", owners: ["git/repository.ts", "cli/main.ts", "kanshi/read.ts", "library/repo.ts", "task/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-environment", owners: ["akuma/providers/claude.ts", "akuma/providers/codex-app-server/index.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "git/repository.ts", "protocol/operations.ts", "runtime/proc/**"] },
     { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },
-    { capability: "type-error-construction", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/persona.ts", "akuma/provider.ts", "akuma/providers/index.ts", "body/**", "cli/actor.ts", "kanshi/**", "library/configuration.ts", "library/input.ts", "library/keiyaku.ts", "identity/coordinates.ts", "settings.ts", "task/**"] },
+    { capability: "type-error-construction", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/persona.ts", "akuma/provider.ts", "akuma/providers/index.ts", "body/**", "cli/actor.ts", "kanshi/**", "library/configuration.ts", "library/contract.ts", "library/input.ts", "library/repo.ts", "identity/coordinates.ts", "settings.ts", "task/**"] },
   ],
   forbiddenFileNames: [
     "approval-preparation.ts",

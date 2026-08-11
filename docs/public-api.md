@@ -9,6 +9,24 @@ root is its sole public import surface. The public objects are `Keiyaku`,
 `Repo`, `Delivery`, the shared `settings` resource constructor, and the
 exported value types defined by their operations.
 
+## Composition Boundary
+
+`src/library` is the package-root composition boundary. It validates
+caller-shaped values, presents public handles and result values, and composes
+capabilities by calling their concrete owner modules. It owns no persisted
+authority, codec, storage mechanism, lifecycle judgment, selector grammar, or
+physical Git, Task, or Akuma mechanism. A public operation may sequence owner
+capabilities, but it does not restate their decisions or persist their facts.
+
+Each public facet has one coherent module. `library/contract.ts` presents the
+Contract handle and Contract operations, `library/repo.ts` presents the pinned
+Git-world capability, and additional high-level facets remain separate from
+both. `library/keiyaku.ts` only assembles the package-root exports and the
+static `Keiyaku` facade. There is no generic orchestration layer, package-root
+registry, or second authority behind that facade. Cross-product facts and
+projections remain with their named concrete owners; the Library only exposes
+their typed results.
+
 Every package-root domain operation that accepts input takes exactly one
 readonly object. Public operations have no positional value parameters and no
 positional-value-plus-options overloads. A genuinely inputless operation keeps

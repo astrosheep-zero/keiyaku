@@ -59,14 +59,14 @@ test("architecture policy keeps invoke and contract commands off the private lif
   assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/dependency-direction").length, 2);
 });
 
-test("architecture policy keeps the library facade on protocol-owned operations", () => {
+test("architecture policy keeps the Contract front door on protocol-owned operations", () => {
   const diagnostics = check({
     "git/repository.ts": "export function repositoryAt(): void {}",
     "core/verbs/attestation.ts": "export function decideAttestation(): void {}",
     "protocol/run.ts": "export function runProtocol(): void {}",
     "protocol/intent.ts": "export function admitPlacement(): void {}",
     "protocol/operations.ts": "export function reviewOperation(): void {}",
-    "library/keiyaku.ts": [
+    "library/contract.ts": [
       'import { repositoryAt } from "../git/repository.js";',
       'import { decideAttestation } from "../core/verbs/attestation.js";',
       'import { runProtocol } from "../protocol/run.js";',
@@ -76,6 +76,19 @@ test("architecture policy keeps the library facade on protocol-owned operations"
     ].join("\n"),
   });
   assert.equal(rules(diagnostics).filter((rule) => rule === "architecture/dependency-direction").length, 4);
+});
+
+test("architecture policy keeps the package-root facade composition-only", () => {
+  const diagnostics = check({
+    "protocol/operations.ts": "export function reviewOperation(): void {}",
+    "library/contract.ts": "export function reviewKeiyaku(): void {}",
+    "library/keiyaku.ts": [
+      'import { reviewOperation } from "../protocol/operations.js";',
+      'import { reviewKeiyaku } from "./contract.js";',
+      "export function facade(): void { reviewOperation(); reviewKeiyaku(); }",
+    ].join("\n"),
+  });
+  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
 
 test("architecture policy keeps the package root on library exports only", () => {
@@ -358,10 +371,10 @@ test("architecture policy enforces symbol-scoped allowances", () => {
   assert.ok(rules(diagnostics).includes("architecture/dependency-direction"));
 });
 
-test("architecture policy uses specific zone before catch-all for library facade", () => {
+test("architecture policy uses specific zone before catch-all for Contract front door", () => {
   const diagnostics = check({
     "protocol/operations.ts": "export function reviewOperation(): void {}",
-    "library/keiyaku.ts": 'import { reviewOperation } from "../protocol/operations.js"; export function facade(): void { reviewOperation(); }',
+    "library/contract.ts": 'import { reviewOperation } from "../protocol/operations.js"; export function facade(): void { reviewOperation(); }',
   });
   assert.deepEqual(diagnostics, []);
 });
