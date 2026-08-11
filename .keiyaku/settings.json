@@ -1,0 +1,16 @@
+{
+  "worktree": {
+    "create": [
+      {
+        "argv": [
+          "npm",
+          "ci",
+          "--ignore-scripts",
+          "--prefer-offline"
+        ],
+        "timeoutMs": 300000
+      }
+    ],
+    "destroy": []
+  }
+}
