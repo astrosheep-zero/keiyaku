@@ -81,7 +81,7 @@ reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
 install <codex|claude|opencode|pi> [--json]
        install --all [--json]
-call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -
+call <akuma> [--cwd <path>] [--json] -
 wait <aku/...> [--timeout <duration>] [--json]
 tell <aku/...> [--json] -
 interrupt <aku/...> [--json] -
@@ -174,7 +174,7 @@ rollback occurs. Text prints one result per harness. JSON returns
 `1`; successful installation exits `0`.
 
 `call`, `tell`, and `interrupt` require the final `-` and pass those bytes
-as the public body input. `--persona` is required for call and names
+as the public body input. The `call` positional is the Archetype name and names
 `~/.keiyaku/akuma/<name>.md`; its provider must resolve through the Cut 1
 Settings-backed provider interpretation. When no same-name Settings entry
 exists, the built-in fallback execution names are `claude` and
@@ -182,7 +182,7 @@ exists, the built-in fallback execution names are `claude` and
 searched. `--cwd` selects the immutable summon seat and is resolved to an
 absolute path at the public boundary. `wait`, `tell`, `interrupt`, `history`,
 `fork`, and `kill` require a complete
-`aku/<persona>/<hex8>`. `status <aku/...>` addresses the same exact handle.
+`aku/<archetype>/<hex8>`. `status <aku/...>` addresses the same exact handle.
 Bare `status` already exposes the Akuma fleet through Kanshi; there is no
 second raw-roster flag. Library `world.of()`
 constructs the addressed handle and has no CLI command of its own.
@@ -208,9 +208,9 @@ lays those rows onto one ruler and spine. No CLI branch repairs, reselects, or
 reinterprets activity. JSON exposes the same public value with complete ISO
 `at` values and no text-only time suppression.
 
-The ruler carries only facts fixed for the invocation: the life mark, complete
-Akuma id, and optional Contract. The id already contains the Persona, so the
-Persona is never repeated. The closed marks are `●` running, `○` nonterminal
+The ruler carries only facts fixed for the invocation: the life mark and complete
+Akuma id. The id already contains the Archetype, so the
+Archetype is never repeated. The closed marks are `●` running, `○` nonterminal
 idle, `×` dead, `!` stillborn or warning, `│` spine, `⋮` omitted history, `⧗`
 tell, `✂` interrupted, and `✓` answered. Text never prints the storage words
 `retained`, `latest`, `body`, `heart`, or `turn`, and never emits a standalone
@@ -468,9 +468,9 @@ switch to another observation result. The Contract section is supplied by
 `Keiyaku.list({ repo })` and exposes lifecycle, candidate, and every declared
 gate's current report. Kanshi and the renderer copy those discriminants and do
 not evaluate gate currency, infer claimability, or derive terminality.
-Its Akuma section is supplied by `Akuma.list()` and joined as specified by
-[kanshi.md](kanshi.md); the board copies life, identity, optional Contract
-endpoint observation, pending count, confinement, and searched coordinates
+Its Akuma section is supplied by `Akuma.list()` as specified by
+[kanshi.md](kanshi.md); the board copies life, identity, pending count,
+confinement, and searched coordinates
 without probing, reading history, or reclassifying them.
 
 Akuma call, exact status, wait, history, an `interrupted` interrupt, successful

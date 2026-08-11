@@ -26,9 +26,8 @@ import {
 } from "./heart/index.js";
 import {
   parseAkuId,
-  contractId,
   pathsForAkuId,
-  personaName,
+  archetypeName,
   worldRootForAkumaPaths,
   type AkumaPaths,
 } from "./identity.js";
@@ -43,10 +42,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 type RequestClaim = Readonly<{
   id: string;
   world: string;
-  persona: string;
+  archetype: string;
   body: string;
   cwd?: string;
-  contract?: string;
   recipe: RequestRecipe;
 }>;
 
@@ -141,11 +139,10 @@ function decodeClaim(bytes: string, fileId: string): RequestClaim | null {
   const value = object(decoded);
   if (value === null) return null;
   const expected = [
+    "archetype",
     "body",
-    ...(value.contract === undefined ? [] : ["contract"]),
     ...(value.cwd === undefined ? [] : ["cwd"]),
     "id",
-    "persona",
     "recipe",
     "world",
   ];
@@ -154,19 +151,17 @@ function decodeClaim(bytes: string, fileId: string): RequestClaim | null {
   if (typeof value.body !== "string" || !absolute(value.world)) return null;
   if (value.cwd !== undefined && !absolute(value.cwd)) return null;
   try {
-    personaName(value.persona as string);
-    if (value.contract !== undefined) contractId(value.contract as string);
+    archetypeName(value.archetype as string);
   } catch { return null; }
   const recipe = decodeRecipe(value.recipe, (value.cwd ?? value.world) as string);
   if (recipe === null) return null;
   return {
     id: value.id,
     world: value.world,
-    persona: value.persona as string,
+    archetype: value.archetype as string,
     body: value.body,
     recipe,
     ...(value.cwd === undefined ? {} : { cwd: value.cwd }),
-    ...(value.contract === undefined ? {} : { contract: value.contract as string }),
   };
 }
 
@@ -221,11 +216,10 @@ export async function requestBodyCall(input: RequestClaim & Readonly<{ directory
   atomicJson(join(input.directory, `${input.id}.request.json`), {
     id: input.id,
     world: input.world,
-    persona: input.persona,
+    archetype: input.archetype,
     body: input.body,
     recipe: input.recipe,
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-    ...(input.contract === undefined ? {} : { contract: input.contract }),
   });
   const receiptPath = join(input.directory, `${input.id}.receipt.json`);
   for (;;) {
@@ -266,20 +260,19 @@ async function serveClaim(input: Readonly<{
   try {
     const published = await publishAkuma({
       worldPath: servingWorld,
-      persona: request.persona,
+      archetype: request.archetype,
       reserve: (allocated) => { fact = reserveRequest(input.paths, request.id, allocated.id); },
       launch: async (allocated) => await input.spawn({
         paths: allocated.paths,
         seed: {
           id: allocated.id,
-          persona: allocated.persona,
+          archetype: allocated.archetype,
           ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),
           provider: request.recipe.provider,
           options: request.recipe.options,
           cwd,
           origin: { kind: "request", parentId: input.parent.id, requestId: request.id },
           confinement: request.recipe.confinement,
-          ...(request.contract === undefined ? {} : { contract: request.contract }),
         },
         initialBody: request.body,
       }),

@@ -13,10 +13,14 @@ import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { akumaExitCode, akumaJsonValue, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 
 test("Akuma CLI parses root verbs without the removed namespace", () => {
-  assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "--cwd", "/work", "--contract", "kei/delivery", "-"]), {
+  assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "--cwd", "/work", "-"]), {
     cwd: "/world",
-    command: { command: "call", persona: "claude", cwd: "/work", contract: "kei/delivery", output: "text" },
+    command: { command: "call", archetype: "claude", cwd: "/work", output: "text" },
   });
+  assert.throws(
+    () => parseArgv(["call", "claude", "--contract", "kei/delivery", "-"]),
+    CliUsageError,
+  );
   assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--json", "-"]), {
     command: { command: "tell", id: "aku/claude/1234abcd", output: "json" },
   });
@@ -45,7 +49,7 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.throws(() => parseArgv(["wait", "aku/claude/1234abcd", "--deadline", "25"]), /option --deadline is not valid/u);
   assert.throws(() => parseArgv(["akuma", "ls"]), CliUsageError);
   assert.throws(() => parseArgv(["status", "--akuma"]), CliUsageError);
-  assert.throws(() => parseArgv(["call", "--persona", "claude", "-"]), CliUsageError);
+  assert.throws(() => parseArgv(["call", "--archetype", "claude", "-"]), CliUsageError);
   assert.throws(() => parseArgv(["call", "-"]), CliUsageError);
   assert.throws(() => parseArgv(["call", "claude"]), CliUsageError);
   assert.throws(() => parseArgv(["call", "claude", "reviewer", "-"]), CliUsageError);
@@ -59,7 +63,7 @@ test("Akuma status aligns and counts omitted activity", () => {
   const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
   const status = {
     id: "aku/worker/1234abcd",
-    persona: "worker",
+    archetype: "worker",
     life: "running" as const,
     collar: { kind: "alive" as const },
     confinement: { kind: "unconfined" as const },
@@ -135,18 +139,17 @@ test("akuma fork renders the public receipt and maps every exit class", () => {
 test("akuma interrupt invokes the public receipt and maps every exit class", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-interrupt-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "1d1e0004" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0004" });
     initializeHeart(allocated.paths);
     await driveAkumaBody({
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
-        contract: "kei/cli-purpose",
         cwd: root,
       },
       initialBody: "done",
@@ -214,7 +217,7 @@ test("akuma interrupt invokes the public receipt and maps every exit class", asy
 test("Akuma status, wait, and history share public observations without embedding history", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-status-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "1234abcd" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
     initializeHeart(allocated.paths);
     const provider: ProviderAdapter = {
       confinement: () => ({ kind: "unconfined" }),
@@ -236,12 +239,11 @@ test("Akuma status, wait, and history share public observations without embeddin
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
-        contract: "kei/cli-purpose",
         cwd: root,
       },
       initialBody: "work",

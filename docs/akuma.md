@@ -21,12 +21,10 @@ and go; the heart stays.
   mechanics, and transaction judges remain separate paragraphs of the same
   heart. Raw statements are row mechanics; they do not speak in the judge's
   transaction language.
-- **soul** — the immutable birth facts: id, persona, description, resolved
-  provider execution, provider options, summon cwd, origin, confinement, and
-  optional Contract association.
-  The association is opaque `kei/...` identity bytes meaning "summoned for";
-  it carries no Contract lifecycle or Git behavior. The cwd is the akuma's
-  seat, not a native resume coordinate; resumability remains a session fact.
+- **soul** — the immutable birth facts: id, archetype, description, resolved
+  provider execution, provider options, summon cwd, origin, and confinement.
+  The cwd is the akuma's seat, not a native resume coordinate; resumability
+  remains a session fact.
 - **body** — the detached, unsandboxed process currently driving the akuma.
   At most one body at a time; most of the time, none.
 - **leash** — an exclusive transaction in `leash.db`. Whoever holds it is the
@@ -45,8 +43,8 @@ and go; the heart stays.
 The dependency direction is fixed:
 
 ```text
-cli -> akuma -> {body, heart, identity, persona, provider(codec), publication, requests, providers(map), settings, runtime/proc(collar)}
-persona -> {identity, provider, providers(map), settings}
+cli -> akuma -> {body, heart, identity, archetype, provider(codec), publication, requests, providers(map), settings, runtime/proc(collar)}
+archetype -> {identity, provider, providers(map), settings}
 body -> {heart, provider, providers, requests, runtime/proc}
 requests -> {heart, identity, provider, providers(map), publication}
 publication -> {heart, identity, runtime/proc}
@@ -111,7 +109,7 @@ did finish birth remains a real, origin-bearing akuma.
 
 ## Identity and birth
 
-Identity is `aku/<persona>/<hex8>`, the registered family in `docs/model.md`.
+Identity is `aku/<archetype>/<hex8>`, the registered family in `docs/model.md`.
 The physical directory name is the structural projection `/` -> `-`
 (`spider-5fa5fb68`) — deterministic topology, not a second identity.
 `identity.ts` is the sole interpreter in both directions: identity to directory
@@ -139,9 +137,9 @@ Stillborn residue is visible in `list()` with its evidence. No automatic
 cleaner ships until a real reader needs one; manual removal is safe because
 a body must not outlive its heart (ENOENT -> kill own tree, exit).
 
-## Persona
+## Archetype
 
-A Persona is the mask that combines an akuma's personality and provider
+An Archetype is the mask that combines an akuma's personality and provider
 configuration. It is call-time input at exactly one path:
 
 ```text
@@ -152,33 +150,39 @@ The file begins with one strict YAML mapping. `provider` is required;
 `model`, `effort`, `access`, `network`, and `description` are optional.
 `access` is `read | write | auto`; `network` is `disabled | enabled`; every
 other consumed value is a nonblank string. Additional top-level keys are
-ignored and never enter Persona options or the soul snapshot. The Markdown body
+ignored and never enter Archetype options or the soul snapshot. The Markdown body
 after frontmatter is the system prompt, including an empty one.
 
 `Akuma.at({ path, settings? })` normalizes the world once. It uses the injected
 Settings snapshot when present and otherwise constructs one Settings value for
-that world. `call({ persona })` validates the name, reads this one Persona file,
+that world. `call({ archetype })` validates the name, reads this one Archetype file,
 resolves its `provider` as an execution name in the Settings `providers`
-namespace, and asks the selected built-in adapter kind to admit the Persona
+namespace, and asks the selected built-in adapter kind to admit the Archetype
 options before allocating an identity. Missing, malformed, unknown-provider,
-and provider-unsupported input is typed failure; a missing or malformed Persona
-includes the exact path searched. There is no fallback Persona or directory
+and provider-unsupported input is typed failure; a missing or malformed Archetype
+includes the exact path searched. There is no fallback Archetype or directory
 layering.
+
+`world.listArchetypes()` is the catalog read. It enumerates canonical `.md`
+filenames in that same directory and returns their normalized names in byte
+order. It does not decode definitions, resolve providers, or duplicate call
+admission; malformed content remains the selected call's typed failure. A
+missing directory is an empty catalog, and other IO failures remain exceptions.
 
 A provider entry is one strict object with required `kind`, optional nonblank
 `description` and `executable`, optional object `config`, and optional `env`
 whose values are strings. The two kinds are `claude-agent-sdk` and
 `codex-app-server`; only Codex consumes `config`. When no same-name Settings
-entry exists, Persona names `claude` and `codex-app-server` select their
+entry exists, Archetype names `claude` and `codex-app-server` select their
 Akuma-owned default executions. A configured same-name entry replaces that
 default wholly under Settings shadow law.
 
-Birth snapshots the Persona name, optional description, complete provider
+Birth snapshots the Archetype name, optional description, complete provider
 execution, and admitted options into the soul. The body never reads Settings or
-the Persona file. A newly admitted
+the Archetype file. A newly admitted
 native session snapshots the exact options used alongside its coordinate and
 cwd; resume reads that session recipe. Before admission, the body uses the
-soul's options and summon cwd. Thus later edits to Persona Markdown affect only
+soul's options and summon cwd. Thus later edits to Archetype Markdown affect only
 future akuma.
 
 Provider kind `claude-agent-sdk` consumes `model`, `effort`, and
@@ -214,7 +218,7 @@ Hearts live in the primary world:
 - Known risk, accepted: `git clean -fdx` in the primary world erases run
   state. Same fate as `.keiyaku/response`; repo-local state is repo-local.
   No defense is built.
-- Home keeps Persona configuration only, never state. Nothing reads it back
+- Home keeps Archetype configuration only, never state. Nothing reads it back
   after call.
 
 ## Confinement
@@ -250,11 +254,9 @@ Heart facts self-date when the event occurs. These timestamps are retained
 because the write-time truth cannot be reconstructed after a detached process
 dies; their existence does not depend on a current control-flow reader.
 
-- **soul** — one row, written at birth: id, persona, optional description,
+- **soul** — one row, written at birth: id, archetype, optional description,
   resolved provider execution, admitted options, summon cwd, origin,
-  confinement, optional
-  Contract id, created-at. The Contract id is immutable for the soul's whole
-  life; there is no reassignment verb.
+  confinement, created-at.
 - **bodies** — one row per body: collar, leash-taken-at, end (exited /
   broke-off / put-down).
 - **turns** — append-only completed turns. An answered outcome carries the
@@ -281,11 +283,11 @@ dies; their existence does not depend on a current control-flow reader.
   execution-history log. Raw native payloads are never activity facts.
 - **tells** — body plus its delivery state; see Tell.
 - **requests** — the sole durable authority for Body Requests. One fact holds
-  the caller UUID, Persona, frozen provider recipe, body, optional cwd,
-  optional Contract id, normalized world, admission
-  time, and exactly one monotonic state: `admitted`, `reserved` with the child
-  coordinate, `served` with the child coordinate, `refused` with a diagnostic,
-  or `voided` with evidence. `served`, `refused`, and `voided` are terminal.
+  the caller UUID, Archetype, frozen provider recipe, body, optional cwd,
+  normalized world, admission time, and exactly one monotonic state: `admitted`,
+  `reserved` with the child coordinate, `served` with the child coordinate,
+  `refused` with a diagnostic, or `voided` with evidence. `served`, `refused`,
+  and `voided` are terminal.
 - **stop / pause / death** — distinct control rows. Stop belongs to terminal
   kill; pause belongs to non-terminal interrupt. One meaning never reuses the
   other's row.
@@ -297,9 +299,9 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed `heart/` custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `5`; leash schema version remains `4`. Heart version 5
-adds the activity body coordinate and 5,000-row persistent history to the
-version 4 provider-execution recipe. This is a hard cut: an
+Heart schema version is `6`; leash schema version remains `4`. Heart version 6
+renames the persisted Archetype columns and removes Contract columns from soul
+and Body Requests. This is a hard cut: an
 older heart fails the existing schema gate; no migration or compatibility
 decoder exists. Absence is stored as SQL `NULL` and omitted from public values.
 
@@ -449,8 +451,8 @@ consumed when death arrives gets a typed `voided-by-death` receipt from the
 killer — nothing recorded is ever silently unreachable.
 
 There is no `resume` verb. Providers cannot continue a broken-off turn;
-waking means new input through `tell`. The verb set is call, of, list, status,
-wait, tell, interrupt, history, fork, and kill.
+waking means new input through `tell`. The verb set is call, of,
+listArchetypes, list, status, wait, tell, interrupt, history, fork, and kill.
 
 ## Interrupt
 
@@ -548,9 +550,8 @@ upstream provider has made a child session there is no honest cancellation
 point that can erase that fact.
 
 The sequence is provider fork first, then ordinary local allocation and birth.
-The child's soul copies the parent snapshot, including its optional Contract
-association, except for its id, creation time, and origin `{ kind: "fork",
-parent, at }`; no fork override exists. Direct and body-request births retain
+The child's soul copies the parent snapshot except for its id, creation time,
+and origin `{ kind: "fork", parent, at }`; no fork override exists. Direct and body-request births retain
 their existing arms. Under the birth leash, publication also admits the
 provider-created child coordinate as the first `SessionFact`, with the selected
 answered turn's provider, cwd, and options recipe. Thus the child is born
@@ -603,7 +604,7 @@ request id for idempotence, so at-least-once claim observation produces at most
 one fact. There is no second store.
 
 The claim decoder validates the complete frozen recipe before Heart admission.
-Its provider execution uses the same exact decoder as Persona admission, its
+Its provider execution uses the same exact decoder as Archetype admission, its
 options use the provider-owned option decoder, and its confinement must equal
 the selected adapter's pure projection for that cwd. A malformed recipe is a
 malformed claim and never becomes a durable request fact.
@@ -615,16 +616,11 @@ not a claim that the child was born. The child soul records origin
 
 ### Admission and service
 
-A request carries the caller's normalized absolute world, Persona name, body,
-optional cwd, and optional Contract id. The caller must state the Contract id
-explicitly; a request never inherits the parent soul's association. The serving
-body requires that world to equal its own world,
-loads the Persona from its own home, admits provider options, and normalizes the
-cwd at this boundary. The Akuma boundary structurally validates a present id as
-the shared `kei` identity family and stores its bytes verbatim. It never checks
-whether the endpoint exists or reads Contract state. World mismatch, unknown or
-malformed Persona, and option refusal settle `refused`; the body never silently
-redirects a request.
+A request carries the caller's normalized absolute world, Archetype name, body,
+and optional cwd. The serving body requires that world to equal its own world
+and normalizes the cwd at this boundary. World mismatch settles `refused`; a
+malformed transport claim is not admitted. The body never silently redirects a
+request.
 
 Service is serial in heart admission order:
 
@@ -863,11 +859,12 @@ composition root used by the public boundary and detached body.
 ```ts
 const world = Akuma.at({ path, settings? }); // path is the world; no climbing
 
-const a = await world.call({ persona, body, cwd?, contract? }); // returns after birth
+const a = await world.call({ archetype, body, cwd? }); // returns after birth
 world.of({ id });
+world.listArchetypes();                    // canonical names in byte order
 world.list();                              // compact fleet rows; no history scan
 
-a.id                                       // aku/<persona>/<hex8>
+a.id                                       // aku/<archetype>/<hex8>
 a.status()                                 // current state + bounded activity
 a.wait(predicate?, { timeoutMs? })         // same status carrier on either outcome
 a.history({ before?, since?, limit? })      // persistent execution-history page
@@ -889,9 +886,8 @@ the newest retained turn, and one activity snapshot. Its shape is:
 ```ts
 type AkumaStatus = {
   id: AkuId;
-  persona: string;
+  archetype: string;
   description?: string;
-  contract?: string;
   life: AkumaLife;
   collar: CollarProbe;
   confinement: Confinement;
@@ -963,7 +959,7 @@ akuma is the flagship's decision; the surface puts the state and available
 verbs in front of her and says nothing more.
 
 `list()` is deliberately smaller than `status()`: born fleet rows expose id,
-Persona and description snapshots, optional Contract id, life, collar evidence,
+Archetype and description snapshots, life, collar evidence,
 confinement, and pending tell ids, but no activity, history, or latest outcome. The id is
 projected verbatim and has no endpoint-state interpretation here. Unborn/stillborn rows retain
 their existing evidence. This keeps a fleet read from scanning the complete
@@ -1000,7 +996,7 @@ Coherent owner modules, not mechanical-step directories.
 ```text
 src/akuma/
   identity.ts         aku/ constructor/parser, allocation, topology
-  persona.ts          one Persona read, Settings provider interpretation, option admission
+  archetype.ts        one Archetype read and catalog, Settings provider interpretation, option admission
   heart/
     facts.ts          import-free typed facts and life() interpretation
     schema.ts         private DDL, independent heart/leash versions, hard-cut gates
@@ -1048,12 +1044,12 @@ Natural-death terminals. Blind sweeps and age-based adjudication — the
 leash and the seal judge; age is evidence. Placement laws that claim to
 confine unconfined processes. Confinement gates — confinement facts are
 evidence, never admission control. Anti-forgery machinery of any kind —
-malice is outside the threat model. Contract lifecycle or Git knowledge
-inside `src/akuma` — structural validation and opaque association bytes are the
-whole edge. There is no Task endpoint field, generic metadata bag, binding
-registry, existence validation, implicit Body Request inheritance, Contract or
-Task back-pointer, association sweep, or behavior conditioned on Contract state
-(SOUL: cut any pillar, the other two do not bleed).
+malice is outside the threat model. Contract lifecycle, identity, association,
+or Git knowledge inside `src/akuma`. There is no Task endpoint field, generic
+metadata bag, binding registry, existence validation, implicit Body Request
+inheritance, Contract or Task back-pointer, association sweep, or behavior
+conditioned on Contract state (SOUL: cut any pillar, the other two do not
+bleed).
 
 Activity does not grow an updated phase, write-time fold, per-verb snapshot
 window, usage arm, warning taxonomy, terminal file ledger, truncation metadata

@@ -29,14 +29,13 @@ export type AkumaOrigin =
 
 export type Soul = Readonly<{
   id: AkuId;
-  persona: string;
+  archetype: string;
   description?: string;
   provider: ProviderExecution;
   options: ProviderOptions;
   cwd: string;
   origin: AkumaOrigin;
   confinement: Confinement;
-  contract?: string;
   createdAt: string;
 }>;
 
@@ -99,10 +98,9 @@ export type TellFact = Readonly<{
 
 export type RequestInput = Readonly<{
   id: string;
-  persona: string;
+  archetype: string;
   body: string;
   cwd?: string;
-  contract?: string;
   world: string;
   recipe: RequestRecipe;
 }>;

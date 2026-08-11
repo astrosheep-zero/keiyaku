@@ -23,14 +23,13 @@ import type {
 
 export type SoulRow = Readonly<{
   id: string;
-  persona: string;
+  archetype: string;
   description: string | null;
   provider_json: string;
   options_json: string;
   cwd: string;
   origin_json: string;
   confinement_json: string;
-  contract: string | null;
   created_at: string;
 }>;
 
@@ -76,10 +75,9 @@ export type TellRow = Readonly<{
 export type RequestRow = Readonly<{
   sequence: number;
   id: string;
-  persona: string;
+  archetype: string;
   body: string;
   cwd: string | null;
-  contract: string | null;
   world: string;
   recipe_json: string;
   admitted_at: string;
@@ -126,19 +124,17 @@ export function encodeSoulRow(soul: Soul): readonly [
   string,
   string,
   string,
-  string | null,
   string,
 ] {
   return [
     soul.id,
-    soul.persona,
+    soul.archetype,
     soul.description ?? null,
     json(soul.provider),
     json(soul.options),
     soul.cwd,
     json(soul.origin),
     json(soul.confinement),
-    soul.contract ?? null,
     soul.createdAt,
   ];
 }
@@ -146,14 +142,13 @@ export function encodeSoulRow(soul: Soul): readonly [
 export function decodeSoulRow(row: SoulRow): Soul {
   return {
     id: row.id as AkuId,
-    persona: row.persona,
+    archetype: row.archetype,
     ...(row.description === null ? {} : { description: row.description }),
     provider: parsed<ProviderExecution>(row.provider_json),
     options: parsed<ProviderOptions>(row.options_json),
     cwd: row.cwd,
     origin: parsed<AkumaOrigin>(row.origin_json),
     confinement: parsed<Confinement>(row.confinement_json),
-    ...(row.contract === null ? {} : { contract: row.contract }),
     createdAt: row.created_at,
   };
 }
@@ -210,10 +205,9 @@ export function decodeTellRow(row: TellRow): TellFact {
 export function decodeRequestRow(row: RequestRow): RequestFact {
   const input = {
     id: row.id,
-    persona: row.persona,
+    archetype: row.archetype,
     body: row.body,
     ...(row.cwd === null ? {} : { cwd: row.cwd }),
-    ...(row.contract === null ? {} : { contract: row.contract }),
     world: row.world,
     recipe: parsed<RequestRecipe>(row.recipe_json),
     admittedAt: row.admitted_at,
@@ -248,8 +242,8 @@ export function decodeDeathRow(row: DeathRow): DeathFact {
 }
 
 export function soulFact(database: DatabaseSync): Soul | null {
-  const row = database.prepare(`SELECT id, persona, description, provider_json, options_json, cwd,
-    origin_json, confinement_json, contract, created_at FROM soul WHERE singleton = 1`).get() as SoulRow | undefined;
+  const row = database.prepare(`SELECT id, archetype, description, provider_json, options_json, cwd,
+    origin_json, confinement_json, created_at FROM soul WHERE singleton = 1`).get() as SoulRow | undefined;
   return row === undefined ? null : decodeSoulRow(row);
 }
 
@@ -258,8 +252,8 @@ export function sealExists(database: DatabaseSync): boolean {
 }
 
 export function insertSoulFact(database: DatabaseSync, soul: Soul): void {
-  database.prepare(`INSERT INTO soul(singleton, id, persona, description, provider_json, options_json, cwd, origin_json, confinement_json, contract, created_at)
-    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...encodeSoulRow(soul));
+  database.prepare(`INSERT INTO soul(singleton, id, archetype, description, provider_json, options_json, cwd, origin_json, confinement_json, created_at)
+    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...encodeSoulRow(soul));
 }
 
 export function insertSealFact(database: DatabaseSync, input: Readonly<{ evidence: string; at: string }>): void {
@@ -351,20 +345,19 @@ export function updateTellState(database: DatabaseSync, id: string, state: TellS
   database.prepare("UPDATE tells SET state = ? WHERE id = ?").run(state, id);
 }
 
-const REQUEST_COLUMNS = `sequence, id, persona, body, cwd, contract, world, recipe_json, admitted_at,
+const REQUEST_COLUMNS = `sequence, id, archetype, body, cwd, world, recipe_json, admitted_at,
   state, child, diagnostic, evidence`;
 
 export function insertRequestFact(
   database: DatabaseSync,
   input: RequestInput & Readonly<{ admittedAt: string }>,
 ): void {
-  database.prepare(`INSERT OR IGNORE INTO requests(id, persona, body, cwd, contract, world, recipe_json, admitted_at, state)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'admitted')`).run(
+  database.prepare(`INSERT OR IGNORE INTO requests(id, archetype, body, cwd, world, recipe_json, admitted_at, state)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'admitted')`).run(
     input.id,
-    input.persona,
+    input.archetype,
     input.body,
     input.cwd ?? null,
-    input.contract ?? null,
     input.world,
     json(input.recipe),
     input.admittedAt,

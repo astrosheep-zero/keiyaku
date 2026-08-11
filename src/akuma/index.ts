@@ -1,5 +1,5 @@
 export { Akuma, AkumaHandle, AkumaNotBornError } from "./akuma.js";
-export { AkumaPersonaError } from "./persona.js";
+export { AkumaArchetypeError } from "./archetype.js";
 export { AkumaBodyRequestError } from "./requests.js";
 export type {
   AkumaList,

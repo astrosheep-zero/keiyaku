@@ -30,10 +30,9 @@ import {
   akuIdFromDirectoryName,
   akumaPaths,
   akumaRunRoot,
-  contractId,
   parseAkuId,
   pathsForAkuId,
-  personaName,
+  archetypeName,
   type AkumaPaths,
 } from "./identity.js";
 import type { AkuId } from "./heart/index.js";
@@ -43,7 +42,7 @@ import {
   type ActivityHistory,
   type ActivitySnapshot,
 } from "./activity.js";
-import { loadPersona } from "./persona.js";
+import { listArchetypes as readArchetypes, loadArchetype } from "./archetype.js";
 import { publishAkuma } from "./publication.js";
 import { providerNamed } from "./providers/index.js";
 import { injectedBodyRequests, requestBodyCall } from "./requests.js";
@@ -55,9 +54,8 @@ const KILL_GRACE_MS = 1_000;
 
 export type AkumaListRow = Readonly<{
   id: AkuId;
-  persona: string;
+  archetype: string;
   description?: string;
-  contract?: string;
   life: AkumaLife;
   collar: CollarProbe;
   confinement: Soul["confinement"];
@@ -168,9 +166,8 @@ function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot = readHeart(pa
   const collar = collarProbe(snapshot);
   return {
     id: snapshot.soul.id,
-    persona: snapshot.soul.persona,
+    archetype: snapshot.soul.archetype,
     ...(snapshot.soul.description === undefined ? {} : { description: snapshot.soul.description }),
-    ...(snapshot.soul.contract === undefined ? {} : { contract: snapshot.soul.contract }),
     life: life(probeLeash(paths), collar, snapshot.death),
     collar,
     confinement: snapshot.soul.confinement,
@@ -327,20 +324,19 @@ export class AkumaHandle {
     try {
       const child = await publishAkuma({
         worldPath: this.worldPath,
-        persona: source.persona,
+        archetype: source.archetype,
         awaitAsleep: true,
         launch: async (allocated) => await spawnAkumaBody({
           paths: allocated.paths,
           seed: {
             id: allocated.id,
-            persona: source.persona,
+            archetype: source.archetype,
             ...(source.description === undefined ? {} : { description: source.description }),
             provider: source.provider,
             options: source.options,
             cwd: source.cwd,
             origin: { kind: "fork", parent: this.id, at: input.at },
             confinement: source.confinement,
-            ...(source.contract === undefined ? {} : { contract: source.contract }),
           },
           birthSession,
         }),
@@ -386,17 +382,20 @@ export class Akuma {
     return new AkumaHandle(parseAkuId(input.id).id, this.path);
   }
 
-  async call(input: Readonly<{ persona: string; body: string; cwd?: string; contract?: string }>): Promise<AkumaHandle> {
-    const name = personaName(input.persona);
-    const contract = input.contract === undefined ? undefined : contractId(input.contract);
-    const persona = loadPersona({ name, settings: this.settings });
-    const provider = persona.adapter;
+  listArchetypes(): readonly string[] {
+    return readArchetypes({ settings: this.settings });
+  }
+
+  async call(input: Readonly<{ archetype: string; body: string; cwd?: string }>): Promise<AkumaHandle> {
+    const name = archetypeName(input.archetype);
+    const archetype = loadArchetype({ name, settings: this.settings });
+    const provider = archetype.adapter;
     const cwd = resolve(input.cwd ?? this.path);
     const recipe = Object.freeze({
-      ...(persona.description === undefined ? {} : { description: persona.description }),
-      provider: persona.provider,
-      options: persona.options,
-      confinement: provider.confinement({ cwd, options: persona.options }),
+      ...(archetype.description === undefined ? {} : { description: archetype.description }),
+      provider: archetype.provider,
+      options: archetype.options,
+      confinement: provider.confinement({ cwd, options: archetype.options }),
     });
     const requests = injectedBodyRequests();
     if (requests !== null) {
@@ -404,29 +403,27 @@ export class Akuma {
         directory: requests,
         id: randomUUID(),
         world: this.path,
-        persona: name,
+        archetype: name,
         body: input.body,
         cwd,
         recipe,
-        ...(contract === undefined ? {} : { contract }),
       });
       return new AkumaHandle(child, this.path);
     }
     const published = await publishAkuma({
       worldPath: this.path,
-      persona: persona.name,
+      archetype: archetype.name,
       launch: async (allocated) => await spawnAkumaBody({
         paths: allocated.paths,
         seed: {
           id: allocated.id,
-          persona: allocated.persona,
-          ...(persona.description === undefined ? {} : { description: persona.description }),
-          provider: persona.provider,
-          options: persona.options,
+          archetype: allocated.archetype,
+          ...(archetype.description === undefined ? {} : { description: archetype.description }),
+          provider: archetype.provider,
+          options: archetype.options,
           cwd,
           origin: { kind: "direct" },
           confinement: recipe.confinement,
-          ...(contract === undefined ? {} : { contract }),
         },
         initialBody: input.body,
       }),
@@ -449,7 +446,7 @@ export class Akuma {
     const rows: AkumaList["rows"] = names.flatMap((name): AkumaList["rows"] => {
       try {
         const physical = akuIdFromDirectoryName(name);
-        const paths = akumaPaths({ runRoot, persona: physical.persona, suffix: physical.suffix });
+        const paths = akumaPaths({ runRoot, archetype: physical.archetype, suffix: physical.suffix });
         const snapshot = readHeart(paths);
         if (snapshot.soul !== null) return [bornListRow(paths, physical.id, snapshot)];
         if (probeLeash(paths) === "held") return [{ id: physical.id, life: "unborn" as const }];

@@ -26,9 +26,9 @@ type KanshiReport = {
 
 ## Contract endpoints
 
-Akuma source rows may name one Contract. Task endpoints come only from current
-`held` TaskHolder facts read through the package-root composition boundary;
-Task Markdown has no association field. Kanshi outer-joins each endpoint id
+Task endpoints come only from current `held` TaskHolder facts read through the
+package-root composition boundary; Task Markdown has no association field.
+Kanshi outer-joins each endpoint id
 against the already-read Contract board and exposes `{ id, observed }` in its
 own row type. `observed` is the Contract's
 public disposition when found, `missing` when a present board lacks the id, and
@@ -41,10 +41,14 @@ the joined view. A malformed or unreadable holder fails only the Task section;
 Contract and Akuma sections remain independently observable. Task and Akuma
 products do not import Contract lifecycle or Git behavior.
 
+Akuma rows have no Contract endpoint in this cut. Kanshi copies the Akuma fleet
+without joining or inferring an association.
+
 ## Selection
 
 `selectKanshi({ report, contract })` projects an assembled report without new
-reads. It keeps the addressed Contract row and Task and Akuma rows whose joined
-endpoint id exactly matches the selector. Section presence, absence, and
+reads. It keeps the addressed Contract row and Task rows whose joined endpoint
+id exactly matches the selector; the selected Akuma section has no rows because
+there is no Akuma endpoint. Section presence, absence, and
 failure remain unchanged. The text renderer consumes only this public report
 and renders each present endpoint as `keiyaku <id> (<observed>)`.

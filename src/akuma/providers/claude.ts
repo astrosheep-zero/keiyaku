@@ -236,7 +236,7 @@ function emitClaudeMessage(message: SDKMessage, events: AgentEventChannel, state
 
 function admitClaudeOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
   if (options.network !== undefined) {
-    return { kind: "refused", diagnostic: "Claude provider does not support the Persona network option" };
+    return { kind: "refused", diagnostic: "Claude provider does not support the Archetype network option" };
   }
   return { kind: "admitted", options: Object.freeze({ ...options }) };
 }

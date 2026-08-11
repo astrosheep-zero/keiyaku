@@ -90,12 +90,12 @@ function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): void {
 
 export async function publishAkuma(input: Readonly<{
   worldPath: string;
-  persona: string;
+  archetype: string;
   awaitAsleep?: boolean;
   reserve?(allocated: AllocatedAkuma): void;
   launch(allocated: AllocatedAkuma): Promise<ProcessCollar>;
 }>): Promise<AllocatedAkuma> {
-  const allocated = allocateAkumaDirectory({ worldRoot: input.worldPath, persona: input.persona });
+  const allocated = allocateAkumaDirectory({ worldRoot: input.worldPath, archetype: input.archetype });
   let collar: ProcessCollar;
   try {
     initializeHeart(allocated.paths);

@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
 import { selectActivitySnapshot } from "../src/akuma/activity.js";
-import { AkumaPersonaError, loadPersona } from "../src/akuma/persona.js";
+import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
   appendActivity,
@@ -42,19 +42,18 @@ const provider: ProviderAdapter = {
 };
 
 async function answeredSource(root: string, suffix: string) {
-  const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => suffix });
+  const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => suffix });
   initializeHeart(allocated.paths);
   await driveAkumaBody({
     paths: allocated.paths,
     seed: {
       id: allocated.id,
-      persona: "claude",
+      archetype: "claude",
       description: "Fork source",
       provider: CLAUDE_EXECUTION,
       options: { model: "fixture-model" },
       origin: { kind: "direct" },
       confinement: { kind: "unconfined" },
-      contract: "kei/fork-purpose",
       cwd: root,
     },
     initialBody: "work",
@@ -166,7 +165,6 @@ test("fork publishes a sleeping child with lineage and its native birth session"
     const snapshot = readHeart(childPaths);
     assert.deepEqual(snapshot.soul?.origin, { kind: "fork", parent: source.id, at: "public-history" });
     assert.equal(snapshot.soul?.description, "Fork source");
-    assert.equal(snapshot.soul?.contract, "kei/fork-purpose");
     assert.deepEqual(snapshot.latestSession, {
       sequence: 1,
       provider: "claude",
@@ -217,7 +215,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
 
     const unbornRoot = mkdtempSync(join(tmpdir(), "keiyaku-akuma-fork-unborn-"));
     try {
-      const unborn = allocateAkumaDirectory({ worldRoot: unbornRoot, persona: "claude", draw: () => "f0a10003" });
+      const unborn = allocateAkumaDirectory({ worldRoot: unbornRoot, archetype: "claude", draw: () => "f0a10003" });
       await assert.rejects(
         Akuma.at({ path: unbornRoot }).of({ id: unborn.id }).fork({ at: "anything" }),
         AkumaNotBornError,
@@ -234,7 +232,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
   try {
     const world = Akuma.at({ path: root });
     assert.deepEqual(world.list().rows, []);
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "1234abcd" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
     initializeHeart(allocated.paths);
     assert.equal(world.list().rows[0]?.life, "unborn");
 
@@ -242,13 +240,12 @@ test("public Akuma handles separate compact list rows from full status and wait"
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         description: "Fixture akuma",
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
         confinement: { kind: "unconfined" },
-        contract: "kei/public-purpose",
         cwd: root,
       },
       initialBody: "work",
@@ -266,10 +263,8 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.equal("answer" in listed, false);
     const status = handle.status();
     assert.equal(status.life, "asleep");
-    assert.equal(status.persona, "claude");
+    assert.equal(status.archetype, "claude");
     assert.equal(status.description, "Fixture akuma");
-    assert.equal(listed.contract, "kei/public-purpose");
-    assert.equal(status.contract, "kei/public-purpose");
     assert.deepEqual(status.confinement, { kind: "unconfined" });
     assert.equal(status.answer, "public answer");
     assert.deepEqual(status.pending, []);
@@ -316,13 +311,13 @@ test("interrupt records a tell only after taking an idle leash", async () => {
   const seat = join(root, "seat");
   try {
     mkdirSync(seat);
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "1d1e0001" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0001" });
     initializeHeart(allocated.paths);
     await driveAkumaBody({
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
@@ -354,7 +349,7 @@ test("interrupt waits for a running body to self-abort before recording the tell
   const seat = join(root, "seat");
   try {
     mkdirSync(seat);
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "1d1e0002" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0002" });
     initializeHeart(allocated.paths);
     let aborted = false;
     let settle!: (result: { kind: "failed"; diagnostic: string }) => void;
@@ -363,7 +358,7 @@ test("interrupt waits for a running body to self-abort before recording the tell
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
@@ -415,12 +410,12 @@ test("interrupt waits for a running body to self-abort before recording the tell
 test("interrupt leaves pause behind and records no tell when a held leash has no collar", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-interrupt-unstoppable-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "1d1e0003" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0003" });
     initializeHeart(allocated.paths);
     const holder = HeldAkumaLeash.try(allocated.paths)!;
     holder.birth(allocated.paths, {
       id: allocated.id,
-      persona: "claude",
+      archetype: "claude",
       provider: CLAUDE_EXECUTION,
       options: {},
       origin: { kind: "direct" },
@@ -446,12 +441,12 @@ test("interrupt leaves pause behind and records no tell when a held leash has no
 test("physical put-down evidence is not success while the leash remains held", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-interrupt-held-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "1d1e0005" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0005" });
     initializeHeart(allocated.paths);
     const holder = HeldAkumaLeash.try(allocated.paths)!;
     holder.birth(allocated.paths, {
       id: allocated.id,
-      persona: "claude",
+      archetype: "claude",
       provider: CLAUDE_EXECUTION,
       options: {},
       origin: { kind: "direct" },
@@ -478,8 +473,8 @@ test("physical put-down evidence is not success while the leash remains held", a
   }
 });
 
-test("Persona Markdown is strict call-time input with a durable option shape", () => {
-  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-persona-"));
+test("Archetype Markdown is strict call-time input with a durable option shape", () => {
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-"));
   try {
     mkdirSync(join(home, "akuma"));
     const settingsValue = settings({ home });
@@ -498,7 +493,7 @@ test("Persona Markdown is strict call-time input with a durable option shape", (
       "Review the change from first principles.",
       "",
     ].join("\n"));
-    const loaded = loadPersona({ name: "reviewer", settings: settingsValue });
+    const loaded = loadArchetype({ name: "reviewer", settings: settingsValue });
     const { adapter, ...definition } = loaded;
     assert.equal(typeof adapter.start, "function");
     assert.deepEqual(definition, {
@@ -515,21 +510,21 @@ test("Persona Markdown is strict call-time input with a durable option shape", (
     });
     writeFileSync(join(home, "akuma", "invalid.md"), "---\nprovider: claude\naccess: execute\n---\n");
     assert.throws(
-      () => loadPersona({ name: "invalid", settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaPersonaError
+      () => loadArchetype({ name: "invalid", settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError
         && error.searched[0] === join(home, "akuma", "invalid.md"),
     );
     writeFileSync(join(home, "akuma", "unknown.md"), "---\nprovider: missing\n---\n");
     assert.throws(
-      () => loadPersona({ name: "unknown", settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaPersonaError
+      () => loadArchetype({ name: "unknown", settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError
         && error.reason === "uses unknown provider missing"
         && error.searched[0] === join(home, "akuma", "unknown.md"),
     );
     assert.throws(
-      () => loadPersona({ name: "missing", settings: settingsValue }),
-      (error: unknown) => error instanceof AkumaPersonaError
-        && error.kind === "akuma-persona"
+      () => loadArchetype({ name: "missing", settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError
+        && error.kind === "akuma-archetype"
         && error.searched[0] === join(home, "akuma", "missing.md"),
     );
   } finally {
@@ -537,21 +532,34 @@ test("Persona Markdown is strict call-time input with a durable option shape", (
   }
 });
 
-test("call structurally refuses a non-Contract association before allocation", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-contract-boundary-"));
+test("Archetype catalog lists canonical files in byte order without admitting contents", () => {
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-archetype-catalog-"));
   try {
-    await assert.rejects(
-      Akuma.at({ path: root }).call({ persona: "worker", body: "build", contract: "task/not-a-contract" }),
-      /identity must use kei\//u,
+    const settingsValue = settings({ home });
+    const world = Akuma.at({ path: home, settings: settingsValue });
+    assert.deepEqual(world.listArchetypes(), []);
+
+    mkdirSync(join(home, "akuma"));
+    writeFileSync(join(home, "akuma", "zeta.md"), "not Archetype Markdown\n");
+    writeFileSync(join(home, "akuma", "alpha.md"), "---\nprovider: claude\n---\n");
+    writeFileSync(join(home, "akuma", "Upper.md"), "---\nprovider: claude\n---\n");
+    writeFileSync(join(home, "akuma", "notes.txt"), "ignored\n");
+    mkdirSync(join(home, "akuma", "directory.md"));
+
+    assert.deepEqual(world.listArchetypes(), ["alpha", "zeta"]);
+    assert.throws(
+      () => loadArchetype({ name: "zeta", settings: settingsValue }),
+      (error: unknown) => error instanceof AkumaArchetypeError && error.kind === "akuma-archetype",
     );
-    assert.equal(existsSync(akumaRunRoot(root)), false);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("list distinguishes sealed residue from an unclaimed birth", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-seal-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "abcdef12" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "abcdef12" });
     initializeHeart(allocated.paths);
     const leash = HeldAkumaLeash.try(allocated.paths)!;
     assert.equal(leash.sealIfUnborn(allocated.paths, {
@@ -571,13 +579,13 @@ test("list distinguishes sealed residue from an unclaimed birth", () => {
 test("a failed turn is durable public evidence and never masquerades as provider activity", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-failed-turn-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "fa11ed00" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "fa11ed00" });
     initializeHeart(allocated.paths);
     await driveAkumaBody({
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
@@ -649,7 +657,7 @@ test("activity is persistent narration and old raw events fail the public hard c
 test("kill gives the body a stop grace before putting down its process tree", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-kill-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "fedcba98" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "fedcba98" });
     initializeHeart(allocated.paths);
     let aborted = false;
     let settle!: (result: { kind: "failed"; diagnostic: string }) => void;
@@ -679,7 +687,7 @@ test("kill gives the body a stop grace before putting down its process tree", as
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },

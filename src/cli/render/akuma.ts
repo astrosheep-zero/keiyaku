@@ -95,7 +95,7 @@ function omission(status: AkumaStatus): string[] {
 
 function statusText(status: AkumaStatus): string {
   return [
-    ruler([`${mark(status.life)} ${status.id}`, ...(status.contract === undefined ? [] : [status.contract])]),
+    ruler([`${mark(status.life)} ${status.id}`]),
     ...omission(status),
     ...renderSpine(statusItems(status)),
   ].join("\n");

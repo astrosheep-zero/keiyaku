@@ -20,7 +20,7 @@ export function selectKanshi(input: Readonly<{
           kind: "present",
           value: {
             ...report.akuma.value,
-            rows: report.akuma.value.rows.filter((row) => "contract" in row && row.contract?.id === contract),
+            rows: [],
           },
         }
       : report.akuma,

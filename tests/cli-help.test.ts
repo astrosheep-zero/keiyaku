@@ -33,9 +33,9 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--json\] -/u);
   assert.match(renderRootHelp(), /interrupt <aku\/\.\.\.>/u);
   assert.equal(renderAkumaHelp("call"), [
-    "Summon an Akuma from a Persona and stdin body.",
+    "Summon an Akuma from an Archetype and stdin body.",
     "",
-    "usage: keiyaku call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -",
+    "usage: keiyaku call <akuma> [--cwd <path>] [--json] -",
   ].join("\n"));
 });
 
@@ -44,7 +44,7 @@ test("syntax refusal retains the deepest reached grammar", () => {
     () => parseArgv(["call", "--cwd", "/tmp", "-"]),
     (error: unknown) => error instanceof CliUsageError
       && error.diagnostic === "call has invalid positional arguments"
-      && error.projection === "usage: keiyaku call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -",
+      && error.projection === "usage: keiyaku call <akuma> [--cwd <path>] [--json] -",
   );
   assert.throws(
     () => parseArgv(["task", "unknown"]),

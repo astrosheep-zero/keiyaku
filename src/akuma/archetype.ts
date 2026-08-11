@@ -1,13 +1,13 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseDocument } from "yaml";
 import type { Settings } from "../settings.js";
-import { personaName } from "./identity.js";
+import { archetypeName } from "./identity.js";
 import { decodeProviderOptions, type ProviderAdapter, type ProviderOptions } from "./provider.js";
 import type { ProviderExecution } from "./heart/index.js";
 import { decodeProviderExecution, providerNamed } from "./providers/index.js";
 
-type DecodedPersona = Readonly<{
+type DecodedArchetype = Readonly<{
   name: string;
   path: string;
   provider: string;
@@ -15,22 +15,46 @@ type DecodedPersona = Readonly<{
   options: ProviderOptions;
 }>;
 
-type PersonaDefinition = DecodedPersona & Readonly<{ adapter: ProviderAdapter }>;
-type AdmittedPersona = Omit<PersonaDefinition, "provider"> & Readonly<{ provider: ProviderExecution }>;
+type ArchetypeDefinition = DecodedArchetype & Readonly<{ adapter: ProviderAdapter }>;
+type AdmittedArchetype = Omit<ArchetypeDefinition, "provider"> & Readonly<{ provider: ProviderExecution }>;
 
-export class AkumaPersonaError extends Error {
-  readonly kind = "akuma-persona";
+export class AkumaArchetypeError extends Error {
+  readonly kind = "akuma-archetype";
   constructor(
-    readonly persona: string,
+    readonly archetype: string,
     readonly searched: readonly string[],
     readonly reason: string,
   ) {
-    super(`Akuma persona ${persona} ${reason}\n${searched.map((path) => `searched ${path}`).join("\n")}`);
-    this.name = "AkumaPersonaError";
+    super(`Akuma archetype ${archetype} ${reason}\n${searched.map((path) => `searched ${path}`).join("\n")}`);
+    this.name = "AkumaArchetypeError";
   }
 }
 
-function personaField(
+function archetypeDirectory(settings: Settings): string | null {
+  const userPath = settings.scopes.user.path;
+  return userPath === undefined ? null : join(dirname(userPath), "akuma");
+}
+
+export function listArchetypes(input: Readonly<{ settings: Settings }>): readonly string[] {
+  const directory = archetypeDirectory(input.settings);
+  if (directory === null) return [];
+  try {
+    return readdirSync(directory, { withFileTypes: true })
+      .flatMap((entry) => {
+        if (!entry.isFile()) return [];
+        const filename = entry.name;
+        if (!filename.endsWith(".md")) return [];
+        const name = filename.slice(0, -3);
+        try { return [archetypeName(name)]; } catch { return []; }
+      })
+      .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+function archetypeField(
   values: Readonly<Record<string, unknown>>,
   key: string,
   required = false,
@@ -38,40 +62,40 @@ function personaField(
   const value = values[key];
   if (value === undefined && !required) return undefined;
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`Persona ${key} must be a nonblank string`);
+    throw new TypeError(`Archetype ${key} must be a nonblank string`);
   }
   return value;
 }
 
-function personaEnum<T extends string>(
+function archetypeEnum<T extends string>(
   values: Readonly<Record<string, unknown>>,
   key: string,
   allowed: readonly T[],
 ): T | undefined {
-  const value = personaField(values, key);
+  const value = archetypeField(values, key);
   if (value === undefined) return undefined;
-  if (!allowed.includes(value as T)) throw new TypeError(`Persona ${key} must be one of ${allowed.join(", ")}`);
+  if (!allowed.includes(value as T)) throw new TypeError(`Archetype ${key} must be one of ${allowed.join(", ")}`);
   return value as T;
 }
 
-function decodePersona(name: string, path: string, markdown: string): DecodedPersona {
+function decodeArchetype(name: string, path: string, markdown: string): DecodedArchetype {
   const lines = markdown.split(/\r?\n/u);
-  if (lines[0]?.trim() !== "---") throw new TypeError("Persona must begin with YAML frontmatter");
+  if (lines[0]?.trim() !== "---") throw new TypeError("Archetype must begin with YAML frontmatter");
   const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
-  if (closing < 0) throw new TypeError("Persona frontmatter is not closed");
+  if (closing < 0) throw new TypeError("Archetype frontmatter is not closed");
   const document = parseDocument(lines.slice(1, closing).join("\n"), { uniqueKeys: true });
-  if (document.errors.length > 0) throw new TypeError(`Persona frontmatter is invalid: ${document.errors[0]!.message}`);
+  if (document.errors.length > 0) throw new TypeError(`Archetype frontmatter is invalid: ${document.errors[0]!.message}`);
   const decoded = document.toJS() as unknown;
   if (decoded === null || typeof decoded !== "object" || Array.isArray(decoded)) {
-    throw new TypeError("Persona frontmatter must be one mapping");
+    throw new TypeError("Archetype frontmatter must be one mapping");
   }
   const values = decoded as Readonly<Record<string, unknown>>;
-  const provider = personaField(values, "provider", true)!;
-  const model = personaField(values, "model");
-  const effort = personaField(values, "effort");
-  const access = personaEnum(values, "access", ["read", "write", "auto"] as const);
-  const network = personaEnum(values, "network", ["disabled", "enabled"] as const);
-  const description = personaField(values, "description");
+  const provider = archetypeField(values, "provider", true)!;
+  const model = archetypeField(values, "model");
+  const effort = archetypeField(values, "effort");
+  const access = archetypeEnum(values, "access", ["read", "write", "auto"] as const);
+  const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
+  const description = archetypeField(values, "description");
   const systemPrompt = lines.slice(closing + 1).join("\n");
   return Object.freeze({
     name,
@@ -127,39 +151,39 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
   throw new TypeError(`unknown provider ${name}`);
 }
 
-function admitPersona(persona: DecodedPersona, settings: Settings): AdmittedPersona {
+function admitArchetype(archetype: DecodedArchetype, settings: Settings): AdmittedArchetype {
   let execution: ProviderExecution;
-  try { execution = providerExecution(settings, persona.provider); }
+  try { execution = providerExecution(settings, archetype.provider); }
   catch (error) {
-    if (error instanceof TypeError) throw new AkumaPersonaError(persona.name, [persona.path], `uses ${error.message}`);
+    if (error instanceof TypeError) throw new AkumaArchetypeError(archetype.name, [archetype.path], `uses ${error.message}`);
     throw error;
   }
   const adapter = providerNamed(execution);
-  const admission = adapter.admitOptions(persona.options);
+  const admission = adapter.admitOptions(archetype.options);
   if (admission.kind === "refused") {
-    throw new AkumaPersonaError(persona.name, [persona.path], `is unsupported: ${admission.diagnostic}`);
+    throw new AkumaArchetypeError(archetype.name, [archetype.path], `is unsupported: ${admission.diagnostic}`);
   }
-  return Object.freeze({ ...persona, provider: execution, adapter, options: admission.options });
+  return Object.freeze({ ...archetype, provider: execution, adapter, options: admission.options });
 }
 
-export function loadPersona(input: Readonly<{ name: string; settings: Settings }>): AdmittedPersona {
-  const name = personaName(input.name);
-  const userPath = input.settings.scopes.user.path;
-  if (userPath === undefined) throw new AkumaPersonaError(name, [], "has no user Settings coordinate");
-  const path = join(dirname(userPath), "akuma", `${name}.md`);
+export function loadArchetype(input: Readonly<{ name: string; settings: Settings }>): AdmittedArchetype {
+  const name = archetypeName(input.name);
+  const directory = archetypeDirectory(input.settings);
+  if (directory === null) throw new AkumaArchetypeError(name, [], "has no user Settings coordinate");
+  const path = join(directory, `${name}.md`);
   let markdown: string;
   try {
     markdown = readFileSync(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new AkumaPersonaError(name, [path], "was not found");
+      throw new AkumaArchetypeError(name, [path], "was not found");
     }
-    throw new AkumaPersonaError(name, [path], `could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    throw new AkumaArchetypeError(name, [path], `could not be read: ${error instanceof Error ? error.message : String(error)}`);
   }
   try {
-    return admitPersona(decodePersona(name, path, markdown), input.settings);
+    return admitArchetype(decodeArchetype(name, path, markdown), input.settings);
   } catch (error) {
-    if (error instanceof AkumaPersonaError) throw error;
-    throw new AkumaPersonaError(name, [path], `is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    if (error instanceof AkumaArchetypeError) throw error;
+    throw new AkumaArchetypeError(name, [path], `is invalid: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

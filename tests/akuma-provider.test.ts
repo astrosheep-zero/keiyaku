@@ -343,7 +343,7 @@ test("Claude never substitutes a sidechain assistant UUID for the outer fork poi
   });
 });
 
-test("Claude adapter consumes the admitted Persona options", async () => {
+test("Claude adapter consumes the admitted Archetype options", async () => {
   let seen: unknown;
   const provider = createClaudeProvider(async () => ({
     query(input) {
@@ -388,7 +388,7 @@ test("Claude adapter consumes the admitted Persona options", async () => {
   });
   assert.deepEqual(provider.admitOptions({ network: "disabled" }), {
     kind: "refused",
-    diagnostic: "Claude provider does not support the Persona network option",
+    diagnostic: "Claude provider does not support the Archetype network option",
   });
 });
 

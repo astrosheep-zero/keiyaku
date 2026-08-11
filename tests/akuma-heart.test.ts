@@ -35,18 +35,17 @@ import {
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-"));
-  const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "1234abcd" });
+  const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
   initializeHeart(allocated.paths);
   const soul: Soul = {
     id: allocated.id,
-    persona: "claude",
+    archetype: "claude",
     description: "Claude fixture",
     provider: { name: "claude", kind: "claude-agent-sdk" },
     options: { model: "claude-sonnet-4-5", systemPrompt: "Be precise." },
     cwd: root,
     origin: { kind: "direct" },
     confinement: { kind: "unconfined" },
-    contract: "kei/fixture",
     createdAt: "2026-08-08T00:00:00.000Z",
   };
   return { root, allocated, soul, close: () => rmSync(root, { recursive: true, force: true }) };
@@ -118,9 +117,8 @@ test("Body Request facts have one idempotent monotonic authority", () => {
   try {
     const input = {
       id: "00000000-0000-4000-8000-000000000001",
-      persona: "claude",
+      archetype: "claude",
       body: "build",
-      contract: "kei/fixture",
       world: value.root,
       recipe: {
         description: value.soul.description,
@@ -134,7 +132,7 @@ test("Body Request facts have one idempotent monotonic authority", () => {
     assert.equal(admitRequest(value.allocated.paths, { ...input, admittedAt: "later" }).admittedAt, input.admittedAt);
     assert.deepEqual(readNonterminalRequests(value.allocated.paths).map((request) => request.id), [input.id]);
 
-    const child = allocateAkumaDirectory({ worldRoot: value.root, persona: "claude", draw: () => "deadbeef" });
+    const child = allocateAkumaDirectory({ worldRoot: value.root, archetype: "claude", draw: () => "deadbeef" });
     assert.equal(reserveRequest(value.allocated.paths, input.id, child.id).state, "reserved");
     assert.equal(serveRequest(value.allocated.paths, input.id, child.id).state, "served");
     assert.equal(readRequest(value.allocated.paths, input.id)?.state, "served");
@@ -145,7 +143,7 @@ test("Body Request facts have one idempotent monotonic authority", () => {
       id: "00000000-0000-4000-8000-000000000002",
       body: "refuse",
     });
-    assert.equal(refuseRequest(value.allocated.paths, refused.id, "unknown Persona").state, "refused");
+    assert.equal(refuseRequest(value.allocated.paths, refused.id, "unknown Archetype").state, "refused");
     const voided = admitRequest(value.allocated.paths, {
       ...input,
       id: "00000000-0000-4000-8000-000000000003",
@@ -163,7 +161,7 @@ test("Body Request facts have one idempotent monotonic authority", () => {
       id: "00000000-0000-4000-8000-000000000005",
       body: "death reserved",
     });
-    const reservedChild = allocateAkumaDirectory({ worldRoot: value.root, persona: "claude", draw: () => "feedface" });
+    const reservedChild = allocateAkumaDirectory({ worldRoot: value.root, archetype: "claude", draw: () => "feedface" });
     reserveRequest(value.allocated.paths, deathReserved.id, reservedChild.id);
     recordDeath(value.allocated.paths, { evidence: "killed", at: "2026-08-08T00:00:02.000Z" });
     assert.deepEqual(readRequest(value.allocated.paths, deathAdmitted.id), {
@@ -180,17 +178,17 @@ test("Body Request facts have one idempotent monotonic authority", () => {
   } finally { value.close(); }
 });
 
-test("heart schema version 5 and leash schema version 4 hard-refuse old authority", () => {
+test("heart schema version 6 and leash schema version 4 hard-refuse old authority", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
-  const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "30000000" });
+  const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
     const heart = new DatabaseSync(allocated.paths.heart);
-    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 2)");
+    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 5)");
     heart.close();
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 5/u);
+    assert.throws(() => readHeart(allocated.paths), /heart schema version must be 6/u);
     assert.throws(() => HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

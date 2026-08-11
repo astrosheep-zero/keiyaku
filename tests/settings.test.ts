@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { gatesFrom, SettingsError } from "../src/library/keiyaku.js";
-import { loadPersona } from "../src/akuma/persona.js";
+import { loadArchetype } from "../src/akuma/archetype.js";
 import { invoke, type SettingsInvocationResult } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderSettingsText, settingsJsonValue } from "../src/cli/render/settings.js";
@@ -90,7 +90,7 @@ test("gatesFrom admits custom words, empty sets, and no implicit default", () =>
   } finally { value.close(); }
 });
 
-test("Persona resolves one provider execution without dotenv loading", () => {
+test("Archetype resolves one provider execution without dotenv loading", () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, ".env"), "INTRUDER=dotenv\n");
@@ -103,7 +103,7 @@ test("Persona resolves one provider execution without dotenv loading", () => {
       },
     } }));
     writeFileSync(join(value.home, "akuma", "reviewer.md"), "---\nprovider: codex-for\nmodel: gpt-test\n---\nReview.\n");
-    const loaded = loadPersona({ name: "reviewer", settings: settings({ root: value.project, home: value.home }) });
+    const loaded = loadArchetype({ name: "reviewer", settings: settings({ root: value.project, home: value.home }) });
     assert.deepEqual(loaded.provider, {
       name: "codex-for",
       kind: "codex-app-server",

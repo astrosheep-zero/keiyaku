@@ -282,10 +282,9 @@ export function advanceTell(paths: AkumaPaths, id: string, state: Exclude<TellSt
 
 function sameRequestInput(fact: RequestFact, input: RequestInput): boolean {
   return fact.id === input.id
-    && fact.persona === input.persona
+    && fact.archetype === input.archetype
     && fact.body === input.body
     && fact.cwd === input.cwd
-    && fact.contract === input.contract
     && fact.world === input.world
     && JSON.stringify(fact.recipe) === JSON.stringify(input.recipe);
 }

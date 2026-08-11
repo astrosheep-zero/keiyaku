@@ -3,8 +3,8 @@ import { listKeiyaku, taskHoldersForRepo } from "../library/contract.js";
 import { NoGitWorldError, Repo } from "../library/repo.js";
 import type { ContractBoard, ContractDisposition } from "../library/contract.js";
 import { Tasks, type TaskRow } from "../task/index.js";
-import { Akuma, type AkumaList } from "../akuma/index.js";
-import type { AkumaKanshiRow, AkumaKanshiWorld, KanshiReport, Section, TaskKanshiRow, TaskKanshiWorld } from "./report.js";
+import { Akuma } from "../akuma/index.js";
+import type { AkumaKanshiWorld, KanshiReport, Section, TaskKanshiRow, TaskKanshiWorld } from "./report.js";
 
 export type KanshiInput = Readonly<{ path?: string }>;
 
@@ -65,21 +65,6 @@ function joinTasks(
   });
 }
 
-function joinAkuma(rows: AkumaList["rows"], contracts: Section<ContractBoard>): readonly AkumaKanshiRow[] {
-  const dispositions = contracts.kind === "present"
-    ? new Map<string, ContractDisposition>(contracts.value.rows.map((row) => [row.id, row.disposition]))
-    : null;
-  return rows.map((row) => {
-    if (!("persona" in row)) return row;
-    const { contract, ...source } = row;
-    if (contract === undefined) return source;
-    const observed = contracts.kind !== "present"
-      ? "unavailable"
-      : dispositions?.get(contract) ?? "missing";
-    return { ...source, contract: { id: contract, observed } };
-  });
-}
-
 async function readTasks(path: string, contracts: Section<ContractBoard>, repo?: Repo): Promise<Section<TaskKanshiWorld>> {
   try {
     const tasks = Tasks.at({ path });
@@ -94,10 +79,10 @@ async function readTasks(path: string, contracts: Section<ContractBoard>, repo?:
   }
 }
 
-function readAkuma(path: string, contracts: Section<ContractBoard>): Section<AkumaKanshiWorld> {
+function readAkuma(path: string): Section<AkumaKanshiWorld> {
   try {
     const source = Akuma.at({ path }).list();
-    return { kind: "present", value: { ...source, rows: joinAkuma(source.rows, contracts) } };
+    return { kind: "present", value: source };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
   }
@@ -108,5 +93,5 @@ export async function kanshi(input?: KanshiInput): Promise<KanshiReport> {
   const contractRead = await readContracts(path);
   const contracts = contractRead.section;
   const tasks = await readTasks(path, contracts, contractRead.repo);
-  return { root: path, contracts, tasks, akuma: readAkuma(path, contracts) };
+  return { root: path, contracts, tasks, akuma: readAkuma(path) };
 }

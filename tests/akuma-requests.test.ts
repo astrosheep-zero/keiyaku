@@ -25,17 +25,16 @@ import {
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-"));
-  const parent = allocateAkumaDirectory({ worldRoot: root, persona: "parent", draw: () => "1234abcd" });
+  const parent = allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
   initializeHeart(parent.paths);
   const soul: Soul = {
     id: parent.id,
-    persona: "parent",
+    archetype: "parent",
     provider: { name: "codex-app-server", kind: "codex-app-server" },
     options: { access: "write" },
     cwd: root,
     origin: { kind: "direct" },
     confinement: { kind: "declared", writableRoots: [root] },
-    contract: "kei/parent-purpose",
     createdAt: "2026-08-09T00:00:00.000Z",
   };
   const leash = HeldAkumaLeash.try(parent.paths)!;
@@ -66,9 +65,8 @@ test("a declared drive serves Body Requests through transport while Heart remain
   try {
     process.env[AKUMA_REQUESTS_ENV] = pump.directory;
     const childId = (await Akuma.at({ path: value.root }).call({
-      persona: "worker",
+      archetype: "worker",
       body: "build",
-      contract: "kei/explicit-purpose",
     })).id;
     const origin = readSoul(pathsForAkuId(value.root, childId))?.origin;
     assert.equal(origin?.kind, "request");
@@ -80,21 +78,20 @@ test("a declared drive serves Body Requests through transport while Heart remain
       parentId: value.parent.id,
       requestId,
     });
-    assert.equal(readSoul(pathsForAkuId(value.root, childId))?.contract, "kei/explicit-purpose");
 
-    const unassociated = (await Akuma.at({ path: value.root }).call({ persona: "worker", body: "separate" })).id;
-    assert.equal(readSoul(pathsForAkuId(value.root, unassociated))?.contract, undefined);
+    const unassociated = (await Akuma.at({ path: value.root }).call({ archetype: "worker", body: "separate" })).id;
     delete process.env[AKUMA_REQUESTS_ENV];
 
     const malformedId = "00000000-0000-4000-8000-000000000001";
     writeFileSync(join(pump.directory, `${malformedId}.request.json`), JSON.stringify({
       id: malformedId,
       world: value.root,
-      persona: "worker",
-      body: "malformed recipe",
+      archetype: "worker",
+      body: "legacy association",
+      contract: "kei/legacy-association",
       recipe: {
-        provider: { name: "broken", kind: "unknown" },
-        options: {},
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: { systemPrompt: "Work.\n" },
         confinement: { kind: "unconfined" },
       },
     }));
@@ -102,7 +99,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
       directory: pump.directory,
       id: "00000000-0000-4000-8000-000000000002",
       world: join(value.root, "other"),
-      persona: "worker",
+      archetype: "worker",
       body: "wrong world",
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
@@ -110,7 +107,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
         confinement: { kind: "unconfined" },
       },
     }), (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "refused");
-    assert.equal(readRequest(value.parent.paths, malformedId), null, "malformed recipe bytes must not enter Heart");
+    assert.equal(readRequest(value.parent.paths, malformedId), null, "legacy association bytes must not enter Heart");
   } finally {
     await pump.close();
     value.leash.release();
@@ -129,7 +126,7 @@ test("a new body settles old requests by observation without replay", async () =
     const admittedId = "00000000-0000-4000-8000-000000000011";
     admitRequest(value.parent.paths, {
       id: admittedId,
-      persona: "worker",
+      archetype: "worker",
       body: "never spawned",
       world: value.root,
       recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
@@ -138,46 +135,46 @@ test("a new body settles old requests by observation without replay", async () =
 
     const bornId = "00000000-0000-4000-8000-000000000012";
     admitRequest(value.parent.paths, {
-      id: bornId, persona: "worker", body: "born", world: value.root,
+      id: bornId, archetype: "worker", body: "born", world: value.root,
       recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
       admittedAt: "2026-08-09T00:00:02.000Z",
     });
-    const born = allocateAkumaDirectory({ worldRoot: value.root, persona: "worker", draw: () => "00000012" });
+    const born = allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000012" });
     initializeHeart(born.paths);
     reserveRequest(value.parent.paths, bornId, born.id);
     const bornLeash = HeldAkumaLeash.try(born.paths)!;
     bornLeash.birth(born.paths, {
       ...value.soul,
       id: born.id,
-      persona: "worker",
+      archetype: "worker",
       origin: { kind: "request", parentId: value.parent.id, requestId: bornId },
     });
     bornLeash.release();
 
     const unbornId = "00000000-0000-4000-8000-000000000013";
     admitRequest(value.parent.paths, {
-      id: unbornId, persona: "worker", body: "unborn", world: value.root,
+      id: unbornId, archetype: "worker", body: "unborn", world: value.root,
       recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
       admittedAt: "2026-08-09T00:00:03.000Z",
     });
-    const unborn = allocateAkumaDirectory({ worldRoot: value.root, persona: "worker", draw: () => "00000013" });
+    const unborn = allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000013" });
     initializeHeart(unborn.paths);
     reserveRequest(value.parent.paths, unbornId, unborn.id);
 
     const mismatchId = "00000000-0000-4000-8000-000000000014";
     admitRequest(value.parent.paths, {
-      id: mismatchId, persona: "worker", body: "mismatch", world: value.root,
+      id: mismatchId, archetype: "worker", body: "mismatch", world: value.root,
       recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
       admittedAt: "2026-08-09T00:00:04.000Z",
     });
-    const mismatch = allocateAkumaDirectory({ worldRoot: value.root, persona: "worker", draw: () => "00000014" });
+    const mismatch = allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000014" });
     initializeHeart(mismatch.paths);
     reserveRequest(value.parent.paths, mismatchId, mismatch.id);
     const mismatchLeash = HeldAkumaLeash.try(mismatch.paths)!;
     mismatchLeash.birth(mismatch.paths, {
       ...value.soul,
       id: mismatch.id,
-      persona: "worker",
+      archetype: "worker",
       origin: { kind: "direct" },
     });
     mismatchLeash.release();

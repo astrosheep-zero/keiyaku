@@ -51,7 +51,7 @@ Public identities use this closed registry:
 
 | Prefix | Grammar |
 | --- | --- |
-| `aku/` | `aku/<human-persona>/<lower-hex8>` |
+| `aku/` | `aku/<human-archetype>/<lower-hex8>` |
 | `kei/` | `kei/<contract-segment>` |
 | `task/` | `task/<human-local-id>` or `task/<human-ns...>/<human-local-id>` |
 | `resp/` | `resp/<machine-artifact>` |

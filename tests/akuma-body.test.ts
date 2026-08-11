@@ -36,13 +36,13 @@ function adapter(input: Readonly<{
 test("body births, admits native session, records the turn, and exits only when idle", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-body-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "1234abcd" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
     initializeHeart(allocated.paths);
     const launch: BodyLaunch = {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { model: "claude-sonnet-4-5", effort: "high", systemPrompt: "Build carefully." },
         origin: { kind: "direct" },
@@ -132,7 +132,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
   writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   process.env.HOME = home;
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "parent", draw: () => "1234abcd" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
     initializeHeart(allocated.paths);
     let requestDirectory: string | undefined;
     let childId: AkuId | undefined;
@@ -146,7 +146,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
           directory: input.requests.dir,
           id: "00000000-0000-4000-8000-000000000021",
           world: root,
-          persona: "worker",
+          archetype: "worker",
           body: "nested work",
           recipe: {
             provider: { name: "claude", kind: "claude-agent-sdk" },
@@ -169,7 +169,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "parent",
+        archetype: "parent",
         provider: { name: "codex-app-server", kind: "codex-app-server" },
         options: { access: "write" },
         origin: { kind: "direct" },
@@ -208,14 +208,14 @@ test("a declared drive drains Body Requests before recording its terminal turn",
 test("a fork-born body sleeps without a turn and its first tell resumes the child session", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-fork-body-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "f0a1b0d1" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a1b0d1" });
     initializeHeart(allocated.paths);
     const starts: Array<Readonly<{ prompt: string; options: ProviderOptions; session?: string }>> = [];
     await driveAkumaBody({
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { model: "soul-model" },
         origin: { kind: "fork", parent: "aku/claude/1234abcd" as typeof allocated.id, at: "history-1" },
@@ -267,13 +267,13 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
 test("the soul retains the summon cwd before native session admission", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-seat-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "87654321" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "87654321" });
     initializeHeart(allocated.paths);
     const launch: BodyLaunch = {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
@@ -303,13 +303,13 @@ test("the soul retains the summon cwd before native session admission", async ()
 test("an answer without an admitted or resumed session is retained as a failed turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-sessionless-answer-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "decafbad" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "decafbad" });
     initializeHeart(allocated.paths);
     await driveAkumaBody({
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
@@ -339,13 +339,13 @@ test("an answer without an admitted or resumed session is retained as a failed t
 test("a new leash holder revokes stop and pause abandoned before settlement", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-orphan-stop-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "a1b2c3d4" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "a1b2c3d4" });
     initializeHeart(allocated.paths);
     const base: BodyLaunch = {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
@@ -397,7 +397,7 @@ test("a new leash holder revokes stop and pause abandoned before settlement", as
 test("pause aborts the current drive and records the body as put down", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-pause-"));
   try {
-    const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "c0ffee00" });
+    const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee00" });
     initializeHeart(allocated.paths);
     let aborted = false;
     let settle!: (result: TurnResult) => void;
@@ -427,7 +427,7 @@ test("pause aborts the current drive and records the body as put down", async ()
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        persona: "claude",
+        archetype: "claude",
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
@@ -454,7 +454,7 @@ test("pause aborts the current drive and records the body as put down", async ()
 
 test("a body aborts and buries its process tree when the heart disappears during a drive", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-gone-"));
-  const allocated = allocateAkumaDirectory({ worldRoot: root, persona: "claude", draw: () => "bad0cafe" });
+  const allocated = allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "bad0cafe" });
   initializeHeart(allocated.paths);
   let aborted = false;
   let buried = false;
@@ -478,7 +478,7 @@ test("a body aborts and buries its process tree when the heart disappears during
     paths: allocated.paths,
     seed: {
       id: allocated.id,
-      persona: "claude",
+      archetype: "claude",
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       origin: { kind: "direct" },

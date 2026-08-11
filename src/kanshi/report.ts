@@ -18,11 +18,7 @@ export type TaskKanshiWorld = Readonly<{
   rows: readonly TaskKanshiRow[];
 }>;
 
-export type AkumaKanshiRow =
-  | (Omit<AkumaListRow, "contract"> & Readonly<{
-      contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
-    }>)
-  | UnbornAkumaListRow;
+export type AkumaKanshiRow = AkumaListRow | UnbornAkumaListRow;
 
 export type AkumaKanshiWorld = Omit<AkumaList, "rows"> & Readonly<{
   rows: readonly AkumaKanshiRow[];

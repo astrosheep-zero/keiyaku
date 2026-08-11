@@ -18,14 +18,14 @@ export type AkumaPaths = Readonly<{
 
 export type AllocatedAkuma = Readonly<{
   id: AkuId;
-  persona: string;
+  archetype: string;
   suffix: string;
   paths: AkumaPaths;
 }>;
 
-export function personaName(value: string): string {
+export function archetypeName(value: string): string {
   if (value.length === 0 || normalizeIdentityStem({ source: value }) !== value) {
-    throw new TypeError("Akuma persona must be one normalized human identity segment");
+    throw new TypeError("Akuma archetype must be one normalized human identity segment");
   }
   return value;
 }
@@ -35,24 +35,19 @@ function suffixSegment(value: string): string {
   return value;
 }
 
-export function akuId(input: Readonly<{ persona: string; suffix: string }>): AkuId {
+export function akuId(input: Readonly<{ archetype: string; suffix: string }>): AkuId {
   return identityCoordinate({
     family: "aku",
-    segments: [personaName(input.persona), suffixSegment(input.suffix)],
+    segments: [archetypeName(input.archetype), suffixSegment(input.suffix)],
   }) as AkuId;
 }
 
-export function parseAkuId(value: string): Readonly<{ id: AkuId; persona: string; suffix: string }> {
+export function parseAkuId(value: string): Readonly<{ id: AkuId; archetype: string; suffix: string }> {
   const segments = identitySegments({ family: "aku", value });
-  if (segments.length !== 2) throw new TypeError("Akuma identity must be aku/<persona>/<hex8>");
-  const persona = personaName(segments[0]!);
+  if (segments.length !== 2) throw new TypeError("Akuma identity must be aku/<archetype>/<hex8>");
+  const archetype = archetypeName(segments[0]!);
   const suffix = suffixSegment(segments[1]!);
-  return { id: akuId({ persona, suffix }), persona, suffix };
-}
-
-export function contractId(value: string): string {
-  identitySegments({ family: "kei", value });
-  return value;
+  return { id: akuId({ archetype, suffix }), archetype, suffix };
 }
 
 export function akumaRunRoot(worldRoot: string): string {
@@ -61,10 +56,10 @@ export function akumaRunRoot(worldRoot: string): string {
 
 export function akumaPaths(input: Readonly<{
   runRoot: string;
-  persona: string;
+  archetype: string;
   suffix: string;
 }>): AkumaPaths {
-  const directory = join(input.runRoot, `${personaName(input.persona)}-${suffixSegment(input.suffix)}`);
+  const directory = join(input.runRoot, `${archetypeName(input.archetype)}-${suffixSegment(input.suffix)}`);
   return {
     directory,
     heart: join(directory, "heart.db"),
@@ -73,11 +68,11 @@ export function akumaPaths(input: Readonly<{
   };
 }
 
-export function akuIdFromDirectoryName(name: string): Readonly<{ id: AkuId; persona: string; suffix: string }> {
+export function akuIdFromDirectoryName(name: string): Readonly<{ id: AkuId; archetype: string; suffix: string }> {
   if (name.length < 10 || name.at(-9) !== "-") throw new Error(`invalid Akuma run directory ${name}`);
-  const persona = name.slice(0, -9);
+  const archetype = name.slice(0, -9);
   const suffix = name.slice(-8);
-  return { id: akuId({ persona, suffix }), persona, suffix };
+  return { id: akuId({ archetype, suffix }), archetype, suffix };
 }
 
 export function ensureAkumaRunRoot(worldRoot: string): string {
@@ -93,17 +88,17 @@ export function ensureAkumaRunRoot(worldRoot: string): string {
 
 export function allocateAkumaDirectory(input: Readonly<{
   worldRoot: string;
-  persona: string;
+  archetype: string;
   draw?: () => string;
 }>): AllocatedAkuma {
-  const persona = personaName(input.persona);
+  const archetype = archetypeName(input.archetype);
   const runRoot = ensureAkumaRunRoot(input.worldRoot);
   for (;;) {
     const suffix = suffixSegment(input.draw?.() ?? randomBytes(4).toString("hex"));
-    const paths = akumaPaths({ runRoot, persona, suffix });
+    const paths = akumaPaths({ runRoot, archetype, suffix });
     try {
       mkdirSync(paths.directory);
-      return { id: akuId({ persona, suffix }), persona, suffix, paths };
+      return { id: akuId({ archetype, suffix }), archetype, suffix, paths };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
@@ -112,7 +107,7 @@ export function allocateAkumaDirectory(input: Readonly<{
 
 export function pathsForAkuId(worldRoot: string, id: AkuId): AkumaPaths {
   const parsed = parseAkuId(id);
-  return akumaPaths({ runRoot: akumaRunRoot(worldRoot), persona: parsed.persona, suffix: parsed.suffix });
+  return akumaPaths({ runRoot: akumaRunRoot(worldRoot), archetype: parsed.archetype, suffix: parsed.suffix });
 }
 
 export function worldRootForAkumaPaths(paths: AkumaPaths): string {

@@ -4,7 +4,7 @@ type Output = Readonly<{ output: "text" | "json" }>;
 type Addressed = Readonly<{ id: string }>;
 
 export type ParsedAkumaCommand = Output & (
-  | Readonly<{ command: "call"; persona: string; cwd?: string; contract?: string }>
+  | Readonly<{ command: "call"; archetype: string; cwd?: string }>
   | (Readonly<{ command: "kill" }> & Addressed)
   | (Readonly<{ command: "wait"; timeoutMs?: number }> & Addressed)
   | (Readonly<{ command: "tell" | "interrupt" }> & Addressed)
@@ -26,9 +26,9 @@ const AKUMA_COMMAND_SPECS = {
   call: {
     arity: 1,
     stdin: true,
-    flags: { cwd: "value", contract: "value", json: "boolean" },
-    usage: "call <persona> [--cwd <path>] [--contract <contract-id>] [--json] -",
-    purpose: "Summon an Akuma from a Persona and stdin body.",
+    flags: { cwd: "value", json: "boolean" },
+    usage: "call <akuma> [--cwd <path>] [--json] -",
+    purpose: "Summon an Akuma from an Archetype and stdin body.",
   },
   wait: {
     arity: 1,
@@ -193,9 +193,8 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   if (action === "call") {
     return {
       command: action,
-      persona: positionals[0]!,
+      archetype: positionals[0]!,
       ...(typeof flags.cwd === "string" ? { cwd: flags.cwd } : {}),
-      ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
       output,
     };
   }
