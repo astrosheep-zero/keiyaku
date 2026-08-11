@@ -14,13 +14,14 @@ World.at(path: string): WorldRoot
 ```
 
 `World.locate` resolves an existing directory and climbs toward the filesystem
-root for the nearest `.keiyaku/` marker. It never climbs through the user home
-directory selected by the process edge (`$HOME`); `$HOME` is never a World.
-When no marker is found it returns `null` and creates nothing.
+root for the nearest `.keiyaku/` marker. It skips the user home directory
+selected by the process edge (`$HOME`) and the filesystem root itself; neither
+may be a World. When no marker is found it returns `null` and creates nothing.
 
-`World.at` resolves exactly the supplied existing directory, rejects `$HOME`,
-and asserts or creates its `.keiyaku/` marker. It never searches upward or
-downward. A missing directory or non-directory marker is a typed world error.
+`World.at` resolves exactly the supplied existing directory, rejects `$HOME`
+and the filesystem root, and asserts or creates its `.keiyaku/` marker. It
+never searches upward or downward. A missing directory or non-directory marker
+is a typed world error.
 
 The CLI is the only climb policy: it calls `locate` for read commands and uses
 `locate` followed by `at` for commands that create world-local facts. Library

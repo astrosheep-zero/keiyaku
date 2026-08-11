@@ -7,9 +7,9 @@ const WORLD_BRAND: unique symbol = Symbol("keiyaku.world");
 export type WorldRoot = string & { readonly [WORLD_BRAND]: true };
 
 export class WorldError extends Error {
-  readonly kind: "invalid-world" | "home-world";
+  readonly kind: "invalid-world" | "home-world" | "root-world";
 
-  constructor(kind: "invalid-world" | "home-world", message: string) {
+  constructor(kind: "invalid-world" | "home-world" | "root-world", message: string) {
     super(message);
     this.name = "WorldError";
     this.kind = kind;
@@ -38,9 +38,12 @@ function brand(path: string): WorldRoot { return path as WorldRoot; }
 
 function marker(root: string): string { return join(root, ".keiyaku"); }
 
-function rejectHome(root: string): void {
+function rejectReservedRoot(root: string): void {
   if (root === homeRoot()) {
     throw new WorldError("home-world", "the user home directory cannot be a Keiyaku world");
+  }
+  if (root === parse(root).root) {
+    throw new WorldError("root-world", "the filesystem root cannot be a Keiyaku world");
   }
 }
 
@@ -57,7 +60,7 @@ function ensureMarker(root: string): void {
 
 function exact(input: string): WorldRoot {
   const root = directory(input, "world");
-  rejectHome(root);
+  rejectReservedRoot(root);
   ensureMarker(root);
   return brand(root);
 }
@@ -71,7 +74,8 @@ export const World = Object.freeze({
     let candidate = locateInput(input);
     const home = homeRoot();
     for (;;) {
-      if (candidate !== home && existsSync(marker(candidate))) {
+      const filesystemRoot = parse(candidate).root;
+      if (candidate !== home && candidate !== filesystemRoot && existsSync(marker(candidate))) {
         try {
           if (!statSync(marker(candidate)).isDirectory()) {
             throw new WorldError("invalid-world", `world marker is not a directory: ${marker(candidate)}`);
@@ -83,7 +87,7 @@ export const World = Object.freeze({
         return brand(candidate);
       }
       const parent = dirname(candidate);
-      if (parent === candidate || candidate === parse(candidate).root) return null;
+      if (parent === candidate || candidate === filesystemRoot) return null;
       candidate = parent;
     }
   },

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import test from "node:test";
 import { World, WorldError } from "../src/world.js";
 
@@ -28,6 +28,12 @@ test("World.at establishes only the exact directory", () => {
 test("World excludes the user home from locate and exact construction", () => {
   assert.equal(World.locate(homedir()), null);
   assert.throws(() => World.at(homedir()), (error) => error instanceof WorldError && error.kind === "home-world");
+});
+
+test("World excludes the filesystem root from locate and exact construction", () => {
+  const root = parse(process.cwd()).root;
+  assert.equal(World.locate(root), null);
+  assert.throws(() => World.at(root), (error) => error instanceof WorldError && error.kind === "root-world");
 });
 
 test("World refuses a non-directory marker", () => {
