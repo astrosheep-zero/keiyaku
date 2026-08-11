@@ -169,7 +169,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/identity.ts"),
         any("git/observe.ts", ["currentBranch"]),
         any("git/repository.ts"),
-        any("git/workspace.ts", ["captureWorkspaceTree"]),
+        any("git/workspace.ts", ["captureWorkspaceTree", "withPrivateGitIndex"]),
       ],
     },
     {

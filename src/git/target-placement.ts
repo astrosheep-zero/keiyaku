@@ -6,12 +6,13 @@ import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, type GitObjectId } 
 import { currentBranch } from "./observe.js";
 import {
   commonGitDirectory,
+  GitPlumbingError,
   readRef,
   registeredWorktrees,
   runGit,
   type GitRepository,
 } from "./repository.js";
-import { captureWorkspaceTree } from "./workspace.js";
+import { captureWorkspaceTree, withPrivateGitIndex } from "./workspace.js";
 
 export type WorkspaceNotOnTargetRefusal = Readonly<{
   kind: "workspace-not-on-target";
@@ -87,16 +88,52 @@ function commitTree(repository: GitRepository, snapshot: SnapshotId): GitObjectI
   );
 }
 
-function indexTree(repository: GitRepository, path: string): GitObjectId {
-  return gitObjectId(runGit(repository, ["-C", path, "write-tree"]).toString("utf8").trim(), "index tree");
-}
-
 function pathsOverlap(left: string, right: string): boolean {
   return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
 }
 
 function intersection(left: readonly string[], right: readonly string[]): readonly string[] {
   return left.filter((candidate) => right.some((path) => pathsOverlap(candidate, path))).sort();
+}
+
+function failurePaths(error: unknown): readonly string[] {
+  if (!(error instanceof GitPlumbingError)) return [];
+  const paths = new Set<string>();
+  for (const match of error.stderr.toString("utf8").matchAll(/(?:Entry|Untracked working tree file) '([^']+)'/gu)) {
+    paths.add(match[1]!);
+  }
+  return [...paths].sort();
+}
+
+function checkoutRefusal(
+  contractId: ContractId,
+  target: RefOperation,
+  path: string,
+  reason: CheckoutNotFollowableRefusal["reason"],
+  error: unknown,
+): CheckoutNotFollowableRefusal {
+  const paths = failurePaths(error);
+  if (paths.length === 0) throw error;
+  return { kind: "checkout-not-followable", contractId, target: target.target, path, reason, paths };
+}
+
+function indexMatchesTreeOnPaths(
+  repository: GitRepository,
+  path: string,
+  tree: GitObjectId,
+  paths: readonly string[],
+): boolean {
+  return gitPaths(repository, path, ["diff-index", "--cached", "--name-only", "-z", tree, "--", ...paths]).length === 0;
+}
+
+function workspaceMatchesTreeOnPaths(
+  repository: GitRepository,
+  path: string,
+  tree: GitObjectId,
+  workspaceTree: GitObjectId,
+  paths: readonly string[],
+): boolean {
+  return gitPaths(repository, path, ["diff", "--name-only", "-z", tree, workspaceTree, "--", ...paths]).length === 0;
 }
 
 function sourceWorktree(repository: GitRepository): string {
@@ -111,16 +148,12 @@ function ordinaryPrecheck(
 ): CheckoutNotFollowableRefusal | null {
   const predecessor = gitObjectIdForSnapshot(target.expectedOid);
   const candidate = gitObjectIdForSnapshot(target.newOid);
-  const staged = gitPaths(repository, path, ["diff", "--cached", "--name-only", "-z", predecessor]);
-  if (staged.length > 0) {
-    return {
-      kind: "checkout-not-followable",
-      contractId,
-      target: target.target,
-      path,
-      reason: "staged",
-      paths: staged,
-    };
+  try {
+    withPrivateGitIndex((environment) => {
+      runGit(repository, ["-C", path, "read-tree", "-i", `--index-output=${environment.GIT_INDEX_FILE}`, "-m", predecessor, candidate]);
+    });
+  } catch (error) {
+    return checkoutRefusal(contractId, target, path, "staged", error);
   }
 
   const changed = gitPaths(repository, path, ["diff", "--name-only", "-z", predecessor, candidate]);
@@ -151,7 +184,14 @@ function ordinaryPrecheck(
     };
   }
 
-  runGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
+  try {
+    runGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
+  } catch (error) {
+    const reason = error instanceof GitPlumbingError && /untracked working tree file/iu.test(error.stderr.toString("utf8"))
+      ? "untracked"
+      : "conflict";
+    return checkoutRefusal(contractId, target, path, reason, error);
+  }
   return null;
 }
 
@@ -237,6 +277,55 @@ function recoveryLag(path: string, target: string, detail: string): TargetChecko
   return { kind: "target-checkout-retained", path, target, diagnostic: detail };
 }
 
+function recoverCheckout(input: Readonly<{
+  repository: GitRepository;
+  path: string;
+  predecessor: SnapshotId;
+  candidate: SnapshotId;
+  predecessorTree: GitObjectId;
+  candidateTree: GitObjectId;
+}>): "complete" | "recovered" | "retained" {
+  const { repository, path, predecessor, candidate, predecessorTree, candidateTree } = input;
+  const changedPaths = gitPaths(repository, path, ["diff", "--name-only", "-z", predecessorTree, candidateTree]);
+  if (changedPaths.length === 0) return "complete";
+  const workspaceTree = captureWorkspaceTree(repository, path).tree;
+  const candidateIndex = indexMatchesTreeOnPaths(repository, path, candidateTree, changedPaths);
+  const candidateWorkspace = workspaceMatchesTreeOnPaths(repository, path, candidateTree, workspaceTree, changedPaths);
+  if (candidateIndex && candidateWorkspace) return "complete";
+
+  if (workspaceTree === candidateTree) {
+    runGit(repository, ["-C", path, "read-tree", gitObjectIdForSnapshot(candidate)]);
+    return "recovered";
+  }
+
+  const predecessorIndex = indexMatchesTreeOnPaths(repository, path, predecessorTree, changedPaths);
+  if (predecessorIndex && candidateWorkspace) {
+    runGit(repository, [
+      "-C",
+      path,
+      "read-tree",
+      "-i",
+      "-m",
+      gitObjectIdForSnapshot(predecessor),
+      gitObjectIdForSnapshot(candidate),
+    ]);
+    return "recovered";
+  }
+
+  const predecessorWorkspace = workspaceMatchesTreeOnPaths(repository, path, predecessorTree, workspaceTree, changedPaths);
+  if (!predecessorIndex || !predecessorWorkspace) return "retained";
+  runGit(repository, [
+    "-C",
+    path,
+    "read-tree",
+    "-m",
+    "-u",
+    gitObjectIdForSnapshot(predecessor),
+    gitObjectIdForSnapshot(candidate),
+  ]);
+  return "recovered";
+}
+
 export function recoverTargetPlacement(
   repository: GitRepository,
   state: ContractState,
@@ -254,36 +343,22 @@ export function recoverTargetPlacement(
   const effects: TargetCheckoutEffect[] = [];
   const lag: TargetCheckoutLag[] = [];
   for (const worktree of worktrees) {
-    let currentIndex: GitObjectId;
     try {
-      currentIndex = indexTree(repository, worktree.path);
-    } catch (error) {
-      lag.push(recoveryLag(worktree.path, target, diagnostic(error)));
-      continue;
-    }
-    if (currentIndex === candidateTree) {
-      continue;
-    }
-
-    try {
-      if (captureWorkspaceTree(repository, worktree.path).tree === candidateTree) {
-        runGit(repository, ["-C", worktree.path, "read-tree", gitObjectIdForSnapshot(delivery.data.candidate)]);
-      } else {
-        if (currentIndex !== predecessorTree) {
-          lag.push(recoveryLag(worktree.path, target, "target checkout index is neither predecessor nor candidate"));
-          continue;
-        }
-        runGit(repository, [
-          "-C",
-          worktree.path,
-          "read-tree",
-          "-m",
-          "-u",
-          gitObjectIdForSnapshot(delivery.data.expectedPredecessor),
-          gitObjectIdForSnapshot(delivery.data.candidate),
-        ]);
+      const recovery = recoverCheckout({
+        repository,
+        path: worktree.path,
+        predecessor: delivery.data.expectedPredecessor,
+        candidate: delivery.data.candidate,
+        predecessorTree,
+        candidateTree,
+      });
+      if (recovery === "retained") {
+        lag.push(recoveryLag(worktree.path, target, "target checkout entries are neither predecessor nor candidate"));
+        continue;
       }
-      effects.push({ kind: "target-checkout", path: worktree.path, target, action: "recovered" });
+      if (recovery === "recovered") {
+        effects.push({ kind: "target-checkout", path: worktree.path, target, action: "recovered" });
+      }
     } catch (error) {
       lag.push(recoveryLag(worktree.path, target, diagnostic(error)));
     }

@@ -115,14 +115,16 @@ that same fence.
 
 When the target checkout is not the tender source, placement follows Git merge
 semantics. Before publication, each registered checkout of the target must
-have an index tree equal to the predecessor tree, no worktree modification on
-a predecessor-to-candidate changed path, and no untracked path colliding with
-a candidate addition. Unrelated unstaged and untracked paths are preserved.
-Any staged change refuses regardless of path overlap. Failure returns
+admit the predecessor-to-candidate two-tree merge of its current index, have no
+worktree modification on a predecessor-to-candidate changed path, and have no
+untracked path colliding with a candidate addition. The index merge preserves
+staged entries that the candidate does not change. A staged entry that Git
+cannot carry through that merge refuses; unrelated staged, unstaged, and
+untracked paths are preserved. Every failure returns
 `checkout-not-followable` with the checkout, target, exact implicated paths,
 and reason `staged`, `conflict`, or `untracked`; neither the claimed fact nor
-target ref is written. On success Git performs the predecessor-to-candidate
-two-tree update immediately after publication and reports a followed target
+target ref is written. On success Git performs that same two-tree index and
+worktree update immediately after publication and reports a followed target
 checkout effect.
 
 When a targeted here workspace is itself the target checkout, placement
@@ -138,13 +140,17 @@ The target fence removes ordinary post-admission projection. Process death or
 a failed follow after ref publication can leave only the current placement's
 unfinished second half. It has no marker and no ancestor search. Recovery
 proceeds only while the target still names the claimed candidate. Each checkout
-is recovered from its own provable shape rather than a remembered arm: an
-index already at the candidate is complete; candidate-equal worktree content
-completes by index-only alignment regardless of the old index; otherwise a
-predecessor index may complete the same two-tree update. Any other shape or
-failed update reports typed target-checkout lag and performs no further mutation.
-A later placement cannot pass its preconditions while that checkout is behind,
-so unfinished placements do not accumulate.
+is recovered from its own provable shape rather than a remembered arm. For an
+ordinary checkout, candidate index and worktree entries on every
+predecessor-to-candidate changed path prove the follow complete while preserving
+unrelated staged and unstaged entries. Candidate worktree entries with
+predecessor index entries on those paths complete through an index-only
+two-tree merge; predecessor entries in both may complete the same index and
+worktree update. A full candidate worktree whose changed-path index is not yet
+at the candidate completes through full candidate index alignment. Any other
+shape or failed update reports typed target-checkout lag and performs no further
+mutation. A later placement cannot pass its preconditions while that checkout
+is behind, so unfinished placements do not accumulate.
 
 Git admission builds raw Git objects and uses one
 `update-ref --stdin --no-deref` transaction. It recognizes canonical admitted

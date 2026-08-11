@@ -85,6 +85,26 @@ test("ordinary placement follows a checked-out target and preserves unrelated wo
     && effect.action === "followed"));
 });
 
+test("ordinary placement carries unrelated staged index bytes through the follow", async () => {
+  const repository = repositoryWithMain();
+  const { contract, path } = await managedCandidate(repository);
+  const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
+  const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]);
+  writeFileSync(resolve(repository.path, "local.txt"), "staged local\n");
+  repository.run(["add", "local.txt"]);
+  const stagedPatch = repository.run(["diff", "--cached", "--", "local.txt"]);
+
+  const delivered = await contract.deliver();
+
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]), candidate);
+  assert.notEqual(candidate, predecessor);
+  assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
+  assert.equal(readFileSync(resolve(repository.path, "local.txt"), "utf8"), "staged local\n");
+  assert.equal(repository.run(["diff", "--cached", "--", "local.txt"]), stagedPatch);
+  assert.deepEqual(delivered.lags, []);
+  assert.ok(delivered.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "followed"));
+});
+
 test("ordinary placement follows the target checkout in another worktree", async () => {
   const repository = repositoryWithMain();
   repository.run(["branch", "observer"]);
@@ -172,12 +192,13 @@ test("an ignored untracked collision remains a typed refusal", async () => {
   assert.equal(readFileSync(resolve(repository.path, "generated.dat"), "utf8"), "ignored local\n");
 });
 
-test("any staged target change refuses placement and preserves the complete index", async () => {
+test("a staged candidate-changed path refuses placement with its exact path", async () => {
   const repository = repositoryWithMain();
   const { contract } = await managedCandidate(repository);
   const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
-  writeFileSync(resolve(repository.path, "local.txt"), "staged local\n");
-  repository.run(["add", "local.txt"]);
+  writeFileSync(resolve(repository.path, "delivered.txt"), "staged conflict\n");
+  repository.run(["add", "delivered.txt"]);
+  const stagedPatch = repository.run(["diff", "--cached", "--", "delivered.txt"]);
 
   const delivered = await contract.deliver();
 
@@ -186,10 +207,12 @@ test("any staged target change refuses placement and preserves the complete inde
     assert.fail("expected checkout-not-followable");
   }
   assert.equal(delivered.value.placement.refusal.reason, "staged");
-  assert.deepEqual(delivered.value.placement.refusal.paths, ["local.txt"]);
+  assert.deepEqual(delivered.value.placement.refusal.paths, ["delivered.txt"]);
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]), predecessor);
-  assert.equal(repository.run(["diff", "--cached", "--name-only"]), "local.txt\n");
-  assert.equal(readFileSync(resolve(repository.path, "local.txt"), "utf8"), "staged local\n");
+  assert.equal(repository.run(["diff", "--cached", "--", "delivered.txt"]), stagedPatch);
+  assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "staged conflict\n");
+  assert.deepEqual(delivered.lags, []);
+  assert.ok(!delivered.effects.some((effect) => effect.kind === "target-checkout"));
 });
 
 test("dirty here placement commits staged unstaged and untracked bytes without rewriting the worktree", async () => {
@@ -298,6 +321,51 @@ test("reconcile completes an ordinary follow interrupted after atomic publicatio
   assert.ok(reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
 });
 
+test("reconcile recognizes a completed ordinary follow despite unrelated staged and unstaged bytes", async () => {
+  const repository = repositoryWithMain();
+  const candidate = await managedCandidate(repository, ["reviewed"]);
+  await admitClaimWithoutFollow(repository, candidate.contract);
+  const delivery = observeContract(repositoryAt(repository.path), candidate.contract.id).state?.delivery?.data;
+  assert.ok(delivery);
+  repository.run(["read-tree", "-m", "-u", delivery.expectedPredecessor, delivery.candidate]);
+  writeFileSync(resolve(repository.path, "local.txt"), "staged local\n");
+  repository.run(["add", "local.txt"]);
+  const stagedPatch = repository.run(["diff", "--cached", "--", "local.txt"]);
+  writeFileSync(resolve(repository.path, "local.txt"), "unstaged local\n");
+
+  const reconciled = await candidate.contract.reconcile();
+
+  assert.deepEqual(reconciled.lag, []);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]), `${delivery.candidate}\n`);
+  assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
+  assert.equal(readFileSync(resolve(repository.path, "local.txt"), "utf8"), "unstaged local\n");
+  assert.equal(repository.run(["diff", "--cached", "--", "local.txt"]), stagedPatch);
+  assert.ok(!reconciled.effects.some((effect) => effect.kind === "target-checkout"));
+});
+
+test("reconcile aligns a candidate worktree to its index without disturbing unrelated staged content", async () => {
+  const repository = repositoryWithMain();
+  const candidate = await managedCandidate(repository, ["reviewed"]);
+  writeFileSync(resolve(repository.path, "local.txt"), "staged local\n");
+  repository.run(["add", "local.txt"]);
+  const stagedPatch = repository.run(["diff", "--cached", "--", "local.txt"]);
+  await admitClaimWithoutFollow(repository, candidate.contract);
+  const delivery = observeContract(repositoryAt(repository.path), candidate.contract.id).state?.delivery?.data;
+  assert.ok(delivery);
+  writeFileSync(resolve(repository.path, "delivered.txt"), "candidate\n");
+  assert.equal(repository.run(["diff", "--cached", "--name-only", delivery.expectedPredecessor]), "local.txt\n");
+  assert.equal(repository.run(["diff-files", "--name-only"]), "delivered.txt\n");
+
+  const reconciled = await candidate.contract.reconcile();
+
+  assert.deepEqual(reconciled.lag, []);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]), `${delivery.candidate}\n`);
+  assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
+  assert.equal(readFileSync(resolve(repository.path, "local.txt"), "utf8"), "staged local\n");
+  assert.equal(repository.run(["diff", "--cached", "--", "local.txt"]), stagedPatch);
+  assert.ok(reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+});
+
 test("reconcile completes a dirty here index alignment interrupted after atomic publication", async () => {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({
@@ -342,6 +410,34 @@ test("reconcile independently recovers here and ordinary checkouts of one target
   assert.equal(readFileSync(resolve(checkout, "delivered.txt"), "utf8"), "candidate\n");
   assert.equal(repository.run(["status", "--porcelain"]), "");
   assert.equal(repository.run(["-C", checkout, "status", "--porcelain"]), "");
+  assert.equal(reconciled.effects.filter((effect) =>
+    effect.kind === "target-checkout" && effect.action === "recovered").length, 2);
+});
+
+test("reconcile identifies a dirty here source by checkout shape instead of invocation path", async () => {
+  const repository = repositoryWithMain();
+  const checkout = `${repository.path}-reconcile-caller`;
+  repository.run(["worktree", "add", "--force", "--quiet", checkout, "main"]);
+  const bound = await Keiyaku.bind({
+    repo: Repo.at({ path: repository.path }),
+    markdown: document("Shape-proven here recovery"),
+    workspace: "here",
+    target: "main",
+    gates: ["reviewed"],
+  });
+  writeFileSync(resolve(repository.path, "delivered.txt"), "staged candidate\n");
+  repository.run(["add", "delivered.txt"]);
+  writeFileSync(resolve(repository.path, "local.txt"), "unstaged candidate\n");
+  writeFileSync(resolve(repository.path, "untracked.txt"), "untracked candidate\n");
+  await admitClaimWithoutFollow(repository, bound.keiyaku);
+
+  const reconciled = await Keiyaku.of({ repo: Repo.at({ path: checkout }), id: bound.keiyaku.id }).reconcile();
+
+  assert.deepEqual(reconciled.lag, []);
+  assert.equal(repository.run(["status", "--porcelain"]), "");
+  assert.equal(repository.run(["-C", checkout, "status", "--porcelain"]), "");
+  assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "staged candidate\n");
+  assert.equal(readFileSync(resolve(checkout, "delivered.txt"), "utf8"), "staged candidate\n");
   assert.equal(reconciled.effects.filter((effect) =>
     effect.kind === "target-checkout" && effect.action === "recovered").length, 2);
 });

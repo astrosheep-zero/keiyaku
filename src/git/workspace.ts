@@ -13,7 +13,7 @@ export function deliveryWorktreePath(repository: GitRepository, contract: Contra
   return resolve(realpathSync(repository.primaryWorktree), ...WORKTREE_DIRECTORY, contractPhysicalName(contract));
 }
 
-function withPrivateGitIndex<Value>(action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value): Value {
+export function withPrivateGitIndex<Value>(action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value): Value {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-index-"));
   try {
     return action({ GIT_INDEX_FILE: join(directory, "index") });
