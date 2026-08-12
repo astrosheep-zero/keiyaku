@@ -1,13 +1,13 @@
 ---
 id: task/收束-codex-app-server-provider-目录与当前
 title: 收束-codex-app-server-provider-目录与当前门禁
-state: in_progress
+state: drop
 priority: 2
 needs: []
 parent: null
 supersedes: []
 relates: []
-note: 依据 docs/akuma.md provider/module ownership：将 Codex app-server 收束为 index/events 目录模块，修复 Akuma architecture/maintainability 门禁并恢复既有 20000 行预算。
+note: The provider is already split into index/events and architecture passes; the 20000-line target was superseded by the settled 25000-line production budget.
 createdAt: 2026-08-10T08:57:43.298Z
-updatedAt: 2026-08-10T08:57:43.298Z
+updatedAt: 2026-08-12T16:21:45.098Z
 ---
