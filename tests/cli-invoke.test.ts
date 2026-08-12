@@ -516,6 +516,7 @@ test("managed delivery reads without realigning its deterministic worktree", asy
   );
   assert.equal(deliveryWorktreePath(managedRepository, id), path);
   assert.notEqual(path, resolve(path, ".keiyaku-v4", "worktrees", "managed-worktree"));
+  assert.match(path, /[\\/]keiyaku[\\/]wt[\\/]/u);
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "managed candidate"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
 

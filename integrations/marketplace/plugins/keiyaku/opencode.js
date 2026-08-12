@@ -5,7 +5,7 @@ const skills = ["keiyaku", "keiyaku-task", "keiyaku-bind", "keiyaku-workflow", "
   .map((name) => fileURLToPath(new URL(`./skills/${name}/SKILL.md`, import.meta.url)));
 
 export default {
-  id: "keiyaku-v4",
+  id: "keiyaku",
   server: async () => ({
     config: async (config) => {
       const instructions = config.instructions ?? (config.instructions = []);

@@ -125,3 +125,12 @@ test("all harness manifests identify the same bundle version", () => {
   });
   assert.equal(new Set(versions).size, 1, `harness manifest versions differ: ${versions.join(", ")}`);
 });
+
+test("OpenCode and Pi expose the Keiyaku hard-cut identity", () => {
+  const plugin = join(installAssetsRoot(), "plugins", "keiyaku");
+  const harness = JSON.parse(readFileSync(join(plugin, "package.json"), "utf8")) as { name?: unknown };
+  const opencode = readFileSync(join(plugin, "opencode.js"), "utf8");
+  assert.equal(harness.name, "keiyaku-harness");
+  assert.match(opencode, /id: "keiyaku"/u);
+  assert.doesNotMatch(opencode, /keiyaku-v4/u);
+});

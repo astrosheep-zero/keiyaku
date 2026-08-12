@@ -1,7 +1,6 @@
 {
-  "name": "@astrosheep/keiyaku-v4",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@astrosheep/keiyaku",
+  "version": "4.0.0",
   "files": [
     "build"
   ],
@@ -26,7 +25,7 @@
     }
   },
   "bin": {
-    "keiyaku-v4": "build/src/cli/index.js"
+    "keiyaku": "build/src/cli/index.js"
   },
   "type": "module",
   "engines": {
@@ -35,9 +34,9 @@
   "scripts": {
     "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.json && node scripts/copy-integrations.js && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('build/src/cli/index.js', 0o755)\"",
     "review:model-impact": "node --import tsx scripts/model-change-impact.ts",
-    "test": "npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx --test tests/**/*.test.ts tests/maintainability.test.js && npm run test:dogfood",
+    "test": "npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx --test tests/**/*.test.ts tests/maintainability.test.js",
     "test:architecture": "node --import tsx scripts/check-architecture.ts",
-    "test:dogfood": "npm run build && node --import tsx --test tests/day1-shell-dogfood.dogfood.ts",
+    "test:e2e": "npm run build && node --import tsx --test tests/packaged-cli.e2e.ts",
     "test:maintainability": "node scripts/check-maintainability.js",
     "test:reachability": "knip --include files,dependencies,unlisted,unresolved,duplicates",
     "test:typecheck": "tsc -p tsconfig.json --noEmit"
@@ -55,12 +54,23 @@
     "diff": "^8.0.4",
     "yaml": "^2.9.0"
   },
-  "description": "Keiyaku v4 is a clean implementation of an agent-facing contract workflow.",
+  "description": "Keiyaku is an agent-facing contract workflow.",
   "directories": {
     "doc": "docs",
     "test": "tests"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/astrosheep-zero/keiyaku.git"
+  },
+  "bugs": {
+    "url": "https://github.com/astrosheep-zero/keiyaku/issues"
+  },
+  "homepage": "https://github.com/astrosheep-zero/keiyaku#readme"
 }

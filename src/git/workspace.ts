@@ -1,16 +1,16 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { contractPhysicalName, gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { runGit, runGitWithEnvironment, type GitRepository } from "./repository.js";
 
-const WORKTREE_DIRECTORY = [".keiyaku-v4", "worktrees"] as const;
+const WORKTREE_DIRECTORY = ["keiyaku", "wt"] as const;
 
 export type WorkspaceTree = Readonly<{ tree: GitObjectId; head: SnapshotId; dirty: boolean }>;
 
 export function deliveryWorktreePath(repository: GitRepository, contract: ContractId): string {
-  return resolve(realpathSync(repository.primaryWorktree), ...WORKTREE_DIRECTORY, contractPhysicalName(contract));
+  return resolve(repository.commonDirectory, ...WORKTREE_DIRECTORY, contractPhysicalName(contract));
 }
 
 export function withPrivateGitIndex<Value>(action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value): Value {

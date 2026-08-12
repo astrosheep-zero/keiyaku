@@ -36,6 +36,8 @@ export type GitRepository = Readonly<{
   readonly effectiveCwd: string;
   /** The canonical primary worktree root for this repository. */
   readonly primaryWorktree: string;
+  /** The canonical common Git directory pinned when this capability is created. */
+  readonly commonDirectory: string;
 }>;
 export type GitSnapshot = Readonly<{
   readonly commit: GitOid | null;
@@ -104,23 +106,28 @@ export function registeredWorktrees(repository: GitRepository): readonly Registe
 }
 
 export function registeredWorktreePaths(repository: GitRepository): readonly string[] { return registeredWorktrees(repository).map((worktree) => worktree.path); }
-
 export function repositoryAt(cwd: string): GitRepository {
   if (typeof cwd !== "string" || cwd.length === 0) {
     throw new Error("repository path must be a nonempty string");
   }
   const effectiveCwd = resolve(cwd);
-  const provisional = { effectiveCwd, primaryWorktree: effectiveCwd } satisfies GitRepository;
+  const provisional = {
+    effectiveCwd,
+    primaryWorktree: effectiveCwd,
+    commonDirectory: effectiveCwd,
+  } satisfies GitRepository;
   let primaryWorktree: string;
+  let commonDirectory: string;
   try {
     primaryWorktree = registeredWorktreePaths(provisional)[0]!;
+    commonDirectory = absoluteGitPath(provisional, ["--git-common-dir"], "common Git directory");
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 128) {
       throw new NoGitWorldError(effectiveCwd);
     }
     throw error;
   }
-  return { effectiveCwd, primaryWorktree };
+  return { effectiveCwd, primaryWorktree, commonDirectory };
 }
 
 function absoluteGitPath(repository: GitRepository, args: readonly string[], label: string): string {
@@ -130,7 +137,7 @@ function absoluteGitPath(repository: GitRepository, args: readonly string[], lab
 }
 
 export function commonGitDirectory(repository: GitRepository): string {
-  return absoluteGitPath(repository, ["--git-common-dir"], "common Git directory");
+  return repository.commonDirectory;
 }
 
 export function worktreeGitDirectory(repository: GitRepository, worktree: string): string {

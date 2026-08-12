@@ -18,7 +18,7 @@ function board(): ContractBoard {
         phase: "bound",
         disposition: "active",
         workspace: "worktree",
-        worktreePath: "/repo/.keiyaku-v4/worktrees/active-contract",
+        worktreePath: "/repo/.git/keiyaku/wt/active-contract",
         target: "refs/heads/main",
         delivery: null,
         targetObservation: null,
@@ -42,7 +42,7 @@ function board(): ContractBoard {
 test("selectors resolve active worktrees from public status rows", () => {
   const report = board();
   assert.equal(resolveContextualContract(report, "@active-contract", "/repo"), active);
-  assert.equal(resolveContextualContract(report, undefined, "/repo/.keiyaku-v4/worktrees/active-contract"), active);
+  assert.equal(resolveContextualContract(report, undefined, "/repo/.git/keiyaku/wt/active-contract"), active);
 });
 
 test("short selectors match normalized contract segments without a second grammar", () => {
@@ -57,7 +57,7 @@ test("short selectors match normalized contract segments without a second gramma
 
 test("omitted selectors require an exact public scope and exclude here workspaces", () => {
   assert.throws(
-    () => resolveContextualContract(board(), undefined, "/repo/.keiyaku-v4/worktrees/active-contract/subdirectory"),
+    () => resolveContextualContract(board(), undefined, "/repo/.git/keiyaku/wt/active-contract/subdirectory"),
     CliUsageError,
   );
   assert.throws(
@@ -75,7 +75,7 @@ test("selectors use disposition rather than reinterpreting terminal phases", () 
     } satisfies ContractBoard;
     assert.throws(() => resolveContextualContract(report, "@active-contract", "/repo"), CliUsageError);
     assert.throws(
-      () => resolveContextualContract(report, undefined, "/repo/.keiyaku-v4/worktrees/active-contract"),
+      () => resolveContextualContract(report, undefined, "/repo/.git/keiyaku/wt/active-contract"),
       CliUsageError,
     );
   }

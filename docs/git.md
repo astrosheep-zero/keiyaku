@@ -14,7 +14,10 @@ The physical map and its layout are implementation-private and reachable under
 one Git ref. A contract's journal blob is its `ContractHead`; unrelated
 Git movement does not change that contract. Discovery follows worktree
 identity to the common repository. Scope resolution pins both the caller
-worktree and the primary worktree for the one Git world.
+worktree and the primary worktree for the one Git world. It also resolves the
+absolute common Git directory once when constructing the internal repository
+capability; later operations read that pinned value and do not rediscover it
+per Contract.
 
 Targeted observation and admission are
 `O(touched journal size + bounded ancestor depth)`, never `O(world)`. A
@@ -99,6 +102,12 @@ prefix comes from the identity itself and is neither added nor reconstructed by
 Git. This stable projection does not reuse title normalization. These
 names are deterministic topology, not public identity or a second legality
 authority.
+
+A managed worktree has exactly one deterministic physical path:
+`<git-common-dir>/keiyaku/wt/<contract-physical-name>`. Primary and linked
+worktrees therefore derive the same path for one Contract. The path is a
+read-time projection from the pinned common Git directory and ContractId; it is
+not stored in the Contract journal, and there is no legacy-path fallback.
 
 ## Delivery Preparation And Placement
 

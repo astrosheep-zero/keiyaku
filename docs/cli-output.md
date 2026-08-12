@@ -2,6 +2,9 @@
 
 This chapter owns help, rendering, and exit status.
 
+The installed executable is `keiyaku`. The package declares no alternate or
+versioned command name.
+
 ## Help
 
 CLI grammar has one table owner for each command family: Contract and shared

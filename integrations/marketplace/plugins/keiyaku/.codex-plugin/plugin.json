@@ -1,7 +1,7 @@
 {
   "name": "keiyaku",
-  "version": "0.1.0",
-  "description": "Use the Keiyaku v4 contract, task, and Akuma CLI.",
+  "version": "0.1.0+codex.20260812090343",
+  "description": "Use the Keiyaku contract, task, and Akuma CLI.",
   "author": {
     "name": "Keiyaku"
   },
@@ -9,10 +9,10 @@
   "interface": {
     "displayName": "Keiyaku",
     "shortDescription": "Use Keiyaku in Codex.",
-    "longDescription": "Keiyaku adds the v4 agent-facing workflow CLI.",
+    "longDescription": "Keiyaku adds the agent-facing workflow CLI.",
     "developerName": "Keiyaku",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Use Keiyaku v4 to coordinate this work."
+    "defaultPrompt": "Use Keiyaku to coordinate this work."
   }
 }

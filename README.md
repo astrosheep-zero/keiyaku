@@ -1,6 +1,6 @@
-# Keiyaku v4
+# Keiyaku
 
-Keiyaku v4 is a clean implementation of an agent-facing contract workflow.
+Keiyaku is an agent-facing contract workflow.
 
 The first milestone is intentionally narrow: a Git-backed facts kernel with
 per-contract append-only journals, Git-tree evidence, atomic path-set CAS,
