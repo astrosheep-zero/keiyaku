@@ -29,13 +29,16 @@ keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 task ls
 keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 task show <task-id>
 ```
 
-Use the task board for decomposition and dependencies. A task is open,
-in-progress, done, or dropped; it is never a contract binding. Create a new
-task for a new bounded concern instead of silently enlarging an unrelated task.
-The v4 task loop is `task add` → `task start` → implementation/review → `task
-done` (or `task stop`/`task drop`). When delivery needs a Contract, `bind
---task <task/...>` atomically installs the Settlement-owned TaskHolder; Contract
-claim settles the current held Task to `done`, while abandon releases it.
+Use the task board when work needs durable planning: decomposition,
+dependencies, priority, readiness, or coordination across deliveries. A Task
+is optional and is never required merely because a bounded Contract will be
+delivered. Do not create a Task that only duplicates a Contract objective. A
+task is open, in-progress, done, or dropped; it is never a contract binding.
+When a real Task already owns the plan, its loop is `task add` → `task start`
+→ implementation/review → `task done` (or `task stop`/`task drop`), and
+`bind --task <task/...>` atomically installs the optional Settlement-owned
+TaskHolder. Contract claim settles the current held Task to `done`, while
+abandon releases it. Otherwise bind the Contract without `--task`.
 
 Contract gates come from the Settings `gates` namespace. Omitting `--gates`
 selects `gates.default`, or freezes `[]` when that entry is absent. `--gates
@@ -187,7 +190,8 @@ owning root document in the same accepted change when it is durable architecture
 ## Delivery loop
 
 1. Read `docs/README.md`, the owning root document, and neighboring code before editing.
-2. Add or update a task when the work is a new bounded concern.
+2. Add or update a Task only when durable planning has a concrete reader;
+   otherwise bind a bounded delivery directly.
 3. Write every settled design into the owning root document before implementation.
 4. Dispatch independent Akuma lanes with exact `-C`, authority citations, and
    non-overlapping scope.
