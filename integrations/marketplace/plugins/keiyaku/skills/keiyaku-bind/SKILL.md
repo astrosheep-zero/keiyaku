@@ -65,13 +65,19 @@ Inspect the actual command surface before choosing inputs:
 keiyaku -C <repo> bind --help
 ```
 
-Bind the complete document through stdin. Associate an existing Task when the
-Contract is the delivery of that Task:
+Bind the complete document through stdin. A Task is optional: a Contract is
+complete delivery authority on its own, and ordinary bounded delivery does not
+require creating planning state first. Use `--task` only when an existing Task
+already carries real scheduling, dependency, or coordination value and this
+Contract is specifically its delivery:
 
 ```bash
 keiyaku -C <repo> bind - < CONTRACT.md
 keiyaku -C <repo> bind --task <task/...> - < CONTRACT.md
 ```
+
+Do not create a Task merely to make `bind --task` available or to mirror the
+Contract objective. That adds a second lifecycle with no planning reader.
 
 Use `bind --help` as the installed command authority for optional target,
 workspace, prerequisite, gate-set, actor, and JSON inputs. Do not guess flags

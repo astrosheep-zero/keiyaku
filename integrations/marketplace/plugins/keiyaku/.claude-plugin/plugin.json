@@ -1,6 +1,6 @@
 {
   "name": "keiyaku",
-  "version": "0.1.0+codex.20260812090343",
+  "version": "0.1.0+codex.20260813045202",
   "description": "Use the Keiyaku contract, task, and Akuma CLI.",
   "author": { "name": "Keiyaku" },
   "skills": "./skills/"
