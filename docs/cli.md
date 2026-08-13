@@ -396,7 +396,5 @@ Contract commands accept no task coordinate and never interpret or perform a
 Task mutation; the CLI merely renders package-root results.
 
 The surface has no interactive mode, input envelope, independent JSON schema,
-configurable attempt count, or command alias.
-
-The report `root` remains the invocation world coordinate. There is no
-`scope` or `region` command.
+configurable attempt count, command alias, or `scope`/`region` command. The
+report `root` remains the invocation world coordinate.
