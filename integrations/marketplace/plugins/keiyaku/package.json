@@ -1,6 +1,6 @@
 {
   "name": "keiyaku-harness",
-  "version": "0.1.0+codex.20260813045202",
+  "version": "0.1.0+codex.20260813114301",
   "type": "module",
   "main": "./opencode.js",
   "keywords": ["pi-package"],
