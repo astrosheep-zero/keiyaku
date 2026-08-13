@@ -230,7 +230,7 @@ export function readRef(repository: GitRepository, ref: string): GitOid | null {
 
 function readTreeForCommit(repository: GitRepository, commit: GitOid): GitOid {
   assertOid(commit, "Git commit");
-  const tree = runGit(repository, ["rev-parse", "--verify", `${commit}^{tree}`]).toString("utf8").trim();
+  const tree = runGit(repository, ["show", "-s", "--format=%T", commit]).toString("utf8").trim();
   assertOid(tree, "Git tree");
   return tree;
 }

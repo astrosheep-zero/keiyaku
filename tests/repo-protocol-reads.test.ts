@@ -97,7 +97,13 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
   writeFileSync(log, "");
 
   const report = await withGitShim(
-    "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_STATUS_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    [
+      "for argument do",
+      "  case \"$argument\" in *'^{tree}'*) exit 97 ;; esac",
+      "done",
+      "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_STATUS_READ_LOG\"; fi",
+      "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    ].join("\n"),
     { KEIYAKU_STATUS_READ_LOG: log },
     () => withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel })),
   );

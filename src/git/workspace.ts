@@ -94,7 +94,7 @@ function workspaceChanges(repository: GitRepository, workspace: string): Workspa
 
 /** Capture tracked and untracked workspace bytes without changing its real index. */
 export function captureWorkspaceTree(repository: GitRepository, workspace: string): WorkspaceTree {
-  const identities = runGit(repository, ["-C", workspace, "rev-parse", "HEAD", "HEAD^{tree}"])
+  const identities = runGit(repository, ["-C", workspace, "show", "-s", "--format=%H%n%T", "HEAD"])
     .toString("utf8")
     .split("\n");
   if (identities.length !== 3 || identities[0] === undefined || identities[1] === undefined || identities[2] !== "") {

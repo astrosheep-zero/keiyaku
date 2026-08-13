@@ -429,8 +429,11 @@ test("clean delivery resolves its workspace head and tree in one Git call", asyn
   const calls = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-git-calls-")), "calls");
   const prepared = await withGitShim(
     [
-      "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"rev-parse\" ]; then",
-      "  printf '%s|%s|%s\\n' \"$3\" \"$4\" \"$5\" >> \"$KEIYAKU_GIT_CALLS\"",
+      "for argument do",
+      "  case \"$argument\" in *'^{tree}'*) exit 97 ;; esac",
+      "done",
+      "if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"show\" ]; then",
+      "  printf '%s|%s|%s|%s\\n' \"$3\" \"$4\" \"$5\" \"$6\" >> \"$KEIYAKU_GIT_CALLS\"",
       "fi",
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
@@ -439,7 +442,7 @@ test("clean delivery resolves its workspace head and tree in one Git call", asyn
   );
 
   assert.equal(prepared.kind, "prepared");
-  assert.equal(readFileSync(calls, "utf8"), "rev-parse|HEAD|HEAD^{tree}\n");
+  assert.equal(readFileSync(calls, "utf8"), "show|-s|--format=%H%n%T|HEAD\n");
 });
 
 test("delivery diff preserves an empty patch and treats a clean missing object as Git absence", async () => {

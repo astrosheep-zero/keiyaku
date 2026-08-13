@@ -12,7 +12,7 @@ import { observeContractsForAdmissionAt } from "../src/git/observe.js";
 import { deliveryWorktreePath } from "../src/git/workspace.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { makeGitRepository, observeContract, type TestGitRepository } from "./support/git.js";
+import { makeGitRepository, observeContract, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithMain(): TestGitRepository {
   const repository = makeGitRepository();
@@ -351,7 +351,16 @@ test("reconcile completes an ordinary follow interrupted after atomic publicatio
   await admitClaimWithoutFollow(repository, candidate.contract);
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "base\n");
 
-  const reconciled = await candidate.contract.reconcile();
+  const reconciled = await withGitShim(
+    [
+      "for argument do",
+      "  case \"$argument\" in *'^{tree}'*) exit 97 ;; esac",
+      "done",
+      "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
+    ].join("\n"),
+    {},
+    () => candidate.contract.reconcile(),
+  );
 
   assert.deepEqual(reconciled.lag, []);
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");

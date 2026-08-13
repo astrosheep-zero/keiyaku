@@ -86,7 +86,7 @@ function gitPaths(repository: GitRepository, path: string, args: readonly string
 
 function commitTree(repository: GitRepository, snapshot: SnapshotId): GitObjectId {
   return gitObjectId(
-    runGit(repository, ["rev-parse", "--verify", `${gitObjectIdForSnapshot(snapshot)}^{tree}`])
+    runGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)])
       .toString("utf8")
       .trim(),
     "commit tree",
