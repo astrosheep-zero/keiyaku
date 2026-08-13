@@ -594,9 +594,11 @@ export async function reconcileAllOperation(
     git,
     input.channel,
     observation.contracts.keys(),
-    input.hooks,
-    input.retryHooks,
-    input.retainTerminalWorktree ?? false,
+    {
+      hooks: input.hooks,
+      retryHooks: input.retryHooks,
+      retainTerminalWorktree: input.retainTerminalWorktree ?? false,
+    },
   )).map((item): RepoReconcileItem => ({
     contractId: item.contract,
     state: item.state,

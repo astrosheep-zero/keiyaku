@@ -488,15 +488,19 @@ export function reconcileEffectFailure(error: unknown, prior?: ReconcileResult):
   return failed("effect", error, prior?.effects, prior?.lag);
 }
 
+type ReconcileBatchOptions = Readonly<{
+  hooks: WorktreeHooks;
+  retryHooks: boolean;
+  retainTerminalWorktree: boolean;
+}>;
+
 async function reconcileBatchItem(
   repository: GitRepository,
   channel: GitDecodeChannel,
   contract: ContractId,
-  hooks: WorktreeHooks,
-  retryHooks: boolean,
-  retainTerminalWorktree: boolean,
+  options: ReconcileBatchOptions,
 ): Promise<ReconcileBatchItem> {
-  const observation = await reconcile({ repository, channel, contractId: contract, hooks, retryHooks, retainTerminalWorktree });
+  const observation = await reconcile({ repository, channel, contractId: contract, ...options });
   return {
     contract,
     state: observation.state,
@@ -509,11 +513,9 @@ export async function reconcileBatch(
   repository: GitRepository,
   channel: GitDecodeChannel,
   contracts: Iterable<ContractId>,
-  hooks: WorktreeHooks,
-  retryHooks: boolean,
-  retainTerminalWorktree: boolean,
+  options: ReconcileBatchOptions,
 ): Promise<readonly ReconcileBatchItem[]> {
   const items: ReconcileBatchItem[] = [];
-  for (const contract of contracts) items.push(await reconcileBatchItem(repository, channel, contract, hooks, retryHooks, retainTerminalWorktree));
+  for (const contract of contracts) items.push(await reconcileBatchItem(repository, channel, contract, options));
   return items;
 }
