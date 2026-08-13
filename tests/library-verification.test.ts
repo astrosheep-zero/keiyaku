@@ -91,7 +91,7 @@ test("amend preserves untouched Verification bytes and currentness", async () =>
 test("a declaration timeout admits unsatisfied testimony and leaves placement to gates", async () => {
   const openRepository = repositoryWithMain();
   const open = await Keiyaku.bind({ repo: Repo.at({ path: openRepository.path }),
-    markdown: document("sleep 1").replace("~~~bash\n", "~~~bash timeout=25\n"),
+    markdown: document("sleep 1").replace("~~~bash\n", "~~~bash timeout=25ms\n"),
     workspace: "here",
     gates: [],
   });
@@ -105,7 +105,7 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
 
   const gatedRepository = repositoryWithMain();
   const gated = await Keiyaku.bind({ repo: Repo.at({ path: gatedRepository.path }),
-    markdown: document("sleep 1").replace("~~~bash\n", "~~~bash timeout=25\n"),
+    markdown: document("sleep 1").replace("~~~bash\n", "~~~bash timeout=25ms\n"),
     workspace: "here",
     gates: ["verified"],
   });

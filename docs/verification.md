@@ -6,7 +6,7 @@ declaration type, or core-derived gate. The attestation fact shape is defined by
 [model.md](model.md), and generic gate meaning by [lifecycle.md](lifecycle.md).
 The library owns the `Verification` declaration grammar at this edge:
 ordered `bash`, `zsh`, or `pwsh` fenced scripts, each with an optional
-`timeout=<positive-safe-integer-milliseconds>` fence attribute. The declaration value and its
+`timeout=<integer-duration>` fence attribute, using `ms`, `s`, `m`, or `h`. The declaration value and its
 producer-specific dependency rule remain private to this chapter; they are not
 core fact or core gate vocabulary.
 
@@ -142,7 +142,8 @@ process group, and observed start identity. `probeProcessTree` returns `gone`,
 evidence without importing Akuma facts. A start-identity mismatch is never
 group-killed blindly.
 
-Each declaration has only its optional Markdown timeout; omission is unbounded.
+Each declaration has only its optional Markdown timeout, written with an
+explicit `ms`, `s`, `m`, or `h` unit; omission is unbounded.
 A declaration timeout is terminal unsatisfied testimony. Caller cancellation is
 nonterminal and `deliver`/`audit` accepts an optional `AbortSignal`. There is no
 global Verification timeout, Settings key, CLI flag, library option, or

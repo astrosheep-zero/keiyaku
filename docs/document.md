@@ -80,7 +80,8 @@ machine terms, not Markdown-derived core fields.
 
 `Verification` uses one or more direct closed fences with an exact `bash`,
 `zsh`, or `pwsh` info string, optionally followed by one ASCII space and
-`timeout=<positive-safe-integer-milliseconds>`, and a nonblank script body.
+`timeout=<integer-duration>` where the duration has one of the `ms`, `s`, `m`,
+or `h` units, and a nonblank script body.
 The optional timeout belongs to that declaration alone; its absence means no
 Keiyaku deadline. A declaration has no other attributes.
 The resulting declaration values are private library/verification values. Core

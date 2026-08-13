@@ -5,6 +5,7 @@ const types = (target: string) => ({ target, mode: "type-only" as const });
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
+    { source: "duration.ts", allow: [] },
     { source: "settings.ts", allow: [] },
     { source: "world.ts", allow: [] },
     { source: "coordination/**", allow: [] },
@@ -584,12 +585,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("markdown/query.ts"),
         types("markdown/types.ts"),
         any("core/facts/types.ts"),
+        any("duration.ts"),
         types("verification/declaration.ts"),
       ],
     },
     {
       source: "cli/commands/akuma.ts",
-      allow: [any("akuma/identity.ts", ["archetypeName", "parseAkuId", "AkuId"]), any("cli/usage.ts"), any("identity/selector.ts")],
+      allow: [any("akuma/identity.ts", ["archetypeName", "parseAkuId", "AkuId"]), any("cli/usage.ts"), any("duration.ts"), any("identity/selector.ts")],
     },
     {
       source: "cli/commands/akuma-invoke.ts",

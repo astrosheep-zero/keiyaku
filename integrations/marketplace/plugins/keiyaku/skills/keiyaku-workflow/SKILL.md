@@ -90,6 +90,10 @@ included. Read the receipt:
   placement stop. This is not a failed delivery. The Contract stays
   `pending-delivery` while you complete the gates.
 
+Verification declarations may set an individual timeout in the fence info
+string, using an explicit duration unit such as `bash timeout=5m`. Omit the
+attribute for an unbounded declaration; there is no Verification-wide timeout.
+
 ## Review Gates
 
 A `reviewed` gate wants a recorded judgment of the current patch:

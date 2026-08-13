@@ -1,4 +1,5 @@
 import type { ArcData } from "../core/facts/types.js";
+import { formatDuration } from "../duration.js";
 import type { ContractBody } from "./types.js";
 import type { VerificationDeclaration } from "../verification/declaration.js";
 import { parseToAST } from "../markdown/parse.js";
@@ -29,7 +30,7 @@ function fenced(value: string, info = ""): string {
 }
 
 function verificationFence(declaration: VerificationDeclaration): string {
-  return fenced(declaration.script, `${declaration.executor}${declaration.timeoutMs === undefined ? "" : ` timeout=${declaration.timeoutMs}`}`);
+  return fenced(declaration.script, `${declaration.executor}${declaration.timeoutMs === undefined ? "" : ` timeout=${formatDuration(declaration.timeoutMs)}`}`);
 }
 
 function arcSection(arc: ArcData): string {

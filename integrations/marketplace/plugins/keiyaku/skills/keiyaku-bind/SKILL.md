@@ -53,6 +53,8 @@ Start from this complete shape:
 ~~~
 
 Use an H1 title and the H2 sections shown above. `Verification` is optional.
+When a declaration needs a limit, put an explicit duration such as
+`bash timeout=5m` in its fence info string; omit it for an unbounded declaration.
 Keep extra rationale and investigation logs out of the Contract.
 
 ## Bind

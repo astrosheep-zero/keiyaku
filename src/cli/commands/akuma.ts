@@ -1,5 +1,6 @@
 import { CliUsageError, usageLine } from "../usage.js";
 import { archetypeName, parseAkuId } from "../../akuma/identity.js";
+import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
 
 type Output = Readonly<{ output: "text" | "json" }>;
@@ -122,12 +123,11 @@ function stringFlag(value: FlagValue | undefined, diagnostic: string, fail: (mes
 }
 
 function parseDuration(raw: FlagValue, fail: (message: string) => never): number {
-  const match = typeof raw === "string" ? /^(0|[1-9][0-9]*)(ms|s|m|h)$/u.exec(raw) : null;
-  if (match === null) fail("--timeout requires an integer duration with unit ms, s, m, or h");
-  const multipliers = { ms: 1n, s: 1_000n, m: 60_000n, h: 3_600_000n } as const;
-  const milliseconds = BigInt(match[1]!) * multipliers[match[2] as keyof typeof multipliers];
-  if (milliseconds > BigInt(Number.MAX_SAFE_INTEGER)) fail("--timeout duration exceeds the safe millisecond range");
-  return Number(milliseconds);
+  if (typeof raw !== "string") fail("--timeout requires an integer duration with unit ms, s, m, or h");
+  const duration = decodeDuration(raw);
+  if (duration.kind === "invalid") fail("--timeout requires an integer duration with unit ms, s, m, or h");
+  if (duration.kind === "overflow") fail("--timeout duration exceeds the safe millisecond range");
+  return duration.milliseconds;
 }
 
 function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message: string) => never): Scanned {
