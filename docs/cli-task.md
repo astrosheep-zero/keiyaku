@@ -18,9 +18,9 @@ task add <TITLE> [--namespace <ns>] [--priority 0..3]
   [--body <text>] [--json]
 task add [--namespace <ns>] [--json] -
 task show <TaskId> [--json]
-task ls [--closed | --all] [--world] [--json]
-task ready [--world] [--json]
-task blocked [--world] [--json]
+task ls [--closed | --all] [--world] [--limit <n>] [--json]
+task ready [--world] [--parent <TaskId>] [--limit <n>] [--json]
+task blocked [--world] [--parent <TaskId>] [--limit <n>] [--json]
 task tree <TaskId> [--full] [--json]
 task doctor [--json]
 task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
@@ -53,12 +53,18 @@ lifecycle commands preserve input order, continue after per-Task refusals, and
 do not consume stdin for notes.
 
 `ls`, `ready`, and `blocked` use current namespace unless `--world` is present.
-`show`, `tree`, update, and lifecycle use complete IDs and never infer
-from namespace. Text rows are `TaskId - P<n> - <disposition> - title`.
+Their observations are bounded and carry the complete matching `total`; ready
+and blocked may additionally select recursive descendants of a complete parent
+TaskId. `show`, `tree`, update, and lifecycle use complete IDs and never infer
+from namespace. `tree` is parent decomposition traversal. Text rows are
+`TaskId - P<n> - <disposition> - title`.
 
 `task doctor` scans the complete Task world and renders every graph issue. It
 does not repair authority. A healthy report renders `healthy` and exits `0`; a
-report containing issues exits `1`.
+report containing issues exits `1`. An absent world is not a healthy empty
+world: Task observations distinguish `present`, `absent`, and `failed` in
+native values, JSON, text, and exit status. Only `present` may render an empty
+board.
 
 Accepted update and compose render native whole-document diffs; the CLI never
 computes them. An incomplete compose writes only its reusable draft to stdout,

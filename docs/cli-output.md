@@ -58,6 +58,15 @@ CLI does not prompt.
 
 ## Rendering And Exit Status
 
+Plain text is the primary CLI interface for both the flagship agent and the
+human directing it. Text is their default usage choice and the designer's
+default design surface, not merely the parser behavior when `--json` is
+omitted. They share one presentation: what a human reads is what the flagship
+reads. Every command is designed text-first, and its text receipt or board must
+carry the decision-relevant product facts. `--json` is an explicit secondary
+projection for debugging or non-interactive bulk scripting; its availability
+never excuses missing, opaque, or degraded text output.
+
 Every invocation renders exactly one plain result object:
 
 | Kind | Product content | Exit |

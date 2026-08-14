@@ -58,7 +58,7 @@ task add [--namespace <ns>] [--json] -`,
   done: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" }, usage: "task done <TaskId>... [--note <text>] [--json]", purpose: "Mark one or more Tasks done." },
   drop: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" }, usage: "task drop <TaskId>... [--note <text>] [--json]", purpose: "Drop one or more Tasks." },
   namespace: { arity: [0, 1], flags: COMMON, usage: "task namespace [<namespace>] [--json]", purpose: "Read or replace the current Task namespace." },
-  compose: { arity: [0, 0], stdin: "compose", flags: COMMON, usage: "task compose [--json] -", purpose: "Apply one atomic Task graph composition from stdin." },
+  compose: { arity: [0, 0], stdin: "compose", flags: COMMON, usage: "task compose [--json] -", purpose: "Admit independent Task document changes from stdin; partial admission is reported." },
 };
 
 export function isTaskAction(value: string | undefined): value is TaskAction {

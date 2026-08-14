@@ -69,7 +69,9 @@ that changes Task authority preserves `createdAt` and advances `updatedAt` once;
 a no-op update preserves both. Manual writers own the truth of both timestamps
 when they edit authority. `parent` is nullable. V1 has no
 cached readiness, counters, task log, NDJSON trace, private history ref, or
-`history <TaskId>`.
+`history <TaskId>`. Because manual, uncommitted Markdown edits remain
+authoritative, Task does not promise complete change-since-observation,
+history, or event-log reads; a partial journal would be dishonest.
 
 ## Lifecycle And Graph
 
@@ -106,14 +108,22 @@ itself declares. It does not validate unrelated documents and never detects or
 rejects a cycle. Manual and product-written graph disease remains authoritative
 until another mutation or manual edit changes it. `doctor` is the sole active
 graph-diagnosis surface; it reports missing targets, self edges, and cycle
-components in `needs`, `parent`, and `supersedes`. Parent is decomposition,
-supersedes is navigation, and relates is nonblocking; none changes readiness or
-lifecycle.
+components in `needs`, `parent`, and `supersedes`. `needs` is ordering and
+blocking; `parent` is grouping/decomposition. Parent supports recursive
+descendant observation and scoped selection, but never cascades lifecycle or
+propagates needs. `supersedes` is navigation, and `relates` is nonblocking;
+neither changes readiness or lifecycle.
 
 ## Native TypeScript Surface
 
 `@astrosheep/keiyaku/task` is the sole public import. Inputs are readonly
 objects validated at the JavaScript boundary.
+
+World discovery for Task reads is a three-arm observation: `present` carries a
+read from one observed Task world, `absent` means no discoverable `.keiyaku`
+world exists at the coordinate, and `failed` means a discovered world could not
+be read. `Tasks.of` is constructed only in the `present` arm. Absence is never
+converted to an accepted empty list or a healthy doctor report.
 
 ```ts
 Tasks.of(root: WorldRoot): Tasks
@@ -123,9 +133,9 @@ tasks.setNamespace(input: { namespace: readonly string[] }): Promise<void>
 tasks.task(input: { id: string }): Task
 tasks.add(input: AddTaskInput): Promise<TaskMutationResult>
 tasks.addDocument(input: AddTaskDocumentInput): Promise<TaskMutationResult>
-tasks.list(input?: { selection?: "active" | "closed" | "all"; scope?: "namespace" | "world" }): Promise<TaskList>
-tasks.ready(input?: { scope?: "namespace" | "world" }): Promise<TaskList>
-tasks.blocked(input?: { scope?: "namespace" | "world" }): Promise<BlockedTaskList>
+tasks.list(input?: { selection?: "active" | "closed" | "all"; scope?: "namespace" | "world"; limit?: number }): Promise<TaskList>
+tasks.ready(input?: { scope?: "namespace" | "world"; parent?: string; limit?: number }): Promise<TaskList>
+tasks.blocked(input?: { scope?: "namespace" | "world"; parent?: string; limit?: number }): Promise<BlockedTaskList>
 tasks.doctor(): Promise<TaskDoctorReport>
 tasks.batch(input: { verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }): Promise<TaskBatchResult>
 tasks.compose(input: { markdown: string; signal?: AbortSignal }): Promise<TaskCompositionResult>
@@ -140,6 +150,12 @@ task.resume(input?: { signal?: AbortSignal }): Promise<TaskMutationResult>
 task.done(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult>
 task.drop(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult>
 ```
+
+`TaskList` and `BlockedTaskList` accepted values carry `rows`, the complete
+matching `total`, and whether the requested limit truncated the rows. A limit
+must be a positive integer. The fixed priority-then-TaskId order is stable for
+one observed board snapshot; Task owns no continuation cursor or observer
+session.
 
 `add` accepts structured title, namespace, body, note, priority, relations,
 optional initial state, and signal. `addDocument` accepts
@@ -180,16 +196,21 @@ next item and never interrupts an atomic replacement.
 with released status, unresolved blockers, derived blocks/children/
 supersededBy/related, parent, and outgoing supersedes
 bytes when present.
-`tree <TaskId> [--full]` follows transitive needs across namespaces, marks
-cycles, and either deduplicates shared nodes or expands every acyclic
-occurrence. `doctor` diagnoses the complete world independently of current
-namespace.
+`tree <TaskId> [--full]` follows the parent decomposition relation recursively,
+marks cycles, and either deduplicates shared nodes or expands every acyclic
+occurrence. `needs` traversal remains the ordering/blocking projection in
+`show` and readiness; it is not the decomposition tree. `doctor` diagnoses the
+complete world independently of current namespace.
 
 `list` defaults to active tasks in the current namespace. Closed and all are
 explicit selections; `scope: "world"` escapes the current namespace. `ready`
-and `blocked` have the same scope rule. Rows sort by priority then TaskId bytes
-and contain TaskId, priority, disposition, and title.
-Blocked rows add unresolved blocker references only. File mtime is never read.
+and `blocked` have the same scope rule and accept an optional parent TaskId;
+parent-scoped results contain only recursive descendants of that Task. Rows
+sort by priority then TaskId bytes and contain TaskId, priority, disposition,
+and title. Every list result is bounded by its optional `limit` and carries an
+honest `total` for the complete matching set; no result requires title/body
+prose inference. Blocked rows add unresolved blocker references only. File
+mtime is never read.
 The Task operations owner can project the complete world rows and these blocker
 references from one board snapshot for a composite reader; this observation
 does not expose Task persistence or read TaskHolder or Contract authority.

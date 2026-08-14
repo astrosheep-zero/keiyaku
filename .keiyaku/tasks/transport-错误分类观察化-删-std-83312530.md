@@ -1,15 +1,15 @@
 ---
 id: task/transport-错误分类观察化-删-std-83312530
 title: Transport 错误分类观察化：删 stderr 文本协议
-state: open
+state: done
 priority: 1
 needs: []
 parent: null
 supersedes: []
 relates: []
-note: ""
+note: Implementation commit 05dec88 is an ancestor of current HEAD and current source preserves observation-based transport classification; independent review by aku/review-akuma/01f1afa1 found no remaining delivery.
 createdAt: 2026-08-04T06:59:47.743Z
-updatedAt: 2026-08-07T11:29:07.428Z
+updatedAt: 2026-08-14T00:49:30.386Z
 ---
 裁定（square #96）：transport 只分类进程结局（published / non-published / unknown），语义归因只来自失败后观察，stderr 是不透明诊断字节，永不匹配、永不分支。
 
