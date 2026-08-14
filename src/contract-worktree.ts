@@ -41,8 +41,9 @@ const FULFILLMENT = [
   "Implement and verify the Objective under the Design, Region, and Criteria in this Contract.",
   "Leave lifecycle decisions to the caller; report the candidate, verification performed, and any unmet term.", "",
   "### Reviewer", "",
-  "Review the current candidate against the complete Contract and report material findings with direct evidence.",
-  "Do not modify the candidate. State which Criteria are covered and identify missing or unsupported evidence.",
+  "Review this Contract worktree against the complete Contract.",
+  "Review the complete current worktree snapshot, not a named candidate commit.",
+  "Do not modify it; report covered Criteria, findings, and missing evidence.",
 ].join("\n");
 
 export function renderContractGuidance(state: ContractState): string {

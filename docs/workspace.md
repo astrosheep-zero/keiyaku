@@ -19,7 +19,8 @@ One pure renderer consumes a current `ContractState` and emits, in order:
 Reviewer; the worker never infers an omitted seat. `Worktree` identifies this
 file as a derived view and requires work to remain in its Contract worktree.
 `Deliverer` implements and verifies the Contract terms without deciding the
-lifecycle. `Reviewer` judges the current candidate without modifying it.
+lifecycle. `Reviewer` reviews the complete current worktree snapshot without
+modifying it. Candidate commits are only for historical review.
 
 The same renderer feeds `Keiyaku.guidance()`, `keiyaku show`, and worktree
 materialization. `show` text is exactly those bytes; JSON contains the Contract

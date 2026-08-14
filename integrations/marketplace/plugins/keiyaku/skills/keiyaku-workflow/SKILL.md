@@ -71,12 +71,10 @@ frontmatter names `Contract`, then reads the listed owner documents and source
 files before acting. Do not substitute a generic repository tour for the files
 that actually govern the assignment.
 
-A `Deliverer` implements and verifies the terms, keeps all work in `Worktree`,
-and reports the candidate, checks run, and unmet terms. A `Reviewer` reads the
-same worktree and Contract, judges the current candidate with direct evidence,
-and does not modify it. If `Seat`, `Worktree`, or the required reading list is
-missing or contradictory, the worker stops and asks the caller instead of
-guessing.
+A `Deliverer` implements and verifies the terms in `Worktree`. A `Reviewer`
+reviews the complete current Contract worktree snapshot, not a named candidate
+commit, and does not modify it. Missing or contradictory seat, worktree, or
+reading list means stop and ask.
 
 ## Arcs For Large Deliveries
 
@@ -137,8 +135,8 @@ keiyaku review <contract> --satisfied --summary "<conclusion>"
 keiyaku review <contract> --unsatisfied --summary "<finding>"
 ```
 
-Have an independent reviewer read the exact Contract worktree first; the
-`review` command records the gate-visible verdict. `--satisfied` requests
+Have an independent reviewer inspect the complete current Contract worktree
+snapshot. The `review` command records the verdict. `--satisfied` requests
 placement. If the same patch is already delivered and the other gates are
 current, the receipt shows `claimed`. Review works before or after deliver.
 When the reviewed projection includes ordinary dirty workspace bytes, the
