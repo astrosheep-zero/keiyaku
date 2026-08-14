@@ -89,7 +89,7 @@ test("provider answered results may omit an exact fork point", () => {
   assert.deepEqual(result, { kind: "answered", answer: "complete answer" });
 });
 
-function fakeAcp(root: string, mode: "complete" | "cancel" | "permission" | "reverse" = "complete") {
+function fakeAcp(root: string, mode: "complete" | "cancel" | "reverse" | "prompt-error" = "complete") {
   const executable = join(root, "fake-acp.mjs");
   const log = join(root, "acp-log.jsonl");
   const sdk = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
@@ -118,16 +118,14 @@ const app = acp.agent({ name: "fake-acp" })
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     log({ kind: "prompt", params, argv: process.argv.slice(2) });
+    if (process.env.ACP_TEST_MODE === "prompt-error") throw new acp.RequestError(-32603, "Internal error", "native detail");
     if (process.env.ACP_TEST_MODE === "cancel") return await new Promise(() => {});
-    if (process.env.ACP_TEST_MODE === "permission") {
-      const permission = await client.request(acp.methods.client.session.requestPermission, { sessionId: params.sessionId, toolCall: { toolCallId: "permission-1" }, options: [] });
-      log({ kind: "permission", permission });
-    }
     if (process.env.ACP_TEST_MODE === "reverse") {
       const request = async (kind, method, request) => {
         try { log({ kind, response: await client.request(method, request) }); }
         catch (error) { log({ kind, refusal: { code: error.code, message: error.message } }); }
       };
+      await request("permission", acp.methods.client.session.requestPermission, { sessionId: params.sessionId, toolCall: { toolCallId: "permission-1" }, options: [] });
       await request("fs-read", acp.methods.client.fs.readTextFile, { sessionId: params.sessionId, path: "/tmp/refused" });
       await request("fs-write", acp.methods.client.fs.writeTextFile, { sessionId: params.sessionId, path: "/tmp/refused", content: "no" });
       await request("terminal-create", acp.methods.client.terminal.create, { sessionId: params.sessionId, command: "false" });
@@ -216,19 +214,7 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("ACP cancels stable agent permission requests without an unhandled method error", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-permission-"));
-  try {
-    const fake = fakeAcp(root, "permission");
-    const drive = await createAcpProvider(fake.execution).start({
-      body: "build", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
-    });
-    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
-    assert.deepEqual(acpLog(fake.log).find((record) => record.kind === "permission")?.permission, { outcome: { outcome: "cancelled" } });
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("ACP explicitly refuses unsupported filesystem and terminal reverse requests", async () => {
+test("ACP exposes no client-side coding capabilities", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-reverse-"));
   try {
     const fake = fakeAcp(root, "reverse");
@@ -239,15 +225,27 @@ test("ACP explicitly refuses unsupported filesystem and terminal reverse request
     const records = acpLog(fake.log);
     const refused = records.filter((record) => record.refusal !== undefined);
     assert.deepEqual(refused.map((record) => [record.kind, (record.refusal as { code: number }).code]), [
-      ["fs-read", -32000],
-      ["fs-write", -32000],
-      ["terminal-create", -32000],
-      ["terminal-output", -32000],
-      ["terminal-release", -32000],
-      ["terminal-wait", -32000],
-      ["terminal-kill", -32000],
+      ["permission", -32601],
+      ["fs-read", -32601],
+      ["fs-write", -32601],
+      ["terminal-create", -32601],
+      ["terminal-output", -32601],
+      ["terminal-release", -32601],
+      ["terminal-wait", -32601],
+      ["terminal-kill", -32601],
+      ["elicitation", -32601],
     ]);
-    assert.deepEqual(records.find((record) => record.kind === "elicitation")?.response, { action: "cancel" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("ACP preserves native request error code and data", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-error-"));
+  try {
+    const fake = fakeAcp(root, "prompt-error");
+    const drive = await createAcpProvider(fake.execution).start({
+      body: "build", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
+    });
+    assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Internal error [-32603]: native detail" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

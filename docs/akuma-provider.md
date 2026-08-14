@@ -331,9 +331,15 @@ Its execution configuration is limited to process launch data, with fixed argv
 before and after declared portable option-to-argument mappings. An option
 without such a mapping, and
 portable access or network claims ACP cannot enforce, are refused at Archetype
-admission. Its process has the caller environment with the frozen execution
+admission; an empty system prompt needs no mapping because it changes no native
+input. Its process has the caller environment with the frozen execution
 overlay; ACP itself neither reads nor copies another product's credentials or
 configuration.
+
+The adapter exposes no client-side filesystem, terminal, permission, or
+elicitation capability. An ACP execution is a self-contained agent and uses its
+own local tools; Keiyaku observes their session updates but does not become a
+second coding harness.
 
 An ACP drive initializes one connection, creates or loads one session, and
 uses one `session/prompt` response as the sole terminal authority. The exact

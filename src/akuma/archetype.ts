@@ -187,7 +187,6 @@ const BUILTIN_EXECUTIONS = {
       argvAfter: ["stdio"],
       modelArg: "--model",
       effortArg: "--reasoning-effort",
-      systemPromptArg: "--system-prompt-override",
     },
   },
 } as const satisfies Readonly<Record<string, Omit<ProviderExecution, "name">>>;

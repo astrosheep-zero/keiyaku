@@ -45,7 +45,7 @@ function optionAdmission(options: ProviderOptions, config: AcpExecutionConfig): 
   if (options.network !== undefined) return { kind: "refused", diagnostic: "ACP provider does not support the Archetype network option" };
   if (options.model !== undefined && config.modelArg === undefined) return { kind: "refused", diagnostic: "ACP provider has no model argument mapping" };
   if (options.effort !== undefined && config.effortArg === undefined) return { kind: "refused", diagnostic: "ACP provider has no effort argument mapping" };
-  if (options.systemPrompt !== undefined && config.systemPromptArg === undefined) return { kind: "refused", diagnostic: "ACP provider has no systemPrompt argument mapping" };
+  if (options.systemPrompt !== undefined && options.systemPrompt.length > 0 && config.systemPromptArg === undefined) return { kind: "refused", diagnostic: "ACP provider has no systemPrompt argument mapping" };
   return { kind: "admitted", options };
 }
 function argv(execution: ProviderExecution, config: AcpExecutionConfig, options: ProviderOptions): readonly [string, ...string[]] {
@@ -53,25 +53,21 @@ function argv(execution: ProviderExecution, config: AcpExecutionConfig, options:
   const values = [execution.executable, ...config.argvBefore];
   if (options.model !== undefined) values.push(config.modelArg!, options.model);
   if (options.effort !== undefined) values.push(config.effortArg!, options.effort);
-  if (options.systemPrompt !== undefined) values.push(config.systemPromptArg!, options.systemPrompt);
+  if (options.systemPrompt !== undefined && config.systemPromptArg !== undefined) values.push(config.systemPromptArg, options.systemPrompt);
   values.push(...config.argvAfter);
   return values as [string, ...string[]];
 }
-function diagnostic(error: unknown): string { return error instanceof Error ? error.message : String(error); }
-
-function unsupportedClientRequest(method: string): never { throw new acp.RequestError(-32000, `Keiyaku ACP client refuses ${method}`); }
+function diagnostic(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  if (!(error instanceof acp.RequestError) || error.data === undefined) return error.message;
+  let data: string;
+  try { data = typeof error.data === "string" ? error.data : JSON.stringify(error.data); }
+  catch { data = String(error.data); }
+  return data.length === 0 ? `${error.message} [${error.code}]` : `${error.message} [${error.code}]: ${data}`;
+}
 
 function createAcpClient(onUpdate: (notification: acp.SessionNotification) => void): acp.ClientApp {
   return acp.client({ name: "keiyaku" })
-    .onRequest(acp.methods.client.session.requestPermission, () => ({ outcome: { outcome: "cancelled" } }))
-    .onRequest(acp.methods.client.fs.readTextFile, () => unsupportedClientRequest(acp.methods.client.fs.readTextFile))
-    .onRequest(acp.methods.client.fs.writeTextFile, () => unsupportedClientRequest(acp.methods.client.fs.writeTextFile))
-    .onRequest(acp.methods.client.terminal.create, () => unsupportedClientRequest(acp.methods.client.terminal.create))
-    .onRequest(acp.methods.client.terminal.output, () => unsupportedClientRequest(acp.methods.client.terminal.output))
-    .onRequest(acp.methods.client.terminal.release, () => unsupportedClientRequest(acp.methods.client.terminal.release))
-    .onRequest(acp.methods.client.terminal.waitForExit, () => unsupportedClientRequest(acp.methods.client.terminal.waitForExit))
-    .onRequest(acp.methods.client.terminal.kill, () => unsupportedClientRequest(acp.methods.client.terminal.kill))
-    .onRequest(acp.methods.client.elicitation.create, () => ({ action: "cancel" }))
     .onNotification(acp.methods.client.session.update, ({ params }) => onUpdate(params));
 }
 
@@ -188,7 +184,8 @@ async function startAcpSession(
     return beginAcpPrompt(connection.agent, child, turn, sessionId, input);
   } catch (error) {
     connection.close(error);
-    await child.close(true);
+    try { await child.close(true); }
+    catch (cleanup) { throw new Error(`${diagnostic(error)}; ACP cleanup failed: ${diagnostic(cleanup)}`, { cause: error }); }
     turn.events.end();
     throw error;
   }
