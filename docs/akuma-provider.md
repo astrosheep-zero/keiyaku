@@ -267,12 +267,17 @@ submission, `tell()` returns `turn-ended`; source or Query failure before the
 post-yield acknowledgement rejects. Adapter submission ordinals and checkpoint
 tracking are ephemeral and never enter Heart.
 
-OpenCode V2 omits live tell: its prompt response proves durable input admission,
-not terminal native processing evidence. Pending OpenCode tells are carried
-through the next launch. Its durable event union has an explicit disposition for
-every current kind and an `unknown` fallback for future kinds; output, deltas,
-usage, cost, and telemetry remain dropped. Its terminal answer is read from the
-complete assistant message after the durable event stream drains.
+OpenCode uses the public V1 Session API. `promptAsync` acceptance is launch
+admission. The adapter gives each launch a native message identity, and only
+the matching native user-message observation opens that Turn's terminal epoch.
+A subsequent same-session busy-to-idle transition or session error is the sole
+terminal evidence. A same-session error after submission begins also closes a
+launch that failed before it could publish that identity. After terminal
+evidence, the complete assistant message is
+read only for the answer and fork coordinate and cannot create a second
+completion decision. The directory-wide event stream is isolated by native
+session id. The adapter does not use V2 APIs and does not claim a live tell
+boundary that V1 cannot prove; pending tells are carried in the next prompt.
 
 Pi's `steer()` acknowledgement likewise proves queueing only. Pi omits live
 tell and receives pending text in the next launch input.

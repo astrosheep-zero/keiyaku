@@ -1,91 +1,190 @@
-import type { AgentEvent, ToolCall, ToolResult } from "../../provider.js";
-import type { SessionDurableEvent } from "@opencode-ai/sdk/v2";
+import { noteEvent, type AgentEvent, type ToolCall, type ToolResult } from "../../provider.js";
+import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
 
 type Emitter = { emit(event: AgentEvent): void };
-type ToolState = Readonly<{ name: string; call: ToolCall }>;
-type State = { tools: Map<string, ToolState>; answer: string[]; seen: Set<string>; failure?: string };
+type ObservedTool = Readonly<{ name: string; call: ToolCall }>;
+type State = {
+  sessionId?: string;
+  assistantParts: Set<string>;
+  reasoningParts: Set<string>;
+  tools: Map<string, ObservedTool>;
+  completedTools: Set<string>;
+  failure?: string;
+};
+type Part = Record<string, unknown>;
+type NativeEventKind = OpencodeEvent["type"];
 
-type NativeEventKind = SessionDurableEvent["type"];
 export const OPENCODE_EVENT_DISPOSITIONS = {
-  "session.next.agent.switched": "dropped",
-  "session.next.model.switched": "dropped",
-  "session.next.moved": "dropped",
-  "session.next.prompted": "dropped",
-  "session.next.prompt.admitted": "dropped",
-  "session.next.context.updated": "dropped",
-  "session.next.synthetic": "dropped",
-  "session.next.shell.started": "dropped",
-  "session.next.shell.ended": "dropped",
-  "session.next.step.started": "dropped",
-  "session.next.step.ended": "dropped",
-  "session.next.step.failed": "mapped",
-  "session.next.text.started": "dropped",
-  "session.next.text.ended": "mapped",
-  "session.next.tool.input.started": "dropped",
-  "session.next.tool.input.ended": "dropped",
-  "session.next.tool.called": "mapped",
-  "session.next.tool.progress": "dropped",
-  "session.next.tool.success": "mapped",
-  "session.next.tool.failed": "mapped",
-  "session.next.reasoning.started": "dropped",
-  "session.next.reasoning.ended": "mapped",
-  "session.next.retried": "mapped",
-  "session.next.compaction.started": "dropped",
-  "session.next.compaction.ended": "dropped",
-  "session.next.revert.staged": "dropped",
-  "session.next.revert.cleared": "dropped",
-  "session.next.revert.committed": "dropped",
+  "server.instance.disposed": "dropped",
+  "installation.updated": "dropped",
+  "installation.update-available": "dropped",
+  "lsp.client.diagnostics": "dropped",
+  "lsp.updated": "dropped",
+  "message.updated": "mapped",
+  "message.removed": "dropped",
+  "message.part.updated": "mapped",
+  "message.part.removed": "dropped",
+  "permission.updated": "dropped",
+  "permission.replied": "dropped",
+  "session.status": "dropped",
+  "session.idle": "dropped",
+  "session.compacted": "dropped",
+  "file.edited": "dropped",
+  "todo.updated": "mapped",
+  "command.executed": "dropped",
+  "session.created": "dropped",
+  "session.updated": "dropped",
+  "session.deleted": "dropped",
+  "session.diff": "dropped",
+  "session.error": "mapped",
+  "file.watcher.updated": "dropped",
+  "vcs.branch.updated": "dropped",
+  "tui.prompt.append": "dropped",
+  "tui.command.execute": "dropped",
+  "tui.toast.show": "dropped",
+  "pty.created": "dropped",
+  "pty.updated": "dropped",
+  "pty.exited": "dropped",
+  "pty.deleted": "dropped",
+  "server.connected": "dropped",
 } as const satisfies Record<NativeEventKind, "mapped" | "dropped">;
 
+// OpenCode may emit these server-side metadata events before the generated
+// SDK union catches up. They are all non-narrative and therefore remain drop
+// dispositions; genuinely new execution events still use the unknown arm.
+const RUNTIME_DROPPED_EVENT_KINDS = new Set([
+  "plugin.added",
+  "catalog.updated",
+  "reference.updated",
+  "integration.updated",
+  "server.heartbeat",
+  "message.part.delta",
+]);
+
 function object(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined;
 }
-function text(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 ? value : undefined; }
-function diagnostic(value: unknown): string { const v = object(value); return text(v?.message) ?? text(v?.error) ?? "OpenCode session failed"; }
+function text(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+function diagnostic(value: unknown): string {
+  const data = object(value);
+  const nested = object(data?.data);
+  return text(nested?.message) ?? text(data?.message) ?? "OpenCode session failed";
+}
 function callFor(name: string, input: unknown): ToolCall {
   const value = object(input);
-  if (name === "shell") return { kind: "run", command: text(value?.command) ?? "shell" };
-  if (name === "read") return { kind: "read", path: text(value?.path) ?? "file" };
-  if (name === "grep" || name === "search") return { kind: "search", query: text(value?.query) ?? "search" };
+  const lower = name.toLowerCase();
+  if (lower === "bash" || lower === "shell") return { kind: "run", command: text(value?.command) ?? lower };
+  if (lower === "read") return { kind: "read", path: text(value?.filePath) ?? text(value?.path) ?? "file" };
+  if (lower === "grep" || lower === "glob" || lower === "search") {
+    return { kind: "search", query: text(value?.pattern) ?? text(value?.query) ?? lower };
+  }
   return { kind: "other", display: name };
 }
-function resultFor(value: unknown, failed: boolean): ToolResult {
-  return { status: failed ? "error" : "ok", ...(failed ? { message: diagnostic(value) } : {}) };
+function belongs(part: Part, state: State): boolean {
+  return state.sessionId === undefined || part.sessionID === state.sessionId;
+}
+function mapTextPart(part: Part, events: Emitter, state: State, thought: boolean): void {
+  const id = text(part.id);
+  const time = object(part.time);
+  const content = text(part.text);
+  const seen = thought ? state.reasoningParts : state.assistantParts;
+  if (!belongs(part, state) || id === undefined || content === undefined || time?.end === undefined || seen.has(id)) return;
+  seen.add(id);
+  if (thought) events.emit({ type: "thought", text: content });
+  else events.emit({ type: "assistant", text: content });
+}
+function resultFor(state: Part, failed: boolean): ToolResult {
+  const exit = object(state.metadata)?.exit;
+  const exitCode = typeof exit === "number" && Number.isInteger(exit) ? exit : undefined;
+  if (failed) {
+    return { status: "error", message: text(state.error) ?? "OpenCode tool failed", ...(exitCode === undefined ? {} : { exitCode }) };
+  }
+  return { status: exitCode !== undefined && exitCode !== 0 ? "error" : "ok", ...(exitCode === undefined ? {} : { exitCode }) };
+}
+function mapToolPart(part: Part, events: Emitter, state: State): void {
+  if (!belongs(part, state)) return;
+  const id = text(part.callID);
+  const name = text(part.tool);
+  const toolState = object(part.state);
+  if (id === undefined || name === undefined || toolState === undefined) return;
+  if ((toolState.status === "pending" || toolState.status === "running")
+    && !state.tools.has(id) && !state.completedTools.has(id)) {
+    const observed = { name, call: callFor(name, toolState.input) };
+    state.tools.set(id, observed);
+    events.emit({ type: "tool", phase: "started", id, ...observed });
+    return;
+  }
+  if ((toolState.status !== "completed" && toolState.status !== "error") || state.completedTools.has(id)) return;
+  const observed = state.tools.get(id) ?? { name, call: callFor(name, toolState.input) };
+  if (!state.tools.has(id)) {
+    state.tools.set(id, observed);
+    events.emit({ type: "tool", phase: "started", id, ...observed });
+  }
+  state.completedTools.add(id);
+  events.emit({
+    type: "tool",
+    phase: "completed",
+    id,
+    ...observed,
+    result: resultFor(toolState, toolState.status === "error"),
+  });
+}
+function mapPart(part: Part, events: Emitter, state: State): void {
+  if (part.type === "text") return mapTextPart(part, events, state, false);
+  if (part.type === "reasoning") return mapTextPart(part, events, state, true);
+  if (part.type === "tool") mapToolPart(part, events, state);
+}
+function mapSessionError(properties: Part, events: Emitter, state: State): void {
+  if (state.sessionId !== undefined && properties.sessionID !== state.sessionId) return;
+  state.failure = diagnostic(properties.error);
+  events.emit(noteEvent(state.failure));
+}
+function mapTodo(properties: Part, events: Emitter, state: State): void {
+  if (properties.sessionID !== state.sessionId || !Array.isArray(properties.todos)) return;
+  const summary = properties.todos.flatMap((value) => {
+    const todo = object(value);
+    const content = text(todo?.content);
+    return content === undefined ? [] : [`${text(todo?.status) ?? "todo"}: ${content}`];
+  }).join("; ");
+  if (summary.length > 0) events.emit(noteEvent(summary));
+}
+function ignoredEvent(type: unknown): boolean {
+  return typeof type === "string"
+    && (OPENCODE_EVENT_DISPOSITIONS[type as NativeEventKind] === "dropped" || RUNTIME_DROPPED_EVENT_KINDS.has(type));
 }
 
 export function mapEvent(value: unknown, events: Emitter, state: State): void {
   const event = object(value);
-  const eventId = text(event?.id);
-  if (eventId !== undefined && state.seen.has(eventId)) return;
-  if (eventId !== undefined) state.seen.add(eventId);
-  const kind = text(event?.type) ?? "unknown";
-  const data = object(event?.data) ?? event ?? {};
-  switch (kind) {
-    case "session.next.text.ended": {
-      const value = text(data.text); if (value !== undefined) { state.answer.push(value); events.emit({ type: "assistant", text: value }); } return;
-    }
-    case "session.next.reasoning.ended": { const value = text(data.text); if (value !== undefined) events.emit({ type: "thought", text: value }); return; }
-    case "session.next.tool.called": {
-      const id = text(data.callID); if (id === undefined) { events.emit({ type: "unknown", kind: `${kind}/missing-id` }); return; }
-      const observed = { name: text(data.tool) ?? "tool", call: callFor(text(data.tool) ?? "tool", data.input) };
-      state.tools.set(id, observed); events.emit({ type: "tool", phase: "started", id, ...observed }); return;
-    }
-    case "session.next.tool.success":
-    case "session.next.tool.failed": {
-      const id = text(data.callID); if (id === undefined) { events.emit({ type: "unknown", kind: `${kind}/missing-id` }); return; }
-      const started = state.tools.get(id); const failed = kind.endsWith("failed");
-      if (started === undefined) { events.emit({ type: "unknown", kind: `${kind}/orphan` }); return; }
-      state.tools.delete(id); events.emit({ type: "tool", phase: "completed", id, ...started, result: resultFor(data.error, failed) }); return;
-    }
-    case "session.next.step.failed": state.failure = diagnostic(data.error); events.emit({ type: "note", text: state.failure }); return;
-    case "session.next.retried": events.emit({ type: "note", text: "Retrying" }); return;
-    default: {
-      const disposition = OPENCODE_EVENT_DISPOSITIONS[kind as NativeEventKind];
-      if (disposition === "dropped") return;
-      events.emit({ type: "unknown", kind });
-    }
+  if (event === undefined) return;
+  const properties = object(event.properties) ?? {};
+  if (event.type === "message.part.updated") {
+    const part = object(properties.part);
+    if (part !== undefined) mapPart(part, events, state);
+    return;
   }
+  if (event.type === "message.updated") {
+    const info = object(properties.info);
+    if (info !== undefined && info.sessionID === state.sessionId && info.role === "assistant" && info.error !== undefined) {
+      state.failure = diagnostic(info.error);
+    }
+    return;
+  }
+  if (event.type === "session.error") return mapSessionError(properties, events, state);
+  if (event.type === "todo.updated") return mapTodo(properties, events, state);
+  if (ignoredEvent(event.type)) return;
+  events.emit({ type: "unknown", kind: typeof event.type === "string" ? event.type : "unknown" });
 }
 
 export type EventState = State;
-export function createEventState(): State { return { tools: new Map(), answer: [], seen: new Set() }; }
+export function createEventState(sessionId?: string): State {
+  return {
+    ...(sessionId === undefined ? {} : { sessionId }),
+    assistantParts: new Set(),
+    reasoningParts: new Set(),
+    tools: new Map(),
+    completedTools: new Set(),
+  };
+}

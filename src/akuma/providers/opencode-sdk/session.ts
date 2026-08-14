@@ -1,33 +1,38 @@
 import net from "node:net";
 import { spawnDetachedProcess, putDownProcessTree, type ProcessCollar } from "../../../runtime/proc/run.js";
-import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/v2";
-import { type ProviderExecution, type ResumeCoordinate } from "../../heart/index.js";
+import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
+import type { ProviderExecution, ResumeCoordinate } from "../../heart/index.js";
 
-export type OpencodeSdkSession = Pick<OpencodeClient["v2"]["session"],
-  "create" | "get" | "prompt" | "events" | "history" | "messages" | "interrupt" | "switchModel" | "wait">;
+export type OpencodeSdkSession = Pick<OpencodeClient["session"],
+  "create" | "get" | "fork" | "abort" | "promptAsync" | "messages">;
+export type OpencodeSdkEvent = Pick<OpencodeClient["event"], "subscribe">;
 export type OpencodeSdkLoader = (cwd: string) => Promise<Readonly<{
-  client: { v2: { session: OpencodeSdkSession; model?: Pick<OpencodeClient["v2"]["model"], "list"> }; session?: { fork(params: { sessionID: string; messageID: string }): Promise<unknown> } };
+  client: { session: OpencodeSdkSession; event: OpencodeSdkEvent };
   close?: () => Promise<void> | void;
 }>>;
 
 export const OPENCODE_SDK_PROVIDER = "opencode-sdk" as const;
 
-export function parseModel(model: string, effort?: string): Readonly<{ providerID: string; id: string; variant?: string }> {
+export function parseModel(model: string): Readonly<{ providerID: string; modelID: string }> {
   const slash = model.indexOf("/");
   if (slash <= 0 || slash === model.length - 1) throw new Error("OpenCode model must be <provider>/<model>");
-  return { providerID: model.slice(0, slash), id: model.slice(slash + 1), ...(effort === undefined ? {} : { variant: effort }) };
+  return { providerID: model.slice(0, slash), modelID: model.slice(slash + 1) };
 }
 
 export type OpencodeRuntime = Readonly<{
-  client: { v2: { session: OpencodeSdkSession; model?: Pick<OpencodeClient["v2"]["model"], "list"> }; session?: { fork(params: { sessionID: string; messageID: string }): Promise<unknown> } };
+  client: { session: OpencodeSdkSession; event: OpencodeSdkEvent };
   close: () => Promise<void>;
 }>;
 
 async function waitReady(client: OpencodeClient, cwd: string, signal: AbortSignal): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (signal.aborted) throw new Error("OpenCode startup aborted");
-    try { await client.v2.model.list({ location: { directory: cwd } }, { throwOnError: true }); return; }
-    catch { await new Promise((resolve) => setTimeout(resolve, 100)); }
+    try {
+      await client.session.list({ query: { directory: cwd }, throwOnError: true });
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   }
   throw new Error("OpenCode server did not become ready within 10000ms");
 }
@@ -38,7 +43,11 @@ async function availablePort(): Promise<number> {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
-      if (address === null || typeof address === "string") { server.close(); reject(new Error("OpenCode port unavailable")); return; }
+      if (address === null || typeof address === "string") {
+        server.close();
+        reject(new Error("OpenCode port unavailable"));
+        return;
+      }
       server.close((error) => error === undefined ? resolve(address.port) : reject(error));
     });
   });
@@ -62,8 +71,12 @@ export async function loadOpencode(
     log: `${cwd}/.opencode.log`,
   });
   const client = createOpencodeClient({ baseUrl: `http://127.0.0.1:${port}`, directory: cwd });
-  try { await waitReady(client, cwd, signal); }
-  catch (error) { await putDownProcessTree(collar); throw error; }
+  try {
+    await waitReady(client, cwd, signal);
+  } catch (error) {
+    await putDownProcessTree(collar);
+    throw error;
+  }
   return { client, close: async () => { await putDownProcessTree(collar); } };
 }
 

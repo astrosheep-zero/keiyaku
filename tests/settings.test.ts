@@ -132,13 +132,13 @@ test("Archetype resolves one provider execution without dotenv loading", () => {
   } finally { value.close(); }
 });
 
-test("Archetype resolves the OpenCode V2 provider execution as one frozen recipe", () => {
+test("Archetype resolves the OpenCode V1 provider execution as one frozen recipe", () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: {
       local: { kind: "opencode-sdk", executable: "opencode-custom", env: { LITERAL: "yes" } },
     } }));
-    writeFileSync(join(value.home, "akuma", "builder.md"), "---\nprovider: local\nmodel: openai/test\neffort: high\n---\n");
+    writeFileSync(join(value.home, "akuma", "builder.md"), "---\nprovider: local\nmodel: openai/test\n---\n");
     const loaded = loadArchetype({ name: "builder", settings: settings({ root: value.project, home: value.home }) });
     assert.deepEqual(loaded.provider, {
       name: "local",
@@ -146,7 +146,7 @@ test("Archetype resolves the OpenCode V2 provider execution as one frozen recipe
       executable: "opencode-custom",
       env: { LITERAL: "yes" },
     });
-    assert.deepEqual(loaded.options, { model: "openai/test", effort: "high", systemPrompt: "" });
+    assert.deepEqual(loaded.options, { model: "openai/test", systemPrompt: "" });
     assert.equal(Object.isFrozen(loaded.provider), true);
     assert.equal(Object.isFrozen(loaded.provider.env), true);
   } finally { value.close(); }

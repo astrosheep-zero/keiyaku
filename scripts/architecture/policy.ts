@@ -771,6 +771,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         { source: "akuma/identity.ts", symbols: ["randomBytes"] },
         { source: "akuma/akuma.ts", symbols: ["randomUUID"] },
         { source: "akuma/providers/claude/index.ts", symbols: ["randomUUID"] },
+        { source: "akuma/providers/opencode-sdk/index.ts", symbols: ["randomUUID"] },
         { source: "akuma/requests.ts", symbols: ["randomUUID"] },
         { source: "dispatch/index.ts", symbols: ["createHash"] },
       ],

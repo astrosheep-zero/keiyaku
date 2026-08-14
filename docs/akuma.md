@@ -2,7 +2,7 @@
 
 This chapter owns Akuma identity, heart facts, life, detached bodies, provider
 boundaries, lifecycle verbs, and persistence. The current surface ships the
-Claude, Codex app-server, and OpenCode V2 providers, public handles, status, wait, interrupt,
+Claude, Codex app-server, and OpenCode V1 providers, public handles, status, wait, interrupt,
 fork, Body Requests, CLI skin, and Kanshi rows. Body Requests reroute the
 existing call surface; they do not add a public verb.
 
@@ -217,14 +217,12 @@ awaits termination of that complete tree, so provider descendants cannot outlive
 the body turn or leave an answered Akuma headless.
 
 Provider kind `opencode-sdk` runs the selected executable, defaulting to
-`opencode`, through the official V2 Session API. It consumes `model`, `effort`,
-and the system prompt only where the native V2 request accepts them; explicit
-`access` and `network` values are refused. Fresh and resumed drives admit the
-native session id and prompt before returning a Session. Resume uses only the
-frozen session coordinate. Native root-session fork is optional and uses the
-exact supplied session and message point. Live tell is omitted because V2 prompt
-admission does not prove terminal native processing evidence; pending tells
-remain next-launch input.
+`opencode`, through the official public V1 Session API. It consumes `model` and
+the system prompt; `effort`, explicit `access`, and `network` values are
+refused because this surface has no honest portable mapping for them. Fresh and
+resumed drives use the frozen session id, and native fork uses that exact
+session plus the answered assistant message id. Native admission, completion,
+event, and tell semantics belong exclusively to [akuma-provider.md](akuma-provider.md).
 
 Provider kind `pi` uses the in-process `@earendil-works/pi-coding-agent`
 SDK. Model is an exact `<provider>/<id>` lookup through `ModelRuntime`; effort

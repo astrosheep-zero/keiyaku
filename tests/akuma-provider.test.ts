@@ -22,42 +22,60 @@ import {
   createCodexAppServerProvider,
 } from "../src/akuma/providers/codex-app-server/index.js";
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
-import { createEventState, mapEvent, OPENCODE_EVENT_DISPOSITIONS } from "../src/akuma/providers/opencode-sdk/events.js";
+import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/events.js";
 import type { OpencodeSdkLoader, OpencodeSdkSession } from "../src/akuma/providers/opencode-sdk/session.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 
 function fakeOpencode() {
   let closed = 0;
-  const switchedModels: unknown[] = [];
+  const prompts: unknown[] = [];
+  let activeSession = "session-fresh";
+  let activeMessage = "msg_unset";
+  let admit!: () => void;
+  const admitted = new Promise<void>((resolve) => { admit = resolve; });
   const events = [
-    { id: "event-1", durable: { aggregateID: "session-fresh", seq: 1, version: 1 }, type: "session.next.tool.called", data: { callID: "tool-1", tool: "shell", input: { command: "npm test" } } },
-    { id: "event-2", durable: { aggregateID: "session-fresh", seq: 2, version: 1 }, type: "session.next.tool.success", data: { callID: "tool-1" } },
-    { id: "event-3", durable: { aggregateID: "session-fresh", seq: 3, version: 1 }, type: "session.next.reasoning.ended", data: { text: "checked" } },
-    { id: "event-4", durable: { aggregateID: "session-fresh", seq: 4, version: 1 }, type: "session.next.text.ended", data: { text: "answer" } },
-    { id: "event-5", durable: { aggregateID: "session-fresh", seq: 5, version: 1 }, type: "session.next.future", data: { secret: "drop" } },
+    { type: "session.status", properties: { sessionID: "session-fresh", status: { type: "busy" } } },
+    { type: "message.part.updated", properties: { part: { id: "part-tool", sessionID: "session-fresh", messageID: "message-1", type: "tool", callID: "tool-1", tool: "shell", state: { status: "running", input: { command: "npm test" }, time: { start: 1 } } } } },
+    { type: "message.part.updated", properties: { part: { id: "part-tool", sessionID: "session-fresh", messageID: "message-1", type: "tool", callID: "tool-1", tool: "shell", state: { status: "completed", input: { command: "npm test" }, output: "ok", title: "test", metadata: {}, time: { start: 1, end: 2 } } } } },
+    { type: "message.part.updated", properties: { part: { id: "part-thought", sessionID: "session-fresh", messageID: "message-1", type: "reasoning", text: "checked", time: { start: 1, end: 2 } } } },
+    { type: "message.part.updated", properties: { part: { id: "part-answer", sessionID: "session-fresh", messageID: "message-1", type: "text", text: "answer", time: { start: 1, end: 2 } } } },
+    { type: "session.future", properties: { secret: "drop" } },
+    { type: "session.status", properties: { sessionID: "session-fresh", status: { type: "idle" } } },
   ];
-  const stream = async function* (): AsyncGenerator<Readonly<{ data: string }>> {
-    for (const event of events) yield { data: JSON.stringify(event) };
+  const stream = async function* (): AsyncGenerator<unknown> {
+    await admitted;
+    yield { type: "message.updated", properties: { info: { id: activeMessage, sessionID: activeSession, role: "user" } } };
+    for (const event of events) {
+      yield JSON.parse(JSON.stringify(event).replaceAll("session-fresh", activeSession)) as unknown;
+    }
   };
   const session = {
-    async create() { return { data: { data: { id: "session-fresh" } } }; },
-    async get() { return { data: { data: { id: "session-resume" } } }; },
-    async prompt() { return { data: { data: { id: "prompt-1", admittedSeq: 3, sessionID: "session-fresh", prompt: { text: "" }, delivery: "queue", timeCreated: 1 } } }; },
-    async events() { return { stream: stream() }; },
-    async wait() { return undefined; },
-    async history() { return { data: { data: events, hasMore: false } }; },
-    async messages() { return { data: { data: [{ id: "message-1", type: "assistant", time: { created: 1 }, agent: "build", model: { providerID: "p", id: "m" }, content: [{ type: "text", id: "text-1", text: "answer" }] }] } }; },
-    async interrupt() { return undefined; },
-    async switchModel(input: unknown) { switchedModels.push(input); return undefined; },
+    async create() { activeSession = "session-fresh"; return { data: { id: activeSession } }; },
+    async get() { activeSession = "session-resume"; return { data: { id: activeSession } }; },
+    async promptAsync(input: unknown) {
+      prompts.push(input);
+      activeMessage = String((input as { body?: { messageID?: unknown } }).body?.messageID);
+      admit();
+      return { data: undefined };
+    },
+    async messages() {
+      return { data: [
+        { info: { id: activeMessage, sessionID: activeSession, role: "user", time: { created: 1 } }, parts: [] },
+        { info: { id: "message-1", sessionID: activeSession, parentID: activeMessage, role: "assistant", time: { created: 2 } }, parts: [
+        { id: "part-tool", sessionID: "session-fresh", messageID: "message-1", type: "tool", callID: "tool-1", tool: "shell", state: { status: "completed", input: { command: "npm test" }, output: "ok", title: "test", metadata: {}, time: { start: 1, end: 2 } } },
+        { id: "part-thought", sessionID: "session-fresh", messageID: "message-1", type: "reasoning", text: "checked", time: { start: 1, end: 2 } },
+        { id: "part-answer", sessionID: "session-fresh", messageID: "message-1", type: "text", text: "answer", time: { start: 1, end: 2 } },
+        ] },
+      ] };
+    },
+    async fork() { return { data: { id: "session-child" } }; },
+    async abort() { return { data: true }; },
   } as unknown as OpencodeSdkSession;
   const loader: OpencodeSdkLoader = async () => ({
-    client: {
-      v2: { session },
-      session: { async fork() { return { data: { id: "session-child" } }; } },
-    },
+    client: { session, event: { async subscribe() { return { stream: stream() }; } } as never },
     close: () => { closed += 1; },
   });
-  return { loader, closed: () => closed, switchedModels };
+  return { loader, closed: () => closed, prompts };
 }
 
 function fakePiSdk(input: {
@@ -129,12 +147,12 @@ function fakePiSdk(input: {
   };
 }
 
-test("OpenCode V2 adapter admits, maps, completes, and cleans up through a loader fake", async () => {
+test("OpenCode V1 adapter admits with promptAsync and completes from terminal events", async () => {
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
   assert.equal(provider.admitOptions({ access: "write" }).kind, "refused");
   const drive = await provider.start({ body: "build", launchTells: [{ id: "tell-1", text: "also check" }], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
-  assert.match(drive.admission.fence, /session-fresh:3/u);
+  assert.equal(drive.admission.fence, "session-fresh");
   const observed = [];
   for await (const event of drive.events) observed.push(event);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "answer", historyId: "message-1" });
@@ -143,16 +161,36 @@ test("OpenCode V2 adapter admits, maps, completes, and cleans up through a loade
   assert.equal(fake.closed(), 1);
 });
 
-test("OpenCode V2 adapter resumes the supplied coordinate and forks the exact point", async () => {
+test("OpenCode V1 start waits for native prompt admission", async () => {
+  let admit!: () => void;
+  const admitted = new Promise<void>((resolve) => { admit = resolve; });
+  const session = {
+    async create() { return { data: { id: "session-admission" } }; },
+    async promptAsync() { await admitted; return { data: undefined }; },
+    async abort() { return { data: true }; },
+  } as unknown as OpencodeSdkSession;
+  const provider = createOpencodeProvider({ loader: async () => ({
+    client: { session, event: { async subscribe() { return { stream: (async function* () { await new Promise<void>(() => undefined); })() }; } } as never },
+  }) });
+  let returned = false;
+  const starting = provider.start({ body: "wait", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } })
+    .then((drive) => { returned = true; return drive; });
+  await Promise.resolve();
+  assert.equal(returned, false);
+  admit();
+  const drive = await starting;
+  await drive.abort();
+});
+
+test("OpenCode V1 adapter resumes the supplied coordinate and forks the exact point", async () => {
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
   const drive = await provider.resume!({ body: "continue", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "resume", coordinate: { sessionId: "session-resume" } } });
-  await drive.abort();
-  assert.equal((await drive.completion).kind, "failed");
+  assert.equal((await drive.completion).kind, "answered");
   assert.deepEqual(await provider.fork!({ session: { sessionId: "session-resume" }, at: "message-1", cwd: "/tmp" }), { session: { sessionId: "session-child" } });
 });
 
-test("OpenCode V2 refuses a Pi coordinate before loading its native runtime", async () => {
+test("OpenCode V1 refuses a Pi coordinate before loading its native runtime", async () => {
   let loaded = false;
   const provider = createOpencodeProvider({ loader: async () => {
     loaded = true;
@@ -172,70 +210,192 @@ test("OpenCode V2 refuses a Pi coordinate before loading its native runtime", as
   assert.equal(loaded, false);
 });
 
-test("OpenCode V2 abort cleanup does not await an uncooperative native interrupt", async () => {
+test("OpenCode V1 abort cleanup does not await an uncooperative native abort", async () => {
   let closed = 0;
   const session = {
-    async create() { return { data: { data: { id: "session-stuck-interrupt" } } }; },
-    async events() { return { stream: (async function* () {})() }; },
-    async prompt() { return { data: { data: { id: "prompt-id", admittedSeq: 1 } } }; },
-    async wait() { await new Promise<void>(() => undefined); },
-    async interrupt() { await new Promise<void>(() => undefined); },
+    async create() { return { data: { id: "session-stuck-abort" } }; },
+    async promptAsync() { return { data: undefined }; },
+    async abort() { await new Promise<void>(() => undefined); },
   } as unknown as OpencodeSdkSession;
-  const provider = createOpencodeProvider({ loader: async () => ({ client: { v2: { session } }, close: () => { closed += 1; } }) });
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { session, event: { async subscribe() { return { stream: (async function* () { await new Promise<void>(() => undefined); })() }; } } as never }, close: () => { closed += 1; } }) });
   const drive = await provider.start({ body: "interrupt", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
   await drive.abort();
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "OpenCode session interrupted" });
   assert.equal(closed, 1);
 });
 
-test("OpenCode V2 cleans up when prompt admission rejects", async () => {
+test("OpenCode V1 rejects failed prompt admission and cleans up", async () => {
   let closed = 0;
   const session = {
-    async create() { return { data: { data: { id: "session-rejected" } } }; },
-    async events() { return { stream: (async function* () {})() }; },
-    async prompt() { throw new Error("prompt rejected"); },
+    async create() { return { data: { id: "session-rejected" } }; },
+    async promptAsync() { throw new Error("prompt rejected"); },
   } as unknown as OpencodeSdkSession;
-  const provider = createOpencodeProvider({ loader: async () => ({ client: { v2: { session } }, close: () => { closed += 1; } }) });
-  await assert.rejects(() => provider.start({ body: "fail", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } }), /prompt rejected/u);
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { session, event: { async subscribe() {
+    return { stream: (async function* () {
+      yield { type: "session.status", properties: { sessionID: "session-empty", status: { type: "busy" } } };
+      yield { type: "session.status", properties: { sessionID: "session-empty", status: { type: "idle" } } };
+    })() };
+  } } as never }, close: () => { closed += 1; } }) });
+  await assert.rejects(provider.start({ body: "fail", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } }), /prompt rejected/u);
   assert.equal(closed, 1);
 });
 
-test("OpenCode V2 refuses unsupported options before birth and applies resume model", async () => {
+test("OpenCode V1 admits native prompt options and refuses unsupported effort", async () => {
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
-  assert.equal(provider.admitOptions({ systemPrompt: "must enforce" }).kind, "refused");
+  assert.equal(provider.admitOptions({ systemPrompt: "must enforce" }).kind, "admitted");
   assert.equal(provider.admitOptions({ effort: "high" }).kind, "refused");
   assert.equal(provider.admitOptions({ model: "not-a-provider-model" }).kind, "refused");
-  assert.equal(provider.admitOptions({ model: "provider/model", effort: "high" }).kind, "admitted");
-  const drive = await provider.resume!({ body: "continue", launchTells: [], cwd: "/tmp", options: { model: "provider/model", effort: "high" }, session: { kind: "resume", coordinate: { sessionId: "session-resume" } } });
-  await drive.abort();
-  assert.deepEqual(fake.switchedModels, [{ sessionID: "session-resume", model: { providerID: "provider", id: "model", variant: "high" } }]);
+  assert.equal(provider.admitOptions({ model: "provider/model" }).kind, "admitted");
+  const drive = await provider.resume!({ body: "continue", launchTells: [], cwd: "/tmp", options: { model: "provider/model", systemPrompt: "must enforce" }, session: { kind: "resume", coordinate: { sessionId: "session-resume" } } });
+  assert.equal((await drive.completion).kind, "answered");
+  const prompt = fake.prompts[0] as { body: { messageID: string } };
+  assert.match(prompt.body.messageID, /^msg_[0-9a-f]{32}$/u);
+  assert.deepEqual(prompt, {
+    path: { id: "session-resume" },
+    query: { directory: "/tmp" },
+    body: { messageID: prompt.body.messageID, model: { providerID: "provider", modelID: "model" }, system: "must enforce", parts: [{ type: "text", text: "continue" }] },
+    throwOnError: true,
+  });
 });
 
-test("OpenCode V2 pins every installed durable event kind and retains a future fallback", () => {
-  assert.equal(OPENCODE_EVENT_DISPOSITIONS["session.next.step.ended"], "dropped");
+test("OpenCode V1 event translation drops known control events and retains a future fallback", () => {
   const observed: AgentEvent[] = [];
   const emitter = { emit(event: AgentEvent) { observed.push(event); } };
-  mapEvent({ id: "step-ended", type: "session.next.step.ended", data: {} }, emitter, createEventState());
-  mapEvent({ id: "future", type: "session.next.future", data: {} }, emitter, createEventState());
-  assert.deepEqual(observed, [{ type: "unknown", kind: "session.next.future" }]);
+  mapEvent({ type: "session.status", properties: { sessionID: "session-1", status: { type: "idle" } } }, emitter, createEventState());
+  mapEvent({ type: "session.future", properties: {} }, emitter, createEventState());
+  assert.deepEqual(observed, [{ type: "unknown", kind: "session.future" }]);
+  const scoped = createEventState("session-1");
+  mapEvent({ type: "message.updated", properties: { info: { sessionID: "other", role: "assistant", error: { message: "wrong session" } } } }, emitter, scoped);
+  assert.equal(scoped.failure, undefined);
 });
 
-test("OpenCode V2 fails an idle drain without native assistant evidence", async () => {
+test("OpenCode V1 fails terminal observation without native assistant evidence", async () => {
   let closed = 0;
+  let messageID = "msg_unset";
+  let prompt!: () => void;
+  const prompted = new Promise<void>((resolve) => { prompt = resolve; });
   const session = {
-    async create() { return { data: { data: { id: "session-idle" } } }; },
-    async events() { return { stream: (async function* () {})() }; },
-    async prompt() { return { data: { data: { id: "prompt-id", admittedSeq: 1 } } }; },
-    async wait() { return undefined; },
-    async history() { return { data: { data: [], hasMore: false } }; },
-    async messages() { return { data: { data: [] } }; },
-    async interrupt() { return undefined; },
+    async create() { return { data: { id: "session-empty" } }; },
+    async promptAsync(input: unknown) {
+      messageID = String((input as { body?: { messageID?: unknown } }).body?.messageID);
+      prompt();
+      return { data: undefined };
+    },
+    async messages() {
+      return { data: [{ info: { id: messageID, sessionID: "session-empty", role: "user", time: { created: 1 } }, parts: [] }] };
+    },
   } as unknown as OpencodeSdkSession;
-  const provider = createOpencodeProvider({ loader: async () => ({ client: { v2: { session } }, close: () => { closed += 1; } }) });
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { session, event: { async subscribe() {
+    return { stream: (async function* () {
+      await prompted;
+      yield { type: "message.updated", properties: { info: { id: messageID, sessionID: "session-empty", role: "user" } } };
+      yield { type: "session.status", properties: { sessionID: "session-empty", status: { type: "busy" } } };
+      yield { type: "session.status", properties: { sessionID: "session-empty", status: { type: "idle" } } };
+    })() };
+  } } as never }, close: () => { closed += 1; } }) });
   const drive = await provider.start({ body: "idle", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "OpenCode completed without a native assistant answer/history point" });
   assert.equal(closed, 1);
+});
+
+test("OpenCode V1 ignores a prior terminal pair before this prompt is admitted", async () => {
+  let admit!: () => void;
+  let finish!: () => void;
+  let messageID = "msg_unset";
+  const admitted = new Promise<void>((resolve) => { admit = resolve; });
+  const terminal = new Promise<void>((resolve) => { finish = resolve; });
+  const session = {
+    async create() { return { data: { id: "session-race" } }; },
+    async promptAsync(input: unknown) {
+      messageID = String((input as { body?: { messageID?: unknown } }).body?.messageID);
+      await admitted;
+      return { data: undefined };
+    },
+    async messages() {
+      return { data: [
+        { info: { id: messageID, sessionID: "session-race", role: "user", time: { created: 2 } }, parts: [] },
+        { info: { id: "assistant-race", sessionID: "session-race", parentID: messageID, role: "assistant", time: { created: 3 } }, parts: [
+          { id: "answer-race", sessionID: "session-race", messageID: "assistant-race", type: "text", text: "current", time: { start: 2, end: 3 } },
+        ] },
+      ] };
+    },
+  } as unknown as OpencodeSdkSession;
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { session, event: { async subscribe() {
+    return { stream: (async function* () {
+      yield { type: "session.status", properties: { sessionID: "session-race", status: { type: "busy" } } };
+      yield { type: "session.status", properties: { sessionID: "session-race", status: { type: "idle" } } };
+      await admitted;
+      yield { type: "message.updated", properties: { info: { id: messageID, sessionID: "session-race", role: "user" } } };
+      yield { type: "session.status", properties: { sessionID: "session-race", status: { type: "busy" } } };
+      await terminal;
+      yield { type: "session.status", properties: { sessionID: "session-race", status: { type: "idle" } } };
+    })() };
+  } } as never } }) });
+  let returned = false;
+  const starting = provider.start({ body: "current", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } })
+    .then((drive) => { returned = true; return drive; });
+  await Promise.resolve();
+  assert.equal(returned, false);
+  admit();
+  const drive = await starting;
+  let completed = false;
+  void drive.completion.then(() => { completed = true; });
+  await Promise.resolve();
+  assert.equal(completed, false);
+  finish();
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "current", historyId: "assistant-race" });
+  const observed = [];
+  for await (const event of drive.events) observed.push(event);
+  assert.deepEqual(observed.map((event) => event.type), ["session"]);
+});
+
+test("OpenCode V1 isolates other sessions and accepts the current Turn error", async () => {
+  let messageID = "msg_unset";
+  let prompt!: () => void;
+  const prompted = new Promise<void>((resolve) => { prompt = resolve; });
+  const session = {
+    async create() { return { data: { id: "session-error" } }; },
+    async promptAsync(input: unknown) {
+      messageID = String((input as { body?: { messageID?: unknown } }).body?.messageID);
+      prompt();
+      return { data: undefined };
+    },
+  } as unknown as OpencodeSdkSession;
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { session, event: { async subscribe() {
+    return { stream: (async function* () {
+      await prompted;
+      yield { type: "message.updated", properties: { info: { id: messageID, sessionID: "session-error", role: "user" } } };
+      yield { type: "session.status", properties: { sessionID: "session-other", status: { type: "busy" } } };
+      yield { type: "session.status", properties: { sessionID: "session-other", status: { type: "idle" } } };
+      yield { type: "session.error", properties: { sessionID: "session-error", error: { message: "native failed" } } };
+    })() };
+  } } as never } }) });
+  const drive = await provider.start({ body: "fail", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "native failed" });
+});
+
+test("OpenCode V1 retains a setup error emitted before the user identity", async () => {
+  let begin!: () => void;
+  let admit!: () => void;
+  const begun = new Promise<void>((resolve) => { begin = resolve; });
+  const admitted = new Promise<void>((resolve) => { admit = resolve; });
+  const session = {
+    async create() { return { data: { id: "session-setup-error" } }; },
+    async promptAsync() { begin(); await admitted; return { data: undefined }; },
+  } as unknown as OpencodeSdkSession;
+  const provider = createOpencodeProvider({ loader: async () => ({ client: { session, event: { async subscribe() {
+    return { stream: (async function* () {
+      await begun;
+      yield { type: "session.error", properties: { sessionID: "session-setup-error", error: { message: "setup failed" } } };
+    })() };
+  } } as never } }) });
+  const starting = provider.start({ body: "fail", launchTells: [], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
+  await begun;
+  await Promise.resolve();
+  admit();
+  const drive = await starting;
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "setup failed" });
 });
 
 test("Pi adapter maps completed native evidence and disposes after answer", async () => {
