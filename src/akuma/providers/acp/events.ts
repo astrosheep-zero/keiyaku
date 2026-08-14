@@ -5,6 +5,7 @@ type OpenBlock = Readonly<{ type: "assistant" | "thought"; text: string }> | nul
 
 export type AcpEventState = Readonly<{
   answer: string;
+  assistantMessageId: string | null;
   open: OpenBlock;
   tools: ReadonlyMap<string, string>;
 }>;
@@ -12,6 +13,7 @@ type AcpEventMapping = Readonly<{ events: readonly AgentEvent[]; state: AcpEvent
 
 export const EMPTY_ACP_EVENT_STATE: AcpEventState = Object.freeze({
   answer: "",
+  assistantMessageId: null,
   open: null,
   tools: new Map(),
 });
@@ -28,15 +30,24 @@ function appendBlock(
   state: AcpEventState,
   type: "assistant" | "thought",
   text: string,
+  messageId?: string,
 ): AcpEventMapping {
-  const flushed = state.open === null || state.open.type === type
+  const newAssistantMessage = type === "assistant"
+    && messageId !== undefined
+    && state.assistantMessageId !== messageId;
+  const flushed = state.open === null || (state.open.type === type && !newAssistantMessage)
     ? { events: [], state }
     : flushAcpEvents(state);
   return {
     events: flushed.events,
     state: {
       ...flushed.state,
-      answer: type === "assistant" ? `${flushed.state.answer}${text}` : flushed.state.answer,
+      answer: type === "assistant"
+        ? `${newAssistantMessage ? "" : flushed.state.answer}${text}`
+        : flushed.state.answer,
+      assistantMessageId: type === "assistant" && messageId !== undefined
+        ? messageId
+        : flushed.state.assistantMessageId,
       open: { type, text: `${flushed.state.open?.text ?? ""}${text}` },
     },
   };
@@ -48,7 +59,14 @@ export function mapAcpUpdate(update: SessionUpdate, previous: AcpEventState): Ac
     case "agent_thought_chunk": {
       const text = update.content.type === "text" ? update.content.text : undefined;
       if (text === undefined) return flushAcpEvents(previous, [unknownEvent(`${update.sessionUpdate}/${update.content.type}`)]);
-      return appendBlock(previous, update.sessionUpdate === "agent_message_chunk" ? "assistant" : "thought", text);
+      return appendBlock(
+        previous,
+        update.sessionUpdate === "agent_message_chunk" ? "assistant" : "thought",
+        text,
+        update.sessionUpdate === "agent_message_chunk" && update.messageId !== null
+          ? update.messageId
+          : undefined,
+      );
     }
     case "user_message_chunk": return flushAcpEvents(previous);
     case "tool_call":

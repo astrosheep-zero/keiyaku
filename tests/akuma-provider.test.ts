@@ -386,6 +386,40 @@ test("ACP mapper preserves buffered state for an unknown runtime update discrimi
   });
 });
 
+test("ACP mapper returns the final identified assistant message as the answer", () => {
+  const progress = mapAcpUpdate({
+    sessionUpdate: "agent_message_chunk",
+    messageId: "progress",
+    content: { type: "text", text: "I will inspect the repository." },
+  }, EMPTY_ACP_EVENT_STATE);
+  const finalStart = mapAcpUpdate({
+    sessionUpdate: "agent_message_chunk",
+    messageId: "final",
+    content: { type: "text", text: "The audit " },
+  }, progress.state);
+  const finalEnd = mapAcpUpdate({
+    sessionUpdate: "agent_message_chunk",
+    messageId: "final",
+    content: { type: "text", text: "passed." },
+  }, finalStart.state);
+
+  assert.deepEqual(finalStart.events, [{ type: "assistant", text: "I will inspect the repository." }]);
+  assert.equal(finalEnd.state.answer, "The audit passed.");
+});
+
+test("ACP mapper treats unidentified v1 assistant chunks as one message", () => {
+  const first = mapAcpUpdate({
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text: "complete " },
+  }, EMPTY_ACP_EVENT_STATE);
+  const second = mapAcpUpdate({
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text: "answer" },
+  }, first.state);
+
+  assert.equal(second.state.answer, "complete answer");
+});
+
 function fakePiSdk(input: {
   events?: readonly Record<string, unknown>[];
   fail?: Error;

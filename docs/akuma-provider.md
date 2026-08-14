@@ -351,8 +351,10 @@ second coding harness.
 
 An ACP drive initializes one connection, creates or loads one session, and
 uses one `session/prompt` response as the sole terminal authority. The exact
-ACP session id is the resume coordinate. Assistant chunks form the complete
-answer while session updates remain activity only. Completion is published
+ACP session id is the resume coordinate. Chunks with one ACP message identity
+form one assistant message; an identity change starts another, while
+unidentified v1 chunks remain one message. The final assistant message is the
+complete answer while every message remains activity. Completion is published
 only after owned-process cleanup settles; cleanup failure is a typed failed
 Turn. ACP cancellation sends the standard session cancellation before
 connection and owned-process cleanup.
