@@ -13,18 +13,18 @@ function rules(diagnostics: readonly Diagnostic[]): readonly string[] {
   return diagnostics.map((diagnostic) => diagnostic.rule);
 }
 
-test("production TypeScript has a hard 25000-line architecture budget", () => {
+test("production TypeScript has a hard 30000-line architecture budget", () => {
   const atLimit = productionLineBudgetDiagnostic([
-    { path: "core/limit.ts", source: "x\n".repeat(25_000) },
+    { path: "core/limit.ts", source: "x\n".repeat(30_000) },
     { path: "scripts/ignored.ts", source: "x\n".repeat(10_000) },
   ]);
   assert.equal(atLimit, null);
 
   const overLimit = productionLineBudgetDiagnostic([
-    { path: "core/over.ts", source: "x\n".repeat(25_001) },
+    { path: "core/over.ts", source: "x\n".repeat(30_001) },
   ]);
   assert.equal(overLimit?.rule, "architecture/production-line-budget");
-  assert.equal(overLimit?.detail, "production TypeScript is 25001 lines; limit is 25000");
+  assert.equal(overLimit?.detail, "production TypeScript is 30001 lines; limit is 30000");
 });
 
 test("architecture policy accepts public command adapters", () => {
