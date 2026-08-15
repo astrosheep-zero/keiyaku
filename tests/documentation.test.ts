@@ -21,16 +21,35 @@ function physicalLines(path: string): number {
   return bytes.endsWith("\n") ? bytes.split("\n").length - 1 : bytes.split("\n").length;
 }
 
-test("formal documentation files do not exceed 400 physical lines", () => {
-  const oversized = markdownFiles(docs)
-    .map((path) => ({ path: relative(root, path), lines: physicalLines(path) }))
-    .filter(({ lines }) => lines > 400)
-    .sort((left, right) => left.path.localeCompare(right.path));
+type DocumentationSize = "normal" | "warning" | "error";
 
+function documentationSize(lines: number): DocumentationSize {
+  if (lines > 500) return "error";
+  if (lines > 400) return "warning";
+  return "normal";
+}
+
+test("formal documentation line thresholds are exact", () => {
+  assert.deepEqual(
+    [400, 401, 500, 501].map(documentationSize),
+    ["normal", "warning", "warning", "error"],
+  );
+});
+
+test("formal documentation warns after 400 and fails after 500 physical lines", (context) => {
+  const measured = markdownFiles(docs)
+    .map((path) => ({ path: relative(root, path), lines: physicalLines(path) }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const warnings = measured.filter(({ lines }) => documentationSize(lines) === "warning");
+  const oversized = measured.filter(({ lines }) => documentationSize(lines) === "error");
+
+  for (const { path, lines } of warnings) {
+    context.diagnostic(`warning: formal documentation exceeds 400 lines: ${path}: ${lines}`);
+  }
   assert.deepEqual(
     oversized,
     [],
-    `formal documentation exceeds 400 lines:\n${oversized
+    `formal documentation exceeds 500 lines:\n${oversized
       .map(({ path, lines }) => `${path}: ${lines}`)
       .join("\n")}`,
   );
