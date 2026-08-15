@@ -127,11 +127,12 @@ Audit before each delivery or redelivery:
 keiyaku audit <contract> --show-diff-body
 ```
 
-Audit is the aggregate Contract view: delivery history, Verification testimony,
-gate evidence, target drift, and rework/review timeline. With an existing
-candidate it also shows its diff and reruns declared Verification. Before the
-first delivery there is no candidate to diff or verify. Audit never requests
-placement. Read it instead of trusting a worker's completion report.
+Audit is the aggregate Contract view and the exact pre-delivery preview. It
+uses the same candidate preparation as deliver, shows the prospective diff and
+integration or checkout conflicts, and runs declared Verification against that
+candidate. A terminal run records ordinary subject-bound `verified` testimony;
+it does not record a delivery or request placement. Read the preview instead of
+trusting a worker's completion report.
 
 ## Deliver
 
@@ -141,8 +142,11 @@ Deliver after audit and before review:
 keiyaku deliver <contract>
 ```
 
-`deliver` tenders the clean `HEAD`, runs the declared `Verification`, records
-the candidate, and requests placement. If the workspace is dirty, the refusal
+`deliver` freshly tenders the clean `HEAD`, records the candidate, and requests
+placement. When a current audit attestation names the identical integration
+snapshot and Verification segment, deliver reuses it; otherwise it runs the
+declarations. Worktree, target, policy, document, Verification, or
+snapshot-producing option changes prevent reuse. If the workspace is dirty, the refusal
 lists staged, unstaged, and untracked paths, a short statistic, and the
 `--include-dirty` option. Use that option only when the complete current
 workspace is the intended delivery; dirty submodule internals cannot be
