@@ -18,13 +18,18 @@ contract document -> bind -> work -> audit -> deliver -> review gates
 ```
 
 The lifecycle is `waiting -> bound -> pending-delivery -> claimed | abandoned`;
-the last two are terminal. `--after` prerequisites are placement obligations,
-not a delivery admission gate: a Contract may record `bound` and deliver before
-they claim, while placement waits for the current prerequisites and declared
-gates. Active terms may amend `--after` after `bound` or `deliver`; terminal
-Contracts remain immutable. You never push it through states by hand: `deliver`
-and satisfied reviews request placement, and placement claims when every
-placement obligation allows it.
+the last two are terminal. Reserve `--after` for true logical ordering: one
+Contract's result must ultimately build on another's settled outcome, or their
+intended work has a large or irreconcilable interaction that should be
+sequenced. Ordinary Region overlap is not enough. Small overlaps may proceed
+under Git's optimistic write model and be resolved manually or by a delegated
+worker. At runtime prerequisites are placement obligations, not a delivery
+admission gate: a Contract may record `bound` and deliver before they claim,
+while placement waits for the current prerequisites and declared gates. Active
+terms may amend `--after` after `bound` or `deliver`; terminal Contracts remain
+immutable. You never push it through states by hand: `deliver` and satisfied
+reviews request placement, and placement claims when every prerequisite and
+gate allows it.
 
 ## Bind
 
@@ -84,8 +89,10 @@ and ask.
 Complex Keiyaku should be divided along independently acceptable delivery
 boundaries. Use judgment to find those boundaries from the work's objectives,
 dependencies, Regions, and acceptance criteria; raw size or file count is not
-the test. Give each resulting Contract coherent terms, and connect ordering
-with `--after` where needed.
+the test. Give each resulting Contract coherent terms. Connect them with
+`--after` only when one must proceed from another's settled result or their
+intended work is unsafe to run concurrently; ordinary Region overlap alone is
+not enough.
 
 When one acceptance boundary still spans several coherent implementation
 chapters, record each chapter as an arc before moving to the next:

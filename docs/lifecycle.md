@@ -19,10 +19,16 @@ facts, never another persisted authority.
 
 A bind records immutable coordinates and the initial opaque contract terms. It
 does not admit `bound`; the contract waits for the first operation whose fact
-requires boundness. A contract's `after` list is an ordered placement
-prerequisite snapshot and cannot contain the contract itself. An amend replaces
-the complete opaque terms and may change `after` at any point before a terminal
-fact, including after `bound` or `deliver`. Coordinates never change.
+requires boundness. A contract's `after` list is the ordered placement
+prerequisite snapshot. Authors declare an edge only when one Contract's result
+must ultimately build on another's settled outcome, or when their intended work
+has a large or irreconcilable interaction that should be sequenced. Small Region
+overlaps do not meet that threshold: Keiyaku uses Git's optimistic write model,
+and ordinary conflicts may be resolved manually or by a delegated worker. An
+`after` edge does not assert disjoint Regions or forbid all overlap. It cannot
+contain the contract itself. An amend replaces the complete opaque terms and
+may change `after` at any point before a terminal fact, including after `bound`
+or `deliver`. Coordinates never change.
 
 The prerequisite graph is acyclic by construction. An amend whose resulting
 `after` would make the contract reachable from its own transitive prerequisite

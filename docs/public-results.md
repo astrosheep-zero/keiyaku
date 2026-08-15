@@ -221,6 +221,14 @@ means admission succeeded but the non-authoritative observation did not
 complete; it contains the verbatim diagnostic and does not change the mutation
 result. `RegionOverlap` is the only exported Region result type.
 
+The report compares declared write intent to expose likely interaction between
+active Contracts. Even though pattern intersection is exact, the report is a
+coarse planning signal because Region does not predict the eventual Git diff.
+An overlap neither grants nor denies write authority and does not refuse bind
+or amend. Small overlaps may proceed under Git's optimistic model and be
+resolved manually or by a delegated worker; logical dependency or unsafe
+large interaction is represented explicitly with `after`.
+
 The Region report remains a library-edge observation. It is not passed to
 protocol, core, or Git, and it never crosses those layers as Region
 vocabulary. After admission, the library makes one internal protocol document

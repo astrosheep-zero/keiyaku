@@ -56,6 +56,13 @@ The library owns interpretation of these sections and any extensions. They are
 not structural core facts. In particular, `Region` and every other decoded
 document field remain library methodology, not journal-model vocabulary.
 
+`Region` declares the author's intended write surface so bind and amend can
+report likely interaction with active Contracts. It is planning evidence, not
+filesystem authority, a Git restriction, or a claim that the eventual diff
+will contain every named path. Concurrent Contracts may declare overlapping
+Regions. The overlap helps the flagship decide whether optimistic parallel work
+is sensible; it does not adjudicate ownership or reject either Contract.
+
 Each nonblank line in `Region` is one repository-relative positive path
 pattern. `/` separates segments. Within a segment, `*` matches any number of
 characters other than `/`, and `?` matches exactly one such character. `**`
@@ -65,9 +72,11 @@ valid. A pattern may not contain `!`, `[`, `]`, `{`, or `}`, begin with `/`, or
 contain `..`. Invalid patterns are typed document refusals.
 
 The dialect computes exact intersection between two patterns from this closed
-grammar. It does not use a conservative approximation. This interpretation is
-pure body methodology: only the opaque source document terms may persist below
-the library edge; core, protocol, and Git never receive the decoded body.
+grammar. It does not use a conservative approximation for the pattern
+calculation. The resulting overlap is still a coarse comparison of declared
+intent, not an exact forecast of future Git writes. This interpretation is pure
+body methodology: only the opaque source document terms may persist below the
+library edge; core, protocol, and Git never receive the decoded body.
 
 The title has no content before the first H2. The document has no nonblank
 bytes outside its H1 and H2 sections, no duplicate top-level H2, and no

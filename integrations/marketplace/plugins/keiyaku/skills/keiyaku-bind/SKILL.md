@@ -14,9 +14,11 @@ Design closes every decision a candidate could get wrong: owner, boundary,
 data flow, commit point, authority, and forbidden shapes. Add high-level
 pseudocode when ordering matters.
 
-Region is the smallest truthful write surface. Do not use `src/**` unless
-every file under `src` is in scope. Each criterion states one observable
-accept/reject condition.
+Region declares the intended write surface for coarse overlap detection against
+active Contracts. Keep it narrow enough to make that signal useful; do not use
+`src/**` unless the whole tree is genuinely intended. Region is not filesystem
+authority or a forecast of the exact final diff. Each criterion states one
+observable accept/reject condition.
 
 ## Bind
 
@@ -33,7 +35,7 @@ The comments explain the fields; only the heredoc is stdin.
 # Context: facts the delivery depends on.
 # Objective: one observable outcome.
 # Design: closed decisions and necessary pseudocode.
-# Region: exact files or narrow patterns the delivery may write.
+# Region: intended writes for active-Contract overlap detection.
 # Criteria: independently decidable acceptance conditions.
 # Verification: optional executable declaration and timeout.
 keiyaku -C <repo> bind - <<'KEIYAKU'
