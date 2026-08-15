@@ -1,21 +1,20 @@
 ---
 name: keiyaku-workflow
-description: Use when authoring, binding, delivering, reviewing, amending, auditing, or abandoning a Keiyaku v4 Contract.
+description: Use when authoring, binding, auditing, delivering, reviewing, amending, or abandoning a Keiyaku v4 Contract.
 ---
 
 # Keiyaku Workflow
 
-A Contract turns one bounded delivery into acceptable terms: write what done
-means, bind it, work in the worktree the receipt names, and deliver. When
-every declared gate is current, the result lands on the target ref. This is
-the whole trip from current work to `claimed`.
+A Contract turns one bounded delivery into acceptable terms: bind it, work in
+the appointed worktree, audit the Contract, deliver, then review. When every
+declared gate is current, the result lands on the target ref.
 
 ## How The Delivery Moves
 
 ```text
-contract document -> bind -> work in the Contract worktree -> deliver
-                             -> review gates -> placement -> claimed
-                                                      \-> abandoned
+contract document -> bind -> work -> audit -> deliver -> review gates
+                                                    -> placement -> claimed
+                                                                \-> abandoned
 ```
 
 The lifecycle is `waiting -> bound -> pending-delivery -> claimed | abandoned`;
@@ -74,23 +73,30 @@ frontmatter names `Contract`, then reads the listed owner documents and source
 files before acting. Do not substitute a generic repository tour for the files
 that actually govern the assignment.
 
-A `Deliverer` implements and verifies the terms in `Worktree`. A `Reviewer`
-reviews the complete current Contract worktree snapshot, not a named candidate
-commit, and does not modify it. Missing or contradictory seat, worktree, or
-reading list means stop and ask.
+A `Deliverer` implements and verifies the terms in `Worktree`. Commission a
+`Reviewer` after delivery. The reviewer inspects the complete current Contract
+worktree snapshot, not a worker report or named candidate commit, and does not
+modify it. Missing or contradictory seat, worktree, or reading list means stop
+and ask.
 
-## Arcs For Large Deliveries
+## Decompose Complex Work
 
-When one Contract carries several coherent chunks, record each chunk as an arc
-before moving to the next:
+Complex Keiyaku should be divided along independently acceptable delivery
+boundaries. Use judgment to find those boundaries from the work's objectives,
+dependencies, Regions, and acceptance criteria; raw size or file count is not
+the test. Give each resulting Contract coherent terms, and connect ordering
+with `--after` where needed.
+
+When one acceptance boundary still spans several coherent implementation
+chapters, record each chapter as an arc before moving to the next:
 
 ```bash
 keiyaku arc <contract> -
 ```
 
 The stdin body is the arc's Markdown; see `arc --help` for its shape. Arcs
-narrate one delivery; they do not split acceptance. Work that needs its own
-independent acceptance is a new Contract, not an arc.
+narrate progress inside that Contract's single delivery and acceptance
+boundary.
 
 ## Amend Or Start Over
 
@@ -106,7 +112,23 @@ See `amend --help` for the operation grammar. If the objective or boundary
 itself changed, `abandon` with a note and bind a new Contract; do not steer an
 old Contract onto a different delivery.
 
+## Audit Before Delivery
+
+Audit before each delivery or redelivery:
+
+```bash
+keiyaku audit <contract> --show-diff-body
+```
+
+Audit is the aggregate Contract view: delivery history, Verification testimony,
+gate evidence, target drift, and rework/review timeline. With an existing
+candidate it also shows its diff and reruns declared Verification. Before the
+first delivery there is no candidate to diff or verify. Audit never requests
+placement. Read it instead of trusting a worker's completion report.
+
 ## Deliver
+
+Deliver after audit and before review:
 
 ```bash
 keiyaku deliver <contract>
@@ -138,17 +160,14 @@ keiyaku review <contract> --satisfied --summary "<conclusion>"
 keiyaku review <contract> --unsatisfied --summary "<finding>"
 ```
 
-Have an independent reviewer inspect the complete current Contract worktree
-snapshot. The `review` command records the verdict. `--satisfied` requests
-placement. If the same patch is already delivered and the other gates are
-current, the receipt shows `claimed`. Review works before or after deliver.
-When the reviewed projection includes ordinary dirty workspace bytes, the
-review receipt discloses those paths and stats; delivery still needs
-`deliver --include-dirty` before those bytes become the candidate.
+Have an independent reviewer inspect the delivered Contract worktree snapshot.
+The `review` command records the verdict. `--satisfied` requests placement; if
+the other gates are current, the receipt shows `claimed`.
 
-Fixing findings changes the patch, which turns earlier evidence stale (`?` in
-`status`): review the current patch again. Record `--unsatisfied` only when the
-negative judgment should remain in Contract history.
+Fixing findings changes the patch and makes earlier evidence stale (`?` in
+`status`). Audit the rework, deliver it, then review again. Record
+`--unsatisfied` only when the negative judgment should remain in Contract
+history.
 
 ## Target Placement
 
@@ -169,18 +188,16 @@ Placement follows the Git mental model you already have:
 After a refusal, handle the listed paths, then `deliver` again or record a
 satisfied review; either command requests placement again.
 
-## Observe, Recover, Or End
+## Recover Or End
 
 ```bash
-keiyaku audit <contract> [--show-diff-body]   # report only; never places
 keiyaku reconcile <contract>                  # finish accepted lagging effects
 keiyaku abandon <contract> --note "<why>"     # terminal; target untouched
 ```
 
-`audit` is one aggregate read of the document, candidate diff, Verification,
-gates, and target status. `reconcile` completes physical effects of already
-accepted placements; it does not retry an ordinary placement refusal.
-`abandon` ends the Contract and never touches the target.
+`reconcile` completes physical effects of already accepted placements; it does
+not retry an ordinary placement refusal. `abandon` ends the Contract and never
+touches the target.
 
 ## Routine Output
 
