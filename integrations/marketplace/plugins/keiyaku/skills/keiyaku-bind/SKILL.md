@@ -5,83 +5,88 @@ description: Author and bind one Keiyaku delivery Contract. Use when deciding wh
 
 # Keiyaku Bind
 
-Use bind when the work is a delivery decision rather than an investigation.
-The objective and delivery boundary should be clear, the expected write surface
-should be truthful, and every criterion should be decidable without inventing
-taste at review time. Investigate first when a plausible unresolved fact could
-change the objective, governing design, criteria, or delivery boundary.
+Use bind for a settled delivery, not an investigation. Investigate first if
+an unresolved fact could change the Objective, Design, Region, or Criteria.
 
 ## Author The Terms
 
-Write for the implementer and reviewer. Include facts they cannot safely
-recover locally: the owner, boundary, data-flow direction, commit point, single
-authority, and forbidden parallel shapes. Leave ordinary helper names and
-equivalent local control flow to the implementation.
+Design closes every decision a candidate could get wrong: owner, boundary,
+data flow, commit point, authority, and forbidden shapes. Add high-level
+pseudocode when ordering matters.
 
-A design statement earns its place when a test-green candidate could violate
-it. A criterion names one observable condition that can accept or reject the
-candidate. Keep the Region truthful and no broader than the intended write
-surface.
-
-Start from this complete shape:
-
-~~~markdown
-# <delivery name>
-
-## Context
-<established facts that frame the decision>
-
-## Objective
-<one observable delivery outcome>
-
-## Design
-<ownership, boundaries, and constraints a test-green candidate could violate>
-
-## Region
-```
-<expected write surface>
-```
-
-## Criteria
-### <criterion title>
-<one decidable acceptance condition>
-
-## Verification
-```bash
-<optional executable check>
-```
-~~~
-
-Use an H1 title and the H2 sections shown above. `Verification` is optional.
-When a declaration needs a limit, put an explicit duration such as
-`bash timeout=5m` in its fence info string; omit it for an unbounded declaration.
-Keep extra rationale and investigation logs out of the Contract.
+Region is the smallest truthful write surface. Do not use `src/**` unless
+every file under `src` is in scope. Each criterion states one observable
+accept/reject condition.
 
 ## Bind
 
-Inspect the actual command surface before choosing inputs:
+Inspect the installed command before choosing options:
 
 ```bash
 keiyaku -C <repo> bind --help
 ```
 
-Bind the complete document through stdin. A Task is optional: a Contract is
-complete delivery authority on its own, and ordinary bounded delivery does not
-require creating planning state first. Use `--task` only when an existing Task
-already carries real scheduling, dependency, or coordination value and this
-Contract is specifically its delivery:
+The comments explain the fields; only the heredoc is stdin.
+
+~~~~bash
+# H1: delivery name; source of the first kei/... identity.
+# Context: facts the delivery depends on.
+# Objective: one observable outcome.
+# Design: closed decisions and necessary pseudocode.
+# Region: exact files or narrow patterns the delivery may write.
+# Criteria: independently decidable acceptance conditions.
+# Verification: optional executable declaration and timeout.
+keiyaku -C <repo> bind - <<'KEIYAKU'
+# Guard ignored bytes during target placement
+
+## Context
+Target checkout can overwrite an ignored untracked path in the candidate's
+write footprint.
+
+## Objective
+Refuse before checkout and name every colliding path.
+
+## Design
+The target-placement layer owns this check. Derive literal write paths from
+the predecessor/candidate diff, inspect only those paths, and return
+`checkout-not-followable` with reason `untracked` before checkout.
+
+```text
+writes = diff(predecessor, candidate)
+collisions = ignoredUntrackedPaths(writes)
+if collisions: refuse({ reason: "untracked", paths: collisions })
+```
+
+## Region
+```
+src/git/target-placement.ts
+tests/git-delivery.test.ts
+```
+
+## Criteria
+### Collisions are named
+The refusal lists every colliding path once.
+
+### Unrelated paths are not observed
+A large ignored population outside the write footprint does not affect placement.
+
+## Verification
+```bash timeout=5m
+node --import tsx --test tests/git-delivery.test.ts
+```
+KEIYAKU
+~~~~
+
+For a saved document:
 
 ```bash
 keiyaku -C <repo> bind - < CONTRACT.md
 keiyaku -C <repo> bind --task <task/...> - < CONTRACT.md
 ```
 
-Do not create a Task merely to make `bind --task` available or to mirror the
-Contract objective. That adds a second lifecycle with no planning reader.
-
-Use `bind --help` as the installed command authority for optional target,
-workspace, prerequisite, gate-set, actor, and JSON inputs. Do not guess flags
-from an older installation or repository checkout.
+Use `--task` only for an existing Task with scheduling or dependency value;
+do not create one just to mirror the Contract. Use `bind --help` for other
+options.
 
 ## Read The Receipt
 
