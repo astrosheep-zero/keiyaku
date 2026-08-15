@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { globSync } from "node:fs";
+
+const DEFAULT_TEST_PATTERNS = ["tests/**/*.test.ts", "tests/maintainability.test.js"];
 
 const supplied = process.argv.slice(2);
 const valueOptions = new Set([
@@ -26,12 +29,19 @@ for (let index = 0; index < supplied.length; index += 1) {
 }
 
 const testFiles = files.length === 0
-  ? ["tests/**/*.test.ts", "tests/maintainability.test.js"]
+  ? DEFAULT_TEST_PATTERNS.flatMap((pattern) => globSync(pattern)).sort()
   : files;
+if (testFiles.length === 0) {
+  console.error("No test files matched the default test patterns.");
+  process.exit(1);
+}
+const reporterOptions = options.some((option) => option === "--test-reporter" || option.startsWith("--test-reporter="))
+  ? []
+  : ["--test-reporter=dot"];
 const result = spawnSync(process.execPath, [
   "--import", "tsx",
   "--test",
-  "--test-reporter=dot",
+  ...reporterOptions,
   ...options,
   ...testFiles,
 ], { stdio: "inherit" });
