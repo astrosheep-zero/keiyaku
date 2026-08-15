@@ -180,6 +180,32 @@ Fixing findings changes the patch and makes earlier evidence stale (`?` in
 `--unsatisfied` only when the negative judgment should remain in Contract
 history.
 
+## When Multiple Contracts Overlap On One Target
+
+When active Contracts write a shared surface, landing order is a coordinator
+judgment, not Contract state. Keep the decision in the workflow skill; do not
+persist a train or add a second placement authority.
+
+- `audit` and a reviewer's report are preliminary. `review --satisfied` is
+  authoritative gate testimony: it requests placement and claims when
+  delivery, prerequisites, and all gates are current. Record it only when the
+  reviewed bytes are intended to land now.
+- Before recording a satisfied review, or delivering a Contract with no
+  declared gates, ask whether the exact patch will survive until placement. A
+  pure rebase whose `ChangeId` is unchanged keeps the existing review current;
+  do not re-review content addressing kept alive. Conflict resolution that
+  changes the `ChangeId` makes earlier testimony stale and requires a fresh
+  review against the resolved candidate.
+- For Contracts known to overlap, resolve the current-target integration before
+  the authoritative review. Preliminary feedback may happen earlier, but it
+  is not a satisfied gate until its reviewed patch is the candidate intended
+  for placement. Land overlapping Contracts one at a time; let independent,
+  non-overlapping Contracts proceed without ceremony. Treat overlap as a
+  planning signal, not a correctness verdict.
+- After target movement, a changed candidate, or a placement refusal, read the
+  current Contract facts again. Recompute the next landing judgment from those
+  facts; do not rely on a remembered queue or promise exactly one rebase.
+
 ## Target Placement
 
 Placement follows the Git mental model you already have:
