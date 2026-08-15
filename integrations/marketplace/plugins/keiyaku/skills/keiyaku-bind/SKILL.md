@@ -5,76 +5,90 @@ description: Author and bind one Keiyaku delivery Contract. Use when deciding wh
 
 # Keiyaku Bind
 
-Use bind for a settled delivery, not an investigation. Investigate first if
-an unresolved fact could change the Objective, Design, Region, or Criteria.
+A Contract records a decision that already exists; writing terms does not
+produce one. You supply **all high-level design and public-surface facts this
+Keiyaku creates or changes**, and **all** pseudocode where ordering matters.
+The worker is a cheap executor: every choice you leave open, it resolves —
+possibly the way you like least, discovered at review and billed at review
+prices.
 
-## Author The Terms
+## Before You Bind
 
-Design closes every decision a candidate could get wrong: owner, boundary,
-data flow, commit point, authority, and forbidden shapes. Add high-level
-pseudocode when ordering matters.
+Bind is the last step of an investigation, never the first step of an idea.
 
-Region declares the intended write surface for coarse overlap detection against
-active Contracts. Keep it narrow enough to make that signal useful; do not use
-`src/**` unless the whole tree is genuinely intended. Region is not filesystem
-authority or a forecast of the exact final diff. Each criterion states one
-observable accept/reject condition.
+- Design the delivery to the depth you could implement it yourself, against
+  the code as it is — not as you remember it. An unknown surfacing while
+  you design is the next investigation, not a detail for the worker.
+- Walk the implementation path once, end to end. A step you cannot walk is
+  an unresolved fact.
+- Observe active Contracts whose Regions intersect yours. Region overlap is a
+  prompt signal only; it does not by itself imply a logical conflict. The
+  caller decides autonomously whether to proceed in parallel or serialize.
+- A decision settled elsewhere binds only its explicit words; converting it
+  into concrete shape is your job, and a question it left open goes back to
+  its decider, never to the worker.
+- If the delivery must land documentation, you can draft its exact sentence
+  now. Cannot draft means unresolved design — "the worker will sort out the
+  docs" is a design gap in disguise.
 
-## Bind
+Two tests close the gate:
 
-Inspect the installed command before choosing options:
+- **Substitution.** Two workers who never met each deliver test-green from
+  your terms. If any external reader could tell the deliveries apart, that
+  fact is undecided — decide it and write it.
+- **Rework.** For each blank: "if the worker picks what I like least, do I
+  demand rework?" Yes — write it. No — write nothing.
 
-```bash
-keiyaku -C <repo> bind --help
-```
+Public — anything visible outside the diff — is always yours to pin.
+Private — helper names, decomposition, control flow — is the worker's;
+its freedom comes from your genuine indifference, not from omission.
 
-The comments explain the fields; only the heredoc is stdin.
+## Author And Bind
+
+`keiyaku -C <repo> bind --help` lists the options; only the heredoc is
+stdin. Each section states what it must contain:
 
 ~~~~bash
-# H1: delivery name; source of the first kei/... identity.
-# Context: facts the delivery depends on.
-# Objective: one observable outcome.
-# Design: closed decisions and necessary pseudocode.
-# Region: intended writes for active-Contract overlap detection.
-# Criteria: independently decidable acceptance conditions.
-# Verification: optional executable declaration and timeout.
 keiyaku -C <repo> bind - <<'KEIYAKU'
-# Guard ignored bytes during target placement
+# <Delivery name — one decision, active voice; source of the kei/... identity>
 
 ## Context
-Target checkout can overwrite an ignored untracked path in the candidate's
-write footprint.
+<Premises: coordinates of the governing decision or document, and facts a
+reader would otherwise re-derive wrongly. Never narrative. If Objective and
+Design read the same without a sentence here, delete it.>
 
 ## Objective
-Refuse before checkout and name every colliding path.
+<One observable end-state, judged done/not-done without reading Design.
+If you need "and", bind two Contracts.>
 
 ## Design
-The target-placement layer owns this check. Derive literal write paths from
-the predecessor/candidate diff, inspect only those paths, and return
-`checkout-not-followable` with reason `untracked` before checkout.
+<The closed decisions. A statement belongs here exactly when a test-green
+candidate could still violate it: which module owns the change; the exact
+public surface — each type with its fields, each verb with its success,
+refusal, and error arms and their reason words; the persisted format; which
+way data flows and where it commits or refuses; which parallel shapes are
+forbidden. Helper names and equivalent control flow do not belong here —
+they are the worker's.>
 
 ```text
-writes = diff(predecessor, candidate)
-collisions = ignoredUntrackedPaths(writes)
-if collisions: refuse({ reason: "untracked", paths: collisions })
+<pseudocode — only where ordering matters>
 ```
 
 ## Region
 ```
-src/git/target-placement.ts
-tests/git-delivery.test.ts
+<intended write patterns — planning evidence for overlap detection, never
+ownership or the exact diff. Narrow enough that overlap is a real signal;
+directory patterns end with `/`.>
 ```
 
 ## Criteria
-### Collisions are named
-The refusal lists every colliding path once.
-
-### Unrelated paths are not observed
-A large ignored population outside the write footprint does not affect placement.
+### <one observable condition>
+<One accept/reject observation with its method: run this, observe that.
+Decidable without consulting you.>
 
 ## Verification
-```bash timeout=5m
-node --import tsx --test tests/git-delivery.test.ts
+```bash timeout=<honest bound>
+<commands runnable exactly as written>
 ```
 KEIYAKU
 ~~~~
@@ -87,15 +101,21 @@ keiyaku -C <repo> bind --task <task/...> - < CONTRACT.md
 ```
 
 Use `--task` only for an existing Task with scheduling or dependency value;
-do not create one just to mirror the Contract. Use `bind --help` for other
-options.
+do not create one just to mirror the Contract.
+
+## Authority Order
+
+> Settled upstream decisions and their documentation → this Contract → worker
+> brief (zero authority) → review evidence (witnessed fact, never law).
+
+Gaps flow upstream, never down: a design gap found by a worker or reviewer
+returns to you, never filled silently downstream.
 
 ## Read The Receipt
 
-Treat the receipt as the handoff. Keep the complete `kei/...` identity, work in
-the reported managed worktree when one was created, and retain the target and
-gate facts it reports. A waiting receipt means prerequisites remain; it is not
-a second authoring workflow. A post-admission lag does not erase the admitted
-Contract; read the typed facts, effects, and lag before acting.
+Treat the receipt as the handoff. Keep the complete `kei/...` identity, work
+in the reported managed worktree when one was created, and retain the target
+and gate facts it reports. A waiting receipt means prerequisites remain; it
+is not a second authoring workflow.
 
 Continue the delivery with `keiyaku-workflow`.
