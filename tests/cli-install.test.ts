@@ -94,10 +94,8 @@ test("workflow delegates bind authorship to the bind skill", () => {
   assert.match(bind, /keiyaku -C <repo> bind/);
   assert.match(workflow, /Use `keiyaku-bind`/);
   assert.doesNotMatch(workflow, /### Decide The Threshold|### Write The Document/);
-  assert.match(
-    workflow,
-    /`audit` is one aggregate read of the document, candidate diff, Verification,\n?gates, and target status\./,
-  );
+  assert.match(workflow, /Audit is the aggregate Contract view and the exact pre-delivery preview\./);
+  assert.match(workflow, /uses the same candidate preparation as deliver/);
 });
 
 test("bundled Akuma instructions use the current hard-cut call surface", () => {
