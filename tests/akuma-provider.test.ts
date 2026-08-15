@@ -583,21 +583,21 @@ test("OpenCode V1 rejects failed prompt admission and cleans up", async () => {
   assert.equal(closed, 1);
 });
 
-test("OpenCode V1 admits native prompt options and refuses unsupported effort", async () => {
+test("OpenCode V1 admits native prompt options and maps archetype effort to a model variant", async () => {
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
   assert.equal(provider.admitOptions({ systemPrompt: "must enforce" }).kind, "admitted");
-  assert.equal(provider.admitOptions({ effort: "high" }).kind, "refused");
+  assert.equal(provider.admitOptions({ effort: "high" }).kind, "admitted");
   assert.equal(provider.admitOptions({ model: "not-a-provider-model" }).kind, "refused");
   assert.equal(provider.admitOptions({ model: "provider/model" }).kind, "admitted");
-  const drive = await provider.resume!({ body: "continue", launchTells: [], cwd: "/tmp", options: { model: "provider/model", systemPrompt: "must enforce" }, session: { kind: "resume", coordinate: { sessionId: "session-resume" } } });
+  const drive = await provider.resume!({ body: "continue", launchTells: [], cwd: "/tmp", options: { model: "provider/model", effort: "high", systemPrompt: "must enforce" }, session: { kind: "resume", coordinate: { sessionId: "session-resume" } } });
   assert.equal((await drive.completion).kind, "answered");
   const prompt = fake.prompts[0] as { body: { messageID: string } };
   assert.match(prompt.body.messageID, /^msg_[0-9a-f]{32}$/u);
   assert.deepEqual(prompt, {
     path: { id: "session-resume" },
     query: { directory: "/tmp" },
-    body: { messageID: prompt.body.messageID, model: { providerID: "provider", modelID: "model" }, system: "must enforce", parts: [{ type: "text", text: "continue" }] },
+    body: { messageID: prompt.body.messageID, model: { providerID: "provider", modelID: "model" }, variant: "high", system: "must enforce", parts: [{ type: "text", text: "continue" }] },
     throwOnError: true,
   });
 });

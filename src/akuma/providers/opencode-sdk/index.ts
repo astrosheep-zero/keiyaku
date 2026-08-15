@@ -28,7 +28,6 @@ function opencodeSessionId(coordinateValue: ResumeCoordinate): string {
 function admit(options: ProviderOptions): void {
   if (options.access !== undefined) throw new Error("OpenCode does not support explicit access");
   if (options.network !== undefined) throw new Error("OpenCode does not support explicit network");
-  if (options.effort !== undefined) throw new Error("OpenCode V1 does not expose an enforceable effort option");
   if (options.model !== undefined) parseModel(options.model);
 }
 function eventValue(value: unknown): unknown {
@@ -39,6 +38,7 @@ function eventValue(value: unknown): unknown {
 function promptBody(input: Input, messageID: string): Readonly<{
   messageID: string;
   model?: { providerID: string; modelID: string };
+  variant?: string;
   system?: string;
   parts: [{ type: "text"; text: string }];
 }> {
@@ -49,6 +49,7 @@ function promptBody(input: Input, messageID: string): Readonly<{
   return {
     messageID,
     ...(model === undefined ? {} : { model }),
+    ...(input.options.effort === undefined ? {} : { variant: input.options.effort }),
     ...(input.options.systemPrompt === undefined ? {} : { system: input.options.systemPrompt }),
     parts: [{ type: "text", text: promptText }],
   };

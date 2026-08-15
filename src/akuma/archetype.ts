@@ -116,7 +116,7 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
       ...(effort === undefined ? {} : { effort }),
       ...(access === undefined ? {} : { access }),
       ...(network === undefined ? {} : { network }),
-      systemPrompt,
+      ...(systemPrompt.length === 0 ? {} : { systemPrompt }),
     }),
   });
 }

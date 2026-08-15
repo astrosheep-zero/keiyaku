@@ -146,7 +146,7 @@ test("Archetype resolves the OpenCode V1 provider execution as one frozen recipe
       executable: "opencode-custom",
       env: { LITERAL: "yes" },
     });
-    assert.deepEqual(loaded.options, { model: "openai/test", systemPrompt: "" });
+    assert.deepEqual(loaded.options, { model: "openai/test" });
     assert.equal(Object.isFrozen(loaded.provider), true);
     assert.equal(Object.isFrozen(loaded.provider.env), true);
   } finally { value.close(); }
@@ -186,7 +186,7 @@ test("Archetype resolves grok-build as the builtin ACP execution profile", async
         effortArg: "--reasoning-effort",
       },
     });
-    assert.deepEqual(loaded.options, { model: "grok-4", effort: "high", systemPrompt: "" });
+    assert.deepEqual(loaded.options, { model: "grok-4", effort: "high" });
     writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: grok-build\n---\nBuild.\n");
     await assert.rejects(
       loadArchetype({ name: "grok", settings: await settings({ root: value.project, home: value.home }) }),

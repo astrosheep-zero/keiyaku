@@ -286,6 +286,8 @@ read only for the answer and fork coordinate and cannot create a second
 completion decision. The directory-wide event stream is isolated by native
 session id. The adapter does not use V2 APIs and does not claim a live tell
 boundary that V1 cannot prove; pending tells are carried in the next prompt.
+OpenCode maps the frozen Archetype `effort` to its native model `variant`;
+Provider Core does not validate provider-specific variant names.
 
 Pi's `steer()` acknowledgement likewise proves queueing only. Pi omits live
 tell and receives pending text in the next launch input.

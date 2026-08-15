@@ -157,8 +157,9 @@ The file begins with one strict YAML mapping. `provider` is required;
 `model`, `effort`, `access`, `network`, and `description` are optional.
 `access` is `read | write | auto`; `network` is `disabled | enabled`; every
 other consumed value is a nonblank string. Additional top-level keys are
-ignored and never enter Archetype options or the soul snapshot. The Markdown body
-after frontmatter is the system prompt, including an empty one.
+ignored and never enter Archetype options or the soul snapshot. A nonempty
+Markdown body after frontmatter overrides the system prompt; an empty body
+leaves that option absent so the native harness keeps its default.
 
 `Akuma.of(root, settings?)` consumes one already resolved WorldRoot. All
 worktrees of one Git repository therefore share one fleet, Alias authority,
@@ -224,8 +225,9 @@ the body turn or leave an answered Akuma headless.
 
 Provider kind `opencode-sdk` runs the selected executable, defaulting to
 `opencode`, through the official public V1 Session API. It consumes `model` and
-the system prompt; `effort`, explicit `access`, and `network` values are
-refused because this surface has no honest portable mapping for them. Fresh and
+the system prompt. Archetype `effort` is passed as OpenCode's native model
+variant; it is not a per-call override. Explicit `access` and `network` values
+remain refused because this surface has no honest mapping for them. Fresh and
 resumed drives use the frozen session id, and native fork uses that exact
 session plus the answered assistant message id. Native admission, completion,
 event, and tell semantics belong exclusively to [akuma-provider.md](akuma-provider.md).
