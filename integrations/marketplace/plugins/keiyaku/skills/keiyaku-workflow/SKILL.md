@@ -121,16 +121,27 @@ the test. Give each resulting Contract coherent terms. Connect them with
 `--after` only when one must proceed from another's settled result or their
 intended work is unsafe to run concurrently.
 
-When one acceptance boundary still spans several coherent implementation
-chapters, record each chapter as an arc before moving to the next:
+When one acceptance boundary still spans several coherent chapters,
+organize them as arcs. An arc is a chapter of the delivery's
+story, not a task list: its title names the chapter, Objective is the
+chapter's aim, Brief opens the next chapter. When an Arc is active, stay
+within that current chapter. `.keiyaku/KEIYAKU.md` renders the current Arc.
+Record the next chapter before entering it:
 
 ```bash
-keiyaku arc <contract> -
+keiyaku arc <contract> - <<'KEIYAKU'
+# <chapter title>
+
+## Objective
+<nonblank objective>
+
+## Brief
+<nonblank dispatch brief>
+KEIYAKU
 ```
 
-The stdin body is the arc's Markdown; see `arc --help` for its shape. Arcs
-narrate progress inside that Contract's single delivery and acceptance
-boundary.
+All chapters live inside that Contract's single delivery and acceptance
+boundary. The document grammar authority is `docs/document.md`.
 
 ## Amend Or Start Over
 

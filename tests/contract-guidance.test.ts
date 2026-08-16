@@ -42,6 +42,7 @@ test("guidance preserves source bytes and appends one Fulfillment H2", () => {
   assert.match(guidance, /^### Appointment$/m);
   assert.match(guidance, /^### Worktree$/m);
   assert.match(guidance, /^### Deliverer$/m);
+  assert.match(guidance, /When an Arc is active, stay within that current chapter\./);
   assert.match(guidance, /^### Reviewer$/m);
   assert.doesNotMatch(guidance, /^## Arc$/m);
   assert.ok(guidance.endsWith("\n"));

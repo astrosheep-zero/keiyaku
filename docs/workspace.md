@@ -30,7 +30,7 @@ Contract data, lifecycle evidence, or a second appointment coordinate.
 Reviewer; the worker never infers an omitted seat. `Worktree` identifies this
 file as a derived view and requires work to remain in its Contract worktree.
 `Deliverer` implements and verifies the Contract terms without deciding the
-lifecycle. `Reviewer` reviews the complete current worktree snapshot without
+lifecycle and, when an Arc is active, stays within that current chapter. `Reviewer` reviews the complete current worktree snapshot without
 modifying it. Candidate commits are only for historical review.
 
 The same canonical frontmatter helper feeds initial here-worktree reservation

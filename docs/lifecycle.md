@@ -108,11 +108,12 @@ An arc is a narrative chapter within one contract lifetime:
 bind -> work -> arc -> work -> arc -> ... -> claimed
 ```
 
-It marks the next coherent unit of progress without splitting delivery,
-acceptance, settlement, reward, criteria, tasks, eligibility, or gates. An
-independently deliverable slice is a separate contract. Before the first
-explicit arc, `currentArc` is absent and readers use the effective contract
-terms.
+It names the current chapter of the delivery's story, framing its stage
+without splitting delivery, acceptance, settlement, reward, criteria, tasks,
+eligibility, or gates. It is not a progress measure and not a task list; a
+chapter's contents need not be linear steps. An independently deliverable
+slice is a separate contract. Before the first explicit arc, `currentArc`
+is absent and readers use the effective contract terms.
 The first admitted arc has `seq = 1`; every later arc increments it exactly by
 one. The newest arc is `ContractState.currentArc`. Arc is legal before a
 terminal fact and otherwise receives a typed refusal.

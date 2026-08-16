@@ -56,6 +56,7 @@ const FULFILLMENT = [
   "Read the complete Contract before acting and keep work inside that worktree.", "",
   "### Deliverer", "",
   "Implement and verify the Objective under the Design, Region, and Criteria in this Contract.",
+  "When an Arc is active, stay within that current chapter.",
   "Leave lifecycle decisions to the caller; report the candidate, verification performed, and any unmet term.", "",
   "### Reviewer", "",
   "Review this Contract worktree against the complete Contract.",
