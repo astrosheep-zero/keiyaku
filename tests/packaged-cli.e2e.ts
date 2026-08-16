@@ -14,13 +14,31 @@ import test from "node:test";
 
 const root = resolve(import.meta.dirname, "..");
 
-function command(executable: string, args: readonly string[], cwd: string): string {
+function command(
+  executable: string,
+  args: readonly string[],
+  cwd: string,
+  shell = false,
+): string {
   return execFileSync(executable, args, {
     cwd,
     encoding: "utf8",
-    shell: process.platform === "win32",
+    shell,
     stdio: ["ignore", "pipe", "pipe"],
   }).toString();
+}
+
+function npmCommand(args: readonly string[], cwd: string): string {
+  return command(
+    process.platform === "win32" ? "npm.cmd" : "npm",
+    args,
+    cwd,
+    process.platform === "win32",
+  );
+}
+
+function installedCommand(args: readonly string[], cwd: string): string {
+  return npmCommand(["exec", "--offline", "--", "keiyaku", ...args], cwd);
 }
 
 test("published package installs one keiyaku CLI and runs against a real repository", () => {
@@ -29,7 +47,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   const cache = mkdtempSync(join(tmpdir(), "keiyaku-npm-cache-"));
   const repository = mkdtempSync(join(tmpdir(), "keiyaku-e2e-repo-"));
 
-  command("npm", ["pack", "--ignore-scripts", "--pack-destination", packed], root);
+  npmCommand(["pack", "--ignore-scripts", "--pack-destination", packed], root);
   const archives = readdirSync(packed).filter((name) => name.endsWith(".tgz"));
   assert.equal(archives.length, 1, `expected one package archive, got ${archives.join(", ")}`);
 
@@ -46,7 +64,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
     private: true,
     dependencies,
   }, null, 2)}\n`);
-  command("npm", [
+  npmCommand([
     "install",
     "--ignore-scripts",
     "--no-audit",
@@ -75,7 +93,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   if (process.platform !== "win32") {
     assert.notEqual(statSync(target).mode & 0o111, 0, "installed CLI must be executable");
   }
-  assert.match(command(bin, ["--help"], installed), /^usage: keiyaku /m);
+  assert.match(installedCommand(["--help"], installed), /^usage: keiyaku /m);
 
   command("git", ["init", "--quiet", "--initial-branch=main", repository], repository);
   command("git", ["config", "user.name", "Keiyaku E2E"], repository);
@@ -83,7 +101,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   writeFileSync(join(repository, "README.md"), "initial\n");
   command("git", ["add", "README.md"], repository);
   command("git", ["commit", "--quiet", "-m", "initial"], repository);
-  const status = JSON.parse(command(bin, ["-C", repository, "status", "--json"], repository)) as {
+  const status = JSON.parse(installedCommand(["-C", repository, "status", "--json"], installed)) as {
     contracts?: { kind?: string };
   };
   assert.equal(status.contracts?.kind, "present");
