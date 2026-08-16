@@ -12,6 +12,16 @@ import type { TaskBoard } from "./board.js";
 
 export type BoardSnapshot = Readonly<{ board: TaskBoard; bytes: ReadonlyMap<TaskId, Uint8Array> }>;
 
+function syncTaskDirectory(path: string): void {
+  if (process.platform === "win32") return;
+  const directory = openSync(path, "r");
+  try {
+    fsyncSync(directory);
+  } finally {
+    closeSync(directory);
+  }
+}
+
 function tasksDirectory(world: WorldRoot): string { return resolve(world, ".keiyaku", "tasks"); }
 
 async function authorityFiles(directory: string): Promise<readonly string[]> {
@@ -85,12 +95,7 @@ export async function replaceAuthority(input: Readonly<{
     descriptor = undefined;
     if (!equal(await currentBytes(input.path), input.expected)) return "concurrent-modification";
     renameSync(temporary, input.path);
-    const directoryDescriptor = openSync(parent, "r");
-    try {
-      fsyncSync(directoryDescriptor);
-    } finally {
-      closeSync(directoryDescriptor);
-    }
+    syncTaskDirectory(parent);
     return "replaced";
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);

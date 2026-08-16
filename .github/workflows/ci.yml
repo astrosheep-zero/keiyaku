@@ -31,6 +31,11 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
 
+      - name: Configure Git identity for external worktree fixtures
+        run: |
+          git config --global user.name "Keiyaku CI"
+          git config --global user.email "keiyaku-ci@example.invalid"
+
       - name: Run repository verification
         run: npm test
 
@@ -71,6 +76,11 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
+
+      - name: Configure Git identity for external worktree fixtures
+        run: |
+          git config --global user.name "Keiyaku CI"
+          git config --global user.email "keiyaku-ci@example.invalid"
 
       - name: Build
         run: npm run build

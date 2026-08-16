@@ -9,6 +9,16 @@ import {
 import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
+export function syncDirectory(path: string): void {
+  if (process.platform === "win32") return;
+  const directory = openSync(path, "r");
+  try {
+    fsyncSync(directory);
+  } finally {
+    closeSync(directory);
+  }
+}
+
 export async function replaceFileDurably(path: string, bytes: string | Uint8Array): Promise<void> {
   const parent = dirname(path);
   for (;;) {
@@ -21,12 +31,7 @@ export async function replaceFileDurably(path: string, bytes: string | Uint8Arra
       closeSync(descriptor);
       descriptor = undefined;
       renameSync(temporary, path);
-      const directory = openSync(parent, "r");
-      try {
-        fsyncSync(directory);
-      } finally {
-        closeSync(directory);
-      }
+      syncDirectory(parent);
       return;
     } catch (error) {
       if (descriptor !== undefined) closeSync(descriptor);
@@ -52,12 +57,7 @@ export async function createFileDurablyExclusive(
     fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;
-    const directory = openSync(parent, "r");
-    try {
-      fsyncSync(directory);
-    } finally {
-      closeSync(directory);
-    }
+    syncDirectory(parent);
     return true;
   } catch (error) {
     if (descriptor !== undefined) closeSync(descriptor);

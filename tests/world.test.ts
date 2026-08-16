@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import test from "node:test";
@@ -14,7 +15,7 @@ test("World.locate selects the nearest marker without creating one", async () =>
   mkdirSync(join(outer, ".keiyaku"));
   mkdirSync(join(nested, ".keiyaku"), { recursive: true });
   mkdirSync(leaf, { recursive: true });
-  assert.equal(await World.locate(leaf), realpathSync(nested));
+  assert.equal(await World.locate(leaf), await realpath(nested));
   const bare = join(temporary(), "leaf"); mkdirSync(bare);
   assert.equal(await World.locate(bare), null);
   assert.equal(existsSync(join(bare, ".keiyaku")), false);
@@ -25,11 +26,11 @@ test("World resolution reuses a non-Git ancestor marker while World.at remains e
   mkdirSync(join(marked, ".keiyaku"));
   mkdirSync(nested, { recursive: true });
   const resolution = await World.resolve(nested);
-  assert.equal(resolution.root, realpathSync(marked));
-  assert.equal(await resolution.establish(), realpathSync(marked));
+  assert.equal(resolution.root, await realpath(marked));
+  assert.equal(await resolution.establish(), await realpath(marked));
 
   const root = temporary(), leaf = join(root, "a", "b"); mkdirSync(leaf, { recursive: true });
-  assert.equal(await World.at(leaf), realpathSync(leaf));
+  assert.equal(await World.at(leaf), await realpath(leaf));
   assert.equal(existsSync(join(leaf, ".keiyaku")), true);
   assert.equal(existsSync(join(root, ".keiyaku")), false);
 });
@@ -47,9 +48,9 @@ test("one Git repository resolves one WorldRoot from primary, subdirectory, and 
 
   const primary = await repositoryAt(repository.path);
   const secondary = await repositoryAt(linked);
-  assert.equal(await World.locate({ cwd: repository.path, repositoryRoot: primary.primaryWorktree }), realpathSync(repository.path));
-  assert.equal(await World.locate({ cwd: nested, repositoryRoot: primary.primaryWorktree }), realpathSync(repository.path));
-  assert.equal(await World.locate({ cwd: linked, repositoryRoot: secondary.primaryWorktree }), realpathSync(repository.path));
+  assert.equal(await World.locate({ cwd: repository.path, repositoryRoot: primary.primaryWorktree }), await realpath(repository.path));
+  assert.equal(await World.locate({ cwd: nested, repositoryRoot: primary.primaryWorktree }), await realpath(repository.path));
+  assert.equal(await World.locate({ cwd: linked, repositoryRoot: secondary.primaryWorktree }), await realpath(repository.path));
 });
 
 test("Git reads do not create a marker and Git creation establishes only the primary WorldRoot", async () => {
@@ -62,11 +63,11 @@ test("Git reads do not create a marker and Git creation establishes only the pri
   const scope = await repositoryAt(linked);
 
   const world = await World.resolve({ cwd: linked, repositoryRoot: scope.primaryWorktree });
-  assert.equal(world.root, realpathSync(repository.path));
+  assert.equal(world.root, await realpath(repository.path));
   assert.equal(existsSync(join(repository.path, ".keiyaku")), false);
   assert.equal(existsSync(join(linked, ".keiyaku")), false);
 
-  assert.equal(await world.establish(), realpathSync(repository.path));
+  assert.equal(await world.establish(), await realpath(repository.path));
   assert.equal(existsSync(join(repository.path, ".keiyaku")), true);
   assert.equal(existsSync(join(linked, ".keiyaku")), false);
 });

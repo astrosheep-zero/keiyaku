@@ -70,10 +70,12 @@ Board reads and every public Task operation that consumes authority are
 asynchronous and observe complete files before fulfillment. Task retains one
 synchronous filesystem exception inside its compare-and-replace commit: after
 the expected bytes are re-observed, the unique temporary file is written and
-fsynced, atomically renamed, and the parent directory is fsynced before the
-Promise fulfills. This bounded section preserves one atomic authority
-replacement; directory walks, metadata, reads, and cleanup remain asynchronous,
-and no second sync API or parallel writer exists.
+fsynced, atomically renamed, and the parent directory is fsynced when the host
+platform supports directory fsync. Windows does not support fsync on an opened
+directory; the file fsync and atomic rename remain the commit boundary there.
+This bounded section preserves one atomic authority replacement; directory walks,
+metadata, reads, and cleanup remain asynchronous, and no second sync API or
+parallel writer exists.
 
 `priority` is `0 | 1 | 2 | 3` and defaults to `2`. Relation arrays are ordered,
 duplicate-free full TaskIds. `note` is a string and defaults to empty.
@@ -277,7 +279,8 @@ type TaskCompositionResult =
 
 One Task file replacement is one commit point. Task never stages, commits, or
 changes Git refs. It writes a temporary regular file, flushes it, rechecks the
-observed predecessor bytes, atomically renames it, and syncs the directory.
+observed predecessor bytes, atomically renames it, and syncs the directory when
+that platform supports directory fsync.
 
 Cooperating writers use `.keiyaku/locks/task/<namespace...>/<local-id>.sqlite`.
 ID allocation first takes `.keiyaku/locks/task-allocation.sqlite`; compose then
