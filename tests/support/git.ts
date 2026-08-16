@@ -20,19 +20,10 @@ export function withGitShim<T>(
   action: () => T | Promise<T>,
 ): T | Promise<T> {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-git-shim-"));
-  const realGit = process.platform === "win32"
-    ? execFileSync("where.exe", ["git.exe"], { encoding: "utf8" }).split(/\r?\n/u).find((line) => line.length > 0)!
-    : execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  const shimPath = join(directory, process.platform === "win32" ? "git.cmd" : "git");
-  if (process.platform === "win32") {
-    const scriptPath = join(directory, "git-shim");
-    const bash = execFileSync("where.exe", ["bash.exe"], { encoding: "utf8" }).split(/\r?\n/u).find((line) => line.length > 0)!;
-    writeFileSync(scriptPath, `${body}\n`);
-    writeFileSync(shimPath, `@echo off\r\n\"${bash}\" \"%~dp0git-shim\" %*\r\n`);
-  } else {
-    writeFileSync(shimPath, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
-    chmodSync(shimPath, 0o755);
-  }
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const shimPath = join(directory, "git");
+  writeFileSync(shimPath, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  chmodSync(shimPath, 0o755);
   const updates = {
     PATH: `${directory}:${process.env.PATH ?? ""}`,
     KEIYAKU_REAL_GIT: realGit,
@@ -63,6 +54,7 @@ export function makeGitRepository(): TestGitRepository {
   execFileSync("git", ["init", "--quiet", "--initial-branch=main", path]);
   execFileSync("git", ["-C", path, "config", "user.name", "Keiyaku Test"]);
   execFileSync("git", ["-C", path, "config", "user.email", "keiyaku-test@example.invalid"]);
+  execFileSync("git", ["-C", path, "config", "core.autocrlf", "false"]);
   const run = (args: readonly string[], input?: string | Uint8Array): string =>
     execFileSync("git", ["-C", path, ...args], { input, encoding: "utf8" }).toString();
   return { path, run };

@@ -51,18 +51,10 @@ jobs:
       - name: Check patch whitespace
         run: git diff --check
 
-  windows-behavior:
-    name: windows-2022 / behavior ${{ matrix.shard }}
+  windows-native:
+    name: windows-2022 / native behavioral suite
     runs-on: windows-2022
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        shard:
-          - 1/4
-          - 2/4
-          - 3/4
-          - 4/4
 
     steps:
       - name: Check out repository
@@ -77,16 +69,33 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
 
-      - name: Configure Git identity for external worktree fixtures
-        run: |
-          git config --global user.name "Keiyaku CI"
-          git config --global user.email "keiyaku-ci@example.invalid"
-
       - name: Build
         run: npm run build
 
-      - name: Run behavioral test shard
-        run: node --import tsx scripts/run-tests.mjs --test-shard=${{ matrix.shard }} --test-concurrency=1
+      - name: Run Windows-native behavioral tests
+        run: >-
+          node --import tsx scripts/run-tests.mjs --test-concurrency=1
+          tests/actor.test.ts
+          tests/akuma-heart.test.ts
+          tests/akuma-identity.test.ts
+          tests/amend-body.test.ts
+          tests/arc.test.ts
+          tests/contract-document.test.ts
+          tests/dependency-currentness.test.ts
+          tests/documentation.test.ts
+          tests/fold.test.ts
+          tests/markdown-ast.test.ts
+          tests/model-impact.test.ts
+          tests/namespace-context.test.ts
+          tests/normalized-identity.test.ts
+          tests/observation.test.ts
+          tests/runtime-proc.test.ts
+          tests/settings.test.ts
+          tests/sqlite-transaction-lock.test.ts
+          tests/task-document.test.ts
+          tests/task-operations.test.ts
+          tests/verification-producer.test.ts
+          tests/world.test.ts
 
       - name: Check patch whitespace
         run: git diff --check

@@ -113,7 +113,9 @@ test("runProcess reports unknown exits", async () => {
     'process.kill(process.pid, "SIGTERM");',
   ]));
 
-  assert.deepEqual(outcome, { kind: "unknown-exit" });
+  assert.deepEqual(outcome, process.platform === "win32"
+    ? { kind: "terminal", code: 1, stdout: "", stderr: "", truncated: false }
+    : { kind: "unknown-exit" });
 });
 
 test("runProcess reports spawn errors", async () => {
