@@ -69,36 +69,61 @@ function runPackagedCli(
 test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["-C", "/world", "call", "claude", "-"]), {
     cwd: "/world",
-    command: { command: "call", archetype: "claude", mode: "wait", output: "text" },
+    command: { command: "call", archetype: "claude", mode: "wait", prompt: { kind: "stdin" }, output: "text" },
   });
-  assert.deepEqual(parseArgv(["call", "claude", "--contract", "kei/delivery", "--alias", "@review", "-d", "-"]), {
+  assert.deepEqual(parseArgv(["call", "claude", "--contract", "kei/delivery", "--alias", "@review", "-d", "review the patch"]), {
     command: {
       command: "call",
       archetype: "claude",
       contract: "kei/delivery",
       alias: "@review",
       mode: "detach",
+      prompt: { kind: "argument", value: "review the patch" },
       output: "text",
     },
   });
-  assert.deepEqual(parseArgv(["call", "claude", "--wait", "--timeout", "10m", "--cwd", "/world", "-"]), {
+  assert.deepEqual(parseArgv(["call", "claude", "--wait", "10m", "--cwd", "/world", "-"]), {
     cwd: "/world",
-    command: { command: "call", archetype: "claude", mode: "wait", timeoutMs: 600_000, output: "text" },
+    command: {
+      command: "call",
+      archetype: "claude",
+      mode: "wait",
+      timeoutMs: 600_000,
+      prompt: { kind: "stdin" },
+      output: "text",
+    },
   });
-  assert.deepEqual(parseArgv(["call", "claude", "--detach", "-C", "/world", "-"]), {
+  assert.deepEqual(parseArgv(["call", "claude", "--detach", "-C", "/world", "ship it"]), {
     cwd: "/world",
-    command: { command: "call", archetype: "claude", mode: "detach", output: "text" },
+    command: {
+      command: "call",
+      archetype: "claude",
+      mode: "detach",
+      prompt: { kind: "argument", value: "ship it" },
+      output: "text",
+    },
   });
   assert.throws(() => parseArgv(["-C", "/one", "call", "claude", "--cwd", "/two", "-"]), /may appear only once/u);
   assert.throws(() => parseArgv(["call", "claude", "-", "--cwd", "/world"]), /stdin marker '-' must be the final argument/u);
-  assert.throws(() => parseArgv(["call", "claude", "--wait", "--detach", "-"]), /mutually exclusive/u);
-  assert.throws(() => parseArgv(["call", "claude", "--timeout", "5m", "-d", "-"]), /mutually exclusive/u);
+  assert.throws(() => parseArgv(["call", "claude", "--wait", "5m", "--detach", "-"]), /mutually exclusive/u);
   assert.throws(() => parseArgv(["call", "claude", "--alias", "review", "-"]), /Akuma alias must match/u);
   assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--json", "-"]), {
-    command: { command: "tell", akuma: "aku/claude/1234abcd", interrupt: false, output: "json" },
+    command: {
+      command: "tell",
+      akuma: "aku/claude/1234abcd",
+      interrupt: false,
+      prompt: { kind: "stdin" },
+      output: "json",
+    },
   });
-  assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--interrupt", "-"]), {
-    command: { command: "tell", akuma: "aku/claude/1234abcd", interrupt: true, output: "text" },
+  assert.deepEqual(parseArgv(["tell", "@review", "--interrupt", "continue from the failure"]), {
+    command: {
+      command: "tell",
+      akuma: "@review",
+      interrupt: true,
+      prompt: { kind: "argument", value: "continue from the failure" },
+      output: "text",
+    },
   });
   assert.deepEqual(parseArgv(["fork", "aku/claude/1234abcd", "--at", "history-1", "--json"]), {
     command: { command: "fork", akuma: "aku/claude/1234abcd", at: "history-1", output: "json" },
@@ -132,9 +157,12 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.throws(() => parseArgv(["call", "--archetype", "claude", "-"]), CliUsageError);
   assert.throws(() => parseArgv(["call", "-"]), CliUsageError);
   assert.throws(() => parseArgv(["call", "claude"]), CliUsageError);
-  assert.throws(() => parseArgv(["call", "claude", "reviewer", "-"]), CliUsageError);
+  assert.throws(
+    () => parseArgv(["call", "claude", "reviewer", "-"]),
+    /accepts either a prompt argument or stdin, not both/u,
+  );
   assert.throws(() => parseArgv(["interrupt", "aku\/claude\/1234abcd", "-"]), /unknown command/u);
-  assert.throws(() => parseArgv(["tell", "aku\/claude\/1234abcd", "--interrupt"]), /requires stdin/);
+  assert.throws(() => parseArgv(["tell", "aku\/claude\/1234abcd", "--interrupt"]), /requires a prompt argument or stdin/u);
   assert.throws(() => parseArgv(["kill", "aku\/claude\/1234abcd", "-"]), /stdin marker .* not valid/);
   assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd"]), /requires --at/);
   assert.throws(() => parseArgv(["fork", "aku\/claude\/1234abcd", "--at", ""]), /requires --at/);
@@ -1780,18 +1808,23 @@ test("packaged CLI call writes missing, detached, answered, unfinished, and fail
     assert.equal(detached.stdout, `─────\n${akuId}\n$ keiyaku wait ${akuId} --timeout 5m\n`);
     assert.doesNotMatch(detached.stdout, /● running|○ asleep|success/u);
 
-    const answered = await runPackagedCli(["-C", root, "call", "worker", "--timeout", "2s", "-"], { cwd: root, env, stdin: "answer" });
+    const answered = await runPackagedCli(["-C", root, "call", "worker", "answer"], { cwd: root, env });
     assert.equal(answered.code, 0);
     assert.equal(answered.stdout, "finished");
     assert.equal(answered.stderr, "");
 
-    const unfinished = await runPackagedCli(["-C", root, "call", "worker", "--timeout", "0ms", "-"], { cwd: root, env, stdin: "hang" });
+    const unfinished = await runPackagedCli(["-C", root, "call", "worker", "--wait", "0ms", "-"], { cwd: root, env, stdin: "hang" });
     assert.equal(unfinished.code, 0);
     assert.match(unfinished.stdout, /^aku\/worker\/[0-9a-f]{8}$/mu);
     assert.match(unfinished.stdout, / {2}● running\n$/u);
     assert.doesNotMatch(unfinished.stdout, /keiyaku wait|finished/u);
+    const unfinishedId = unfinished.stdout.match(/aku\/worker\/[0-9a-f]{8}/u)?.[0];
+    assert.notEqual(unfinishedId, undefined);
+    const told = await runPackagedCli(["-C", root, "tell", unfinishedId!, "continue with logs"], { cwd: root, env });
+    assert.equal(told.code, 0);
+    assert.match(told.stdout, /continue with logs/u);
 
-    const failed = await runPackagedCli(["-C", root, "call", "worker", "--timeout", "2s", "-"], { cwd: root, env, stdin: "fail" });
+    const failed = await runPackagedCli(["-C", root, "call", "worker", "--wait", "2s", "-"], { cwd: root, env, stdin: "fail" });
     assert.equal(failed.code, 2);
     assert.match(failed.stdout, /! error\s+turn failed/u);
     assert.notEqual(failed.stdout, "turn failed\n");

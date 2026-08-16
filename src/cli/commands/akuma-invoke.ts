@@ -13,7 +13,7 @@ import {
 } from "../../index.js";
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
-import type { ParsedAkumaCommand } from "./akuma.js";
+import type { AkumaPromptSource, ParsedAkumaCommand } from "./akuma.js";
 
 export type AkumaInvocationResult =
   | Readonly<{ kind: "akuma"; action: "call"; result: CallResult }>
@@ -40,6 +40,10 @@ function inputAlias(selector: string): string | undefined {
   return selector.startsWith("@") ? selector : undefined;
 }
 
+async function promptBody(command: Readonly<{ prompt: AkumaPromptSource }>, input: InvokeInput): Promise<string> {
+  return command.prompt.kind === "stdin" ? await input.readStdin() : command.prompt.value;
+}
+
 async function invokeWait(command: Extract<ParsedAkumaCommand, { command: "wait" }>, input: InvokeInput): Promise<AkumaInvocationResult> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
   return {
@@ -58,7 +62,7 @@ async function invokeWait(command: Extract<ParsedAkumaCommand, { command: "wait"
 }
 
 async function invokeTell(command: ParsedAkumaCommand & Readonly<{ command: "tell"; akuma: string }>, input: InvokeInput): Promise<AkumaInvocationResult> {
-  const body = await input.readStdin();
+  const body = await promptBody(command, input);
   if (command.interrupt) {
     const result = await Keiyaku.interrupt({ path: input.path, akuma: command.akuma, settings: input.settings, body, ...(input.repo === undefined ? {} : { repo: input.repo }) });
     const alias = inputAlias(command.akuma);
@@ -128,10 +132,11 @@ export async function invokeAkuma(
 ): Promise<AkumaInvocationResult> {
   switch (command.command) {
     case "call": {
+      const body = await promptBody(command, input);
       const result = await Keiyaku.call({
         path: input.path,
         archetype: command.archetype,
-        body: await input.readStdin(),
+        body,
         settings: input.settings,
         cwd: input.executionCwd,
         mode: command.mode,

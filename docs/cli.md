@@ -105,9 +105,9 @@ reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
 install <codex|claude|opencode|pi> [--json]
        install --all [--json]
-call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -
+call <akuma-name> [--contract <kei/...>] [--alias @name] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
 wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]
-tell <aku/...|@alias> [--interrupt] [--json] -
+tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)
 history <aku/...|@alias> [--before <index> | --since <index> | --last] [--json]
 fork <aku/...|@alias> --at <historyId> [--json]
 kill <akuma-selector>... [--json]
@@ -245,8 +245,10 @@ rollback occurs. Text prints one result per harness. JSON returns
 `failed` and a diagnostic on failure. Any failed harness makes the command exit
 `1`; successful installation exits `0`.
 
-`call` and `tell` require the final `-` and pass those bytes
-as the public body input. The `call` positional is the Akuma name and names
+`call` and `tell` each accept exactly one prompt source: one positional
+`<prompt>` argument, or a final `-` that reads stdin. Supplying both or neither
+is a usage refusal. The selected argument text or stdin bytes become the public
+body input. The `call` positional `<akuma-name>` names
 `~/.keiyaku/akuma/<name>.md`; its provider must resolve through the
 Settings-backed provider interpretation. When no same-name Settings entry
 exists, the built-in fallback execution names are `claude` and
@@ -257,22 +259,22 @@ accepts one complete `kei/...` identity, constructs its
 handle from the selected Contract Repo, and asks the package-root call to publish
 Dispatch after birth. It is not a lifecycle gate and does not accept an
 omitted or `@` Contract selector. `--alias` accepts the sole `@name` grammar and
-asks that same call to move the world-local Alias after any Dispatch succeeds.
-Both flags are optional. The canonical invocation cwd is the immutable execution
-cwd supplied to the public call; the CLI has no separate execution-cwd option.
-Call waits on the born Akuma by default and consumes the same public status
-carrier as `wait` when it stops running or after five minutes. An answered
-terminal observation writes the exact answer bytes and nothing else. An open
-observation uses the shared snapshot text. A terminal failed outcome, typed
-Dispatch or Alias failure, or readonly-none refusal remains a visible
-diagnostic rather than an answer. `--wait` explicitly
-selects that default mode, while `--timeout` replaces the five-minute duration.
-`-d` and `--detach` are identical and return after birth plus Dispatch and Alias
-integration. A successful detach prints `$ keiyaku wait <AkuId> --timeout 5m`
-with the complete born identity. Dispatch failure, Alias failure, or a
-readonly-none refusal keeps its existing factual lines and does not add that
-command. Detach does not fabricate a current life. It is mutually exclusive
-with `--wait` and `--timeout`.
+assigns that world-local selector to the born Akuma after any Dispatch succeeds;
+when the Alias already exists, it moves to the born Akuma. Both flags are
+optional. The canonical invocation cwd is the immutable execution cwd supplied
+to the public call; the CLI has no separate execution-cwd option.
+Call waits on the born Akuma for five minutes by default and consumes the same
+public status carrier as `wait` when it stops running or that window ends. An
+answered terminal observation writes the exact answer bytes and nothing else.
+An open observation uses the shared snapshot text. A terminal failed outcome,
+typed Dispatch or Alias failure, or readonly-none refusal remains a visible
+diagnostic rather than an answer. `--wait <duration>` keeps wait mode and
+replaces the five-minute observation window. `-d` and `--detach` are identical
+and return after birth plus Dispatch and Alias integration. A successful detach
+prints `$ keiyaku wait <AkuId> --timeout 5m` with the complete born identity.
+Dispatch failure, Alias failure, or a readonly-none refusal keeps its existing
+factual lines and does not add that command. Detach does not fabricate a current
+life. It is mutually exclusive with `--wait`.
 `tell`, `history`, `fork`, and exact `status` accept a complete
 `aku/<akuma>/<hex8>` or world-local `@alias`. `wait` and `kill` additionally
 accept Akuma globs and complete `kei/...` worker selectors. Their positional
@@ -298,11 +300,12 @@ not an aggregate envelope. `status @name` remains an Address-facet decision
 and refuses explicitly when the spelling is both an active Contract short
 selector and an Akuma Alias.
 CLI `wait` uses the public default predicate (`life !== "running"`). Its
-optional duration matches exactly `^(0|[1-9][0-9]*)(ms|s|m|h)$`: integers and
-units are required, leading zeroes are refused except for zero itself, and the
-units convert to milliseconds before the public call. A converted value beyond
-the safe integer range is refused. `--timeout` passes that value as
-`timeoutMs`, while predicate functions remain library-only input. `history`
+optional `--timeout` value and `call --wait` value match exactly
+`^(0|[1-9][0-9]*)(ms|s|m|h)$`: integers and units are required, leading zeroes
+are refused except for zero itself, and the units convert to milliseconds
+before the public call. A converted value beyond the safe integer range is
+refused. Each duration passes that value as `timeoutMs`, while predicate
+functions remain library-only input. `history`
 with no mode renders the newest page of at most 50 semantic rows. `--before`
 reads the page preceding an already visible activity index; `--since` reads
 activity following an already visible index. Both are exclusive, accept only
@@ -366,8 +369,8 @@ a CLI-only diagnostic projection. No output asks the caller to query a TellId.
 `tell --interrupt` selects the Library's fenced interrupt composition. It is
 one CLI input action, not a standalone lifecycle verb: the current Body is
 asked to yield through its owned capability, the leash proves clean settlement,
-and only then are the same stdin bytes durably recorded and woken for its
-successor. A hung or untidy result is reported without external process
+and only then is the selected prompt durably recorded before its successor is
+woken. A hung or untidy result is reported without external process
 signaling. Text uses the same refreshed snapshot as the other Akuma mutations.
 JSON returns the Library result unchanged; the CLI does not infer a second
 receipt or observation.

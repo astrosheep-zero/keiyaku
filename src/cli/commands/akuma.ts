@@ -5,19 +5,23 @@ import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity
 
 type Output = Readonly<{ output: "text" | "json" }>;
 type Addressed = Readonly<{ akuma: string }>;
+export type AkumaPromptSource =
+  | Readonly<{ kind: "argument"; value: string }>
+  | Readonly<{ kind: "stdin" }>;
+type Prompted = Readonly<{ prompt: AkumaPromptSource }>;
 
 export type ParsedAkumaCommand = Output & (
-  | Readonly<{
+  | (Readonly<{
       command: "call";
       archetype: string;
       contract?: string;
       alias?: AkumaAlias;
       mode: "wait" | "detach";
       timeoutMs?: number;
-    }>
+    }> & Prompted)
   | Readonly<{ command: "kill"; akuma: readonly string[] }>
   | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
-  | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed)
+  | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
   | (Readonly<{ command: "history"; last: boolean; before?: number; since?: number }> & Addressed)
   | (Readonly<{ command: "fork"; at: string }> & Addressed)
 );
@@ -30,6 +34,7 @@ type AkumaCommandSpec = Readonly<{
   flags: Readonly<Record<string, "boolean" | "value">>;
   usage: string;
   purpose: string;
+  details?: string;
 }>;
 
 const AKUMA_COMMAND_SPECS = {
@@ -39,13 +44,19 @@ const AKUMA_COMMAND_SPECS = {
     flags: {
       contract: "value",
       alias: "value",
-      wait: "boolean",
-      timeout: "value",
+      wait: "value",
       detach: "boolean",
       json: "boolean",
     },
-    usage: "call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -",
-    purpose: "Call an Akuma with stdin body.",
+    usage: "call <akuma-name> [--contract <kei/...>] [--alias @name] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
+    purpose: "Birth an Akuma from <akuma-name> with one prompt.",
+    details: [
+      "Give <prompt> as one argument, or use final - to read stdin.",
+      "Default: --wait 5m. An explicit --wait replaces that duration; -d and --detach return after birth.",
+      "--contract dispatches the born Akuma to that Contract.",
+      "--alias assigns the world-local @name selector to the born Akuma.",
+      "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",
+    ].join("\n"),
   },
   wait: {
     arity: "one-or-more",
@@ -58,8 +69,12 @@ const AKUMA_COMMAND_SPECS = {
     arity: 1,
     stdin: true,
     flags: { interrupt: "boolean", json: "boolean" },
-    usage: "tell <aku/...> [--interrupt] [--json] -",
-    purpose: "Record and wake one Akuma, optionally putting down its current Body first.",
+    usage: "tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)",
+    purpose: "Send one prompt to an existing Akuma and wake it.",
+    details: [
+      "Give <prompt> as one argument, or use final - to read stdin.",
+      "--interrupt ends the current Body before recording the prompt and waking its successor.",
+    ].join("\n"),
   },
   history: {
     arity: 1,
@@ -97,8 +112,8 @@ export function renderAkumaRootRows(): readonly string[] {
 }
 
 export function renderAkumaHelp(action: AkumaAction): string {
-  const spec = AKUMA_COMMAND_SPECS[action];
-  return `${spec.purpose}\n\n${usageLine(spec.usage)}`;
+  const spec: AkumaCommandSpec = AKUMA_COMMAND_SPECS[action];
+  return `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
 }
 
 export function renderAkumaUsage(action: AkumaAction): string {
@@ -120,11 +135,11 @@ function stringFlag(value: FlagValue | undefined, diagnostic: string, fail: (mes
   return value as string;
 }
 
-function parseDuration(raw: FlagValue, fail: (message: string) => never): number {
-  if (typeof raw !== "string") fail("--timeout requires an integer duration with unit ms, s, m, or h");
+function parseDuration(raw: FlagValue, option: string, fail: (message: string) => never): number {
+  if (typeof raw !== "string") fail(`${option} requires an integer duration with unit ms, s, m, or h`);
   const duration = decodeDuration(raw);
-  if (duration.kind === "invalid") fail("--timeout requires an integer duration with unit ms, s, m, or h");
-  if (duration.kind === "overflow") fail("--timeout duration exceeds the safe millisecond range");
+  if (duration.kind === "invalid") fail(`${option} requires an integer duration with unit ms, s, m, or h`);
+  if (duration.kind === "overflow") fail(`${option} duration exceeds the safe millisecond range`);
   return duration.milliseconds;
 }
 
@@ -204,7 +219,7 @@ function parseWait(
     command: "wait",
     akuma: rawSelectors.map((value) => validateSet(value, fail)),
     ...(completion === undefined ? {} : { completion }),
-    ...(flags.timeout === undefined ? {} : { timeoutMs: parseDuration(flags.timeout, fail) }),
+    ...(flags.timeout === undefined ? {} : { timeoutMs: parseDuration(flags.timeout, "--timeout", fail) }),
     output,
   };
 }
@@ -230,16 +245,13 @@ function parseHistory(
 }
 
 function parseAddressed(
-  action: Exclude<AkumaAction, "call">,
+  action: Exclude<AkumaAction, "call" | "tell">,
   rawSelectors: readonly string[],
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
   fail: (message: string) => never,
 ): ParsedAkumaCommand {
   if (action === "kill") return { command: action, akuma: rawSelectors.map((value) => validateSet(value, fail)), output };
-  if (action === "tell") {
-    return { command: action, akuma: validateDirect(rawSelectors[0]!, fail), interrupt: flags.interrupt === true, output };
-  }
   if (action === "wait") return parseWait(rawSelectors, flags, output, fail);
   const akuma = validateDirect(rawSelectors[0]!, fail);
   if (action === "history") return parseHistory(akuma, flags, output, fail);
@@ -248,9 +260,36 @@ function parseAddressed(
   return { command: action, akuma, at, output };
 }
 
+function parsePrompted(
+  action: "call" | "tell",
+  positionals: readonly string[],
+  stdin: boolean,
+  fail: (message: string) => never,
+): Readonly<{ subject: string; prompt: AkumaPromptSource }> {
+  if (positionals.length < 1 || positionals.length > 2) fail(`${action} has invalid positional arguments`);
+  const argument = positionals[1];
+  if (stdin && argument !== undefined) fail(`${action} accepts either a prompt argument or stdin, not both`);
+  if (!stdin && argument === undefined) fail(`${action} requires a prompt argument or stdin`);
+  return {
+    subject: positionals[0]!,
+    prompt: stdin ? { kind: "stdin" } : { kind: "argument", value: argument! },
+  };
+}
+
+function parseTell(
+  flags: Readonly<Record<string, FlagValue>>,
+  subject: string,
+  prompt: AkumaPromptSource,
+  output: "text" | "json",
+  fail: (message: string) => never,
+): Extract<ParsedAkumaCommand, { command: "tell" }> {
+  return { command: "tell", akuma: validateDirect(subject, fail), interrupt: flags.interrupt === true, prompt, output };
+}
+
 function parseCall(
   flags: Readonly<Record<string, FlagValue>>,
-  positionals: readonly string[],
+  archetype: string,
+  prompt: AkumaPromptSource,
   output: "text" | "json",
   fail: (message: string) => never,
 ): Extract<ParsedAkumaCommand, { command: "call" }> {
@@ -259,17 +298,17 @@ function parseCall(
     try { alias = parseAkumaAlias(stringFlag(flags.alias, "--alias requires @name", fail)); }
     catch (error) { fail(error instanceof Error ? error.message : "invalid Akuma alias"); }
   }
-  if (flags.detach === true && flags.wait === true) fail("call --wait and --detach are mutually exclusive");
-  if (flags.detach === true && flags.timeout !== undefined) fail("call --timeout and --detach are mutually exclusive");
+  if (flags.detach === true && flags.wait !== undefined) fail("call --wait and --detach are mutually exclusive");
   const mode = flags.detach === true ? "detach" as const : "wait" as const;
-  const timeoutMs = flags.timeout === undefined ? undefined : parseDuration(flags.timeout, fail);
+  const timeoutMs = flags.wait === undefined ? undefined : parseDuration(flags.wait, "--wait", fail);
   return {
     command: "call",
-    archetype: positionals[0]!,
+    archetype,
     ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
     ...(alias === undefined ? {} : { alias }),
     mode,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    prompt,
     output,
   };
 }
@@ -281,11 +320,16 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   const spec = AKUMA_COMMAND_SPECS[action];
   const fail = (message: string): never => { throw new CliUsageError(message, renderAkumaUsage(action)); };
   const { flags, positionals, stdin } = scanAkuma(action, argv, fail);
+  const output = flags.json === true ? "json" as const : "text" as const;
+  if (action === "call" || action === "tell") {
+    const parsed = parsePrompted(action, positionals, stdin, fail);
+    return action === "call"
+      ? parseCall(flags, parsed.subject, parsed.prompt, output, fail)
+      : parseTell(flags, parsed.subject, parsed.prompt, output, fail);
+  }
   if (spec.arity === "one-or-more" ? positionals.length === 0 : positionals.length !== spec.arity) {
     fail(`${action} has invalid positional arguments`);
   }
-  if (stdin !== spec.stdin) fail(`${action} ${spec.stdin ? "requires" : "reads no"} stdin`);
-  const output = flags.json === true ? "json" as const : "text" as const;
-  if (action === "call") return parseCall(flags, positionals, output, fail);
+  if (stdin) fail(`${action} reads no stdin`);
   return parseAddressed(action, positionals, flags, output, fail);
 }

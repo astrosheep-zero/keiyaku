@@ -57,11 +57,25 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderTaskHelp("compose"), /documents independently; partial admission has no cross-file atomicity or rollback/u);
   assert.match(renderTaskHelp("ready"), /open Tasks whose every need is terminal/u);
   assert.doesNotMatch(renderRootHelp(), /^  interrupt /mu);
-  assert.match(renderRootHelp(), /tell <aku\/\.\.\.> \[--interrupt\]/u);
+  assert.match(renderRootHelp(), /tell <aku\/\.\.\.|@alias> \[--interrupt\]/u);
   assert.equal(renderAkumaHelp("call"), [
-    "Call an Akuma with stdin body.",
+    "Birth an Akuma from <akuma-name> with one prompt.",
     "",
-    "usage: keiyaku call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -",
+    "usage: keiyaku call <akuma-name> [--contract <kei/...>] [--alias @name] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
+    "",
+    "Give <prompt> as one argument, or use final - to read stdin.",
+    "Default: --wait 5m. An explicit --wait replaces that duration; -d and --detach return after birth.",
+    "--contract dispatches the born Akuma to that Contract.",
+    "--alias assigns the world-local @name selector to the born Akuma.",
+    "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",
+  ].join("\n"));
+  assert.equal(renderAkumaHelp("tell"), [
+    "Send one prompt to an existing Akuma and wake it.",
+    "",
+    "usage: keiyaku tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)",
+    "",
+    "Give <prompt> as one argument, or use final - to read stdin.",
+    "--interrupt ends the current Body before recording the prompt and waking its successor.",
   ].join("\n"));
   assert.doesNotMatch(
     [renderRootHelp(), renderContractHelp("ls"), renderAkumaHelp("call"), renderAkumaHelp("wait")].join("\n"),

@@ -7,25 +7,27 @@ description: Use when delegating work to, supervising, steering, inspecting, for
 
 An Akuma is a durable callable worker. Its complete identity is
 `aku/<archetype>/<hex8>` — keep it; it is how you address the same worker
-later. `--alias @name` attaches a movable local address usable wherever an id
+later. An Alias is a movable world-local selector usable wherever a direct id
 is accepted; the identity underneath never changes.
 
 ## Start One
 
 ```bash
-keiyaku -C <cwd> call <akuma> [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -
+keiyaku -C <cwd> call <akuma-name> [--alias @name] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
 ```
 
-The stdin body is the worker's initial input and is required. Decide up front
-whether you will stay:
+Give the worker's initial prompt as one argument (quote it when it contains
+spaces), or use final `-` to read it from stdin. These forms are mutually
+exclusive. Decide up front whether you will stay:
 
-- The default (and explicit `--wait`) observes up to five minutes and writes
-  the complete answer when it arrives inside that window.
+- The default observes up to five minutes and writes the complete answer when
+  it arrives inside that window. `--wait <duration>` replaces that window.
 - `-d` / `--detach` returns right after birth with the AkuId. Use it when the
   work outlives your attention; come back with `wait`.
 
-The worker's execution cwd is exactly `-C <path>`, or your own cwd when `-C`
-is omitted.
+`--alias @name` assigns that world-local selector to the born Akuma. If the
+Alias already points elsewhere, it moves to the born Akuma. The worker's
+execution cwd is exactly `-C <path>`, or your own cwd when `-C` is omitted.
 
 ## Archetypes
 
@@ -54,10 +56,12 @@ running.
 ## Steer
 
 ```bash
-keiyaku tell <aku/...|@alias> -
-keiyaku tell <aku/...|@alias> --interrupt -
+keiyaku tell <aku/...|@alias> (<prompt> | -)
+keiyaku tell <aku/...|@alias> --interrupt (<prompt> | -)
 ```
 
+Give `tell` one prompt argument (quote it when it contains spaces) or final `-`
+for stdin, never both.
 `tell` continues the same worker: it steers a live Body in place, or — when
 none is running, including after an answer — records the message durably and
 wakes a successor. `tell --interrupt` puts down the current Body synchronously

@@ -41,8 +41,8 @@ tokens do not need to form a valid invocation: `task unknown --help` describes
 the Task namespace. Root help lists the root command vocabulary and points one
 hop to `task --help`; Task namespace help lists every action and its usage.
 Root Akuma and Contract leaf help give the owning row's purpose and full usage.
-A command-specific supplemental example may follow the usage block in leaf
-help; it does not appear in syntax-refusal usage. There is no
+Command-specific supplemental guidance or one minimal example may follow the
+usage block in leaf help; it does not appear in syntax-refusal usage. There is no
 `help` command, `-h` alias, or per-row `--help` flag.
 
 Help is a terminal parser observation. It writes text to stdout, exits `0`,
