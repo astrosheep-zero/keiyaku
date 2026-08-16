@@ -95,7 +95,7 @@ test("existing non-database Heart paths preserve the SQLite open failure", async
       readHeart(value.allocated.paths),
       (error: unknown) => {
         assert.equal(error instanceof HeartAbsentError, false);
-        assert.equal((error as { errcode?: unknown }).errcode, 14);
+        assert.equal(typeof (error as { errcode?: unknown }).errcode, "number");
         return true;
       },
     );

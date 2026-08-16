@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { documentDiff } from "../markdown/diff.js";
 import { installNamespaceContext, readNamespaceContext } from "./context.js";
 import { relationProblem, projectBlocked, projectRows, projectStatusRows, type BlockedTaskRow, type TaskBoard, type TaskRow } from "./board.js";
@@ -50,7 +51,7 @@ function retry(reason: TaskRetry): TaskMutationResult { return { kind: "retry", 
 async function context(world: WorldRoot, explicit?: readonly string[]): Promise<readonly string[] | TaskRefusal> {
   if (explicit !== undefined) return explicit;
   const current = await readNamespaceContext(world);
-  return current === "malformed" ? { kind: "invalid-namespace-context", path: `${world}/.keiyaku/namespace/current` }
+  return current === "malformed" ? { kind: "invalid-namespace-context", path: resolve(world, ".keiyaku", "namespace", "current") }
     : current === "absent" ? [] : current;
 }
 function occupied(board: TaskBoard, namespace: readonly string[]): Set<string> {

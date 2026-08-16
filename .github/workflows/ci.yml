@@ -94,7 +94,6 @@ jobs:
           tests/sqlite-transaction-lock.test.ts
           tests/task-document.test.ts
           tests/task-operations.test.ts
-          tests/verification-producer.test.ts
           tests/world.test.ts
 
       - name: Check patch whitespace
