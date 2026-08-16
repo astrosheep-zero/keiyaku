@@ -6,6 +6,10 @@ export const FILE_LINE_EXEMPTIONS = Object.freeze([
     reason: "The centralized declarative architecture map must remain one policy authority.",
   },
   {
+    file: "scripts/architecture/engine.ts",
+    reason: "The centralized TypeScript architecture analyzer keeps parsing and all enforced dependency and capability rules in one implementation owner.",
+  },
+  {
     file: "src/protocol/operations.ts",
     reason: "The centralized protocol operation surface remains one authority; splitting thin operation entry points would obscure that boundary.",
   },

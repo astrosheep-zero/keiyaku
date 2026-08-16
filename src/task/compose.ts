@@ -94,6 +94,13 @@ function applyAssignments(document: TaskDocument, assignments: readonly Assignme
 
 function currentTimestamp(): string { return new Date().toISOString(); }
 function advancedTimestamp(previous: string, current: string): string { return current > previous ? current : new Date(Date.parse(previous) + 1).toISOString(); }
+function createdTask(id: TaskId, title: string, at: string, actor?: string): TaskDocument {
+  return {
+    id, title, state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], note: "",
+    ...(actor === undefined ? {} : { createdBy: actor }),
+    createdAt: at, updatedAt: at, body: "",
+  };
+}
 function plan(sketch: Sketch, board: TaskBoard, defaultNamespace: readonly string[], at: string, actor?: string): readonly Planned[] | TaskRefusal {
   try {
     const namespace = sketch.namespace ?? defaultNamespace; const occupied = new Set([...board.tasks.values()].flatMap((task) => {
@@ -103,11 +110,7 @@ function plan(sketch: Sketch, board: TaskBoard, defaultNamespace: readonly strin
     const allocations = new Map<number, TaskDocument>();
     for (const node of sketch.nodes) if (node.kind === "new") {
       const localId = allocateLocalId(deriveLocalStem(node.title!), occupied); occupied.add(localId); const coordinate = { namespace, localId };
-      allocations.set(node.index, {
-        id: formatTaskId(coordinate), title: node.title!, state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], note: "",
-        ...(actor === undefined ? {} : { createdBy: actor }),
-        createdAt: at, updatedAt: at, body: "",
-      });
+      allocations.set(node.index, createdTask(formatTaskId(coordinate), node.title!, at, actor));
     }
     const all = new Map(board.tasks); for (const allocated of allocations.values()) all.set(allocated.id, allocated);
     const byDepth: TaskId[] = [], addressed = new Set<TaskId>(); const planned: Planned[] = [];

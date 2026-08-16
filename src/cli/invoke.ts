@@ -510,10 +510,6 @@ async function invokeParsed(
   }
 }
 
-async function invokeInstall(command: Extract<ParsedCommand, { command: "install" }>, runtime: InvokeRuntime): Promise<InstallInvocationResult> {
-  return installHarnesses(command.harnesses, runtime.environment ?? process.env);
-}
-
 function withResolvedTaskActor(command: ParsedCommand, runtime: InvokeRuntime): InvokeRuntime {
   if (command.command !== "task" || (command.action !== "add" && command.action !== "compose")) return runtime;
   const actor = actorFromEdge(typeof command.flags.actor === "string" ? command.flags.actor : undefined, runtime.environment ?? process.env);
@@ -524,7 +520,7 @@ export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime
   try {
     const command = invocation.command;
     assertExplicitRepoUse(command, invocation.repo);
-    if (command.command === "install") return await invokeInstall(command, runtime);
+    if (command.command === "install") return installHarnesses(command.harnesses, runtime.environment ?? process.env);
     return await invokeParsed({
       ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
