@@ -100,6 +100,18 @@ worktree snapshot, not a worker report or named candidate commit, and does not
 modify it. Missing or contradictory seat, worktree, or reading list means stop
 and ask.
 
+Observe commissioned workers through their Contract association instead of
+collecting Aku ids by hand:
+
+```bash
+keiyaku wait kei/<contract> --all --timeout 5m
+keiyaku wait kei/<first> kei/<second> --any --timeout 5m
+```
+
+A Contract selector snapshots its dispatched workers when the command starts.
+Use `--all` to wait for every selected worker or `--any` to return when one
+finishes; an expanded set with more than one worker requires an explicit mode.
+
 ## Decompose Complex Work
 
 Complex Keiyaku should be divided along independently acceptable delivery
