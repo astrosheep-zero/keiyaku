@@ -13,15 +13,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verification:
-    name: ${{ matrix.os }} / Node 22.19.0
-    runs-on: ${{ matrix.os }}
+  full:
+    name: ubuntu-24.04 / full verification
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --prefer-offline
+
+      - name: Configure Git identity for repository fixtures
+        run: |
+          git config --global user.name "Keiyaku CI"
+          git config --global user.email "keiyaku-ci@example.invalid"
+
+      - name: Run repository verification
+        run: npm test
+
+      - name: Run packaged CLI end-to-end test
+        run: npm run test:e2e
+
+      - name: Typecheck
+        run: npm run test:typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+  packaged-e2e:
+    name: ${{ matrix.os }} / packaged CLI e2e
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-24.04
           - windows-2022
           - macos-14
 
@@ -38,17 +75,13 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
 
-      - name: Run repository verification
-        run: npm test
+      - name: Configure Git identity for repository fixtures
+        run: |
+          git config --global user.name "Keiyaku CI"
+          git config --global user.email "keiyaku-ci@example.invalid"
 
       - name: Run packaged CLI end-to-end test
         run: npm run test:e2e
 
       - name: Typecheck
         run: npm run test:typecheck
-
-      - name: Build
-        run: npm run build
-
-      - name: Check patch whitespace
-        run: git diff --check
