@@ -15,6 +15,12 @@ legacy repository at `/Users/astrosheep/Developer/keiyaku`.
 - Read the root authority registry and the owner document before touching code.
 - Keep concrete product decisions in their owning root document; skills, tasks,
   Square discussion, source code, and tests provide procedure or evidence only.
+- Before designing a mechanism, inspect the repository's existing dependencies
+  and Keiyaku's current use of them for a primitive that already satisfies the
+  named invariant. Prefer that primitive. Build a custom mechanism only after a
+  concrete failing case proves the existing answer insufficient; do not wrap a
+  mature dependency in a parallel identity, codec, or adjudicator merely
+  because its relevant option has not yet been checked.
 - If a requested behavior is not settled by the owner document, stop the
   dependent implementation and report the smallest concrete authority gap.
 - Keep the current-version-only cut: port evidence selectively, never because
