@@ -51,7 +51,9 @@ export function withGitShim<T>(
 
 export function makeGitRepository(): TestGitRepository {
   const path = mkdtempSync(join(tmpdir(), "keiyaku-v4-"));
-  execFileSync("git", ["init", "--quiet", path]);
+  execFileSync("git", ["init", "--quiet", "--initial-branch=main", path]);
+  execFileSync("git", ["-C", path, "config", "user.name", "Keiyaku Test"]);
+  execFileSync("git", ["-C", path, "config", "user.email", "keiyaku-test@example.invalid"]);
   const run = (args: readonly string[], input?: string | Uint8Array): string =>
     execFileSync("git", ["-C", path, ...args], { input, encoding: "utf8" }).toString();
   return { path, run };

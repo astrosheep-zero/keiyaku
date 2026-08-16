@@ -10,10 +10,6 @@ import { makeGitRepository } from "./support/git.js";
 
 const root = resolve(import.meta.dirname, "..");
 
-test.before(() => {
-  execFileSync("npm", ["run", "build"], { cwd: root, stdio: "ignore" });
-});
-
 function externalConsumer(): string {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-consumer-"));
   mkdirSync(join(directory, "node_modules", "@astrosheep"), { recursive: true });

@@ -25,16 +25,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 22.19.0
+          node-version: 24.x
           cache: npm
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
-
-      - name: Configure Git identity for repository fixtures
-        run: |
-          git config --global user.name "Keiyaku CI"
-          git config --global user.email "keiyaku-ci@example.invalid"
 
       - name: Run repository verification
         run: npm test
@@ -51,10 +46,18 @@ jobs:
       - name: Check patch whitespace
         run: git diff --check
 
-  windows:
-    name: windows-2022 / full behavioral suite
+  windows-behavior:
+    name: windows-2022 / behavior ${{ matrix.shard }}
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - 1/4
+          - 2/4
+          - 3/4
+          - 4/4
 
     steps:
       - name: Check out repository
@@ -63,31 +66,44 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 22.19.0
+          node-version: 24.x
           cache: npm
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
 
-      - name: Configure Git identity for repository fixtures
-        run: |
-          git config --global user.name "Keiyaku CI"
-          git config --global user.email "keiyaku-ci@example.invalid"
+      - name: Build
+        run: npm run build
 
-      - name: Run full behavioral test suite
-        run: node --import tsx scripts/run-tests.mjs
+      - name: Run behavioral test shard
+        run: node --import tsx scripts/run-tests.mjs --test-shard=${{ matrix.shard }} --test-concurrency=1
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+  windows-e2e:
+    name: windows-2022 / packaged CLI e2e
+    runs-on: windows-2022
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --prefer-offline
 
       - name: Run packaged CLI end-to-end test
         run: npm run test:e2e
 
       - name: Typecheck
         run: npm run test:typecheck
-
-      - name: Build
-        run: npm run build
-
-      - name: Check patch whitespace
-        run: git diff --check
 
   macos-e2e:
     name: macos-14 / packaged CLI e2e
@@ -101,16 +117,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 22.19.0
+          node-version: 24.x
           cache: npm
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
-
-      - name: Configure Git identity for repository fixtures
-        run: |
-          git config --global user.name "Keiyaku CI"
-          git config --global user.email "keiyaku-ci@example.invalid"
 
       - name: Run packaged CLI end-to-end test
         run: npm run test:e2e
