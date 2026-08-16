@@ -93,6 +93,10 @@ Decidable without consulting you.>
 KEIYAKU
 ~~~~
 
+Each declaration may set an individual timeout in its fence info string, using
+an explicit duration unit such as `bash timeout=5m`. Omit it for an unbounded
+declaration; there is no Verification-wide timeout.
+
 For a saved document:
 
 ```bash

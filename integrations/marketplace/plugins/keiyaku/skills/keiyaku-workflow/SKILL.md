@@ -41,15 +41,31 @@ bind inputs, and read the receipt. Continue here from that receipt.
 Change and test code in the worktree the bind receipt names. `deliver` accepts
 a clean worktree by default. You may commit first, or explicitly include all
 non-ignored staged, unstaged, and untracked final bytes with
-`deliver --include-dirty`. Check where you are at any point:
+`deliver --include-dirty`.
+
+## Regain The Picture
+
+Rebuild state from reads, not memory — after a compact, a handoff, or any
+surprising receipt, read before acting:
 
 ```bash
-keiyaku status [<contract>|@<contract>]
+keiyaku status                    # the whole board
+keiyaku status <contract>         # lifecycle, candidate, one mark per gate
+keiyaku show <contract>           # the exact current Contract terms
+keiyaku region                    # every active Contract's declared surfaces
+keiyaku region <contract>         # one Contract's declared intent
+keiyaku region --overlap          # which declared intents intersect
+keiyaku region --path <path>      # which active Contracts declare this path
 ```
 
-`status` shows the lifecycle state, the candidate, and one mark per gate: `✓`
-current satisfied, `!` current unsatisfied, `?` stale because the patch or
-document changed after the evidence, and `○` missing.
+`status` marks each gate: `✓` current satisfied, `!` current unsatisfied, `?`
+stale because the patch or document changed after the evidence, `○` missing.
+A Region is a Contract's declared write intent — not ownership, not a gate,
+and not a Git conflict. Read the world before decomposing or commissioning
+into an occupied repository; read `--overlap` before choosing a landing order
+or an `--after` edge; read `--path` before touching a file that may belong to
+another lane. Regions are declarations only, a coarse planning signal: actual
+touched paths and conflicts remain Git's.
 
 ## Commission A Contract
 
@@ -91,8 +107,7 @@ boundaries. Use judgment to find those boundaries from the work's objectives,
 dependencies, Regions, and acceptance criteria; raw size or file count is not
 the test. Give each resulting Contract coherent terms. Connect them with
 `--after` only when one must proceed from another's settled result or their
-intended work is unsafe to run concurrently; ordinary Region overlap alone is
-not enough.
+intended work is unsafe to run concurrently.
 
 When one acceptance boundary still spans several coherent implementation
 chapters, record each chapter as an arc before moving to the next:
@@ -121,7 +136,7 @@ old Contract onto a different delivery.
 
 ## Audit Before Delivery
 
-Audit before each delivery or redelivery:
+Audit is how you see a delivery before it exists:
 
 ```bash
 keiyaku audit <contract> --show-diff-body
@@ -136,7 +151,7 @@ trusting a worker's completion report.
 
 ## Deliver
 
-Deliver after audit and before review:
+Deliver when the worktree content is the candidate you intend to land:
 
 ```bash
 keiyaku deliver <contract>
@@ -157,10 +172,9 @@ included. Read the receipt:
 - When a gate is not current, the receipt shows the recorded candidate and the
   placement stop. This is not a failed delivery. The Contract stays
   `pending-delivery` while you complete the gates.
-
-Verification declarations may set an individual timeout in the fence info
-string, using an explicit duration unit such as `bash timeout=5m`. Omit the
-attribute for an unbounded declaration; there is no Verification-wide timeout.
+- A lag row reports an accepted physical effect that has not finished. The
+  delivery stands; `reconcile` completes the effect later. It never changes
+  the verdict.
 
 ## Review Gates
 
