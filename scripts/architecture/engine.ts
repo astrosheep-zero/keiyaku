@@ -249,10 +249,18 @@ function runtimeReExport(node: ts.Node, sourceFile: ts.SourceFile): Readonly<{ l
   return node.exportClause.elements.some((element) => !element.isTypeOnly) ? location(sourceFile, node) : null;
 }
 
+function isProcessReference(node: ts.Expression): boolean {
+  return ts.isIdentifier(node) && node.text === "process"
+    || ts.isPropertyAccessExpression(node)
+      && ts.isIdentifier(node.expression)
+      && node.expression.text === "globalThis"
+      && node.name.text === "process";
+}
+
 function propertyCapability(node: ts.PropertyAccessExpression): Capability | null {
   if (ts.isIdentifier(node.expression) && node.expression.text === "Date" && node.name.text === "now") return "date-now";
   if (ts.isIdentifier(node.expression) && node.expression.text === "Math" && node.name.text === "random") return "math-random";
-  if (!ts.isIdentifier(node.expression) || node.expression.text !== "process") return null;
+  if (!isProcessReference(node.expression)) return null;
   if (node.name.text === "env") return "process-environment";
   if (node.name.text === "argv") return "process-argv";
   if (node.name.text === "cwd") return "process-cwd";

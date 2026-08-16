@@ -485,6 +485,7 @@ test("architecture policy rejects capability use outside declared owners", () =>
     "protocol/attempt.ts": "export function stamp(): number { return Date.now(); }",
     "library/contract.ts": "export function reject(): never { throw new TypeError('bad input'); }",
     "kanshi/read.ts": "export function observedAt(): string { return new Date().toISOString(); }",
+    "akuma/providers/acp/core.ts": "export const environment = globalThis.process.env;",
   });
   assert.deepEqual(rules(accepted).filter((r) => r === "architecture/capability-use"), []);
 
@@ -502,6 +503,13 @@ test("architecture policy rejects capability use outside declared owners", () =>
     "core/facts/types.ts": "export function reject(): never { throw new TypeError('bad state'); }",
   });
   assert.ok(rules(misplacedTypeError).includes("architecture/capability-use"));
+
+  for (const access of ["process.env", "globalThis.process.env"] as const) {
+    const misplacedEnvironment = check({
+      "core/facts/types.ts": `export const environment = ${access};`,
+    });
+    assert.ok(rules(misplacedEnvironment).includes("architecture/capability-use"));
+  }
 });
 
 test("architecture policy enforces symbol-scoped allowances", () => {
