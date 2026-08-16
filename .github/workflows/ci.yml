@@ -20,10 +20,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22.19.0
           cache: npm
@@ -51,23 +51,55 @@ jobs:
       - name: Check patch whitespace
         run: git diff --check
 
-  packaged-e2e:
-    name: ${{ matrix.os }} / packaged CLI e2e
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - windows-2022
-          - macos-14
+  windows:
+    name: windows-2022 / full behavioral suite
+    runs-on: windows-2022
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.19.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --prefer-offline
+
+      - name: Configure Git identity for repository fixtures
+        run: |
+          git config --global user.name "Keiyaku CI"
+          git config --global user.email "keiyaku-ci@example.invalid"
+
+      - name: Run full behavioral test suite
+        run: node --import tsx scripts/run-tests.mjs
+
+      - name: Run packaged CLI end-to-end test
+        run: npm run test:e2e
+
+      - name: Typecheck
+        run: npm run test:typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+  macos-e2e:
+    name: macos-14 / packaged CLI e2e
+    runs-on: macos-14
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
         with:
           node-version: 22.19.0
           cache: npm

@@ -18,6 +18,7 @@ function command(executable: string, args: readonly string[], cwd: string): stri
   return execFileSync(executable, args, {
     cwd,
     encoding: "utf8",
+    shell: process.platform === "win32",
     stdio: ["ignore", "pipe", "pipe"],
   }).toString();
 }
@@ -65,12 +66,15 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   assert.equal(installedPackage.version, packageManifest.version);
   assert.deepEqual(installedPackage.bin, { keiyaku: "build/src/cli/index.js" });
 
-  const bin = join(installed, "node_modules", ".bin", "keiyaku");
+  const binSuffix = process.platform === "win32" ? ".cmd" : "";
+  const bin = join(installed, "node_modules", ".bin", `keiyaku${binSuffix}`);
   assert.equal(existsSync(bin), true);
-  assert.equal(existsSync(join(installed, "node_modules", ".bin", "keiyaku-v4")), false);
+  assert.equal(existsSync(join(installed, "node_modules", ".bin", `keiyaku-v4${binSuffix}`)), false);
   const target = join(installed, "node_modules", "@astrosheep", "keiyaku", "build", "src", "cli", "index.js");
   assert.equal(readFileSync(target, "utf8").split("\n", 1)[0], "#!/usr/bin/env node");
-  assert.notEqual(statSync(target).mode & 0o111, 0, "installed CLI must be executable");
+  if (process.platform !== "win32") {
+    assert.notEqual(statSync(target).mode & 0o111, 0, "installed CLI must be executable");
+  }
   assert.match(command(bin, ["--help"], installed), /^usage: keiyaku /m);
 
   command("git", ["init", "--quiet", "--initial-branch=main", repository], repository);
