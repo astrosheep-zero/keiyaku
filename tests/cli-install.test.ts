@@ -98,15 +98,16 @@ test("workflow delegates bind authorship to the bind skill", () => {
   assert.match(workflow, /uses the same candidate preparation as deliver/);
 });
 
-test("bundled Akuma instructions use the current hard-cut call surface", () => {
+test("bundled instructions keep facade and standalone Akuma call surfaces distinct", () => {
   const plugin = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
   const call = renderAkumaUsage("call").slice("usage: keiyaku ".length);
   const canonical = `keiyaku -C <cwd> ${call}`;
+  const standalone = canonical.replace(" [--contract <kei/...>]", "");
   const rootSkill = readFileSync(join(plugin, "keiyaku", "SKILL.md"), "utf8");
   const akumaSkill = readFileSync(join(plugin, "keiyaku-akuma", "SKILL.md"), "utf8");
   assert.equal(rootSkill.includes(canonical), true);
-  assert.equal(akumaSkill.includes(canonical), true);
-  assert.doesNotMatch(akumaSkill, /\bpersona\b|--persona|Contract association/iu);
+  assert.equal(akumaSkill.includes(standalone), true);
+  assert.doesNotMatch(akumaSkill, /\bpersona\b|--persona|Contract|Dispatch|kei\/|--contract|--repo/iu);
 });
 
 test("all harness manifests identify the same bundle version", () => {
