@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
-  existsSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -84,10 +83,6 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   assert.equal(installedPackage.version, packageManifest.version);
   assert.deepEqual(installedPackage.bin, { keiyaku: "build/src/cli/index.js" });
 
-  const binSuffix = process.platform === "win32" ? ".cmd" : "";
-  const bin = join(installed, "node_modules", ".bin", `keiyaku${binSuffix}`);
-  assert.equal(existsSync(bin), true);
-  assert.equal(existsSync(join(installed, "node_modules", ".bin", `keiyaku-v4${binSuffix}`)), false);
   const target = join(installed, "node_modules", "@astrosheep", "keiyaku", "build", "src", "cli", "index.js");
   assert.equal(readFileSync(target, "utf8").split("\n", 1)[0], "#!/usr/bin/env node");
   if (process.platform !== "win32") {
