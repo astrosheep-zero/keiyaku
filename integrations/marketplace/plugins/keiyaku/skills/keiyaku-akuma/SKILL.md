@@ -12,7 +12,7 @@ An Akuma is a durable callable worker projection. Its complete id is
 
 ```bash
 keiyaku -C <cwd> call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -
-keiyaku -C <repo> wait <aku/...> [--timeout <duration>]
+keiyaku -C <repo> wait <akuma-selector>... [--any | --all] [--timeout <duration>]
 keiyaku -C <repo> tell <aku/...> -
 keiyaku -C <repo> tell <aku/...> --interrupt -
 keiyaku -C <repo> history <aku/...>
@@ -44,10 +44,13 @@ keiyaku -C <repo> history <aku/...> --last
 
 Bare `status` shows the compact fleet. Exact `status <aku/...>` and `wait`
 share the public status carrier; a wait timeout returns the current snapshot,
-not a fabricated timeout state. History cursors are persistent activity
+not a fabricated timeout state. Wait accepts complete Aku ids, aliases, Akuma
+globs, and Contract worker selectors. One target needs no mode; multiple
+targets require exactly one of `--any` or `--all`, and resolve once to a stable
+deduplicated set. History cursors are persistent activity
 sequences and `--before`/`--since` are exclusive. `--last` writes only the
 complete answer bytes. Use `--json` when a script needs the typed values.
 
 Read the exact command help for duration syntax and provider-specific Archetype
-configuration. Do not use old `follow`, plural wait, `--after`, or `--at`
-index forms; they are not root commands.
+configuration. Do not use old `follow`, `--after`, or `--at` index forms; they
+are not root commands.

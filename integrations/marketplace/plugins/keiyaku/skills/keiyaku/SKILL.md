@@ -32,7 +32,7 @@ keiyaku -C <repo> review [<contract>|@<contract>] --satisfied
 
 ```bash
 keiyaku -C <cwd> call <akuma> [--contract <kei/...>] [--alias @name] [--wait [--timeout <duration>] | -d | --detach] [--json] -
-keiyaku -C <repo> wait <aku/...>
+keiyaku -C <repo> wait <akuma-selector>... [--any | --all]
 keiyaku -C <repo> tell <aku/...> -
 ```
 
