@@ -797,7 +797,17 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "cli/commands/task-query.ts",
-      allow: [types("task/index.ts"), any("task/query.ts", ["MAX_TASK_LIMIT", "normalizeTaskQuery"])],
+      allow: [
+        any("task/index.ts", [
+          "TaskId",
+          "TaskPriority",
+          "TaskQueryExpression",
+          "TaskQueryPredicate",
+          "TaskState",
+          "isTaskRelationPredicateField",
+        ]),
+        any("task/query.ts", ["MAX_TASK_LIMIT", "normalizeTaskQuery"]),
+      ],
     },
     {
       source: "cli/commands/task.ts",

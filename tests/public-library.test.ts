@@ -246,7 +246,10 @@ test("task package export exposes only the Tasks-first native surface", () => {
   writeFileSync(join(directory, "consumer-task.ts"), source);
   execFileSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "--noEmit", "--strict", "--target", "ES2023", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--skipLibCheck", "consumer-task.ts"], { cwd: directory, stdio: "ignore" });
   const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku/task"); console.log(Object.keys(m).sort().join(","));'], { cwd: directory, encoding: "utf8" });
-  assert.equal(output.trim(), "TaskAuthorityCorruptionError,Tasks");
+  assert.equal(
+    output.trim(),
+    "TASK_RELATION_PREDICATE_FIELDS,TaskAuthorityCorruptionError,Tasks,isTaskRelationPredicateField",
+  );
 });
 
 test("built CLI bin keeps its shebang and executes through an installed-style symlink", () => {

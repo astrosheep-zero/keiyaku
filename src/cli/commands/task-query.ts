@@ -1,5 +1,12 @@
-import type { TaskId, TaskPriority, TaskQueryExpression, TaskQueryPredicate, TaskState } from "../../task/index.js";
-import { isTaskRelationPredicateField, MAX_TASK_LIMIT, normalizeTaskQuery } from "../../task/query.js";
+import {
+  isTaskRelationPredicateField,
+  type TaskId,
+  type TaskPriority,
+  type TaskQueryExpression,
+  type TaskQueryPredicate,
+  type TaskState,
+} from "../../task/index.js";
+import { MAX_TASK_LIMIT, normalizeTaskQuery } from "../../task/query.js";
 
 export type { TaskQueryExpression } from "../../task/index.js";
 
