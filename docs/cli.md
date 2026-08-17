@@ -100,7 +100,7 @@ reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
 install <codex|claude|opencode|pi> [--json]
        install --all [--json]
-call <akuma-name> [--contract <kei/...>] [--alias @name] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
+call <akuma-name> [--contract <kei/...>] [--alias @name] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
 wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]
 tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)
 history <aku/...|@alias|kei/...> [--before <index> | --since <index>] [--limit <count>] [--last] [--json]
@@ -233,7 +233,11 @@ searched path.
 
 `--contract` accepts one complete `kei/...` and requests Dispatch after birth;
 `--alias` accepts `@name` and moves that world-local Alias only after Dispatch
-succeeds. Explicit invocation cwd wins for a contracted call, otherwise its
+succeeds. Repeated `--allowed` values replace the Archetype list for that
+birth; `--allowed none` selects the empty list and cannot be combined with
+another value. The vocabulary is owned by
+[akuma-allowed.md](akuma-allowed.md). Explicit invocation cwd wins for a
+contracted call, otherwise its
 appointed managed worktree is used. A direct Contract-free call uses ambient
 process cwd; a nested omitted call inherits its hosting caller Soul cwd.
 Call waits five minutes by default. `--wait` replaces that duration, while

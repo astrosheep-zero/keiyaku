@@ -12,6 +12,7 @@ import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js"
 import type { AgentEvent, ProviderAdapter, TurnResult } from "../src/akuma/provider.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { requestBodyCall } from "../src/akuma/requests.js";
+import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 
 async function outcomes(paths: Parameters<typeof activitySlice>[0]) {
   return (await activitySlice(paths)).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.outcome);
@@ -687,9 +688,23 @@ test("a declared drive drains Body Requests before recording its terminal turn",
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
     await initializeHeart(allocated.paths);
+    const seed = {
+      id: allocated.id,
+      archetype: "parent",
+      provider: { name: "codex-app-server", kind: "codex-app-server" } as const,
+      options: {},
+      origin: { kind: "direct" } as const,
+      confinement: { kind: "declared", writableRoots: [root] } as const,
+      allowed: ALLOWED_ACTIONS,
+      cwd: root,
+    };
+    const birth = (await HeldAkumaLeash.try(allocated.paths))!;
+    await birth.birth(allocated.paths, { ...seed, createdAt: "2026-08-09T00:00:00.000Z" });
+    birth.release();
     const recoveredRequestId = "00000000-0000-4000-8000-000000000020";
     await admitRequest(allocated.paths, {
       id: recoveredRequestId,
+      action: "akuma.call",
       archetype: "worker",
       body: "crashed nested work",
       world: root,
@@ -697,6 +712,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { systemPrompt: "Work.\n" },
         confinement: { kind: "unconfined" },
+        allowed: ALLOWED_ACTIONS,
       },
       admittedAt: "2026-08-09T00:00:00.000Z",
     });
@@ -724,7 +740,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
           recipe: {
             provider: { name: "claude", kind: "claude-agent-sdk" },
             options: { systemPrompt: "Work.\n" },
-            confinement: { kind: "unconfined" },
+            allowed: ALLOWED_ACTIONS,
           },
         });
         return {
@@ -744,15 +760,7 @@ test("a declared drive drains Body Requests before recording its terminal turn",
     };
     await driveAkumaBody({
       paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        archetype: "parent",
-        provider: { name: "codex-app-server", kind: "codex-app-server" },
-        options: {},
-        origin: { kind: "direct" },
-        confinement: { kind: "declared", writableRoots: [root] },
-        cwd: root,
-      },
+      seed,
       initialBody: "parent work",
     }, provider, {
       now: () => "2026-08-09T00:00:00.000Z",
@@ -1032,6 +1040,7 @@ test("pause interrupts pre-drive request settlement within the control window", 
       options: {},
       origin: { kind: "direct" } as const,
       confinement: { kind: "unconfined" } as const,
+      allowed: ALLOWED_ACTIONS,
       cwd: root,
       createdAt: "2026-08-08T00:00:00.000Z",
     };
@@ -1040,8 +1049,8 @@ test("pause interrupts pre-drive request settlement within the control window", 
     birth.release();
     const requestId = "00000000-0000-4000-8000-000000000099";
     await admitRequest(allocated.paths, {
-      id: requestId, archetype: "worker", body: "wait", world: root,
-      recipe: { provider: soul.provider, options: {}, confinement: soul.confinement },
+      id: requestId, action: "akuma.call", archetype: "worker", body: "wait", world: root,
+      recipe: { provider: soul.provider, options: {}, confinement: soul.confinement, allowed: soul.allowed },
       admittedAt: "2026-08-08T00:00:01.000Z",
     });
     const child = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "c0ffed02" });

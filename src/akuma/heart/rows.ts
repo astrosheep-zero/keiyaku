@@ -8,7 +8,6 @@ import type {
   PauseFact,
   RequestFact,
   RequestInput,
-  RequestRecipe,
   ResumeCoordinate,
   SessionFact,
   StopFact,
@@ -62,11 +61,9 @@ export type CallRow = Readonly<{
 export type RequestRow = Readonly<{
   sequence: number;
   id: string;
-  archetype: string;
-  body: string;
-  cwd: string | null;
-  world: string;
-  recipe_json: string;
+  requester: string;
+  action: string;
+  payload_json: string;
   admitted_at: string;
   state: RequestFact["state"];
   child: string | null;
@@ -164,13 +161,15 @@ export function decodeCallRow(row: CallRow): CallFact {
 }
 
 export function decodeRequestRow(row: RequestRow): RequestFact {
+  if (row.action !== "akuma.call") {
+    throw new Error(`Akuma authority contains an unknown request action: ${row.action}`);
+  }
+  const payload = parsed<Omit<RequestInput, "action" | "id">>(row.payload_json);
   const input = {
     id: row.id,
-    archetype: row.archetype,
-    body: row.body,
-    ...(row.cwd === null ? {} : { cwd: row.cwd }),
-    world: row.world,
-    recipe: parsed<RequestRecipe>(row.recipe_json),
+    requester: row.requester as AkuId,
+    action: "akuma.call" as const,
+    ...payload,
     admittedAt: row.admitted_at,
   };
   if (row.state === "reserved" || row.state === "served") {
@@ -241,22 +240,35 @@ export function insertActivityFact(
   return sequence;
 }
 
-const REQUEST_COLUMNS = `sequence, id, archetype, body, cwd, world, recipe_json, admitted_at,
+const REQUEST_COLUMNS = `sequence, id, requester, action, payload_json, admitted_at,
   state, child, diagnostic, evidence`;
 
 export function insertRequestFact(
   database: DatabaseSync,
-  input: RequestInput & Readonly<{ admittedAt: string }>,
+  input: RequestInput & Readonly<{
+    action: "akuma.call";
+    requester: AkuId;
+    admittedAt: string;
+    refusal?: string;
+  }>,
 ): void {
-  database.prepare(`INSERT OR IGNORE INTO requests(id, archetype, body, cwd, world, recipe_json, admitted_at, state)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'admitted')`).run(
+  const payload = {
+    archetype: input.archetype,
+    body: input.body,
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    world: input.world,
+    recipe: input.recipe,
+  };
+  database.prepare(`INSERT OR IGNORE INTO requests(
+    id, requester, action, payload_json, admitted_at, state, diagnostic
+  ) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
     input.id,
-    input.archetype,
-    input.body,
-    input.cwd ?? null,
-    input.world,
-    json(input.recipe),
+    input.requester,
+    input.action,
+    json(payload),
     input.admittedAt,
+    input.refusal === undefined ? "admitted" : "refused",
+    input.refusal ?? null,
   );
 }
 

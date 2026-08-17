@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Akuma } from "../src/akuma/akuma.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
+import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import {
   HeldAkumaLeash,
   admitRequest,
@@ -32,7 +33,7 @@ test("ordinary Akuma birth allows 30 seconds", () => {
   assert.equal(BIRTH_TIMEOUT_MS, 30_000);
 });
 
-async function fixture() {
+async function fixture(allowed?: Soul["allowed"]) {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-")));
   const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
   await initializeHeart(parent.paths);
@@ -45,6 +46,7 @@ async function fixture() {
     cwd: root,
     origin: { kind: "direct" },
     confinement: { kind: "declared", writableRoots: [root] },
+    allowed: allowed ?? ALLOWED_ACTIONS,
     createdAt: "2026-08-09T00:00:00.000Z",
   };
   const leash = (await HeldAkumaLeash.try(parent.paths))!;
@@ -82,6 +84,108 @@ test("aborted publication keeps an in-flight launch lexically owned", async () =
     assert.equal(settled, true);
     assert.equal(childPaths === undefined ? null : (await readSeal(childPaths))?.evidence, "cancelled publication");
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Heart clips nested allowed at each direct parent and cannot regain removed actions", async () => {
+  const value = await fixture(["akuma.call", "task.add"]);
+  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
+  const previousHome = process.env.HOME;
+  const home = join(value.root, "home");
+  mkdirSync(join(home, ".keiyaku", "akuma"), { recursive: true });
+  writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  process.env.HOME = home;
+  const first = await BodyRequestPump.open({
+    paths: value.parent.paths,
+    parent: value.soul,
+    bodySequence: 1,
+    now: () => "2026-08-09T00:00:01.000Z",
+    signal: new AbortController().signal,
+    async spawn(launch) {
+      const leash = (await HeldAkumaLeash.try(launch.paths))!;
+      await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
+      leash.release();
+    },
+  });
+  try {
+    process.env[AKUMA_REQUESTS_ENV] = first.directory;
+    const child = await (await akumaAt(value.root)).call({
+      archetype: "worker",
+      body: "child",
+      allowed: ["akuma.call"],
+    });
+    const childSoul = (await readSoul(pathsForAkuId(value.root, child.id)))!;
+    assert.deepEqual(childSoul.allowed, ["akuma.call"]);
+
+    const childPaths = pathsForAkuId(value.root, child.id);
+    const second = await BodyRequestPump.open({
+      paths: childPaths,
+      parent: childSoul,
+      bodySequence: 1,
+      now: () => "2026-08-09T00:00:03.000Z",
+      signal: new AbortController().signal,
+      async spawn(launch) {
+        const leash = (await HeldAkumaLeash.try(launch.paths))!;
+        await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:04.000Z" });
+        leash.release();
+      },
+    });
+    try {
+      process.env[AKUMA_REQUESTS_ENV] = second.directory;
+      const grandchild = await (await akumaAt(value.root)).call({
+        archetype: "worker",
+        body: "grandchild",
+        allowed: ["akuma.call", "task.add"],
+      });
+      assert.deepEqual(
+        (await readSoul(pathsForAkuId(value.root, grandchild.id)))?.allowed,
+        ["akuma.call"],
+      );
+    } finally { await second.close(); }
+  } finally {
+    await first.close();
+    value.leash.release();
+    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    value.close();
+  }
+});
+
+test("Heart refuses a disabled call before child publication", async () => {
+  const value = await fixture([]);
+  const pump = await BodyRequestPump.open({
+    paths: value.parent.paths,
+    parent: value.soul,
+    bodySequence: 1,
+    now: () => "2026-08-09T00:00:01.000Z",
+    signal: new AbortController().signal,
+    async spawn() { assert.fail("disabled request reached child publication"); },
+  });
+  try {
+    await assert.rejects(requestBodyCall({
+      directory: pump.directory,
+      id: "00000000-0000-4000-8000-000000000004",
+      world: value.root,
+      archetype: "worker",
+      body: "blocked",
+      recipe: {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        allowed: ["akuma.call"],
+      },
+    }), (error: unknown) => error instanceof AkumaBodyRequestError
+      && error.outcome === "refused"
+      && error.diagnostic === "not-allowed: akuma.call");
+    const fact = await readRequest(value.parent.paths, "00000000-0000-4000-8000-000000000004");
+    assert.equal(fact?.state, "refused");
+    assert.equal(fact?.requester, value.parent.id);
+    assert.equal(fact?.action, "akuma.call");
+  } finally {
+    await pump.close();
+    value.leash.release();
+    value.close();
+  }
 });
 
 test("publication preserves a Body failure that occurs before birth", async () => {
@@ -173,6 +277,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { systemPrompt: "Work.\n" },
+        allowed: ALLOWED_ACTIONS,
       },
     }));
     await assert.rejects(requestBodyCall({
@@ -184,6 +289,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { systemPrompt: "Work.\n" },
+        allowed: ALLOWED_ACTIONS,
       },
     }), (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "refused");
     assert.equal(await readRequest(value.parent.paths, malformedId), null, "legacy association bytes must not enter Heart");
@@ -218,17 +324,18 @@ test("a new body settles old requests by observation without replay", async () =
     const admittedId = "00000000-0000-4000-8000-000000000011";
     await admitRequest(value.parent.paths, {
       id: admittedId,
+      action: "akuma.call",
       archetype: "worker",
       body: "never spawned",
       world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
+      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement, allowed: value.soul.allowed },
       admittedAt: "2026-08-09T00:00:01.000Z",
     });
 
     const bornId = "00000000-0000-4000-8000-000000000012";
     await admitRequest(value.parent.paths, {
-      id: bornId, archetype: "worker", body: "born", world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
+      id: bornId, action: "akuma.call", archetype: "worker", body: "born", world: value.root,
+      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement, allowed: value.soul.allowed },
       admittedAt: "2026-08-09T00:00:02.000Z",
     });
     const born = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000012" });
@@ -245,8 +352,8 @@ test("a new body settles old requests by observation without replay", async () =
 
     const unbornId = "00000000-0000-4000-8000-000000000013";
     await admitRequest(value.parent.paths, {
-      id: unbornId, archetype: "worker", body: "unborn", world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
+      id: unbornId, action: "akuma.call", archetype: "worker", body: "unborn", world: value.root,
+      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement, allowed: value.soul.allowed },
       admittedAt: "2026-08-09T00:00:03.000Z",
     });
     const unborn = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000013" });
@@ -255,8 +362,8 @@ test("a new body settles old requests by observation without replay", async () =
 
     const mismatchId = "00000000-0000-4000-8000-000000000014";
     await admitRequest(value.parent.paths, {
-      id: mismatchId, archetype: "worker", body: "mismatch", world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement },
+      id: mismatchId, action: "akuma.call", archetype: "worker", body: "mismatch", world: value.root,
+      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement, allowed: value.soul.allowed },
       admittedAt: "2026-08-09T00:00:04.000Z",
     });
     const mismatch = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000014" });

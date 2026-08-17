@@ -28,6 +28,7 @@ import { abortableDelay } from "./abort.js";
 import { AKUMA_REQUESTS_ENV } from "./provider.js";
 import { decodeProviderOptions, decodeReadonlyRestraint } from "./provider-recipe.js";
 import { resolveProviderExecution } from "./providers/index.js";
+import { decodeAllowedActions } from "./allowed.js";
 
 const POLL_MS = 25;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -36,6 +37,7 @@ type RequestClaimRecipe = Omit<RequestRecipe, "confinement">;
 
 type RequestClaim = Readonly<{
   id: string;
+  action: "akuma.call";
   world: string;
   archetype: string;
   body: string;
@@ -46,9 +48,9 @@ type RequestClaim = Readonly<{
 type StructuralRequestClaim = Omit<RequestClaim, "recipe"> & Readonly<{ recipe: unknown }>;
 
 type RequestReceipt =
-  | Readonly<{ id: string; state: "served"; child: AkuId }>
-  | Readonly<{ id: string; state: "refused"; diagnostic: string }>
-  | Readonly<{ id: string; state: "voided"; evidence: string }>;
+  | Readonly<{ id: string; action: "akuma.call"; state: "served"; child: AkuId }>
+  | Readonly<{ id: string; action: "akuma.call"; state: "refused"; diagnostic: string }>
+  | Readonly<{ id: string; action: "akuma.call"; state: "voided"; evidence: string }>;
 
 export type RequestChildLaunch = Readonly<{
   paths: AkumaPaths;
@@ -91,6 +93,7 @@ function decodeRecipe(value: unknown, cwd: string): RequestRecipe | null {
   if (recipe === null) return null;
   const expectedKeys = [
     ...(recipe.description === undefined ? [] : ["description"]),
+    "allowed",
     "options",
     "provider",
     ...(recipe.readonly === undefined ? [] : ["readonly"]),
@@ -108,6 +111,7 @@ function decodeRecipe(value: unknown, cwd: string): RequestRecipe | null {
     const confinement = adapter.confinement({ cwd, options: decodedOptions });
     return Object.freeze({
       ...(recipe.description === undefined ? {} : { description: recipe.description }),
+      allowed: decodeAllowedActions(recipe.allowed),
       provider,
       options: decodedOptions,
       ...(readonly === undefined ? {} : { readonly }),
@@ -123,28 +127,31 @@ function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | nu
   try { decoded = JSON.parse(bytes); } catch { return null; }
   const value = object(decoded);
   if (value === null) return null;
+  if (!exactKeys(value, ["action", "id", "payload"]) || value.action !== "akuma.call") return null;
+  const payload = object(value.payload);
+  if (payload === null) return null;
   const expected = [
     "archetype",
     "body",
-    ...(value.cwd === undefined ? [] : ["cwd"]),
-    "id",
+    ...(payload.cwd === undefined ? [] : ["cwd"]),
     "recipe",
     "world",
   ];
-  if (!exactKeys(value, expected)) return null;
+  if (!exactKeys(payload, expected)) return null;
   if (value.id !== fileId || typeof value.id !== "string" || !UUID.test(value.id)) return null;
-  if (typeof value.body !== "string" || !absolute(value.world)) return null;
-  if (value.cwd !== undefined && !absolute(value.cwd)) return null;
+  if (typeof payload.body !== "string" || !absolute(payload.world)) return null;
+  if (payload.cwd !== undefined && !absolute(payload.cwd)) return null;
   try {
-    archetypeName(value.archetype as string);
+    archetypeName(payload.archetype as string);
   } catch { return null; }
   return {
     id: value.id,
-    world: value.world,
-    archetype: value.archetype as string,
-    body: value.body,
-    recipe: value.recipe,
-    ...(value.cwd === undefined ? {} : { cwd: value.cwd }),
+    action: "akuma.call",
+    world: payload.world,
+    archetype: payload.archetype as string,
+    body: payload.body,
+    recipe: payload.recipe,
+    ...(payload.cwd === undefined ? {} : { cwd: payload.cwd }),
   };
 }
 
@@ -152,18 +159,18 @@ function decodeReceipt(bytes: string, requestId: string): RequestReceipt | null 
   let decoded: unknown;
   try { decoded = JSON.parse(bytes); } catch { return null; }
   const value = object(decoded);
-  if (value === null || value.id !== requestId) return null;
-  if (value.state === "served" && exactKeys(value, ["child", "id", "state"])) {
-    try { return { id: requestId, state: "served", child: parseAkuId(value.child as string).id }; }
+  if (value === null || value.id !== requestId || value.action !== "akuma.call") return null;
+  if (value.state === "served" && exactKeys(value, ["action", "child", "id", "state"])) {
+    try { return { id: requestId, action: "akuma.call", state: "served", child: parseAkuId(value.child as string).id }; }
     catch { return null; }
   }
-  if (value.state === "refused" && exactKeys(value, ["diagnostic", "id", "state"])
+  if (value.state === "refused" && exactKeys(value, ["action", "diagnostic", "id", "state"])
     && typeof value.diagnostic === "string") {
-    return { id: requestId, state: "refused", diagnostic: value.diagnostic };
+    return { id: requestId, action: "akuma.call", state: "refused", diagnostic: value.diagnostic };
   }
-  if (value.state === "voided" && exactKeys(value, ["evidence", "id", "state"])
+  if (value.state === "voided" && exactKeys(value, ["action", "evidence", "id", "state"])
     && typeof value.evidence === "string") {
-    return { id: requestId, state: "voided", evidence: value.evidence };
+    return { id: requestId, action: "akuma.call", state: "voided", evidence: value.evidence };
   }
   return null;
 }
@@ -177,9 +184,11 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 }
 
 function receiptFor(fact: RequestFact): RequestReceipt | null {
-  if (fact.state === "served") return { id: fact.id, state: fact.state, child: fact.child };
-  if (fact.state === "refused") return { id: fact.id, state: fact.state, diagnostic: fact.diagnostic };
-  if (fact.state === "voided") return { id: fact.id, state: fact.state, evidence: fact.evidence };
+  if (fact.state === "served") return { id: fact.id, action: fact.action, state: fact.state, child: fact.child };
+  if (fact.state === "refused") {
+    return { id: fact.id, action: fact.action, state: fact.state, diagnostic: fact.diagnostic };
+  }
+  if (fact.state === "voided") return { id: fact.id, action: fact.action, state: fact.state, evidence: fact.evidence };
   return null;
 }
 
@@ -195,14 +204,19 @@ export function injectedBodyRequests(): string | null {
   return directory;
 }
 
-export async function requestBodyCall(input: RequestClaim & Readonly<{ directory: string }>): Promise<AkuId> {
+export async function requestBodyCall(
+  input: Omit<RequestClaim, "action"> & Readonly<{ directory: string }>,
+): Promise<AkuId> {
   await atomicJson(join(input.directory, `${input.id}.request.json`), {
     id: input.id,
-    world: input.world,
-    archetype: input.archetype,
-    body: input.body,
-    recipe: input.recipe,
-    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    action: "akuma.call",
+    payload: {
+      world: input.world,
+      archetype: input.archetype,
+      body: input.body,
+      recipe: input.recipe,
+      ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    },
   });
   const receiptPath = join(input.directory, `${input.id}.receipt.json`);
   for (;;) {
@@ -263,6 +277,7 @@ async function serveClaim(input: Readonly<{
           provider: request.recipe.provider,
           options: request.recipe.options,
           ...(request.recipe.readonly === undefined ? {} : { readonly: request.recipe.readonly }),
+          allowed: request.recipe.allowed,
           cwd,
           origin: { kind: "request", parent: input.parent.id, requestId: request.id },
           confinement: request.recipe.confinement,

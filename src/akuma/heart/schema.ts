@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 14;
+const HEART_SCHEMA_VERSION = 15;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(
@@ -119,11 +119,9 @@ export const HEART_SCHEMA = `
   CREATE TABLE IF NOT EXISTS requests (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
-    archetype TEXT NOT NULL,
-    body TEXT NOT NULL,
-    cwd TEXT,
-    world TEXT NOT NULL,
-    recipe_json TEXT NOT NULL CHECK (json_valid(recipe_json)),
+    requester TEXT NOT NULL,
+    action TEXT NOT NULL,
+    payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     admitted_at TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('admitted', 'reserved', 'served', 'refused', 'voided')),
     child TEXT,

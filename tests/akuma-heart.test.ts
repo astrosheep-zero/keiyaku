@@ -41,6 +41,7 @@ import {
 } from "../src/akuma/heart/index.js";
 import { insertActivityFact, insertKillFact, insertSessionFact, insertStopControl } from "../src/akuma/heart/rows.js";
 import { decodeSoul, decodeSoulRow, encodeSoul, encodeSoulRow } from "../src/akuma/heart/soul.js";
+import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 
 async function fixture() {
@@ -56,6 +57,7 @@ async function fixture() {
     cwd: root,
     origin: { kind: "direct" },
     confinement: { kind: "unconfined" },
+    allowed: ALLOWED_ACTIONS,
     createdAt: "2026-08-08T00:00:00.000Z",
   };
   return { root, allocated, soul, close: () => rmSync(root, { recursive: true, force: true }) };
@@ -296,6 +298,7 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
     assert.equal(pending.kind, "recorded");
     const request = await admitRequest(value.allocated.paths, {
       id: "00000000-0000-4000-8000-000000000010",
+      action: "akuma.call",
       archetype: "claude",
       body: "child work",
       world: value.root,
@@ -304,6 +307,7 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
         provider: value.soul.provider,
         options: value.soul.options,
         confinement: value.soul.confinement,
+        allowed: value.soul.allowed,
       },
       admittedAt: "2026-08-08T00:00:02.000Z",
     });
@@ -418,9 +422,12 @@ test("retention uses a bounded settled buffer while pending tells remain pinned"
 
 test("Body Request facts have one idempotent monotonic authority", async () => {
   const value = await fixture();
+  const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
   try {
+    await leash.birth(value.allocated.paths, value.soul);
     const input = {
       id: "00000000-0000-4000-8000-000000000001",
+      action: "akuma.call" as const,
       archetype: "claude",
       body: "build",
       world: value.root,
@@ -429,6 +436,7 @@ test("Body Request facts have one idempotent monotonic authority", async () => {
         provider: value.soul.provider,
         options: value.soul.options,
         confinement: value.soul.confinement,
+        allowed: value.soul.allowed,
       },
       admittedAt: "2026-08-08T00:00:01.000Z",
     };
@@ -456,20 +464,23 @@ test("Body Request facts have one idempotent monotonic authority", async () => {
     assert.equal((await voidRequest(value.allocated.paths, voided.id, "caller gone")).state, "voided");
 
     assert.deepEqual(await readNonterminalRequests(value.allocated.paths), []);
-  } finally { value.close(); }
+  } finally {
+    leash.release();
+    value.close();
+  }
 });
 
-test("heart schema version 14 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 15 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
     const heart = new DatabaseSync(allocated.paths.heart);
-    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 13)");
+    heart.exec("CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 14)");
     heart.close();
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 14/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 15/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -698,6 +709,7 @@ function codecSoul(): Soul {
     cwd: "/tmp/work",
     origin: { kind: "request", parent: "aku/parent/1234abcd" as Soul["id"], requestId: "00000000-0000-4000-8000-000000000001" },
     confinement: { kind: "declared", writableRoots: ["/tmp/work"] },
+    allowed: ["akuma.call", "task.add"],
     createdAt: "2026-08-15T00:00:00.000Z",
   };
 }
@@ -733,6 +745,9 @@ test("soul codec hard-fails every valid-JSON corruption shape", () => {
     { name: "id and archetype disagree", change: (soul) => ({ ...soul, archetype: "worker" }) },
     { name: "blank cwd", change: (soul) => ({ ...soul, cwd: "" }) },
     { name: "blank description", change: (soul) => ({ ...soul, description: " " }) },
+    { name: "unknown allowed action", change: (soul) => ({ ...soul, allowed: ["akuma.unknown"] }) },
+    { name: "duplicate allowed action", change: (soul) => ({ ...soul, allowed: ["akuma.call", "akuma.call"] }) },
+    { name: "non-string allowed action", change: (soul) => ({ ...soul, allowed: [1] }) },
   ];
   for (const { name, change } of corruptions) {
     assert.throws(() => decodeSoul(change(codecSoul())), undefined, name);
@@ -774,8 +789,13 @@ test("soul codec decodes canonically, deep-freezes, and round-trips", () => {
   }
   assert.deepEqual(encodeSoulRow(codecSoul()), encodeSoulRow(reordered as unknown as Soul), "canonical serialization ignores input key order");
   assert.deepEqual(Object.keys(JSON.parse(encoded[0]!)), [
-    "id", "archetype", "description", "provider", "options", "readonly", "cwd", "origin", "confinement", "createdAt",
+    "id", "archetype", "description", "provider", "options", "readonly", "cwd", "origin", "confinement", "allowed", "createdAt",
   ]);
+
+  const preFeature = JSON.parse(encoded[0]!) as Record<string, unknown>;
+  delete preFeature.allowed;
+  assert.deepEqual(decodeSoul(preFeature).allowed, ALLOWED_ACTIONS);
+  assert.deepEqual(JSON.parse(encodeSoul(decodeSoul(preFeature))).allowed, ALLOWED_ACTIONS);
 
   assert.throws(() => encodeSoulRow({ ...codecSoul(), options: { readonly: true }, readonly: undefined }), undefined, "encode validates the consistency rule");
   assert.equal(encodeSoulRow(codecSoul())[0] === encodeSoulRow(codecSoul())[0], true, "canonical encoding is deterministic");

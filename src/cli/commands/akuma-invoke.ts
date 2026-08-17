@@ -167,6 +167,7 @@ export async function invokeAkuma(
         ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
         ...(input.contract === undefined ? {} : { contract: input.contract }),
         ...(command.alias === undefined ? {} : { alias: command.alias }),
+        ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
       });
       return { kind: "akuma", action: "call", result, world: input.path };
     }

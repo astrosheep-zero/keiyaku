@@ -6,6 +6,7 @@ import {
   decodeReadonlyRestraint,
 } from "../provider-recipe.js";
 import type { AkumaOrigin, Confinement, Soul, SoulRow } from "./facts.js";
+import { effectiveAllowedActions } from "../allowed.js";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -85,7 +86,7 @@ function decodeConfinement(value: unknown): Confinement {
 function validateSoul(value: unknown): Soul {
   const soul = record(value);
   if (soul === null) throw new Error("Akuma soul must be an object");
-  if (unknownKey(soul, ["archetype", "confinement", "createdAt", "cwd", "description", "id", "options", "origin", "provider", "readonly"]) !== undefined) {
+  if (unknownKey(soul, ["allowed", "archetype", "confinement", "createdAt", "cwd", "description", "id", "options", "origin", "provider", "readonly"]) !== undefined) {
     throw new Error("Akuma soul has an unknown field");
   }
   const identity = soulAkuIdentity(soul.id, "id");
@@ -109,6 +110,7 @@ function validateSoul(value: unknown): Soul {
     cwd: nonblank(soul.cwd, "cwd"),
     origin: decodeOrigin(soul.origin),
     confinement: decodeConfinement(soul.confinement),
+    allowed: effectiveAllowedActions(soul.allowed),
     createdAt: nonblank(soul.createdAt, "createdAt"),
   };
 }

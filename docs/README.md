@@ -25,6 +25,7 @@ surface. Read every owner named for the surface being changed.
 | [cli-output.md](cli-output.md) | Help composition, shared rendering, exit status, and install output. |
 | [task.md](task.md) | Separate in-package task product: document authority, identity, lifecycle, associations, concurrency, and persistence. |
 | [akuma.md](akuma.md) | Akuma identity, birth, life, Archetypes, placement, and confinement. |
+| [akuma-allowed.md](akuma-allowed.md) | Forwarded mutable-action vocabulary, birth-time reduction, Soul interpretation, and keyed admission. |
 | [akuma-heart.md](akuma-heart.md) | Akuma durable facts, custody, schema gates, activity retention, and projections. |
 | [akuma-execution.md](akuma-execution.md) | Body execution and tell, interrupt, kill, fork, and wake semantics. |
 | [akuma-requests.md](akuma-requests.md) | Body Request admission, forwarding, serving, and recovery protocol. |

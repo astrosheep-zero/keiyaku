@@ -2,6 +2,7 @@ import { CliUsageError, isBlankInput, usageLine, withJsonAutomationHelp } from "
 import { archetypeName, parseAkuId } from "../../akuma/identity.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
+import { decodeAllowedActions, type AllowedActions } from "../../akuma/allowed.js";
 
 type Output = Readonly<{ output: "text" | "json" }>;
 type Addressed = Readonly<{ akuma: string }>;
@@ -18,6 +19,7 @@ export type ParsedAkumaCommand = Output & (
       alias?: AkumaAlias;
       mode: "wait" | "detach";
       timeoutMs?: number;
+      allowed?: AllowedActions;
     }> & Prompted)
   | Readonly<{ command: "kill"; akuma: readonly string[] }>
   | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
@@ -30,11 +32,11 @@ export type ParsedAkumaCommand = Output & (
 export type InvokedAkumaCommand = Exclude<ParsedAkumaCommand, { command: "history"; contract: string }>;
 
 export type AkumaAction = ParsedAkumaCommand["command"];
-type FlagValue = string | true;
+type FlagValue = string | true | readonly string[];
 type AkumaCommandSpec = Readonly<{
   arity: number | "one-or-more";
   stdin: boolean;
-  flags: Readonly<Record<string, "boolean" | "value">>;
+  flags: Readonly<Record<string, "boolean" | "value" | "repeatable">>;
   usage: string;
   purpose: string;
   details?: string;
@@ -49,15 +51,17 @@ const AKUMA_COMMAND_SPECS = {
       alias: "value",
       wait: "value",
       detach: "boolean",
+      allowed: "repeatable",
       json: "boolean",
     },
-    usage: "call <akuma-name> [--contract <kei/...>] [--alias @name] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
+    usage: "call <akuma-name> [--contract <kei/...>] [--alias @name] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
       "Give <prompt> as one argument, or use final - to read stdin.",
       "Default: --wait 5m. An explicit --wait replaces that duration; -d and --detach return after birth.",
       "--contract dispatches the born Akuma to that Contract.",
       "--alias assigns the world-local @name selector to the born Akuma.",
+      "Repeated --allowed replaces the Archetype list; --allowed none selects an empty list.",
       "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",
     ].join("\n"),
   },
@@ -148,6 +152,36 @@ function parseDuration(raw: FlagValue, option: string, fail: (message: string) =
   return duration.milliseconds;
 }
 
+function scanNamedOption(
+  input: Readonly<{
+    action: AkumaAction;
+    spec: AkumaCommandSpec;
+    argv: readonly string[];
+    index: number;
+  }>,
+  flags: Record<string, FlagValue>,
+  fail: (message: string) => never,
+): number {
+  const token = input.argv[input.index]!;
+  const name = token.slice(2);
+  const kind = input.spec.flags[name];
+  if (kind === undefined) fail(`option ${token} is not valid for ${input.action}`);
+  if (kind !== "repeatable" && flags[name] !== undefined) fail(`duplicate option: ${token}`);
+  if (kind === "boolean") {
+    flags[name] = true;
+    return input.index;
+  }
+  const value = input.argv[input.index + 1];
+  if (value === undefined || value === "-" || value === "-d" || value.startsWith("--")) {
+    fail(`${token} requires a value`);
+  }
+  if (isBlankInput(value)) fail(`${token} requires a nonblank value`);
+  flags[name] = kind === "repeatable"
+    ? [...(Array.isArray(flags[name]) ? flags[name] : []), value]
+    : value;
+  return input.index + 1;
+}
+
 function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message: string) => never): Scanned {
   const spec = AKUMA_COMMAND_SPECS[action];
   const flags: Record<string, FlagValue> = {};
@@ -166,20 +200,7 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
       if (isBlankInput(token)) fail(`${action} requires a nonblank value`);
       positionals.push(token);
     } else {
-      const name = token.slice(2);
-      const kind = (spec.flags as Readonly<Record<string, "boolean" | "value">>)[name];
-      if (kind === undefined) fail(`option ${token} is not valid for ${action}`);
-      if (flags[name] !== undefined) fail(`duplicate option: ${token}`);
-      if (kind === "boolean") flags[name] = true;
-      else {
-        const value = argv[index + 1];
-        if (value === undefined || value === "-" || value === "-d" || value.startsWith("--")) {
-          fail(`${token} requires a value`);
-        }
-        if (isBlankInput(value)) fail(`${token} requires a nonblank value`);
-        flags[name] = value;
-        index += 1;
-      }
+      index = scanNamedOption({ action, spec, argv, index }, flags, fail);
     }
   }
   return { flags, positionals, stdin };
@@ -306,6 +327,21 @@ function parseTell(
   return { command: "tell", akuma: validateDirect(subject, fail), interrupt: flags.interrupt === true, prompt, output };
 }
 
+function parseAllowedFlag(
+  raw: FlagValue | undefined,
+  fail: (message: string) => never,
+): AllowedActions | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) fail("--allowed requires a value");
+  const selected = raw as readonly string[];
+  if (selected.includes("none")) {
+    if (selected.length !== 1) fail("--allowed none cannot be combined with another value");
+    return [];
+  }
+  try { return decodeAllowedActions(selected, "--allowed"); }
+  catch (error) { fail(error instanceof Error ? error.message : "invalid --allowed action"); }
+}
+
 function parseCall(
   flags: Readonly<Record<string, FlagValue>>,
   archetype: string,
@@ -321,6 +357,7 @@ function parseCall(
   if (flags.detach === true && flags.wait !== undefined) fail("call --wait and --detach are mutually exclusive");
   const mode = flags.detach === true ? "detach" as const : "wait" as const;
   const timeoutMs = flags.wait === undefined ? undefined : parseDuration(flags.wait, "--wait", fail);
+  const allowed = parseAllowedFlag(flags.allowed, fail);
   return {
     command: "call",
     archetype,
@@ -328,6 +365,7 @@ function parseCall(
     ...(alias === undefined ? {} : { alias }),
     mode,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(allowed === undefined ? {} : { allowed }),
     prompt,
     output,
   };

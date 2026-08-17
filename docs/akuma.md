@@ -30,7 +30,7 @@ synchronous.
   transaction language.
 - **soul** — the immutable birth facts: id, archetype, description, resolved
   provider execution, provider options, optional readonly restraint, summon
-  cwd, origin, and confinement.
+  cwd, origin, confinement, and effective allowed actions.
   The cwd is the akuma's seat, not a native resume coordinate; resumability
   remains a session fact.
 - **body** — the detached, unsandboxed process currently driving the akuma.
@@ -164,10 +164,12 @@ configuration. It is call-time input at exactly one path:
 ```
 
 The file begins with one strict YAML mapping. `provider` is required;
-`model`, `effort`, `readonly`, `network`, and `description` are optional.
+`model`, `effort`, `readonly`, `network`, `description`, and `allowed` are
+optional. The complete `allowed` grammar and birth reduction are owned by
+[akuma-allowed.md](akuma-allowed.md).
 When present, `readonly` accepts only literal `true`; `false`, non-boolean
 values, and the removed `access` spelling are malformed. `network` is
-`disabled | enabled`; every other consumed value is a nonblank string.
+`disabled | enabled`; `model`, `effort`, and `description` are nonblank strings.
 Additional top-level keys are ignored and never enter Archetype options or the
 soul snapshot. A nonempty Markdown body after frontmatter overrides the system
 prompt; an empty body leaves that option absent so the native harness keeps its
@@ -214,8 +216,9 @@ Akuma-owned default executions. A configured same-name entry replaces that
 default wholly under Settings shadow law.
 
 Birth snapshots the Archetype name, optional description, complete provider
-execution, admitted options, and the adapter's optional readonly restraint into
-the soul. The body never reads Settings or the Archetype file. A newly admitted
+execution, admitted options, the adapter's optional readonly restraint, and
+the effective allowed list into the soul. The body never reads Settings or the
+Archetype file. A newly admitted
 native session snapshots the exact options used alongside its coordinate and
 cwd; resume reads that session recipe. Before admission, the body uses the
 soul's options and summon cwd. Thus later edits to Archetype Markdown affect only

@@ -17,6 +17,8 @@ export type {
   AbandonInput,
   ActorId,
   AkuId,
+  AllowedAction,
+  AllowedActions,
   AkumaAddressInput,
   AkumaAlias,
   AkumaGlob,

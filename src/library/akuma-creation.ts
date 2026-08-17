@@ -21,6 +21,7 @@ import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
+import type { AllowedAction } from "../akuma/allowed.js";
 import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
 import { KeiyakuRefused, seatForKeiyaku, type Keiyaku } from "./contract.js";
@@ -55,6 +56,7 @@ export type CallInput = Readonly<{
   settings?: Settings;
   contract?: Keiyaku;
   alias?: AkumaAlias;
+  allowed?: readonly AllowedAction[];
 }>;
 
 export type CallObservation =
@@ -262,7 +264,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const values = requireInput(input, "Keiyaku.call input");
   onlyKeys(
     values,
-    ["path", "archetype", "body", "cwd", "mode", "timeoutMs", "home", "settings", "contract", "alias"],
+    ["path", "archetype", "body", "cwd", "mode", "timeoutMs", "home", "settings", "contract", "alias", "allowed"],
     "Keiyaku.call input",
   );
   const path = nonblank(values.path, "path") as WorldRoot;
@@ -287,6 +289,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const call = {
     archetype,
     body,
+    ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
   };
   const handle = execution === undefined

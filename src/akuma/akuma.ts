@@ -51,6 +51,10 @@ import { resolveProviderExecution } from "./providers/index.js";
 import { injectedBodyRequests, requestBodyCall } from "./requests.js";
 import { settings as readSettings, type Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
+import {
+  decodeAllowedActions,
+  type AllowedAction,
+} from "./allowed.js";
 
 const POLL_MS = 25;
 
@@ -108,7 +112,12 @@ export type AkumaCallExecution = Readonly<{
 const CALL_EXECUTION: unique symbol = Symbol("akuma-call-execution");
 const CALL_WITH_CONTEXT: unique symbol = Symbol("akuma-call-with-context");
 
-type AkumaCallInput = Readonly<{ archetype: string; body: string; cwd?: string }>;
+export type AkumaCallInput = Readonly<{
+  archetype: string;
+  body: string;
+  cwd?: string;
+  allowed?: readonly AllowedAction[];
+}>;
 type AkumaCallContext = Readonly<{ initiatorCwd?: string; cwdCanonical?: true }>;
 
 export type TellResult = Readonly<{
@@ -415,6 +424,7 @@ export class AkumaHandle {
             provider: source.provider,
             options: source.options,
             ...(source.readonly === undefined ? {} : { readonly: source.readonly }),
+            allowed: source.allowed,
             cwd: source.cwd,
             origin: { kind: "fork", parent: this.id, at: input.at },
             confinement: source.confinement,
@@ -507,12 +517,16 @@ export class Akuma {
     const home = this.configuration.home === undefined ? {} : { home: this.configuration.home };
     const settings = this.configuration.settings ?? await readSettings({ root: this.path, ...home });
     const archetype = await loadArchetype({ name, ...home, settings });
+    const allowed = input.allowed === undefined
+      ? archetype.allowed
+      : decodeAllowedActions(input.allowed, "Akuma call allowed");
     const requests = injectedBodyRequests();
     const requestRecipe = Object.freeze({
       ...(archetype.description === undefined ? {} : { description: archetype.description }),
       provider: archetype.provider,
       options: archetype.options,
       ...(archetype.readonly === undefined ? {} : { readonly: archetype.readonly }),
+      allowed,
     });
     if (requests !== null) {
       const cwd = input.cwd === undefined

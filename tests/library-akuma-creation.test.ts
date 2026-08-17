@@ -17,6 +17,7 @@ import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/requests.js";
+import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { publishDispatch, readDispatch } from "../src/dispatch/index.js";
 import {
   GIT_REF,
@@ -83,6 +84,10 @@ async function directArchetypeSettings(root: string) {
   symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "dir");
   mkdirSync(join(home, "akuma"), { recursive: true });
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: local\n---\nWork.\n");
+  writeFileSync(
+    join(home, "akuma", "restricted.md"),
+    "---\nprovider: local\nallowed:\n  - task.add\n---\nWork.\n",
+  );
   writeFileSync(join(home, "settings.json"), JSON.stringify({
     providers: { local: { kind: "codex-app-server", executable } },
   }));
@@ -341,6 +346,64 @@ test("direct Akuma birth reports process cwd and the embedding World fallback", 
   }
 });
 
+test("direct birth freezes Archetype defaults and exact per-call allowed replacement", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
+  delete process.env[AKUMA_REQUESTS_ENV];
+  try {
+    const akuma = Akuma.of(world, configured);
+    const omitted = await akuma.call({ archetype: "worker", body: "all" });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, omitted.id)))?.allowed, ALLOWED_ACTIONS);
+
+    const restricted = await akuma.call({ archetype: "restricted", body: "default" });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, restricted.id)))?.allowed, ["task.add"]);
+
+    const replaced = await akuma.call({
+      archetype: "restricted",
+      body: "replace",
+      allowed: ["akuma.call"],
+    });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, replaced.id)))?.allowed, ["akuma.call"]);
+
+    const empty = await akuma.call({ archetype: "worker", body: "empty", allowed: [] });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, empty.id)))?.allowed, []);
+    assert.equal((await empty.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
+  } finally {
+    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("Archetype allowed rejects unknown duplicate and non-string entries", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const akuma = Akuma.of(world, configured);
+  const malformed = [
+    ["unknown", "  - akuma.unknown\n", /unknown action: akuma\.unknown/u],
+    ["duplicate", "  - akuma.call\n  - akuma.call\n", /duplicate action: akuma\.call/u],
+    ["non-string", "  - 1\n", /unknown action: 1/u],
+  ] as const;
+  try {
+    for (const [name, allowed, expected] of malformed) {
+      writeFileSync(
+        join(configured.home, "akuma", `${name}.md`),
+        `---\nprovider: local\nallowed:\n${allowed}---\nWork.\n`,
+      );
+      await assert.rejects(
+        Akuma.of(world, configured).call({ archetype: name, body: "invalid" }),
+        expected,
+      );
+    }
+    assert.deepEqual((await akuma.list()).rows, []);
+  } finally {
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
 test("Keiyaku.call projects the same readonly restraint on CallResult and AkumaStatus", async () => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
@@ -421,6 +484,7 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
       cwd: process.cwd(),
       origin: { kind: "direct" },
       confinement: { kind: "unconfined" },
+      allowed: ["akuma.call"],
     },
     initialBody: "work",
   }, {
@@ -461,6 +525,7 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
     assert.equal(result.dispatch.kind, "dispatched");
     assert.equal((await readDispatch(git, result.child))?.contractId, owner);
     assert.equal(await resolveAlias(world, alias), source.id);
+    assert.deepEqual((await readSoul(pathsForAkuId(world, result.child)))?.allowed, ["akuma.call"]);
 
     const snapshot = await readGit(git);
     const dispatchPath = `dispatch/${createHash("sha256").update(source.id).digest("hex")}.json`;

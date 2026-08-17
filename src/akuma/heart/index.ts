@@ -61,6 +61,7 @@ import {
 } from "./timeline.js";
 import { isHeartAbsent, readSealFromLeash, readTransaction, transaction, withHeart } from "./storage.js";
 import { soulFact } from "./soul.js";
+import { clipAllowedActions } from "../allowed.js";
 export { HeartAbsentError, HeldAkumaLeash, initializeHeart, isHeartAbsent, probeLeash } from "./storage.js";
 
 export { life, lifeAt } from "./facts.js";
@@ -192,6 +193,7 @@ export async function recordTellReceipt(
 
 function sameRequestInput(fact: RequestFact, input: RequestInput): boolean {
   return fact.id === input.id
+    && fact.action === input.action
     && fact.archetype === input.archetype
     && fact.body === input.body
     && fact.cwd === input.cwd
@@ -205,10 +207,30 @@ export async function admitRequest(
 ): Promise<RequestFact> {
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
-      insertRequestFact(heart, input);
+      const soul = soulFact(heart);
+      if (soul === null) throw new Error("Akuma request admission requires a born Soul");
+      const action = input.action;
+      const requestedAllowed = input.recipe.allowed;
+      const parentAllowed = soul.allowed;
+      const permitted = parentAllowed.includes(action);
+      const normalized = {
+        ...input,
+        action,
+        requester: soul.id,
+        recipe: {
+          ...input.recipe,
+          allowed: permitted ? clipAllowedActions(requestedAllowed, parentAllowed) : requestedAllowed,
+        },
+      };
+      insertRequestFact(heart, {
+        ...normalized,
+        ...(permitted ? {} : { refusal: `not-allowed: ${action}` }),
+      });
       const fact = requestFact(heart, input.id);
       if (fact === null) throw new Error(`Akuma request ${input.id} was not admitted`);
-      if (!sameRequestInput(fact, input)) throw new Error(`Akuma request ${input.id} reused different input`);
+      if (fact.requester !== soul.id || !sameRequestInput(fact, normalized)) {
+        throw new Error(`Akuma request ${input.id} reused different input`);
+      }
       return fact;
     }));
 }

@@ -15,15 +15,16 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "identity/selector.ts", allow: [any("identity/normalize.ts")] },
     { source: "akuma/identity.ts", allow: [any("identity/coordinates.ts"), any("identity/normalize.ts")] },
     { source: "akuma/provider-recipe.ts", allow: [] },
-    { source: "akuma/heart/facts.ts", allow: [types("akuma/identity.ts"), types("akuma/coordinate.ts"), types("akuma/provider-recipe.ts")] },
+    { source: "akuma/allowed.ts", allow: [] },
+    { source: "akuma/heart/facts.ts", allow: [types("akuma/identity.ts"), types("akuma/coordinate.ts"), types("akuma/provider-recipe.ts"), types("akuma/allowed.ts")] },
     { source: "akuma/heart/schema.ts", allow: [] },
     { source: "akuma/coordinate.ts", allow: [] },
     { source: "akuma/heart/rows.ts", allow: [types("akuma/heart/facts.ts"), types("akuma/identity.ts"), types("akuma/provider-recipe.ts"), any("akuma/coordinate.ts")] },
     { source: "akuma/heart/tells.ts", allow: [types("akuma/heart/facts.ts")] },
     { source: "akuma/heart/timeline.ts", allow: [types("akuma/heart/facts.ts"), any("akuma/heart/rows.ts", ["decodeActivityRow", "decodeCallRow", "decodeTurnRow", "ActivityFact", "ActivityRow", "CallRow", "TurnRow"]), any("akuma/heart/tells.ts", ["decodeTellAtSequence", "pendingTellProtectionSql", "pendingTellSequencesSql"])] },
-    { source: "akuma/heart/soul.ts", allow: [any("akuma/identity.ts", ["parseAkuId", "AkuId"]), any("akuma/provider-recipe.ts"), types("akuma/heart/facts.ts")] },
+    { source: "akuma/heart/soul.ts", allow: [any("akuma/allowed.ts"), any("akuma/identity.ts", ["parseAkuId", "AkuId"]), any("akuma/provider-recipe.ts"), types("akuma/heart/facts.ts")] },
     { source: "akuma/heart/storage.ts", allow: [types("akuma/identity.ts"), types("akuma/heart/facts.ts"), any("akuma/heart/schema.ts"), any("akuma/heart/rows.ts"), any("akuma/heart/soul.ts"), any("akuma/heart/tells.ts", ["insertTellFact"]), any("akuma/heart/timeline.ts", ["pruneActivityFacts"])] },
-    { source: "akuma/heart/index.ts", allow: [types("akuma/identity.ts"), types("akuma/coordinate.ts"), any("akuma/heart/facts.ts"), any("akuma/heart/rows.ts"), any("akuma/heart/soul.ts", ["soulFact"]), any("akuma/heart/tells.ts"), any("akuma/heart/timeline.ts"), any("akuma/heart/storage.ts")] },
+    { source: "akuma/heart/index.ts", allow: [any("akuma/allowed.ts"), types("akuma/identity.ts"), types("akuma/coordinate.ts"), any("akuma/heart/facts.ts"), any("akuma/heart/rows.ts"), any("akuma/heart/soul.ts", ["soulFact"]), any("akuma/heart/tells.ts"), any("akuma/heart/timeline.ts"), any("akuma/heart/storage.ts")] },
     { source: "akuma/provider.ts", allow: [types("akuma/heart/index.ts"), any("akuma/coordinate.ts"), types("akuma/provider-recipe.ts")] },
     { source: "akuma/projection.ts", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts")] },
     { source: "akuma/providers/index.ts", allow: [types("akuma/provider.ts"), any("akuma/provider-recipe.ts"), any("akuma/providers/acp/index.ts"), any("akuma/providers/claude/index.ts"), any("akuma/providers/codex-app-server/index.ts"), any("akuma/providers/grok-build/index.ts"), any("akuma/providers/opencode-sdk/index.ts"), any("akuma/providers/pi/index.ts")] },
@@ -38,7 +39,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "akuma/providers/opencode-sdk/index.ts", allow: [any("akuma/abort.ts"), any("akuma/providers/opencode-sdk/events.ts"), any("akuma/providers/opencode-sdk/session.ts"), any("akuma/provider.ts"), types("akuma/heart/index.ts"), types("akuma/provider-recipe.ts")] },
     { source: "akuma/providers/opencode-sdk/session.ts", allow: [any("akuma/abort.ts"), types("akuma/heart/index.ts"), any("akuma/provider-recipe.ts", ["ProviderExecution", "providerLaunchEnv"]), any("runtime/proc/run.ts")] },
     { source: "akuma/providers/**", allow: [types("akuma/heart/index.ts"), any("akuma/provider.ts"), types("akuma/provider-recipe.ts"), any("runtime/proc/line-rpc.ts")] },
-    { source: "akuma/archetype.ts", allow: [any("akuma/identity.ts"), types("akuma/provider.ts", ["ProviderAdapter"]), any("akuma/provider-recipe.ts"), any("akuma/providers/index.ts", ["resolveProviderExecution"]), types("settings.ts")] },
+    { source: "akuma/archetype.ts", allow: [any("akuma/allowed.ts"), any("akuma/identity.ts"), types("akuma/provider.ts", ["ProviderAdapter"]), any("akuma/provider-recipe.ts"), any("akuma/providers/index.ts", ["resolveProviderExecution"]), types("settings.ts")] },
     {
       source: "akuma/publication.ts",
       allow: [any("akuma/abort.ts"), any("akuma/heart/index.ts"), any("akuma/identity.ts"), any("runtime/proc/run.ts")],
@@ -47,6 +48,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "akuma/requests.ts",
       allow: [
         any("akuma/abort.ts"),
+        any("akuma/allowed.ts"),
         any("akuma/heart/index.ts"),
         any("akuma/identity.ts"),
         any("akuma/provider.ts"),
@@ -71,6 +73,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "akuma/akuma.ts",
       allow: [
+        any("akuma/allowed.ts"),
         any("akuma/body.ts"),
         any("akuma/projection.ts"),
         any("akuma/heart/index.ts"),
@@ -86,7 +89,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("world.ts"),
       ],
     },
-    { source: "akuma/index.ts", allow: [any("akuma/akuma.ts"), any("akuma/archetype.ts"), any("akuma/requests.ts"), any("akuma/heart/index.ts", ["readSoul"]), types("akuma/heart/index.ts"), any("akuma/identity.ts", ["pathsForAkuId", "AkuId"]), types("akuma/identity.ts"), types("akuma/provider.ts"), types("akuma/provider-recipe.ts"), types("world.ts")] },
+    { source: "akuma/index.ts", allow: [any("akuma/allowed.ts"), any("akuma/akuma.ts"), any("akuma/archetype.ts"), any("akuma/requests.ts"), any("akuma/heart/index.ts", ["readSoul"]), types("akuma/heart/index.ts"), any("akuma/identity.ts", ["pathsForAkuId", "AkuId"]), types("akuma/identity.ts"), types("akuma/provider.ts"), types("akuma/provider-recipe.ts"), types("world.ts")] },
     {
       source: "dispatch/index.ts",
       allow: [
@@ -615,6 +618,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "library/keiyaku.ts",
       allow: [
+        types("akuma/allowed.ts"),
         types("akuma/identity.ts"),
         types("alias/index.ts"),
         any("core/facts/errors.ts"),
@@ -636,6 +640,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "library/akuma-creation.ts",
       allow: [
         any("alias/index.ts"),
+        types("akuma/allowed.ts"),
         any("akuma/akuma.ts"),
         any("akuma/identity.ts", ["parseAkuId", "AkuId"]),
         any("core/facts/errors.ts"),
@@ -796,7 +801,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "cli/commands/akuma.ts",
-      allow: [any("akuma/identity.ts", ["archetypeName", "parseAkuId", "AkuId"]), any("cli/usage.ts"), any("duration.ts"), any("identity/selector.ts")],
+      allow: [any("akuma/allowed.ts"), any("akuma/identity.ts", ["archetypeName", "parseAkuId", "AkuId"]), any("cli/usage.ts"), any("duration.ts"), any("identity/selector.ts")],
     },
     {
       source: "cli/commands/akuma-invoke.ts",
@@ -1029,7 +1034,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },
-    { capability: "type-error-construction", owners: ["world.ts", "akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/archetype.ts", "akuma/provider.ts", "akuma/provider-recipe.ts", "akuma/providers/index.ts", "akuma/providers/acp/index.ts", "akuma/providers/grok-build/index.ts", "akuma/providers/pi/index.ts", "alias/index.ts", "body/**", "cli/actor.ts", "contract-worktree.ts", "workspace-place.ts", "git/hooks.ts", "kanshi/**", "library/configuration.ts", "library/contract.ts", "library/input.ts", "library/repo.ts", "library/akuma-creation.ts", "library/address.ts", "library/fleet.ts", "library/catalog.ts", "identity/coordinates.ts", "identity/selector.ts", "settings.ts", "task/**"] },
+    { capability: "type-error-construction", owners: ["world.ts", "akuma/allowed.ts", "akuma/akuma.ts", "akuma/body.ts", "akuma/identity.ts", "akuma/archetype.ts", "akuma/provider.ts", "akuma/provider-recipe.ts", "akuma/providers/index.ts", "akuma/providers/acp/index.ts", "akuma/providers/grok-build/index.ts", "akuma/providers/pi/index.ts", "alias/index.ts", "body/**", "cli/actor.ts", "contract-worktree.ts", "workspace-place.ts", "git/hooks.ts", "kanshi/**", "library/configuration.ts", "library/contract.ts", "library/input.ts", "library/repo.ts", "library/akuma-creation.ts", "library/address.ts", "library/fleet.ts", "library/catalog.ts", "identity/coordinates.ts", "identity/selector.ts", "settings.ts", "task/**"] },
   ],
   forbiddenFileNames: [
     "approval-preparation.ts",

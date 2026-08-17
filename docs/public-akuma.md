@@ -34,6 +34,7 @@ type CallInput = Readonly<{
   settings?: Settings
   contract?: Keiyaku
   alias?: AkumaAlias
+  allowed?: readonly AllowedAction[]
 }>
 
 type ForkInput = Readonly<{
@@ -48,6 +49,8 @@ Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 ```
 
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.
+`allowed`, when present, replaces the Archetype list for that birth; Akuma owns
+its vocabulary and effective-set judgment.
 Optional `home` is the Archetype coordinate and is never inferred from Settings
 provenance; omission uses `~/.keiyaku`. Settings remains the provider snapshot.
 `cwd` is stated execution input and wins when present. Otherwise an active

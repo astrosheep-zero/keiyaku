@@ -13,6 +13,7 @@ import {
   type ReadonlyRestraint,
 } from "./provider-recipe.js";
 import { resolveProviderExecution } from "./providers/index.js";
+import { effectiveAllowedActions, type AllowedActions } from "./allowed.js";
 
 type DecodedArchetype = Readonly<{
   name: string;
@@ -20,6 +21,7 @@ type DecodedArchetype = Readonly<{
   provider: string;
   description?: string;
   options: ProviderOptions;
+  allowed: AllowedActions;
 }>;
 
 export type ArchetypeCatalogRow = Readonly<{
@@ -121,6 +123,7 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
   const readonly = archetypeReadonly(values);
   const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
   const description = archetypeField(values, "description");
+  const allowed = effectiveAllowedActions(values.allowed);
   const systemPrompt = lines.slice(closing + 1).join("\n");
   return Object.freeze({
     name,
@@ -134,6 +137,7 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
       ...(network === undefined ? {} : { network }),
       ...(systemPrompt.length === 0 ? {} : { systemPrompt }),
     }),
+    allowed,
   });
 }
 

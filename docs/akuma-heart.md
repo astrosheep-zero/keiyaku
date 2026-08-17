@@ -83,7 +83,8 @@ dies; their existence does not depend on a current control-flow reader.
 
 - **soul** — one row, written at birth: id, archetype, optional description,
   resolved provider execution, admitted options, optional `ReadonlyRestraint`,
-  summon cwd, origin, confinement, created-at. The restraint is the exact
+  summon cwd, origin, confinement, effective allowed actions, created-at. The
+  restraint is the exact
   provider-admission fact, not a Heart judgment. Heart owns the exact Soul
   envelope and its cross-field consistency; identity and provider-recipe
   members are decoded only by their own authorities.
@@ -126,9 +127,8 @@ dies; their existence does not depend on a current control-flow reader.
   allocator as activity. The tell remains one Heart fact family; no duplicate
   activity row is persisted.
 - **requests** — the sole durable authority for Body Requests. One fact holds
-  the caller UUID, Archetype, frozen provider recipe and readonly restraint,
-  body, optional cwd,
-  normalized world, admission time, and exactly one monotonic state: `admitted`,
+  the request id, authenticated requester, action, action payload, admission
+  time, and exactly one monotonic state: `admitted`,
   `reserved` with the child coordinate, `served` with the child coordinate,
   `refused` with a diagnostic, or `voided` with evidence. `served`, `refused`,
   and `voided` are terminal.
@@ -149,8 +149,9 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed Heart custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `14`; leash schema version remains `4`. Version 14
-adds the named readonly restraint to Soul. Successful completion remains
+Heart schema version is `15`; leash schema version remains `4`. Version 15
+adds the Soul allowed list and request action envelope. Successful completion
+remains
 separate from the optional exact provider fork point; session and complete
 answer remain required for an answered Turn. Older hearts
 fail the schema gate; no migration or compatibility decoder exists. Absence is

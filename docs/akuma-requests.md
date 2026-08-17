@@ -1,6 +1,8 @@
 # Akuma Body Requests
 
-This chapter owns nested provider call transport, authority, service, and recovery.
+This chapter owns one-hop Body Request transport, service, and recovery.
+Allowed-action vocabulary and admission are owned by
+[akuma-allowed.md](akuma-allowed.md).
 
 ## Body Requests
 
@@ -24,8 +26,9 @@ Each declared drive gets an ephemeral transport directory owned by the akuma:
 ```
 
 The adapter grants that directory as an additional provider writable root and
-injects its absolute path. A caller writes `<request-id>.request.json` by
-temporary-file rename and polls `<request-id>.receipt.json` without a deadline.
+injects its absolute path. A caller atomically writes `{ id, action, payload }`
+to `<request-id>.request.json` and polls `<request-id>.receipt.json` without a
+deadline.
 The body writes the receipt projection. The request id is a caller-minted UUID.
 The directory is best-effort removed after the drive drains, so bytes never
 cross drives.
@@ -46,12 +49,12 @@ authority and have one writer: the body holding its leash. Admission uses the
 request id for idempotence, so at-least-once claim observation produces at most
 one fact. There is no second store.
 
-The claim decoder first validates structure, then selects the stated cwd or the
-hosting parent Soul cwd. Only then does it decode the frozen provider and
+The claim decoder first validates the action envelope, then selects the stated
+cwd or the hosting parent Soul cwd. Only then does it decode the frozen provider and
 options with the existing owners and project confinement for that final cwd.
-The complete validated recipe enters Heart; transport never supplies a second
-confinement judgment. A malformed recipe is a malformed claim and never becomes
-a durable request fact.
+The complete validated payload enters Heart; transport never supplies a second
+confinement or allowed-action judgment. A malformed payload is a malformed
+claim and never becomes a durable request fact.
 
 The child directory and its leash remain the sole judge of child birth. The
 parent heart remembers only the reserved child coordinate: where to observe,
@@ -68,7 +71,8 @@ The serving Body requires the request world to equal its own world. World
 mismatch settles `refused`; a malformed transport claim is not admitted. The
 Body never silently redirects a request.
 
-Service is serial in heart admission order:
+Service is serial in Heart admission order. Heart first applies the keyed
+action law; a refusal runs no operation owner. An admitted call then proceeds:
 
 ```text
 parse -> select cwd -> validate recipe -> admit -> allocate directory -> reserve coordinate -> spawn child

@@ -1,6 +1,7 @@
 import type { AkuId } from "../identity.js";
 import type { ResumeCoordinate } from "../coordinate.js";
 import type { ProviderExecution, ProviderOptions, ReadonlyRestraint } from "../provider-recipe.js";
+import type { AllowedAction, AllowedActions } from "../allowed.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
 export type Confinement =
@@ -22,10 +23,11 @@ export type Soul = Readonly<{
   cwd: string;
   origin: AkumaOrigin;
   confinement: Confinement;
+  allowed: AllowedActions;
   createdAt: string;
 }>;
 
-export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "readonly" | "confinement">;
+export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "readonly" | "confinement" | "allowed">;
 
 export type BodyEnd = "exited" | "broke-off" | "put-down";
 
@@ -120,6 +122,7 @@ export type TellReceiptInput = Readonly<{
 
 export type RequestInput = Readonly<{
   id: string;
+  action: Extract<AllowedAction, "akuma.call">;
   archetype: string;
   body: string;
   cwd?: string;
@@ -127,7 +130,10 @@ export type RequestInput = Readonly<{
   recipe: RequestRecipe;
 }>;
 
-export type RequestFact = RequestInput & Readonly<{ admittedAt: string }> & (
+export type RequestFact = RequestInput & Readonly<{
+  requester: AkuId;
+  admittedAt: string;
+}> & (
   | Readonly<{ state: "admitted" }>
   | Readonly<{ state: "reserved"; child: AkuId }>
   | Readonly<{ state: "served"; child: AkuId }>
