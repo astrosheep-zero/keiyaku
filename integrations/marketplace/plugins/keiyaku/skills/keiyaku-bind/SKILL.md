@@ -31,6 +31,14 @@ Bind is the last step of an investigation, never the first step of an idea.
   now. Cannot draft means unresolved design — "the worker will sort out the
   docs" is a design gap in disguise.
 
+Split complex work wherever independently acceptable delivery boundaries
+exist. When a complex Keiyaku cannot be split without breaking one acceptance
+boundary, bind one Contract and plan its fulfillment as explicit arcs. Treat
+each arc as a chapter as in a work of literature, not as a task sequence.
+Commission one current chapter at a time; never hand the whole undifferentiated
+Contract to one Deliverer and trust it to finish everything in one pass.
+Continue with `keiyaku-workflow` for the arc document and command.
+
 Two tests close the gate:
 
 - **Substitution.** Two workers who never met each deliver test-green from
@@ -59,7 +67,8 @@ Design read the same without a sentence here, delete it.>
 
 ## Objective
 <One observable end-state, judged done/not-done without reading Design.
-If you need "and", bind two Contracts.>
+If "and" joins independently acceptable outcomes, bind two Contracts. A
+single outcome may still require several arcs during fulfillment.>
 
 ## Design
 <The closed decisions. A statement belongs here exactly when a test-green
@@ -92,6 +101,11 @@ Decidable without consulting you.>
 ```
 KEIYAKU
 ~~~~
+
+Use separate fences for checks that need separate timeouts or results. Fences
+run top-to-bottom, and later fences may use earlier outputs. Put setup/build
+before its consumers; use `&&` in one fence only when the consumer must stop
+if setup fails.
 
 Each declaration may set an individual timeout in its fence info string, using
 an explicit duration unit such as `bash timeout=5m`. Omit it for an unbounded
