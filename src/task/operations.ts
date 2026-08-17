@@ -197,9 +197,11 @@ export async function readyTasks(world: WorldRoot, scope?: "namespace" | "world"
   const relations = taskRelations.of(board);
   const ready: TaskQueryExpression = { kind: "predicate", predicate: { field: "ready", operator: "=", value: true } };
   const expression: TaskQueryExpression = parent === undefined ? ready : { kind: "and", terms: [ready, underExpression(parent)] };
-  const selectedRows = projectQuery(
-    board, selected as readonly string[] | null, expression, "priority", Math.max(1, board.tasks.size), relations,
-  ).rows;
+  const selectedRows = projectQuery(board, relations, {
+    scope: selected as readonly string[] | null,
+    expression,
+    limit: Math.max(1, board.tasks.size),
+  }).rows;
   const rows = selectedRows.map(({ parent: _parent, needs: _needs, blocks: _blocks, createdAt: _createdAt, updatedAt: _updatedAt, ...row }) => row);
   return { kind: "accepted", value: projectPage(rows, limit) };
 }
@@ -210,9 +212,11 @@ export async function blockedTasks(world: WorldRoot, scope?: "namespace" | "worl
   const relations = taskRelations.of(board);
   const blocked: TaskQueryExpression = { kind: "predicate", predicate: { field: "blocked", operator: "=", value: true } };
   const expression: TaskQueryExpression = parent === undefined ? blocked : { kind: "and", terms: [blocked, underExpression(parent)] };
-  const selectedRows = projectQuery(
-    board, selected as readonly string[] | null, expression, "priority", Math.max(1, board.tasks.size), relations,
-  ).rows;
+  const selectedRows = projectQuery(board, relations, {
+    scope: selected as readonly string[] | null,
+    expression,
+    limit: Math.max(1, board.tasks.size),
+  }).rows;
   const ids = new Set(selectedRows.map((row) => row.id));
   return {
     kind: "accepted",
@@ -237,7 +241,12 @@ export async function queryTasks(
   }
   return {
     kind: "accepted",
-    value: projectQuery(board, selected as readonly string[] | null, expression, sort, limit, relations),
+    value: projectQuery(board, relations, {
+      scope: selected as readonly string[] | null,
+      expression,
+      sort,
+      limit,
+    }),
   };
 }
 /** Internal composite observation from one complete Task board read. */

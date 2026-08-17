@@ -1,7 +1,7 @@
 import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
 import { formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import type { BlockedTaskRow, TaskBoard, TaskRef, TaskRelationProjection, TaskRow } from "./board.js";
-import { taskDisposition, taskRef, taskRelations } from "./board.js";
+import { taskDisposition, taskRef } from "./board.js";
 
 export const DEFAULT_TASK_LIMIT = 100;
 export const MAX_TASK_LIMIT = 1_000;
@@ -289,12 +289,15 @@ function sortTasks(tasks: readonly TaskDocument[], sort: TaskQuerySort): readonl
 }
 export function projectQuery(
   board: TaskBoard,
-  scope: readonly string[] | null,
-  expression: TaskQueryExpression,
-  sort: TaskQuerySort = "priority",
-  limit = DEFAULT_TASK_LIMIT,
-  relations: TaskRelationProjection = taskRelations.of(board),
+  relations: TaskRelationProjection,
+  input: Readonly<{
+    scope: readonly string[] | null;
+    expression: TaskQueryExpression;
+    sort?: TaskQuerySort;
+    limit?: number;
+  }>,
 ): TaskPage<TaskQueryRow> {
+  const { scope, expression, sort = "priority", limit = DEFAULT_TASK_LIMIT } = input;
   const under = new Map(queryUnderTargets(expression).map((target) => [target, descendants(relations, target)]));
   const selected = sortTasks([...board.tasks.values()].filter((task) => scope === null || sameNamespace(parseTaskId(task.id).namespace, scope))
     .filter((task) => matches(board, relations, task, expression, under)), sort);
