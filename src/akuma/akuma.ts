@@ -167,9 +167,10 @@ async function recordTellBody(
   paths: AkumaPaths,
   akuma: AkuId,
   body: string,
+  id: string = randomUUID(),
+  recordedAt = new Date().toISOString(),
 ): Promise<Readonly<{ kind: "recorded"; tellId: string }>> {
-  const id = randomUUID();
-  const admitted = await recordTell(paths, { kind: "tell", id, body, recordedAt: new Date().toISOString() });
+  const admitted = await recordTell(paths, { kind: "tell", id, body, recordedAt });
   if (admitted.kind === "not-born") throw new AkumaNotBornError(akuma);
   return { kind: "recorded", tellId: admitted.tell.id };
 }
@@ -184,6 +185,18 @@ async function wakeTell(paths: AkumaPaths, tellId: string): Promise<TellResult> 
       wake: { kind: "failed", diagnostic: diagnostic(error) },
     };
   }
+}
+
+export async function tellAkumaWithId(
+  worldPath: WorldRoot,
+  id: AkuId,
+  body: string,
+  tellId: string,
+  recordedAt = new Date().toISOString(),
+): Promise<TellResult> {
+  const paths = pathsForAkuId(worldPath, id);
+  const recorded = await recordTellBody(paths, id, body, tellId, recordedAt);
+  return await wakeTell(paths, recorded.tellId);
 }
 
 function diagnostic(error: unknown): string {

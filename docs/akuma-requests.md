@@ -12,10 +12,10 @@ Therefore a later body closes old requests by observation only: it never
 re-executes one, and never needs an exactly-once claim.
 
 Body Requests exist only for a provider whose confinement is `declared`.
-The body injects `AKUMA_REQUESTS` for that drive; a nested `Akuma.call()` or
-`keiyaku akuma call` reroutes exactly when that variable exists. An unconfined
-provider receives no injection and performs the ordinary direct call. There is
-no third mode, second public verb, or generic messaging surface.
+The body injects `AKUMA_REQUESTS` for that drive; nested call, wait, tell, and
+kill operations reroute exactly when that variable exists. An unconfined
+provider receives no injection and performs the ordinary local operation.
+There is no third mode, second public verb, or generic messaging surface.
 
 ### Transport, authority, and judge
 
@@ -49,8 +49,8 @@ authority and have one writer: the body holding its leash. Admission uses the
 request id for idempotence, so at-least-once claim observation produces at most
 one fact. There is no second store.
 
-The claim decoder first validates the action envelope, then selects the stated
-cwd or the hosting parent Soul cwd. Only then does it decode the frozen provider and
+For call, the claim decoder first validates the action envelope, then selects
+the stated cwd or the hosting parent Soul cwd. Only then does it decode the frozen provider and
 options with the existing owners and project confinement for that final cwd.
 The complete validated payload enters Heart; transport never supplies a second
 confinement or allowed-action judgment. A malformed payload is a malformed
@@ -87,7 +87,7 @@ step between allocation and spawn; ordinary call and fork supply no such step.
 It makes no cross-database atomicity claim. A failure after allocation uses the
 ordinary local-publication seal and settles the request `voided`.
 
-The closed transitions are:
+Call uses the following transitions:
 
 ```text
 admitted -> refused { diagnostic }
@@ -99,6 +99,22 @@ admitted -> voided { evidence }
 
 A served receipt returns the child handle. Refused and voided receipts become
 typed call errors carrying the diagnostic or evidence.
+
+### Fleet service
+
+Wait, tell, and kill selectors are fully expanded by the child Library before
+transport. Claims contain only complete, ordered, duplicate-free AkuIds in the
+authenticated channel's World; Alias, glob, Contract, Repo, Settings, and World
+coordinates never cross the channel. The parent Body calls the same forced-local
+Fleet executors used by ordinary Library and CLI entry points, so request service
+cannot recursively forward.
+
+Heart applies keyed permission before tell or kill runs; wait remains an unkeyed
+observation. A served wait stores only a service marker, never its observation or
+timeout result. A served tell stores only its target and the request id used as
+TellId. A served kill stores only ordered target/evidence references; lifecycle
+facts remain in each target Heart. Verb results and operation failures travel only
+in the live receipt and never become permission refusals or a generic result store.
 
 ### Recovery and pump
 

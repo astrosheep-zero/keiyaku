@@ -276,6 +276,12 @@ only the last answered turn by durable sequence and never reads status or
 activity history. Its typed result is either `{ kind: "last", answer }`
 (including an empty answer) or `{ kind: "no-answer" }`.
 
+Inside a declared provider drive, wait, tell, and kill still resolve their
+complete selector snapshot here, then send only canonical AkuIds to the direct
+parent. The parent invokes these same Fleet executors in forced-local mode.
+Receipt transport changes no public result, selector, timeout, lifecycle, or
+failure semantics and never creates automatic multi-hop routing.
+
 `Keiyaku.interrupt` remains a Library composition over one addressed Akuma:
 pause the current Body, wait a bounded window for that Body to abort through
 its owned live handles, obtain its leash, require an explicit end for the same

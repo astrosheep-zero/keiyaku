@@ -5,6 +5,16 @@ const types = (target: string) => ({ target, mode: "type-only" as const });
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
+    {
+      source: "akuma-body.ts",
+      allow: [
+        any("akuma/body.ts", ["runAkumaBody", "BodyLaunch"]),
+        any("akuma/identity.ts", ["worldRootForAkumaPaths"]),
+        types("akuma/requests.ts"),
+        any("library/fleet.ts", ["executeKillAkuma", "executeTellAkuma", "executeWaitAkuma"]),
+        types("world.ts"),
+      ],
+    },
     { source: "akuma/abort.ts", allow: [] },
     { source: "duration.ts", allow: [] },
     { source: "settings.ts", allow: [] },
@@ -676,7 +686,14 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "library/fleet.ts",
       allow: [
         any("akuma/index.ts"),
-        any("akuma/akuma.ts", ["readBudgetedStatus"]),
+        any("akuma/akuma.ts", ["readBudgetedStatus", "tellAkumaWithId"]),
+        any("akuma/requests.ts", [
+          "injectedBodyRequests",
+          "requestBodyKill",
+          "requestBodyTell",
+          "requestBodyWait",
+          "UpstreamRequestOutcome",
+        ]),
         types("core/facts/types.ts", ["ContractId"]),
         any("dispatch/index.ts", ["readDispatch"]),
         any("library/address.ts"),

@@ -32,6 +32,7 @@ import {
   BodyRequestPump,
   clearBodyRequestTransport,
   settleBodyRequests,
+  type UpstreamExecutionPort,
   type RequestChildLaunch,
 } from "./requests.js";
 import {
@@ -52,6 +53,7 @@ export type BodyLaunch = Readonly<{
 type BodyRuntime = Readonly<{
   now(): string;
   spawnChild?(launch: RequestChildLaunch): Promise<void>;
+  upstream?: UpstreamExecutionPort;
 }>;
 
 type BodyStopReason = "control" | "heart-gone";
@@ -257,6 +259,7 @@ type DriveTurnInput = Readonly<{
   launchTells: readonly TellFact[];
   supervisor: BodySupervisor;
   runtimeSpawn(launch: RequestChildLaunch): Promise<void>;
+  upstream?: UpstreamExecutionPort;
   now(): string;
 }>;
 
@@ -301,6 +304,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
         bodySequence: input.bodySequence,
         now: input.now,
         spawn: input.runtimeSpawn,
+        ...(input.upstream === undefined ? {} : { upstream: input.upstream }),
         signal: input.supervisor.signal,
       })
     : null;
@@ -686,6 +690,7 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       body: initial ?? "",
       ...(initial === undefined ? {} : { call: initial }),
       launchTells,
+      ...(runtime.upstream === undefined ? {} : { upstream: runtime.upstream }),
       now: runtime.now,
     });
     if (result.kind === "stopped") {
@@ -745,7 +750,7 @@ export async function spawnAkumaBody(launch: BodyLaunch): Promise<void> {
   const actorId = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
   if (actorId === undefined) throw new Error("Akuma wake has no born soul");
   const owned = await spawnDetachedProcess({
-    argv: [process.execPath, ...process.execArgv, fileURLToPath(import.meta.url), encoded],
+    argv: [process.execPath, ...process.execArgv, fileURLToPath(new URL("../akuma-body.js", import.meta.url)), encoded],
     cwd: await launchCwd(launch),
     env: { ...process.env, KEIYAKU_ACTOR_ID: actorId },
     log: launch.paths.log,
@@ -753,13 +758,15 @@ export async function spawnAkumaBody(launch: BodyLaunch): Promise<void> {
   owned.release();
 }
 
-async function main(): Promise<void> {
+export async function runAkumaBody(
+  upstreamFor: (launch: BodyLaunch) => UpstreamExecutionPort,
+): Promise<void> {
   const encoded = process.argv[2];
   if (encoded === undefined) throw new TypeError("Akuma body launch payload is missing");
   const launch = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as BodyLaunch;
-  await driveAkumaBody(launch);
-}
-
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
-  await main();
+  await driveAkumaBody(launch, undefined, {
+    now: () => new Date().toISOString(),
+    spawnChild: spawnAkumaBody,
+    upstream: upstreamFor(launch),
+  });
 }

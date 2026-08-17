@@ -470,7 +470,7 @@ test("Body Request facts have one idempotent monotonic authority", async () => {
   }
 });
 
-test("heart schema version 15 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 16 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -480,7 +480,7 @@ test("heart schema version 15 and leash schema version 4 hard-refuse old authori
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 15/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 16/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

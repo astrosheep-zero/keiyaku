@@ -7,6 +7,7 @@ import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
+import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { ordinarySelectedCount, ordinarySnapshotBudget, projectTurns, selectHistory, selectSnapshot } from "../src/akuma/projection.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
@@ -1203,6 +1204,7 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
       path: join(home, "akuma", "reviewer.md"),
       provider: CLAUDE_EXECUTION,
       description: "Careful reviewer",
+      allowed: ALLOWED_ACTIONS,
       options: {
         model: "claude-sonnet-4-5",
         effort: "high",
@@ -1436,7 +1438,7 @@ test("list rejects post-identity schema corruption with AkuId and directory", as
         `Akuma list failed for ${heartCut.id} at ${pathsForAkuId(worldRoot, heartCut.id).directory}`,
       );
       assert.ok(error.cause instanceof Error);
-      assert.match(error.cause.message, /heart schema version must be 14/u);
+      assert.match(error.cause.message, /heart schema version must be 16/u);
       return true;
     });
     assert.equal(existsSync(noise), true);

@@ -126,12 +126,11 @@ dies; their existence does not depend on a current control-flow reader.
   see Tell. Admission allocates its sequence from the same monotonic timeline
   allocator as activity. The tell remains one Heart fact family; no duplicate
   activity row is persisted.
-- **requests** — the sole durable authority for Body Requests. One fact holds
-  the request id, authenticated requester, action, action payload, admission
-  time, and exactly one monotonic state: `admitted`,
-  `reserved` with the child coordinate, `served` with the child coordinate,
-  `refused` with a diagnostic, or `voided` with evidence. `served`, `refused`,
-  and `voided` are terminal.
+- **requests** — the sole durable authority for Body Request admission and
+  service references. Call reservation names its child; wait stores no answer;
+  tell names its TellId; kill names existing lifecycle evidence. Verb results
+  remain with their operation owner or live receipt. `served`, `refused`, and
+  `voided` are terminal.
 - **stop / pause** — distinct transient control rows. Stop freezes the current
   Body sequence and asks that Body to end for `kill`; pause asks it to yield for
   `interrupt`. Only that live Body may terminate its descendants through owned
@@ -149,8 +148,8 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed Heart custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `15`; leash schema version remains `4`. Version 15
-adds the Soul allowed list and request action envelope. Successful completion
+Heart schema version is `16`; leash schema version remains `4`. Version 16
+adds action-specific Body Request service references. Successful completion
 remains
 separate from the optional exact provider fork point; session and complete
 answer remain required for an answered Turn. Older hearts

@@ -31,6 +31,10 @@ export const FILE_LINE_EXEMPTIONS = Object.freeze([
     reason: "The low-level Akuma owner keeps birth, handles, lifecycle controls, and fleet reads coherent; splitting those operations would obscure that boundary.",
   },
   {
+    file: "src/akuma/requests.ts",
+    reason: "Body Request transport, admission orchestration, receipts, and recovery remain one protocol owner.",
+  },
+  {
     file: "src/library/contract.ts",
     reason: "The package-root Contract handle remains one operations owner.",
   },

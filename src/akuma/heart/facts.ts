@@ -1,7 +1,7 @@
 import type { AkuId } from "../identity.js";
 import type { ResumeCoordinate } from "../coordinate.js";
 import type { ProviderExecution, ProviderOptions, ReadonlyRestraint } from "../provider-recipe.js";
-import type { AllowedAction, AllowedActions } from "../allowed.js";
+import type { AllowedActions } from "../allowed.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
 export type Confinement =
@@ -122,24 +122,52 @@ export type TellReceiptInput = Readonly<{
 
 export type RequestInput = Readonly<{
   id: string;
-  action: Extract<AllowedAction, "akuma.call">;
+  action: "akuma.call";
   archetype: string;
   body: string;
   cwd?: string;
   world: string;
   recipe: RequestRecipe;
+}> | Readonly<{
+  id: string;
+  action: "akuma.wait";
+  targets: readonly AkuId[];
+  completion: "any" | "all";
+  timeoutMs?: number;
+}> | Readonly<{
+  id: string;
+  action: "akuma.tell";
+  target: AkuId;
+  body: string;
+}> | Readonly<{
+  id: string;
+  action: "akuma.kill";
+  targets: readonly AkuId[];
 }>;
 
-export type RequestFact = RequestInput & Readonly<{
+export type UpstreamRequestService =
+  | Readonly<{ action: "akuma.wait" }>
+  | Readonly<{ action: "akuma.tell"; target: AkuId; tellId: string }>
+  | Readonly<{
+      action: "akuma.kill";
+      results: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[];
+    }>;
+
+type AdmittedRequest = RequestInput & Readonly<{
   requester: AkuId;
   admittedAt: string;
-}> & (
-  | Readonly<{ state: "admitted" }>
-  | Readonly<{ state: "reserved"; child: AkuId }>
-  | Readonly<{ state: "served"; child: AkuId }>
-  | Readonly<{ state: "refused"; diagnostic: string }>
-  | Readonly<{ state: "voided"; evidence: string }>
-);
+}>;
+
+export type RequestFact =
+  | (AdmittedRequest & Readonly<{ state: "admitted" }>)
+  | (Extract<AdmittedRequest, { action: "akuma.call" }> & Readonly<{ state: "reserved"; child: AkuId }>)
+  | (Extract<AdmittedRequest, { action: "akuma.call" }> & Readonly<{ state: "served"; child: AkuId }>)
+  | (Exclude<AdmittedRequest, { action: "akuma.call" }> & Readonly<{
+      state: "served";
+      service: UpstreamRequestService;
+    }>)
+  | (AdmittedRequest & Readonly<{ state: "refused"; diagnostic: string }>)
+  | (AdmittedRequest & Readonly<{ state: "voided"; evidence: string }>);
 
 export type KillEvidence = "killed" | "already-killed" | "already-stopped" | "hung" | "untidy" | "unavailable";
 export type KillFact = Readonly<{ sequence: number; bodySequence: number; evidence: "killed"; at: string }>;

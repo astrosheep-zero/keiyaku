@@ -257,6 +257,9 @@ exactly one of `--any` or `--all`; kill covers the frozen set. Bare `status`
 uses Kanshi. Named `status @name` resolves active Contract short names and the
 retained Alias register from one Kanshi observation, refuses cross-kind
 ambiguity, and performs no preliminary board or Alias reread.
+When `AKUMA_REQUESTS` identifies a declared provider drive, call, wait, tell,
+and kill use the same package-root operations but are served one hop by that
+provider's direct parent; CLI parsing and rendering do not change.
 Bare `ls` renders the command's own help and exits successfully. It does not
 locate or create a World, construct a Repo or Settings value, or read Git,
 Task, Akuma configuration, or Akuma state. The accepted path grammar is closed and uses

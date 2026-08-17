@@ -14,6 +14,7 @@ import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/requests.js";
+import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/library/fleet.js";
 import type { AkumaObservation, ContractHistory, Fact } from "../src/index.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
 import { invoke } from "../src/cli/invoke.js";
@@ -2107,6 +2108,31 @@ test("packaged CLI call writes missing, detached, answered, unfinished, and fail
     bodySequence: 1,
     now: () => "2026-08-15T00:00:01.000Z",
     signal: new AbortController().signal,
+    upstream: {
+      wait: async (input) => await executeWaitAkuma({
+        path: root as import("../src/world.js").WorldRoot,
+        ids: input.targets,
+        completion: input.completion,
+        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        signal: input.signal,
+      }),
+      tell: async (input) => await executeTellAkuma({
+        path: root as import("../src/world.js").WorldRoot,
+        id: input.target,
+        body: input.body,
+        tellId: input.tellId,
+        recordedAt: input.recordedAt,
+        signal: input.signal,
+      }),
+      kill: async (input) => {
+        const result = await executeKillAkuma({
+          path: root as import("../src/world.js").WorldRoot,
+          ids: input.targets,
+          signal: input.signal,
+        });
+        return { result, service: result.results.map(({ id, evidence }) => ({ id, evidence })) };
+      },
+    },
     async spawn(launch) {
       const adapter = launch.initialBody === "fail" ? failing : answering;
       if (launch.initialBody === "hang") {

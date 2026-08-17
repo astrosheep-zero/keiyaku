@@ -7,6 +7,7 @@ import type {
   KillFact,
   RequestFact,
   RequestInput,
+  UpstreamRequestService,
   SealFact,
   SessionFact,
   Soul,
@@ -44,6 +45,7 @@ import {
   updateRequestReserved,
   updateRequestServed,
   updateRequestVoided,
+  updateUpstreamRequestServed,
 } from "./rows.js";
 import type { ActivityFact } from "./rows.js";
 import {
@@ -80,6 +82,7 @@ export type {
   RequestFact,
   RequestInput,
   RequestRecipe,
+  UpstreamRequestService,
   SealFact,
   SessionFact,
   Soul,
@@ -155,6 +158,13 @@ export async function recordTell(
   return await withHeart(paths, (heart) =>
     transaction(heart, () => {
       if (soulFact(heart) === null) return { kind: "not-born" };
+      const existing = tellFact(heart, tell.id);
+      if (existing !== null) {
+        if (existing.body !== tell.body || existing.recordedAt !== tell.recordedAt) {
+          throw new Error(`tell ${tell.id} reused different input`);
+        }
+        return { kind: "recorded", tell: existing };
+      }
       const sequence = insertTellFact(heart, tell);
       pruneActivityFacts(heart, ACTIVITY_LIMIT);
       return { kind: "recorded", tell: { sequence, ...tell, state: "pending", deliveries: [] } };
@@ -192,13 +202,24 @@ export async function recordTellReceipt(
 }
 
 function sameRequestInput(fact: RequestFact, input: RequestInput): boolean {
-  return fact.id === input.id
-    && fact.action === input.action
-    && fact.archetype === input.archetype
-    && fact.body === input.body
-    && fact.cwd === input.cwd
-    && fact.world === input.world
-    && JSON.stringify(fact.recipe) === JSON.stringify(input.recipe);
+  if (fact.id !== input.id || fact.action !== input.action) return false;
+  if (fact.action === "akuma.call" && input.action === "akuma.call") {
+    return fact.archetype === input.archetype
+      && fact.body === input.body
+      && fact.cwd === input.cwd
+      && fact.world === input.world
+      && JSON.stringify(fact.recipe) === JSON.stringify(input.recipe);
+  }
+  if (fact.action === "akuma.wait" && input.action === "akuma.wait") {
+    return fact.completion === input.completion
+      && fact.timeoutMs === input.timeoutMs
+      && JSON.stringify(fact.targets) === JSON.stringify(input.targets);
+  }
+  if (fact.action === "akuma.tell" && input.action === "akuma.tell") {
+    return fact.target === input.target && fact.body === input.body;
+  }
+  return fact.action === "akuma.kill" && input.action === "akuma.kill"
+    && JSON.stringify(fact.targets) === JSON.stringify(input.targets);
 }
 
 export async function admitRequest(
@@ -210,20 +231,21 @@ export async function admitRequest(
       const soul = soulFact(heart);
       if (soul === null) throw new Error("Akuma request admission requires a born Soul");
       const action = input.action;
-      const requestedAllowed = input.recipe.allowed;
       const parentAllowed = soul.allowed;
-      const permitted = parentAllowed.includes(action);
-      const normalized = {
-        ...input,
-        action,
-        requester: soul.id,
-        recipe: {
-          ...input.recipe,
-          allowed: permitted ? clipAllowedActions(requestedAllowed, parentAllowed) : requestedAllowed,
-        },
-      };
+      const permitted = action === "akuma.wait" || parentAllowed.includes(action);
+      const normalized: RequestInput = input.action === "akuma.call"
+        ? {
+            ...input,
+            recipe: {
+              ...input.recipe,
+              allowed: permitted ? clipAllowedActions(input.recipe.allowed, parentAllowed) : input.recipe.allowed,
+            },
+          }
+        : input;
       insertRequestFact(heart, {
         ...normalized,
+        requester: soul.id,
+        admittedAt: input.admittedAt,
         ...(permitted ? {} : { refusal: `not-allowed: ${action}` }),
       });
       const fact = requestFact(heart, input.id);
@@ -240,6 +262,7 @@ export async function reserveRequest(paths: AkumaPaths, id: string, child: AkuId
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
+      if (before.action !== "akuma.call") throw new Error(`Akuma request ${id} cannot reserve a child`);
       if (before.state === "admitted") updateRequestReserved(heart, id, child);
       else if ((before.state !== "reserved" && before.state !== "served") || before.child !== child) {
         throw new Error(`Akuma request ${id} cannot reserve ${child}`);
@@ -253,9 +276,30 @@ export async function serveRequest(paths: AkumaPaths, id: string, child: AkuId):
     transaction(heart, () => {
       const before = requestFact(heart, id);
       if (before === null) throw new Error(`unknown Akuma request ${id}`);
+      if (before.action !== "akuma.call") throw new Error(`Akuma request ${id} cannot serve a child`);
       if (before.state === "reserved" && before.child === child) updateRequestServed(heart, id, child);
       else if (before.state !== "served" || before.child !== child) {
         throw new Error(`Akuma request ${id} cannot serve ${child}`);
+      }
+      return requestFact(heart, id)!;
+    }));
+}
+
+export async function serveUpstreamRequest(
+  paths: AkumaPaths,
+  id: string,
+  service: UpstreamRequestService,
+): Promise<RequestFact> {
+  return await withHeart(paths, (heart) =>
+    transaction(heart, () => {
+      const before = requestFact(heart, id);
+      if (before === null) throw new Error(`unknown Akuma request ${id}`);
+      if (before.action === "akuma.call" || service.action !== before.action) {
+        throw new Error(`Akuma request ${id} has a mismatched service reference`);
+      }
+      if (before.state === "admitted") updateUpstreamRequestServed(heart, id, service);
+      else if (before.state !== "served" || JSON.stringify(before.service) !== JSON.stringify(service)) {
+        throw new Error(`Akuma request ${id} cannot be served as ${service.action}`);
       }
       return requestFact(heart, id)!;
     }));

@@ -1,12 +1,20 @@
 import {
   Akuma,
+  AkumaNotBornError,
   type ActivityHistory,
   type AkumaStatus,
   type InterruptReceipt,
   type KillEvidence,
   type TellResult,
 } from "../akuma/index.js";
-import { readBudgetedStatus } from "../akuma/akuma.js";
+import { readBudgetedStatus, tellAkumaWithId } from "../akuma/akuma.js";
+import {
+  injectedBodyRequests,
+  requestBodyKill,
+  requestBodyTell,
+  requestBodyWait,
+  type UpstreamRequestOutcome,
+} from "../akuma/requests.js";
 import type { ContractId } from "../core/facts/types.js";
 import { readDispatch } from "../dispatch/index.js";
 import type { TaskRow } from "../task/index.js";
@@ -120,8 +128,22 @@ function timeout(value: unknown): number | undefined {
   return value;
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const done = (): void => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const abort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(signal?.reason ?? new Error("upstream request aborted"));
+    };
+    timer = setTimeout(done, milliseconds);
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
 const SHARED_ORDINARY_BUDGET = 30;
@@ -129,18 +151,126 @@ const SHARED_ORDINARY_BUDGET = 30;
 async function observeWaitStatuses(
   path: WorldRoot,
   ids: readonly AkumaStatus["id"][],
+  signal?: AbortSignal,
 ): Promise<readonly AkumaStatus[]> {
+  signal?.throwIfAborted();
   if (ids.length <= 1) {
     return await Promise.all(ids.map(async (id) => await source(path).of({ id }).status()));
   }
   let remaining = SHARED_ORDINARY_BUDGET;
   const statuses: AkumaStatus[] = [];
   for (const id of ids) {
+    signal?.throwIfAborted();
     const observed = await readBudgetedStatus(path, id, { ordinaryBudget: remaining });
     statuses.push(observed.status);
     remaining -= observed.ordinarySelected;
   }
   return statuses;
+}
+
+type WaitExecutionInput = Readonly<{
+  path: WorldRoot;
+  ids: readonly AkumaStatus["id"][];
+  completion: "any" | "all";
+  timeoutMs?: number;
+  repo?: Repo;
+  signal?: AbortSignal;
+}>;
+
+export async function executeWaitAkuma(input: WaitExecutionInput): Promise<AkumaWaitResult> {
+  const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
+  for (;;) {
+    const statuses = await observeWaitStatuses(input.path, input.ids, input.signal);
+    const settled = statuses.map((status) => status.life !== "running");
+    if ((input.completion === "any" ? settled.some(Boolean) : settled.every(Boolean))
+      || (deadline !== undefined && performance.now() >= deadline)) {
+      return {
+        completion: input.completion,
+        observations: await observeAkumaSet(statuses, input.path, input.repo),
+      };
+    }
+    await delay(deadline === undefined ? 25 : Math.min(25, Math.max(0, deadline - performance.now())), input.signal);
+  }
+}
+
+type TellExecutionInput = Readonly<{
+  path: WorldRoot;
+  id: AkumaStatus["id"];
+  body: string;
+  tellId?: string;
+  recordedAt?: string;
+  repo?: Repo;
+  signal?: AbortSignal;
+}>;
+
+export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
+  input.signal?.throwIfAborted();
+  const handle = source(input.path).of({ id: input.id });
+  const tell = input.tellId === undefined
+    ? await handle.tell(input.body)
+    : await tellAkumaWithId(input.path, input.id, input.body, input.tellId, input.recordedAt);
+  input.signal?.throwIfAborted();
+  return {
+    akuma: input.id,
+    tell,
+    observation: await observeAkuma(await handle.status(), input.path, input.repo),
+  };
+}
+
+type KillExecutionInput = Readonly<{
+  path: WorldRoot;
+  ids: readonly AkumaStatus["id"][];
+  repo?: Repo;
+  signal?: AbortSignal;
+}>;
+
+export async function executeKillAkuma(input: KillExecutionInput): Promise<AkumaKillResult> {
+  input.signal?.throwIfAborted();
+  const handles = input.ids.map((id) => source(input.path).of({ id }));
+  const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
+  input.signal?.throwIfAborted();
+  const statuses = await Promise.all(input.ids.map(async (id) => await source(input.path).of({ id }).status()));
+  const observations = await observeAkumaSet(statuses, input.path, input.repo);
+  return {
+    results: input.ids.map((id, index) => ({ id, evidence: evidence[index]!, observation: observations[index]! })),
+  };
+}
+
+function upstreamResult<T>(outcome: UpstreamRequestOutcome): T {
+  if (outcome.kind === "returned") return outcome.result as T;
+  if (outcome.failure.kind === "akuma-not-born") throw new AkumaNotBornError(outcome.failure.id);
+  throw new Error(outcome.failure.diagnostic);
+}
+
+async function attachContract(repo: Repo | undefined, observation: AkumaObservation): Promise<AkumaObservation> {
+  if (repo === undefined || observation.contractId !== undefined) return observation;
+  const contractId = await contractFor(repo, observation.status.id);
+  return contractId === undefined ? observation : { ...observation, contractId };
+}
+
+async function attachWaitContracts(repo: Repo | undefined, result: AkumaWaitResult): Promise<AkumaWaitResult> {
+  return repo === undefined
+    ? result
+    : {
+        ...result,
+        observations: await Promise.all(result.observations.map((observation) => attachContract(repo, observation))),
+      };
+}
+
+async function attachTellContract(repo: Repo | undefined, result: AkumaTellResult): Promise<AkumaTellResult> {
+  return repo === undefined ? result : { ...result, observation: await attachContract(repo, result.observation) };
+}
+
+async function attachKillContracts(repo: Repo | undefined, result: AkumaKillResult): Promise<AkumaKillResult> {
+  return repo === undefined
+    ? result
+    : {
+        ...result,
+        results: await Promise.all(result.results.map(async (entry) => ({
+          ...entry,
+          observation: await attachContract(repo, entry.observation),
+        }))),
+      };
 }
 
 function directAddress(values: Record<string, unknown>): AkumaAddressInput {
@@ -176,38 +306,42 @@ export async function waitAkuma(input: AkumaWaitInput): Promise<AkumaWaitResult>
   if (addressed.ids.length > 1 && completion !== "any" && completion !== "all") {
     throw new TypeError("completion must be any or all when waiting for multiple Akuma");
   }
-  if (completion !== undefined && completion !== "any" && completion !== "all") throw new TypeError("completion must be any or all");
+  if (completion !== undefined && completion !== "any" && completion !== "all") {
+    throw new TypeError("completion must be any or all");
+  }
   const selected = completion ?? "all";
   const timeoutMs = timeout(values.timeoutMs);
-  const deadline = timeoutMs === undefined ? undefined : performance.now() + timeoutMs;
-  for (;;) {
-    const statuses = await observeWaitStatuses(addressed.path, addressed.ids);
-    const settled = statuses.map((status) => status.life !== "running");
-    if ((selected === "any" ? settled.some(Boolean) : settled.every(Boolean))
-      || (deadline !== undefined && performance.now() >= deadline)) {
-      return {
-        completion: selected,
-        observations: await observeAkumaSet(statuses, addressed.path, values.repo as Repo | undefined),
-      };
-    }
-    await delay(deadline === undefined ? 25 : Math.min(25, Math.max(0, deadline - performance.now())));
+  const requests = injectedBodyRequests();
+  if (requests !== null) {
+    const outcome = await requestBodyWait({
+      directory: requests,
+      targets: addressed.ids,
+      completion: selected,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    });
+    return await attachWaitContracts(values.repo as Repo | undefined, upstreamResult<AkumaWaitResult>(outcome));
   }
+  return await executeWaitAkuma({
+    path: addressed.path,
+    ids: addressed.ids,
+    completion: selected,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(values.repo === undefined ? {} : { repo: values.repo as Repo }),
+  });
 }
 
 export async function killAkuma(input: AkumaSetAddressInput): Promise<AkumaKillResult> {
   const addressed = await addressAkumaSet(input);
-  const handles = addressed.ids.map((id) => source(addressed.path).of({ id }));
-  const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
-  const statuses = await Promise.all(addressed.ids.map(async (id) =>
-    await source(addressed.path).of({ id }).status()));
-  const observations = await observeAkumaSet(statuses, addressed.path, input.repo);
-  return {
-    results: addressed.ids.map((id, index) => ({
-      id,
-      evidence: evidence[index]!,
-      observation: observations[index]!,
-    })),
-  };
+  const requests = injectedBodyRequests();
+  if (requests !== null) {
+    const outcome = await requestBodyKill({ directory: requests, targets: addressed.ids });
+    return await attachKillContracts(input.repo, upstreamResult<AkumaKillResult>(outcome));
+  }
+  return await executeKillAkuma({
+    path: addressed.path,
+    ids: addressed.ids,
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
+  });
 }
 
 export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult> {
@@ -219,14 +353,21 @@ export async function tellAkuma(input: AkumaTellInput): Promise<AkumaTellResult>
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const addressed = await addressAkuma(directAddress(values));
-  const handle = source(addressed.path).of({ id: addressed.id });
-  const tell = await handle.tell(values.body);
-  const observation = await observeAkuma(
-    await handle.status(),
-    addressed.path,
-    values.repo as Repo | undefined,
-  );
-  return { akuma: addressed.id, tell, observation };
+  const requests = injectedBodyRequests();
+  if (requests !== null) {
+    const outcome = await requestBodyTell({
+      directory: requests,
+      target: addressed.id,
+      body: values.body,
+    });
+    return await attachTellContract(values.repo as Repo | undefined, upstreamResult<AkumaTellResult>(outcome));
+  }
+  return await executeTellAkuma({
+    path: addressed.path,
+    id: addressed.id,
+    body: values.body,
+    ...(values.repo === undefined ? {} : { repo: values.repo as Repo }),
+  });
 }
 
 export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {

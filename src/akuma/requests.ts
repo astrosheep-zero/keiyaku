@@ -10,7 +10,9 @@ import {
   refuseRequest,
   reserveRequest,
   serveRequest,
+  serveUpstreamRequest,
   voidRequest,
+  type KillEvidence,
   type RequestFact,
   type RequestRecipe,
   type Soul,
@@ -35,7 +37,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 
 type RequestClaimRecipe = Omit<RequestRecipe, "confinement">;
 
-type RequestClaim = Readonly<{
+type CallRequestClaim = Readonly<{
   id: string;
   action: "akuma.call";
   world: string;
@@ -45,12 +47,64 @@ type RequestClaim = Readonly<{
   recipe: RequestClaimRecipe;
 }>;
 
-type StructuralRequestClaim = Omit<RequestClaim, "recipe"> & Readonly<{ recipe: unknown }>;
+type WaitRequestClaim = Readonly<{
+  id: string;
+  action: "akuma.wait";
+  targets: readonly AkuId[];
+  completion: "any" | "all";
+  timeoutMs?: number;
+}>;
+
+type TellRequestClaim = Readonly<{
+  id: string;
+  action: "akuma.tell";
+  target: AkuId;
+  body: string;
+}>;
+
+type KillRequestClaim = Readonly<{
+  id: string;
+  action: "akuma.kill";
+  targets: readonly AkuId[];
+}>;
+
+type RequestClaim = CallRequestClaim | WaitRequestClaim | TellRequestClaim | KillRequestClaim;
+type StructuralRequestClaim = (Omit<CallRequestClaim, "recipe"> & Readonly<{ recipe: unknown }>)
+  | WaitRequestClaim
+  | TellRequestClaim
+  | KillRequestClaim;
+
+type UpstreamRequestFailure =
+  | Readonly<{ kind: "akuma-not-born"; id: AkuId }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+
+export type UpstreamRequestOutcome =
+  | Readonly<{ kind: "returned"; result: unknown }>
+  | Readonly<{ kind: "failed"; failure: UpstreamRequestFailure }>;
+
+export type UpstreamExecutionPort = Readonly<{
+  wait(input: Omit<WaitRequestClaim, "id" | "action"> & Readonly<{ signal: AbortSignal }>): Promise<unknown>;
+  tell(input: Omit<TellRequestClaim, "id" | "action"> & Readonly<{
+    tellId: string;
+    recordedAt: string;
+    signal: AbortSignal;
+  }>): Promise<unknown>;
+  kill(input: Omit<KillRequestClaim, "id" | "action"> & Readonly<{ signal: AbortSignal }>): Promise<Readonly<{
+    result: unknown;
+    service: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[];
+  }>>;
+}>;
 
 type RequestReceipt =
   | Readonly<{ id: string; action: "akuma.call"; state: "served"; child: AkuId }>
-  | Readonly<{ id: string; action: "akuma.call"; state: "refused"; diagnostic: string }>
-  | Readonly<{ id: string; action: "akuma.call"; state: "voided"; evidence: string }>;
+  | Readonly<{
+      id: string;
+      action: Exclude<RequestClaim["action"], "akuma.call">;
+      state: "served";
+      outcome: UpstreamRequestOutcome;
+    }>
+  | Readonly<{ id: string; action: RequestClaim["action"]; state: "refused"; diagnostic: string }>
+  | Readonly<{ id: string; action: RequestClaim["action"]; state: "voided"; evidence: string }>;
 
 export type RequestChildLaunch = Readonly<{
   paths: AkumaPaths;
@@ -122,14 +176,30 @@ function decodeRecipe(value: unknown, cwd: string): RequestRecipe | null {
   }
 }
 
-function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | null {
-  let decoded: unknown;
-  try { decoded = JSON.parse(bytes); } catch { return null; }
-  const value = object(decoded);
-  if (value === null) return null;
-  if (!exactKeys(value, ["action", "id", "payload"]) || value.action !== "akuma.call") return null;
-  const payload = object(value.payload);
-  if (payload === null) return null;
+function canonicalAkuId(value: unknown): AkuId | null {
+  if (typeof value !== "string") return null;
+  try {
+    const id = parseAkuId(value).id;
+    return id === value ? id : null;
+  } catch { return null; }
+}
+
+function canonicalTargets(value: unknown): readonly AkuId[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const ids: AkuId[] = [];
+  for (const item of value) {
+    const id = canonicalAkuId(item);
+    if (id === null) return null;
+    if (ids.length > 0 && Buffer.compare(Buffer.from(ids.at(-1)!), Buffer.from(id)) >= 0) return null;
+    ids.push(id);
+  }
+  return ids;
+}
+
+function decodeCallClaim(
+  id: string,
+  payload: Readonly<Record<string, unknown>>,
+): StructuralRequestClaim | null {
   const expected = [
     "archetype",
     "body",
@@ -137,15 +207,13 @@ function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | nu
     "recipe",
     "world",
   ];
-  if (!exactKeys(payload, expected)) return null;
-  if (value.id !== fileId || typeof value.id !== "string" || !UUID.test(value.id)) return null;
-  if (typeof payload.body !== "string" || !absolute(payload.world)) return null;
+  if (!exactKeys(payload, expected)
+    || typeof payload.body !== "string"
+    || !absolute(payload.world)) return null;
   if (payload.cwd !== undefined && !absolute(payload.cwd)) return null;
-  try {
-    archetypeName(payload.archetype as string);
-  } catch { return null; }
+  try { archetypeName(payload.archetype as string); } catch { return null; }
   return {
-    id: value.id,
+    id,
     action: "akuma.call",
     world: payload.world,
     archetype: payload.archetype as string,
@@ -155,22 +223,120 @@ function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | nu
   };
 }
 
-function decodeReceipt(bytes: string, requestId: string): RequestReceipt | null {
+function decodeWaitClaim(
+  id: string,
+  payload: Readonly<Record<string, unknown>>,
+): WaitRequestClaim | null {
+  const expected = [
+    "completion",
+    "targets",
+    ...(payload.timeoutMs === undefined ? [] : ["timeoutMs"]),
+  ];
+  const targets = canonicalTargets(payload.targets);
+  if (!exactKeys(payload, expected)
+    || targets === null
+    || (payload.completion !== "any" && payload.completion !== "all")) return null;
+  if (payload.timeoutMs !== undefined
+    && (!Number.isSafeInteger(payload.timeoutMs) || (payload.timeoutMs as number) < 0)) return null;
+  return {
+    id,
+    action: "akuma.wait",
+    targets,
+    completion: payload.completion,
+    ...(payload.timeoutMs === undefined ? {} : { timeoutMs: payload.timeoutMs as number }),
+  };
+}
+
+function decodeTellClaim(
+  id: string,
+  payload: Readonly<Record<string, unknown>>,
+): TellRequestClaim | null {
+  const target = canonicalAkuId(payload.target);
+  if (!exactKeys(payload, ["body", "target"])
+    || target === null
+    || typeof payload.body !== "string") return null;
+  return { id, action: "akuma.tell", target, body: payload.body };
+}
+
+function decodeKillClaim(
+  id: string,
+  payload: Readonly<Record<string, unknown>>,
+): KillRequestClaim | null {
+  const targets = canonicalTargets(payload.targets);
+  return exactKeys(payload, ["targets"]) && targets !== null
+    ? { id, action: "akuma.kill", targets }
+    : null;
+}
+
+function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | null {
   let decoded: unknown;
   try { decoded = JSON.parse(bytes); } catch { return null; }
   const value = object(decoded);
-  if (value === null || value.id !== requestId || value.action !== "akuma.call") return null;
-  if (value.state === "served" && exactKeys(value, ["action", "child", "id", "state"])) {
-    try { return { id: requestId, action: "akuma.call", state: "served", child: parseAkuId(value.child as string).id }; }
-    catch { return null; }
+  if (value === null
+    || !exactKeys(value, ["action", "id", "payload"])
+    || value.id !== fileId
+    || typeof value.id !== "string"
+    || !UUID.test(value.id)) return null;
+  const payload = object(value.payload);
+  if (payload === null) return null;
+  if (value.action === "akuma.call") return decodeCallClaim(value.id, payload);
+  if (value.action === "akuma.wait") return decodeWaitClaim(value.id, payload);
+  if (value.action === "akuma.tell") return decodeTellClaim(value.id, payload);
+  if (value.action === "akuma.kill") return decodeKillClaim(value.id, payload);
+  return null;
+}
+
+function decodeUpstreamFailure(value: unknown): UpstreamRequestFailure | null {
+  const failure = object(value);
+  if (failure === null) return null;
+  if (failure.kind === "akuma-not-born" && exactKeys(failure, ["id", "kind"])) {
+    const id = canonicalAkuId(failure.id);
+    return id === null ? null : { kind: failure.kind, id };
   }
-  if (value.state === "refused" && exactKeys(value, ["action", "diagnostic", "id", "state"])
+  if (failure.kind === "failed"
+    && exactKeys(failure, ["diagnostic", "kind"])
+    && typeof failure.diagnostic === "string") {
+    return { kind: failure.kind, diagnostic: failure.diagnostic };
+  }
+  return null;
+}
+
+function decodeUpstreamOutcome(value: unknown): UpstreamRequestOutcome | null {
+  const outcome = object(value);
+  if (outcome?.kind === "returned" && exactKeys(outcome, ["kind", "result"])) {
+    return { kind: outcome.kind, result: outcome.result };
+  }
+  if (outcome?.kind !== "failed" || !exactKeys(outcome, ["failure", "kind"])) return null;
+  const failure = decodeUpstreamFailure(outcome.failure);
+  return failure === null ? null : { kind: outcome.kind, failure };
+}
+
+function decodeReceipt(bytes: string, requestId: string, action: RequestClaim["action"]): RequestReceipt | null {
+  let decoded: unknown;
+  try { decoded = JSON.parse(bytes); } catch { return null; }
+  const value = object(decoded);
+  if (value === null || value.id !== requestId || value.action !== action) return null;
+  if (action === "akuma.call"
+    && value.state === "served"
+    && exactKeys(value, ["action", "child", "id", "state"])) {
+    const child = canonicalAkuId(value.child);
+    return child === null ? null : { id: requestId, action, state: value.state, child };
+  }
+  if (action !== "akuma.call"
+    && value.state === "served"
+    && exactKeys(value, ["action", "id", "outcome", "state"])) {
+    const outcome = decodeUpstreamOutcome(value.outcome);
+    return outcome === null ? null : { id: requestId, action, state: value.state, outcome };
+  }
+  if (value.state === "refused"
+    && exactKeys(value, ["action", "diagnostic", "id", "state"])
     && typeof value.diagnostic === "string") {
-    return { id: requestId, action: "akuma.call", state: "refused", diagnostic: value.diagnostic };
+    return { id: requestId, action, state: value.state, diagnostic: value.diagnostic };
   }
-  if (value.state === "voided" && exactKeys(value, ["action", "evidence", "id", "state"])
+  if (value.state === "voided"
+    && exactKeys(value, ["action", "evidence", "id", "state"])
     && typeof value.evidence === "string") {
-    return { id: requestId, action: "akuma.call", state: "voided", evidence: value.evidence };
+    return { id: requestId, action, state: value.state, evidence: value.evidence };
   }
   return null;
 }
@@ -184,7 +350,9 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 }
 
 function receiptFor(fact: RequestFact): RequestReceipt | null {
-  if (fact.state === "served") return { id: fact.id, action: fact.action, state: fact.state, child: fact.child };
+  if (fact.action === "akuma.call" && fact.state === "served") {
+    return { id: fact.id, action: fact.action, state: fact.state, child: fact.child };
+  }
   if (fact.state === "refused") {
     return { id: fact.id, action: fact.action, state: fact.state, diagnostic: fact.diagnostic };
   }
@@ -192,8 +360,16 @@ function receiptFor(fact: RequestFact): RequestReceipt | null {
   return null;
 }
 
-async function projectReceipt(directory: string, fact: RequestFact): Promise<void> {
-  const receipt = receiptFor(fact);
+async function projectReceipt(
+  directory: string,
+  fact: RequestFact,
+  outcome?: UpstreamRequestOutcome,
+): Promise<void> {
+  const receipt = outcome === undefined
+    ? receiptFor(fact)
+    : fact.action === "akuma.call" || fact.state !== "served"
+      ? null
+      : { id: fact.id, action: fact.action, state: fact.state, outcome } as RequestReceipt;
   if (receipt !== null) await atomicJson(join(directory, `${fact.id}.receipt.json`), receipt);
 }
 
@@ -204,44 +380,95 @@ export function injectedBodyRequests(): string | null {
   return directory;
 }
 
-export async function requestBodyCall(
-  input: Omit<RequestClaim, "action"> & Readonly<{ directory: string }>,
-): Promise<AkuId> {
-  await atomicJson(join(input.directory, `${input.id}.request.json`), {
-    id: input.id,
-    action: "akuma.call",
-    payload: {
-      world: input.world,
-      archetype: input.archetype,
-      body: input.body,
-      recipe: input.recipe,
-      ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-    },
-  });
-  const receiptPath = join(input.directory, `${input.id}.receipt.json`);
+async function requestBody(input: Readonly<{ directory: string; claim: RequestClaim }>): Promise<RequestReceipt> {
+  const { id, action, ...payload } = input.claim;
+  await atomicJson(join(input.directory, `${id}.request.json`), { id, action, payload });
+  const receiptPath = join(input.directory, `${id}.receipt.json`);
   for (;;) {
     try {
-      const receipt = decodeReceipt(await readFile(receiptPath, "utf8"), input.id);
-      if (receipt === null) throw new Error(`Akuma body request ${input.id} has an invalid receipt`);
-      if (receipt.state === "served") return receipt.child;
+      const receipt = decodeReceipt(await readFile(receiptPath, "utf8"), id, action);
+      if (receipt === null) throw new Error(`Akuma body request ${id} has an invalid receipt`);
       if (receipt.state === "refused") throw new AkumaBodyRequestError("refused", receipt.diagnostic);
-      throw new AkumaBodyRequestError("voided", receipt.evidence);
+      if (receipt.state === "voided") throw new AkumaBodyRequestError("voided", receipt.evidence);
+      return receipt;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (!await access(input.directory).then(() => true, () => false)) {
+      throw new AkumaBodyRequestError("voided", "parent request channel closed before a receipt");
     }
     await abortableDelay(POLL_MS);
   }
 }
 
-async function serveClaim(input: Readonly<{
+export async function requestBodyCall(
+  input: Omit<CallRequestClaim, "action"> & Readonly<{ directory: string }>,
+): Promise<AkuId> {
+  const { directory, ...claim } = input;
+  const receipt = await requestBody({ directory, claim: { ...claim, action: "akuma.call" } });
+  if (receipt.action !== "akuma.call" || receipt.state !== "served") {
+    throw new Error(`Akuma body request ${input.id} returned the wrong action`);
+  }
+  return receipt.child;
+}
+
+async function requestUpstream(
+  directory: string,
+  claim: WaitRequestClaim | TellRequestClaim | KillRequestClaim,
+): Promise<UpstreamRequestOutcome> {
+  const receipt = await requestBody({ directory, claim });
+  if (receipt.action === "akuma.call" || receipt.state !== "served") {
+    throw new Error(`Akuma body request ${claim.id} returned the wrong action`);
+  }
+  return receipt.outcome;
+}
+
+export async function requestBodyWait(
+  input: Omit<WaitRequestClaim, "action" | "id"> & Readonly<{
+    directory: string;
+    id?: string;
+  }>,
+): Promise<UpstreamRequestOutcome> {
+  const { directory, id = randomUUID(), ...claim } = input;
+  return await requestUpstream(directory, { ...claim, id, action: "akuma.wait" });
+}
+
+export async function requestBodyTell(
+  input: Omit<TellRequestClaim, "action" | "id"> & Readonly<{
+    directory: string;
+    id?: string;
+  }>,
+): Promise<UpstreamRequestOutcome> {
+  const { directory, id = randomUUID(), ...claim } = input;
+  return await requestUpstream(directory, { ...claim, id, action: "akuma.tell" });
+}
+
+export async function requestBodyKill(
+  input: Omit<KillRequestClaim, "action" | "id"> & Readonly<{
+    directory: string;
+    id?: string;
+  }>,
+): Promise<UpstreamRequestOutcome> {
+  const { directory, id = randomUUID(), ...claim } = input;
+  return await requestUpstream(directory, { ...claim, id, action: "akuma.kill" });
+}
+
+type ServeRequestInput = Readonly<{
   directory: string;
   claim: StructuralRequestClaim;
   paths: AkumaPaths;
   parent: Soul;
   now(): string;
   spawn(launch: RequestChildLaunch): Promise<void>;
+  upstream?: UpstreamExecutionPort;
   signal: AbortSignal;
-}>): Promise<void> {
+}>;
+
+async function serveCallClaim(
+  input: ServeRequestInput & Readonly<{
+    claim: Extract<StructuralRequestClaim, { action: "akuma.call" }>;
+  }>,
+): Promise<void> {
   input.signal.throwIfAborted();
   const cwd = input.claim.cwd ?? input.parent.cwd;
   const recipe = decodeRecipe(input.claim.recipe, cwd);
@@ -252,11 +479,17 @@ async function serveClaim(input: Readonly<{
     if (!input.signal.aborted) await projectReceipt(input.directory, fact);
     return;
   }
-  if (fact.state !== "admitted") throw new Error(`Akuma request ${fact.id} cannot be replayed from ${fact.state}`);
-  const request = fact;
+  if (fact.action !== "akuma.call" || fact.state !== "admitted") {
+    throw new Error(`Akuma request ${fact.id} cannot be replayed from ${fact.state}`);
+  }
+  const request = fact as Extract<RequestFact, { action: "akuma.call"; state: "admitted" }>;
   const servingWorld = worldRootForAkumaPaths(input.paths);
   if (request.world !== servingWorld) {
-    fact = await refuseRequest(input.paths, request.id, `request world ${request.world} does not match ${servingWorld}`);
+    fact = await refuseRequest(
+      input.paths,
+      request.id,
+      `request world ${request.world} does not match ${servingWorld}`,
+    );
     await projectReceipt(input.directory, fact);
     return;
   }
@@ -300,6 +533,91 @@ async function serveClaim(input: Readonly<{
   await projectReceipt(input.directory, fact);
 }
 
+function upstreamFailure(error: unknown): UpstreamRequestFailure {
+  const value = object(error);
+  if (value?.kind === "akuma-not-born") {
+    const id = canonicalAkuId(value.id);
+    if (id !== null) return { kind: "akuma-not-born", id };
+  }
+  return { kind: "failed", diagnostic: diagnostic(error) };
+}
+
+async function serveUpstreamClaim(
+  input: ServeRequestInput & Readonly<{
+    claim: Exclude<StructuralRequestClaim, { action: "akuma.call" }>;
+  }>,
+): Promise<void> {
+  input.signal.throwIfAborted();
+  let fact = await admitRequest(input.paths, { ...input.claim, admittedAt: input.now() });
+  const existing = receiptFor(fact);
+  if (existing !== null) {
+    if (!input.signal.aborted) await projectReceipt(input.directory, fact);
+    return;
+  }
+  if (fact.state === "served") {
+    await projectReceipt(input.directory, fact, {
+      kind: "failed",
+      failure: { kind: "failed", diagnostic: "served request receipt is no longer available" },
+    });
+    return;
+  }
+  if (fact.state !== "admitted" || fact.action === "akuma.call") {
+    throw new Error(`Akuma request ${fact.id} cannot be served from ${fact.state}`);
+  }
+  const request = fact as Exclude<
+    Extract<RequestFact, { state: "admitted" }>,
+    Extract<RequestFact, { action: "akuma.call" }>
+  >;
+
+  let outcome: UpstreamRequestOutcome;
+  let killService: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[] = [];
+  try {
+    if (input.upstream === undefined) throw new Error("upstream execution port is unavailable");
+    let result: unknown;
+    if (request.action === "akuma.wait") {
+      const waitRequest = request as Extract<RequestFact, { action: "akuma.wait"; state: "admitted" }>;
+      result = await input.upstream.wait({
+        targets: waitRequest.targets,
+        completion: waitRequest.completion,
+        ...(waitRequest.timeoutMs === undefined ? {} : { timeoutMs: waitRequest.timeoutMs }),
+        signal: input.signal,
+      });
+    } else if (request.action === "akuma.tell") {
+      const tellRequest = request as Extract<RequestFact, { action: "akuma.tell"; state: "admitted" }>;
+      result = await input.upstream.tell({
+        target: tellRequest.target,
+        body: tellRequest.body,
+        tellId: tellRequest.id,
+        recordedAt: tellRequest.admittedAt,
+        signal: input.signal,
+      });
+    } else {
+      const killRequest = request as Extract<RequestFact, { action: "akuma.kill"; state: "admitted" }>;
+      const served = await input.upstream.kill({ targets: killRequest.targets, signal: input.signal });
+      killService = served.service;
+      result = served.result;
+    }
+    outcome = { kind: "returned", result };
+  } catch (error) {
+    if (input.signal.aborted) return;
+    outcome = { kind: "failed", failure: upstreamFailure(error) };
+  }
+  input.signal.throwIfAborted();
+  const service = request.action === "akuma.wait"
+    ? { action: request.action } as const
+    : request.action === "akuma.tell"
+      ? { action: request.action, target: request.target, tellId: request.id } as const
+      : { action: request.action, results: killService } as const;
+  fact = await serveUpstreamRequest(input.paths, request.id, service);
+  await projectReceipt(input.directory, fact, outcome);
+}
+
+async function serveClaim(input: ServeRequestInput): Promise<void> {
+  return input.claim.action === "akuma.call"
+    ? await serveCallClaim({ ...input, claim: input.claim })
+    : await serveUpstreamClaim({ ...input, claim: input.claim });
+}
+
 async function requestFiles(directory: string): Promise<readonly string[]> {
   try {
     return (await readdir(directory))
@@ -325,6 +643,7 @@ export class BodyRequestPump {
     bodySequence: number;
     now(): string;
     spawn(launch: RequestChildLaunch): Promise<void>;
+    upstream?: UpstreamExecutionPort;
     signal: AbortSignal;
   }>) {
     this.directory = join(input.paths.directory, "requests", String(input.bodySequence));
@@ -344,6 +663,7 @@ export class BodyRequestPump {
     bodySequence: number;
     now(): string;
     spawn(launch: RequestChildLaunch): Promise<void>;
+    upstream?: UpstreamExecutionPort;
     signal: AbortSignal;
   }>): Promise<BodyRequestPump> {
     const directory = join(input.paths.directory, "requests", String(input.bodySequence));
@@ -391,7 +711,12 @@ function matchingRequestOrigin(soul: Soul, parent: AkuId, requestId: string): bo
     && soul.origin.requestId === requestId;
 }
 
-async function settleObservedSoul(paths: AkumaPaths, parent: Soul, request: Extract<RequestFact, { state: "reserved" }>, soul: Soul): Promise<void> {
+async function settleObservedSoul(
+  paths: AkumaPaths,
+  parent: Soul,
+  request: Extract<RequestFact, { state: "reserved" }>,
+  soul: Soul,
+): Promise<void> {
   if (matchingRequestOrigin(soul, parent.id, request.id)) await serveRequest(paths, request.id, request.child);
   else await voidRequest(paths, request.id, "reserved child origin does not match the request");
 }
@@ -445,7 +770,8 @@ export async function settleBodyRequests(
     signal?.throwIfAborted();
     if (request.state === "admitted") {
       await voidRequest(paths, request.id, "body died before serving the request");
-    } else if (request.state === "reserved" && !await settleReserved(paths, parent, request, now, signal)) pending = true;
+    } else if (request.state === "reserved"
+      && !await settleReserved(paths, parent, request, now, signal)) pending = true;
   }
   return pending ? "pending" : "settled";
 }

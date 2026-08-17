@@ -255,6 +255,11 @@ diagnostic is unproved and reports `unavailable`. `untidy` reports a free leash
 without the required clean Body end. `unavailable` also covers a changed or
 otherwise unprovable target. None authorizes external signaling.
 
+Forwarded wait, tell, and kill enter these same local executors after the parent
+Heart's single permission decision. Tell uses the upstream request id as TellId;
+kill retains the lifecycle evidence above; wait remains observation only. The
+forwarding request never becomes a second verb implementation or lifecycle judge.
+
 ## Fork
 
 `fork({ at: historyId })` requires one exact retained answered-turn match.
