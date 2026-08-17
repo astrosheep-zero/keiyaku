@@ -1,5 +1,5 @@
 import {
-  isTaskRelationPredicateField,
+  TASK_RELATION_PREDICATE_FIELDS,
   type TaskId,
   type TaskPriority,
   type TaskQueryExpression,
@@ -134,13 +134,14 @@ function parseRelationPredicate(
   operator: Token,
   value: Token,
 ): TaskQueryPredicate {
-  if (!isTaskRelationPredicateField(field.value)) {
+  const relationField = TASK_RELATION_PREDICATE_FIELDS.find((candidate) => candidate === field.value);
+  if (relationField === undefined) {
     syntax(`unknown query field ${JSON.stringify(field.value)}`, field.offset);
   }
   return {
-    field: field.value,
-    operator: equalityOperator(operator, field.value),
-    value: canonicalTaskId(value, field.value),
+    field: relationField,
+    operator: equalityOperator(operator, relationField),
+    value: canonicalTaskId(value, relationField),
   };
 }
 
@@ -213,9 +214,7 @@ class Parser {
       case "blocked": return parseBooleanPredicate("blocked", operator, value);
       case "created": return parseTimestampPredicate("created", operator, value);
       case "updated": return parseTimestampPredicate("updated", operator, value);
-      default:
-        if (isTaskRelationPredicateField(field.value)) return parseRelationPredicate(field, operator, value);
-        return syntax(`unknown query field ${JSON.stringify(field.value)}`, field.offset);
+      default: return parseRelationPredicate(field, operator, value);
     }
   }
 }

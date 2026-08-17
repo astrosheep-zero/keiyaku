@@ -14,7 +14,7 @@ import {
 } from "./operations.js";
 import { readBoard } from "./store.js";
 import {
-  isTaskRelationPredicateField, isValidTaskLimit, normalizeTaskQuery, TASK_RELATION_PREDICATE_FIELDS,
+  isValidTaskLimit, normalizeTaskQuery, TASK_RELATION_PREDICATE_FIELDS,
   type TaskPage, type TaskQueryExpression, type TaskQueryPredicate, type TaskQueryRow, type TaskQuerySort,
   type TaskRelationPredicateField, MAX_TASK_LIMIT, DEFAULT_TASK_LIMIT,
 } from "./query.js";
@@ -32,7 +32,7 @@ export type {
   TaskTreeNode, TaskUpdateResult, TaskView, UpdateTaskInput, TaskPage, TaskQueryExpression, TaskQueryPredicate,
   TaskQueryRow, TaskQuerySort, TaskRelationPredicateField,
 };
-export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS, isTaskRelationPredicateField };
+export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS };
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object`);

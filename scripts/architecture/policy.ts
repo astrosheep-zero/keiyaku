@@ -803,7 +803,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "TaskQueryExpression",
           "TaskQueryPredicate",
           "TaskState",
-          "isTaskRelationPredicateField",
+          "TASK_RELATION_PREDICATE_FIELDS",
         ]),
         any("task/query.ts", ["MAX_TASK_LIMIT", "normalizeTaskQuery"]),
       ],
