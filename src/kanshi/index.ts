@@ -1,4 +1,4 @@
-export { kanshi } from "./read.js";
+export { kanshi, observeKanshi } from "./read.js";
 export { selectKanshi, selectRegion } from "./select.js";
 
 export type { KanshiInput } from "./read.js";

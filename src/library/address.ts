@@ -12,7 +12,7 @@ import {
   type AkumaGlob,
 } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
-import type { KanshiReport, Section } from "../kanshi/report.js";
+import type { KanshiReport, Section } from "../kanshi/index.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 

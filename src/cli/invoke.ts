@@ -14,8 +14,13 @@ import {
   type Settings,
   type WorktreeHooks,
 } from "../index.js";
-import { kanshi, selectKanshi, selectRegion, type KanshiRegionSelection } from "../kanshi/index.js";
-import { observeKanshi } from "../kanshi/read.js";
+import {
+  kanshi,
+  observeKanshi,
+  selectKanshi,
+  selectRegion,
+  type KanshiRegionSelection,
+} from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
 import {
   acceptedAbandon,
