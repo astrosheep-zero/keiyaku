@@ -8,7 +8,6 @@ import {
   type Session,
   type TurnResult,
 } from "../../provider.js";
-import { providerLaunchEnv } from "../../provider-recipe.js";
 import { EMPTY_ACP_EVENT_STATE, flushAcpEvents, mapAcpUpdate } from "./events.js";
 
 export type AcpStartInput = Parameters<ProviderAdapter["start"]>[0]
@@ -148,7 +147,7 @@ export async function startAcpSession(
   const child = (dependencies.spawnProcess ?? spawnStdioProcess)({
     argv: launch.argv,
     cwd: input.cwd,
-    env: providerLaunchEnv(globalThis.process.env, launch.env),
+    env: { ...globalThis.process.env, ...launch.env },
   });
   let sessionId: string | undefined;
   let turn!: ReturnType<typeof createAcpTurn>;

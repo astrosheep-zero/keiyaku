@@ -15,7 +15,7 @@ import {
   type AgentEvent,
   type TurnResult,
 } from "../src/akuma/provider.js";
-import { decodeReadonlyRestraint, KEIYAKU_ACTOR_ID_ENV, providerLaunchEnv } from "../src/akuma/provider-recipe.js";
+import { decodeReadonlyRestraint } from "../src/akuma/provider-recipe.js";
 import {
   CLAUDE_MESSAGE_DISPOSITIONS,
   CLAUDE_SYSTEM_DISPOSITIONS,
@@ -1692,7 +1692,7 @@ function fakeCodex(
     "const fs=require('node:fs');",
     "const readline=require('node:readline');",
     `const log=${JSON.stringify(log)};`,
-    `fs.writeFileSync(${JSON.stringify(environment)},JSON.stringify({requests:process.env.AKUMA_REQUESTS||'',literal:process.env.SETTINGS_LITERAL||'',actor:process.env.${KEIYAKU_ACTOR_ID_ENV}||''}));`,
+    `fs.writeFileSync(${JSON.stringify(environment)},JSON.stringify({requests:process.env.AKUMA_REQUESTS||'',literal:process.env.SETTINGS_LITERAL||'',actor:process.env.KEIYAKU_ACTOR_ID||''}));`,
     `const mode=${JSON.stringify(mode)};`,
     "const send=(value)=>process.stdout.write(JSON.stringify(value)+'\\n');",
     "const reply=(message,result)=>send({id:message.id,result});",
@@ -2205,7 +2205,6 @@ test("Claude execution overlays literal env and selects its executable", async (
   assert.equal(options.pathToClaudeCodeExecutable, "/custom/claude");
   assert.equal(options.env.SETTINGS_LITERAL, "yes");
   assert.equal(options.env.PATH, process.env.PATH);
-  assert.equal(options.env[KEIYAKU_ACTOR_ID_ENV], process.env[KEIYAKU_ACTOR_ID_ENV]);
 });
 
 test("Claude start consumes its admitted snapshot without a second admission", async () => {
@@ -2570,61 +2569,6 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     });
     assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings", actor: "" });
   } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("provider launch env keeps reserved KEIYAKU_ACTOR_ID over configured settings", () => {
-  const inherited = { PATH: "/bin", [KEIYAKU_ACTOR_ID_ENV]: "aku/worker/abcd1234", EXTRA: "keep" };
-  const merged = providerLaunchEnv(inherited, {
-    SETTINGS_LITERAL: "from-settings",
-    [KEIYAKU_ACTOR_ID_ENV]: "from-settings",
-  });
-  assert.equal(merged[KEIYAKU_ACTOR_ID_ENV], "aku/worker/abcd1234");
-  assert.equal(merged.SETTINGS_LITERAL, "from-settings");
-  assert.equal(merged.PATH, "/bin");
-  assert.equal(inherited[KEIYAKU_ACTOR_ID_ENV], "aku/worker/abcd1234");
-  assert.equal(providerLaunchEnv({ PATH: "/bin" }, { [KEIYAKU_ACTOR_ID_ENV]: "from-settings" })[KEIYAKU_ACTOR_ID_ENV], "from-settings");
-});
-
-test("Codex start, resume, and fork observe reserved KEIYAKU_ACTOR_ID over provider settings", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-actor-env-"));
-  const previous = process.env[KEIYAKU_ACTOR_ID_ENV];
-  const soul = "aku/worker/abcd1234";
-  process.env[KEIYAKU_ACTOR_ID_ENV] = soul;
-  try {
-    const fake = fakeCodex(root);
-    const provider = createCodexAppServerProvider({
-      name: "configured",
-      kind: "codex-app-server",
-      executable: fake.executable,
-      env: { SETTINGS_LITERAL: "from-settings", [KEIYAKU_ACTOR_ID_ENV]: "from-settings" },
-    });
-    const drive = async (session: Parameters<typeof provider.start>[0]["session"]) => {
-      const started = await (session.kind === "fresh" ? provider.start : provider.resume!)({
-        body: "build",
-        launchTells: [],
-        cwd: root,
-        options: {},
-        session,
-      });
-      for await (const _event of started.events) { /* drain */ }
-      assert.equal((await started.completion).kind, "answered");
-    };
-    await drive({ kind: "fresh" });
-    assert.deepEqual(fake.requestEnvironment(), { requests: "", literal: "from-settings", actor: soul });
-    await drive({ kind: "resume", coordinate: { sessionId: "thread-source" } });
-    assert.deepEqual(fake.requestEnvironment(), { requests: "", literal: "from-settings", actor: soul });
-    assert.deepEqual(await provider.fork!({
-      session: { sessionId: "thread-source" },
-      at: "turn-exact",
-      cwd: root,
-    }), { session: { sessionId: "thread-child" } });
-    assert.deepEqual(fake.requestEnvironment(), { requests: "", literal: "from-settings", actor: soul });
-    assert.equal(process.env[KEIYAKU_ACTOR_ID_ENV], soul);
-  } finally {
-    if (previous === undefined) delete process.env[KEIYAKU_ACTOR_ID_ENV];
-    else process.env[KEIYAKU_ACTOR_ID_ENV] = previous;
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test("Codex readonly admits native enforcement and requests the native read-only sandbox", async () => {
