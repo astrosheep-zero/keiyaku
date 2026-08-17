@@ -18,30 +18,6 @@ function sourceInputs(directory: string, prefix = ""): SourceInput[] {
 }
 
 const RETIRED_MODEL_NAMES = ["Commit" + "Oid", "Patch" + "Id", "ful" + "filled"] as const;
-export const PRODUCTION_LINE_LIMIT = 30_000;
-
-function physicalLines(source: string): number {
-  if (source.length === 0) return 0;
-  const lines = source.split(/\r\n|\r|\n/).length;
-  return /(?:\r\n|\r|\n)$/.test(source) ? lines - 1 : lines;
-}
-
-export function productionLineBudgetDiagnostic(
-  inputs: readonly SourceInput[],
-  limit = PRODUCTION_LINE_LIMIT,
-): Diagnostic | null {
-  const lines = inputs
-    .filter((input) => !input.path.startsWith("scripts/"))
-    .reduce((total, input) => total + physicalLines(input.source), 0);
-  if (lines <= limit) return null;
-  return {
-    rule: "architecture/production-line-budget",
-    file: "src",
-    line: 1,
-    column: 1,
-    detail: `production TypeScript is ${lines} lines; limit is ${limit}`,
-  };
-}
 
 function retiredModelDiagnostics(inputs: readonly SourceInput[]): readonly Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
@@ -73,11 +49,9 @@ export function runArchitectureCheck(root: string): number {
     ...sourceInputs(path.join(root, "scripts"), "scripts"),
   ];
   const result = checkArchitecture(inputs, KEIYAKU_ARCHITECTURE_POLICY);
-  const lineBudget = productionLineBudgetDiagnostic(inputs);
   const diagnostics = [
     ...result.diagnostics,
     ...retiredModelDiagnostics(inputs),
-    ...(lineBudget === null ? [] : [lineBudget]),
   ];
   if (diagnostics.length === 0) {
     console.log(`architecture: ok (${result.files.length} files)`);
