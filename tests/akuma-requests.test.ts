@@ -16,7 +16,7 @@ import {
   type Soul,
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
-import { publishAkuma } from "../src/akuma/publication.js";
+import { BIRTH_TIMEOUT_MS, publishAkuma } from "../src/akuma/publication.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import {
   AkumaBodyRequestError,
@@ -27,6 +27,10 @@ import {
 import { World } from "../src/world.js";
 
 async function akumaAt(root: string) { return Akuma.of(await World.at(root)); }
+
+test("ordinary Akuma birth allows 30 seconds", () => {
+  assert.equal(BIRTH_TIMEOUT_MS, 30_000);
+});
 
 async function fixture() {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-")));

@@ -57,6 +57,18 @@ function renderHelp(coordinate: CliHelpCoordinate): string {
   }
 }
 
+export function invocationStart(command: ParsedCommand): string | undefined {
+  if (command.output === "json") return undefined;
+  switch (command.command) {
+    case "bind": return "⧖ preparing keiyaku";
+    case "deliver": return "⧖ delivering";
+    case "audit": return "⧖ auditing";
+    case "reconcile": return "⧖ reconciling";
+    case "install": return "⧖ installing skills";
+    default: return undefined;
+  }
+}
+
 function writeGuidance(command: ParsedCommand, result: Extract<InvocationResult, { kind: "guidance" }>): number {
   if (command.output === "json") process.stdout.write(`${JSON.stringify({ contract: result.contract, guidance: result.guidance })}\n`);
   else process.stdout.write(result.guidance.endsWith("\n") ? result.guidance : `${result.guidance}\n`);
@@ -121,7 +133,11 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     }
     output = parsed.command.output;
     const { invoke } = await import("./invoke.js");
-    const result = await invoke(parsed, { cwd: process.cwd() });
+    const start = invocationStart(parsed.command);
+    const result = await invoke(parsed, {
+      cwd: process.cwd(),
+      ...(start === undefined ? {} : { onOperationStart: () => { process.stderr.write(`${start}\n`); } }),
+    });
     return writeResult(parsed.command, result);
   } catch (error) {
     if (error instanceof AkumaWorldScopeError) return writeWorldScopeRefusal(error, output);

@@ -75,6 +75,17 @@ carry the decision-relevant product facts. `--json` is an explicit secondary
 projection for debugging or non-interactive bulk scripting; its availability
 never excuses missing, opaque, or degraded text output.
 
+Before opaque work that may run external commands or substantial Git work, a
+text invocation writes exactly one start line to stderr after selected stdin is
+fully acquired and before the operation begins. The closed vocabulary is
+`⧖ preparing keiyaku` for bind, `⧖ delivering` for deliver, `⧖ auditing` for
+audit, `⧖ reconciling` for reconcile, and `⧖ installing skills` for install.
+This line states only that the named work has begun; it is not a result object,
+progress percentage, internal-phase report, or durable fact. Explicit waiting
+and Akuma observation commands do not repeat their already-visible intent.
+`--json` writes no start line, so automation receives only the final JSON value
+and diagnostics.
+
 ## Shared Scanner Grammar
 
 Text surfaces share a small scanner grammar, not a shared layout. Renderer words
@@ -113,7 +124,7 @@ the KEIYAKU, TASK, and FLEET apertures and plumb-line hierarchy owned by
 [kanshi.md](kanshi.md). FLEET is never an akuma count unit. Other commands
 start with their operation identity and do not receive a banner.
 
-Every invocation renders exactly one plain result object:
+Every invocation renders exactly one final plain result object on stdout:
 
 | Kind | Product content | Exit |
 | --- | --- | --- |

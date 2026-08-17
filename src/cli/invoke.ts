@@ -33,6 +33,7 @@ type InvokeRuntime = Readonly<{
   environment?: NodeJS.ProcessEnv;
   readStdin?: () => Promise<string>;
   actor?: ActorId;
+  onOperationStart?: () => void;
 }>;
 
 type ExistingCommand = Exclude<ParsedCommand, ParsedAkumaCommand | { command: "bind" | "status" | "show" | "ls" | "reconcile" | "settings" | "region" | "task" | "install" }>;
@@ -520,12 +521,17 @@ export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime
   try {
     const command = invocation.command;
     assertExplicitRepoUse(command, invocation.repo);
-    if (command.command === "install") return installHarnesses(command.harnesses, runtime.environment ?? process.env);
+    if (command.command === "install") {
+      runtime.onOperationStart?.();
+      return installHarnesses(command.harnesses, runtime.environment ?? process.env);
+    }
+    const acquiredRuntime = await withAcquiredStdin(command, withResolvedTaskActor(command, runtime));
+    runtime.onOperationStart?.();
     return await invokeParsed({
       ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
       command,
-    }, await withAcquiredStdin(command, withResolvedTaskActor(command, runtime)));
+    }, acquiredRuntime);
   } catch (error) {
     if (error instanceof CliUsageError && error.projection === undefined) {
       throw new CliUsageError(error.diagnostic, renderCommandUsage(invocation.command));

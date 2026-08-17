@@ -124,13 +124,14 @@ spawned.
 
 Birth order: create directory -> spawn body -> body takes the leash and, in
 the same claim, checks for a seal (sealed -> self-abort) -> soul row written
-under that claim -> visible. `call()` returns only after birth. A Body that
-fails before writing Soul seals the directory under the leash with its exact
-diagnostic; the caller observes that seal and reports the same spawn failure.
-The remaining window between create and claim is owned by `call()` while it
-lives: on timeout it takes the leash itself if it can, seals with
-`call-timeout` evidence, and reports the timeout. Process output never decides
-whether the Body failed or what evidence the Seal contains.
+under that claim -> visible. The ordinary birth timeout is 30 seconds, and
+`call()` returns only after birth. A Body that fails before writing Soul seals
+the directory under the leash with its exact diagnostic; the caller observes
+that seal and reports the same spawn failure. The remaining window between
+create and claim is owned by `call()` while it lives: on timeout it takes the
+leash itself if it can, seals with `call-timeout` evidence, and reports the
+timeout. Process output never decides whether the Body failed or what evidence
+the Seal contains.
 If the caller crashes inside the window, the directory is unborn until someone
 pays the leash to seal it. Nothing sweeps blind; nothing adjudicates by age.
 
