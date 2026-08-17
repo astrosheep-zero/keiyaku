@@ -81,6 +81,7 @@ async function invokeHistory(command: Extract<ParsedAkumaCommand, { command: "hi
     ...(input.repo === undefined ? {} : { repo: input.repo }),
     ...(command.before === undefined ? {} : { before: command.before }),
     ...(command.since === undefined ? {} : { since: command.since }),
+    ...(command.limit === undefined ? {} : { limit: command.limit }),
     last: command.last,
   });
   return {

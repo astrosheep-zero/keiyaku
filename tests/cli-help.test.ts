@@ -47,7 +47,7 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     "       keiyaku ls kei/ [--json]",
     "       keiyaku ls aku/ [--json]",
     "       keiyaku ls aku/<akuma>/ [--json]",
-    "       keiyaku ls aku/*/* [--json]",
+    "       keiyaku ls \"aku/*/*\" [--json]",
   ].join("\n"));
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
   assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId> \[--json\]/u);
@@ -82,6 +82,7 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     "Give <prompt> as one argument, or use final - to read stdin.",
     "--interrupt ends the current Body before recording the prompt and waking its successor.",
   ].join("\n"));
+  assert.match(renderAkumaHelp("history"), /\[--limit <count>\] \[--last\]/u);
   assert.doesNotMatch(
     [renderRootHelp(), renderContractHelp("ls"), renderAkumaHelp("call"), renderAkumaHelp("wait")].join("\n"),
     /archetype/iu,

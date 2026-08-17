@@ -22,7 +22,7 @@ export type ParsedAkumaCommand = Output & (
   | Readonly<{ command: "kill"; akuma: readonly string[] }>
   | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
   | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
-  | (Readonly<{ command: "history"; last: boolean; before?: number; since?: number }> & Addressed)
+  | (Readonly<{ command: "history"; last: boolean; before?: number; since?: number; limit?: number }> & Addressed)
   | (Readonly<{ command: "fork"; at: string }> & Addressed)
 );
 
@@ -79,8 +79,8 @@ const AKUMA_COMMAND_SPECS = {
   history: {
     arity: 1,
     stdin: false,
-    flags: { before: "value", since: "value", last: "boolean", json: "boolean" },
-    usage: "history <aku/...> [--before <index> | --since <index> | --last] [--json]",
+    flags: { before: "value", since: "value", limit: "value", last: "boolean", json: "boolean" },
+    usage: "history <aku/...> [--before <index> | --since <index>] [--limit <count>] [--last] [--json]",
     purpose: "Read the persistent execution history or the last answer.",
   },
   fork: {
@@ -234,15 +234,18 @@ function parseHistory(
   fail: (message: string) => never,
 ): ParsedAkumaCommand {
   if (flags.before !== undefined && flags.since !== undefined) fail("history --before and --since are mutually exclusive");
-  if (flags.last === true && (flags.before !== undefined || flags.since !== undefined)) {
-    fail("history --last cannot be combined with --before or --since");
+  if (flags.last === true && (flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined)) {
+    fail("history --last cannot be combined with --before, --since, or --limit");
   }
+  const limit = flags.limit === undefined ? undefined : positiveIndex(flags.limit, "--limit", fail);
+  if (limit !== undefined && limit > 5_000) fail("--limit must be no greater than 5000");
   return {
     command: "history",
     akuma,
     last: flags.last === true,
     ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
     ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),
+    ...(limit === undefined ? {} : { limit }),
     output,
   };
 }

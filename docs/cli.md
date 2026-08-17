@@ -103,7 +103,7 @@ ls task/ [--json]
 ls kei/ [--json]
 ls aku/ [--json]
 ls aku/<akuma>/ [--json]
-ls aku/*/* [--json]
+ls "aku/*/*" [--json]
 audit [<contract>|@<contract>] [--include-dirty] [--diff] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
@@ -112,7 +112,7 @@ install <codex|claude|opencode|pi> [--json]
 call <akuma-name> [--contract <kei/...>] [--alias @name] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
 wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]
 tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)
-history <aku/...|@alias> [--before <index> | --since <index> | --last] [--json]
+history <aku/...|@alias> [--before <index> | --since <index>] [--limit <count>] [--last] [--json]
 fork <aku/...|@alias> --at <historyId> [--json]
 kill <akuma-selector>... [--json]
 ```
@@ -323,7 +323,7 @@ identities, Alias selectors, and other paths are usage errors.
 `ls task/` lists Task rows from one complete Task-owned catalog snapshot. `ls kei/` lists Contract rows whose persisted
 identities remain `kei/...`, and `ls aku/` lists Akuma configurations with
 name, optional model, and complete description. `ls aku/<akuma>/` lists
-compact instances of that named Akuma, while `ls aku/*/*` explicitly lists all
+compact instances of that named Akuma, while `ls "aku/*/*"` explicitly lists all
 compact instances. Each invocation reads only the selected owner and performs
 no Kanshi join or activity/history read. JSON is the selected Catalog result,
 not an aggregate envelope. `status @name` remains an Address-facet decision
@@ -336,11 +336,14 @@ are refused except for zero itself, and the units convert to milliseconds
 before the public call. A converted value beyond the safe integer range is
 refused. Each duration passes that value as `timeoutMs`, while predicate
 functions remain library-only input. `history`
-with no mode renders the newest page of at most 50 semantic rows. `--before`
+with no mode renders the newest page of at most 50 semantic rows. `--limit`
+selects a positive page size no greater than 5000 and otherwise keeps that
+default. `--before`
 reads the page preceding an already visible activity index; `--since` reads
 activity following an already visible index. Both are exclusive, accept only
-positive safe integers, and are mutually exclusive with each other and
-`--last`. `--last` writes the complete answer from the last answered turn,
+positive safe integers, and are mutually exclusive with each other. `--last`
+is mutually exclusive with `--before`, `--since`, and `--limit`; it writes the
+complete answer from the last answered turn,
 skipping later failed turns; it does not read activity or append framing. With
 no answered turn, text writes `no answer retained` and JSON exposes the typed
 `{ "kind": "no-answer", "id": "..." }` arm. An answered empty string remains

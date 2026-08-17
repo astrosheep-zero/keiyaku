@@ -43,7 +43,7 @@ outgrows its Archetype mid-life.
 ```bash
 keiyaku status                            # deep fleet observation
 keiyaku status <aku/...|@alias>           # one worker's snapshot
-keiyaku ls aku/                           # shallow catalog; also aku/<archetype>/ and aku/*/*
+keiyaku ls aku/                           # shallow catalog; also aku/<archetype>/ and "aku/*/*"
 keiyaku wait <selector>... [--any | --all] [--timeout <duration>] [--json]
 ```
 
@@ -81,7 +81,8 @@ and says so plainly when no answer exists yet. Snapshot rows elsewhere may
 clip long text; the terminal answer from `call`/`wait` and the bytes from
 `--last` are never clipped — when you need the full result, take it from one
 of those. Cursor reads page the activity timeline; `--before` and `--since`
-are exclusive sequence cursors.
+are exclusive sequence cursors. `--limit` defaults to 50 and accepts at most
+5000 semantic rows.
 
 ## Stop
 

@@ -128,6 +128,23 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   assert.deepEqual(parseArgv(["fork", "aku/claude/1234abcd", "--at", "history-1", "--json"]), {
     command: { command: "fork", akuma: "aku/claude/1234abcd", at: "history-1", output: "json" },
   });
+  assert.deepEqual(parseArgv(["history", "aku/claude/1234abcd", "--since", "7", "--limit", "25", "--json"]), {
+    command: {
+      command: "history",
+      akuma: "aku/claude/1234abcd",
+      last: false,
+      since: 7,
+      limit: 25,
+      output: "json",
+    },
+  });
+  for (const limit of ["0", "-1", "1.5", "5001"]) {
+    assert.throws(() => parseArgv(["history", "aku/claude/1234abcd", "--limit", limit]), /--limit/u);
+  }
+  assert.throws(
+    () => parseArgv(["history", "aku/claude/1234abcd", "--last", "--limit", "1"]),
+    /cannot be combined/u,
+  );
   assert.deepEqual(parseArgv(["status", "aku/claude/1234abcd"]), {
     command: { command: "status", contract: "aku/claude/1234abcd", akuma: true, output: "text" },
   });
@@ -1363,6 +1380,9 @@ test("Akuma status, wait, and history share public observations without embeddin
       { kind: "answered", answer: "cli answer", historyId: "cli-history", session: { sessionId: "cli-session" } },
       { kind: "failed", diagnostic: "later failed" },
     ]);
+    const limitedHistory = await invoke(parseArgv(["-C", root, "history", allocated.id, "--limit", "1"]));
+    if (!("kind" in limitedHistory) || limitedHistory.kind !== "akuma" || limitedHistory.action !== "history") return;
+    assert.equal(limitedHistory.history.rows.length, 1);
     const lastParsed = parseArgv(["-C", root, "history", allocated.id, "--last"]);
     const lastResult = await invoke(lastParsed);
     if (!("kind" in lastResult) || lastResult.kind !== "akuma" || lastResult.action !== "history") return;
