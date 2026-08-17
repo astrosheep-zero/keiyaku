@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runProcess, type ProcessInput, type ProcessOutcome } from "../../runtime/proc/run.js";
-import { CliUsageError, usageLine } from "../usage.js";
+import { CliUsageError, usageLine, withJsonAutomationHelp } from "../usage.js";
 
 export const HARNESS_NAMES = ["codex", "claude", "opencode", "pi"] as const;
 export type HarnessName = typeof HARNESS_NAMES[number];
@@ -60,7 +60,9 @@ export function parseInstallCommand(argv: readonly string[]): ParsedInstallComma
 }
 
 export function renderInstallHelp(): string {
-  return `Install the Keiyaku skills into one or more agent harnesses.\n\n${usageLine(INSTALL_USAGE)}`;
+  return withJsonAutomationHelp(
+    `Install the Keiyaku skills into one or more agent harnesses.\n\n${usageLine(INSTALL_USAGE)}`,
+  );
 }
 
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;

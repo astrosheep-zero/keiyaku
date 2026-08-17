@@ -5,6 +5,13 @@ export class CliUsageError extends Error {
   }
 }
 
+export const JSON_AUTOMATION_HELP =
+  "--json is only for automation script input/output and should not be used for daily interactive use.";
+
+export function withJsonAutomationHelp(help: string): string {
+  return help.includes("--json") ? `${help}\n\n${JSON_AUTOMATION_HELP}` : help;
+}
+
 export function isBlankInput(value: string): boolean {
   return value.trim().length === 0;
 }

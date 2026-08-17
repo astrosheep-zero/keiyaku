@@ -2,6 +2,7 @@ import {
   HeldAkumaLeash,
   initializeHeart,
   readHeart,
+  readSeal,
   readSoul,
   type Soul,
 } from "./heart/index.js";
@@ -22,12 +23,29 @@ function diagnostic(error: unknown): string {
 async function settleTimedOutBirth(paths: AkumaPaths): Promise<Soul | null> {
   const leash = await HeldAkumaLeash.try(paths);
   if (leash === null) return null;
-  const result = await leash.sealIfUnborn(paths, { evidence: "call-timeout", at: new Date().toISOString() });
-  if (result === "sealed") throw new Error("Akuma body failed before birth");
-  leash.release();
+  let result: "born" | "sealed";
+  try {
+    result = await leash.sealIfUnborn(paths, {
+      evidence: "call-timeout",
+      at: new Date().toISOString(),
+    });
+  } finally { leash.release(); }
+  if (result === "sealed") {
+    const seal = await readSeal(paths);
+    throw new Error(seal?.evidence === "call-timeout" || seal === null
+      ? "Akuma body failed before birth"
+      : seal.evidence);
+  }
   const soul = await readSoul(paths);
   if (soul === null) throw new Error("Akuma birth settled without a soul");
   return soul;
+}
+
+async function observedBirthFailure(paths: AkumaPaths): Promise<string | null> {
+  const leash = await HeldAkumaLeash.try(paths);
+  if (leash === null) return null;
+  try { return leash.readSeal()?.evidence ?? null; }
+  finally { leash.release(); }
 }
 
 async function awaitBirth(paths: AkumaPaths, signal?: AbortSignal): Promise<Soul> {
@@ -36,6 +54,8 @@ async function awaitBirth(paths: AkumaPaths, signal?: AbortSignal): Promise<Soul
     signal?.throwIfAborted();
     const soul = await readSoul(paths);
     if (soul !== null) return soul;
+    const failure = await observedBirthFailure(paths);
+    if (failure !== null) throw new Error(failure);
     if (performance.now() >= deadline) {
       const settled = await settleTimedOutBirth(paths);
       if (settled !== null) return settled;
@@ -68,7 +88,10 @@ async function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): Prom
     const leash = await HeldAkumaLeash.try(allocated.paths);
     if (leash === null) return;
     try {
-      await leash.sealIfUnborn(allocated.paths, { evidence: diagnostic(error), at: new Date().toISOString() });
+      await leash.sealIfUnborn(allocated.paths, {
+        evidence: diagnostic(error),
+        at: new Date().toISOString(),
+      });
     } finally { leash.release(); }
   } catch { /* the original local publication failure remains authoritative */ }
 }

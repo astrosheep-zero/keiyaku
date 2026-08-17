@@ -45,6 +45,9 @@ typed usage refusal.
 The CLI uses only public `Repo`, `Keiyaku`, and `Delivery` values. No package
 operation resolves a path or reads the working directory again.
 
+On Windows, every CLI-owned child process is created without a visible
+auxiliary console window.
+
 The parser performs argv lexing and syntax only. It extracts the two global path inputs,
 then recognizes command words, an optional contract positional, flags, and a final `-`; it
 checks arity, missing values, duplicates, unknown flags, and mutual exclusion.
@@ -238,7 +241,8 @@ not add a second `diff` field. `--show-diff-body` is a typed usage refusal.
 This is not a Delivery read performed before audit. Audit does not accept a custom commit
 message. Its up-to-date policy is the same Settings consumer used by deliver.
 `status`, `show`, and `reconcile` accept `--json`.
-`--json` is output-only.
+`--json` is output-only. It is only for automation script input/output and
+should not be used for daily interactive use.
 
 `install` is the one edge command that does not read a repository or Git. It
 installs the bundled `keiyaku`, `keiyaku-task`, `keiyaku-workflow`, and

@@ -81,6 +81,7 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
   const child: ChildProcessWithoutNullStreams = spawn("git", ["cat-file", "--batch"], {
     cwd: repository.effectiveCwd,
     stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
   });
   const cursor = streamCursor(child.stdout);
   const cache = new Map<GitOid, Promise<GitObjectResult>>();

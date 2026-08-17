@@ -727,7 +727,14 @@ export async function driveAkumaBody(
       await supervisor.close();
     }
   } catch (error) {
-    if (await heartExists(launch.paths)) throw error;
+    if (!await heartExists(launch.paths)) return;
+    try {
+      await leash.sealIfUnborn(launch.paths, {
+        evidence: error instanceof Error ? error.message : String(error),
+        at: runtime.now(),
+      });
+    } catch { /* the original Body failure remains authoritative */ }
+    throw error;
   } finally {
     leash.release();
   }

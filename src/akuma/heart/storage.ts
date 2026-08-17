@@ -144,12 +144,17 @@ export class HeldAkumaLeash {
   }
 
   async sealIfUnborn(paths: AkumaPaths, input: Readonly<{ evidence: string; at: string }>): Promise<"born" | "sealed"> {
+    if (sealExists(this.database)) return "sealed";
     if (await withHeart(paths, (heart) => soulFact(heart)) !== null) return "born";
     insertSealFact(this.database, input);
     this.database.exec("COMMIT");
     this.closed = true;
     this.database.close();
     return "sealed";
+  }
+
+  readSeal(): ReturnType<typeof sealFact> {
+    return sealFact(this.database);
   }
 
   async clearPause(paths: AkumaPaths): Promise<void> { await withHeart(paths, deletePauseControl); }

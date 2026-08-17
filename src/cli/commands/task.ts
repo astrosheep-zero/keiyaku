@@ -1,4 +1,4 @@
-import { CliUsageError, isBlankInput, usageLine } from "../usage.js";
+import { CliUsageError, isBlankInput, usageLine, withJsonAutomationHelp } from "../usage.js";
 import {
   parseTaskQueryExpression,
   validateTaskLimit,
@@ -77,14 +77,14 @@ export function isTaskAction(value: string | undefined): value is TaskAction {
 export function renderTaskHelp(action?: TaskAction): string {
   if (action !== undefined) {
     const spec = TASK_COMMAND_SPECS[action];
-    return `${spec.purpose}\n\n${usageLine(spec.usage)}`;
+    return withJsonAutomationHelp(`${spec.purpose}\n\n${usageLine(spec.usage)}`);
   }
-  return [
+  return withJsonAutomationHelp([
     "usage: keiyaku task <command> ...",
     "",
     "commands:",
     ...Object.values(TASK_COMMAND_SPECS).flatMap((spec) => spec.usage.split("\n").map((line) => `  ${line}`).concat(`    ${spec.purpose}`)),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function renderTaskUsage(action: TaskAction): string {

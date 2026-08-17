@@ -3,9 +3,10 @@ import test from "node:test";
 import { main } from "../src/cli/main.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "../src/cli/commands/contract.js";
 import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp } from "../src/cli/parse.js";
-import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
-import { renderTaskHelp } from "../src/cli/commands/task.js";
-import { usageLine } from "../src/cli/usage.js";
+import { renderAkumaHelp, type AkumaAction } from "../src/cli/commands/akuma.js";
+import { renderInstallHelp } from "../src/cli/commands/install.js";
+import { renderTaskHelp, type TaskAction } from "../src/cli/commands/task.js";
+import { JSON_AUTOMATION_HELP, usageLine, withJsonAutomationHelp } from "../src/cli/usage.js";
 
 test("help resolves the longest legal command-word prefix before syntax scanning", () => {
   assert.deepEqual(parseArgv(["--help"]), { help: { kind: "root" } });
@@ -39,6 +40,8 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     "Read one Contract guidance projection.",
     "",
     "usage: keiyaku show [<contract>|@<contract>] [--json]",
+    "",
+    JSON_AUTOMATION_HELP,
   ].join("\n"));
   assert.equal(renderContractHelp("ls"), [
     "List one identity directory.",
@@ -48,6 +51,8 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     "       keiyaku ls aku/ [--json]",
     "       keiyaku ls aku/<akuma>/ [--json]",
     "       keiyaku ls \"aku/*/*\" [--json]",
+    "",
+    JSON_AUTOMATION_HELP,
   ].join("\n"));
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
   assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId> \[--json\]/u);
@@ -73,6 +78,8 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     "--contract dispatches the born Akuma to that Contract.",
     "--alias assigns the world-local @name selector to the born Akuma.",
     "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",
+    "",
+    JSON_AUTOMATION_HELP,
   ].join("\n"));
   assert.equal(renderAkumaHelp("tell"), [
     "Send one prompt to an existing Akuma and wake it.",
@@ -81,6 +88,8 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     "",
     "Give <prompt> as one argument, or use final - to read stdin.",
     "--interrupt ends the current Body before recording the prompt and waking its successor.",
+    "",
+    JSON_AUTOMATION_HELP,
   ].join("\n"));
   assert.match(renderAkumaHelp("history"), /\[--limit <count>\] \[--last\]/u);
   assert.doesNotMatch(
@@ -98,6 +107,8 @@ test("amend leaf help shows one minimal stdin example", () => {
     "minimal stdin:",
     "  ## Replace: Design",
     "  <complete replacement>",
+    "",
+    JSON_AUTOMATION_HELP,
   ].join("\n"));
 });
 
@@ -106,8 +117,29 @@ test("only amend leaf help carries the stdin example", () => {
   for (const command of Object.keys(CONTRACT_COMMAND_SPECS) as ContractCommand[]) {
     if (command === "amend") continue;
     const spec = CONTRACT_COMMAND_SPECS[command];
-    assert.equal(renderContractHelp(command), `${spec.purpose}\n\n${usageLine(spec.usage)}`);
+    assert.equal(renderContractHelp(command), withJsonAutomationHelp(`${spec.purpose}\n\n${usageLine(spec.usage)}`));
     assert.doesNotMatch(renderContractHelp(command), /minimal stdin/u);
+  }
+});
+
+test("every JSON help surface reserves the flag for automation scripts", () => {
+  const taskActions: readonly TaskAction[] = [
+    "add", "show", "ls", "ready", "blocked", "query", "tree", "doctor", "update",
+    "start", "stop", "hold", "resume", "done", "drop", "namespace", "compose",
+  ];
+  const akumaActions: readonly AkumaAction[] = ["call", "wait", "tell", "history", "fork", "kill"];
+  const surfaces = [
+    renderRootHelp(),
+    renderInstallHelp(),
+    ...Object.keys(CONTRACT_COMMAND_SPECS).map((command) => renderContractHelp(command as ContractCommand)),
+    renderTaskHelp(),
+    ...taskActions.map((action) => renderTaskHelp(action)),
+    ...akumaActions.map((action) => renderAkumaHelp(action)),
+  ];
+  for (const help of surfaces) {
+    assert.match(help, /--json/u);
+    assert.equal(help.split(JSON_AUTOMATION_HELP).length - 1, 1);
+    assert.equal(help.endsWith(JSON_AUTOMATION_HELP), true);
   }
 });
 

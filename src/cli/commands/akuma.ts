@@ -1,4 +1,4 @@
-import { CliUsageError, isBlankInput, usageLine } from "../usage.js";
+import { CliUsageError, isBlankInput, usageLine, withJsonAutomationHelp } from "../usage.js";
 import { archetypeName, parseAkuId } from "../../akuma/identity.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
@@ -113,7 +113,9 @@ export function renderAkumaRootRows(): readonly string[] {
 
 export function renderAkumaHelp(action: AkumaAction): string {
   const spec: AkumaCommandSpec = AKUMA_COMMAND_SPECS[action];
-  return `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
+  return withJsonAutomationHelp(
+    `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`,
+  );
 }
 
 export function renderAkumaUsage(action: AkumaAction): string {

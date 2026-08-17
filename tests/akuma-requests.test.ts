@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Akuma } from "../src/akuma/akuma.js";
+import { driveAkumaBody } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
   admitRequest,
@@ -76,6 +77,23 @@ test("aborted publication keeps an in-flight launch lexically owned", async () =
     await assert.rejects(publication, /cancelled publication/u);
     assert.equal(settled, true);
     assert.equal(childPaths === undefined ? null : (await readSeal(childPaths))?.evidence, "cancelled publication");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("publication preserves a Body failure that occurs before birth", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-failure-")));
+  let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
+  try {
+    await assert.rejects(publishAkuma({
+      worldPath: root,
+      archetype: "worker",
+      async launch(allocated) {
+        childPaths = allocated.paths;
+        await assert.rejects(driveAkumaBody({ paths: allocated.paths }), /Akuma wake has no born soul/u);
+        assert.equal((await readSeal(allocated.paths))?.evidence, "Akuma wake has no born soul");
+      },
+    }), /Akuma wake has no born soul/u);
+    assert.equal(childPaths === undefined ? null : (await readSeal(childPaths))?.evidence, "Akuma wake has no born soul");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
