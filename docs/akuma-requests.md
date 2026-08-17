@@ -46,11 +46,12 @@ authority and have one writer: the body holding its leash. Admission uses the
 request id for idempotence, so at-least-once claim observation produces at most
 one fact. There is no second store.
 
-The claim decoder validates the complete frozen recipe before Heart admission.
-Its provider execution uses the same exact decoder as Archetype admission, its
-options use the provider-owned option decoder, and its confinement must equal
-the selected adapter's pure projection for that cwd. A malformed recipe is a
-malformed claim and never becomes a durable request fact.
+The claim decoder first validates structure, then selects the stated cwd or the
+hosting parent Soul cwd. Only then does it decode the frozen provider and
+options with the existing owners and project confinement for that final cwd.
+The complete validated recipe enters Heart; transport never supplies a second
+confinement judgment. A malformed recipe is a malformed claim and never becomes
+a durable request fact.
 
 The child directory and its leash remain the sole judge of child birth. The
 parent heart remembers only the reserved child coordinate: where to observe,
@@ -60,15 +61,17 @@ not a claim that the child was born. The child soul records origin
 ### Admission and service
 
 A request carries the caller's normalized absolute world, Archetype name, body,
-and optional cwd. The serving body requires that world to equal its own world
-and normalizes the cwd at this boundary. World mismatch settles `refused`; a
-malformed transport claim is not admitted. The body never silently redirects a
-request.
+and optional stated cwd. Omission is preserved through transport. The serving
+Body uses a stated cwd when present and otherwise its authenticated parent Soul
+cwd; World root and provider process cwd are not defaults at this boundary.
+The serving Body requires the request world to equal its own world. World
+mismatch settles `refused`; a malformed transport claim is not admitted. The
+Body never silently redirects a request.
 
 Service is serial in heart admission order:
 
 ```text
-validate -> admit -> allocate directory -> reserve coordinate -> spawn child
+parse -> select cwd -> validate recipe -> admit -> allocate directory -> reserve coordinate -> spawn child
          -> await birth -> settle served -> project receipt
 ```
 

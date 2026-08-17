@@ -108,6 +108,10 @@ test("a declared drive serves Body Requests through transport while Heart remain
   const home = join(value.root, "home");
   mkdirSync(join(home, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\nreadonly: true\n---\nWork.\n");
+  writeFileSync(
+    join(home, ".keiyaku", "akuma", "declared.md"),
+    "---\nprovider: codex-app-server\nreadonly: true\n---\nWork.\n",
+  );
   process.env.HOME = home;
   const pump = await BodyRequestPump.open({
     paths: value.parent.paths,
@@ -132,6 +136,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
     assert.equal(origin?.kind, "request");
     if (origin?.kind !== "request") return;
     assert.deepEqual(childSoul?.readonly, { enforcement: "native" });
+    assert.equal(childSoul?.cwd, value.soul.cwd);
     const requestId = origin.requestId;
     assert.equal((await readRequest(value.parent.paths, requestId))?.state, "served");
     assert.deepEqual(origin, {
@@ -140,7 +145,22 @@ test("a declared drive serves Body Requests through transport while Heart remain
       requestId,
     });
 
-    const unassociated = (await (await akumaAt(value.root)).call({ archetype: "worker", body: "separate" })).id;
+    const declaredId = (await (await akumaAt(value.root)).call({
+      archetype: "declared",
+      body: "declared confinement",
+    })).id;
+    const declaredSoul = await readSoul(pathsForAkuId(value.root, declaredId));
+    assert.equal(declaredSoul?.cwd, value.soul.cwd);
+    assert.deepEqual(declaredSoul?.confinement, { kind: "declared", writableRoots: [value.soul.cwd] });
+
+    const explicit = join(value.root, "explicit");
+    mkdirSync(explicit);
+    const explicitId = (await (await akumaAt(value.root)).call({
+      archetype: "worker",
+      body: "explicit",
+      cwd: explicit,
+    })).id;
+    assert.equal((await readSoul(pathsForAkuId(value.root, explicitId)))?.cwd, explicit);
     delete process.env[AKUMA_REQUESTS_ENV];
 
     const malformedId = "00000000-0000-4000-8000-000000000001";
@@ -153,7 +173,6 @@ test("a declared drive serves Body Requests through transport while Heart remain
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { systemPrompt: "Work.\n" },
-        confinement: { kind: "unconfined" },
       },
     }));
     await assert.rejects(requestBodyCall({
@@ -165,7 +184,6 @@ test("a declared drive serves Body Requests through transport while Heart remain
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { systemPrompt: "Work.\n" },
-        confinement: { kind: "unconfined" },
       },
     }), (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "refused");
     assert.equal(await readRequest(value.parent.paths, malformedId), null, "legacy association bytes must not enter Heart");
@@ -179,7 +197,6 @@ test("a declared drive serves Body Requests through transport while Heart remain
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { readonly: true, systemPrompt: "Work.\n" },
-        confinement: { kind: "unconfined" },
       },
     }));
     assert.equal(await readRequest(value.parent.paths, mismatchId), null, "a restraint/options mismatch must not enter Heart");

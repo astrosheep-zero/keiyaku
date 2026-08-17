@@ -5,10 +5,27 @@ import { homedir, tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import test from "node:test";
 import { repositoryAt } from "../src/git/repository.js";
+import { resolveCliCoordinates } from "../src/cli/coordinates.js";
+import { parseArgv } from "../src/cli/parse.js";
 import { World, WorldError } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 
 function temporary(): string { return mkdtempSync(join(tmpdir(), "keiyaku-world-")); }
+
+test("CLI coordinates retain explicit versus ambient cwd statedness", async () => {
+  const root = temporary();
+  const explicit = join(root, "explicit");
+  mkdirSync(explicit);
+  const command = parseArgv(["call", "worker", "body"]).command;
+
+  const ambient = await resolveCliCoordinates({ processCwd: root, command });
+  assert.equal(ambient.cwdSource, "process");
+  assert.equal(ambient.cwd, await realpath(root));
+
+  const stated = await resolveCliCoordinates({ processCwd: root, cwd: "explicit", command });
+  assert.equal(stated.cwdSource, "input");
+  assert.equal(stated.cwd, await realpath(explicit));
+});
 
 test("World.locate selects the nearest marker without creating one", async () => {
   const outer = temporary(), nested = join(outer, "a"), leaf = join(nested, "b", "c");

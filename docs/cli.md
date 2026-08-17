@@ -16,10 +16,11 @@ keiyaku [-C <path>] [--repo <path>] <command> [<contract>|@<contract>] [--flag .
 `-C <path>` and `--cwd <path>` are two spellings of the global invocation cwd;
 canonical examples use `-C`. Either spelling may appear before or after the
 command, but they may not be combined or repeated. The value is resolved
-against the process cwd; omission means the process cwd. This canonical cwd is
-the base for relative argv paths, invocation Repo discovery, and Akuma
-execution. Together with the discovered Repo's primary worktree, it feeds
-World resolution; the cwd itself is never product identity.
+against the process cwd; omission means the process cwd. The edge retains
+whether this value was explicit: `-C` is stated Akuma cwd input, while ambient
+process cwd is initiator context. The canonical value remains the base for
+relative argv paths and Repo and World discovery; the cwd itself is never
+product identity.
 
 `--repo <path>` is the explicit Contract Git coordinate. It resolves against
 the invocation cwd and may name any path inside the intended repository. It
@@ -233,7 +234,8 @@ searched path.
 `--contract` accepts one complete `kei/...` and requests Dispatch after birth;
 `--alias` accepts `@name` and moves that world-local Alias only after Dispatch
 succeeds. Explicit invocation cwd wins for a contracted call, otherwise its
-appointed managed worktree is used; a Contract-free call uses invocation cwd.
+appointed managed worktree is used. A direct Contract-free call uses ambient
+process cwd; a nested omitted call inherits its hosting caller Soul cwd.
 Call waits five minutes by default. `--wait` replaces that duration, while
 `-d`/`--detach` returns after birth and composition and excludes `--wait`.
 Answered terminal observations write exact answer bytes. Successful detach

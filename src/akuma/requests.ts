@@ -32,14 +32,18 @@ import { resolveProviderExecution } from "./providers/index.js";
 const POLL_MS = 25;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
+type RequestClaimRecipe = Omit<RequestRecipe, "confinement">;
+
 type RequestClaim = Readonly<{
   id: string;
   world: string;
   archetype: string;
   body: string;
   cwd?: string;
-  recipe: RequestRecipe;
+  recipe: RequestClaimRecipe;
 }>;
+
+type StructuralRequestClaim = Omit<RequestClaim, "recipe"> & Readonly<{ recipe: unknown }>;
 
 type RequestReceipt =
   | Readonly<{ id: string; state: "served"; child: AkuId }>
@@ -82,20 +86,10 @@ function absolute(value: unknown): value is string {
   return typeof value === "string" && isAbsolute(value) && resolve(value) === value;
 }
 
-function matchingConfinement(value: unknown, expected: RequestRecipe["confinement"]): boolean {
-  const confinement = object(value);
-  if (confinement === null || confinement.kind !== expected.kind) return false;
-  if (expected.kind === "unconfined") return exactKeys(confinement, ["kind"]);
-  if (!exactKeys(confinement, ["kind", "writableRoots"]) || !Array.isArray(confinement.writableRoots)) return false;
-  return confinement.writableRoots.length === expected.writableRoots.length
-    && confinement.writableRoots.every((root, index) => root === expected.writableRoots[index]);
-}
-
 function decodeRecipe(value: unknown, cwd: string): RequestRecipe | null {
   const recipe = object(value);
   if (recipe === null) return null;
   const expectedKeys = [
-    "confinement",
     ...(recipe.description === undefined ? [] : ["description"]),
     "options",
     "provider",
@@ -112,7 +106,6 @@ function decodeRecipe(value: unknown, cwd: string): RequestRecipe | null {
     const readonly = recipe.readonly === undefined ? undefined : decodeReadonlyRestraint(recipe.readonly);
     if ((decodedOptions.readonly === true) !== (readonly !== undefined)) return null;
     const confinement = adapter.confinement({ cwd, options: decodedOptions });
-    if (!matchingConfinement(recipe.confinement, confinement)) return null;
     return Object.freeze({
       ...(recipe.description === undefined ? {} : { description: recipe.description }),
       provider,
@@ -125,7 +118,7 @@ function decodeRecipe(value: unknown, cwd: string): RequestRecipe | null {
   }
 }
 
-function decodeClaim(bytes: string, fileId: string): RequestClaim | null {
+function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | null {
   let decoded: unknown;
   try { decoded = JSON.parse(bytes); } catch { return null; }
   const value = object(decoded);
@@ -145,14 +138,12 @@ function decodeClaim(bytes: string, fileId: string): RequestClaim | null {
   try {
     archetypeName(value.archetype as string);
   } catch { return null; }
-  const recipe = decodeRecipe(value.recipe, (value.cwd ?? value.world) as string);
-  if (recipe === null) return null;
   return {
     id: value.id,
     world: value.world,
     archetype: value.archetype as string,
     body: value.body,
-    recipe,
+    recipe: value.recipe,
     ...(value.cwd === undefined ? {} : { cwd: value.cwd }),
   };
 }
@@ -230,7 +221,7 @@ export async function requestBodyCall(input: RequestClaim & Readonly<{ directory
 
 async function serveClaim(input: Readonly<{
   directory: string;
-  claim: RequestClaim;
+  claim: StructuralRequestClaim;
   paths: AkumaPaths;
   parent: Soul;
   now(): string;
@@ -238,7 +229,10 @@ async function serveClaim(input: Readonly<{
   signal: AbortSignal;
 }>): Promise<void> {
   input.signal.throwIfAborted();
-  let fact = await admitRequest(input.paths, { ...input.claim, admittedAt: input.now() });
+  const cwd = input.claim.cwd ?? input.parent.cwd;
+  const recipe = decodeRecipe(input.claim.recipe, cwd);
+  if (recipe === null) return;
+  let fact = await admitRequest(input.paths, { ...input.claim, recipe, admittedAt: input.now() });
   const existing = receiptFor(fact);
   if (existing !== null) {
     if (!input.signal.aborted) await projectReceipt(input.directory, fact);
@@ -252,7 +246,6 @@ async function serveClaim(input: Readonly<{
     await projectReceipt(input.directory, fact);
     return;
   }
-  const cwd = resolve(request.cwd ?? servingWorld);
   let child: AkuId;
   try {
     input.signal.throwIfAborted();

@@ -50,12 +50,13 @@ Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.
 Optional `home` is the Archetype coordinate and is never inferred from Settings
 provenance; omission uses `~/.keiyaku`. Settings remains the provider snapshot.
-`cwd` is the optional execution cwd. Explicit input is canonicalized; an
-omitted Contract-free value uses the WorldRoot. With a Contract and no cwd,
-Library accepts only an active managed workspace and uses the workspace
-owner's Place appointment. It never derives, allocates, releases, creates, or
-reconciles a Place or worktree. An unavailable Contract workspace refuses
-before birth with no cwd fallback; appointment failures identify `reconcile`
+`cwd` is stated execution input and wins when present. Otherwise an active
+managed Contract uses its appointed worktree, a nested Body Request inherits
+the hosting caller Soul cwd, a direct call uses its initiator process cwd, and
+the WorldRoot is the final embedding fallback. Library never derives,
+allocates, releases, creates, or reconciles a Place or worktree. An invalid
+selected path or unavailable Contract workspace refuses before birth without
+trying a lower-precedence source; appointment failures identify `reconcile`
 as the repair entry. `mode` defaults to `"wait"`; wait mode observes the born handle
 until it stops running or `timeoutMs`, which defaults to 300,000 milliseconds.
 Detach mode returns after the post-birth integration stages and rejects a
@@ -112,7 +113,7 @@ type CallResult = Readonly<{
   readonly?: ReadonlyRestraint
   execution: Readonly<{
     cwd: string
-    source: "input" | "world" | "contract-worktree"
+    source: "input" | "contract-worktree" | "caller" | "process" | "world"
   }>
   dispatch: DispatchStage
   alias: AliasStage

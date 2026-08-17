@@ -27,6 +27,10 @@ export const FILE_LINE_EXEMPTIONS = Object.freeze([
     reason: "The Body is the single live supervisor for provider setup, turn consumption, durable control, and owned descendant cleanup.",
   },
   {
+    file: "src/akuma/akuma.ts",
+    reason: "The low-level Akuma owner keeps birth, handles, lifecycle controls, and fleet reads coherent; splitting those operations would obscure that boundary.",
+  },
+  {
     file: "src/library/contract.ts",
     reason: "The package-root Contract handle remains one operations owner.",
   },

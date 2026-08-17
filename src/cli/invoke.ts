@@ -325,7 +325,7 @@ async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks 
 
 type AkumaEdgeInput = Readonly<{
   path: WorldRoot;
-  executionCwd?: string;
+  statedCwd?: string;
   repo?: Repo;
   home?: string;
   configuration?: Settings;
@@ -334,13 +334,13 @@ type AkumaEdgeInput = Readonly<{
 
 async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdgeInput) {
   try {
-    const { path, executionCwd, repo, home, configuration, edge } = input;
+    const { path, statedCwd, repo, home, configuration, edge } = input;
     if (parsed.command === "call" && parsed.contract !== undefined && repo === undefined) {
       throw new Error("call with Contract requires a resolved Repo");
     }
     return await invokeAkuma(parsed, {
       path,
-      ...(executionCwd === undefined ? {} : { executionCwd }),
+      ...(statedCwd === undefined ? {} : { statedCwd }),
       ...(home === undefined ? {} : { home }),
       ...(configuration === undefined ? {} : { settings: configuration }),
       ...(parsed.command === "call" && parsed.contract !== undefined
@@ -483,7 +483,7 @@ async function invokeParsed(
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
     command: invocation.command,
   });
-  const { cwd, repo, world, candidateWorld, establishWorld } = coordinates;
+  const { cwd, cwdSource, repo, world, candidateWorld, establishWorld } = coordinates;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
     readStdin: runtime.readStdin ?? readStdin,
@@ -511,9 +511,7 @@ async function invokeParsed(
     const configuration = parsed.command === "call" ? await settingsAt(akumaWorld, home) : undefined;
     return await invokeAkumaFromEdge(parsed, {
       path: akumaWorld,
-      ...(parsed.command === "call" && parsed.contract !== undefined && invocation.cwd === undefined
-        ? {}
-        : { executionCwd: cwd }),
+      ...(cwdSource === "input" ? { statedCwd: cwd } : {}),
       ...(repo === undefined ? {} : { repo }),
       ...(parsed.command === "call" && home !== undefined ? { home } : {}),
       ...(configuration === undefined ? {} : { configuration }),

@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { moveAlias, resolveAlias } from "../src/alias/index.js";
-import { AkumaHandle } from "../src/akuma/akuma.js";
+import {
+  Akuma,
+  AkumaHandle,
+  akumaCallExecution,
+  callAkumaWithContext,
+} from "../src/akuma/akuma.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
@@ -72,6 +77,35 @@ async function archetypeSettings(root: string) {
   return { home, value, placement: { home, settings: value } };
 }
 
+async function directArchetypeSettings(root: string) {
+  const home = join(root, ".direct-settings");
+  const executable = join(root, "fake-codex");
+  symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "dir");
+  mkdirSync(join(home, "akuma"), { recursive: true });
+  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: local\n---\nWork.\n");
+  writeFileSync(join(home, "settings.json"), JSON.stringify({
+    providers: { local: { kind: "codex-app-server", executable } },
+  }));
+  writeFileSync(executable, [
+    "#!/usr/bin/env node",
+    "const readline = require('node:readline');",
+    "const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');",
+    "const reply = (message, result) => send({ id: message.id, result });",
+    "const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });",
+    "lines.on('line', (line) => {",
+    "  const message = JSON.parse(line);",
+    "  if (message.method === 'initialize') return reply(message, {});",
+    "  if (message.method === 'initialized') return;",
+    "  if (message.method === 'thread/start') return reply(message, { thread: { id: 'thread-1' } });",
+    "  if (message.method !== 'turn/start') return;",
+    "  reply(message, { turn: { id: 'turn-1' } });",
+    "  send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } });",
+    "});",
+  ].join("\n"));
+  chmodSync(executable, 0o755);
+  return { home, value: await settings({ root, home }) };
+}
+
 async function requestPump(root: string) {
   const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
   await initializeHeart(parent.paths);
@@ -118,7 +152,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     });
     assert.deepEqual(independent.dispatch, { kind: "none" });
     assert.deepEqual(independent.alias, { kind: "none" });
-    assert.deepEqual(independent.execution, { cwd: world, source: "world" });
+    assert.deepEqual(independent.execution, { cwd: world, source: "caller" });
     assert.equal(independent.observation.kind, "observed");
     assert.equal(await readDispatch(git, independent.akuma), null);
 
@@ -272,6 +306,35 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
   } finally {
     await pump.close();
     leash.release();
+    if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
+    rmSync(raw.path, { recursive: true, force: true });
+  }
+});
+
+test("direct Akuma birth reports process cwd and the embedding World fallback", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const previousRequests = process.env[AKUMA_REQUESTS_ENV];
+  delete process.env[AKUMA_REQUESTS_ENV];
+  try {
+    const akuma = Akuma.of(world, configured);
+    const direct = await akuma.call({ archetype: "worker", body: "process" });
+    assert.deepEqual(akumaCallExecution(direct), {
+      cwd: realpathSync(process.cwd()),
+      source: "process",
+    });
+
+    const fallback = await callAkumaWithContext(
+      akuma,
+      { archetype: "worker", body: "world" },
+      {},
+    );
+    assert.deepEqual(akumaCallExecution(fallback), { cwd: world, source: "world" });
+    assert.equal((await direct.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
+    assert.equal((await fallback.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
+  } finally {
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
     rmSync(raw.path, { recursive: true, force: true });

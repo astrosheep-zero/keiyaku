@@ -13,6 +13,7 @@ type RepoPolicy = Readonly<{ use: RepoUse; acceptsExplicit: boolean }>;
 
 export type CliCoordinates = Readonly<{
   cwd: string;
+  cwdSource: "input" | "process";
   repo?: Repo;
   world: WorldRoot | null;
   candidateWorld: WorldRoot | null;
@@ -128,6 +129,7 @@ export async function resolveCliCoordinates(input: CliCoordinateInput): Promise<
   const world = await resolveWorld(cwd, worldRepo);
   return {
     cwd,
+    cwdSource: input.cwd === undefined ? "process" : "input",
     ...(repo === undefined ? {} : { repo }),
     world: world.root,
     candidateWorld: world.candidate,

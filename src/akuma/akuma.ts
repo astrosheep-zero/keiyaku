@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdir } from "node:fs/promises";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CONTROL_RESPONSE_MS, spawnAkumaBody } from "./body.js";
 import {
@@ -54,6 +54,17 @@ import type { WorldRoot } from "../world.js";
 
 const POLL_MS = 25;
 
+async function canonicalBirthCwd(input: string): Promise<string> {
+  const selected = resolve(input);
+  try {
+    const canonical = await realpath(selected);
+    if (!(await stat(canonical)).isDirectory()) throw new Error("not a directory");
+    return canonical;
+  } catch {
+    throw new Error(`cwd is not an existing directory: ${input}`);
+  }
+}
+
 export type AkumaListRow = Readonly<{
   id: AkuId;
   archetype: string;
@@ -88,6 +99,17 @@ export type AkumaList = Readonly<{
 export type AkumaListInput = Readonly<{
   archetype?: string;
 }>;
+
+export type AkumaCallExecution = Readonly<{
+  cwd: string;
+  source: "input" | "caller" | "process" | "world";
+}>;
+
+const CALL_EXECUTION: unique symbol = Symbol("akuma-call-execution");
+const CALL_WITH_CONTEXT: unique symbol = Symbol("akuma-call-with-context");
+
+type AkumaCallInput = Readonly<{ archetype: string; body: string; cwd?: string }>;
+type AkumaCallContext = Readonly<{ initiatorCwd?: string; cwdCanonical?: true }>;
 
 export type TellResult = Readonly<{
   admission: Readonly<{ tellId: string; fact: "recorded" }>;
@@ -240,8 +262,23 @@ export async function readBudgetedStatus(
   return { status, ordinarySelected: ordinarySelectedCount(status.timeline) };
 }
 
+/** Package-internal birth projection used by the composed Library call result. */
+export async function readAkumaBirthCwd(worldPath: WorldRoot, id: AkuId): Promise<string> {
+  const soul = await readSoul(pathsForAkuId(worldPath, id));
+  if (soul === null) throw new AkumaNotBornError(id);
+  return soul.cwd;
+}
+
 export class AkumaHandle {
-  constructor(readonly id: AkuId, private readonly worldPath: WorldRoot) {}
+  readonly [CALL_EXECUTION]?: AkumaCallExecution;
+
+  constructor(
+    readonly id: AkuId,
+    private readonly worldPath: WorldRoot,
+    execution?: AkumaCallExecution,
+  ) {
+    if (execution !== undefined) this[CALL_EXECUTION] = execution;
+  }
 
   private get paths(): AkumaPaths {
     return pathsForAkuId(this.worldPath, this.id);
@@ -434,6 +471,11 @@ export class AkumaHandle {
   }
 }
 
+/** Package-internal provenance retained only by the handle returned from call. */
+export function akumaCallExecution(handle: AkumaHandle): AkumaCallExecution | undefined {
+  return handle[CALL_EXECUTION];
+}
+
 export type LastAnswer =
   | Readonly<{ kind: "answer"; answer: string }>
   | Readonly<{ kind: "no-answer" }>;
@@ -456,32 +498,50 @@ export class Akuma {
     return readArchetypes(this.configuration.home === undefined ? {} : { home: this.configuration.home });
   }
 
-  async call(input: Readonly<{ archetype: string; body: string; cwd?: string }>): Promise<AkumaHandle> {
+  async call(input: AkumaCallInput): Promise<AkumaHandle> {
+    return await this[CALL_WITH_CONTEXT](input, { initiatorCwd: process.cwd() });
+  }
+
+  async [CALL_WITH_CONTEXT](input: AkumaCallInput, context: AkumaCallContext): Promise<AkumaHandle> {
     const name = archetypeName(input.archetype);
     const home = this.configuration.home === undefined ? {} : { home: this.configuration.home };
     const settings = this.configuration.settings ?? await readSettings({ root: this.path, ...home });
     const archetype = await loadArchetype({ name, ...home, settings });
-    const cwd = resolve(input.cwd ?? this.path);
-    const recipe = Object.freeze({
+    const requests = injectedBodyRequests();
+    const requestRecipe = Object.freeze({
       ...(archetype.description === undefined ? {} : { description: archetype.description }),
       provider: archetype.provider,
       options: archetype.options,
       ...(archetype.readonly === undefined ? {} : { readonly: archetype.readonly }),
-      confinement: archetype.adapter.confinement({ cwd, options: archetype.options }),
     });
-    const requests = injectedBodyRequests();
     if (requests !== null) {
+      const cwd = input.cwd === undefined
+        ? undefined
+        : context?.cwdCanonical === true ? input.cwd : await canonicalBirthCwd(input.cwd);
       const child = await requestBodyCall({
         directory: requests,
         id: randomUUID(),
         world: this.path,
         archetype: name,
         body: input.body,
-        cwd,
-        recipe,
+        ...(cwd === undefined ? {} : { cwd }),
+        recipe: requestRecipe,
       });
-      return new AkumaHandle(child, this.path);
+      const bornCwd = await readAkumaBirthCwd(this.path, child);
+      return new AkumaHandle(child, this.path, {
+        cwd: bornCwd,
+        source: cwd === undefined ? "caller" : "input",
+      });
     }
+    const initiatorCwd = context.initiatorCwd;
+    const selectedCwd = input.cwd ?? initiatorCwd ?? this.path;
+    const cwd = input.cwd !== undefined && context?.cwdCanonical === true
+      ? input.cwd
+      : await canonicalBirthCwd(selectedCwd);
+    const recipe = Object.freeze({
+      ...requestRecipe,
+      confinement: archetype.adapter.confinement({ cwd, options: archetype.options }),
+    });
     const published = await publishAkuma({
       worldPath: this.path,
       archetype: archetype.name,
@@ -497,7 +557,10 @@ export class Akuma {
         initialBody: input.body,
       }),
     });
-    return new AkumaHandle(published.id, this.path);
+    return new AkumaHandle(published.id, this.path, {
+      cwd,
+      source: input.cwd !== undefined ? "input" : initiatorCwd === undefined ? "world" : "process",
+    });
   }
 
   async list(input: AkumaListInput = {}): Promise<AkumaList> {
@@ -539,4 +602,13 @@ export class Akuma {
       searched: [runRoot],
     };
   }
+}
+
+/** Package-internal call path for a composition owner that already canonicalized cwd. */
+export async function callAkumaWithContext(
+  akuma: Akuma,
+  input: AkumaCallInput,
+  context: AkumaCallContext,
+): Promise<AkumaHandle> {
+  return await akuma[CALL_WITH_CONTEXT](input, context);
 }

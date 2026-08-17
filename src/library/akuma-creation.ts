@@ -2,6 +2,8 @@ import { realpath, stat } from "node:fs/promises";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import {
   Akuma,
+  akumaCallExecution,
+  callAkumaWithContext,
   type AkumaStatus,
   type ForkReceipt,
   type ReadonlyRestraint,
@@ -66,7 +68,7 @@ export type CallResult = Readonly<{
   readonly?: ReadonlyRestraint;
   execution: Readonly<{
     cwd: string;
-    source: "input" | "world" | "contract-worktree";
+    source: "input" | "contract-worktree" | "caller" | "process" | "world";
   }>;
   dispatch: DispatchStage;
   alias: AliasStage;
@@ -228,30 +230,32 @@ async function resolveCallExecution(input: Readonly<{
   path: WorldRoot;
   cwd?: string;
   contract?: Keiyaku;
-}>): Promise<CallExecution> {
+}>): Promise<CallExecution | undefined> {
   if (input.cwd !== undefined) {
     return {
       cwd: await canonicalizeExistingDirectory(input.cwd, `cwd is not an existing directory: ${input.cwd}`),
       source: "input",
     };
   }
-  if (input.contract === undefined) return { cwd: input.path, source: "world" };
-  const seat = seatForKeiyaku(input.contract);
-  const state = await currentManagedContract(input.contract, seat.id);
-  const appointment = await readManagedWorktreeAppointment(seat.scope, state.id);
-  if (appointment.kind === "unappointed") {
-    throw unavailableWorkspace(state.id, "is unappointed; use reconcile");
+  if (input.contract !== undefined) {
+    const seat = seatForKeiyaku(input.contract);
+    const state = await currentManagedContract(input.contract, seat.id);
+    const appointment = await readManagedWorktreeAppointment(seat.scope, state.id);
+    if (appointment.kind === "unappointed") {
+      throw unavailableWorkspace(state.id, "is unappointed; use reconcile");
+    }
+    if (appointment.kind === "failed") {
+      throw new Error(`${appointment.diagnostic}; use reconcile`);
+    }
+    return {
+      cwd: await canonicalizeExistingDirectory(
+        appointment.path,
+        `Contract workspace is unavailable: ${appointment.path}`,
+      ),
+      source: "contract-worktree",
+    };
   }
-  if (appointment.kind === "failed") {
-    throw new Error(`${appointment.diagnostic}; use reconcile`);
-  }
-  return {
-    cwd: await canonicalizeExistingDirectory(
-      appointment.path,
-      `Contract workspace is unavailable: ${appointment.path}`,
-    ),
-    source: "contract-worktree",
-  };
+  return undefined;
 }
 
 export async function callKeiyaku(input: CallInput): Promise<CallResult> {
@@ -279,11 +283,17 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     ...(seat === undefined ? {} : { contract: values.contract as Keiyaku }),
   });
 
-  const handle = await akumaWorld(path, home, settings).call({
+  const world = akumaWorld(path, home, settings);
+  const call = {
     archetype,
     body,
-    cwd: execution.cwd,
-  });
+    ...(execution === undefined ? {} : { cwd: execution.cwd }),
+  };
+  const handle = execution === undefined
+    ? await world.call(call)
+    : await callAkumaWithContext(world, call, { cwdCanonical: true });
+  const completedExecution = execution ?? akumaCallExecution(handle);
+  if (completedExecution === undefined) throw new Error("Akuma call is missing its birth execution");
   const readonly = (await handle.status()).readonly;
   const dispatch: DispatchStage = seat === undefined
     ? { kind: "none" }
@@ -305,7 +315,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
     kind: "called",
     akuma: handle.id,
     ...(readonly === undefined ? {} : { readonly }),
-    execution,
+    execution: completedExecution,
     dispatch,
     alias: aliasStage,
     observation,

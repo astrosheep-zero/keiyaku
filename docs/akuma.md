@@ -126,9 +126,13 @@ unborn address is refused without a timeline or Tell fact. The public handle
 reports the existing not-born error; it never reports failure after leaving a
 future input behind.
 
-Public world and summon coordinates are normalized once at the Akuma boundary.
-Soul cwd, heart paths, and detached launch paths are absolute below that point;
-downstream layers do not reinterpret relative paths.
+Every birth chooses cwd from the first available source: stated input, an
+appointed Contract worktree, the hosting caller Soul for a Body Request, the
+direct initiator process, then the World root. The selected path must be an
+existing canonical absolute directory; an invalid selected path fails instead
+of falling through. Soul cwd, provider confinement, launch, and public call
+provenance use that one value. Contract appointment remains a Library concern,
+while a hosting Body knows only its own Soul and the request claim.
 
 Each Body receives `KEIYAKU_ACTOR_ID` equal to that Soul's AkuId. The caller
 process environment is unchanged.
