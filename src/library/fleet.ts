@@ -95,13 +95,7 @@ async function createdTasksFor(
 }
 
 async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): Promise<AkumaObservation> {
-  const contractId = await contractFor(repo, status.id);
-  const [createdTasks] = await createdTasksFor(path, [status]);
-  return {
-    status,
-    createdTasks: createdTasks!,
-    ...(contractId === undefined ? {} : { contractId }),
-  };
+  return (await observeAkumaSet([status], path, repo))[0]!;
 }
 
 async function observeAkumaSet(
