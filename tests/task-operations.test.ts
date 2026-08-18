@@ -46,6 +46,24 @@ test("note is replaceable authority and product timestamps advance only on chang
   assert.equal(unchanged.value.task.updatedAt, replaced.value.task.updatedAt);
 });
 
+test("ordinary mutations advance a non-later timestamp by one millisecond", async () => {
+  const { root, tasks } = await world();
+  const id = acceptedId(await tasks.add({ title: "Future timestamp" }));
+  const before = await tasks.task({ id }).read();
+  if (before === null) return;
+  const future = "2099-01-01T00:00:00.000Z";
+  writeFileSync(
+    join(root, ".keiyaku", "tasks", "future-timestamp.md"),
+    serializeTaskDocument({ ...before.task, updatedAt: future }),
+  );
+
+  const updated = await tasks.task({ id }).update({ note: "changed" });
+  assert.equal(updated.kind, "accepted");
+  if (updated.kind === "accepted") {
+    assert.equal(updated.value.task.updatedAt, "2099-01-01T00:00:00.001Z");
+  }
+});
+
 test("done and drop replace note while preserving creation time", async () => {
   const { tasks } = await world();
   const one = acceptedId(await tasks.add({ title: "One", note: "old" }));

@@ -77,9 +77,12 @@ with no second sync API or parallel writer.
 duplicate-free full TaskIds. `note` is a string and defaults to empty.
 `createdAt` and `updatedAt` are canonical UTC ISO
 timestamps. Product creation sets both to one captured time. A product mutation
-that changes Task authority preserves `createdAt` and advances `updatedAt` once;
-a no-op update preserves both. Manual writers own the truth of both timestamps
-when they edit authority. `createdBy` is an optional opaque nonblank actor
+that changes Task authority preserves `createdAt` and advances `updatedAt` once:
+it uses its captured candidate when later than the predecessor, otherwise the
+predecessor plus one millisecond. Ordinary mutations capture their own
+candidate; one compose invocation captures one candidate and reuses it for all
+of its changed documents. A no-op update preserves both. Manual writers own the
+truth of both timestamps when they edit authority. `createdBy` is an optional opaque nonblank actor
 string: no registry, AkuId grammar, normalization, or Contract association.
 Product creation writes it only from caller `actor`; later product mutations
 and settlement preserve the existing field and never invent one. A creation

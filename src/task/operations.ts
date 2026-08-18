@@ -63,9 +63,15 @@ function occupied(board: TaskBoard, namespace: readonly string[]): Set<string> {
     return sameNamespace(coordinate.namespace, namespace) ? [coordinate.localId] : [];
   }));
 }
-function currentTimestamp(): string { return new Date().toISOString(); }
-function advancedTimestamp(previous: string): string {
-  const current = currentTimestamp(); return current > previous ? current : new Date(Date.parse(previous) + 1).toISOString();
+function currentTimestamp(): string {
+  return new Date().toISOString();
+}
+
+/** Internal Task timestamp rule shared by ordinary mutations and compose. */
+export function advanceTaskTimestamp(previous: string, candidate: string): string {
+  return candidate > previous
+    ? candidate
+    : new Date(Date.parse(previous) + 1).toISOString();
 }
 function addDocument(base: TaskCreationDocument, namespace: readonly string[], board: TaskBoard, at: string, actor?: string): TaskDocument {
   const localId = allocateLocalId(deriveLocalStem(base.title), occupied(board, namespace));
@@ -133,11 +139,22 @@ export async function updateTask(world: WorldRoot, id: TaskId, input: UpdateTask
     const candidate = updateDocument(snapshot.board, current, input);
     if ("kind" in candidate) return { kind: "refused", refusal: candidate };
     const problem = relationProblem(boardWith(snapshot.board, candidate), current, candidate); if (problem !== null) return { kind: "refused", refusal: { kind: "invalid-graph", diagnostic: problem } };
-    const predecessor = snapshot.bytes.get(id)!, before = Buffer.from(predecessor).toString("utf8");
+    const predecessor = snapshot.bytes.get(id)!;
+    const before = Buffer.from(predecessor).toString("utf8");
     const changed = !Buffer.from(serializeTaskDocument(candidate)).equals(Buffer.from(predecessor));
-    const next = changed ? { ...candidate, updatedAt: advancedTimestamp(current.updatedAt) } : candidate;
-    const afterBytes = serializeTaskDocument(next), after = Buffer.from(afterBytes).toString("utf8");
-    if (before !== after && await replaceAuthority({ path: authorityPath(world, id), expected: predecessor, next: afterBytes }) !== "replaced") return { kind: "retry", reason: "concurrent-modification" };
+    let next = candidate;
+    if (changed) {
+      const at = currentTimestamp();
+      next = { ...candidate, updatedAt: advanceTaskTimestamp(current.updatedAt, at) };
+    }
+    const afterBytes = serializeTaskDocument(next);
+    const after = Buffer.from(afterBytes).toString("utf8");
+    if (
+      before !== after
+      && await replaceAuthority({ path: authorityPath(world, id), expected: predecessor, next: afterBytes }) !== "replaced"
+    ) {
+      return { kind: "retry", reason: "concurrent-modification" };
+    }
     const label = `${id}.md`;
     return { kind: "accepted", value: { task: taskView(next), documentDiff: documentDiff(label, label, before, after) } };
   });
@@ -153,8 +170,18 @@ export async function lifecycleTask(world: WorldRoot, id: TaskId, verb: TaskLife
   const result = await withTaskLocks({ world, allocation: false, ids: [id], ...(signal === undefined ? {} : { signal }) }, async (): Promise<TaskMutationResult> => {
     const snapshot = await readBoard(world), current = snapshot.board.tasks.get(id);
     if (current === undefined) return refused({ kind: "task-missing", taskId: id });
-    const state = TRANSITIONS[verb][current.state]; if (state === undefined) return refused({ kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb });
-    const next = { ...current, state, ...(note === undefined ? {} : { note }), updatedAt: advancedTimestamp(current.updatedAt) }; const bytes = serializeTaskDocument(next);
+    const state = TRANSITIONS[verb][current.state];
+    if (state === undefined) {
+      return refused({ kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb });
+    }
+    const at = currentTimestamp();
+    const next = {
+      ...current,
+      state,
+      ...(note === undefined ? {} : { note }),
+      updatedAt: advanceTaskTimestamp(current.updatedAt, at),
+    };
+    const bytes = serializeTaskDocument(next);
     return await replaceAuthority({ path: authorityPath(world, id), expected: snapshot.bytes.get(id)!, next: bytes }) === "replaced"
       ? { kind: "accepted", value: taskView(next) } : retry("concurrent-modification");
   });
@@ -174,7 +201,12 @@ export async function settleTask(world: WorldRoot, id: TaskId): Promise<SettledT
     if (current.state === "drop") {
       return { kind: "refused", refusal: { kind: "invalid-lifecycle-transition", taskId: id, state: current.state, verb: "done" } };
     }
-    const next: TaskDocument = { ...current, state: "done", updatedAt: advancedTimestamp(current.updatedAt) };
+    const at = currentTimestamp();
+    const next: TaskDocument = {
+      ...current,
+      state: "done",
+      updatedAt: advanceTaskTimestamp(current.updatedAt, at),
+    };
     const replaced = await replaceAuthority({ path: authorityPath(world, id), expected: snapshot.bytes.get(id)!, next: serializeTaskDocument(next) });
     return replaced === "replaced"
       ? { kind: "changed", task: taskView(next), action: "done" }

@@ -42,6 +42,31 @@ test("compose updates existing tasks and accepts an empty change set", async () 
   assert.equal((await product.task({ id: "task/existing" }).read())?.task.updatedAt, changed?.task.updatedAt);
 });
 
+test("compose applies one captured timestamp to changed documents", async () => {
+  const product = await tasks();
+  assert.equal((await product.add({ title: "First" })).kind, "accepted");
+  assert.equal((await product.add({ title: "Second" })).kind, "accepted");
+  const systemDate = Date;
+  let next = Date.parse("2050-01-01T00:00:00.000Z");
+  class AdvancingDate extends systemDate {
+    constructor(value?: string | number) {
+      super(value === undefined ? next++ : value);
+    }
+  }
+  globalThis.Date = AdvancingDate as unknown as DateConstructor;
+  try {
+    const result = await product.compose({ markdown: "@task/first pri=1\n@task/second pri=1\n" });
+    assert.equal(result.kind, "accepted");
+  } finally {
+    globalThis.Date = systemDate;
+  }
+
+  const first = await product.task({ id: "task/first" }).read();
+  const second = await product.task({ id: "task/second" }).read();
+  assert.equal(first?.task.updatedAt, "2050-01-01T00:00:00.000Z");
+  assert.equal(second?.task.updatedAt, "2050-01-01T00:00:00.000Z");
+});
+
 test("compose planning refusals write nothing", async () => {
   const product = await tasks();
   const result = await product.compose({ markdown: "+ Broken needs=@task/missing\n" });

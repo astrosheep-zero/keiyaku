@@ -6,7 +6,7 @@ import { serializeTaskDocument, type TaskDocument, type TaskPriority } from "./d
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import { authorityPath, readBoard, replaceAuthority, withTaskLocks } from "./store.js";
 import type { WorldRoot } from "../world.js";
-import type { TaskRefusal, TaskRetry } from "./operations.js";
+import { advanceTaskTimestamp, type TaskRefusal, type TaskRetry } from "./operations.js";
 
 type TaskDocumentChange = Readonly<{ taskId: TaskId; kind: "created" | "updated"; documentDiff: string }>;
 export type TaskCompositionResult =
@@ -92,8 +92,9 @@ function applyAssignments(document: TaskDocument, assignments: readonly Assignme
   return body === undefined ? next : { ...next, body };
 }
 
-function currentTimestamp(): string { return new Date().toISOString(); }
-function advancedTimestamp(previous: string, current: string): string { return current > previous ? current : new Date(Date.parse(previous) + 1).toISOString(); }
+function currentTimestamp(): string {
+  return new Date().toISOString();
+}
 function createdTask(id: TaskId, title: string, at: string, actor?: string): TaskDocument {
   return {
     id, title, state: "open", priority: 2, needs: [], parent: null, supersedes: [], relates: [], note: "",
@@ -126,7 +127,15 @@ function plan(sketch: Sketch, board: TaskBoard, defaultNamespace: readonly strin
         current = { ...current, parent };
       }
       current = applyAssignments(current, node.assignments, node.body);
-      if (before !== null && !Buffer.from(serializeTaskDocument(current)).equals(Buffer.from(serializeTaskDocument(before)))) current = { ...current, updatedAt: advancedTimestamp(before.updatedAt, at) };
+      if (
+        before !== null
+        && !Buffer.from(serializeTaskDocument(current)).equals(Buffer.from(serializeTaskDocument(before)))
+      ) {
+        current = {
+          ...current,
+          updatedAt: advanceTaskTimestamp(before.updatedAt, at),
+        };
+      }
       byDepth[node.depth] = current.id; byDepth.length = node.depth + 1;
       all.set(current.id, current); planned.push({ node, before, after: current });
     }
