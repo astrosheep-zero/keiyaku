@@ -347,31 +347,6 @@ export async function readGitPaths(
   return { commit, tree, paths };
 }
 
-/** Add paths from the same immutable Git tree without rereading its ref. */
-export async function extendGitPaths(
-  repository: GitRepository,
-  snapshot: GitSnapshot,
-  requestedPaths: readonly string[],
-): Promise<GitSnapshot> {
-  for (const path of requestedPaths) validPath(path);
-  if (snapshot.tree === null || requestedPaths.length === 0) return snapshot;
-  const additions = parseTreeEntries(await runGit(repository, [
-    "ls-tree",
-    "-z",
-    "--full-tree",
-    snapshot.tree,
-    "--",
-    ...requestedPaths,
-  ]));
-  return { ...snapshot, paths: new Map([...snapshot.paths, ...additions]) };
-}
-
-/** Expand a targeted immutable snapshot to its complete already-pinned tree. */
-export async function expandGitSnapshot(repository: GitRepository, snapshot: GitSnapshot): Promise<GitSnapshot> {
-  if (snapshot.tree === null) return snapshot;
-  return { ...snapshot, paths: await readTreeEntries(repository, snapshot.tree) };
-}
-
 export async function writeBlob(repository: GitRepository, bytes: string | Uint8Array): Promise<GitOid> {
   const oid = (await runGit(repository, ["hash-object", "-w", "--stdin"], bytes)).toString("utf8").trim();
   assertOid(oid, "written blob");

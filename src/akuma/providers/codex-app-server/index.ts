@@ -229,5 +229,3 @@ export function createCodexAppServerProvider(input: string | ProviderExecution =
     resume: (input) => startCodex(execution, input),
   };
 }
-
-export const codexAppServerProvider = createCodexAppServerProvider();

@@ -34,10 +34,6 @@ export function requireInput(value: unknown, label: string): Record<string, unkn
   return value;
 }
 
-export function rejectUnknownFields(values: Record<string, unknown>, allowed: readonly string[], label: string): void {
-  for (const key of Object.keys(values)) if (!allowed.includes(key)) throw new TypeError(`${label} has unknown field: ${key}`);
-}
-
 export function optionalNonblank(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value.trim().length === 0) {

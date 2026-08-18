@@ -318,5 +318,3 @@ export function createOpencodeProvider(input: ProviderExecution | OpencodeProvid
     },
   };
 }
-
-export const opencodeProvider = createOpencodeProvider();

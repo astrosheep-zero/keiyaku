@@ -112,9 +112,6 @@ export function projectRows(board: TaskBoard, scope: readonly string[] | null, s
       disposition: taskDisposition(board, task),
     })).sort((a, b) => a.priority - b.priority || Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
 }
-export function projectReady(board: TaskBoard, scope: readonly string[] | null): readonly TaskRow[] {
-  return projectRows(board, scope, "active").filter((row) => row.disposition === "ready");
-}
 export function projectBlocked(
   board: TaskBoard,
   scope: readonly string[] | null,

@@ -121,14 +121,6 @@ export async function unsealedWorkspaceBytes(
   };
 }
 
-export async function unsealedBytes(
-  repository: GitRepository,
-  path: string,
-  expected: TerminalSealExpectations,
-): Promise<UnsealedBytes | null> {
-  return (await observeTerminalWorkspace(repository, path, expected)).unsealed;
-}
-
 export async function observeTerminalWorkspace(
   repository: GitRepository,
   path: string,

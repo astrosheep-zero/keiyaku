@@ -171,11 +171,6 @@ export async function releaseContractWorktree(repository: GitRepository, contrac
   try { await unlink(appointment.path); } catch { /* reservation cleanup is best effort */ }
 }
 
-export async function removeContractWorktreeAppointment(repository: GitRepository, contract: ContractId): Promise<void> {
-  const appointment = await readContractAppointment(repository);
-  if (appointment.kind !== "appointed" || appointment.contract !== contract) return;
-  await unlink(appointment.path);
-}
 
 async function repair(repository: GitRepository, worktree: string, relativePath: string, bytes: string): Promise<ContractFileEffect> {
   const path = join(worktree, relativePath);

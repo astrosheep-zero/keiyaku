@@ -114,25 +114,6 @@ export function safeText(value: string): string {
   return value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => /\s/u.test(character) ? " " : "�");
 }
 
-export function renderFacts(primary: string, facts: readonly string[], columns: number): readonly string[] {
-  const head = safeText(primary);
-  const clean = facts.map(safeText);
-  if (clean.length === 0) return [head];
-  const inline = `${head}  ${clean.join(" · ")}`;
-  if (displayColumns(inline) <= columns) return [inline];
-  const lines = [head];
-  let current = "  ";
-  for (const fact of clean) {
-    const candidate = current === "  " ? `${current}${fact}` : `${current} · ${fact}`;
-    if (current !== "  " && displayColumns(candidate) > columns) {
-      lines.push(current);
-      current = `  ${fact}`;
-    } else current = candidate;
-  }
-  lines.push(current);
-  return lines;
-}
-
 export function renderTextBlock(value: string, indent: string, columns: number): readonly string[] {
   const words = safeText(value).trim().split(/\s+/u).filter((word) => word.length > 0);
   if (words.length === 0) return [indent];
@@ -180,13 +161,6 @@ export function renderOpaqueBlock(value: string, indent: string, columns: number
     prefix = continuation;
   }
   return lines;
-}
-
-export function renderVoiceRuler(left: string, right: string, columns: number): string {
-  const width = Math.max(20, Math.min(80, columns));
-  const occupied = displayColumns(left) + displayColumns(right) + 2;
-  if (occupied >= width) return `${left}\n${"─".repeat(Math.max(1, width - displayColumns(right) - 1))} ${right}`;
-  return `${left} ${"─".repeat(width - occupied)} ${right}`;
 }
 
 export function tone(value: string, kind: "dim" | "alert", color: boolean): string {

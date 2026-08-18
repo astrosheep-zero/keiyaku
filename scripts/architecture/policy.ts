@@ -869,7 +869,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "displayColumns",
           "renderBoundedTextBlock",
           "renderTextBlock",
-          "renderVoiceRuler",
           "safeText",
           "truncateMiddleDisplayText",
         ]),
