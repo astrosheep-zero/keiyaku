@@ -13,8 +13,9 @@ re-executes one, and never needs an exactly-once claim.
 
 The body creates a request transport for every provider drive, and the adapter
 injects `AKUMA_REQUESTS` into that drive's command environment. Nested call,
-wait, tell, kill, and `contract.deliver` operations reroute exactly when that
-variable exists. There is no second public verb or generic messaging surface.
+wait, tell, kill, `contract.deliver`, and `contract.review` operations reroute
+exactly when that variable exists. There is no second public verb or generic
+messaging surface.
 
 ### Transport, authority, and judge
 
@@ -42,7 +43,7 @@ receipt projection.
 
 Transport bytes are not facts. Before Heart admission they are claims. A live
 receipt may carry a one-time operation result that Heart does not retain;
-durable terminal facts and an accepted deliver reference remain reproducible.
+durable terminal facts and accepted Contract fact references remain reproducible.
 Missing, malformed, or discarded transport bytes therefore do not create or
 erase authority. The parent Heart's request facts are the only durable request
 authority and have one writer: the Body holding its leash. Admission uses the
@@ -53,8 +54,8 @@ For call, the claim decoder first validates the action envelope, then selects
 the stated cwd or the hosting parent Soul cwd. Only then does it decode the frozen provider and
 options with the existing owners for that final cwd. The complete validated
 payload enters Heart; transport never supplies a second allowed-action
-judgment. A malformed payload is a malformed
-claim and never becomes a durable request fact.
+judgment. A malformed payload is a malformed claim and never becomes a durable
+request fact.
 
 The child directory and its leash remain the sole judge of child birth. The
 parent heart remembers only the reserved child coordinate: where to observe,
@@ -130,13 +131,27 @@ results but settle Heart as `voided`. Forwarding never carries actor, Settings,
 hooks, policy, callbacks, or an unresolved selector, and it never routes beyond
 the direct parent.
 
+`contract.review` is independent of `contract.deliver`. Its claim carries the
+selected Repo's normalized primary-worktree coordinate, a complete ContractId,
+verdict, and optional summary. The direct parent reconstructs that Repo,
+supplies the authenticated requester as actor, reads Settings scoped to it for
+worktree hooks, and calls the same forced-local Library review executor as
+ordinary review. The live receipt preserves the complete ordinary review result,
+including its attestation, workspace disclosure, placement stop, physical
+effects, lag, and claim projection. An accepted request stores only the Repo
+coordinate, ContractId, and owner-minted review fact id in Heart. Refusal,
+retry, or execution failure without that reference settles `voided` while the
+live typed result remains in the receipt. A later pump projects only the
+accepted reference and never reads or replays Contract state.
+
 ### Recovery and pump
 
 After predecessor settlement and before driving a turn, a body sweeps every
 nonterminal request. An admitted request without a reservation becomes
 `voided`: its old caller is gone and no body was spawned. This includes every
-admitted `contract.deliver`; the sweep does not read Contract state, infer an
-attempt from actor, time, or head, or replay delivery. For a reserved request:
+admitted `contract.deliver` or `contract.review`; the sweep does not read
+Contract state, infer an attempt from actor, time, or head, or replay either
+operation. For a reserved request:
 
 1. A missing child directory becomes `voided` with evidence.
 2. A lock-free child-soul read that finds a matching origin becomes `served`;

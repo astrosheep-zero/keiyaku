@@ -56,7 +56,7 @@ The command vocabulary is:
 | `bind` | Calls `Keiyaku.bind` with the pinned Repo, Markdown, and structured options. |
 | `amend` | Calls `keiyaku.amend` with the operation Markdown and structured options. |
 | `deliver` | Calls `keiyaku.deliver`. |
-| `review` | Calls `keiyaku.review` directly. |
+| `review` | Calls `keiyaku.review`; in a declared request channel it forwards one hop through the direct parent. |
 | `abandon` | Calls `keiyaku.abandon`. |
 | `arc` | Calls `keiyaku.arc` with arc Markdown. |
 | `status` | Calls Kanshi or one exact Akuma status according to its selector. |
@@ -213,6 +213,11 @@ ordinary dirty bytes when accepted. `--diff` maps to audit `showDiff`; the value
 lives only at `report.candidate.diff`, including `""`. `--show-diff-body` is
 usage. Other listed scalar operands must be nonblank. `--json` affects output
 only.
+
+When a declared request channel is present, `deliver` and `review` resolve the
+selected Repo and Contract before forwarding but do not read child Settings or
+construct child hooks. Their direct parent reconstructs the selected Repo and
+applies only its scoped Settings to the forced-local executor.
 
 `install` is the one edge command that does not read a repository or Git. It
 installs the bundled `keiyaku`, `keiyaku-task`, `keiyaku-workflow`, and

@@ -76,12 +76,22 @@ type DeliverRequestClaim = Readonly<{
   includeDirty: boolean;
 }>;
 
-type RequestClaim = CallRequestClaim | WaitRequestClaim | TellRequestClaim | KillRequestClaim | DeliverRequestClaim;
+type ReviewRequestClaim = Readonly<{
+  id: string;
+  action: "contract.review";
+  repoRoot: string;
+  contractId: string;
+  verdict: "satisfied" | "unsatisfied";
+  summary?: string;
+}>;
+
+type RequestClaim = CallRequestClaim | WaitRequestClaim | TellRequestClaim | KillRequestClaim | DeliverRequestClaim | ReviewRequestClaim;
 type StructuralRequestClaim = (Omit<CallRequestClaim, "recipe"> & Readonly<{ recipe: unknown }>)
   | WaitRequestClaim
   | TellRequestClaim
   | KillRequestClaim
-  | DeliverRequestClaim;
+  | DeliverRequestClaim
+  | ReviewRequestClaim;
 
 type UpstreamRequestFailure =
   | Readonly<{ kind: "akuma-not-born"; id: AkuId }>
@@ -96,6 +106,13 @@ export type ForwardedDeliveryReference = Readonly<{
   repoRoot: string;
   contractId: string;
   deliveryFactId: string;
+}>;
+
+export type ForwardedReviewReference = Readonly<{
+  kind: "accepted-reference";
+  repoRoot: string;
+  contractId: string;
+  reviewFactId: string;
 }>;
 
 export type UpstreamExecutionPort = Readonly<{
@@ -113,6 +130,10 @@ export type UpstreamExecutionPort = Readonly<{
     requester: AkuId;
     signal: AbortSignal;
   }>): Promise<Readonly<{ result: unknown; deliveryFactId?: string }>>;
+  review(input: Omit<ReviewRequestClaim, "id" | "action"> & Readonly<{
+    requester: AkuId;
+    signal: AbortSignal;
+  }>): Promise<Readonly<{ result: unknown; reviewFactId?: string }>>;
 }>;
 
 type RequestReceipt =
@@ -122,6 +143,12 @@ type RequestReceipt =
       action: "contract.deliver";
       state: "served";
       reference: ForwardedDeliveryReference;
+    }>
+  | Readonly<{
+      id: string;
+      action: "contract.review";
+      state: "served";
+      reference: ForwardedReviewReference;
     }>
   | Readonly<{
       id: string;
@@ -161,7 +188,8 @@ function object(value: unknown): Readonly<Record<string, unknown>> | null {
 
 function exactKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+  const sortedExpected = [...expected].sort();
+  return actual.length === sortedExpected.length && actual.every((key, index) => key === sortedExpected[index]);
 }
 
 function absolute(value: unknown): value is string {
@@ -316,6 +344,28 @@ function decodeDeliverClaim(
   };
 }
 
+function decodeReviewClaim(
+  id: string,
+  payload: Readonly<Record<string, unknown>>,
+): ReviewRequestClaim | null {
+  const expected = ["contractId", "repoRoot", "verdict", ...(payload.summary === undefined ? [] : ["summary"])];
+  const contract = canonicalContractId(payload.contractId);
+  if (!exactKeys(payload, expected)
+    || contract === null
+    || !absolute(payload.repoRoot)
+    || (payload.verdict !== "satisfied" && payload.verdict !== "unsatisfied")
+    || (payload.summary !== undefined
+      && (typeof payload.summary !== "string" || payload.summary.trim().length === 0))) return null;
+  return {
+    id,
+    action: "contract.review",
+    repoRoot: payload.repoRoot,
+    contractId: contract,
+    verdict: payload.verdict,
+    ...(payload.summary === undefined ? {} : { summary: payload.summary as string }),
+  };
+}
+
 function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | null {
   let decoded: unknown;
   try { decoded = JSON.parse(bytes); } catch { return null; }
@@ -332,6 +382,7 @@ function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | nu
   if (value.action === "akuma.tell") return decodeTellClaim(value.id, payload);
   if (value.action === "akuma.kill") return decodeKillClaim(value.id, payload);
   if (value.action === "contract.deliver") return decodeDeliverClaim(value.id, payload);
+  if (value.action === "contract.review") return decodeReviewClaim(value.id, payload);
   return null;
 }
 
@@ -411,12 +462,66 @@ function decodeDeliverReceipt(
   return null;
 }
 
+function decodeReviewReceipt(
+  value: Readonly<Record<string, unknown>>,
+  requestId: string,
+): RequestReceipt | null {
+  if (value.state === "served" && exactKeys(value, ["action", "id", "reference", "state"])) {
+    const reference = object(value.reference);
+    if (reference !== null
+      && exactKeys(reference, ["contractId", "kind", "repoRoot", "reviewFactId"])
+      && reference.kind === "accepted-reference"
+      && absolute(reference.repoRoot)
+      && canonicalContractId(reference.contractId) !== null
+      && typeof reference.reviewFactId === "string"
+      && reference.reviewFactId.trim().length > 0) {
+      return {
+        id: requestId,
+        action: "contract.review",
+        state: value.state,
+        reference: {
+          kind: reference.kind,
+          repoRoot: reference.repoRoot,
+          contractId: reference.contractId as string,
+          reviewFactId: reference.reviewFactId,
+        },
+      };
+    }
+  }
+  if (value.state === "served" && exactKeys(value, ["action", "id", "outcome", "state"])) {
+    const outcome = decodeUpstreamOutcome(value.outcome);
+    return outcome === null
+      ? null
+      : { id: requestId, action: "contract.review", state: value.state, outcome };
+  }
+  if (value.state === "refused"
+    && exactKeys(value, ["action", "diagnostic", "id", "state"])
+    && typeof value.diagnostic === "string") {
+    return { id: requestId, action: "contract.review", state: value.state, diagnostic: value.diagnostic };
+  }
+  if (value.state === "voided"
+    && exactKeys(value, ["action", "evidence", "id", "state"])
+    && typeof value.evidence === "string") {
+    return { id: requestId, action: "contract.review", state: value.state, evidence: value.evidence };
+  }
+  return null;
+}
+
+const CONTRACT_RECEIPT_DECODERS: Partial<Record<RequestClaim["action"], (
+  value: Readonly<Record<string, unknown>>,
+  requestId: string,
+) => RequestReceipt | null>> = {
+  "contract.deliver": decodeDeliverReceipt,
+  "contract.review": decodeReviewReceipt,
+};
+
 function decodeReceipt(bytes: string, requestId: string, action: RequestClaim["action"]): RequestReceipt | null {
   let decoded: unknown;
   try { decoded = JSON.parse(bytes); } catch { return null; }
   const value = object(decoded);
   if (value === null || value.id !== requestId || value.action !== action) return null;
-  if (action === "contract.deliver") return decodeDeliverReceipt(value, requestId);
+  const contractDecoder = CONTRACT_RECEIPT_DECODERS[action];
+  if (contractDecoder !== undefined) return contractDecoder(value, requestId);
   if (action === "akuma.call"
     && value.state === "served"
     && exactKeys(value, ["action", "child", "id", "state"])) {
@@ -469,6 +574,20 @@ function receiptFor(fact: RequestFact): RequestReceipt | null {
         repoRoot: service.repoRoot,
         contractId: service.contractId,
         deliveryFactId: service.deliveryFactId,
+      },
+    };
+  }
+  if (fact.action === "contract.review" && fact.state === "served") {
+    const service = fact.service as Extract<UpstreamRequestService, { action: "contract.review" }>;
+    return {
+      id: fact.id,
+      action: fact.action,
+      state: fact.state,
+      reference: {
+        kind: "accepted-reference",
+        repoRoot: service.repoRoot,
+        contractId: service.contractId,
+        reviewFactId: service.reviewFactId,
       },
     };
   }
@@ -604,6 +723,36 @@ export async function requestBodyDeliver(
   return "reference" in receipt ? receipt.reference : receipt.outcome;
 }
 
+type BodyReviewInput = Omit<ReviewRequestClaim, "action" | "id"> & Readonly<{
+  directory: string;
+  signal?: AbortSignal;
+}>;
+
+export function requestBodyReview(
+  input: BodyReviewInput & Readonly<{ id?: never }>,
+): Promise<UpstreamRequestOutcome>;
+export function requestBodyReview(
+  input: BodyReviewInput & Readonly<{ id: string }>,
+): Promise<UpstreamRequestOutcome | ForwardedReviewReference>;
+export async function requestBodyReview(
+  input: Omit<ReviewRequestClaim, "action" | "id"> & Readonly<{
+    directory: string;
+    id?: string;
+    signal?: AbortSignal;
+  }>,
+): Promise<UpstreamRequestOutcome | ForwardedReviewReference> {
+  const { directory, id = randomUUID(), signal, ...claim } = input;
+  const receipt = await requestBody({
+    directory,
+    claim: { ...claim, id, action: "contract.review" },
+    ...(signal === undefined ? {} : { signal }),
+  });
+  if (receipt.action !== "contract.review" || receipt.state !== "served") {
+    throw new Error(`Akuma body request ${id} returned the wrong action`);
+  }
+  return "reference" in receipt ? receipt.reference : receipt.outcome;
+}
+
 type ServeRequestInput = Readonly<{
   directory: string;
   claim: StructuralRequestClaim;
@@ -723,6 +872,27 @@ async function executeUpstreamClaim(
     const served = await input.upstream.kill({ targets: request.targets, signal: input.signal });
     return { result: served.result, service: { action: request.action, results: served.service } };
   }
+  if (request.action === "contract.review") {
+    const served = await input.upstream.review({
+      repoRoot: request.repoRoot,
+      contractId: request.contractId,
+      verdict: request.verdict,
+      ...(request.summary === undefined ? {} : { summary: request.summary }),
+      requester: request.requester,
+      signal: input.signal,
+    });
+    return {
+      result: served.result,
+      ...(served.reviewFactId === undefined ? {} : {
+        service: {
+          action: request.action,
+          repoRoot: request.repoRoot,
+          contractId: request.contractId,
+          reviewFactId: served.reviewFactId,
+        },
+      }),
+    };
+  }
   const served = await input.upstream.deliver({
     repoRoot: request.repoRoot,
     contractId: request.contractId,
@@ -788,7 +958,7 @@ async function serveUpstreamClaim(
     const served = await executeUpstreamClaim(input, request);
     outcome = { kind: "returned", result: served.result };
     if (served.service === undefined) {
-      fact = await voidRequest(input.paths, request.id, "body completed without a durable delivery reference");
+      fact = await voidRequest(input.paths, request.id, "body completed without a durable Contract fact reference");
       await projectReceipt(input.directory, fact, outcome);
       return;
     }
@@ -796,7 +966,7 @@ async function serveUpstreamClaim(
   } catch (error) {
     if (input.signal.aborted) return;
     outcome = { kind: "failed", failure: upstreamFailure(error) };
-    if (request.action === "contract.deliver") {
+    if (request.action === "contract.deliver" || request.action === "contract.review") {
       fact = await voidRequest(input.paths, request.id, "body failed before serving the request");
       await projectReceipt(input.directory, fact, outcome);
       return;
@@ -804,7 +974,7 @@ async function serveUpstreamClaim(
   }
   input.signal.throwIfAborted();
   if (service === undefined) {
-    fact = await voidRequest(input.paths, request.id, "body completed without a durable delivery reference");
+    fact = await voidRequest(input.paths, request.id, "body completed without a durable Contract fact reference");
   } else {
     fact = await serveUpstreamRequest(input.paths, request.id, service);
   }

@@ -118,6 +118,25 @@ const KILL_EVIDENCE = [
   "unavailable",
 ] as const;
 
+function decodeContractRequestService(
+  input: Extract<RequestInput, { action: "contract.deliver" | "contract.review" }>,
+  service: Readonly<Record<string, unknown>>,
+): UpstreamRequestService {
+  const factField = input.action === "contract.deliver" ? "deliveryFactId" : "reviewFactId";
+  const factId = service[factField];
+  const expected = ["action", "contractId", "repoRoot", factField].sort();
+  if (!exactKeys(service, expected)
+    || service.repoRoot !== input.repoRoot
+    || service.contractId !== input.contractId
+    || typeof factId !== "string"
+    || factId.trim().length === 0) {
+    throw new Error(`Akuma authority contains an invalid ${input.action.slice("contract.".length)} service reference`);
+  }
+  return input.action === "contract.deliver"
+    ? { action: input.action, repoRoot: input.repoRoot, contractId: input.contractId, deliveryFactId: factId }
+    : { action: input.action, repoRoot: input.repoRoot, contractId: input.contractId, reviewFactId: factId };
+}
+
 function decodeRequestService(
   value: unknown,
   input: Exclude<RequestInput, { action: "akuma.call" }>,
@@ -125,6 +144,9 @@ function decodeRequestService(
   const service = object(value);
   if (service === null || service.action !== input.action) {
     throw new Error("Akuma authority contains a mismatched request service reference");
+  }
+  if (input.action === "contract.deliver" || input.action === "contract.review") {
+    return decodeContractRequestService(input, service);
   }
   if (input.action === "akuma.wait") {
     if (!exactKeys(service, ["action"])) {
@@ -139,22 +161,6 @@ function decodeRequestService(
       throw new Error("Akuma authority contains an invalid tell service reference");
     }
     return { action: input.action, target: input.target, tellId: input.id };
-  }
-  if (input.action === "contract.deliver") {
-    const expected = ["action", "contractId", "deliveryFactId", "repoRoot"];
-    if (!exactKeys(service, expected)
-      || service.repoRoot !== input.repoRoot
-      || service.contractId !== input.contractId
-      || typeof service.deliveryFactId !== "string"
-      || service.deliveryFactId.trim().length === 0) {
-      throw new Error("Akuma authority contains an invalid deliver service reference");
-    }
-    return {
-      action: input.action,
-      repoRoot: input.repoRoot,
-      contractId: input.contractId,
-      deliveryFactId: service.deliveryFactId,
-    };
   }
   if (!exactKeys(service, ["action", "results"]) || !Array.isArray(service.results)) {
     throw new Error("Akuma authority contains an invalid kill service reference");
@@ -246,7 +252,7 @@ export function decodeCallRow(row: CallRow): CallFact {
 }
 
 export function decodeRequestRow(row: RequestRow): RequestFact {
-  if (!["akuma.call", "akuma.wait", "akuma.tell", "akuma.kill", "contract.deliver"].includes(row.action)) {
+  if (!["akuma.call", "akuma.wait", "akuma.tell", "akuma.kill", "contract.deliver", "contract.review"].includes(row.action)) {
     throw new Error(`Akuma authority contains an unknown request action: ${row.action}`);
   }
   const payload = parsed<Omit<RequestInput, "action" | "id">>(row.payload_json);

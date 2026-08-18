@@ -483,6 +483,23 @@ test("a non-collision here refusal stops after the first candidate and releases 
   assert.equal(existsSync(appointment), false);
 });
 
+test("ordinary review retains its complete local mutation result without a request channel", async () => {
+  const repository = repositoryWithInitialCommit();
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: markdown("Local review"),
+    workspace: "here",
+    gates: ["reviewed"],
+  });
+
+  const result = await bound.keiyaku.review({ verdict: "unsatisfied", summary: "needs work" });
+
+  const attestation = result.facts.find((fact) => fact.kind === "attestation");
+  assert.equal(attestation?.kind, "attestation");
+  assert.equal(attestation?.data.verdict, "unsatisfied");
+  assert.equal((await bound.keiyaku.state()).attestations.at(-1)?.data.summary, "needs work");
+});
+
 test("Delivery.diff remains a nullable Promise-backed Git read", async () => {
   const repository = repositoryWithInitialCommit();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: markdown("Diff input"), workspace: "here" });

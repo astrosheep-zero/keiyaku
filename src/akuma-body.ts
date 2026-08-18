@@ -13,6 +13,7 @@ import {
 } from "./library/configuration.js";
 import {
   executeForwardedDeliver,
+  executeForwardedReview,
 } from "./library/contract.js";
 import { Repo } from "./library/repo.js";
 import { settings } from "./settings.js";
@@ -59,6 +60,20 @@ export function upstreamFor(
         requireBranchesToBeUpToDate: requireBranchesToBeUpToDateFrom({ settings: configuration }),
         hooks: worktreeHooksFrom({ settings: configuration }),
         signal: input.signal,
+      });
+    },
+    review: async (input) => {
+      const [repo, configuration] = await Promise.all([
+        Repo.at({ path: input.repoRoot }),
+        settings({ root: input.repoRoot as WorldRoot, ...settingsCoordinates }),
+      ]);
+      return await executeForwardedReview({
+        repo,
+        contractId: input.contractId,
+        requester: input.requester,
+        verdict: input.verdict,
+        ...(input.summary === undefined ? {} : { summary: input.summary }),
+        hooks: worktreeHooksFrom({ settings: configuration }),
       });
     },
   };

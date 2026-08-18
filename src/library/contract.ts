@@ -75,6 +75,7 @@ import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.
 import {
   injectedBodyRequests,
   requestBodyDeliver,
+  requestBodyReview,
   type UpstreamRequestOutcome,
 } from "../akuma/requests.js";
 import { auditContract, type AuditInput } from "./audit.js";
@@ -200,8 +201,21 @@ type DeliveryExecutionInput = Readonly<{
   hooks: WorktreeHooks;
 }>;
 
+type ReviewExecutionInput = Readonly<{
+  scope: RepositoryScope;
+  contractId: ContractId;
+  actor?: ReturnType<typeof actorOption>["actor"];
+  verdict: AttestationVerdict;
+  summary?: string;
+  hooks: WorktreeHooks;
+}>;
+
 type ForwardedDeliveryReceipt =
   | Readonly<{ kind: "accepted"; result: MutationResult<DeliverValue> }>
+  | Readonly<{ kind: "refused"; refusal: KeiyakuRefusal }>
+  | Readonly<{ kind: "retry"; reason: KeiyakuRetryReason }>;
+type ForwardedReviewReceipt =
+  | Readonly<{ kind: "accepted"; result: MutationResult<ReviewValue> }>
   | Readonly<{ kind: "refused"; refusal: KeiyakuRefusal }>
   | Readonly<{ kind: "retry"; reason: KeiyakuRetryReason }>;
 export type { AuditInput };
@@ -251,6 +265,23 @@ async function executeLocalDelivery(input: DeliveryExecutionInput): Promise<Muta
   });
 }
 
+async function executeLocalReview(input: ReviewExecutionInput): Promise<MutationResult<ReviewValue>> {
+  return withGitDecodeChannel(input.scope, async (channel) => {
+    const accepted = requireAccepted(await reviewOperation({
+      scope: input.scope,
+      channel,
+      contractId: input.contractId,
+      verdict: input.verdict,
+      ...(input.summary === undefined ? {} : { summary: input.summary }),
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+    }));
+    return completeMutation({
+      ...completion(input.scope, channel, input.contractId, (review: ReviewValue) => review, input.hooks),
+      accepted,
+    });
+  });
+}
+
 function forwardedReceipt(outcome: UpstreamRequestOutcome): ForwardedDeliveryReceipt {
   if (outcome.kind === "failed") {
     throw new Error(outcome.failure.kind === "failed"
@@ -260,7 +291,22 @@ function forwardedReceipt(outcome: UpstreamRequestOutcome): ForwardedDeliveryRec
   return outcome.result as ForwardedDeliveryReceipt;
 }
 
+function forwardedReviewReceipt(outcome: UpstreamRequestOutcome): ForwardedReviewReceipt {
+  if (outcome.kind === "failed") {
+    throw new Error(outcome.failure.kind === "failed"
+      ? outcome.failure.diagnostic
+      : `Unexpected Akuma target failure for review: ${outcome.failure.id}`);
+  }
+  return outcome.result as ForwardedReviewReceipt;
+}
+
 function requireForwardedDelivery(receipt: ForwardedDeliveryReceipt): MutationResult<DeliverValue> {
+  if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
+  if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
+  return receipt.result;
+}
+
+function requireForwardedReview(receipt: ForwardedReviewReceipt): MutationResult<ReviewValue> {
   if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
   if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
   return receipt.result;
@@ -293,6 +339,39 @@ export async function executeForwardedDeliver(input: Readonly<{
     const delivery = result.facts.find((fact) => fact.kind === "deliver");
     if (delivery === undefined) throw new Error("accepted delivery is missing its journal fact");
     return { result: { kind: "accepted", result }, deliveryFactId: delivery.entry };
+  } catch (error) {
+    if (error instanceof KeiyakuRefused) return { result: { kind: "refused", refusal: error.refusal } };
+    if (error instanceof KeiyakuRetry) return { result: { kind: "retry", reason: error.reason } };
+    throw error;
+  }
+}
+
+export async function executeForwardedReview(input: Readonly<{
+  repo: Repo;
+  contractId: string;
+  requester: string;
+  verdict: AttestationVerdict;
+  summary?: string;
+  hooks: WorktreeHooks;
+}>): Promise<Readonly<{ result: ForwardedReviewReceipt; reviewFactId?: string }>> {
+  const id = contractId(input.contractId);
+  const actor = actorOption(input.requester).actor;
+  if (input.verdict !== "satisfied" && input.verdict !== "unsatisfied") {
+    throw new TypeError("verdict must be satisfied or unsatisfied");
+  }
+  const summary = optionalNonblank(input.summary, "review summary");
+  try {
+    const result = await executeLocalReview({
+      scope: scopeForRepo(input.repo),
+      contractId: id,
+      ...(actor === undefined ? {} : { actor }),
+      verdict: input.verdict,
+      ...(summary === undefined ? {} : { summary }),
+      hooks: input.hooks,
+    });
+    const review = result.facts.find((fact) => fact.kind === "attestation");
+    if (review === undefined) throw new Error("accepted review is missing its journal fact");
+    return { result: { kind: "accepted", result }, reviewFactId: review.entry };
   } catch (error) {
     if (error instanceof KeiyakuRefused) return { result: { kind: "refused", refusal: error.refusal } };
     if (error instanceof KeiyakuRetry) return { result: { kind: "retry", reason: error.reason } };
@@ -467,19 +546,24 @@ export class KeiyakuHandle {
       throw new TypeError("verdict must be satisfied or unsatisfied");
     }
     const summary = optionalNonblank(values.summary, "review summary");
-    return withGitDecodeChannel(this.scope, async (channel) => {
-      const accepted = requireAccepted(await reviewOperation({
-        scope: this.scope,
-        channel,
+    const actor = actorOption(values.actor);
+    const requests = injectedBodyRequests();
+    if (requests !== null) {
+      return requireForwardedReview(forwardedReviewReceipt(await requestBodyReview({
+        directory: requests,
+        repoRoot: this.scope.primaryWorktree,
         contractId: this.id,
         verdict,
         ...(summary === undefined ? {} : { summary }),
-        ...actorOption(values.actor),
-      }));
-      return completeMutation({
-        ...completion(this.scope, channel, this.id, (value: ReviewValue) => value, hooks),
-        accepted,
-      });
+      })));
+    }
+    return await executeLocalReview({
+      scope: this.scope,
+      contractId: this.id,
+      ...actor,
+      verdict,
+      ...(summary === undefined ? {} : { summary }),
+      hooks,
     });
   }
 

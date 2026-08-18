@@ -145,6 +145,13 @@ export type RequestInput = Readonly<{
   contractId: string;
   message?: string;
   includeDirty: boolean;
+}> | Readonly<{
+  id: string;
+  action: "contract.review";
+  repoRoot: string;
+  contractId: string;
+  verdict: "satisfied" | "unsatisfied";
+  summary?: string;
 }>;
 
 export type UpstreamRequestService =
@@ -159,6 +166,12 @@ export type UpstreamRequestService =
       repoRoot: string;
       contractId: string;
       deliveryFactId: string;
+    }>
+  | Readonly<{
+      action: "contract.review";
+      repoRoot: string;
+      contractId: string;
+      reviewFactId: string;
     }>;
 
 type AdmittedRequest = RequestInput & Readonly<{

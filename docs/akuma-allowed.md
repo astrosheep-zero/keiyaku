@@ -13,6 +13,7 @@ akuma.call
 akuma.kill
 akuma.tell
 contract.deliver
+contract.review
 task.add
 task.addDocument
 task.compose

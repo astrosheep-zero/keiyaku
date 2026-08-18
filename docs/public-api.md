@@ -375,6 +375,15 @@ workspace bytes, `Review` exposes a `workspace` disclosure with staged,
 unstaged, untracked, and `shortStat` fields; that disclosure is not testimony
 and does not authorize delivery.
 
+When `AKUMA_REQUESTS` identifies a declared provider drive, `review` preserves
+the selected Repo's normalized primary-worktree coordinate, existing verdict
+and summary inputs, and existing mutation result through one direct-parent
+request. The requester is the actor; caller actor, Settings, hooks, callbacks,
+and unresolved selectors do not cross the channel. The parent reconstructs the
+selected Repo and uses its scoped Settings for worktree hooks before entering
+the same forced-local review executor used by ordinary `KeiyakuHandle.review()`.
+`contract.review` is independently permission-keyed from `contract.deliver`.
+
 `delivery()` freshly observes the journal and returns the most recent tender.
 It returns `null` only when the contract has never tendered. A returned
 Delivery exposes the tender snapshot and the complete integration identity;

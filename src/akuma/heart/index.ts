@@ -210,28 +210,56 @@ function sameDeliverRequestInput(
     && fact.includeDirty === input.includeDirty;
 }
 
-function sameRequestInput(fact: RequestFact, input: RequestInput): boolean {
-  if (fact.id !== input.id || fact.action !== input.action) return false;
-  if (fact.action === "akuma.call" && input.action === "akuma.call") {
-    return fact.archetype === input.archetype
-      && fact.body === input.body
-      && fact.cwd === input.cwd
-      && fact.world === input.world
-      && JSON.stringify(fact.recipe) === JSON.stringify(input.recipe);
-  }
-  if (fact.action === "akuma.wait" && input.action === "akuma.wait") {
-    return fact.completion === input.completion
-      && fact.timeoutMs === input.timeoutMs
-      && JSON.stringify(fact.targets) === JSON.stringify(input.targets);
-  }
-  if (fact.action === "akuma.tell" && input.action === "akuma.tell") {
-    return fact.target === input.target && fact.body === input.body;
-  }
+function sameReviewRequestInput(
+  fact: Extract<RequestFact, { action: "contract.review" }>,
+  input: Extract<RequestInput, { action: "contract.review" }>,
+): boolean {
+  return fact.repoRoot === input.repoRoot
+    && fact.contractId === input.contractId
+    && fact.verdict === input.verdict
+    && fact.summary === input.summary;
+}
+
+function sameContractRequestInput(
+  fact: Extract<RequestFact, { action: "contract.deliver" | "contract.review" }>,
+  input: Extract<RequestInput, { action: "contract.deliver" | "contract.review" }>,
+): boolean {
   if (fact.action === "contract.deliver" && input.action === "contract.deliver") {
     return sameDeliverRequestInput(fact, input);
   }
-  return fact.action === "akuma.kill" && input.action === "akuma.kill"
-    && JSON.stringify(fact.targets) === JSON.stringify(input.targets);
+  return fact.action === "contract.review" && input.action === "contract.review"
+    && sameReviewRequestInput(fact, input);
+}
+
+function sameRequestInput(fact: RequestFact, input: RequestInput): boolean {
+  if (fact.id !== input.id) return false;
+  if (fact.action !== input.action) return false;
+  if (fact.action === "akuma.call") {
+    const call = input as Extract<RequestInput, { action: "akuma.call" }>;
+    return fact.archetype === call.archetype
+      && fact.body === call.body
+      && fact.cwd === call.cwd
+      && fact.world === call.world
+      && JSON.stringify(fact.recipe) === JSON.stringify(call.recipe);
+  }
+  if (fact.action === "akuma.wait") {
+    const wait = input as Extract<RequestInput, { action: "akuma.wait" }>;
+    return fact.completion === wait.completion
+      && fact.timeoutMs === wait.timeoutMs
+      && JSON.stringify(fact.targets) === JSON.stringify(wait.targets);
+  }
+  if (fact.action === "akuma.tell") {
+    const tell = input as Extract<RequestInput, { action: "akuma.tell" }>;
+    return fact.target === tell.target && fact.body === tell.body;
+  }
+  if (fact.action === "contract.deliver" || fact.action === "contract.review") {
+    return sameContractRequestInput(
+      fact,
+      input as Extract<RequestInput, { action: "contract.deliver" | "contract.review" }>,
+    );
+  }
+  const kill = input as Extract<RequestInput, { action: "akuma.kill" }>;
+  return JSON.stringify(fact.targets) === JSON.stringify(kill.targets);
 }
 
 export async function admitRequest(

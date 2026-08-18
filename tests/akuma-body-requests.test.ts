@@ -20,6 +20,7 @@ import {
   AkumaBodyRequestError,
   BodyRequestPump,
   requestBodyDeliver,
+  requestBodyReview,
   requestBodyKill,
   requestBodyTell,
   requestBodyWait,
@@ -158,6 +159,134 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
   }
 });
 
+test("review claims execute once and Heart retains only the attestation fact reference", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-review-reference-")));
+  const parent = await born(root, "parent", "11111111", ["contract.review"]);
+  const contractId = "kei/forwarded-review";
+  let calls = 0;
+  const pump = await openPump(parent, {
+    wait: async () => { throw new Error("unexpected wait"); },
+    tell: async () => { throw new Error("unexpected tell"); },
+    kill: async () => { throw new Error("unexpected kill"); },
+    deliver: async () => { throw new Error("unexpected deliver"); },
+    review: async (input) => {
+      calls += 1;
+      assert.equal(input.requester, parent.id);
+      assert.deepEqual(
+        { contractId: input.contractId, verdict: input.verdict, summary: input.summary },
+        { contractId, verdict: "satisfied", summary: "ready" },
+      );
+      return {
+        result: { kind: "accepted", result: { marker: "review-result" } },
+        reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA4",
+      };
+    },
+  });
+  try {
+    const id = randomUUID();
+    const outcomes = await Promise.all([1, 2].map(async () => await requestBodyReview({
+      directory: pump.directory,
+      id,
+      repoRoot: root,
+      contractId,
+      verdict: "satisfied",
+      summary: "ready",
+    })));
+    assert.deepEqual(outcomes, [
+      { kind: "returned", result: { kind: "accepted", result: { marker: "review-result" } } },
+      { kind: "returned", result: { kind: "accepted", result: { marker: "review-result" } } },
+    ]);
+    assert.equal(calls, 1);
+    const fact = await readRequest(parent.paths, id);
+    assert.deepEqual(fact?.state === "served" && "service" in fact ? fact.service : null, {
+      action: "contract.review",
+      repoRoot: root,
+      contractId,
+      reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA4",
+    });
+    assert.doesNotMatch(JSON.stringify(fact), /review-result|marker/u);
+
+    await pump.close();
+    const replayPump = await openPump(parent, {
+      wait: async () => { throw new Error("unexpected wait"); },
+      tell: async () => { throw new Error("unexpected tell"); },
+      kill: async () => { throw new Error("unexpected kill"); },
+      deliver: async () => { throw new Error("unexpected deliver"); },
+      review: async () => { calls += 1; throw new Error("review must not replay"); },
+    });
+    try {
+      assert.deepEqual(await requestBodyReview({
+        directory: replayPump.directory,
+        id,
+        repoRoot: root,
+        contractId,
+        verdict: "satisfied",
+        summary: "ready",
+      }), {
+        kind: "accepted-reference",
+        repoRoot: root,
+        contractId,
+        reviewFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA4",
+      });
+      assert.equal(calls, 1);
+    } finally { await replayPump.close(); }
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("contract review and delivery retain separate request permissions", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-review-permission-")));
+  const reviewParent = await born(root, "reviewer", "11111111", ["contract.review"]);
+  const reviewPump = await openPump(reviewParent, {
+    wait: async () => { throw new Error("unexpected wait"); },
+    tell: async () => { throw new Error("unexpected tell"); },
+    kill: async () => { throw new Error("unexpected kill"); },
+    deliver: async () => { throw new Error("delivery must not execute"); },
+    review: async () => ({ result: { kind: "refused", refusal: { kind: "contract-missing" } } }),
+  });
+  try {
+    assert.deepEqual(await requestBodyReview({
+      directory: reviewPump.directory,
+      id: randomUUID(),
+      repoRoot: root,
+      contractId: "kei/missing",
+      verdict: "unsatisfied",
+    }), { kind: "returned", result: { kind: "refused", refusal: { kind: "contract-missing" } } });
+    await assert.rejects(requestBodyDeliver({
+      directory: reviewPump.directory,
+      id: randomUUID(),
+      repoRoot: root,
+      contractId: "kei/missing",
+      includeDirty: false,
+    }), (error: unknown) => error instanceof AkumaBodyRequestError
+      && error.diagnostic === "not-allowed: contract.deliver");
+  } finally { await reviewPump.close(); }
+
+  const deliverParent = await born(root, "deliverer", "22222222", ["contract.deliver"]);
+  const deliverPump = await openPump(deliverParent, {
+    wait: async () => { throw new Error("unexpected wait"); },
+    tell: async () => { throw new Error("unexpected tell"); },
+    kill: async () => { throw new Error("unexpected kill"); },
+    deliver: async () => ({ result: { kind: "refused", refusal: { kind: "contract-missing" } } }),
+    review: async () => { throw new Error("review must not execute"); },
+  });
+  try {
+    await assert.rejects(requestBodyReview({
+      directory: deliverPump.directory,
+      id: randomUUID(),
+      repoRoot: root,
+      contractId: "kei/missing",
+      verdict: "unsatisfied",
+    }), (error: unknown) => error instanceof AkumaBodyRequestError
+      && error.diagnostic === "not-allowed: contract.review");
+  } finally {
+    await deliverPump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CLI forwarded deliver preserves its selected Repo and uses parent Settings and execution", async () => {
   const parentRepository = makeGitRepository();
   const contractRepository = makeGitRepository();
@@ -168,7 +297,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   }
   const root = await World.at(parentRepository.path);
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const parent = await born(root, "parent", "11111111", ["contract.deliver", "contract.review"]);
   const inert = await born(root, "inert", "22222222", []);
   const parentHome = mkdtempSync(join(tmpdir(), "keiyaku-forwarded-parent-settings-"));
   const childHome = mkdtempSync(join(tmpdir(), "keiyaku-forwarded-child-settings-"));
@@ -183,10 +312,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
       destroy: [],
     },
   }));
-  await writeFile(join(childHome, "settings.json"), JSON.stringify({
-    git: { requireBranchesToBeUpToDate: false },
-    worktree: { create: [], destroy: [] },
-  }));
+  await writeFile(join(childHome, "settings.json"), "{");
   const repo = await Repo.at({ path: contractRepository.path });
   const bound = await Keiyaku.bind({
     repo,
@@ -242,6 +368,17 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     assert.equal(state.delivery?.actor, parent.id);
     assert.equal(state.delivery?.data.policy.requireBranchesToBeUpToDate, true);
     assert.equal(await readFile(hookLog, "utf8"), "created\n");
+
+    const reviewed = await invoke(parseArgv([
+      "--repo", contractRepository.path, "review", id, "--unsatisfied", "--summary", "needs work", "--actor", "child-supplied-actor",
+    ]), {
+      cwd: parentRepository.path,
+      environment: { KEIYAKU_HOME: childHome },
+    });
+    assert.equal(reviewed.kind, "accepted");
+    const reviewedState = await bound.keiyaku.state();
+    assert.equal(reviewedState.attestations.at(-1)?.actor, parent.id);
+    assert.equal(reviewedState.attestations.at(-1)?.data.summary, "needs work");
   } finally {
     if (previous === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previous;

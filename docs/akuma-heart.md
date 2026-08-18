@@ -148,9 +148,9 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed Heart custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `16`; leash schema version remains `4`. Version 16
-adds action-specific Body Request service references. Successful completion
-remains
+Heart schema version is `18`; leash schema version remains `4`. Version 18
+adds the independent `contract.review` Body Request action to Heart authority.
+Successful completion remains
 separate from the optional exact provider fork point; session and complete
 answer remain required for an answered Turn. Older hearts
 fail the schema gate; no migration or compatibility decoder exists. Absence is

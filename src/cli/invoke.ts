@@ -548,9 +548,11 @@ async function invokeParsed(
   if (repo === undefined) throw new Error(`${parsed.command} requires a resolved Repo`);
   if (parsed.command === "region") return invokeRegion(parsed, world, repo);
   const scope = cwd;
-  if (parsed.command === "deliver" && injectedBodyRequests() !== null) {
+  if ((parsed.command === "deliver" || parsed.command === "review") && injectedBodyRequests() !== null) {
     const seat = await existingSeat({ parsed, repo, edge, scope, hooks: EMPTY_WORKTREE_HOOKS });
-    return invokeDeliver(parsed, seat, false);
+    return parsed.command === "deliver"
+      ? await invokeDeliver(parsed, seat, false)
+      : await invokeReview(parsed, seat, edge.readStdin);
   }
   const configuration = await settingsAt(world ?? undefined, home);
   const hooks = consumeSettings(() => worktreeHooksFrom({ settings: configuration }));

@@ -17,7 +17,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("akuma/requests.ts"),
         any("library/fleet.ts", ["executeKillAkuma", "executeTellAkuma", "executeWaitAkuma"]),
         any("library/configuration.ts", ["requireBranchesToBeUpToDateFrom", "worktreeHooksFrom"]),
-        any("library/contract.ts", ["executeForwardedDeliver"]),
+        any("library/contract.ts", ["executeForwardedDeliver", "executeForwardedReview"]),
         any("library/repo.ts", ["Repo"]),
         any("settings.ts", ["settings"]),
         types("world.ts"),
@@ -499,7 +499,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "library/contract.ts",
       allow: [
-        any("akuma/requests.ts", ["UpstreamRequestOutcome", "injectedBodyRequests", "requestBodyDeliver"]),
+        any("akuma/requests.ts", ["UpstreamRequestOutcome", "injectedBodyRequests", "requestBodyDeliver", "requestBodyReview"]),
         any("body/amend.ts"), any("markdown/diff.ts"),
         any("body/arc.ts"),
         any("body/decode.ts"),

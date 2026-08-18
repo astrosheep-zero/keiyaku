@@ -108,6 +108,17 @@ or delivery fact, not an attestation refusal. An unsatisfied review records the
 same subject and judgment but never requests placement. Optional `summary` is
 opaque testimony and does not participate in a gate.
 
+An authenticated Akuma `contract.review` is the same independent Contract
+operation at a different process boundary. Its claim preserves the selected
+Repo's normalized primary-worktree coordinate, complete ContractId, verdict,
+and optional summary; the direct parent reconstructs that Repo, supplies the
+requester as actor, reads only that Repo's Settings for worktree hooks, and
+calls the same forced-local review executor. Heart retains only the Repo
+coordinate, ContractId, and owner-minted attestation fact id. The live exchange
+retains the complete normal review mutation result. Later pumps project that
+accepted reference only; they never inspect or replay review state. Permission
+is separately keyed as `contract.review` and grants no delivery authority.
+
 `abandon` admits one `abandoned` terminal fact with `{ note? }`. Optional
 `note` remains opaque testimony rather than a gate input. The decision neither
 reads nor changes a target ref. Managed-worktree cleanup may return an
