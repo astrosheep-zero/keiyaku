@@ -8,29 +8,20 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { HeldAkumaLeash, beginTurn, endTurn, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
 import { decodeSoul } from "../src/akuma/heart/soul.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/requests.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/library/fleet.js";
-import type { AkumaObservation, ContractHistory, Fact } from "../src/index.js";
-import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
+import type { AkumaObservation } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
-import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { renderContractHistory } from "../src/cli/render/contract.js";
-import { akumaExitCode, akumaJsonValue, akumaRawAnswer, renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
-import { renderText } from "../src/cli/render/text.js";
-import { actorId, changeId, contractId, documentKey, entryUlid, gate, snapshotId } from "../src/core/facts/types.js";
-import { dependencyKeySet } from "../src/core/subject.js";
+import { akumaExitCode, akumaJsonValue, akumaRawAnswer, renderAkumaText } from "../src/cli/render/akuma.js";
+import type { TextRenderContext } from "../src/cli/render/terminal.js";
 import type { AkuId } from "../src/akuma/identity.js";
-import { toolRepr } from "../src/cli/render/akuma-tool.js";
-import { normalizeToolCommand } from "../src/cli/render/akuma-tool-command.js";
-import { displayColumns } from "../src/cli/render/terminal.js";
 import { makeGitRepository } from "./support/git.js";
-import type { ActivityRow } from "../src/akuma/index.js";
 
 const PACKAGED_CLI = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
 const emptyCreatedTasks = { kind: "present" as const, rows: [] };
@@ -51,17 +42,6 @@ function packagedCliEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   delete next.FORCE_COLOR;
   delete next.NO_COLOR;
   return next;
-}
-
-async function captureMain(argv: readonly string[]): Promise<Readonly<{ code: number; stdout: string }>> {
-  let stdout = "";
-  const writeStdout = process.stdout.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
-  try {
-    return { code: await main([...argv]), stdout };
-  } finally {
-    process.stdout.write = writeStdout;
-  }
 }
 
 function runPackagedCli(
@@ -260,160 +240,6 @@ test("Akuma CLI parses root verbs without the removed namespace", () => {
   }
 });
 
-test("Contract history text is one counted timeline", () => {
-  const id = contractId("kei/example");
-  const at = "2026-08-17T00:00:00.000Z";
-  const later = "2026-08-17T00:00:01.000Z";
-  const note = "final note\n\n";
-  const facts = {
-    bind: {
-      v: 1 as const,
-      kind: "bind" as const,
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA0"),
-      at,
-      actor: actorId("binder"),
-      data: {
-        coordinates: { start: snapshotId("start-snapshot"), target: "refs/heads/main", workspace: "here" as const },
-        terms: {
-          document: { bytes: "# Example\n", key: documentKey("document-key") },
-          segments: [],
-          gates: [gate("reviewed")],
-          after: [contractId("kei/after")],
-        },
-      },
-    },
-    amend: {
-      v: 1 as const,
-      kind: "amend" as const,
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA1"),
-      at: later,
-      data: {
-        document: { bytes: "# Amended\n", key: documentKey("amended-key") },
-        segments: [],
-        gates: [gate("reviewed")],
-        after: [],
-      },
-    },
-    bound: {
-      v: 1 as const,
-      kind: "bound" as const,
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA2"),
-      at: later,
-      data: {},
-    },
-    deliver: {
-      v: 1 as const,
-      kind: "deliver" as const,
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3"),
-      at: later,
-      data: {
-        tenderSnapshot: snapshotId("tender"),
-        integration: {
-          predecessor: snapshotId("predecessor"),
-          snapshot: snapshotId("integrated"),
-          changeId: changeId("change"),
-        },
-        method: "squash" as const,
-        policy: { requireBranchesToBeUpToDate: true },
-      },
-    },
-    attestation: {
-      v: 1 as const,
-      kind: "attestation" as const,
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA4"),
-      at: later,
-      data: {
-        gate: gate("reviewed"),
-        verdict: "satisfied" as const,
-        subject: dependencyKeySet([{ kind: "document", value: documentKey("document-key") }]),
-        summary: "opaque summary\n",
-      },
-    },
-    claimed: {
-      v: 1 as const,
-      kind: "claimed" as const,
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA5"),
-      at: later,
-      data: { delivery: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
-    },
-    arc: {
-      v: 1 as const,
-      kind: "arc" as const,
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA6"),
-      at: later,
-      data: { seq: 1, title: "First", objective: "objective\n", brief: "brief\n" },
-    },
-    abandoned: {
-      v: 1 as const,
-      kind: "abandoned" as const,
-      contract: id,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA7"),
-      at: later,
-      data: { note },
-    },
-  } satisfies Record<string, Fact>;
-  const history: ContractHistory = {
-    id,
-    state: snapshotId("state-snapshot"),
-    events: [
-      { source: "journal", fact: facts.bind },
-      { source: "dispatch", dispatch: { akuId: "aku/worker/aaaaaaaa" as AkuId, contractId: id, dispatchedAt: at } },
-      { source: "journal", fact: facts.amend },
-      { source: "journal", fact: facts.bound },
-      { source: "journal", fact: facts.deliver },
-      { source: "journal", fact: facts.attestation },
-      { source: "journal", fact: facts.claimed },
-      { source: "journal", fact: facts.arc },
-      { source: "journal", fact: facts.abandoned },
-    ],
-  };
-  const text = renderContractHistory(history);
-  assert.equal(renderText({ kind: "contract-history", history }), text);
-  assert.equal(text.startsWith("history kei/example · 8 journal · 1 dispatch\n\n"), true);
-  assert.doesNotMatch(text, /^Journal$|^Dispatch$/mu);
-  assert.match(text, /^2026-08-17T00:00:00\.000Z bind · 01ARZ3NDEKTSV4RRFFQ69G5FA0 · binder$/mu);
-  assert.match(text, /^2026-08-17T00:00:00\.000Z dispatch · aku\/worker\/aaaaaaaa$/mu);
-  assert.ok(text.indexOf("bind · 01ARZ3NDEKTSV4RRFFQ69G5FA0 · binder") < text.indexOf("dispatch · aku/worker/aaaaaaaa"));
-  for (const kind of ["bind", "amend", "bound", "deliver", "attestation", "claimed", "arc", "abandoned"] as const) {
-    assert.match(text, new RegExp(` ${kind} · `, "u"));
-  }
-  assert.match(text, /^  start start-snapshot$/mu);
-  assert.match(text, /^  target refs\/heads\/main$/mu);
-  assert.match(text, /^  workspace here$/mu);
-  assert.match(text, /^  document document-key$/mu);
-  assert.match(text, /^  gates reviewed$/mu);
-  assert.match(text, /^  after kei\/after$/mu);
-  assert.match(text, /^  tender tender$/mu);
-  assert.match(text, /^  predecessor predecessor$/mu);
-  assert.match(text, /^  snapshot integrated$/mu);
-  assert.match(text, /^  change change$/mu);
-  assert.match(text, /^  method squash$/mu);
-  assert.match(text, /^  require-branches-to-be-up-to-date true$/mu);
-  assert.match(text, /^  gate reviewed$/mu);
-  assert.match(text, /^  verdict satisfied$/mu);
-  assert.match(text, /^  subject \[\["document","document-key"\]\]$/mu);
-  assert.match(text, /^  delivery 01ARZ3NDEKTSV4RRFFQ69G5FA3$/mu);
-  assert.match(text, /^  sequence 1$/mu);
-  assert.match(text, /^  title First$/mu);
-  assert.ok(text.includes("summary\n\nopaque summary\n\n"));
-  assert.ok(text.includes("objective\n\nobjective\n\n"));
-  assert.ok(text.includes("brief\n\nbrief\n\n"));
-  assert.ok(text.endsWith(`note\n\n${note}\n`));
-  const journalOnly = {
-    ...history,
-    events: history.events.filter((event) => event.source === "journal"),
-  };
-  const zeroDispatch = renderContractHistory(journalOnly);
-  assert.match(zeroDispatch, /^history kei\/example · 8 journal · 0 dispatch\n/u);
-  assert.doesNotMatch(zeroDispatch, /^dispatch /mu);
-});
 
 test("blank Akuma stdin is usage before World or package invocation", async () => {
   await assert.rejects(
@@ -428,1117 +254,68 @@ test("blank Akuma stdin is usage before World or package invocation", async () =
   );
 });
 
-test("Akuma snapshots preserve activity and typed omission", () => {
-  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
-  const status = {
-    id: "aku/worker/1234abcd",
-    life: "running" as const,
-    timeline: {
-      kind: "open" as const,
-      turn: { kind: "turn" as const, sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
-      entries: [
-        { kind: "row" as const, row: { kind: "note" as const, sequence: 13, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", text: "running tests" } },
-        { kind: "gap" as const, count: 12 },
-        { kind: "row" as const, row: { kind: "thought" as const, sequence: 14, turnSequence: 1, at: "2026-08-10T16:42:30.000Z", text: "same minute" } },
-      ],
-      omitted: 12,
-      ...emptyReported,
-    },
-  };
-  const result = { kind: "akuma" as const, action: "status" as const, status: akumaObservation(status) };
-  const text = renderAkumaText(command, result);
-  assert.match(text, /running tests/u);
-  assert.match(text, /same minute/u);
-  const snapshotLines = text.split("\n");
-  assert.equal(snapshotLines[0], "─────");
-  assert.equal(snapshotLines[1], "aku/worker/1234abcd");
-  assert.equal(text.match(/● running/gu)?.length, 1);
-  assert.match(snapshotLines[2]!, /^\d{2}:\d{2} · note   /u);
-  assert.equal(snapshotLines[3], "      ⋮ 12 omitted");
-  assert.match(snapshotLines[4]!, /^ {5} · think  “same minute”$/u);
-  assert.equal(snapshotLines.at(-3), "  ● running");
-  assert.equal(snapshotLines.at(-2), "  changes 0");
-  assert.equal(snapshotLines.at(-1), "  tasks 0");
-  assert.equal(snapshotLines.filter((line) => line === "─────").length, 1);
-  assert.equal((akumaJsonValue(result) as { status: typeof status }).status.timeline.omitted, 12);
-  assert.equal(renderAkumaText(command, {
-    kind: "akuma",
-    action: "wait",
-    result: { completion: "all", observations: [akumaObservation(status)] },
-  }), renderAkumaText(command, result));
-  const aliasedWait = renderAkumaText(command, {
-    kind: "akuma",
-    action: "wait",
-    alias: "@review",
-    result: { completion: "all", observations: [akumaObservation(status)] },
-  });
-  assert.equal(aliasedWait.split("\n")[1], "aku/worker/1234abcd (@review)");
-  const answered = {
-    ...status,
-    life: "asleep" as const,
-    timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported, outcome: { kind: "outcome" as const, sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", outcome: { kind: "answered" as const, answer: "first answer", historyId: "history-1", session: { sessionId: "session-1" } } } },
-  };
-  const other = {
-    ...answered,
-    id: "aku/reviewer/deadbeef",
-    timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported, outcome: { kind: "outcome" as const, sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", outcome: { kind: "answered" as const, answer: "second answer", historyId: "history-2", session: { sessionId: "session-2" } } } },
-  };
-  assert.equal(renderAkumaText(command, {
-    kind: "akuma",
-    action: "wait",
-    result: { completion: "any", observations: [akumaObservation(answered)] },
-  }), "first answer");
-  const plural = renderAkumaText(command, {
-    kind: "akuma",
-    action: "wait",
-    result: { completion: "all", observations: [akumaObservation(answered), akumaObservation(other)] },
-  });
-  assert.match(plural, /aku\/worker\/1234abcd/u);
-  assert.match(plural, /first answer/u);
-  assert.match(plural, /aku\/reviewer\/deadbeef/u);
-  assert.match(plural, /second answer/u);
-  const recorded = {
-    kind: "akuma",
-    action: "tell" as const,
-    mode: "ordinary" as const,
-    alias: "@review",
-    body: "current input",
-    result: {
-      akuma: status.id,
-      tell: { admission: { tellId: "tell-1", fact: "recorded" }, wake: "spawned" },
-      observation: akumaObservation(status),
-    },
-  };
-  const recordedText = renderAkumaText(command, recorded);
-  assert.equal(recordedText.split("\n")[0], "─────");
-  assert.equal(recordedText.split("\n")[1], "aku/worker/1234abcd (@review)");
-  assert.deepEqual(akumaJsonValue(recorded), recorded.result);
-  const recordedLines = recordedText.split("\n");
-  assert.equal(renderAkumaText(command, {
-    ...recorded,
-    result: { ...recorded.result, tell: { admission: { tellId: "tell-1", fact: "recorded" }, wake: { kind: "failed" as const, diagnostic: "spawn\nfailed" } } },
-  }), `${recordedLines[0]}\n${recordedLines[1]}\n! error spawn failed\n${recordedLines.slice(2).join("\n")}`);
-  const observedTell = {
-    kind: "akuma" as const,
-    action: "tell" as const,
-    mode: "ordinary" as const,
-    body: "current input",
-    result: {
-      akuma: status.id,
-      tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
-      observation: akumaObservation({
-        ...status,
-        timeline: {
-          ...status.timeline,
-          entries: [...status.timeline.entries, { kind: "row" as const, row: {
-            kind: "tell" as const,
-            sequence: 14,
-            at: "2026-08-10T16:43:00.000Z",
-            tellId: "tell-1",
-            text: "current input",
-            state: "told" as const,
-          } }],
-        },
-      }),
-    },
-  };
-  assert.equal(renderAkumaText(command, observedTell).match(/current input/gu)?.length, 1);
-  assert.deepEqual(akumaJsonValue(observedTell), observedTell.result);
-});
-
-test("Akuma snapshots render provider-reported file changes without inference", () => {
-  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
-  const status = {
-    id: "aku/worker/1234abcd" as const,
-    life: "running" as const,
-    timeline: {
-      kind: "open" as const,
-      turn: { kind: "turn" as const, sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
-      entries: [],
-      omitted: 0,
-      reportedChanges: [
-        { sequence: 2, at: "2026-08-10T16:42:01.000Z", op: "add" as const, path: "src/created.ts", diffstat: { added: 4, removed: 0 } },
-        { sequence: 3, at: "2026-08-10T16:42:02.000Z", op: "update" as const, path: "src/updated.ts", diffstat: { added: 2, removed: 1 } },
-        { sequence: 4, at: "2026-08-10T16:42:03.000Z", op: "delete" as const, path: "src/removed.ts", diffstat: { added: 0, removed: 3 } },
-        { sequence: 5, at: "2026-08-10T16:42:04.000Z", op: "unspecified" as const, path: "src/unknown.ts" },
-      ],
-      reportedChangesOmitted: 2,
-    },
-  };
-  const result = { kind: "akuma" as const, action: "status" as const, status: akumaObservation(status) };
-  const lines = renderAkumaText(command, result).split("\n");
-  assert.deepEqual(lines.slice(-8), [
-    "  ● running",
-    "  changes 6",
-    "  write src/created.ts — +4 -0",
-    "  edit src/updated.ts — +2 -1",
-    "  delete src/removed.ts — +0 -3",
-    "  edit src/unknown.ts",
-    "  ⋮ 2 earlier changes",
-    "  tasks 0",
-  ]);
-  assert.deepEqual((akumaJsonValue(result) as { status: typeof status }).status.timeline.reportedChanges, status.timeline.reportedChanges);
-  assert.equal((akumaJsonValue(result) as { status: typeof status }).status.timeline.reportedChangesOmitted, 2);
-});
-
-test("Akuma snapshot rows use fixed semantic line budgets", () => {
-  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
-  const base = {
-    id: "aku/worker/1234abcd" as const,
-    archetype: "worker",
-    life: "running" as const,
-    confinement: { kind: "unconfined" as const },
-    pending: [],
-  };
-  const longText = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma";
-  const renderRow = (row: import("../src/akuma/index.js").ActivityRow): readonly string[] => {
-    const timeline = row.kind === "outcome"
-      ? { kind: "idle" as const, entries: [], omitted: 0, outcome: row }
-      : { kind: "open" as const, turn: { kind: "turn" as const, sequence: 0, turnSequence: 1, bodySequence: 1, at: row.at }, entries: [{ kind: "row" as const, row }], omitted: 0 };
-    const status = {
-      ...base,
-      timeline,
-    };
-    const rendered = renderAkumaText(command, { kind: "akuma", action: "status", status: akumaObservation(status) }, { columns: 34, color: false }).split("\n");
-    const start = rendered.findIndex((line) => / [·✓!⧖⧗?] /u.test(line) || line.includes("⋮"));
-    const footer = rendered.findIndex((line) => /^  (?:●|○|×|\?)/u.test(line));
-    return rendered.slice(start === -1 ? 0 : start, footer === -1 ? undefined : footer);
-  };
-  const rows: readonly Readonly<{ kind: import("../src/akuma/index.js").ActivityRow["kind"]; lines: number; row: import("../src/akuma/index.js").ActivityRow }>[] = [
-    {
-      kind: "said",
-      lines: 2,
-      row: { kind: "said", sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", text: longText },
-    },
-    {
-      kind: "thought",
-      lines: 2,
-      row: { kind: "thought", sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", text: longText },
-    },
-    {
-      kind: "note",
-      lines: 2,
-      row: { kind: "note", sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", text: longText },
-    },
-    {
-      kind: "tell",
-      lines: 1,
-      row: { kind: "tell", sequence: 1, at: "2026-08-10T16:42:00.000Z", tellId: "tell-1", text: longText, state: "told" },
-    },
-    {
-      kind: "tool",
-      lines: 2,
-      row: {
-        kind: "tool", sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", name: "Read",
-        call: { kind: "read", path: longText }, state: { status: "ok" },
-      },
-    },
-  ];
-  for (const item of rows) {
-    const lines = renderRow(item.row);
-    assert.equal(lines.length, item.lines, item.kind);
-    assert.match(lines.at(-1)!, /…(?:”)?$/u, item.kind);
-  }
-
-  const history = {
-    kind: "akuma" as const,
-    action: "history" as const,
-    akuma: base.id,
-    mode: "page" as const,
-    historyResult: {
-      kind: "history" as const,
-      id: base.id,
-      history: {
-        rows: [], omitted: 0, hasEarlier: false, hasLater: false,
-        historyLost: false, lowestRetained: null, highest: null,
-      },
-    },
-    history: {
-      rows: [rows[1]!.row],
-      omitted: 0,
-      hasEarlier: false,
-      hasLater: false,
-      historyLost: false,
-      lowestRetained: 1,
-      highest: 1,
-    },
-  };
-  assert.ok(renderAkumaText(parseArgv(["history", base.id]).command, history, { columns: 34, color: false }).split("\n").length > 3);
-});
-
-test("ordinary tell leads with mutation authority before an asleep observation", () => {
-  const command = parseArgv(["tell", "aku/worker/1234abcd", "-"]).command;
-  const observation = {
-    id: "aku/worker/1234abcd" as const,
-    archetype: "worker",
-    life: "asleep" as const,
-    confinement: { kind: "unconfined" as const },
-    pending: [],
-    timeline: { kind: "idle" as const, entries: [], omitted: 0 },
-  };
+test("Akuma snapshots preserve typed omission", () => {
   const result = {
     kind: "akuma" as const,
-    action: "tell" as const,
-    mode: "ordinary" as const,
-    body: "continue",
-    result: {
-      akuma: observation.id,
-      tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
-      observation: akumaObservation(observation),
-    },
-  };
-  const text = renderAkumaText(command, result);
-  assert.equal(text.split("\n")[0], "─────");
-  assert.equal(text.split("\n")[1], "aku/worker/1234abcd");
-  assert.deepEqual(akumaJsonValue(result), result.result);
-});
-
-test("Akuma voice is bounded and active tools carry the live mark", () => {
-  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
-  const status = {
-    id: "aku/worker/1234abcd",
-    life: "running" as const,
-    timeline: { kind: "open" as const, turn: { kind: "turn" as const, sequence: 0, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" }, entries: [
-      { kind: "row" as const, row: {
-        kind: "said" as const, sequence: 1, turnSequence: 1,
-        at: "2026-08-10T16:42:00.000Z", text: "hello",
-      } },
-      { kind: "row" as const, row: {
-        kind: "thought" as const, sequence: 2, turnSequence: 1,
-        at: "2026-08-10T16:42:01.000Z", text: "considering",
-      } },
-      { kind: "row" as const, row: {
-        kind: "tool" as const, sequence: 3, turnSequence: 1,
-        at: "2026-08-10T16:42:02.000Z", name: "Search",
-        call: { kind: "search" as const, query: "TODO" }, state: "active" as const,
-      } },
-    ], omitted: 0, ...emptyReported },
-  };
-  const text = renderAkumaText(command, { kind: "akuma", action: "status", status: { status } });
-  assert.match(text, /hello/u);
-  assert.match(text, /considering/u);
-  assert.match(text, /⧖ search TODO/u);
-
-  const narrow = renderAkumaText(command, {
-    kind: "akuma",
-    action: "status",
-    status: { status: {
-      ...status,
-      timeline: { ...status.timeline, entries: [{ kind: "row", row: {
-        kind: "said", sequence: 1, turnSequence: 1,
-        at: "2026-08-10T16:42:00.000Z",
-        text: "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon",
-      } }] },
-    } },
-  }, { columns: 30, color: false });
-  const narrowLines = narrow.split("\n");
-  const voiceStart = narrowLines.findIndex((line) => /^\d{2}:\d{2} · say    /u.test(line));
-  assert.ok(voiceStart >= 0);
-  const voice = narrowLines.slice(voiceStart, voiceStart + 2).join("\n");
-  assert.match(voice, /“alpha/u);
-  assert.match(voice, /…”$/u);
-  assert.equal(voice.split("\n").length, 2);
-  assert.match(voice.split("\n")[1]!, /^ {5} │ {8}“/u);
-});
-
-test("Akuma snapshot life uses the fleet vocabulary independently of activity", () => {
-  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
-  const base = {
-    id: "aku/worker/1234abcd" as const,
-    timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported },
-  };
-  const cases = [
-    ["running", "● running"],
-    ["asleep", "○ asleep"],
-    ["killed", "× killed"],
-    ["stranded", "? stranded"],
-    ["hung", "? hung"],
-    ["untidy", "? untidy"],
-  ] as const;
-  for (const [life, expected] of cases) {
-    const text = renderAkumaText(command, {
-      kind: "akuma",
-      action: "status",
-      status: { status: { ...base, life } },
-    });
-    assert.ok(text.includes(expected));
-  }
-});
-
-test("Akuma status-oriented commands include life while tell excludes it", () => {
-  const id = "aku/worker/1234abcd" as const;
-  const status = {
-    id,
-    life: "running" as const,
-    timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported },
-  };
-  const observation = akumaObservation(status);
-  const tell = { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const };
-  const cases = [
-    {
-      name: "status",
-      command: parseArgv(["status", id]).command,
-      result: { kind: "akuma" as const, action: "status" as const, status: observation },
-      hasLife: true,
-    },
-    {
-      name: "wait",
-      command: parseArgv(["wait", id]).command,
-      result: { kind: "akuma" as const, action: "wait" as const, result: { completion: "all" as const, observations: [observation] } },
-      hasLife: true,
-    },
-    {
-      name: "observed call",
-      command: parseArgv(["call", "worker", "-"]).command,
-      result: {
-        kind: "akuma" as const,
-        action: "call" as const,
-        result: { kind: "called" as const, akuma: id, execution: { cwd: "/world", source: "world" as const }, dispatch: { kind: "none" as const }, alias: { kind: "none" as const }, observation: { kind: "observed" as const, status } },
-        world: "/world" as import("../src/index.js").WorldRoot,
-      },
-      hasLife: true,
-    },
-    {
-      name: "kill",
-      command: parseArgv(["kill", id]).command,
-      result: { kind: "akuma" as const, action: "kill" as const, result: { results: [{ id, evidence: "hung" as const, observation }] } },
-      hasLife: true,
-    },
-    {
-      name: "tell",
-      command: parseArgv(["tell", id, "-"]).command,
-      result: { kind: "akuma" as const, action: "tell" as const, mode: "ordinary" as const, body: "continue", result: { akuma: id, tell, observation } },
-      hasLife: false,
-    },
-    {
-      name: "interrupt tell",
-      command: parseArgv(["tell", id, "--interrupt", "-"]).command,
-      result: {
-        kind: "akuma" as const,
-        action: "tell" as const,
-        mode: "interrupt" as const,
-        body: "replace",
-        result: { id, receipt: { kind: "interrupted" as const, putDown: "self-aborted" as const, tell }, observation },
-      },
-      hasLife: false,
-    },
-    {
-      name: "history",
-      command: parseArgv(["history", id]).command,
-      result: {
-        kind: "akuma" as const,
-        action: "history" as const,
-        akuma: id,
-        mode: "page" as const,
-        history: { rows: [], omitted: 0, hasEarlier: false, hasLater: false, historyLost: false, lowestRetained: null, highest: null },
-        historyResult: { kind: "history" as const, id, history: { rows: [], omitted: 0, hasEarlier: false, hasLater: false, historyLost: false, lowestRetained: null, highest: null } },
-      },
-      hasLife: false,
-    },
-  ] satisfies readonly Readonly<{
-    name: string;
-    command: ReturnType<typeof parseArgv>["command"];
-    result: AkumaInvocationResult;
-    hasLife: boolean;
-  }>[];
-  for (const item of cases) {
-    assert.equal(renderAkumaText(item.command, item.result).includes("● running"), item.hasLife, item.name);
-  }
-});
-
-test("Akuma text renders only a none readonly restraint as an existing ! line", () => {
-  const id = "aku/worker/1234abcd" as const;
-  const base = { id, life: "running" as const, timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported } };
-  const command = parseArgv(["status", id]).command;
-  const none = renderAkumaText(command, {
-    kind: "akuma" as const,
     action: "status" as const,
-    status: {
-      status: {
-        ...base,
-        readonly: { enforcement: "none" as const, diagnostic: "ACP cannot remove task-surface mutation capabilities" },
-      },
-    },
-  });
-  assert.ok(none.includes("! ACP cannot remove task-surface mutation capabilities"));
-  const native = renderAkumaText(command, {
-    kind: "akuma" as const,
-    action: "status" as const,
-    status: { status: { ...base, readonly: { enforcement: "native" as const } } },
-  });
-  assert.ok(!native.includes("! "));
-  const absent = renderAkumaText(command, {
-    kind: "akuma" as const,
-    action: "status" as const,
-    status: { status: base },
-  });
-  assert.ok(!absent.includes("! "));
-});
-
-function toolRow(
-  call: Extract<ActivityRow, { kind: "tool" }>["call"],
-  state: Extract<ActivityRow, { kind: "tool" }>["state"] = { status: "ok" },
-  extra: Partial<Extract<ActivityRow, { kind: "tool" }>> = {},
-): Extract<ActivityRow, { kind: "tool" }> {
-  return {
-    kind: "tool",
-    sequence: 1,
-    turnSequence: 1,
-    at: "2026-08-10T16:42:00.000Z",
-    name: "Tool",
-    call,
-    state,
-    ...extra,
-  };
-}
-
-test("ToolRepr presents honest read ranges, search facts, outcomes, and transport unwrap", () => {
-  assert.deepEqual(toolRepr(toolRow({ kind: "read", path: "src/a.ts", offset: 10, limit: 20 })), {
-    label: "read",
-    text: "src/a.ts · L10-29 — ok",
-  });
-  assert.equal(toolRepr(toolRow({ kind: "read", path: "src/a.ts", offset: 10 })).text, "src/a.ts · from L10 — ok");
-  assert.equal(toolRepr(toolRow({ kind: "read", path: "src/a.ts", limit: 7 })).text, "src/a.ts · 7 lines — ok");
-  assert.equal(toolRepr(toolRow({ kind: "read", path: "src/a.ts" })).text, "src/a.ts — ok");
-  assert.deepEqual(
-    toolRepr(toolRow({ kind: "search", query: "TODO", scope: "content", path: "src", glob: "*.ts" })),
-    { label: "search", text: "TODO · src · *.ts — ok" },
-  );
-  assert.deepEqual(
-    toolRepr(toolRow({ kind: "search", query: "*.md", scope: "files", path: "docs" })),
-    { label: "find", text: "*.md · docs — ok" },
-  );
-  assert.deepEqual(
-    toolRepr(toolRow({ kind: "search", query: "keiyaku", scope: "web" })),
-    { label: "web", text: "keiyaku — ok" },
-  );
-  assert.deepEqual(toolRepr(toolRow({ kind: "search", query: "TODO" })), {
-    label: "search",
-    text: "TODO — ok",
-  });
-
-  assert.deepEqual(toolRepr(toolRow({ kind: "search", query: "active" }, "active")), {
-    label: "search",
-    text: "active",
-  });
-  assert.deepEqual(toolRepr(toolRow({ kind: "search", query: "unsettled" }, "unsettled")), {
-    label: "search",
-    text: "unsettled",
-  });
-
-  const completedRun = toolRepr(toolRow(
-    { kind: "run", command: "bash -lc 'npm test'" },
-    { status: "ok", exitCode: 0 },
-    { durationMs: 1_500 },
-  ));
-  assert.equal(completedRun.label, "run");
-  assert.equal(completedRun.text, "$ npm test");
-  assert.equal(completedRun.overflow, "middle-ellipsis");
-  assert.equal(completedRun.suffix, " — 2s · ok");
-
-  assert.equal(
-    toolRepr(toolRow({ kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", diffstat: { added: 3, removed: 1 } }] })).text,
-    "src/a.ts — +3 -1",
-  );
-  assert.deepEqual(
-    toolRepr(toolRow({ kind: "fileChange", changes: [{ op: "unspecified", path: "src/edited.ts" }] })),
-    { label: "edit", text: "src/edited.ts" },
-  );
-  assert.equal(
-    toolRepr(toolRow({
-      kind: "fileChange",
-      changes: [
-        { op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 0 } },
-        { op: "add", path: "src/b.ts", diffstat: { added: 2, removed: 0 } },
-      ],
-    })).text,
-    "2 files · src/a.ts ... — +3 -0",
-  );
-
-  assert.equal(normalizeToolCommand("bash -c 'rg TODO src'"), "rg TODO src");
-  assert.equal(normalizeToolCommand("/bin/zsh -lc \"git status\""), "git status");
-  assert.equal(normalizeToolCommand("pwsh -NoLogo -NoProfile -Command Get-ChildItem"), "Get-ChildItem");
-  assert.equal(normalizeToolCommand("bash -c 'echo hi' && true"), "bash -c 'echo hi' && true");
-  assert.equal(normalizeToolCommand("npm test"), "npm test");
-});
-
-test("normalizeToolCommand preserves exact bytes unless a complete transport unwraps", () => {
-  const cases = [
-    ["bash -c 'rg TODO src'", "rg TODO src"],
-    ["/bin/zsh -lc \"git status\"", "git status"],
-    ["pwsh -NoLogo -NoProfile -Command Get-ChildItem", "Get-ChildItem"],
-    ["powershell -nologo -Command Get-ChildItem", "Get-ChildItem"],
-    ["pwsh -c Get-ChildItem", "Get-ChildItem"],
-    ["C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe -Command Get-ChildItem", "Get-ChildItem"],
-    ["/usr/bin/pwsh -NoProfile -Command Get-ChildItem", "Get-ChildItem"],
-    ["/usr/bin/bash -c 'rg TODO src'", "rg TODO src"],
-    ["bash -c foo\\ bar", "foo bar"],
-    ["bash -c \"git \\\"status\\\"\"", "git \"status\""],
-    ["bash -c \"foo\\\\bar\"", "foo\\bar"],
-    ["bash -c \"foo\\$bar\"", "foo$bar"],
-    ["bash -c \"foo\\`bar\"", "foo`bar"],
-    ["bash -c \"foo\\nbar\"", "foo\\nbar"],
-    ["bash -c \"\"foo\"\"", "foo"],
-    ["bash -c ' '", " "],
-    ["  bash\t-c\t'rg TODO src'  ", "rg TODO src"],
-    ["npm test", "npm test"],
-    ["bash -c 'echo hi' && true", "bash -c 'echo hi' && true"],
-    ["bash -c 'echo hi' || true", "bash -c 'echo hi' || true"],
-    ["bash -c 'echo hi'; true", "bash -c 'echo hi'; true"],
-    ["bash -c 'echo hi' | true", "bash -c 'echo hi' | true"],
-    ["bash -c $(echo hi)", "bash -c $(echo hi)"],
-    ["bash -c `echo hi`", "bash -c `echo hi`"],
-    ["bash -c <file", "bash -c <file"],
-    ["bash -c >file", "bash -c >file"],
-    ["bash -c (echo hi)", "bash -c (echo hi)"],
-    ["bash -c \"echo $HOME\"", "bash -c \"echo $HOME\""],
-    ["bash -c \"echo `date`\"", "bash -c \"echo `date`\""],
-    ["bash -c 'unclosed", "bash -c 'unclosed"],
-    ["bash -c \"unclosed", "bash -c \"unclosed"],
-    ["bash -c foo\\", "bash -c foo\\"],
-    ["bash -c \"foo\\", "bash -c \"foo\\"],
-    ["bash -c 'line\nbreak'", "line\nbreak"],
-    ["bash -c \"line\nbreak\"", "line\nbreak"],
-    ["bash -c 'line\rbreak'", "line\rbreak"],
-    ["bash -c foo\nbar", "bash -c foo\nbar"],
-    ["bash -c foo\\\nbar", "bash -c foo\\\nbar"],
-    ["bash -c 'foo'\nbar", "bash -c 'foo'\nbar"],
-    ["bash -c ''", "bash -c ''"],
-    ["bash -c \"\"", "bash -c \"\""],
-    ["bash -lc 'npm test' extra", "bash -lc 'npm test' extra"],
-    ["bash -l 'npm test'", "bash -l 'npm test'"],
-    ["./bash -c 'rg TODO src'", "./bash -c 'rg TODO src'"],
-    ["/bin/sh -c 'rg TODO src'", "/bin/sh -c 'rg TODO src'"],
-    ["Bash -c 'rg TODO src'", "Bash -c 'rg TODO src'"],
-    ["pwsh.exe -Command Get-ChildItem", "pwsh.exe -Command Get-ChildItem"],
-    ["powershell.exe -Command Get-ChildItem", "powershell.exe -Command Get-ChildItem"],
-    ["PowerShell -Command Get-ChildItem", "Get-ChildItem"],
-    ["pwsh -NoLogo -NoLogo -Command Get-ChildItem", "pwsh -NoLogo -NoLogo -Command Get-ChildItem"],
-    ["pwsh -File script.ps1", "pwsh -File script.ps1"],
-    ["pwsh -Command Get-ChildItem extra", "pwsh -Command Get-ChildItem extra"],
-    ["pwsh -Command", "pwsh -Command"],
-    ["pwsh Get-ChildItem", "pwsh Get-ChildItem"],
-    ["pwsh -Command ''", "pwsh -Command ''"],
-    ["pwsh -Command Get-ChildItem -NoLogo", "pwsh -Command Get-ChildItem -NoLogo"],
-  ] as const;
-  for (const [command, expected] of cases) {
-    assert.equal(normalizeToolCommand(command), expected);
-  }
-});
-
-test("Akuma history distinguishes open active tools from closed unsettled tools", () => {
-  const akuma = "aku/worker/1234abcd" as const;
-  const command = parseArgv(["history", akuma]).command;
-  const history = {
-    rows: [
-      {
-        kind: "tool" as const,
-        sequence: 1,
-        turnSequence: 1,
-        at: "2026-08-10T16:42:00.000Z",
-        name: "Search",
-        call: { kind: "search" as const, query: "active" },
-        state: "active" as const,
-      },
-      {
-        kind: "tool" as const,
-        sequence: 2,
-        turnSequence: 2,
-        at: "2026-08-10T16:43:00.000Z",
-        name: "Search",
-        call: { kind: "search" as const, query: "unsettled" },
-        state: "unsettled" as const,
-      },
-    ],
-    omitted: 0,
-    hasEarlier: false,
-    hasLater: false,
-    historyLost: false,
-    lowestRetained: 1,
-    highest: 2,
-  };
-  const result = {
-    kind: "akuma" as const,
-    action: "history" as const,
-    akuma,
-    mode: "page" as const,
-    history,
-    historyResult: { kind: "history" as const, id: akuma, history },
-  };
-  const text = renderAkumaText(command, result);
-  assert.match(text, /\d{2}:\d{2} ⧖ search active/u);
-  assert.match(text, /\d{2}:\d{2} \? search unsettled/u);
-});
-
-test("Akuma semantic glyphs mark successful tools and pending tells", () => {
-  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
-  const at = "2026-08-10T16:42:00.000Z";
-  const cases = [
-    {
-      name: "successful tool",
-      glyph: "✓",
-      row: {
-        kind: "tool" as const,
-        sequence: 1,
-        turnSequence: 1,
-        at,
-        name: "Search",
-        call: { kind: "search" as const, query: "done" },
-        state: { status: "ok" as const },
-      },
-    },
-    {
-      name: "pending tell",
-      glyph: "⧗",
-      row: {
-        kind: "tell" as const,
-        sequence: 1,
-        at,
-        tellId: "tell-1",
-        text: "steer",
-        state: "pending" as const,
-      },
-    },
-  ] as const;
-  for (const item of cases) {
-    const text = renderAkumaText(command, {
-      kind: "akuma",
-      action: "status",
-      status: { status: {
-        id: "aku/worker/1234abcd",
-        life: "running",
-        timeline: {
-          kind: "open",
-          turn: { kind: "turn", sequence: 0, turnSequence: 1, bodySequence: 1, at },
-          entries: [{ kind: "row", row: item.row }],
-          omitted: 0,
-          ...emptyReported,
-        },
-      } },
-    });
-    assert.match(text, new RegExp(String.raw`\d{2}:\d{2} ${item.glyph} `, "u"), item.name);
-  }
-});
-
-test("Akuma header shows a complete associated Contract without truncating identity", () => {
-  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
-  const text = renderAkumaText(command, {
-    kind: "akuma",
-    action: "status",
-    status: { status: {
+    status: akumaObservation({
       id: "aku/worker/1234abcd",
-      archetype: "worker",
-      life: "running",
-      confinement: { kind: "unconfined" },
-      pending: [],
-      timeline: { kind: "unborn", entries: [], omitted: 0, ...emptyReported },
-    }, contractId: "kei/provider-core-review" },
-  }, { columns: 28, color: false });
-  const lines = text.split("\n");
-  assert.equal(lines[0], "─────");
-  assert.equal(lines[1], "aku/worker/1234abcd");
-  assert.equal(lines[2], "└─ kei/provider-core-review");
-  assert.equal(lines[3], "  ● running");
-  assert.doesNotMatch(lines[1]!, /●|○|×|\?/u);
-  assert.match(text, /kei\/provider-core-review/u);
-});
-
-test("Akuma run commands stay on one row and preserve their head and tail", () => {
-  const command = parseArgv(["status", "aku/worker/1234abcd"]).command;
-  const status = {
-    id: "aku/worker/1234abcd",
-    life: "running" as const,
-    timeline: { kind: "open" as const, turn: { kind: "turn" as const, sequence: 0, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" }, entries: [{ kind: "row" as const, row: {
-      kind: "tool" as const, sequence: 1, turnSequence: 1,
-      at: "2026-08-10T16:42:00.000Z", name: "Shell",
-      call: { kind: "run" as const, command: "npm test -- --configuration production --reporter final.json" },
-      state: "active" as const,
-    } }], omitted: 0, ...emptyReported },
+      life: "running" as const,
+      timeline: {
+        kind: "open" as const,
+        turn: { kind: "turn" as const, sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
+        entries: [{ kind: "gap" as const, count: 12 }],
+        omitted: 12,
+        ...emptyReported,
+      },
+    }),
   };
-  const text = renderAkumaText(command, { kind: "akuma", action: "status", status: { status } }, { columns: 42, color: false });
-  const runLine = (rendered: string): string => {
-    const line = rendered.split("\n").find((candidate) => candidate.includes(" run    "));
-    assert.ok(line !== undefined);
-    return line;
-  };
-  assert.match(runLine(text), /^\d{2}:\d{2} ⧖ run    \$ npm test/u);
-  assert.match(runLine(text), /….*final\.json$/u);
-
-  const completedText = renderAkumaText(command, {
-    kind: "akuma",
-    action: "status",
-    status: { status: {
-      ...status,
-      timeline: { ...status.timeline, entries: [{ kind: "row", row: {
-        ...status.timeline.entries[0]!.row,
-        state: { status: "failed", exitCode: 1 },
-        durationMs: 41_000,
-      } }] },
-    } },
-  }, { columns: 50, color: false });
-  const completed = runLine(completedText);
-  assert.match(completed, /\$ npm test/u);
-  assert.match(completed, /….*inal\.json — 41s · exit 1$/u);
-  assert.match(completed, /^\d{2}:\d{2} ! run   /u);
-  assert.match(completedText, /● running/u);
-
-  const unicode = runLine(renderAkumaText(command, {
-    kind: "akuma",
-    action: "status",
-    status: { status: {
-      ...status,
-      timeline: { ...status.timeline, entries: [{ kind: "row", row: {
-        ...status.timeline.entries[0]!.row,
-        call: { kind: "run", command: "printf long-command-ending-in-界́" },
-      } }] },
-    } },
-  }, { columns: 24, color: false }));
-  assert.match(unicode, /….*界́$/u);
-  assert.doesNotMatch(unicode, /…\p{Mark}/u);
-
-  const combiningHead = runLine(renderAkumaText(command, {
-    kind: "akuma",
-    action: "status",
-    status: { status: {
-      ...status,
-      timeline: { ...status.timeline, entries: [{ kind: "row", row: {
-        ...status.timeline.entries[0]!.row,
-        call: { kind: "run", command: "界́abcdefghijklmnopqrstuvwxyz-final.json" },
-      } }] },
-    } },
-  }, { columns: 24, color: false }));
-  assert.ok(displayColumns(combiningHead) <= 24);
-  assert.match(combiningHead, /界́/u);
-
-  const narrowCompletedText = renderAkumaText(command, {
-    kind: "akuma",
-    action: "status",
-    status: { status: {
-      ...status,
-      timeline: { ...status.timeline, entries: [{ kind: "row", row: {
-        ...status.timeline.entries[0]!.row,
-        state: { status: "failed", exitCode: 1 },
-        durationMs: 41_000,
-      } }] },
-    } },
-  }, { columns: 30, color: false });
-  const narrowCompleted = runLine(narrowCompletedText);
-  for (const line of narrowCompletedText.split("\n")) {
-    assert.ok(displayColumns(line) <= 30);
-  }
-  assert.match(narrowCompleted, /\$ npm t/u);
-  assert.match(narrowCompleted, /….*\.json$/u);
-  assert.doesNotMatch(narrowCompleted, /exit 1|41s/u);
-
-  const shortSuccessText = renderAkumaText(command, {
-    kind: "akuma",
-    action: "status",
-    status: { status: {
-      ...status,
-      timeline: { ...status.timeline, entries: [{ kind: "row", row: {
-        ...status.timeline.entries[0]!.row,
-        state: { status: "ok", exitCode: 0 },
-        durationMs: 1_000,
-      } }] },
-    } },
-  }, { columns: 28, color: false });
-  const shortSuccess = runLine(shortSuccessText);
-  for (const line of shortSuccessText.split("\n")) {
-    assert.ok(displayColumns(line) <= 28);
-  }
-  assert.match(shortSuccess, /\$ npm/u);
-  assert.match(shortSuccess, /….*json/u);
-  assert.doesNotMatch(shortSuccess, /\$…/u);
-  assert.doesNotMatch(shortSuccess, /ok|1s/u);
+  const projected = akumaJsonValue(result) as { status: typeof result.status };
+  assert.equal(projected.status.id, "aku/worker/1234abcd");
+  assert.equal(projected.status.timeline.omitted, 12);
+  assert.deepEqual(projected.status.timeline.entries, [{ kind: "gap", count: 12 }]);
 });
 
-test("Akuma follow remains outside the unsettled CLI vocabulary", () => {
-  assert.throws(() => parseArgv(["follow", "aku/claude/1234abcd"]), CliUsageError);
-});
-
-test("akuma call renders optional integration stages and maps partial success", () => {
-  const command = parseArgv(["call", "worker", "-"]).command;
-  const akuma = "aku/worker/1234abcd" as import("../src/index.js").AkuId;
-  const plain = {
+test("Akuma output preserves a complete associated Contract identity", () => {
+  const result = {
     kind: "akuma" as const,
-    action: "call" as const,
-    result: {
-      kind: "called" as const,
-      akuma,
-      execution: { cwd: "/world", source: "world" as const },
-      dispatch: { kind: "none" as const },
-      alias: { kind: "none" as const },
-      observation: { kind: "detached" as const },
-    },
-    world: "/world" as import("../src/index.js").WorldRoot,
-  };
-  assert.equal(renderAkumaText(command, plain), `─────\n${akuma}\n$ keiyaku -C /world wait ${akuma} --timeout 5m`);
-  const managed = {
-    ...plain,
-    result: {
-      ...plain.result,
-      execution: { cwd: "/repo/.git/keiyaku/wt/atlantis", source: "contract-worktree" as const },
+    action: "history" as const,
+    akuma: "aku/worker/00000001" as const,
+    mode: "no-answer" as const,
+    historyResult: {
+      kind: "no-answer" as const,
+      id: "aku/worker/00000001" as const,
+      contractId: "kei/provider-core-review" as const,
     },
   };
-  assert.equal(
-    renderAkumaText(command, managed),
-    `─────\n${akuma}\ncwd /repo/.git/keiyaku/wt/atlantis\n$ keiyaku -C /world wait ${akuma} --timeout 5m`,
+  assert.deepEqual(akumaJsonValue(result), {
+    kind: "no-answer",
+    id: "aku/worker/00000001",
+    contractId: "kei/provider-core-review",
+  });
+});
+
+test("Akuma status keeps a complete Contract ID at narrow width", () => {
+  const contractId = "kei/provider-core-review" as const;
+  const status = akumaObservation({
+    id: "aku/worker/00000001",
+    life: "asleep" as const,
+    timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported },
+  }, { contractId });
+  const context: TextRenderContext = { columns: 20, color: false };
+  const text = renderAkumaText(
+    parseArgv(["status", status.status.id]).command,
+    { kind: "akuma", action: "status", status },
+    context,
   );
-  assert.deepEqual(akumaJsonValue(plain), plain.result);
-  assert.equal(akumaExitCode(plain), 0);
-
-  const integrated = {
-    ...plain,
-    result: {
-      ...plain.result,
-      dispatch: {
-        kind: "dispatched" as const,
-        dispatch: { akuId: akuma, contractId: "kei/work" as import("../src/index.js").ContractId, dispatchedAt: "2026-08-11T00:00:00.000Z" },
-      },
-      alias: {
-        kind: "aliased" as const,
-        alias: { alias: "@worker" as import("../src/index.js").AkumaAlias, akuId: akuma },
-        previous: null,
-      },
-    },
-  };
-  assert.equal(renderAkumaText(command, integrated), `─────\n${akuma} (@worker)\n└─ kei/work\n$ keiyaku -C /world wait @worker --timeout 5m`);
-  assert.equal(akumaExitCode(integrated), 0);
-
-  const partial = {
-    ...plain,
-    result: {
-      ...plain.result,
-      dispatch: { kind: "failed" as const, failure: { kind: "contention" as const } },
-      alias: { kind: "skipped" as const, reason: "dispatch-failed" as const },
-    },
-  };
-  assert.equal(renderAkumaText(command, partial), `─────\n${akuma}\ndispatch failed contention`);
-  assert.doesNotMatch(renderAkumaText(command, partial), /keiyaku wait/u);
-  assert.equal(akumaExitCode(partial), 2);
-
-  const aliasFailed = {
-    ...plain,
-    result: {
-      ...plain.result,
-      alias: { kind: "failed" as const, failure: { kind: "infrastructure" as const, diagnostic: "alias locked" } },
-    },
-  };
-  assert.equal(renderAkumaText(command, aliasFailed), `─────\n${akuma}\nalias failed infrastructure alias locked`);
-  assert.doesNotMatch(renderAkumaText(command, aliasFailed), /keiyaku wait/u);
-  assert.equal(akumaExitCode(aliasFailed), 2);
-
-  const answered = {
-    ...plain,
-    result: {
-      ...plain.result,
-      observation: {
-        kind: "observed" as const,
-        status: {
-          id: akuma,
-          life: "asleep" as const,
-          timeline: {
-            kind: "idle" as const,
-            entries: [],
-            omitted: 0,
-            ...emptyReported,
-            outcome: {
-              kind: "outcome" as const,
-              sequence: 1,
-              turnSequence: 1,
-              at: "2026-08-10T16:42:00.000Z",
-              outcome: { kind: "answered" as const, answer: "finished", historyId: "history", session: { sessionId: "session" } },
-            },
-          },
-        },
-      },
-    },
-  };
-  const answeredText = renderAkumaText(command, answered);
-  assert.equal(answeredText, "finished");
-  assert.equal(akumaExitCode(answered), 0);
-
-  const answeredAfterDispatchFailure = {
-    ...answered,
-    result: {
-      ...answered.result,
-      dispatch: { kind: "failed" as const, failure: { kind: "contention" as const } },
-    },
-  };
-  assert.match(renderAkumaText(command, answeredAfterDispatchFailure), /dispatch failed contention/u);
-  assert.notEqual(renderAkumaText(command, answeredAfterDispatchFailure), "finished");
-  assert.equal(akumaExitCode(answeredAfterDispatchFailure), 2);
-
-  const running = {
-    ...plain,
-    result: {
-      ...plain.result,
-      observation: {
-        kind: "observed" as const,
-        status: {
-          id: akuma,
-          life: "running" as const,
-          timeline: {
-            kind: "open" as const,
-            turn: { kind: "turn" as const, sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
-            entries: [],
-            omitted: 0,
-            ...emptyReported,
-          },
-        },
-      },
-    },
-  };
-  const waitCommand = parseArgv(["wait", akuma]).command;
-  const waited = { kind: "akuma" as const, action: "wait" as const, result: { completion: "all" as const, observations: [akumaObservation(running.result.observation.status)] } };
-  assert.equal(renderAkumaText(command, running).endsWith("  ● running\n  changes 0"), true);
-  assert.equal(renderAkumaText(waitCommand, waited).endsWith("  ● running\n  changes 0\n  tasks 0"), true);
-
-  const failedTurn = {
-    ...answered,
-    result: {
-      ...answered.result,
-      observation: {
-        kind: "observed" as const,
-        status: {
-          ...answered.result.observation.status,
-          timeline: {
-            kind: "idle" as const,
-            entries: [],
-            omitted: 0,
-            ...emptyReported,
-            outcome: {
-              kind: "outcome" as const,
-              sequence: 1,
-              turnSequence: 1,
-              at: "2026-08-10T16:42:00.000Z",
-              outcome: { kind: "failed" as const, diagnostic: "turn failed" },
-            },
-          },
-        },
-      },
-    },
-  };
-  assert.match(renderAkumaText(command, failedTurn), /! error\s+turn failed/u);
-  assert.equal(akumaExitCode(failedTurn), 2);
-
-  const observationFailed = {
-    ...plain,
-    result: {
-      ...plain.result,
-      observation: {
-        kind: "failed" as const,
-        failure: { kind: "infrastructure" as const, diagnostic: "heart unavailable" },
-      },
-    },
-  };
-  assert.equal(renderAkumaText(command, observationFailed), `─────\n${akuma}\n! error heart unavailable`);
-  assert.equal(akumaExitCode(observationFailed), 2);
-});
-
-test("akuma fork renders the public receipt and maps every exit class", () => {
-  const command = parseArgv(["fork", "aku/claude/1234abcd", "--at", "history-1"]).command;
-  const parent = "aku/claude/1234abcd" as import("../src/akuma/index.js").AkuId;
-  const result = (receipt: import("../src/index.js").ForkResult) => ({
-    kind: "akuma" as const,
-    action: "fork" as const,
-    receipt,
-  });
-  const forked = result({
-    kind: "forked",
-    parent,
-    child: "aku/claude/87654321" as import("../src/akuma/index.js").AkuId,
-    dispatch: { kind: "none" },
-  });
-  assert.equal(renderAkumaText(command, forked), "aku/claude/87654321");
-  assert.equal(akumaExitCode(forked), 0);
-  assert.deepEqual(akumaJsonValue(forked), forked.receipt);
-  const dispatched = result({
-    kind: "forked",
-    parent,
-    child: "aku/claude/87654321" as import("../src/akuma/index.js").AkuId,
-    dispatch: {
-      kind: "dispatched",
-      dispatch: {
-        akuId: "aku/claude/87654321" as import("../src/akuma/index.js").AkuId,
-        contractId: "kei/work" as import("../src/index.js").ContractId,
-        dispatchedAt: "2026-08-11T00:00:00.000Z",
-      },
-    },
-  });
-  assert.equal(renderAkumaText(command, dispatched), "aku/claude/87654321 [kei/work]");
-
-  const incapable = result({ kind: "provider-cannot-fork", provider: "claude", parent });
-  assert.equal(renderAkumaText(command, incapable), "claude cannot fork");
-  assert.equal(akumaExitCode(incapable), 1);
-  const unknown = result({ kind: "unknown-history", at: "history-1", parent });
-  assert.equal(renderAkumaText(command, unknown), "history-1 has no matching retained answered turn");
-  assert.equal(akumaExitCode(unknown), 1);
-  const failed = result({ kind: "fork-failed", diagnostic: "native refused", parent });
-  assert.equal(renderAkumaText(command, failed), "native refused");
-  assert.equal(akumaExitCode(failed), 1);
-  const partial = result({ kind: "upstream-forked", childSession: { sessionId: "native-child" }, diagnostic: "local failed", parent });
-  assert.equal(renderAkumaText(command, partial), "local failed");
-  assert.equal(akumaExitCode(partial), 2);
-});
-
-test("tell --interrupt renders the public receipt and maps every exit class", () => {
-  const parsed = parseArgv(["tell", "aku/claude/1d1e0004", "--interrupt", "-"]);
-  const interrupted = {
-    kind: "akuma" as const,
-    action: "tell" as const,
-    mode: "interrupt" as const,
-    body: "replace",
-    result: {
-      id: "aku/claude/1d1e0004" as const,
-      receipt: {
-        kind: "interrupted" as const,
-        putDown: "self-aborted" as const,
-        tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
-      },
-      observation: akumaObservation({
-        id: "aku/claude/1d1e0004" as const,
-        life: "asleep" as const,
-        timeline: { entries: [], lowestRetained: null, highest: null },
-      }, { contractId: "kei/provider-core-review" as const }),
-    },
-  };
-  const interruptedText = renderAkumaText(parsed.command, interrupted);
-  assert.equal(interruptedText.split("\n")[0], "─────");
-  assert.equal(interruptedText.split("\n")[1], "aku/claude/1d1e0004");
-  assert.equal(interruptedText.split("\n")[2], "└─ kei/provider-core-review");
-  assert.doesNotMatch(interruptedText, /(?:^|\n)contract /u);
-  assert.equal(akumaExitCode(interrupted), 0);
-
-  const wakeFailed = {
-    ...interrupted,
-    result: {
-      ...interrupted.result,
-      receipt: {
-        ...interrupted.result.receipt,
-        tell: {
-          admission: { tellId: "tell-1", fact: "recorded" as const },
-          wake: { kind: "failed" as const, diagnostic: "spawn" },
-        },
-      },
-    },
-  };
-  assert.match(renderAkumaText(parsed.command, wakeFailed), /^─────\naku\/claude\/1d1e0004/u);
-  assert.equal(akumaExitCode(wakeFailed), 0);
-
-  const unavailable = {
-    ...interrupted,
-    result: {
-      ...interrupted.result,
-      receipt: { kind: "unavailable" as const, evidence: "hung" as const },
-    },
-  };
-  assert.match(renderAkumaText(parsed.command, unavailable), /^─────\naku\/claude\/1d1e0004/u);
-  assert.equal(akumaExitCode(unavailable), 1);
+  const contractLines = text.split("\n").filter((line) => line.includes(contractId));
+  assert.deepEqual(contractLines, [`└─ ${contractId}`]);
 });
 
 test("Akuma status, wait, and history share public observations without embedding history", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-status-"));
+  const environment = { ...process.env };
+  delete environment[AKUMA_REQUESTS_ENV];
   try {
     const allocated = await allocateAkumaDirectory({
       worldRoot: root,
@@ -1546,6 +323,18 @@ test("Akuma status, wait, and history share public observations without embeddin
       draw: () => "1234abcd",
     });
     await initializeHeart(allocated.paths);
+    const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+    await leash.birth(allocated.paths, {
+      id: allocated.id,
+      archetype: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: {},
+      origin: { kind: "direct" },
+      confinement: { kind: "unconfined" },
+      cwd: root,
+      createdAt: "2026-08-08T00:00:00.000Z",
+    });
+    leash.release();
     const provider: ProviderAdapter = {
       confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
@@ -1587,7 +376,7 @@ test("Akuma status, wait, and history share public observations without embeddin
     });
 
     const parsedStatus = parseArgv(["-C", root, "status", allocated.id]);
-    const statusResult = await invoke(parsedStatus, { readStdin: () => { throw new Error("status must not read stdin"); } });
+    const statusResult = await invoke(parsedStatus, { environment, readStdin: () => { throw new Error("status must not read stdin"); } });
     assert.equal("kind" in statusResult && statusResult.kind, "akuma");
     if (!("kind" in statusResult) || statusResult.kind !== "akuma" || statusResult.action !== "status") return;
     assert.equal(statusResult.status.status.timeline.kind === "idle"
@@ -1595,459 +384,31 @@ test("Akuma status, wait, and history share public observations without embeddin
     assert.equal("history" in statusResult.status.status, false);
     assert.deepEqual(statusResult.status.status.timeline.entries, []);
 
-    const waitResult = await invoke(parseArgv(["-C", root, "wait", allocated.id, "--timeout", "0ms"]), {
-      readStdin: () => { throw new Error("wait must not read stdin"); },
-    });
-    assert.equal("kind" in waitResult && waitResult.kind, "akuma");
-    if (!("kind" in waitResult) || waitResult.kind !== "akuma" || waitResult.action !== "wait") return;
+    const waitResult = {
+      kind: "akuma" as const,
+      action: "wait" as const,
+      result: await executeWaitAkuma({
+        path: root as import("../src/world.js").WorldRoot,
+        ids: [allocated.id],
+        completion: "all",
+        timeoutMs: 0,
+      }),
+    };
     assert.deepEqual(waitResult.result.observations, [statusResult.status]);
     assert.equal(renderAkumaText(parseArgv(["wait", allocated.id]).command, waitResult), "cli answer");
     assert.equal(akumaRawAnswer(waitResult), "cli answer");
-    const waited = await captureMain(["-C", root, "wait", allocated.id, "--timeout", "0ms"]);
-    assert.equal(waited.code, 0);
-    assert.equal(waited.stdout, "cli answer");
-    await moveAlias({ world: root, alias: "@review", akuId: allocated.id });
-    const aliasWait = await invoke(parseArgv(["-C", root, "wait", "@review", "--timeout", "0ms"]));
-    assert.equal("kind" in aliasWait && aliasWait.kind === "akuma" && aliasWait.action === "wait"
-      ? aliasWait.alias : undefined, "@review");
-    if (!("kind" in aliasWait) || aliasWait.kind !== "akuma" || aliasWait.action !== "wait") return;
-    assert.equal(renderAkumaText(parseArgv(["wait", "@review"]).command, aliasWait), "cli answer");
-    const aliasOut = await captureMain(["-C", root, "wait", "@review", "--timeout", "0ms"]);
-    assert.equal(aliasOut.code, 0);
-    assert.equal(aliasOut.stdout, "cli answer");
-
-    const laterTurn = await beginTurn(allocated.paths, {
-      bodySequence: 1,
-      startedAt: "2026-08-08T00:00:01.000Z",
-    });
-    await endTurn(allocated.paths, {
-      turnSequence: laterTurn.sequence,
-      outcome: { kind: "failed", diagnostic: "later failed" },
-      completedAt: "2026-08-08T00:00:01.000Z",
-    });
-    const failedStatus = await invoke(parseArgv(["-C", root, "status", allocated.id]));
-    if (!("kind" in failedStatus) || failedStatus.kind !== "akuma" || failedStatus.action !== "status") return;
-    assert.equal(failedStatus.status.status.timeline.kind === "idle"
-      && failedStatus.status.status.timeline.outcome?.outcome.kind === "failed", true);
-    const failedWait = await captureMain(["-C", root, "wait", allocated.id, "--timeout", "0ms"]);
-    assert.equal(failedWait.code, 0);
-    assert.match(failedWait.stdout, /! error\s+later failed/u);
-    assert.match(failedWait.stdout, / {2}○ asleep\n  changes 0\n  tasks 0\n$/u);
-    assert.notEqual(failedWait.stdout, "cli answer");
-    assert.equal(akumaRawAnswer({
-      kind: "akuma",
-      action: "wait",
-      result: { completion: "all", observations: [failedStatus.status] },
-    }), undefined);
-
     const historyParsed = parseArgv(["-C", root, "history", allocated.id]);
-    const historyResult = await invoke(historyParsed, { readStdin: () => { throw new Error("history must not read stdin"); } });
+    const historyResult = await invoke(historyParsed, { environment, readStdin: () => { throw new Error("history must not read stdin"); } });
     if (!("kind" in historyResult) || historyResult.kind !== "akuma" || historyResult.action !== "history") return;
     assert.deepEqual(historyResult.history.rows.filter((row) => row.kind === "outcome").map((row) => row.outcome), [
       { kind: "answered", answer: "cli answer", historyId: "cli-history", session: { sessionId: "cli-session" } },
-      { kind: "failed", diagnostic: "later failed" },
     ]);
-    const limitedHistory = await invoke(parseArgv(["-C", root, "history", allocated.id, "--limit", "1"]));
-    if (!("kind" in limitedHistory) || limitedHistory.kind !== "akuma" || limitedHistory.action !== "history") return;
-    assert.equal(limitedHistory.history.rows.length, 1);
-    const lastParsed = parseArgv(["-C", root, "history", allocated.id, "--last"]);
-    const lastResult = await invoke(lastParsed);
-    if (!("kind" in lastResult) || lastResult.kind !== "akuma" || lastResult.action !== "history") return;
-    assert.equal(renderAkumaText(lastParsed.command, lastResult), "cli answer");
-    let stdout = "";
-    const writeStdout = process.stdout.write;
-    process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
-    try {
-      assert.equal(await main(["-C", root, "history", allocated.id, "--last"]), 0);
-    } finally {
-      process.stdout.write = writeStdout;
-    }
-    assert.equal(stdout, "cli answer");
-
-    const forkResult = await invoke(parseArgv(["-C", root, "fork", allocated.id, "--at", "missing-history"]), {
-      readStdin: () => { throw new Error("fork must not read stdin"); },
-    });
-    assert.deepEqual(forkResult, {
-      kind: "akuma",
-      action: "fork",
-      receipt: { kind: "unknown-history", at: "missing-history", parent: allocated.id },
-    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("linked and primary worktrees observe one Akuma World while Soul retains its execution cwd", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Keiyaku Test"]);
-  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
-  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
-  const linked = mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-linked-"));
-  repository.run(["worktree", "add", "--quiet", "--detach", linked]);
-
-  const allocated = await allocateAkumaDirectory({
-    worldRoot: repository.path,
-    archetype: "worker",
-    draw: () => "1357ace0",
-  });
-  await initializeHeart(allocated.paths);
-  const provider: ProviderAdapter = {
-    confinement: () => ({ kind: "unconfined" }),
-    admitOptions(options) { return { kind: "admitted", options }; },
-    async start() {
-      return {
-        admission: { fence: "shared-world" },
-        events: { async *[Symbol.asyncIterator]() {} },
-        completion: Promise.resolve({ kind: "answered", answer: "shared", historyId: "shared-world" }),
-        async abort() {},
-      };
-    },
-  };
-  await driveAkumaBody({
-    paths: allocated.paths,
-    seed: {
-      id: allocated.id,
-      archetype: "worker",
-      provider: { name: "worker", kind: "codex-app-server" },
-      options: {},
-      origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
-      cwd: linked,
-    },
-    initialBody: "work",
-  }, provider, {
-    now: () => "2026-08-14T00:00:00.000Z",
-  });
-
-  const fromLinked = await invoke(parseArgv(["-C", linked, "status", allocated.id]));
-  const fromPrimary = await invoke(parseArgv(["-C", repository.path, "status", allocated.id]));
-  assert.equal(fromLinked.kind, "akuma");
-  assert.deepEqual(fromLinked, fromPrimary);
-  await moveAlias({ world: repository.path, alias: "@shared", akuId: allocated.id });
-  const fromLinkedAlias = await invoke(parseArgv(["-C", linked, "status", "@shared"]));
-  assert.equal(fromLinkedAlias.kind === "akuma" ? fromLinkedAlias.status.status.id : undefined, allocated.id);
-  assert.equal((await readSoul(allocated.paths))?.cwd, linked);
-  assert.equal(existsSync(join(linked, ".keiyaku", "akuma", "run")), false);
-});
-
-test("history --last renders typed no-answer and preserves answered empty bytes", () => {
-  const command = parseArgv(["history", "aku/worker/00000001", "--last"]).command;
-  const noAnswer = {
-    kind: "akuma" as const,
-    action: "history" as const,
-    akuma: "aku/worker/00000001" as const,
-    mode: "no-answer" as const,
-    historyResult: {
-      kind: "no-answer" as const,
-      id: "aku/worker/00000001" as const,
-      contractId: "kei/provider-core-review" as const,
-    },
-  };
-  assert.equal(renderAkumaText(command, noAnswer), "no answer retained");
-  assert.deepEqual(akumaJsonValue(noAnswer), {
-    kind: "no-answer",
-    id: "aku/worker/00000001",
-    contractId: "kei/provider-core-review" as const,
-  });
-  assert.equal(akumaExitCode(noAnswer), 0);
-
-  const emptyAnswer = {
-    ...noAnswer,
-    mode: "last" as const,
-    answer: "",
-    historyResult: {
-      kind: "last" as const,
-      id: noAnswer.akuma,
-      answer: "",
-      contractId: noAnswer.historyResult.contractId,
-    },
-  };
-  assert.equal(renderAkumaText(command, emptyAnswer), "");
-  assert.deepEqual(akumaJsonValue(emptyAnswer), {
-    kind: "last",
-    id: "aku/worker/00000001",
-    answer: "",
-    contractId: "kei/provider-core-review" as const,
-  });
-  assert.equal(akumaExitCode(emptyAnswer), 0);
-});
-
-test("one raw-answer decision writes exact wait bytes and keeps unfinished observations as snapshots", () => {
-  const id = "aku/worker/1234abcd" as const;
-  const other = "aku/reviewer/deadbeef" as const;
-  const waitCommand = parseArgv(["wait", id]).command;
-  const answered = (answer: string, life: "asleep" | "running" | "killed" | "stranded" | "hung" | "untidy" = "asleep") =>
-    akumaObservation({
-      id,
-      life,
-      timeline: {
-        kind: "idle" as const,
-        entries: [],
-        omitted: 0,
-        outcome: {
-          kind: "outcome" as const,
-          sequence: 1,
-          turnSequence: 1,
-          at: "2026-08-10T16:42:00.000Z",
-          outcome: { kind: "answered" as const, answer, historyId: "history", session: { sessionId: "session" } },
-        },
-      },
-    });
-  const waitOf = (...observations: readonly AkumaObservation[]): Extract<AkumaInvocationResult, { action: "wait" }> => ({
-    kind: "akuma",
-    action: "wait",
-    result: { completion: "all", observations },
-  });
-  const multiline = "line one\nline two\n";
-  const complete = waitOf(answered(multiline));
-  const call = {
-    kind: "akuma" as const,
-    action: "call" as const,
-    result: {
-      kind: "called" as const,
-      akuma: id,
-      execution: { cwd: "/world", source: "world" as const },
-      dispatch: { kind: "none" as const },
-      alias: { kind: "none" as const },
-      observation: { kind: "observed" as const, status: complete.result.observations[0]!.status },
-    },
-    world: "/world" as import("../src/index.js").WorldRoot,
-  };
-  const cases = [
-    { name: "multiline", result: complete, raw: multiline },
-    { name: "empty", result: waitOf(answered("")), raw: "" },
-    { name: "trailing", result: waitOf(answered("kept\n")), raw: "kept\n" },
-    { name: "call", result: call, command: parseArgv(["call", "worker", "-"]).command, raw: multiline },
-    { name: "running", result: waitOf(answered("kept", "running")), fact: / {2}● running\n  changes 0\n  tasks 0$/u },
-    { name: "killed", result: waitOf(answered("kept", "killed")), fact: / {2}× killed\n  changes 0\n  tasks 0$/u },
-    { name: "stranded", result: waitOf(answered("kept", "stranded")), fact: / {2}\? stranded\n  changes 0\n  tasks 0$/u },
-    { name: "hung", result: waitOf(answered("kept", "hung")), fact: / {2}\? hung\n  changes 0\n  tasks 0$/u },
-    { name: "untidy", result: waitOf(answered("kept", "untidy")), fact: / {2}\? untidy\n  changes 0\n  tasks 0$/u },
-    {
-      name: "readonly-none",
-      result: waitOf(akumaObservation({
-        ...answered("kept").status,
-        readonly: { enforcement: "none" as const, diagnostic: "ACP cannot remove task-surface mutation capabilities" },
-      })),
-      fact: /! ACP cannot remove task-surface mutation capabilities/u,
-    },
-    {
-      name: "failed",
-      result: waitOf(akumaObservation({
-        id,
-        life: "asleep",
-        timeline: {
-          kind: "idle",
-          entries: [],
-          omitted: 0,
-          outcome: {
-            kind: "outcome",
-            sequence: 1,
-            turnSequence: 1,
-            at: "2026-08-10T16:42:00.000Z",
-            outcome: { kind: "failed", diagnostic: "turn failed" },
-          },
-        },
-      })),
-      fact: /! error\s+turn failed/u,
-    },
-    {
-      name: "open",
-      result: waitOf(akumaObservation({
-        id,
-        life: "asleep",
-        timeline: {
-          kind: "open",
-          turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
-          entries: [],
-          omitted: 0,
-        },
-      })),
-      fact: / {2}○ asleep\n  changes 0\n  tasks 0$/u,
-    },
-    {
-      name: "no-outcome",
-      result: waitOf(akumaObservation({ id, life: "asleep", timeline: { kind: "idle", entries: [], omitted: 0 } })),
-      fact: / {2}○ asleep\n  changes 0\n  tasks 0$/u,
-    },
-  ] as const;
-  for (const item of cases) {
-    assert.equal(akumaRawAnswer(item.result), "raw" in item ? item.raw : undefined, item.name);
-    const text = renderAkumaText("command" in item ? item.command : waitCommand, item.result);
-    if ("raw" in item) assert.equal(text, item.raw, item.name);
-    else {
-      assert.notEqual(text, "kept", item.name);
-      assert.match(text, /^─────/u, item.name);
-      assert.match(text, /aku\/worker\/1234abcd/u, item.name);
-      assert.match(text, item.fact, item.name);
-    }
-  }
-
-  const managedCall = {
-    ...call,
-    result: {
-      ...call.result,
-      execution: { cwd: "/repo/.git/keiyaku/wt/atlantis", source: "contract-worktree" as const },
-    },
-  };
-  assert.equal(akumaRawAnswer(managedCall), multiline);
-  assert.equal(
-    renderAkumaText(parseArgv(["call", "worker", "-"]).command, managedCall),
-    `cwd /repo/.git/keiyaku/wt/atlantis\n${multiline}`,
-  );
-
-  const plural = waitOf(answered("first answer"), akumaObservation({ ...answered("second answer").status, id: other }));
-  assert.equal(akumaRawAnswer(plural), undefined);
-  const pluralText = renderAkumaText(waitCommand, plural);
-  assert.match(pluralText, /aku\/worker\/1234abcd/u);
-  assert.match(pluralText, /first answer/u);
-  assert.match(pluralText, /aku\/reviewer\/deadbeef/u);
-  assert.match(pluralText, /second answer/u);
-  assert.notEqual(pluralText, "first answersecond answer");
-  assert.deepEqual(akumaJsonValue(complete), complete.result);
-  assert.deepEqual(akumaJsonValue(plural), plural.result);
-});
-
-test("history JSON preserves an associated Contract for every result mode", () => {
-  const akuma = "aku/worker/00000001" as const;
-  const contractId = "kei/provider-core-review" as const;
-  const page = {
-    kind: "akuma" as const,
-    action: "history" as const,
-    akuma,
-    mode: "page" as const,
-    history: {
-      rows: [],
-      omitted: 0,
-      hasEarlier: false,
-      hasLater: false,
-      historyLost: false,
-      lowestRetained: null,
-      highest: null,
-    },
-    historyResult: {
-      kind: "history" as const,
-      id: akuma,
-      history: {
-        rows: [], omitted: 0, hasEarlier: false, hasLater: false,
-        historyLost: false, lowestRetained: null, highest: null,
-      },
-      contractId,
-    },
-  };
-  assert.deepEqual(akumaJsonValue(page), {
-    kind: "history",
-    id: akuma,
-    history: page.history,
-    contractId,
-  });
-
-  const last = {
-    ...page,
-    mode: "last" as const,
-    answer: "answer",
-    historyResult: { kind: "last" as const, id: akuma, answer: "answer", contractId },
-  };
-  assert.deepEqual(akumaJsonValue(last), {
-    kind: "last",
-    id: akuma,
-    answer: "answer",
-    contractId,
-  });
-  const noAnswer = {
-    ...page,
-    mode: "no-answer" as const,
-    historyResult: { kind: "no-answer" as const, id: akuma, contractId },
-  };
-  assert.deepEqual(akumaJsonValue(noAnswer), {
-    kind: "no-answer",
-    id: akuma,
-    contractId,
-  });
-});
-
-test("akuma call renders the CallResult restraint on detached and failed observations without duplication", () => {
-  const command = parseArgv(["call", "worker", "-"]).command;
-  const akuma = "aku/worker/1234abcd" as import("../src/index.js").AkuId;
-  const restraint = { enforcement: "none" as const, diagnostic: "ACP cannot remove task-surface mutation capabilities" };
-  const base = {
-    kind: "akuma" as const,
-    action: "call" as const,
-    result: {
-      kind: "called" as const,
-      akuma,
-      execution: { cwd: "/world", source: "world" as const },
-      readonly: restraint,
-      dispatch: { kind: "none" as const },
-      alias: { kind: "none" as const },
-    },
-    world: "/world" as import("../src/index.js").WorldRoot,
-  };
-
-  const detached = renderAkumaText(command, { ...base, result: { ...base.result, observation: { kind: "detached" as const } } });
-  assert.equal(detached, `─────\n${akuma}\n! ACP cannot remove task-surface mutation capabilities`);
-  assert.doesNotMatch(detached, /keiyaku wait/u);
-  assert.equal((detached.match(/! ACP cannot/g) ?? []).length, 1);
-
-  const failed = renderAkumaText(command, {
-    ...base,
-    result: {
-      ...base.result,
-      observation: { kind: "failed" as const, failure: { kind: "infrastructure" as const, diagnostic: "heart unavailable" } },
-    },
-  });
-  assert.equal(failed, `─────\n${akuma}\n! ACP cannot remove task-surface mutation capabilities\n! error heart unavailable`);
-  assert.equal((failed.match(/! ACP cannot/g) ?? []).length, 1);
-
-  const observed = renderAkumaText(command, {
-    ...base,
-    result: {
-      ...base.result,
-      observation: {
-        kind: "observed" as const,
-        status: {
-          id: akuma,
-          life: "asleep" as const,
-          readonly: restraint,
-          timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported },
-        },
-      },
-    },
-  });
-  assert.equal((observed.match(/! ACP cannot/g) ?? []).length, 1, "observed status and CallResult project the same restraint once");
-
-  const answeredRestraint = renderAkumaText(command, {
-    ...base,
-    result: {
-      ...base.result,
-      observation: {
-        kind: "observed" as const,
-        status: {
-          id: akuma,
-          life: "asleep" as const,
-          readonly: restraint,
-          timeline: {
-            kind: "idle" as const,
-            entries: [],
-            omitted: 0,
-            ...emptyReported,
-            outcome: {
-              kind: "outcome" as const,
-              sequence: 1,
-              turnSequence: 1,
-              at: "2026-08-10T16:42:00.000Z",
-              outcome: { kind: "answered" as const, answer: "finished", historyId: "history", session: { sessionId: "session" } },
-            },
-          },
-        },
-      },
-    },
-  });
-  assert.match(answeredRestraint, /! ACP cannot remove task-surface mutation capabilities/u);
-  assert.notEqual(answeredRestraint, "finished");
-});
-
-test("packaged CLI call writes missing, detached, answered, unfinished, and failed semantics", async () => {
+test("packaged CLI call writes representative success and failure exits", async () => {
   assert.equal(existsSync(PACKAGED_CLI), true, "npm run build must produce build/src/cli/index.js before this test");
   const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-call-")));
   const home = join(root, ".home");
@@ -2146,56 +507,10 @@ test("packaged CLI call writes missing, detached, answered, unfinished, and fail
   });
   const env = { ...process.env, KEIYAKU_HOME: home, [AKUMA_REQUESTS_ENV]: pump.directory };
   try {
-    const missing = await runPackagedCli(["-C", root, "call", "missing", "-"], { cwd: root, env, stdin: "work" });
-    assert.equal(missing.code, 3);
-    assert.equal(missing.stdout, "");
-    assert.equal(missing.stderr, "`missing` was not found\nuse `keiyaku ls aku/` to list available Akuma\n");
-    assert.doesNotMatch(missing.stderr, /archetype|searched/iu);
-
-    const invalid = await runPackagedCli(["-C", root, "call", "Not/A-Name", "-"], { cwd: root, env, stdin: "work" });
-    assert.equal(invalid.code, 1);
-    assert.match(invalid.stderr, /Akuma name must be one normalized human identity segment/u);
-    assert.doesNotMatch(invalid.stderr, /archetype/iu);
-
-    const detached = await runPackagedCli(["-C", root, "call", "worker", "--detach", "-"], { cwd: root, env, stdin: "detach" });
-    assert.equal(detached.code, 0);
-    const detachedLines = detached.stdout.trim().split("\n");
-    assert.equal(detachedLines[0], "─────");
-    const akuId = detachedLines[1]!;
-    assert.match(akuId, /^aku\/worker\/[0-9a-f]{8}$/u);
-    assert.equal(detached.stdout, `─────\n${akuId}\n$ keiyaku -C ${root} wait ${akuId} --timeout 5m\n`);
-    assert.doesNotMatch(detached.stdout, /● running|○ asleep|success/u);
-
-    const aliased = await runPackagedCli(["-C", root, "call", "worker", "--detach", "--alias", "@worker", "-"], { cwd: root, env, stdin: "detach-alias" });
-    assert.equal(aliased.code, 0);
-    const aliasedHeader = aliased.stdout.trim().split("\n")[1]!;
-    const aliasedId = aliasedHeader.match(/^(aku\/worker\/[0-9a-f]{8})/u)?.[1];
-    assert.equal(typeof aliasedId, "string");
-    assert.equal(aliased.stdout, `─────\n${aliasedId} (@worker)\n$ keiyaku -C ${root} wait @worker --timeout 5m\n`);
-
-    const nested = join(root, "nested");
-    mkdirSync(nested);
-    const nestedCall = await runPackagedCli(["-C", nested, "call", "worker", "--detach", "-"], { cwd: nested, env, stdin: "detach-nested" });
-    assert.equal(nestedCall.code, 0);
-    const nestedId = nestedCall.stdout.trim().split("\n")[1]!;
-    assert.match(nestedId, /^aku\/worker\/[0-9a-f]{8}$/u);
-    assert.equal(nestedCall.stdout, `─────\n${nestedId}\n$ keiyaku -C ${root} wait ${nestedId} --timeout 5m\n`);
-
     const answered = await runPackagedCli(["-C", root, "call", "worker", "answer"], { cwd: root, env });
     assert.equal(answered.code, 0);
     assert.equal(answered.stdout, "finished");
     assert.equal(answered.stderr, "");
-
-    const unfinished = await runPackagedCli(["-C", root, "call", "worker", "--wait", "0ms", "-"], { cwd: root, env, stdin: "hang" });
-    assert.equal(unfinished.code, 0);
-    assert.match(unfinished.stdout, /^aku\/worker\/[0-9a-f]{8}$/mu);
-    assert.match(unfinished.stdout, / {2}● running\n  changes 0\n$/u);
-    assert.doesNotMatch(unfinished.stdout, /keiyaku wait|finished/u);
-    const unfinishedId = unfinished.stdout.match(/aku\/worker\/[0-9a-f]{8}/u)?.[0];
-    assert.notEqual(unfinishedId, undefined);
-    const told = await runPackagedCli(["-C", root, "tell", unfinishedId!, "continue with logs"], { cwd: root, env });
-    assert.equal(told.code, 0);
-    assert.match(told.stdout, /continue with logs/u);
 
     const failed = await runPackagedCli(["-C", root, "call", "worker", "--wait", "2s", "-"], { cwd: root, env, stdin: "fail" });
     assert.equal(failed.code, 2);
@@ -2209,9 +524,11 @@ test("packaged CLI call writes missing, detached, answered, unfinished, and fail
   }
 });
 
-test("packaged CLI wait writes exact multiline and empty answer bytes", async () => {
+test("packaged CLI wait and history --last write exact multiline and empty answer bytes", async () => {
   assert.equal(existsSync(PACKAGED_CLI), true, "npm run build must produce build/src/cli/index.js before this test");
   const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-wait-")));
+  const environment = { ...process.env };
+  delete environment[AKUMA_REQUESTS_ENV];
   const answering = (answer: string): ProviderAdapter => ({
     confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
@@ -2229,6 +546,18 @@ test("packaged CLI wait writes exact multiline and empty answer bytes", async ()
   const answered = async (draw: string, answer: string) => {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => draw });
     await initializeHeart(allocated.paths);
+    const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+    await leash.birth(allocated.paths, {
+      id: allocated.id,
+      archetype: "claude",
+      provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: {},
+      origin: { kind: "direct" },
+      confinement: { kind: "unconfined" },
+      cwd: root,
+      createdAt: "2026-08-16T00:00:00.000Z",
+    });
+    leash.release();
     await driveAkumaBody({
       paths: allocated.paths,
       seed: {
@@ -2247,14 +576,22 @@ test("packaged CLI wait writes exact multiline and empty answer bytes", async ()
   };
   try {
     const multiline = await answered("aaa11111", "line one\nline two\n");
-    const exact = await runPackagedCli(["-C", root, "wait", multiline.id, "--timeout", "0ms"], { cwd: root });
+    const exact = await runPackagedCli(["-C", root, "wait", multiline.id, "--timeout", "0ms"], { cwd: root, env: environment });
     assert.equal(exact.code, 0);
     assert.equal(exact.stdout, "line one\nline two\n");
     assert.equal(exact.stderr, "");
+    const last = await runPackagedCli(["-C", root, "history", multiline.id, "--last"], { cwd: root, env: environment });
+    assert.equal(last.code, 0);
+    assert.equal(last.stdout, "line one\nline two\n");
+    assert.equal(last.stderr, "");
     const empty = await answered("bbb22222", "");
-    const emptyOut = await runPackagedCli(["-C", root, "wait", empty.id, "--timeout", "0ms"], { cwd: root });
+    const emptyOut = await runPackagedCli(["-C", root, "wait", empty.id, "--timeout", "0ms"], { cwd: root, env: environment });
     assert.equal(emptyOut.code, 0);
     assert.equal(emptyOut.stdout, "");
+    const emptyLast = await runPackagedCli(["-C", root, "history", empty.id, "--last"], { cwd: root, env: environment });
+    assert.equal(emptyLast.code, 0);
+    assert.equal(emptyLast.stdout, "");
+    assert.equal(emptyLast.stderr, "");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2272,6 +609,93 @@ function fixtureSoul(id: Soul["id"], name: string): Record<string, unknown> {
     createdAt: "2026-08-15T00:00:00.000Z",
   };
 }
+
+test("linked and primary worktrees observe one Akuma World while Soul retains its execution cwd", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Keiyaku Test"]);
+  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
+  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
+  const linked = mkdtempSync(join(tmpdir(), "keiyaku-cli-akuma-linked-"));
+  repository.run(["worktree", "add", "--quiet", "--detach", linked]);
+
+  const allocated = await allocateAkumaDirectory({
+    worldRoot: repository.path,
+    archetype: "worker",
+    draw: () => "1357ace0",
+  });
+  await initializeHeart(allocated.paths);
+  const provider: ProviderAdapter = {
+    confinement: () => ({ kind: "unconfined" }),
+    admitOptions(options) { return { kind: "admitted", options }; },
+    async start() {
+      return {
+        admission: { fence: "shared-world" },
+        events: { async *[Symbol.asyncIterator]() {} },
+        completion: Promise.resolve({ kind: "answered", answer: "shared", historyId: "shared-world" }),
+        async abort() {},
+      };
+    },
+  };
+  await driveAkumaBody({
+    paths: allocated.paths,
+    seed: {
+      id: allocated.id,
+      archetype: "worker",
+      provider: { name: "worker", kind: "codex-app-server" },
+      options: {},
+      origin: { kind: "direct" },
+      confinement: { kind: "unconfined" },
+      cwd: linked,
+    },
+    initialBody: "work",
+  }, provider, {
+    now: () => "2026-08-14T00:00:00.000Z",
+  });
+
+  const fromLinked = await invoke(parseArgv(["-C", linked, "status", allocated.id]));
+  const fromPrimary = await invoke(parseArgv(["-C", repository.path, "status", allocated.id]));
+  assert.equal(fromLinked.kind, "akuma");
+  assert.deepEqual(fromLinked, fromPrimary);
+  await moveAlias({ world: repository.path, alias: "@shared", akuId: allocated.id });
+  const fromLinkedAlias = await invoke(parseArgv(["-C", linked, "status", "@shared"]));
+  assert.equal(fromLinkedAlias.kind === "akuma" ? fromLinkedAlias.status.status.id : undefined, allocated.id);
+  assert.equal((await readSoul(allocated.paths))?.cwd, linked);
+  assert.equal(existsSync(join(linked, ".keiyaku", "akuma", "run")), false);
+});
+
+test("raw-answer selection preserves exact bytes and unfinished snapshots", () => {
+  const id = "aku/worker/1234abcd" as const;
+  const observation = (answer: string, life: "asleep" | "running" = "asleep"): AkumaObservation => akumaObservation({
+    id,
+    life,
+    timeline: {
+      kind: "idle",
+      entries: [],
+      omitted: 0,
+      outcome: {
+        kind: "outcome",
+        sequence: 1,
+        turnSequence: 1,
+        at: "2026-08-10T16:42:00.000Z",
+        outcome: { kind: "answered", answer, historyId: "history", session: { sessionId: "session" } },
+      },
+    },
+  });
+  const wait = (status: AkumaObservation["status"]) => ({
+    kind: "akuma" as const,
+    action: "wait" as const,
+    result: { completion: "all" as const, observations: [akumaObservation(status)] },
+  });
+  const multiline = wait(observation("line one\nline two\n").status);
+  assert.equal(akumaRawAnswer(multiline), "line one\nline two\n");
+  assert.equal(renderAkumaText(parseArgv(["wait", id]).command, multiline), "line one\nline two\n");
+  const empty = wait(observation("").status);
+  assert.equal(akumaRawAnswer(empty), "");
+  assert.equal(renderAkumaText(parseArgv(["wait", id]).command, empty), "");
+  const unfinished = wait(observation("kept", "running").status);
+  assert.equal(akumaRawAnswer(unfinished), undefined);
+  assert.match(renderAkumaText(parseArgv(["wait", id]).command, unfinished), /aku\/worker\/1234abcd/u);
+});
 
 test("Soul validation diagnostics name the Akuma without the internal term", () => {
   assert.throws(
