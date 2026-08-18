@@ -1,6 +1,7 @@
 import { normalizeTargetBranch, observeBindCoordinates } from "../git/observe.js";
 import { gitObjectIdForSnapshot } from "../git/identity.js";
-import type { GitRefAssertion, GitRepository } from "../git/repository.js";
+import type { GitRefAssertion } from "../git/repository.js";
+import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { BindData, ActorId, ContractId } from "../core/facts/types.js";
 import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";

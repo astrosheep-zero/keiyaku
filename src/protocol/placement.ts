@@ -6,7 +6,7 @@ import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.
 import { observeGitForAdmissionAt } from "../git/observe.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
-import { GitPlumbingError, type GitRepository } from "../git/repository.js";
+import { GitPlumbingError, type GitRepository } from "../git/process.js";
 import {
   acquireTargetPlacementFence,
   followTargetPlacement,

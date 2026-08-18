@@ -1,7 +1,11 @@
 import type { ArchitecturePolicy } from "./engine.js";
 
 const any = (target: string, symbols?: readonly string[]) => symbols ? { target, symbols } : { target };
-const types = (target: string) => ({ target, mode: "type-only" as const });
+const types = (target: string, symbols?: readonly string[]) => ({
+  target,
+  ...(symbols === undefined ? {} : { symbols }),
+  mode: "type-only" as const,
+});
 
 export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
@@ -112,6 +116,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/errors.ts"),
         any("core/facts/types.ts"),
         any("git/read-observation.ts"),
+        types("git/process.ts", ["GitRepository"]),
         any("git/repository.ts"),
       ],
     },
@@ -160,16 +165,18 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "git/identity.ts", allow: [any("core/facts/types.ts")] },
     { source: "git/tree.ts", allow: [any("git/identity.ts")] },
-    { source: "git/repository.ts", allow: [any("git/identity.ts"), any("git/tree.ts"), any("core/facts/errors.ts"), any("runtime/proc/run.ts", ["consumeProcessStdout"])] },
+    { source: "git/process.ts", allow: [any("runtime/proc/run.ts", ["consumeProcessStdout"])] },
+    { source: "git/repository.ts", allow: [any("git/identity.ts"), any("git/tree.ts"), any("core/facts/errors.ts"), any("git/process.ts", ["GitPlumbingError", "runGit", "runGitWithEnvironment", "GitRepository"])] },
     {
       source: "git/read-observation.ts",
-      allow: [any("core/facts/errors.ts"), any("git/identity.ts"), any("git/repository.ts"), any("git/tree.ts", ["parseTreeObject", "TreeEntry", "validPath"])],
+      allow: [any("core/facts/errors.ts"), any("git/identity.ts"), any("git/process.ts", ["GitPlumbingError", "GitRepository"]), any("git/repository.ts"), any("git/tree.ts", ["parseTreeObject", "TreeEntry", "validPath"])],
     },
     {
       source: "git/admission.ts",
       allow: [
         any("git/identity.ts"),
         types("git/observe.ts"),
+        types("git/process.ts", ["GitRepository"]),
         any("git/repository.ts"),
         any("git/tree.ts", ["validPath"]),
         any("core/facts/codec.ts"),
@@ -186,6 +193,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "readGitTreeSelection", "withGitReadObservation", "withGitTargetedReadObservation",
         ]),
         any("git/repository.ts"),
+        any("git/process.ts", ["GitPlumbingError", "runGit", "GitRepository"]),
         any("core/facts/errors.ts"),
         any("core/facts/codec.ts"),
         any("core/facts/fold.ts"),
@@ -198,6 +206,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("git/identity.ts"),
         any("git/repository.ts"),
+        any("git/process.ts", ["GitPlumbingError", "runGit", "runGitWithEnvironment", "GitRepository"]),
         any("git/workspace.ts", ["captureWorkspaceTree", "worktreePath"]),
         types("core/decide.ts"),
         types("core/facts/types.ts"),
@@ -208,6 +217,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("git/identity.ts"),
         any("git/repository.ts"),
+        any("git/process.ts", ["GitPlumbingError", "runGit", "runGitWithEnvironment", "GitRepository"]),
         types("git/tender.ts"),
         any("core/facts/errors.ts"),
         types("core/decide.ts"),
@@ -216,7 +226,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "git/workspace.ts",
-      allow: [types("core/facts/types.ts"), any("git/identity.ts"), any("git/repository.ts")],
+      allow: [types("core/facts/types.ts"), any("git/identity.ts"), any("git/process.ts", ["runGit", "runGitWithEnvironment", "GitRepository"]), any("git/repository.ts")],
     },
     {
       source: "git/target-placement.ts",
@@ -226,6 +236,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("core/facts/types.ts"),
         any("git/identity.ts"),
         any("git/observe.ts", ["currentBranch"]),
+        any("git/process.ts", ["consumeGitStdout", "GitPlumbingError", "runGit", "GitRepository"]),
         any("git/repository.ts"),
         any("git/workspace.ts", ["captureWorkspaceTree"]),
       ],
@@ -240,6 +251,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/identity.ts"),
         any("git/observe.ts"),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
+        any("git/process.ts", ["GitPlumbingError", "runGit", "GitRepository"]),
         any("git/repository.ts"),
         any("git/target-placement.ts"),
         any("git/terminal-seal.ts"),
@@ -254,7 +266,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("coordination/sqlite-transaction-lock.ts"),
         any("core/facts/errors.ts", ["AuthorityCorruptionError"]),
         any("core/facts/types.ts", ["contractId", "ContractId"]),
-        types("git/repository.ts", ["GitRepository"]),
+        types("git/process.ts", ["GitRepository"]),
         any("git/workspace.ts", ["worktreePath"]),
       ],
     },
@@ -264,6 +276,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("coordination/durable-file.ts"),
         any("coordination/sqlite-transaction-lock.ts"),
         any("core/facts/types.ts"),
+        any("git/process.ts", ["GitPlumbingError", "runGit", "GitRepository"]),
         any("git/repository.ts"),
         any("git/workspace.ts", ["worktreePath"]),
         any("workspace-place.ts", ["appointmentFor", "placeRegisterPath", "readPlaceRegister", "PlaceRegister"]),
@@ -274,6 +287,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         types("core/facts/types.ts"),
         any("git/identity.ts"),
+        any("git/process.ts", ["runGit", "GitRepository"]),
         any("git/repository.ts"),
         any("git/workspace.ts", ["captureWorkspaceTree"]),
       ],
@@ -288,7 +302,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "git/scratch.ts",
-      allow: [any("coordination/sqlite-transaction-lock.ts"), any("git/identity.ts"), any("git/repository.ts"), types("core/facts/types.ts")],
+      allow: [any("coordination/sqlite-transaction-lock.ts"), any("git/identity.ts"), any("git/process.ts", ["runGit", "GitRepository"]), any("git/repository.ts"), types("core/facts/types.ts")],
     },
     {
       source: "protocol/attempt.ts",
@@ -296,7 +310,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/admission.ts"),
         any("git/observe.ts"),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
-        any("git/repository.ts", ["GIT_REF", "GitRefAssertion", "GitRepository", "readRef"]),
+        any("git/repository.ts", ["GIT_REF", "GitRefAssertion", "readRef"]),
+        types("git/process.ts", ["GitRepository"]),
         types("core/decide.ts"),
         any("core/facts/codec.ts"),
         any("core/facts/errors.ts"),
@@ -310,7 +325,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("git/observe.ts"),
         types("git/read-observation.ts"),
-        types("git/repository.ts"),
+        types("git/repository.ts", ["GitRefAssertion"]),
+        types("git/process.ts", ["GitRepository"]),
         types("core/decide.ts"),
         types("core/facts/offer.ts"),
         types("core/facts/types.ts"),
@@ -335,6 +351,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/identity.ts", ["gitObjectIdForSnapshot"]),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
         any("git/repository.ts"),
+        types("git/process.ts", ["GitRepository"]),
         any("core/facts/types.ts"),
         any("core/verbs/bind.ts"),
         any("protocol/intent.ts"),
@@ -347,11 +364,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "protocol/intent.ts",
       allow: [
         any("git/observe.ts"),
-        types("git/read-observation.ts", ["GitDecodeChannel"]),
+        types("git/read-observation.ts", ["GitDecodeChannel", "GitTreeSelection"]),
         any("git/scratch.ts", ["materializeScratchCandidate", "WorktreeLeak"]),
         types("git/hooks.ts", ["HookFailure"]),
         any("settings.ts", ["projectSettings"]),
-        types("git/repository.ts"),
+        types("git/repository.ts", ["GitRefAssertion"]),
+        types("git/process.ts", ["GitRepository"]),
         types("core/decide.ts"),
         types("core/facts/types.ts"),
         any("core/subject.ts", ["dependencyKeySet"]),
@@ -374,7 +392,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/observe.ts", ["observeGitForAdmissionAt"]),
         types("git/read-observation.ts", ["GitDecodeChannel"]),
         any("git/reconcile.ts", ["ReconcileResult", "reconcileEffectFailure"]),
-        any("git/repository.ts", ["GitPlumbingError", "GitRepository"]),
+        any("git/process.ts", ["GitPlumbingError", "GitRepository"]),
         any("git/target-placement.ts"),
         any("protocol/attempt.ts", ["AcceptedAdmission", "admitDecidedOffer", "mintAttempts", "mintEntryUlids"]),
         any("protocol/run.ts"),
@@ -391,6 +409,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/read-observation.ts", ["GitDecodeChannel", "GitTreeSelection", "withGitReadObservation"]),
         any("git/reconcile.ts"),
         any("git/repository.ts"),
+        types("git/process.ts", ["GitRepository"]),
         any("git/target-placement.ts"),
         types("git/scratch.ts"),
         any("core/facts/errors.ts"),
@@ -429,7 +448,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("git/observe.ts"),
         any("git/read-observation.ts", ["GitDecodeChannel", "GitReadObservation", "withGitReadObservation"]),
-        types("git/repository.ts"),
+        types("git/process.ts", ["GitRepository"]),
         any("git/workspace.ts", ["worktreePath", "observeTargetLag", "observeWorkspace"]),
         any("workspace-place.ts", ["PlaceRegister", "appointmentFor", "readPlaceRegister"]),
         types("git/workspace.ts", ["ContractTargetLag", "ContractWorkspaceObservation"]),
@@ -457,7 +476,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/hooks.ts"),
         any("library/configuration.ts", ["worktreeHooksFrom"]),
         types("git/scratch.ts"),
-        types("git/repository.ts"),
+        types("git/process.ts", ["GitRepository"]),
         types("settings.ts"),
         any("runtime/proc/run.ts"),
         types("verification/declaration.ts"),
@@ -757,7 +776,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "task/index.ts", allow: [types("world.ts"), any("task/board.ts"), any("task/compose.ts"), any("task/document.ts"), any("task/identity.ts"), any("task/operations.ts"), any("task/query.ts"), any("task/store.ts")] },
     {
       source: "settlement/fence.ts",
-      allow: [any("coordination/sqlite-transaction-lock.ts"), any("git/repository.ts"), types("task/identity.ts")],
+      allow: [any("coordination/sqlite-transaction-lock.ts"), any("git/repository.ts"), types("git/process.ts", ["GitRepository"]), types("task/identity.ts")],
     },
     {
       source: "settlement/holder.ts",
@@ -768,11 +787,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("git/observe.ts", ["GitDecisionObservation"]),
         any("git/read-observation.ts"),
         any("git/repository.ts"),
+        types("git/process.ts", ["GitRepository"]),
         any("settlement/fence.ts"),
         any("task/identity.ts"),
       ],
     },
-    { source: "settlement/settle.ts", allow: [any("world.ts"), any("git/observe.ts"), any("git/read-observation.ts"), types("git/reconcile.ts"), types("git/repository.ts"), any("core/facts/types.ts"), any("settlement/fence.ts"), any("settlement/holder.ts"), any("task/context.ts"), any("task/operations.ts"), types("task/identity.ts"), types("task/store.ts")] },
+    { source: "settlement/settle.ts", allow: [any("world.ts"), any("git/observe.ts"), any("git/read-observation.ts"), types("git/reconcile.ts"), types("git/process.ts", ["GitRepository"]), any("core/facts/types.ts"), any("settlement/fence.ts"), any("settlement/holder.ts"), any("task/context.ts"), any("task/operations.ts"), types("task/identity.ts"), types("task/store.ts")] },
     {
       source: "kanshi/read.ts",
       allow: [
@@ -925,7 +945,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       module: "node:child_process",
       owners: [
-        { source: "git/repository.ts", symbols: ["spawn"] },
+        { source: "git/process.ts", symbols: ["spawn"] },
         { source: "git/read-observation.ts", symbols: ["ChildProcessWithoutNullStreams", "spawn"] },
         { source: "runtime/proc/**", symbols: ["ChildProcess", "ChildProcessWithoutNullStreams", "execFile", "spawn"] },
         { source: "scripts/model-change-impact.ts", symbols: ["execFileSync"] },
@@ -1054,7 +1074,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "new-date-current", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/publication.ts", "dispatch/index.ts", "kanshi/read.ts", "protocol/bind.ts", "protocol/operations.ts", "task/compose.ts", "task/operations.ts"] },
     { capability: "process-argv", owners: ["akuma/body.ts", "cli/main.ts", "cli/index.ts", "git/hooks.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-cwd", owners: ["akuma/akuma.ts", "git/repository.ts", "cli/main.ts", "kanshi/read.ts", "library/repo.ts", "task/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
-    { capability: "process-environment", owners: ["akuma/body.ts", "akuma/providers/acp/core.ts", "akuma/providers/claude/index.ts", "akuma/providers/codex-app-server/index.ts", "akuma/providers/opencode-sdk/session.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "git/repository.ts", "protocol/operations.ts", "runtime/proc/**"] },
+    { capability: "process-environment", owners: ["akuma/body.ts", "akuma/providers/acp/core.ts", "akuma/providers/claude/index.ts", "akuma/providers/codex-app-server/index.ts", "akuma/providers/opencode-sdk/session.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "git/process.ts", "protocol/operations.ts", "runtime/proc/**"] },
     { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },

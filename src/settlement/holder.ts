@@ -9,8 +9,8 @@ import {
   updateRefsAtomically,
   writeBlob,
   writeCommit,
-  type GitRepository,
 } from "../git/repository.js";
+import type { GitRepository } from "../git/process.js";
 import {
   withGitTargetedReadObservation,
   type GitDecodeChannel,

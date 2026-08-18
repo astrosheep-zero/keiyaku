@@ -8,7 +8,7 @@ import {
 } from "../coordination/sqlite-transaction-lock.js";
 import type { SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot } from "./identity.js";
-import { runGit, type GitRepository } from "./repository.js";
+import { runGit, type GitRepository } from "./process.js";
 
 const SCRATCH_PREFIX = "keiyaku-v4-verify-";
 const SCRATCH_ROOT = await realpath(tmpdir());

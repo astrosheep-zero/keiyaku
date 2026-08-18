@@ -5,12 +5,14 @@ import { gitObjectId, gitObjectIdForSnapshot, mintChangeId, mintSnapshotId, type
 import {
   decodeGitNameOnly,
   decodeGitNumstat,
-  GitPlumbingError,
   readRef,
+} from "./repository.js";
+import {
+  GitPlumbingError,
   runGit,
   runGitWithEnvironment,
   type GitRepository,
-} from "./repository.js";
+} from "./process.js";
 import type { DeliveryCommitMetadata, TenderCapture } from "./tender.js";
 
 const REQUIRED_GIT = "2.38" as const;

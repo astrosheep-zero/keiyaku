@@ -8,7 +8,6 @@ import {
   GIT_FORMAT_BYTES,
   GIT_FORMAT_PATH,
   GIT_REF,
-  type GitRepository,
   type GitRefAssertion,
   type RefPublication,
   type TreeChange,
@@ -17,6 +16,7 @@ import {
   writeBlob,
   writeCommit,
 } from "./repository.js";
+import type { GitRepository } from "./process.js";
 import {
   type ContractHead,
   type ContractId,

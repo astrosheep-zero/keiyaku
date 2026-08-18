@@ -32,7 +32,8 @@ import {
   type ReconcileResult,
 } from "../git/reconcile.js";
 import type { WorktreeHooks } from "../git/hooks.js";
-import { NoGitWorldError, repositoryAt, type GitRepository } from "../git/repository.js";
+import { NoGitWorldError, repositoryAt } from "../git/repository.js";
+import type { GitRepository } from "../git/process.js";
 import { withGitReadObservation, type GitDecodeChannel, type GitTreeSelection } from "../git/read-observation.js";
 import type { WorktreeLeak } from "../git/scratch.js";
 import { dependencyKeySet } from "../core/subject.js";

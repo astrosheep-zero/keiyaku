@@ -208,8 +208,8 @@ test("architecture policy rejects dependency cycles including type-only cycles",
 
 test("architecture policy keeps pure facts independent of Git", () => {
   const diagnostics = check({
-    "git/repository.ts": "export type GitRepository = {};",
-    "core/facts/fold.ts": 'import type { GitRepository } from "../../git/repository.js"; export function fold(repository: GitRepository): void {}',
+    "git/process.ts": "export type GitRepository = {};",
+    "core/facts/fold.ts": 'import type { GitRepository } from "../../git/process.js"; export function fold(repository: GitRepository): void {}',
   });
   assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
@@ -217,10 +217,10 @@ test("architecture policy keeps pure facts independent of Git", () => {
 test("architecture policy keeps verbs away from admission and repository", () => {
   const diagnostics = check({
     "git/admission.ts": "export type Offer = {};",
-    "git/repository.ts": "export type GitRepository = {};",
+    "git/process.ts": "export type GitRepository = {};",
     "core/verbs/deliver.ts": [
       'import type { Offer } from "../../git/admission.js";',
-      'import type { GitRepository } from "../../git/repository.js";',
+      'import type { GitRepository } from "../../git/process.js";',
       "export function decideDeliver(offer: Offer, repository: GitRepository): void {}",
     ].join("\n"),
   });
@@ -230,10 +230,10 @@ test("architecture policy keeps verbs away from admission and repository", () =>
 test("architecture policy permits protocol to join pact with Git", () => {
   const diagnostics = check({
     "core/decide.ts": "export type AttemptContext = {};",
-    "git/repository.ts": "export type GitRepository = {};",
-    "git/observe.ts": 'import type { GitRepository } from "./repository.js"; export function observeContractsForAdmissionAt(repository: GitRepository): void { void repository; }',
+    "git/process.ts": "export type GitRepository = {};",
+    "git/observe.ts": 'import type { GitRepository } from "./process.js"; export function observeContractsForAdmissionAt(repository: GitRepository): void { void repository; }',
     "protocol/attempt.ts": "export function admitDecidedOffer(): void {}",
-    "protocol/run.ts": 'import { observeContractsForAdmissionAt } from "../git/observe.js"; import type { GitRepository } from "../git/repository.js"; import type { AttemptContext } from "../core/decide.js"; import { admitDecidedOffer } from "./attempt.js"; export function run(repository: GitRepository, attempt: AttemptContext): void { observeContractsForAdmissionAt(repository); void attempt; admitDecidedOffer(); }',
+    "protocol/run.ts": 'import { observeContractsForAdmissionAt } from "../git/observe.js"; import type { GitRepository } from "../git/process.js"; import type { AttemptContext } from "../core/decide.js"; import { admitDecidedOffer } from "./attempt.js"; export function run(repository: GitRepository, attempt: AttemptContext): void { observeContractsForAdmissionAt(repository); void attempt; admitDecidedOffer(); }',
   });
   assert.deepEqual(diagnostics, []);
 });
@@ -378,8 +378,9 @@ test("architecture policy permits the aggregate status read path", () => {
 
 test("architecture policy limits publication retry observation to asserted refs", () => {
   const accepted = check({
-    "git/repository.ts": "export const GIT_REF = ''; export async function readRef(): Promise<void> {} export function runGit(): void {} export type GitRepository = {};",
-    "protocol/attempt.ts": 'import { GIT_REF, readRef, type GitRepository } from "../git/repository.js"; export async function classify(repository: GitRepository): Promise<void> { void GIT_REF; await readRef(); void repository; }',
+    "git/repository.ts": "export const GIT_REF = ''; export async function readRef(): Promise<void> {}",
+    "git/process.ts": "export type GitRepository = {};",
+    "protocol/attempt.ts": 'import { GIT_REF, readRef } from "../git/repository.js"; import type { GitRepository } from "../git/process.js"; export async function classify(repository: GitRepository): Promise<void> { void GIT_REF; await readRef(); void repository; }',
   });
   assert.deepEqual(accepted, []);
 
@@ -502,6 +503,20 @@ test("architecture policy enforces symbol-scoped allowances", () => {
     "core/facts/codec.ts": 'import { other } from "../subject.js"; export function codec(): void { other(); }',
   });
   assert.ok(rules(diagnostics).includes("architecture/dependency-direction"));
+});
+
+test("architecture policy scopes type-only allowances to approved symbols", () => {
+  const accepted = check({
+    "git/process.ts": "export type GitRepository = {}; export type Other = {};",
+    "workspace-place.ts": 'import type { GitRepository } from "./git/process.js"; export function place(repository: GitRepository): void { void repository; }',
+  });
+  assert.deepEqual(accepted, []);
+
+  const rejected = check({
+    "git/process.ts": "export type GitRepository = {}; export type Other = {};",
+    "workspace-place.ts": 'import type { Other } from "./git/process.js"; export function place(value: Other): void { void value; }',
+  });
+  assert.ok(rules(rejected).includes("architecture/dependency-direction"));
 });
 
 test("architecture policy uses specific zone before catch-all for Contract front door", () => {

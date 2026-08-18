@@ -16,7 +16,7 @@ import {
   type PlaceRegister,
 } from "../../workspace-place.js";
 import type { ContractTargetLag, ContractWorkspaceObservation } from "../../git/workspace.js";
-import type { GitRepository } from "../../git/repository.js";
+import type { GitRepository } from "../../git/process.js";
 import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import type { ContractId, ContractState, DeliverData, SnapshotId } from "../../core/facts/types.js";

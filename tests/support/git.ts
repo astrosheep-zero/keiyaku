@@ -6,7 +6,7 @@ import { readManagedWorktreeAppointment } from "../../src/workspace-place.js";
 import type { ContractId } from "../../src/core/facts/types.js";
 import { observeContractAt } from "../../src/git/observe.js";
 import { withGitDecodeChannel } from "../../src/git/read-observation.js";
-import type { GitRepository } from "../../src/git/repository.js";
+import type { GitRepository } from "../../src/git/process.js";
 
 export interface TestGitRepository {
   readonly path: string;

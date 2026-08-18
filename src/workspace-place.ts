@@ -4,7 +4,7 @@ import { replaceFileDurably } from "./coordination/durable-file.js";
 import { acquireSqliteTransactionLock } from "./coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "./core/facts/errors.js";
 import { contractId, type ContractId } from "./core/facts/types.js";
-import type { GitRepository } from "./git/repository.js";
+import type { GitRepository } from "./git/process.js";
 import { worktreePath } from "./git/workspace.js";
 
 export const CONTRACT_PLACES = Object.freeze([

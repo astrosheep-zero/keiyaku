@@ -14,10 +14,10 @@ import {
   updateRefsAtomically,
   writeBlob,
   writeCommit,
-  type GitRepository,
   type GitSnapshot,
   type TreeChange,
 } from "../git/repository.js";
+import type { GitRepository } from "../git/process.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 
 const DISPATCH_ROOT = "dispatch";

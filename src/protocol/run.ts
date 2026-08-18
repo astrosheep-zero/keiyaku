@@ -4,7 +4,7 @@ import {
   type GitDecisionObservation,
 } from "../git/observe.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
-import type { GitRepository } from "../git/repository.js";
+import type { GitRepository } from "../git/process.js";
 import type { GitRefAssertion } from "../git/repository.js";
 import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
 import type { Offer, TreeUpdate } from "../core/facts/offer.js";

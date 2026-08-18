@@ -1,6 +1,6 @@
 import type { GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
-import type { GitRepository } from "../git/repository.js";
+import type { GitRepository } from "../git/process.js";
 import type { GitRefAssertion } from "../git/repository.js";
 import { materializeScratchCandidate, type WorktreeLeak } from "../git/scratch.js";
 import type { HookFailure } from "../git/hooks.js";

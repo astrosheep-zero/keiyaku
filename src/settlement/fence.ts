@@ -4,7 +4,8 @@ import {
   acquireSqliteTransactionLock,
   type HeldSqliteTransactionLock,
 } from "../coordination/sqlite-transaction-lock.js";
-import { commonGitDirectory, type GitRepository } from "../git/repository.js";
+import { commonGitDirectory } from "../git/repository.js";
+import type { GitRepository } from "../git/process.js";
 import type { TaskId } from "../task/identity.js";
 
 export function settlementFencePath(repository: GitRepository, taskId: TaskId): string {

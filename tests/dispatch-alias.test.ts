@@ -9,7 +9,8 @@ import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transac
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
 import { publishDispatch, readDispatch, readDispatches } from "../src/dispatch/index.js";
-import { commonGitDirectory, repositoryAt, type GitRepository } from "../src/git/repository.js";
+import { commonGitDirectory, repositoryAt } from "../src/git/repository.js";
+import type { GitRepository } from "../src/git/process.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 

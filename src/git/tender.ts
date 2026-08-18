@@ -4,12 +4,14 @@ import type { ActorId, ContractCoordinates, ContractId, SnapshotId } from "../co
 import { gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
 import {
   decodeGitNumstat,
-  GitPlumbingError,
   registeredWorktreePaths,
+} from "./repository.js";
+import {
+  GitPlumbingError,
   runGit,
   runGitWithEnvironment,
   type GitRepository,
-} from "./repository.js";
+} from "./process.js";
 import { captureWorkspaceTree, worktreePath } from "./workspace.js";
 
 export type TenderCaptureCoordinates = Readonly<{

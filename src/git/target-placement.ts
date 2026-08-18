@@ -7,13 +7,15 @@ import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, mintSnapshotId, typ
 import { currentBranch } from "./observe.js";
 import {
   commonGitDirectory,
-  consumeGitStdout,
-  GitPlumbingError,
   readRef,
   registeredWorktrees,
+} from "./repository.js";
+import {
+  consumeGitStdout,
+  GitPlumbingError,
   runGit,
   type GitRepository,
-} from "./repository.js";
+} from "./process.js";
 import { captureWorkspaceTree } from "./workspace.js";
 
 export type WorkspaceNotOnTargetRefusal = Readonly<{

@@ -1,6 +1,7 @@
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { runGit, type GitOid, type GitRepository } from "./repository.js";
+import type { GitOid } from "./repository.js";
+import { runGit, type GitRepository } from "./process.js";
 import { captureWorkspaceTree } from "./workspace.js";
 
 export type UnsealedBytes = Readonly<{

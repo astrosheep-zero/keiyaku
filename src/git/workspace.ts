@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { runGit, runGitWithEnvironment, type GitRepository } from "./repository.js";
+import { runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
 
 const WORKTREE_DIRECTORY = ["keiyaku", "wt"] as const;
 

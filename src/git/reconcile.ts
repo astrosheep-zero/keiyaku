@@ -6,16 +6,14 @@ import {
   CANDIDATE_PIN_REF_NAMESPACE,
   commonGitDirectory,
   DELIVERY_REF_NAMESPACE,
-  GitPlumbingError,
   isKeiyakuOwnedRef,
   readRef,
   registeredWorktreePaths,
-  runGit,
   writeCommit,
   worktreeGitDirectory,
   type GitOid,
-  type GitRepository,
 } from "./repository.js";
+import { GitPlumbingError, runGit, type GitRepository } from "./process.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import {
   contractLocator,

@@ -5,13 +5,15 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import {
   commonGitDirectory,
-  GitPlumbingError,
   readBlob,
   repositoryAt,
-  runGit,
-  runGitWithEnvironment,
   writeBlob,
 } from "../src/git/repository.js";
+import {
+  GitPlumbingError,
+  runGit,
+  runGitWithEnvironment,
+} from "../src/git/process.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 

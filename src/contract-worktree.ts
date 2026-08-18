@@ -8,12 +8,10 @@ import {
 } from "./coordination/durable-file.js";
 import { contractId, type ArcData, type ContractId, type ContractState } from "./core/facts/types.js";
 import {
-  GitPlumbingError,
-  runGit,
   worktreeGitDirectory,
   worktreeRoot,
-  type GitRepository,
 } from "./git/repository.js";
+import { GitPlumbingError, runGit, type GitRepository } from "./git/process.js";
 import { worktreePath } from "./git/workspace.js";
 import {
   appointmentFor,

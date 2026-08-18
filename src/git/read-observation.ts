@@ -6,12 +6,11 @@ import {
   GIT_FORMAT_BYTES,
   GIT_FORMAT_PATH,
   GIT_REF,
-  GitPlumbingError,
   readRef,
   type GitOid,
-  type GitRepository,
   type GitSnapshot,
 } from "./repository.js";
+import { GitPlumbingError, type GitRepository } from "./process.js";
 
 const gitReadObservationBrand: unique symbol = Symbol("GitReadObservation");
 const gitDecodeChannelBrand: unique symbol = Symbol("GitDecodeChannel");

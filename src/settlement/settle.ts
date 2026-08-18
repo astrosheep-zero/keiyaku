@@ -2,7 +2,7 @@ import { contractSegment, type ContractId, type ContractState } from "../core/fa
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { Effect } from "../git/reconcile.js";
-import type { GitRepository } from "../git/repository.js";
+import type { GitRepository } from "../git/process.js";
 import { repairNamespaceContext } from "../task/context.js";
 import { settleTask, type SettledTaskResult } from "../task/operations.js";
 import type { TaskId } from "../task/identity.js";

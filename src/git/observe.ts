@@ -16,13 +16,11 @@ import {
   type ContractJournalClass,
 } from "./identity.js";
 import {
-  GitPlumbingError,
   isKeiyakuOwnedRef,
-  runGit,
   type GitSnapshot,
   type GitOid,
-  type GitRepository,
 } from "./repository.js";
+import { GitPlumbingError, runGit, type GitRepository } from "./process.js";
 import {
   readGitTreeSelection,
   withGitTargetedReadObservation,
