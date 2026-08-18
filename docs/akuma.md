@@ -1,7 +1,7 @@
 # Akuma
 
-This chapter owns Akuma identity, heart facts, life, detached bodies, provider
-boundaries, lifecycle verbs, and persistence. The current surface ships ACP,
+This chapter owns Akuma identity, birth, life, lifecycle, placement, and
+execution/provider boundaries. The current surface ships ACP,
 Claude, Codex app-server, Grok Build, OpenCode V1, and Pi providers, public
 handles, status, wait, interrupt, fork, Body Requests, CLI skin, and Kanshi
 rows. Body Requests reroute the existing call surface; they add no public verb.
@@ -136,22 +136,12 @@ while a hosting Body knows only its own Soul and the request claim.
 Each Body receives `KEIYAKU_ACTOR_ID` equal to that Soul's AkuId. The caller
 process environment is unchanged.
 
-Stillborn residue is visible in `list()` with its evidence. No automatic
-cleaner ships until a real reader needs one; manual removal is safe because
-a body must not outlive its heart (ENOENT -> abort through its live provider
-handles, exit).
+Stillborn residue retains its birth evidence. No automatic cleaner ships until
+a real reader needs one; manual removal is safe because a body must not outlive
+its heart (ENOENT -> abort through its live provider handles, exit).
 
-`list()` reads the complete compact fleet. `list({ archetype })` is the same
-Akuma-owned read with one optional Archetype selection: Akuma validates the
-name, decodes each physical identity, and includes only matching rows. The
-caller does not parse AkuIds or filter a complete result itself.
-
-Every valid allocated directory remains visible as born, unborn, or stillborn.
-Missing Heart or leash during initialization is unborn; a seal without Soul
-is stillborn; Soul selects the born row. A noncanonical physical name may be
-ignored. After a valid identity, schema mismatch, corruption, and other read
-failures fail the fleet read with that AkuId, directory, and original cause.
-The read never seals, sweeps, repairs, retries, or judges age.
+Public Fleet/list values and their projection are owned by
+[akuma-public.md](akuma-public.md).
 
 ## Archetype
 

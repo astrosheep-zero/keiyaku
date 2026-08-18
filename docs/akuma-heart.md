@@ -234,13 +234,7 @@ resume, fork, outcome, failure, and life never read activity. Thus the shared
 timeline owns execution chronology and complete outcome bytes, while session
 rows remain the sole resume authority.
 
-`list()` remains a compact fleet read and never scans activity or turns. A
-noncanonical physical AkuId is not a member and may be ignored. Known absence
-of Heart or leash during initialization projects the existing unborn row.
-After a valid physical identity, schema mismatch, corruption, and other read
-failures fail the complete fleet read, naming the AkuId and directory while
-retaining the original cause. There is no per-member diagnostic or partial
-marker.
+Public Fleet/list behavior is owned by [akuma-public.md](akuma-public.md).
 
 One judge per question:
 

@@ -145,11 +145,13 @@ Archetype and description snapshots, life and its source Heart timestamp, and
 pending tell count, but no activity, history, or latest outcome. The public
 types share `id` and `life` by coincidence, not by inheritance. The id is
 projected verbatim and has no endpoint-state interpretation here. Unborn/stillborn rows retain
-their existing evidence. A valid allocated directory is never omitted: missing
-Heart or leash in the initialization window is `unborn`; seal without Soul is
-`stillborn`; Soul selects the born row. Invalid directory names may be ignored.
-Other failures while projecting one valid physical identity silently omit that
-row and do not suppress readable peers. There is no public per-row failure arm,
+their existing evidence. A valid allocated directory that is otherwise readable
+is not omitted for the recognized unborn/stillborn cases: missing Heart or leash
+in the initialization window is `unborn`; seal without Soul is `stillborn`; Soul
+selects the born row. Invalid directory names may be ignored. Hard read failures
+while projecting one valid physical identity, including schema mismatch and
+corruption, silently omit that row and do not suppress readable peers. There is
+no public per-row failure arm,
 diagnostic row, or retry. Direct reads of that AkuId retain their ordinary
 failure. This keeps a fleet read from scanning the complete
 turn history of every akuma. No read reaches back into home.
