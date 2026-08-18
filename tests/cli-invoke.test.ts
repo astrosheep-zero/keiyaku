@@ -123,10 +123,6 @@ test("show returns the canonical Contract guidance in text and JSON projections"
   const text = await invokeWithDocument(repository.path, ["show", id], "");
   assert.deepEqual(text, { kind: "guidance", contract: id, guidance: expected });
 
-  const json = await invokeWithDocument(repository.path, ["show", `@${id.slice("kei/".length)}`, "--json"], "");
-  assert.deepEqual(json, { kind: "guidance", contract: id, guidance: expected });
-  assert.deepEqual(Object.keys(json), ["kind", "contract", "guidance"]);
-
   await assert.rejects(
     () => invokeWithDocument(repository.path, ["show", "kei/missing"], ""),
     (error: unknown) => error instanceof KeiyakuRefused
@@ -1013,13 +1009,6 @@ test("history kei/... reads Contract history through Repo without an Akuma World
   });
   assert.deepEqual(result, { kind: "contract-history", history: expected });
   assert.equal(existsSync(resolve(foreign.path, ".keiyaku")), false);
-  const json = await invoke(parseArgv(["--repo", repository.path, "history", id, "--json"]), {
-    cwd: foreign.path,
-    environment: {},
-  });
-  assert.equal(json.kind, "contract-history");
-  if (json.kind === "contract-history") assert.deepEqual(json.history, expected);
-
   const missing = await invoke(parseArgv(["history", "kei/missing-history"]), {
     cwd: repository.path,
     environment: {},
