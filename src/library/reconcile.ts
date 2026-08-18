@@ -3,13 +3,12 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import {
   reconcileAllOperation,
-  reconcileObservationFailure,
   reconcileOperation,
-  stateOperation,
   worldContractStates,
   type ReconcileReport,
-  type RepositoryScope,
-} from "../protocol/operations.js";
+} from "../protocol/reconcile.js";
+import { reconcileObservationFailure } from "../git/reconcile.js";
+import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
 import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
 import type { WorktreeHooks } from "./configuration.js";
 import {

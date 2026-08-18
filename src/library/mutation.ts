@@ -1,6 +1,7 @@
 import type { ContractHead, ContractId, JournalEntry } from "../core/facts/types.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import type { ReconcileReport, RepositoryScope } from "../protocol/operations.js";
+import type { ReconcileReport } from "../protocol/reconcile.js";
+import type { RepositoryScope } from "../protocol/operations.js";
 import type { IntentOutcome } from "../protocol/operations.js";
 import type { AcceptedObligations } from "../protocol/outcome.js";
 import { deferredTaskHolderSettlement, type SettlementReport } from "../settlement/settle.js";

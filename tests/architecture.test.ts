@@ -50,13 +50,13 @@ test("architecture policy keeps the Contract front door on protocol-owned operat
     "core/verbs/attestation.ts": "export function decideAttestation(): void {}",
     "protocol/run.ts": "export function runProtocol(): void {}",
     "protocol/placement.ts": "export function admitPlacement(): void {}",
-    "protocol/operations.ts": "export function reviewOperation(): void {}",
+    "protocol/review.ts": "export function reviewOperation(): void {}",
     "library/contract.ts": [
       'import { repositoryAt } from "../git/repository.js";',
       'import { decideAttestation } from "../core/verbs/attestation.js";',
       'import { runProtocol } from "../protocol/run.js";',
       'import { admitPlacement } from "../protocol/placement.js";',
-      'import { reviewOperation } from "../protocol/operations.js";',
+      'import { reviewOperation } from "../protocol/review.js";',
       "export function facade(): void { repositoryAt(); decideAttestation(); runProtocol(); admitPlacement(); reviewOperation(); }",
     ].join("\n"),
   });
@@ -65,10 +65,10 @@ test("architecture policy keeps the Contract front door on protocol-owned operat
 
 test("architecture policy keeps the package-root facade composition-only", () => {
   const diagnostics = check({
-    "protocol/operations.ts": "export function reviewOperation(): void {}",
+    "protocol/review.ts": "export function reviewOperation(): void {}",
     "library/contract.ts": "export function reviewKeiyaku(): void {}",
     "library/keiyaku.ts": [
-      'import { reviewOperation } from "../protocol/operations.js";',
+      'import { reviewOperation } from "../protocol/review.js";',
       'import { reviewKeiyaku } from "./contract.js";',
       "export function facade(): void { reviewOperation(); reviewKeiyaku(); }",
     ].join("\n"),
@@ -288,13 +288,14 @@ test("architecture policy lets Verification protocol own generic currentness loo
 
 test("architecture policy gives public audit invocation one library owner", () => {
   const accepted = check({
-    "protocol/operations.ts": "export function auditOperation(): void {} export type AuditReport = {}; export type RepositoryScope = {};",
+    "protocol/audit.ts": "export function auditOperation(): void {} export type AuditReport = {};",
+    "protocol/operations.ts": "export type RepositoryScope = {};",
     "library/input.ts": "export function requireInput(): void {} export function documentDerivation(): void {}",
     "library/mutation.ts": "export function completeMutation(): void {}",
     "library/refusal.ts": "export function requireAccepted(): void {}",
     "library/configuration.ts": "export function worktreeHooksOption(): void {}",
     "library/audit.ts": [
-      'import { auditOperation } from "../protocol/operations.js";',
+      'import { auditOperation } from "../protocol/audit.js";',
       'import { documentDerivation, requireInput } from "./input.js";',
       'import { completeMutation } from "./mutation.js";',
       'import { requireAccepted } from "./refusal.js";',
@@ -307,8 +308,8 @@ test("architecture policy gives public audit invocation one library owner", () =
   assert.deepEqual(accepted, []);
 
   const rejectedFacade = check({
-    "protocol/operations.ts": "export function auditOperation(): void {}",
-    "library/contract.ts": 'import { auditOperation } from "../protocol/operations.js"; export function audit(): void { auditOperation(); }',
+    "protocol/audit.ts": "export function auditOperation(): void {}",
+    "library/contract.ts": 'import { auditOperation } from "../protocol/audit.js"; export function audit(): void { auditOperation(); }',
   });
   assert.deepEqual(rules(rejectedFacade), ["architecture/dependency-direction"]);
 
@@ -329,13 +330,8 @@ test("architecture policy lets audit operations call the Git target adjudicator"
   const accepted = check({
     "git/target-placement.ts": "export function observeTargetPlacement(): void {} export function adjudicateAuditTarget(): void {} export type TargetPlacementRefusal = {};",
     "protocol/placement.ts": 'import { observeTargetPlacement } from "../git/target-placement.js"; export function observe(): void { observeTargetPlacement(); }',
-    "verification/declaration.ts": "export type VerificationDeclarationPreparation = {};",
-    "protocol/operations.ts": [
+    "protocol/audit.ts": [
       'import { adjudicateAuditTarget } from "../git/target-placement.js";',
-      'import type { TargetPlacementRefusal } from "../git/target-placement.js";',
-      'import type { VerificationDeclarationPreparation } from "../verification/declaration.js";',
-      "export type Refusal = TargetPlacementRefusal;",
-      "export type Prep = VerificationDeclarationPreparation;",
       "export function audit(): void { adjudicateAuditTarget(); }",
     ].join("\n"),
   });
@@ -364,7 +360,6 @@ test("architecture policy permits the aggregate status read path", () => {
     "protocol/operations.ts": [
       'import { readContractBoard, type ContractBoard, type ContractRow } from "./read/status.js";',
       "export function contracts(): ContractBoard { return readContractBoard({}); }",
-      "export type { ContractRow };",
     ].join("\n"),
   });
   assert.deepEqual(diagnostics, []);
@@ -521,8 +516,8 @@ test("architecture policy scopes type-only allowances to approved symbols", () =
 
 test("architecture policy uses specific zone before catch-all for Contract front door", () => {
   const diagnostics = check({
-    "protocol/operations.ts": "export function reviewOperation(): void {}",
-    "library/contract.ts": 'import { reviewOperation } from "../protocol/operations.js"; export function facade(): void { reviewOperation(); }',
+    "protocol/review.ts": "export function reviewOperation(): void {}",
+    "library/contract.ts": 'import { reviewOperation } from "../protocol/review.js"; export function facade(): void { reviewOperation(); }',
   });
   assert.deepEqual(diagnostics, []);
 });

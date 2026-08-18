@@ -7,7 +7,8 @@ import {
 import { contractIdFromSegment, type ActorId, type ContractId } from "../core/facts/types.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js";
-import { bindOperation, type IntentOutcome, type RepositoryScope } from "../protocol/operations.js";
+import { bindOperation } from "../protocol/bind.js";
+import type { IntentOutcome, RepositoryScope } from "../protocol/operations.js";
 import { claimTaskHolder } from "../settlement/holder.js";
 import type { TaskId } from "../task/identity.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";

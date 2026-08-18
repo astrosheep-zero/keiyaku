@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { AuthorityCorruptionError, Keiyaku, Repo } from "../src/index.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
-import { prepareDelivery } from "../src/protocol/operations.js";
+import { prepareDelivery } from "../src/protocol/deliver.js";
 import { admit } from "../src/git/admission.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
@@ -25,7 +25,8 @@ import {
 } from "../src/git/observe.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { contractJournalPath } from "../src/git/identity.js";
-import { bindOperation as rawBindOperation, amendOperation as rawAmendOperation } from "../src/protocol/operations.js";
+import { bindOperation as rawBindOperation } from "../src/protocol/bind.js";
+import { amendOperation as rawAmendOperation } from "../src/protocol/amend.js";
 import {
   contractId,
   contractIdFromSegment,

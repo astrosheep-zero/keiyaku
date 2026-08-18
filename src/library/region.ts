@@ -3,7 +3,7 @@ import { assertCanonicalRegionPath, regionPatternsMatchPath, regionsOverlap } fr
 import type { ContractId } from "../core/facts/types.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { documentsOperationAt, type RepositoryScope } from "../protocol/operations.js";
-import type { ContractDocumentProjection } from "../protocol/operations.js";
+import type { ContractDocumentProjection } from "../protocol/read/documents.js";
 
 export type RegionOverlap = Readonly<{
   contract: ContractId;

@@ -9,7 +9,7 @@ import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId 
 import { contractId, documentKey } from "../src/core/facts/types.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { bindOperation } from "../src/protocol/operations.js";
+import { bindOperation } from "../src/protocol/bind.js";
 import { makeGitRepository } from "./support/git.js";
 
 const root = resolve(import.meta.dirname, "..");

@@ -11,10 +11,6 @@ export const FILE_LINE_EXEMPTIONS = Object.freeze([
     reason: "The centralized TypeScript architecture analyzer keeps parsing and all enforced dependency and capability rules in one implementation owner.",
   },
   {
-    file: "src/protocol/operations.ts",
-    reason: "The centralized protocol operation surface remains one authority; splitting thin operation entry points would obscure that boundary.",
-  },
-  {
     file: "src/git/reconcile.ts",
     reason: "Git reconciliation is one serialized effect owner; the terminal physical-absence proof belongs with topology, hooks, and custody rather than a packed companion file.",
   },

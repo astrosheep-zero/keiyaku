@@ -1,155 +1,66 @@
-import {
-  materializeIntegrationSnapshot,
-  planIntegration,
-  readDeliveryDiff,
-  readDeliveryScope,
-  worktreeChangeId,
-  type DeliveryDiffScope,
-  type IntegrationPreparationRefusal,
-} from "../git/integration.js";
-import {
-  captureTender,
-  dirtyTenderDelta,
-  dirtyTenderRefusal,
-  materializeTenderSnapshot,
-  prepareDeliveryCommitMetadata,
-  type DirtyWorkspaceRefusal,
-  type TenderCapture,
-  type WorkspaceDirtyDelta,
-} from "../git/tender.js";
-import {
-  currentBranch,
-  extendContractsForAdmissionAt,
-  observeContractAt,
-  observeContractWorld,
-  observeContractsForAdmissionAt,
-  type GitDecisionObservation,
-} from "../git/observe.js";
-import {
-  reconcile,
-  reconcileBatch,
-  reconcileObservationFailure,
-  type ReconcileResult,
-} from "../git/reconcile.js";
-import type { WorktreeHooks } from "../git/hooks.js";
-import { NoGitWorldError, repositoryAt } from "../git/repository.js";
+import { readDeliveryDiff } from "../git/integration.js";
+import { type DirtyWorkspaceRefusal } from "../git/tender.js";
+import { currentBranch, observeContractAt } from "../git/observe.js";
 import type { GitRepository } from "../git/process.js";
-import { withGitReadObservation, type GitDecodeChannel, type GitTreeSelection } from "../git/read-observation.js";
+import { repositoryAt } from "../git/repository.js";
+import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import type { WorktreeLeak } from "../git/scratch.js";
-import { dependencyKeySet } from "../core/subject.js";
-import type { AttemptContext } from "../core/decide.js";
-import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import { activeContract, contractState, documentIsCurrent } from "../core/facts/observation.js";
-import type { ActorId, AmendData, ArcData, AttestationData, ChangeId, ContractId, ContractState, ContractTerms, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
-import { gate } from "../core/facts/types.js";
-import { decideAbandon, type AbandonRefusal } from "../core/verbs/abandon.js";
-import { decideAmend, type AmendInput, type AmendRefusal } from "../core/verbs/amend.js";
-import { decideArc, type ArcRefusal } from "../core/verbs/arc.js";
-import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
+import type { AbandonRefusal } from "../core/verbs/abandon.js";
+import type { AmendRefusal } from "../core/verbs/amend.js";
+import type { ArcRefusal } from "../core/verbs/arc.js";
+import type { DeliverRefusal } from "../core/verbs/deliver.js";
 import type { PlacementRefusal } from "../core/verbs/placement.js";
-import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
-import type { VerificationDeclarationPreparation, VerificationDeclarationRefusal } from "../verification/declaration.js";
-import {
-  admitIntent,
-  currentVerifiedAttestation,
-  verifyDelivery,
-  type CurrentVerifiedAttestation,
-  type VerificationResult,
-  type VerificationStep,
-  type VerificationRuntimeStop,
-  type VerificationCleanupFailure,
-} from "./intent.js";
-import {
-  admitPlacement,
-  type PlacementProtocolResult,
-} from "./placement.js";
-import { adjudicateAuditTarget, type AuditTargetAnswer, type TargetPlacementRefusal } from "../git/target-placement.js";
+import type { AttestationRefusal } from "../core/verbs/attestation.js";
+import type { ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
+import type { BindRefusal, TargetInputRefusal } from "./bind.js";
+import type { IntegrationPreparationRefusal } from "../git/integration.js";
+import type { TargetPlacementRefusal } from "../git/target-placement.js";
+import type { VerificationCleanupFailure, VerificationRuntimeStop, VerificationResult } from "./intent.js";
+import type {
+  VerificationDeclarationPreparation,
+  VerificationDeclarationRefusal,
+} from "../verification/declaration.js";
+import type { PlacementProtocolResult } from "./placement.js";
+import type { AcceptedAdmission, DecidedOfferResult } from "./attempt.js";
+import type { AcceptedProtocolStep, IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
+import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import {
   readContractBoard,
   readContractObservationAt,
   type ContractBoard,
-  type ContractDisposition,
-  type ContractGateCurrent,
-  type ContractGateReport,
   type ContractObservation,
-  type ContractPhase,
-  type ContractRow,
 } from "./read/status.js";
-import { admitDecidedOffer, mintAttempts, type AcceptedAdmission, type DecidedOfferResult } from "./attempt.js";
-import {
-  appointmentFor,
-  readManagedWorktreeAppointment,
-  readPlaceRegister,
-  type ManagedWorktreeAppointment,
-} from "../workspace-place.js";
-export { bindOperation } from "./bind.js";
-export { reconcileObservationFailure } from "../git/reconcile.js";
-import type { BindRefusal, TargetInputRefusal } from "./bind.js";
-import {
-  accepted,
-  admitted,
-  complete,
-  type AcceptedProtocolStep,
-  type IntentOutcome as ProtocolIntentOutcome,
-} from "./outcome.js";
-import type { ProtocolResult, ProtocolTerminal } from "./run.js";
-import type { CompanionDecorator } from "./run.js";
 
-export type { FactKind } from "../core/facts/types.js";
-export type { ContractDocumentProjection } from "./read/documents.js";
-export type DeliveryPreparationRefusal = Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
+export type DeliveryPreparationRefusal = Readonly<{
+  kind: "target-missing" | "worktree-missing";
+  contractId: ContractId;
+}>
   | DirtyWorkspaceRefusal
   | IntegrationPreparationRefusal
   | TargetPlacementRefusal;
-type ReviewPreparationRefusal = Readonly<{ kind: "worktree-missing"; contractId: ContractId }>
-  | DirtyWorkspaceRefusal;
-type DeliveryFailure = DeliveryPreparationRefusal | VerificationDeclarationRefusal | DeliverRefusal;
 
-type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
-
-const REVIEWED = gate("reviewed");
-
-export type IntentRefusal = AbandonRefusal | AmendRefusal | ArcRefusal | BindRefusal | DeliverRefusal
-  | DeliveryPreparationRefusal | PlacementRefusal | ReviewRefusal | TargetInputRefusal | VerificationDeclarationRefusal;
-
-export type { TargetInputRefusal } from "./bind.js";
+export type IntentRefusal =
+  | AbandonRefusal
+  | AmendRefusal
+  | ArcRefusal
+  | BindRefusal
+  | DeliverRefusal
+  | DeliveryPreparationRefusal
+  | PlacementRefusal
+  | AttestationRefusal
+  | TargetInputRefusal
+  | VerificationDeclarationRefusal;
 
 export type IntentRetry = ProtocolTerminal;
 export type IntentOutcome<Value, Refusal = IntentRefusal> = ProtocolIntentOutcome<Value, Refusal>;
 
-type OperationInput = Readonly<{ scope: RepositoryScope; contractId: ContractId; actor?: ActorId }>;
-type MutationOperationInput = OperationInput & Readonly<{ channel: GitDecodeChannel }>;
-
-export type AuditWorkspace = Readonly<{
-  kind: "worktree" | "here";
-  path: string;
+type OperationInput = Readonly<{
+  scope: RepositoryScope;
+  contractId: ContractId;
+  actor?: import("../core/facts/types.js").ActorId;
 }>;
-
-export type DiffScope = DeliveryDiffScope;
-
-export type AuditReport = Readonly<{
-  candidate:
-    | Readonly<{ kind: "blocked"; refusal: DeliveryPreparationRefusal }>
-    | Readonly<{
-      kind: "ready";
-      workspace: AuditWorkspace;
-      identity: DeliveryIdentity;
-      scope: DiffScope;
-      diff?: string;
-    }>;
-  verification:
-    | Readonly<{ kind: "not-run" }>
-    | Readonly<{ kind: "satisfied"; passed: number; total: number; summary?: string }>
-    | Readonly<{ kind: "unsatisfied"; passed: number; total: number; summary?: string }>
-    | Readonly<{ kind: "stopped"; stop: VerificationStop }>;
-  target:
-    | Readonly<{ kind: "not-observed" }>
-    | AuditTargetAnswer;
-  delivery?: Readonly<{ changeId: ChangeId; relation: "identical" | "differs" }>;
-}>;
-
-export type VerificationReuse = CurrentVerifiedAttestation;
+export type MutationOperationInput = OperationInput & Readonly<{ channel: GitDecodeChannel }>;
 
 export type DocumentDerivation = Readonly<{
   document: DocumentKey;
@@ -158,17 +69,29 @@ export type DocumentDerivation = Readonly<{
   verification: VerificationDeclarationPreparation;
 }>;
 
-export type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: IntentRetry; refusal?: never }>;
-
+type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: IntentRetry; refusal?: never }>;
 export type VerificationStop = StepStop<AttestationRefusal> | VerificationRuntimeStop;
 export type PlacementStop =
   | StepStop<PlacementRefusal | TargetPlacementRefusal | IntegrationPreparationRefusal>
-  | Readonly<{ failure: "target-moved"; contractId: ContractId; target: string; expected: SnapshotId; observed: SnapshotId | null }>
+  | Readonly<{
+    failure: "target-moved";
+    contractId: ContractId;
+    target: string;
+    expected: SnapshotId;
+    observed: SnapshotId | null;
+  }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>;
 
-function timestamp(): string { return new Date().toISOString(); }
+export type AttemptDecision<Value, Refusal = IntentRefusal> =
+  | (AcceptedAdmission & Readonly<{ value: Value }>)
+  | Readonly<{ kind: "refused"; refusal: Refusal }>
+  | Readonly<{ kind: "redecide" }>
+  | Readonly<{ kind: "collision" }>
+  | Extract<DecidedOfferResult, { kind: "publication-failed" }>;
 
-function mergeAdmissions(current: AcceptedProtocolStep, next: AcceptedProtocolStep): AcceptedProtocolStep {
+export function timestamp(): string { return new Date().toISOString(); }
+
+export function mergeAdmissions(current: AcceptedProtocolStep, next: AcceptedProtocolStep): AcceptedProtocolStep {
   const effects = [...(current.physical?.effects ?? []), ...(next.physical?.effects ?? [])];
   const lag = [...(current.physical?.lag ?? []), ...(next.physical?.lag ?? [])];
   return {
@@ -178,26 +101,21 @@ function mergeAdmissions(current: AcceptedProtocolStep, next: AcceptedProtocolSt
   };
 }
 
-function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> | undefined {
+export function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> | undefined {
   if (result.kind === "accepted") return undefined;
   return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
 }
 
-function verificationStop(step: VerificationStep): VerificationStop | undefined {
-  return "failure" in step ? step : stepStop(step);
-}
-
-function unpackVerificationOutcome(verification: VerificationResult): Readonly<{
+export function unpackVerificationOutcome(verification: VerificationResult): Readonly<{
   cleanup?: VerificationCleanupFailure;
   leak?: WorktreeLeak;
   stop?: VerificationStop;
   admission?: AcceptedProtocolStep;
   counts?: NonNullable<VerificationResult["counts"]>;
 }> {
-  const stop = verificationStop(verification.step);
-  const admission = !("failure" in verification.step) && verification.step.kind === "accepted"
-    ? verification.step
-    : undefined;
+  const step = verification.step;
+  const stop = "failure" in step ? step : stepStop(step);
+  const admission = !("failure" in step) && step.kind === "accepted" ? step : undefined;
   return {
     ...(verification.cleanup === undefined ? {} : { cleanup: verification.cleanup }),
     ...(verification.leak === undefined ? {} : { leak: verification.leak }),
@@ -207,11 +125,11 @@ function unpackVerificationOutcome(verification: VerificationResult): Readonly<{
   };
 }
 
-function placementStop(result: PlacementProtocolResult<IntegrationPreparationRefusal>): PlacementStop | undefined {
+export function placementStop(
+  result: PlacementProtocolResult<IntegrationPreparationRefusal>,
+): PlacementStop | undefined {
   if (result.kind === "accepted") return undefined;
-  if (result.kind === "placement-failed") {
-    return { failure: "target-placement-failed", diagnostic: result.diagnostic };
-  }
+  if (result.kind === "placement-failed") return { failure: "target-placement-failed", diagnostic: result.diagnostic };
   if (result.kind === "target-moved") {
     const { contractId, target, expected, observed } = result;
     return { failure: "target-moved", contractId, target, expected, observed };
@@ -219,10 +137,9 @@ function placementStop(result: PlacementProtocolResult<IntegrationPreparationRef
   return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
 }
 
-type ScopeOperationInput = Readonly<{ coordinate: string }>;
 export type RepositoryScope = GitRepository;
-export { NoGitWorldError };
-export async function scopeOperation(input: ScopeOperationInput): Promise<RepositoryScope> {
+
+export async function scopeOperation(input: Readonly<{ coordinate: string }>): Promise<RepositoryScope> {
   return await repositoryAt(input.coordinate);
 }
 
@@ -230,15 +147,15 @@ export async function currentBranchOperation(input: Readonly<{ scope: Repository
   return await currentBranch(input.scope);
 }
 
-export async function contractsOperation(input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }>): Promise<ContractBoard> {
+export async function contractsOperation(
+  input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }>,
+): Promise<ContractBoard> {
   return withGitReadObservation(input.scope, input.channel, readContractBoard);
 }
 
 export async function contractObservationOperation(input: MutationOperationInput): Promise<ContractObservation> {
   return await readContractObservationAt(input.scope, input.channel, input.contractId);
 }
-
-export type { ContractBoard, ContractDisposition, ContractGateCurrent, ContractGateReport, ContractObservation, ContractPhase, ContractRow };
 
 export async function documentsOperationAt(
   scope: RepositoryScope,
@@ -253,771 +170,15 @@ export async function stateOperation(input: MutationOperationInput): Promise<Con
   return state;
 }
 
-type DeliveryIdentity = DeliverData;
-
-export async function deliveryOperation(input: MutationOperationInput): Promise<DeliveryIdentity | null> {
+export async function deliveryOperation(input: MutationOperationInput): Promise<DeliverData | null> {
   const state = (await observeContractAt(input.scope, input.channel, input.contractId)).state;
   return state?.delivery?.data ?? null;
 }
 
-type DeliveryDiffOperationInput = Readonly<{ scope: RepositoryScope; integrationPredecessor: SnapshotId; integrationSnapshot: SnapshotId }>;
-
-export async function deliveryDiffOperation(input: DeliveryDiffOperationInput): Promise<string | null> { return await readDeliveryDiff(input.scope, input.integrationPredecessor, input.integrationSnapshot); }
-
-type AmendOperationInput = MutationOperationInput & Readonly<{
-  source?: ContractTerms;
-  deriveAmendment?: (source: ContractTerms) => Readonly<{
-    terms: AmendData;
-    verification: VerificationDeclarationPreparation;
-  }>;
-}>;
-
-type Amendment = Readonly<{ source: ContractTerms }> & ReturnType<NonNullable<AmendOperationInput["deriveAmendment"]>>;
-
-async function extendPrerequisiteClosureAt(
-  channel: GitDecodeChannel,
-  observation: GitDecisionObservation,
-  seeds: readonly ContractId[],
-): Promise<GitDecisionObservation> {
-  let current = observation;
-  const visited = new Set<ContractId>();
-  let pending = [...seeds];
-  while (pending.length > 0) {
-    const batch = [...new Set(pending.filter((id) => !visited.has(id)))];
-    pending = [];
-    if (batch.length === 0) break;
-    current = await extendContractsForAdmissionAt(channel, current, batch);
-    for (const id of batch) {
-      visited.add(id);
-      const state = contractState(current.decision, id);
-      if (state !== null) pending.push(...state.terms.after);
-    }
-  }
-  return current;
-}
-
-export async function amendOperation(
-  input: AmendOperationInput,
-): Promise<IntentOutcome<Amendment, AmendRefusal | VerificationDeclarationRefusal>> {
-  const attempts = mintAttempts({ entryCount: 1 });
-  let source = input.source;
-  for (let index = 0; index < attempts.length; index += 1) {
-    let observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
-    const state = contractState(observation.decision, input.contractId);
-    if (source === undefined && state !== null) source = state.terms;
-    const amendment = source === undefined || input.deriveAmendment === undefined
-      ? undefined
-      : { source, ...input.deriveAmendment(source) };
-    if (amendment !== undefined) {
-      observation = await extendPrerequisiteClosureAt(
-        input.channel,
-        observation,
-        [...new Set([...(state?.terms.after ?? []), ...amendment.terms.after])],
-      );
-    }
-    const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] = amendment === undefined
-      ? undefined
-      : amendment.verification.kind === "prepared"
-        ? { kind: "prepared", data: amendment.terms }
-        : { kind: "refused", refusal: amendment.verification.refusal };
-    const decision = decideAmend({
-      input: {
-        contractId: input.contractId,
-        ...(input.actor === undefined ? {} : { actor: input.actor }),
-        at: timestamp(),
-        ...(amendment === undefined ? {} : { source: amendment.source }),
-        ...(preparation === undefined ? {} : { preparation }),
-      },
-      attempt: attempts[index]!,
-      observation: observation.decision,
-    });
-    if (decision.kind === "refused") return decision;
-    const admission = await admitDecidedOffer({
-      channel: input.channel,
-      repository: input.scope,
-      decisionObservation: observation,
-      attempt: attempts[index]!,
-      offer: decision.offer,
-      primaryContract: input.contractId,
-    });
-    if (admission.kind === "accepted") {
-      if (amendment === undefined) throw new Error("accepted amendment is missing its document derivation");
-      return admitted(admission, amendment);
-    }
-    if (admission.kind === "publication-failed") return { kind: "retry", reason: admission };
-    if (admission.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: admission };
-  }
-  return { kind: "retry", reason: { kind: "exhausted" } };
-}
-
-export type DeliverValue = DeliveryIdentity & Readonly<{
-  verification?: VerificationStop;
-  verificationReuse?: VerificationReuse;
-  placement?: PlacementStop;
-  cleanup?: VerificationCleanupFailure;
-  leak?: WorktreeLeak;
-}>;
-
-type AttemptDecision<Value, Refusal = IntentRefusal> =
-  | (AcceptedAdmission & Readonly<{ value: Value }>)
-  | Readonly<{ kind: "refused"; refusal: Refusal }>
-  | Readonly<{ kind: "redecide" }>
-  | Readonly<{ kind: "collision" }>
-  | Extract<DecidedOfferResult, { kind: "publication-failed" }>;
-
-type DeliverOperationInput = MutationOperationInput & Readonly<{
-  deriveDocument: (state: ContractState) => DocumentDerivation;
-  message?: string;
-  requireBranchesToBeUpToDate: boolean;
-  includeDirty: boolean;
-  signal?: AbortSignal;
-}>;
-
-type PreparedDelivery = Readonly<{ delivery: DeliveryIdentity; derivation: DocumentDerivation }>;
-
-export async function prepareDelivery(
-  repository: GitRepository,
-  stage: Readonly<{
-    contractId: ContractId;
-    coordinates: ContractState["coordinates"];
-    appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
-  }>,
-  input: Readonly<{
-    title: string;
-    document: string;
-    actor?: ActorId;
-    message?: string;
-    requireBranchesToBeUpToDate?: boolean;
-    includeDirty?: boolean;
-  }>,
-): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal }> {
-  const { contractId, coordinates } = stage;
-  if (coordinates.workspace === "here" && coordinates.target !== undefined) {
-    const branch = await currentBranch(repository);
-    if (branch !== coordinates.target) {
-      return { kind: "refused", refusal: { kind: "workspace-not-on-target", contractId, target: coordinates.target, branch } };
-    }
-  }
-  const appointed = coordinates.workspace === "worktree"
-    ? stage.appointment === undefined
-      ? appointmentFor(await readPlaceRegister(repository), contractId)
-      : { contract: contractId, place: stage.appointment.place }
-    : undefined;
-  const tender = await captureTender(repository, {
-    contractId,
-    coordinates,
-    ...(appointed === undefined ? {} : { place: appointed.place }),
-  });
-  if (tender.kind === "refused") return tender;
-  if ((tender.data.dirty && input.includeDirty !== true) || tender.data.changes.submodules.length > 0) {
-    return { kind: "refused", refusal: await dirtyTenderRefusal(repository, contractId, tender.data) };
-  }
-  const commit = await prepareDeliveryCommitMetadata(repository, {
-    contractId,
-    title: input.title,
-    document: input.document,
-    at: tender.data.at,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    ...(input.message === undefined ? {} : { message: input.message }),
-  });
-  const tenderSnapshot = await materializeTenderSnapshot(repository, tender.data, commit);
-  const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
-  const integration = await planIntegration(
-    repository,
-    { contractId, coordinates },
-    { ...tender.data, head: tenderSnapshot },
-    requireBranchesToBeUpToDate,
-  );
-  if (integration.kind === "refused") return integration;
-  const integrationSnapshot = coordinates.target === undefined
-    ? tenderSnapshot
-    : await materializeIntegrationSnapshot(repository, integration.data.tree, integration.data.predecessor, commit);
-  return {
-    kind: "prepared",
-    data: {
-      tenderSnapshot,
-      integration: {
-        predecessor: integration.data.predecessor,
-        snapshot: integrationSnapshot,
-        changeId: await worktreeChangeId(repository, { contractId, coordinates }, tender.data),
-      },
-      method: "squash",
-      policy: { requireBranchesToBeUpToDate },
-    },
-  };
-}
-
-async function captureReviewableWorktree(
-  repository: GitRepository,
-  stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"] }>,
-): Promise<{ kind: "prepared"; data: Readonly<{
-  changeId: DeliverData["integration"]["changeId"];
-  tender: TenderCapture;
-  workspace?: WorkspaceDirtyDelta;
-}> } | { kind: "refused"; refusal: ReviewPreparationRefusal }> {
-  const appointed = stage.coordinates.workspace === "worktree"
-    ? appointmentFor(await readPlaceRegister(repository), stage.contractId)
-    : undefined;
-  const tender = await captureTender(repository, {
-    ...stage,
-    ...(appointed === undefined ? {} : { place: appointed.place }),
-  });
-  if (tender.kind === "refused") return tender;
-  if (tender.data.changes.submodules.length > 0) {
-    return { kind: "refused", refusal: await dirtyTenderRefusal(repository, stage.contractId, tender.data) };
-  }
-  const workspace = await dirtyTenderDelta(repository, tender.data);
-  return {
-    kind: "prepared",
-    data: {
-      changeId: await worktreeChangeId(repository, stage, tender.data),
-      tender: tender.data,
-      ...(workspace === undefined ? {} : { workspace }),
-    },
-  };
-}
-
-export async function prepareReview(
-  repository: GitRepository,
-  stage: Readonly<{ contractId: ContractId; coordinates: ContractState["coordinates"] }>,
-): Promise<{ kind: "prepared"; data: Readonly<{
-  changeId: DeliverData["integration"]["changeId"];
-  workspace?: WorkspaceDirtyDelta;
-}> }
-  | { kind: "refused"; refusal: ReviewPreparationRefusal }> {
-  const prepared = await captureReviewableWorktree(repository, stage);
-  if (prepared.kind === "refused") return prepared;
-  return {
-    kind: "prepared",
-    data: {
-      changeId: prepared.data.changeId,
-      ...(prepared.data.workspace === undefined ? {} : { workspace: prepared.data.workspace }),
-    },
-  };
-}
-
-async function deliverAttempt(input: DeliverOperationInput, attempt: AttemptContext): Promise<AttemptDecision<PreparedDelivery>> {
-  const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
-  const state = contractState(decisionObservation.decision, input.contractId);
-  const derivation = state === null || input.deriveDocument === undefined
-    ? undefined
-    : input.deriveDocument(state);
-  let preparation: DeliverInput<DeliveryFailure>["preparation"];
-  if (state === null || derivation === undefined) {
-    preparation = { kind: "unavailable" };
-  } else if (derivation.verification.kind === "refused") {
-    preparation = {
-      kind: "refused",
-      document: derivation.document,
-      refusal: derivation.verification.refusal,
-    };
-  } else {
-    const prepared = await prepareDelivery(input.scope, {
-      contractId: state.id,
-      coordinates: state.coordinates,
-    }, {
-      title: derivation.title,
-      document: derivation.bytes,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      ...(input.message === undefined ? {} : { message: input.message }),
-      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-      includeDirty: input.includeDirty,
-    });
-    preparation = prepared.kind === "refused"
-      ? { kind: "refused", document: derivation.document, refusal: prepared.refusal }
-      : { kind: "prepared", document: derivation.document, data: prepared.data };
-  }
-  const decisionInput: DeliverInput<DeliveryFailure> = {
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-    preparation,
-  };
-  const decision = decideDeliver({ input: decisionInput, attempt, observation: decisionObservation.decision });
-  if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
-  if (preparation.kind !== "prepared") {
-    throw new Error("offered delivery is missing its mechanical preparation");
-  }
-  const admitted = await admitDecidedOffer({
-    channel: input.channel,
-    repository: input.scope,
-    decisionObservation,
-    attempt,
-    offer: decision.offer,
-    primaryContract: input.contractId,
-  });
-  if (admitted.kind === "accepted") {
-    if (derivation === undefined) throw new Error("accepted delivery is missing its document derivation");
-    return { ...admitted, value: { delivery: preparation.data, derivation } };
-  }
-  return admitted;
-}
-
-async function completeDelivery(
-  input: DeliverOperationInput,
-  first: Extract<AttemptDecision<PreparedDelivery>, { kind: "accepted" }>,
-): Promise<IntentOutcome<DeliverValue>> {
-  const derivation = first.value.derivation;
-  if (derivation.verification.kind !== "prepared") {
-    throw new Error("accepted delivery is missing its Verification preparation");
-  }
-  let admission: AcceptedProtocolStep = first;
-  let verificationValue: VerificationStop | undefined;
-  let verificationReuse: VerificationReuse | undefined;
-  let cleanup: VerificationCleanupFailure | undefined;
-  let leak: WorktreeLeak | undefined;
-  const currentVerified = currentVerifiedAttestation(first.state);
-  if (currentVerified !== undefined) {
-    verificationReuse = currentVerified;
-  } else {
-    const verification = await verifyDelivery({
-      channel: input.channel,
-      repository: input.scope,
-      contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      at: timestamp(),
-      state: first.state,
-      snapshot: first.value.delivery.integration.snapshot,
-      environment: process.env,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(derivation.verification.data === null
-        ? {}
-        : { verification: derivation.verification.data }),
-    });
-    if (verification !== null) {
-      const unpacked = unpackVerificationOutcome(verification);
-      cleanup = unpacked.cleanup;
-      leak = unpacked.leak;
-      verificationValue = unpacked.stop;
-      if (unpacked.admission !== undefined) admission = mergeAdmissions(admission, unpacked.admission);
-    }
-  }
-  const placement = await admitPlacement(input.channel, input.scope, first.state.coordinates.target, {
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-  });
-  const placementValue = placementStop(placement);
-  if (placement.kind === "accepted") admission = mergeAdmissions(admission, placement);
-  return admitted(admission, {
-    ...first.value.delivery,
-    ...(verificationValue === undefined ? {} : { verification: verificationValue }),
-    ...(verificationReuse === undefined ? {} : { verificationReuse }),
-    ...(placementValue === undefined ? {} : { placement: placementValue }),
-    ...(cleanup === undefined ? {} : { cleanup }),
-    ...(leak === undefined ? {} : { leak }),
-  });
-}
-
-export async function deliverOperation(
-  input: DeliverOperationInput,
-): Promise<IntentOutcome<DeliverValue>> {
-  const attempts = mintAttempts({ entryCount: 2 });
-  let first: Extract<AttemptDecision<PreparedDelivery>, { kind: "accepted" }> | null = null;
-  for (let index = 0; index < attempts.length; index += 1) {
-    const result = await deliverAttempt(input, attempts[index]!);
-    if (result.kind === "accepted") {
-      first = result;
-      break;
-    }
-    if (result.kind === "refused") return result;
-    if (result.kind === "publication-failed") return { kind: "retry", reason: result };
-    if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
-    if (result.kind === "redecide") continue;
-  }
-  if (first === null) return { kind: "retry", reason: { kind: "exhausted" } };
-  return await completeDelivery(input, first);
-}
-
-export async function abandonOperation(
-  input: MutationOperationInput & Readonly<{
-    note?: string;
-    decorateOffer?: CompanionDecorator;
-    observationSelection?: GitTreeSelection;
-  }>,
-): Promise<IntentOutcome<void, AbandonRefusal>> {
-  return complete(
-    await admitIntent(input.channel, input.scope, {
-      contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      at: timestamp(),
-      ...(input.note === undefined ? {} : { note: input.note }),
-    }, decideAbandon, {
-      ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
-      ...(input.observationSelection === undefined ? {} : { observationSelection: input.observationSelection }),
-    }),
-    undefined,
-  );
-}
-
-export async function arcOperation(
-  input: MutationOperationInput & Readonly<{ chapter: Omit<ArcData, "seq"> }>,
-): Promise<IntentOutcome<void, ArcRefusal>> {
-  return complete(
-    await admitIntent(input.channel, input.scope, {
-      contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      at: timestamp(),
-      data: input.chapter,
-    }, decideArc),
-    undefined,
-  );
-}
-
-type ReviewOperationInput = MutationOperationInput & Readonly<{ verdict: AttestationData["verdict"]; summary?: string }>;
-
-export type ReviewValue = Readonly<{ placement?: PlacementStop; workspace?: WorkspaceDirtyDelta }>;
-type PreparedReview = Readonly<{ workspace?: WorkspaceDirtyDelta; tender?: TenderCapture }>;
-
-function reviewValue(value: PreparedReview, placement?: PlacementStop): ReviewValue {
-  return {
-    ...(value.workspace === undefined ? {} : { workspace: value.workspace }),
-    ...(placement === undefined ? {} : { placement }),
-  };
-}
-
-async function reviewAttempt(
-  input: ReviewOperationInput,
-  attempt: AttemptContext,
-): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
-  const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
-  const state = contractState(decisionObservation.decision, input.contractId);
-  let preparation: AttestationInput<ReviewRefusal>["preparation"];
-  let workspace: WorkspaceDirtyDelta | undefined;
-  let tender: TenderCapture | undefined;
-  if (state !== null) {
-    const prepared = await captureReviewableWorktree(input.scope, { contractId: state.id, coordinates: state.coordinates });
-    preparation = prepared.kind === "refused"
-      ? { kind: "refused", refusal: prepared.refusal }
-      : {
-        kind: "prepared",
-        data: {
-          gate: REVIEWED,
-          subject: dependencyKeySet([
-            { kind: "document", value: state.terms.document.key },
-            { kind: "change", value: prepared.data.changeId },
-          ]),
-          verdict: input.verdict,
-          ...(input.summary === undefined ? {} : { summary: input.summary }),
-        },
-      };
-    if (prepared.kind === "prepared") {
-      workspace = prepared.data.workspace;
-      tender = prepared.data.tender;
-    }
-  }
-  const decisionInput: AttestationInput<ReviewRefusal> = {
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-    ...(preparation === undefined ? {} : { preparation }),
-  };
-  const decision = decideAttestation({ input: decisionInput, attempt, observation: decisionObservation.decision });
-  if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
-  const admitted = await admitDecidedOffer({
-    channel: input.channel,
-    repository: input.scope,
-    decisionObservation,
-    attempt,
-    offer: decision.offer,
-    primaryContract: input.contractId,
-  });
-  if (admitted.kind === "accepted") return {
-    ...admitted,
-    value: {
-      ...(workspace === undefined ? {} : { workspace }),
-      ...(tender === undefined ? {} : { tender }),
-    },
-  };
-  return admitted;
-}
-
-export async function reviewOperation(
-  input: ReviewOperationInput,
-): Promise<IntentOutcome<ReviewValue, ReviewRefusal>> {
-  const git = input.scope;
-  const attempts = mintAttempts({ entryCount: 1 });
-  let review: Extract<AttemptDecision<PreparedReview, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
-  for (let index = 0; index < attempts.length; index += 1) {
-    const result = await reviewAttempt(input, attempts[index]!);
-    if (result.kind === "accepted" || result.kind === "refused") {
-      review = result;
-      break;
-    }
-    if (result.kind === "publication-failed") return { kind: "retry", reason: result };
-    if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
-  }
-  if (review === null) return { kind: "retry", reason: { kind: "exhausted" } };
-  if (review.kind !== "accepted") return review;
-  if (input.verdict !== "satisfied") return admitted(review, reviewValue(review.value));
-
-  const target = review.state.coordinates.target;
-  const tender = review.value.tender;
-  const placement = await admitPlacement(input.channel, git, target, {
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-  }, tender === undefined || target === undefined ? undefined : async () => {
-    const integration = await planIntegration(git, {
-      contractId: input.contractId,
-      coordinates: review.state.coordinates,
-    }, tender, false);
-    if (integration.kind === "refused" && integration.refusal.kind !== "target-missing") {
-      return { kind: "refused" as const, refusal: integration.refusal };
-    }
-    return undefined;
-  });
-  const stopped = placementStop(placement);
-  const admission = placement.kind === "accepted" ? mergeAdmissions(review, placement) : review;
-  return admitted(admission, reviewValue(review.value, stopped));
-}
-
-type AuditOperationInput = MutationOperationInput & Readonly<{
-  deriveDocument?: (state: ContractState) => DocumentDerivation;
-  requireBranchesToBeUpToDate?: boolean;
-  includeDirty?: boolean;
-  showDiff?: boolean;
-  signal?: AbortSignal;
-}>;
-
-async function auditWorkspace(
-  repository: RepositoryScope,
-  state: ContractState,
-): Promise<
-  | Readonly<{ kind: "ready"; answer: AuditWorkspace; appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }> }>
-  | Readonly<{ kind: "unappointed" }>
-> {
-  if (state.coordinates.workspace === "here") {
-    return { kind: "ready", answer: { kind: "here", path: repository.effectiveCwd } };
-  }
-  const appointed = await readManagedWorktreeAppointment(repository, state.id);
-  if (appointed.kind === "failed") throw new Error(appointed.diagnostic);
-  if (appointed.kind === "unappointed") return appointed;
-  return {
-    kind: "ready",
-    answer: { kind: "worktree", path: appointed.path },
-    appointment: appointed,
-  };
-}
-
-function auditDeliveryRelation(state: ContractState, candidate: DeliveryIdentity): AuditReport["delivery"] {
-  const recorded = state.delivery?.data.integration.changeId;
-  if (recorded === undefined) return undefined;
-  return {
-    changeId: recorded,
-    relation: recorded === candidate.integration.changeId ? "identical" : "differs",
-  };
-}
-
-async function auditCandidateVerification(
-  input: AuditOperationInput,
-  state: ContractState,
-  snapshot: SnapshotId,
-  definition: NonNullable<DocumentDerivation["verification"]["data"]>,
-): Promise<ReturnType<typeof unpackVerificationOutcome>> {
-  const verification = await verifyDelivery({
-    channel: input.channel,
-    repository: input.scope,
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-    state,
-    snapshot,
-    environment: process.env,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-    verification: definition,
-  });
-  if (verification === null) {
-    throw new Error("audit verification preparation unexpectedly produced no attempt");
-  }
-  return unpackVerificationOutcome(verification);
-}
-
-function auditVerificationAnswer(
-  verified: ReturnType<typeof unpackVerificationOutcome> | undefined,
-): AuditReport["verification"] {
-  if (verified === undefined) return { kind: "not-run" };
-  if (verified.stop !== undefined) return { kind: "stopped", stop: verified.stop };
-  if (verified.counts === undefined) {
-    throw new Error("terminal Verification is missing producer counts");
-  }
-  return {
-    kind: verified.counts.verdict,
-    passed: verified.counts.passed,
-    total: verified.counts.total,
-    ...(verified.counts.summary === undefined ? {} : { summary: verified.counts.summary }),
-  };
-}
-
-async function readyAuditCandidate(
-  repository: RepositoryScope,
-  candidate: DeliveryIdentity,
-  workspace: AuditWorkspace,
-  showDiff: boolean,
-): Promise<Extract<AuditReport["candidate"], { kind: "ready" }>> {
-  const predecessor = candidate.integration.predecessor;
-  const snapshot = candidate.integration.snapshot;
-  const scope = await readDeliveryScope(repository, predecessor, snapshot, showDiff);
-  const diff = showDiff ? await readDeliveryDiff(repository, predecessor, snapshot) : undefined;
-  return {
-    kind: "ready",
-    workspace,
-    identity: candidate,
-    scope,
-    ...(diff === undefined || diff === null ? {} : { diff }),
-  };
-}
-
-async function auditTargetAnswer(
-  repository: RepositoryScope,
-  state: ContractState,
-  candidate: DeliveryIdentity,
-): Promise<AuditReport["target"]> {
-  const target = state.coordinates.target;
-  if (target === undefined) return { kind: "not-observed" };
-  return await adjudicateAuditTarget(repository, {
-    contractId: state.id,
-    coordinates: { ...state.coordinates, target },
-    predecessor: candidate.integration.predecessor,
-    candidate: candidate.integration.snapshot,
-  });
-}
-
-function blockedAudit(refusal: DeliveryPreparationRefusal): AuditReport {
-  return {
-    candidate: { kind: "blocked", refusal },
-    verification: { kind: "not-run" },
-    target: { kind: "not-observed" },
-  };
-}
-
-function completedAudit(
-  state: ContractState,
-  verified: ReturnType<typeof unpackVerificationOutcome> | undefined,
-  value: AuditReport,
-): IntentOutcome<AuditReport> {
-  const obligations = {
-    ...(verified?.cleanup === undefined ? {} : { cleanup: verified.cleanup }),
-    ...(verified?.leak === undefined ? {} : { leak: verified.leak }),
-  };
-  return verified?.admission === undefined
-    ? accepted(state, [], value, undefined, obligations)
-    : {
-      ...admitted(verified.admission, value),
-      ...obligations,
-    };
-}
-
-export async function auditOperation(input: AuditOperationInput): Promise<IntentOutcome<AuditReport>> {
-  const observed = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
-  const state = activeContract(observed.decision, input.contractId);
-  if ("kind" in state) return { kind: "refused", refusal: state };
-  const derivation = input.deriveDocument?.(state);
-  if (derivation === undefined || !documentIsCurrent(state, derivation.document)) {
-    return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
-  }
-  if (derivation.verification.kind === "refused") {
-    return { kind: "refused", refusal: derivation.verification.refusal };
-  }
-
-  const workspace = await auditWorkspace(input.scope, state);
-  if (workspace.kind === "unappointed") {
-    return accepted(state, [], blockedAudit({ kind: "worktree-missing", contractId: state.id }));
-  }
-  const prepared = await prepareDelivery(input.scope, {
-    contractId: state.id,
-    coordinates: state.coordinates,
-    ...(workspace.appointment === undefined ? {} : { appointment: workspace.appointment }),
-  }, {
-    title: derivation.title,
-    document: derivation.bytes,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate ?? false,
-    includeDirty: input.includeDirty ?? false,
-  });
-  if (prepared.kind === "refused") {
-    return accepted(state, [], blockedAudit(prepared.refusal));
-  }
-
-  const verified = derivation.verification.data === null
-    ? undefined
-    : await auditCandidateVerification(input, state, prepared.data.integration.snapshot, derivation.verification.data);
-  const delivery = auditDeliveryRelation(state, prepared.data);
-  const verification = auditVerificationAnswer(verified);
-  const value: AuditReport = {
-    candidate: await readyAuditCandidate(
-      input.scope,
-      prepared.data,
-      workspace.answer,
-      input.showDiff === true,
-    ),
-    verification,
-    target: verification.kind === "stopped"
-      ? { kind: "not-observed" }
-      : await auditTargetAnswer(input.scope, state, prepared.data),
-    ...(delivery === undefined ? {} : { delivery }),
-  };
-  return completedAudit(state, verified, value);
-}
-
-export type ReconcileReport = ReconcileResult;
-export type ReconcileObservation = Readonly<{ state: ContractState | null; report: ReconcileReport }>;
-type ReconcileOptions = Readonly<{
-  hooks: WorktreeHooks;
-  retryHooks: boolean;
-  retainTerminalWorktree?: boolean;
-  place?: string;
-  places?: ReadonlyMap<ContractId, string>;
-}>;
-
-export async function reconcileOperation(input: MutationOperationInput & ReconcileOptions): Promise<ReconcileObservation> {
-  try {
-    const observation = await reconcile({
-      repository: input.scope,
-      channel: input.channel,
-      contractId: input.contractId,
-      hooks: input.hooks,
-      retryHooks: input.retryHooks,
-      ...(input.retainTerminalWorktree === undefined ? {} : { retainTerminalWorktree: input.retainTerminalWorktree }),
-      ...(input.place === undefined ? {} : { place: input.place }),
-    });
-    return { state: observation.state, report: observation.result };
-  } catch (error) {
-    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
-    return { state: null, report: reconcileObservationFailure(error) };
-  }
-}
-
-type RepoReconcileItem = Readonly<{ contractId: ContractId; state: ContractState | null; report: ReconcileReport }>;
-
-export type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>;
-
-export async function worldContractStates(
-  input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }>,
-): Promise<readonly ContractState[]> {
-  const observation = await withGitReadObservation(input.scope, input.channel, async (read) => await observeContractWorld(read));
-  return [...observation.contracts.values()].flatMap((value) => value.state === null ? [] : [value.state]);
-}
-
-export async function reconcileAllOperation(
-  input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }> & ReconcileOptions,
-): Promise<RepoReconcileReport> {
-  const git = input.scope;
-  const observation = await withGitReadObservation(input.scope, input.channel, async (read) => await observeContractWorld(read));
-  const contracts = (await reconcileBatch(
-    git,
-    input.channel,
-    observation.contracts.keys(),
-    {
-      hooks: input.hooks,
-      retryHooks: input.retryHooks,
-      retainTerminalWorktree: input.retainTerminalWorktree ?? false,
-      ...(input.places === undefined ? {} : { places: input.places }),
-    },
-  )).map((item): RepoReconcileItem => ({
-    contractId: item.contract,
-    state: item.state,
-    report: item.result,
-  }));
-  return { contracts };
+export async function deliveryDiffOperation(input: Readonly<{
+  scope: RepositoryScope;
+  integrationPredecessor: SnapshotId;
+  integrationSnapshot: SnapshotId;
+}>): Promise<string | null> {
+  return await readDeliveryDiff(input.scope, input.integrationPredecessor, input.integrationSnapshot);
 }

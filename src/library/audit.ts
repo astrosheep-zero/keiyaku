@@ -1,11 +1,8 @@
 import { decodeContractDocument } from "../body/decode.js";
 import type { ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
-import {
-  auditOperation,
-  type AuditReport,
-  type RepositoryScope,
-} from "../protocol/operations.js";
+import { auditOperation, type AuditReport } from "../protocol/audit.js";
+import type { RepositoryScope } from "../protocol/operations.js";
 import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
 import {
   actorOption,

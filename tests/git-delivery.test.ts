@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSy
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import test from "node:test";
-import { prepareDelivery, prepareReview } from "../src/protocol/operations.js";
+import { prepareDelivery } from "../src/protocol/deliver.js";
+import { prepareReview } from "../src/protocol/review.js";
 import { actorId } from "../src/core/facts/types.js";
 import { mintSnapshotId } from "../src/git/identity.js";
 import { adjudicateAuditTarget, observeTargetPlacement } from "../src/git/target-placement.js";

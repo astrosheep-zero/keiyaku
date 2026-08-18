@@ -1,9 +1,9 @@
 import {
   currentBranchOperation,
-  NoGitWorldError,
   scopeOperation,
   type RepositoryScope,
 } from "../protocol/operations.js";
+import { NoGitWorldError } from "../git/repository.js";
 import { optionalNonblank, requireInput } from "./input.js";
 import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";

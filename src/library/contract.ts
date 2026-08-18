@@ -31,34 +31,33 @@ import {
 } from "../core/facts/types.js";
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
-  abandonOperation,
-  amendOperation,
-  arcOperation,
   contractObservationOperation,
   contractsOperation,
   deliveryDiffOperation,
-  deliverOperation,
   deliveryOperation,
-  reviewOperation,
   stateOperation,
-  type AuditReport,
-  type ContractBoard,
-  type ContractDisposition,
-  type ContractGateCurrent,
-  type ContractGateReport,
-  type ContractObservation,
-  type ContractPhase,
-  type ContractRow,
-  type DeliverValue,
-  type FactKind,
   type PlacementStop,
-  type ReconcileReport as ProtocolReconcileReport,
   type RepositoryScope,
-  type ReviewValue,
-  type VerificationReuse,
   type VerificationStop,
   type DeliveryPreparationRefusal,
 } from "../protocol/operations.js";
+import type {
+  ContractBoard,
+  ContractDisposition,
+  ContractGateCurrent,
+  ContractGateReport,
+  ContractObservation,
+  ContractPhase,
+  ContractRow,
+} from "../protocol/read/status.js";
+import { abandonOperation } from "../protocol/abandon.js";
+import { amendOperation } from "../protocol/amend.js";
+import { arcOperation } from "../protocol/arc.js";
+import type { AuditReport } from "../protocol/audit.js";
+import { deliverOperation, type DeliverValue, type VerificationReuse } from "../protocol/deliver.js";
+import type { ReconcileReport as ProtocolReconcileReport } from "../protocol/reconcile.js";
+import { reviewOperation, type ReviewValue } from "../protocol/review.js";
+import type { FactKind } from "../core/facts/types.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { mintSnapshotId } from "../git/identity.js";
 import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";

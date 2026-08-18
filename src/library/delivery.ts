@@ -1,5 +1,5 @@
 import type { SnapshotId } from "../core/facts/types.js";
-import type { DeliverValue } from "../protocol/operations.js";
+import type { DeliverValue } from "../protocol/deliver.js";
 
 class DeliveryHandle {
   declare readonly verification?: DeliverValue["verification"];

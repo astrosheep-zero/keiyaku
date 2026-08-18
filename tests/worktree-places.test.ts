@@ -24,7 +24,7 @@ import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { resolveContextualContract } from "../src/cli/selectors.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { worldContractStates } from "../src/protocol/operations.js";
+import { worldContractStates } from "../src/protocol/reconcile.js";
 import { readContractObservationAt } from "../src/protocol/read/status.js";
 import { Keiyaku, Repo, type ContractBoard, type ContractId } from "../src/index.js";
 import { Tasks } from "../src/task/index.js";

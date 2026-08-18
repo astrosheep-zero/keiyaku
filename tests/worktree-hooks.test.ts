@@ -14,7 +14,8 @@ import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/g
 import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { Keiyaku, Repo } from "../src/index.js";
-import { abandonOperation, scopeOperation } from "../src/protocol/operations.js";
+import { abandonOperation } from "../src/protocol/abandon.js";
+import { scopeOperation } from "../src/protocol/operations.js";
 import { makeGitRepository } from "./support/git.js";
 
 const EMPTY_HOOKS: WorktreeHooks = { create: [], destroy: [] };

@@ -23,7 +23,7 @@ import {
 import { completeHolderMutation } from "../src/library/mutation.js";
 import { EMPTY_WORKTREE_HOOKS } from "../src/library/configuration.js";
 import { requireAccepted } from "../src/library/refusal.js";
-import { reviewOperation } from "../src/protocol/operations.js";
+import { reviewOperation } from "../src/protocol/review.js";
 import { settle } from "../src/settlement/settle.js";
 
 import { readNamespaceContext } from "../src/task/context.js";

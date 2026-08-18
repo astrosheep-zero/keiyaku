@@ -17,11 +17,11 @@ import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { contractJournalPath } from "../src/git/identity.js";
+import { bindOperation } from "../src/protocol/bind.js";
+import { reconcileAllOperation } from "../src/protocol/reconcile.js";
 import {
-  bindOperation,
   contractObservationOperation,
   contractsOperation,
-  reconcileAllOperation,
   scopeOperation,
 } from "../src/protocol/operations.js";
 import {
