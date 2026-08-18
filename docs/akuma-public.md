@@ -116,6 +116,9 @@ its predicate to the returned observation. One status read prevents a torn
 timeout result assembled from separate liveness and snapshot observations.
 `wait` does not promise that every recorded tell was delivered: a crash can
 kill body and waker together and legitimately leave tells pending.
+This standalone handle wait retains its ordinary status-read failures; only the
+package-root plural wait has the per-round omission law in
+[public-akuma.md](public-akuma.md).
 
 `history()` is the sole public execution-history read. It pages the same
 persisted-order Turn ledger used by status; it does not join a second Turn

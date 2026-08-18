@@ -267,9 +267,12 @@ accepts one complete ContractId. `wait` and `kill` additionally accept Akuma
 globs and complete Contract worker selectors; their set expands once,
 deduplicates, and byte-sorts. A Contract selector reads Dispatch from the
 selected Repo and operates only in the invocation World. A foreign member
-refuses the whole set as `akuma-not-in-world`; a corrupt Heart retains its
-diagnostic, and a missing direct AkuId remains not-born. Multi-wait requires
-exactly one of `--any` or `--all`; kill covers the frozen set. Bare `status`
+refuses the whole set as `akuma-not-in-world`; an unreadable Heart remains in
+the frozen selection rather than becoming that refusal. Plural wait omits its
+failed status read for that polling round, while one-member wait and the other
+verbs retain their ordinary diagnostics; a missing direct AkuId remains
+not-born. Multi-wait requires exactly one of `--any` or `--all`; kill covers the
+frozen set. Bare `status`
 uses Kanshi. Named `status @name` resolves active Contract short names and the
 retained Alias register from one Kanshi observation, refuses cross-kind
 ambiguity, and performs no preliminary board or Alias reread.

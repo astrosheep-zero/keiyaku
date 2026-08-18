@@ -166,7 +166,12 @@ function addSelectorIds(
 }
 
 async function contractMemberInWorld(path: WorldRoot, id: AkuId): Promise<boolean> {
-  return await probeBornAkuma(path, id);
+  try {
+    return await probeBornAkuma(path, id);
+  } catch {
+    // A dispatched physical member remains selected when its Heart cannot be read.
+    return true;
+  }
 }
 
 async function refuseForeignContractMembers(path: WorldRoot, ids: readonly AkuId[], contractMembers: ReadonlySet<AkuId>): Promise<void> {

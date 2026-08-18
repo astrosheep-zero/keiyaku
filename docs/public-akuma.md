@@ -165,14 +165,16 @@ Alias map for aliases, and the supplied Repo's Dispatch set for Contract
 selectors. An unused or failed product cannot suppress an exact selector. It unions
 duplicates, and returns AkuIds in byte order. Dispatch membership does not
 depend on compact-fleet visibility; a corrupt skipped member therefore remains
-an addressed worker and its operation reports its own failure. After that union,
-every member introduced by a `kei/...` selector is checked in the invocation
-World (`path`). An Akuma absent from that World refuses the whole frozen set
-with `AkumaWorldScopeError` before wait or kill starts. The refusal is
+an addressed worker. After that union, every member introduced by a `kei/...`
+selector is checked in the invocation World (`path`). An Akuma absent from that
+World refuses the whole frozen set with `AkumaWorldScopeError` before wait or
+kill starts. An unreadable Heart or Leash while checking that presence retains
+the dispatched id in the frozen set for the operation's own read behavior. The
+refusal is
 `{ kind: "akuma-not-in-world", ids, world }`: it names the selected World and
 those AkuIds and does not claim where they live. A corrupt Heart keeps its
-existing diagnostic and is not relabeled as that refusal. A direct `aku/...`
-selector that is absent keeps `AkumaNotBornError`. A `kei/...` selector
+ordinary diagnostic outside plural wait and is not relabeled as that refusal. A
+direct `aku/...` selector that is absent keeps `AkumaNotBornError`. A `kei/...` selector
 requires `repo`, reads Dispatch only from that Repo, and never scans another
 World or silently drops a Dispatch member. An empty set,
 unknown Alias, invalid selector, or Contract selector without a Repo is caller
@@ -253,16 +255,24 @@ and renderers perform no lookup. `CallObservation` and `AkumaHistoryResult`
 remain on their current raw status/history shapes.
 
 Wait and kill freeze their subject set at entry. A one-member wait defaults to
-`all`; a multi-member wait requires `completion: "any" | "all"`. Any returns
-after one member satisfies the ordinary Akuma wait predicate; all returns after
-every member does. Timeout returns one complete aggregate of fresh observations
-and is not a streaming or partial result. A plural aggregate carries one shared
-30-row ordinary-detail budget, equal to five complete default `3 + 3` snapshots.
-Each member uses the same `tail=3`, `voice=3` selector as ordinary status. After
-that budget is spent, later members retain life, outcome, every running tool and
-pending tell while ordinary detail collapses into typed gaps. When only part of
-one member fits, its newest ordinary detail consumes the remainder. Kill returns one
-evidence and compact post-action observation per selected AkuId in stable order.
+`all` and retains the ordinary hard status failure. A multi-member wait requires
+`completion: "any" | "all"`. In each plural polling round, Fleet reads every
+frozen id in byte order. A status-read failure omits only that id from that
+round; it creates no result arm, diagnostic, retry record, or compatibility
+decode, and the next round attempts that id again. `any` and `all` apply only
+to the readable statuses and require at least one readable status. Thus a
+readable settled peer may complete either mode; an all-unreadable round does not
+fabricate completion. An explicit timeout then returns observations from that
+round, including `[]`, while an unbounded wait continues. Returned observations
+are exactly the readable statuses from the completing or timed-out round in
+frozen byte order. A plural aggregate carries one shared 30-row
+ordinary-detail budget, equal to five complete default `3 + 3` snapshots. Each
+successful read uses the same `tail=3`, `voice=3` selector as ordinary status;
+an omitted read spends none of that budget. After that budget is spent, later
+members retain life, outcome, every running tool and pending tell while ordinary
+detail collapses into typed gaps. When only part of one member fits, its newest
+ordinary detail consumes the remainder. Kill returns one evidence and compact
+post-action observation per selected AkuId in stable order.
 `Keiyaku.tell` composes the handle's
 typed mutation result with one subsequent whole-Akuma status observation. The
 two fields have separate authority: `tell` alone states what this invocation

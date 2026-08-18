@@ -155,9 +155,14 @@ async function observeWaitStatuses(
   const statuses: AkumaStatus[] = [];
   for (const id of ids) {
     signal?.throwIfAborted();
-    const observed = await readBudgetedStatus(path, id, { ordinaryBudget: remaining });
-    statuses.push(observed.status);
-    remaining -= observed.ordinarySelected;
+    try {
+      const observed = await readBudgetedStatus(path, id, { ordinaryBudget: remaining });
+      statuses.push(observed.status);
+      remaining -= observed.ordinarySelected;
+    } catch (error) {
+      if (error instanceof AkumaNotBornError) throw error;
+      // Plural wait omits one unreadable status without spending its shared budget.
+    }
   }
   return statuses;
 }
@@ -176,7 +181,9 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
   for (;;) {
     const statuses = await observeWaitStatuses(input.path, input.ids, input.signal);
     const settled = statuses.map((status) => status.life !== "running");
-    if ((input.completion === "any" ? settled.some(Boolean) : settled.every(Boolean))
+    const completed = statuses.length > 0
+      && (input.completion === "any" ? settled.some(Boolean) : settled.every(Boolean));
+    if (completed
       || (deadline !== undefined && performance.now() >= deadline)) {
       return {
         completion: input.completion,

@@ -132,6 +132,14 @@ async function answered(root: string, archetype: string, suffix: string) {
   return allocated;
 }
 
+function corruptHeart(root: string, suffix: string) {
+  const id = akuId({ archetype: "worker", suffix });
+  const directory = join(root, ".keiyaku", "akuma", "run", `worker-${suffix}`);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "heart.db"), "broken\n");
+  return id;
+}
+
 test("facade snapshots aliases and globs with stable dedupe for wait and kill", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-fleet-"));
   try {
@@ -170,9 +178,10 @@ test("facade requires an explicit completion mode for a plural wait", async () =
   }
 });
 
-test("plural wait shares one 30-row budget across five complete members", async () => {
+test("plural wait skips an earlier unreadable member without spending its shared budget", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-budget-"));
   try {
+    const unreadable = corruptHeart(root, "00000000");
     const sources = [];
     for (let member = 1; member <= 5; member += 1) {
       const source = await answered(root, "worker", String(member).padStart(8, "0"));
@@ -195,7 +204,7 @@ test("plural wait shares one 30-row budget across five complete members", async 
 
     const waited = await Keiyaku.wait({
       path: root,
-      akuma: sources.map((source) => source.id),
+      akuma: [unreadable, ...sources.map((source) => source.id)],
       completion: "all",
       timeoutMs: 0,
     });
@@ -620,6 +629,20 @@ test("direct missing Aku remains AkumaNotBornError", async () => {
   }
 });
 
+test("plural wait preserves a missing direct AkuId error", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-plural-direct-missing-"));
+  try {
+    const missing = akuId({ archetype: "worker", suffix: "00000001" });
+    const readable = await answered(root, "worker", "00000002");
+    await assert.rejects(
+      Keiyaku.wait({ path: root, akuma: [missing, readable.id], completion: "all", timeoutMs: 0 }),
+      (error: unknown) => error instanceof AkumaNotBornError && error.id === missing,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Contract selector preserves Dispatch membership skipped by compact fleet", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
@@ -645,31 +668,68 @@ test("Contract selector preserves Dispatch membership skipped by compact fleet",
   );
 });
 
-test("Contract selector preserves corrupt Heart diagnostic", async () => {
+test("one-member Contract selector retains a corrupt Heart diagnostic", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(repository.path);
-  const missing = akuId({ archetype: "worker", suffix: "deadbeef" });
-  const directory = join(world, ".keiyaku", "akuma", "run", "worker-deadbeef");
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, "heart.db"), "broken\n");
+  const unreadable = corruptHeart(world, "deadbeef");
   assert.equal((await publishDispatch({
     repository: await repositoryAt(world),
-    akuId: missing,
+    akuId: unreadable,
     contractId: contractId("kei/review"),
   })).kind, "dispatched");
-  await assert.rejects(
-    addressAkumaSet({
+  const repo = await Repo.at({ path: world });
+  assert.deepEqual((await addressAkumaSet({ path: world, akuma: ["kei/review"], repo })).ids, [unreadable]);
+  const corruptDiagnostic = (error: unknown) => error instanceof Error
+    && /schema version|SQLITE|database|file is not a database/iu.test(error.message);
+  await assert.rejects(Keiyaku.wait({ path: world, akuma: [unreadable], timeoutMs: 0 }), corruptDiagnostic);
+  await assert.rejects(Keiyaku.wait({ path: world, akuma: ["kei/review"], repo, timeoutMs: 0 }), corruptDiagnostic);
+});
+
+test("Contract plural wait omits unreadable Heart observations for all and any", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(repository.path);
+  const unreadable = corruptHeart(world, "aaaaaaaa");
+  const readable = await answered(world, "worker", "bbbbbbbb");
+  const owner = contractId("kei/plural-corrupt");
+  const git = await repositoryAt(world);
+  for (const akuId of [unreadable, readable.id]) {
+    assert.equal((await publishDispatch({ repository: git, akuId, contractId: owner })).kind, "dispatched");
+  }
+  const repo = await Repo.at({ path: world });
+  for (const completion of ["all", "any"] as const) {
+    const waited = await Keiyaku.wait({
       path: world,
-      akuma: ["kei/review"],
-      repo: await Repo.at({ path: world }),
-    }),
-    (error: unknown) => !(error instanceof AkumaWorldScopeError)
-      && error instanceof Error
-      && /schema version|SQLITE|database|file is not a database/iu.test(error.message),
-  );
+      akuma: [owner],
+      repo,
+      completion,
+      timeoutMs: 0,
+    });
+    assert.deepEqual(waited.observations.map((observation) => observation.status.id), [readable.id]);
+  }
+});
+
+test("plural wait returns no observations when every status is unreadable", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-wait-unreadable-"));
+  try {
+    const earlier = corruptHeart(root, "00000001");
+    const later = corruptHeart(root, "00000002");
+    for (const completion of ["all", "any"] as const) {
+      assert.deepEqual(await Keiyaku.wait({
+        path: root,
+        akuma: [earlier, later],
+        completion,
+        timeoutMs: 0,
+      }), { completion, observations: [] });
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("fleet status projects Dispatch association without changing Akuma core", async () => {
