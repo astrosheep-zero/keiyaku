@@ -7,23 +7,36 @@ import {
   markdownCharacterCount,
   markdownCharacterFindings,
   markdownCharacterSeverity,
+  promoteHardLineLimit,
   validateExemptions,
 } from "../scripts/check-maintainability.js";
 
-test("maintainability max-lines exemptions require exact live paths and reasons", () => {
+test("maintainability max-lines exemptions require exact live paths", () => {
   assert.deepEqual(validateExemptions([{
     file: "scripts/check-maintainability.js",
-    reason: "Fixture uses an existing file.",
   }]), []);
 
   const invalid = validateExemptions([
-    { file: "src/**/*.ts", reason: "Too broad." },
-    { file: "src/missing.ts", reason: "Missing." },
-    { file: "scripts/check-maintainability.js", reason: "" },
+    { file: "src/**/*.ts" },
+    { file: "src/missing.ts" },
   ]);
   assert.match(invalid[0] ?? "", /exact normalized relative file path/);
   assert.match(invalid[1] ?? "", /targets missing file/);
-  assert.match(invalid[2] ?? "", /needs a reason/);
+});
+
+test("maintainability hard line limit promotes only above 500 effective lines", () => {
+  const [result] = promoteHardLineLimit([{
+    messages: [
+      { ruleId: "max-lines", messageId: "exceed", message: "File has too many lines (500).", severity: 1 },
+      { ruleId: "max-lines", messageId: "exceed", message: "File has too many lines (501).", severity: 1 },
+    ],
+    errorCount: 0,
+    warningCount: 2,
+  }]);
+
+  assert.deepEqual(result.messages.map(({ severity }) => severity), [1, 2]);
+  assert.equal(result.errorCount, 1);
+  assert.equal(result.warningCount, 1);
 });
 
 test("Markdown character limits warn above 20000 and fail above 30000", () => {
