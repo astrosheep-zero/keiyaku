@@ -8,6 +8,7 @@ import type {
   ContractTerms,
   ContractCoordinates,
   DeliverData,
+  ReintegratedData,
   ClaimedData,
   JournalEntry,
   DependencyKeySet,
@@ -32,6 +33,7 @@ const VERSION_BY_KIND = {
   amend: 1,
   bound: 1,
   deliver: 1,
+  reintegrated: 1,
   attestation: 1,
   claimed: 1,
   arc: 1,
@@ -221,6 +223,14 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
           ),
         },
       } satisfies DeliverData;
+    }
+    case "reintegrated": {
+      const object = requireRecord(value, path);
+      requireKeys(object, ["predecessor", "snapshot"], path);
+      return {
+        predecessor: brandedValue(object.predecessor, `${path}.predecessor`, snapshotId),
+        snapshot: brandedValue(object.snapshot, `${path}.snapshot`, snapshotId),
+      } satisfies ReintegratedData;
     }
     case "attestation":
       return validateAttestation(value, path) satisfies AttestationData;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contractHead, contractId } from "../src/core/facts/types.js";
+import { contractHead, contractId, snapshotId } from "../src/core/facts/types.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { renderText } from "../src/cli/render/text.js";
@@ -72,6 +72,66 @@ test("completion stops render the public unmet prerequisites in order", () => {
     "  prerequisite kei/abandoned-prerequisite · abandoned",
     "  prerequisite kei/missing-prerequisite · missing",
     "  record",
+    "    head head",
+  ].join("\n"));
+});
+
+test("reintegration receipts show the new target and a bounded movement stop", () => {
+  const contract = contractId("kei/reintegrated");
+  const predecessor = snapshotId("target-1");
+  const integrated = snapshotId("integration-2");
+  const observed = snapshotId("target-3");
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("head"),
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+  const facts = [{
+    contract,
+    entry: "reintegration",
+    kind: "reintegrated" as const,
+    data: { predecessor, snapshot: integrated },
+  }];
+
+  assert.equal(renderText({
+    ...envelope,
+    verb: "deliver",
+    facts: [...facts, { contract, entry: "claim", kind: "claimed" as const }],
+    verificationVerdict: "satisfied",
+  }), [
+    "✓ delivered — kei/reintegrated",
+    "  re-integrated target-1 -> integration-2",
+    "  verification re-run · satisfied",
+    "  target -> integration-2",
+    "✓ verification passed",
+    "  record",
+    "    journal reintegration · reintegrated",
+    "    journal claim · claimed",
+    "    head head",
+  ].join("\n"));
+
+  assert.equal(renderText({
+    ...envelope,
+    verb: "deliver",
+    facts,
+    placement: {
+      failure: "target-moved",
+      contractId: contract,
+      target: "refs/heads/main",
+      integratedAt: integrated,
+      observed: null,
+      attempts: 3,
+    },
+  }), [
+    "✓ deliver — not complete — kei/reintegrated",
+    "  re-integrated target-1 -> integration-2",
+    "  candidate kept",
+    "! completion blocked · target-moved refs/heads/main integration-2 -> null",
+    "  attempts=3",
+    "  record",
+    "    journal reintegration · reintegrated",
     "    head head",
   ].join("\n"));
 });

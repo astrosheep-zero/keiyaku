@@ -22,11 +22,20 @@ export type BindDraftReceipt = Readonly<
 
 export type Effect = ReconcileReport["effects"][number];
 
-export type AcceptedFact = Readonly<{
+type AcceptedFactEnvelope = Readonly<{
   contract: ContractId;
   entry: string;
-  kind: Fact["kind"];
 }>;
+
+export type AcceptedFact =
+  | (AcceptedFactEnvelope & Readonly<{
+      kind: Exclude<Fact["kind"], "reintegrated">;
+      data?: never;
+    }>)
+  | (AcceptedFactEnvelope & Readonly<{
+      kind: "reintegrated";
+      data: Extract<Fact, { kind: "reintegrated" }>["data"];
+    }>);
 
 export type Lag = ReconcileReport["lag"][number];
 
@@ -98,18 +107,18 @@ export type AcceptedDeliverResult = AcceptedEnvelope & Readonly<{
 export type AcceptedReviewResult = AcceptedEnvelope & Readonly<{
   verb: "review";
   verdict: "satisfied" | "unsatisfied";
+  verificationVerdict?: "satisfied" | "unsatisfied";
+  verification?: VerificationStop;
+  verificationReuse?: VerificationReuse;
   placement?: PlacementStop;
   workspace?: Review["workspace"];
+  cleanup?: MutationResult<unknown>["cleanup"];
+  leak?: MutationResult<unknown>["leak"];
   target?: never;
-  verification?: never;
-  verificationReuse?: never;
-  cleanup?: never;
-  leak?: never;
   overlaps?: never;
   overlapFailure?: never;
   report?: never;
   diff?: never;
-  verificationVerdict?: never;
   chapter?: never;
   note?: never;
 }>;

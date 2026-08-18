@@ -250,10 +250,41 @@ function renderAcceptedAmend(result: AcceptedAmendResult, columns: number): stri
   return lines.join("\n");
 }
 
+function reintegrationLines(
+  result: AcceptedDeliverResult | AcceptedReviewResult,
+  complete: boolean,
+  columns: number,
+): readonly string[] {
+  const reintegrated = result.facts.filter((fact) => fact.kind === "reintegrated");
+  if (reintegrated.length === 0) return [];
+  const lines: string[] = [];
+  for (const fact of reintegrated) {
+    receiptRow(lines, " ", "re-integrated", [
+      { text: fact.data.predecessor, opaque: true },
+      { text: "->" },
+      { text: fact.data.snapshot, opaque: true },
+    ], columns);
+  }
+  if (result.verificationVerdict !== undefined) {
+    receiptRow(lines, " ", "verification re-run", [
+      { text: "·" },
+      { text: result.verificationVerdict },
+    ], columns);
+  }
+  if (complete) {
+    receiptRow(lines, " ", "target", [
+      { text: "->" },
+      { text: reintegrated.at(-1)!.data.snapshot, opaque: true },
+    ], columns);
+  }
+  return lines;
+}
+
 function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): string {
   const complete = result.facts.some((fact) => fact.kind === "claimed");
   const title = complete ? "delivered" : "deliver — not complete";
   const lines = titleLines("✓", title, result.contract, columns);
+  lines.push(...reintegrationLines(result, complete, columns));
   if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   if (result.verification !== undefined) {
     lines.push(...stopLines("verification", result.verification, columns, result.contract));
@@ -274,12 +305,18 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
 function renderAcceptedReview(result: AcceptedReviewResult, columns: number): string {
   const complete = result.facts.some((fact) => fact.kind === "claimed");
   const lines = titleLines("✓", `review ${result.verdict}`, result.contract, columns);
+  lines.push(...reintegrationLines(result, complete, columns));
   receiptRow(lines, complete ? "✓" : "!", "contract", [
     { text: complete ? "complete" : "not complete" },
   ], columns);
   if (result.placement !== undefined) {
     lines.push(...stopLines("completion", result.placement, columns, result.contract));
   }
+  if (result.verification !== undefined) {
+    lines.push(...stopLines("verification", result.verification, columns, result.contract));
+  }
+  if (result.cleanup !== undefined) pushBlock(lines, cleanupLines(result.cleanup, columns));
+  if (result.leak !== undefined) pushBlock(lines, leakLines(result.leak, columns));
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
   return lines.join("\n");
 }
@@ -389,6 +426,11 @@ function journalBody(fact: Fact): readonly string[] {
         `  require-branches-to-be-up-to-date ${String(policy.requireBranchesToBeUpToDate)}`,
       ];
     }
+    case "reintegrated":
+      return [
+        `  predecessor ${fact.data.predecessor}`,
+        `  snapshot ${fact.data.snapshot}`,
+      ];
     case "attestation": {
       const lines = [
         `  gate ${fact.data.gate}`,

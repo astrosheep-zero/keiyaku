@@ -40,11 +40,11 @@ export async function observeDeliveryTargetAt(
   if (target === undefined) return null;
   const value = await observation.resolveRef(target);
   const head = value === null ? null : mintSnapshotId(value);
-  const delivery = state.delivery?.data;
-  if (delivery === undefined) return { head, drift: false };
+  const integration = state.currentIntegration;
+  if (integration === null) return { head, drift: false };
   const expected = state.terminal?.kind === "claimed"
-    ? delivery.integration.snapshot
-    : delivery.integration.predecessor;
+    ? integration.snapshot
+    : integration.predecessor;
   return { head, drift: head !== expected };
 }
 

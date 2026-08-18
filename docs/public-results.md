@@ -206,8 +206,9 @@ type PlacementStop =
       failure: "target-moved"
       contractId: ContractId
       target: string
-      expected: SnapshotId
+      integratedAt: SnapshotId
       observed: SnapshotId | null
+      attempts: number
     }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>
 
@@ -240,7 +241,11 @@ type Delivery = Readonly<{
 }>
 
 type Review = Readonly<{
+  verification?: VerificationStop
+  verificationReuse?: VerificationReuse
   placement?: PlacementStop
+  cleanup?: VerificationCleanupFailure
+  leak?: WorktreeLeak
 }>
 ```
 
@@ -317,13 +322,16 @@ The `verification` or `placement` channel contains the typed reason why that
 obligation admitted no fact. Verification process outcomes and attestation
 admission stops share `VerificationStop`; placement admission stops use
 `PlacementStop`. In particular, a satisfied review can admit its attestation
-and then return an `IntegrationRefusal` through `placement`; that stop neither
-removes the fact nor becomes a top-level review refusal. Review and delivery
-share the delivery fact's one worktree-content ChangeId, while integration
-coordinates remain placement topology. The obligations are independent and both
-channels may be present on one Delivery. A channel is absent exactly when its
-obligation was not applicable or admitted its fact; callers distinguish those
-cases through `facts`. These values remain process-local and non-authoritative;
+and then return a `delivery-missing` placement stop before any delivery exists.
+Once a delivery exists, review and delivery share the same reintegration
+completion loop. Target movement is represented by admitted `reintegrated`
+facts followed by a retry, or by an accepted typed repeated-movement stop after
+three complete cycles. Review and delivery share the delivery fact's one
+worktree-content ChangeId, while integration coordinates remain placement
+topology. The obligations are independent and both channels may be present on
+one Delivery. A channel is absent exactly when its obligation was not applicable
+or admitted its fact; callers distinguish those cases through `facts`. These
+values remain process-local and non-authoritative;
 the journal is the sole lifecycle authority. `environment-failure` identifies
 candidate provisioning, never a Verification verdict; `candidate-unavailable`
 identifies materialization failure; `unknown-exit`, `spawn-error`, and admission

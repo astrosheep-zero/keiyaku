@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
 import {
   changeId,
@@ -120,6 +121,67 @@ test("foldJournal materializes its total state from the first bind", () => {
 
   assert.deepEqual(state.coordinates, bind.data.coordinates);
   assert.deepEqual(state.terms, bind.data.terms);
+});
+
+test("foldJournal keeps the delivery identity while advancing current integration", () => {
+  const bind = entry("bind", {
+    coordinates: { start: snapshotId("initial"), workspace: "here" },
+    terms: {
+      document: { bytes: "# Initial\n", key: documentKey("initial") },
+      segments: [],
+      gates: [],
+      after: [],
+    },
+  }, 0);
+  const bound = entry("bound", {}, 1);
+  const delivery = entry("deliver", {
+    tenderSnapshot: snapshotId("tender"),
+    integration: {
+      predecessor: snapshotId("predecessor"),
+      snapshot: snapshotId("candidate"),
+      changeId: changeId("patch"),
+    },
+    method: "squash",
+    policy: { requireBranchesToBeUpToDate: false },
+  }, 2);
+  const reintegrated = entry("reintegrated", {
+    predecessor: snapshotId("target-2"),
+    snapshot: snapshotId("candidate-2"),
+  }, 3);
+  const claimed = entry("claimed", { delivery: delivery.entry }, 4);
+
+  const state = foldJournal(id, [bind, bound, delivery, reintegrated, claimed]);
+
+  assert.strictEqual(state.delivery, delivery);
+  assert.deepEqual(state.currentIntegration, {
+    predecessor: snapshotId("target-2"),
+    snapshot: snapshotId("candidate-2"),
+    changeId: changeId("patch"),
+  });
+  assert.equal(state.terminal, claimed);
+});
+
+test("reintegrated codec rejects malformed data and fold rejects out-of-order entries", () => {
+  const valid = entry("reintegrated", {
+    predecessor: snapshotId("target"),
+    snapshot: snapshotId("candidate"),
+  }, 3);
+  const malformed = encodeEntry(valid).replace('"snapshot":"candidate"', '"snapshot":""');
+  assert.throws(() => decodeJournal(malformed), /data\.reintegrated\.snapshot/);
+
+  const bind = entry("bind", {
+    coordinates: { start: snapshotId("initial"), workspace: "here" },
+    terms: {
+      document: { bytes: "# Initial\n", key: documentKey("initial") },
+      segments: [],
+      gates: [],
+      after: [],
+    },
+  }, 0);
+  assert.throws(
+    () => foldJournal(id, [bind, valid]),
+    /reintegrated requires a deliver/,
+  );
 });
 
 test("foldJournal accepts an after replacement after bound and delivery", () => {

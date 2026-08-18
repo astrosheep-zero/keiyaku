@@ -52,10 +52,15 @@ other non-claimed state. Claimed prerequisites are omitted, and this refusal
 always has a nonempty `unmet` collection. No later layer rereads Contract
 authority or adjudicates those categories.
 Admitting testimony does not itself invoke placement; `deliver` and a satisfied
-`review` explicitly request it as a later protocol step. That request is one
-target-fence placement attempt: a present delivery is judged as-is, and only a
-still-missing delivery may attach a typed integration stop. Audit never invokes
-placement.
+`review` explicitly request it as a later protocol step. The request attempts
+placement under the target fence. If the target moved after the accepted
+candidate was prepared, the protocol reuses the persisted tender and frozen
+policy, admits `reintegrated`, runs or reuses the exact Verification, and
+retries placement. It performs at most three complete integrate-verify-place
+cycles. Repeated movement is an accepted trailing `target-moved` stop with the
+last integration snapshot, freshly observed target (or `null` when the ref
+disappeared), and numeric attempt count.
+Audit never invokes placement.
 
 For a targeted offer, Git's checked-out-target preconditions are part of that
 same placement attempt. `checkout-not-followable` is a typed mechanical
@@ -102,11 +107,12 @@ change or are cleaned away, the review is stale. The reviewed producer boundary
 owns the `reviewed` token whether or not it is listed in `terms.gates`.
 
 Review admission records the attestation before a satisfied verdict requests
-trailing placement. Git may find that the target cannot integrate the reviewed
-content; that is a typed placement stop on the accepted review, with no claimed
-or delivery fact, not an attestation refusal. An unsatisfied review records the
-same subject and judgment but never requests placement. Optional `summary` is
-opaque testimony and does not participate in a gate.
+trailing placement. Before any delivery exists it retains the `delivery-missing`
+placement stop. With a delivery present, target movement follows the same
+reintegration loop as delivery and never captures new workspace bytes or creates
+a second delivery fact. An unsatisfied review records the same subject and
+judgment but never requests placement. Optional `summary` is opaque testimony
+and does not participate in a gate.
 
 An authenticated Akuma `contract.review` is the same independent Contract
 operation at a different process boundary. Its claim preserves the selected
@@ -192,6 +198,13 @@ The current key set always contains the current document and ordered segment
 keys; the delivered tender ChangeId and integration snapshot join it only while
 a delivery exists. Tender snapshot identity is custody and observation data,
 not gate currency.
+
+The original `deliver` entry remains the stable candidate record. A
+`reintegrated` entry records the observed target predecessor and the newly
+materialized integration snapshot. Folded `currentIntegration` replaces only
+those coordinates and retains the original delivery ChangeId, tender, method,
+and policy. `claimed.data.delivery` continues to name the original delivery
+entry.
 
 Gate currency has one pure core judgment. Claimed
 admission and the public Contract status projection both call that

@@ -142,7 +142,7 @@ export function currentVerifiedAttestation(state: ContractState): CurrentVerifie
 export async function verifyDelivery(
   input: VerifyDeliveryInput,
 ): Promise<VerificationResult | null> {
-  const snapshot = input.snapshot ?? input.state.delivery?.data.integration.snapshot;
+  const snapshot = input.snapshot ?? input.state.currentIntegration?.snapshot;
   if (snapshot === undefined || input.verification === undefined) return null;
   const subject = dependencyKeySet([
     { kind: "snapshot", value: snapshot },

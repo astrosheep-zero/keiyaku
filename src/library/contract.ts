@@ -270,6 +270,11 @@ async function executeLocalReview(input: ReviewExecutionInput): Promise<Mutation
       scope: input.scope,
       channel,
       contractId: input.contractId,
+      deriveDocument: (state) => documentDerivation(
+        decodeContractDocument(state.terms.document.bytes),
+        state.terms.gates,
+        state.id,
+      ),
       verdict: input.verdict,
       ...(input.summary === undefined ? {} : { summary: input.summary }),
       ...(input.actor === undefined ? {} : { actor: input.actor }),

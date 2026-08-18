@@ -15,6 +15,8 @@ import {
 } from "./process.js";
 import type { DeliveryCommitMetadata, TenderCapture } from "./tender.js";
 
+type IntegrationTender = Pick<TenderCapture, "head" | "tree">;
+
 const REQUIRED_GIT = "2.38" as const;
 
 async function runAllowingNonzero(repository: GitRepository, args: readonly string[], input?: string): Promise<Readonly<{ stdout: Buffer; stderr: Buffer; status: number | null }>> {
@@ -103,6 +105,70 @@ export async function materializeIntegrationSnapshot(
       GIT_COMMITTER_EMAIL: metadata.identity.email,
       GIT_AUTHOR_DATE: metadata.at,
       GIT_COMMITTER_DATE: metadata.at,
+    },
+  )).toString("utf8").trim();
+  return mintSnapshotId(commit);
+}
+
+export async function persistedTender(
+  repository: GitRepository,
+  snapshot: SnapshotId,
+): Promise<IntegrationTender> {
+  const tree = (await runGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)]))
+    .toString("ascii")
+    .trim();
+  return { head: snapshot, tree: gitObjectId(tree, "persisted tender tree") };
+}
+
+export async function materializeReintegrationSnapshot(
+  repository: GitRepository,
+  tree: GitObjectId,
+  parent: SnapshotId,
+  template: SnapshotId,
+): Promise<SnapshotId> {
+  const templateObject = gitObjectIdForSnapshot(template);
+  let raw: Buffer;
+  try {
+    raw = await runGit(repository, ["cat-file", "commit", templateObject]);
+  } catch (error) {
+    if (error instanceof GitPlumbingError) {
+      throw new AuthorityCorruptionError(`recorded delivery snapshot cannot be read: ${template}`);
+    }
+    throw error;
+  }
+  const separator = raw.indexOf(Buffer.from("\n\n"));
+  if (separator < 0) throw new AuthorityCorruptionError(`recorded delivery snapshot has no commit message: ${template}`);
+  const message = raw.subarray(separator + 2);
+  let fields: readonly string[];
+  try {
+    const formatted = (await runGit(repository, [
+      "show",
+      "-s",
+      "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI",
+      templateObject,
+    ])).toString("utf8").replace(/\n$/u, "");
+    fields = formatted.split("\0");
+  } catch (error) {
+    if (error instanceof GitPlumbingError) {
+      throw new AuthorityCorruptionError(`recorded delivery snapshot metadata cannot be read: ${template}`);
+    }
+    throw error;
+  }
+  if (fields.length !== 6 || fields.some((field) => field.length === 0)) {
+    throw new AuthorityCorruptionError(`recorded delivery snapshot metadata is malformed: ${template}`);
+  }
+  const [authorName, authorEmail, authorDate, committerName, committerEmail, committerDate] = fields;
+  const commit = (await runGitWithEnvironment(
+    repository,
+    ["commit-tree", tree, "-p", gitObjectIdForSnapshot(parent)],
+    message!,
+    {
+      GIT_AUTHOR_NAME: authorName!,
+      GIT_AUTHOR_EMAIL: authorEmail!,
+      GIT_AUTHOR_DATE: authorDate!,
+      GIT_COMMITTER_NAME: committerName!,
+      GIT_COMMITTER_EMAIL: committerEmail!,
+      GIT_COMMITTER_DATE: committerDate!,
     },
   )).toString("utf8").trim();
   return mintSnapshotId(commit);
@@ -200,7 +266,7 @@ async function mergedTree(
 export async function planIntegration(
   repository: GitRepository,
   input: IntegrationCoordinates,
-  tender: TenderCapture,
+  tender: IntegrationTender,
   requireBranchesToBeUpToDate: boolean,
 ): Promise<Preparation<IntegrationPlan, Readonly<{ kind: "target-missing"; contractId: ContractId }> | IntegrationPreparationRefusal>> {
   const target = input.coordinates.target;

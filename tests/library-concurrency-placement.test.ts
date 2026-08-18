@@ -220,7 +220,65 @@ test("claim does not mutate eligible dependents", async () => {
   }
 });
 
-test("review stops placement when its verified target premise moves", async () => {
+test("delivery re-integrates its persisted tender when the target premise moves", async () => {
+  const repository = repositoryWithMain();
+  repository.run(["branch", "release"]);
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+    markdown: document(),
+    target: "refs/heads/release",
+    workspace: "worktree",
+    gates: [],
+  });
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), result.keiyaku.id);
+  writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+  writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
+  repository.run(["add", "target.txt"]);
+  repository.run(["commit", "--quiet", "-m", "move target"]);
+
+  const raced = `${repository.path}/target-raced.marker`;
+  const delivered = await withGitShim([
+    'if [ "$1" = "update-ref" ]; then',
+    '  input_file=$(mktemp)',
+    '  cat >"$input_file"',
+    '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_TARGET_RACED" ]; then',
+    '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$KEIYAKU_TARGET_HEAD"',
+    '    printf "changed after capture\\n" > "$KEIYAKU_CANDIDATE_PATH"',
+    '    touch "$KEIYAKU_TARGET_RACED"',
+    '  fi',
+    '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
+    '  status=$?',
+    '  rm -f "$input_file"',
+    '  exit "$status"',
+    'fi',
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n"), {
+    KEIYAKU_CANDIDATE_PATH: resolve(worktree, "candidate.txt"),
+    KEIYAKU_TARGET_HEAD: repository.run(["rev-parse", "HEAD"]).trim(),
+    KEIYAKU_TARGET_RACED: raced,
+  }, () => result.keiyaku.deliver({ actor: "delivery-actor", message: "preserve this subject" }));
+
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "reintegrated", "claimed"]);
+  const reintegrated = delivered.facts.find((fact) => fact.kind === "reintegrated");
+  assert.ok(reintegrated);
+  assert.equal(repository.run(["show", "refs/heads/release:candidate.txt"]), "captured\n");
+  assert.equal(readFileSync(resolve(worktree, "candidate.txt"), "utf8"), "changed after capture\n");
+  const metadata = ["show", "-s", "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%B"] as const;
+  assert.equal(
+    repository.run([...metadata, reintegrated.data.snapshot]),
+    repository.run([...metadata, delivered.value.integration.snapshot]),
+  );
+  assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), reintegrated.data.snapshot);
+  const current = await result.keiyaku.delivery();
+  assert.equal(current?.tenderSnapshot, delivered.value.tenderSnapshot);
+  assert.equal(current?.integration.predecessor, reintegrated.data.predecessor);
+  assert.equal(current?.integration.snapshot, reintegrated.data.snapshot);
+  assert.equal(current?.integration.changeId, delivered.value.integration.changeId);
+  assert.match(await current?.diff() ?? "", /candidate\.txt/u);
+});
+
+test("review re-integrates its accepted delivery when the target premise moves", async () => {
   const repository = repositoryWithMain();
   repository.run(["branch", "release"]);
   const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
@@ -241,14 +299,14 @@ test("review stops placement when its verified target premise moves", async () =
     'if [ "$1" = "update-ref" ]; then',
     '  input_file=$(mktemp)',
     '  cat >"$input_file"',
-    '  if grep -q "refs/heads/release" "$input_file"; then',
+    '  if grep -q "update refs/heads/release" "$input_file" && [ ! -e "$KEIYAKU_PUBLICATION_FAILED" ]; then',
     '    candidate=$("$KEIYAKU_REAL_GIT" rev-parse HEAD)',
     '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/release "$candidate"',
+    '    touch "$KEIYAKU_PUBLICATION_FAILED"',
     '  fi',
     '  "$KEIYAKU_REAL_GIT" "$@" <"$input_file"',
     '  status=$?',
     '  rm -f "$input_file"',
-    '  touch "$KEIYAKU_PUBLICATION_FAILED"',
     '  exit "$status"',
     'fi',
     'exec "$KEIYAKU_REAL_GIT" "$@"',
@@ -256,15 +314,14 @@ test("review stops placement when its verified target premise moves", async () =
   const reviewed = await withGitShim(shim, {
     KEIYAKU_PUBLICATION_FAILED: failed,
   }, () => result.keiyaku.review({ verdict: "satisfied" }));
-  assert.deepEqual(reviewed.value.placement, {
-    failure: "target-moved",
-    contractId: result.keiyaku.id,
-    target: "refs/heads/release",
-    expected: delivered.value.integration.predecessor,
-    observed: repository.run(["rev-parse", "HEAD"]).trim(),
-  });
-  assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
+  assert.equal(reviewed.value.placement, undefined);
+  assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation", "reintegrated", "claimed"]);
+  const reintegrated = reviewed.facts.find((fact) => fact.kind === "reintegrated");
+  assert.equal(reintegrated?.data.predecessor, repository.run(["rev-parse", "HEAD"]).trim());
   const state = await result.keiyaku.state();
   assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");
-  assert.equal(state.terminal, null);
+  assert.equal(state.terminal?.kind, "claimed");
+  assert.deepEqual(state.delivery?.data.integration, delivered.value.integration);
+  assert.equal(state.currentIntegration?.snapshot, reintegrated?.data.snapshot);
+  assert.equal(repository.run(["rev-parse", "refs/heads/release"]).trim(), state.currentIntegration?.snapshot);
 });

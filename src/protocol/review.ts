@@ -1,4 +1,4 @@
-import { planIntegration, worktreeChangeId } from "../git/integration.js";
+import { worktreeChangeId } from "../git/integration.js";
 import {
   captureTender,
   dirtyTenderDelta,
@@ -12,19 +12,19 @@ import { contractState } from "../core/facts/observation.js";
 import type { AttestationData, ContractState, DeliverData } from "../core/facts/types.js";
 import { gate } from "../core/facts/types.js";
 import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
-import { admitPlacement } from "./placement.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import { admitted } from "./outcome.js";
+import { completeCandidate, type CompletionEvidence } from "./completion.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import type { AttemptContext } from "../core/decide.js";
 import type {
   AttemptDecision,
+  DocumentDerivation,
   IntentOutcome,
   MutationOperationInput,
-  PlacementStop,
   RepositoryScope,
 } from "./operations.js";
-import { mergeAdmissions, placementStop, timestamp } from "./operations.js";
+import { timestamp } from "./operations.js";
 
 const REVIEWED = gate("reviewed");
 type ReviewPreparationRefusal = Readonly<{
@@ -36,8 +36,9 @@ type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
 type ReviewOperationInput = MutationOperationInput & Readonly<{
   verdict: AttestationData["verdict"];
   summary?: string;
+  deriveDocument?: (state: ContractState) => DocumentDerivation;
 }>;
-export type ReviewValue = Readonly<{ placement?: PlacementStop; workspace?: WorkspaceDirtyDelta }>;
+export type ReviewValue = CompletionEvidence & Readonly<{ workspace?: WorkspaceDirtyDelta }>;
 type PreparedReview = Readonly<{ workspace?: WorkspaceDirtyDelta; tender?: TenderCapture }>;
 
 async function captureReviewableWorktree(
@@ -94,10 +95,10 @@ export async function prepareReview(
   };
 }
 
-function reviewValue(value: PreparedReview, placement?: PlacementStop): ReviewValue {
+function reviewValue(value: PreparedReview, completion: CompletionEvidence = {}): ReviewValue {
   return {
     ...(value.workspace === undefined ? {} : { workspace: value.workspace }),
-    ...(placement === undefined ? {} : { placement }),
+    ...completion,
   };
 }
 
@@ -179,23 +180,16 @@ export async function reviewOperation(input: ReviewOperationInput): Promise<Inte
   if (review === null) return { kind: "retry", reason: { kind: "exhausted" } };
   if (review.kind !== "accepted") return review;
   if (input.verdict !== "satisfied") return admitted(review, reviewValue(review.value));
-  const target = review.state.coordinates.target;
-  const tender = review.value.tender;
-  const placement = await admitPlacement(input.channel, git, target, {
+  const derivation = input.deriveDocument?.(review.state);
+  const completed = await completeCandidate({
+    channel: input.channel,
+    repository: git,
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-  }, tender === undefined || target === undefined ? undefined : async () => {
-    const integration = await planIntegration(git, {
-      contractId: input.contractId,
-      coordinates: review.state.coordinates,
-    }, tender, false);
-    if (integration.kind === "refused" && integration.refusal.kind !== "target-missing") {
-      return { kind: "refused" as const, refusal: integration.refusal };
-    }
-    return undefined;
+    ...(review.state.coordinates.target === undefined ? {} : { target: review.state.coordinates.target }),
+    verification: derivation?.verification ?? { kind: "prepared", data: null },
+    initial: review,
+    verifyInitial: false,
   });
-  const stopped = placementStop(placement);
-  const admission = placement.kind === "accepted" ? mergeAdmissions(review, placement) : review;
-  return admitted(admission, reviewValue(review.value, stopped));
+  return admitted(completed.admission, reviewValue(review.value, completed.evidence));
 }

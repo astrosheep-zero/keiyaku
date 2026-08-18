@@ -55,6 +55,13 @@ diagnostic text. The derivation and resolved declaration list remain
 attempt-local; neither becomes a persisted derivation or second execution
 authority.
 
+When a satisfied review follows an admitted delivery whose target moved,
+Verification runs against the reintegrated snapshot using the same frozen
+declaration and environment hooks. A current matching attestation may be
+reused. Review reintegration never captures the caller workspace or creates a
+new delivery identity; the original ChangeId remains the subject component
+while the current integration snapshot advances.
+
 If the edge's `verified` gate is declared without a valid declaration, its
 key-stamped absent declaration enters the owning outer legal decision. That
 decision rejects it after judging document currency; it is not a preflight

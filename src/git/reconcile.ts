@@ -328,7 +328,8 @@ async function reconcileHereWorkspaceRefs(
   if (state.terminal) {
     if (state.delivery === null) effects.push(await removeRef(repository, pin));
     else {
-      const integration = state.delivery.data.integration.snapshot;
+      const integration = state.currentIntegration?.snapshot;
+      if (integration === undefined) return complete();
       const custodian = await snapshotCustodian(repository, integration);
       effects.push(await (custodian === null
         ? await updateRef(repository, pin, integration)
@@ -337,7 +338,7 @@ async function reconcileHereWorkspaceRefs(
   } else if (state.bound) {
     effects.push(await (state.delivery === null
       ? await removeRef(repository, pin)
-      : await updateRef(repository, pin, state.delivery.data.integration.snapshot)));
+      : await updateRef(repository, pin, state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot)));
   }
   return complete(effects, lag);
 }
@@ -453,7 +454,7 @@ async function releaseTerminalCustody(
     return;
   }
   const tender = state.delivery.data.tenderSnapshot;
-  const integration = state.delivery.data.integration.snapshot;
+  const integration = state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot;
   const target = await targetCustodyForClaimedIntegration(repository, state, integration);
   if (sealedTree(expected, tender) === sealedTree(expected, integration) && target !== null) {
     effects.push(await removeRefWithCustody(repository, ref, target.ref, target.oid));
@@ -479,7 +480,7 @@ async function reconcileTerminalManagedWorktree(
   const expected = await terminalSealExpectations(channel, state);
   acc.effects.push(await updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
   if (state.delivery !== null) {
-    acc.effects.push(await updateRef(primary, pin, state.delivery.data.integration.snapshot));
+    acc.effects.push(await updateRef(primary, pin, state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot));
   }
   if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag);
   const retained = await removeSealedTerminalWorktree({
@@ -511,7 +512,7 @@ async function reconcileActiveManagedWorktree(
   const hookLag = await runCreateHooks(path, await worktreeGitDirectory(repository, path), hooks, retryHooks);
   if (hookLag !== null) lag.push(hookLag);
   effects.push(await (state.delivery
-    ? await updateRef(repository, candidatePinRefFor(state.id), state.delivery.data.integration.snapshot)
+      ? await updateRef(repository, candidatePinRefFor(state.id), state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot)
     : await removeRef(repository, candidatePinRefFor(state.id))));
   return complete(effects, lag);
 }

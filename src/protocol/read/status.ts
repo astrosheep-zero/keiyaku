@@ -147,7 +147,9 @@ async function rowFor(
     workspaceObservation,
     target: state.coordinates.target ?? null,
     targetLag,
-    delivery: state.delivery?.data ?? null,
+    delivery: state.delivery === null || state.currentIntegration === null
+      ? null
+      : { ...state.delivery.data, integration: state.currentIntegration },
     targetObservation,
     gates: {
       reports: gates.reports.map((report) => ({ gate: report.gate, current: report.current })),

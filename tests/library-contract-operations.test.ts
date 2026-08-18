@@ -371,20 +371,14 @@ test("review records before delivery and the same patch can be placed", async ()
   assert.equal((await result.keiyaku.state()).terminal?.kind, "claimed");
 });
 
-test("a conflicted satisfied review records testimony before returning its placement stop", async () => {
+test("a satisfied review before delivery records testimony and reports delivery-missing", async () => {
   const { repository, bound, targetHead } = await conflictedTargetReview();
 
   const reviewed = await bound.keiyaku.review({ verdict: "satisfied" });
 
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
   assert.deepEqual(reviewed.value.placement, {
-    refusal: {
-      kind: "integration-failed",
-      contractId: bound.keiyaku.id,
-      reason: "conflict",
-      targetHead,
-      conflictPaths: ["a.txt", "z.txt"],
-    },
+    refusal: { kind: "delivery-missing", contractId: bound.keiyaku.id },
   });
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetHead);
   const reviewedState = await bound.keiyaku.state();
@@ -492,7 +486,7 @@ test("an unsatisfied conflicted review records the same subject without requesti
   const satisfied = await bound.keiyaku.review({ verdict: "satisfied" });
   const satisfiedState = await bound.keiyaku.state();
   assert.equal(satisfiedState.attestations.at(-1)?.data.subject, unsatisfiedSubject);
-  assert.equal(satisfied.value.placement?.refusal.kind, "integration-failed");
+  assert.equal(satisfied.value.placement?.refusal.kind, "delivery-missing");
 });
 
 test("diff presentation config does not change a reviewed worktree ChangeId", async () => {
@@ -544,7 +538,7 @@ test("diff presentation config does not change a reviewed worktree ChangeId", as
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "claimed"]);
 });
 
-test("a satisfied review waits on the target-placement fence before placing", async () => {
+test("a satisfied review waits on the target-placement fence before reporting delivery-missing", async () => {
   const { repository, bound } = await conflictedTargetReview();
   const held = await acquireTargetPlacementFence(await repositoryAt(repository.path), "refs/heads/main");
   const pending = bound.keiyaku.review({ verdict: "satisfied" });
@@ -556,7 +550,7 @@ test("a satisfied review waits on the target-placement fence before placing", as
   held.close();
   const reviewed = await pending;
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
-  assert.equal(reviewed.value.placement?.refusal.kind, "integration-failed");
+  assert.equal(reviewed.value.placement?.refusal.kind, "delivery-missing");
 });
 
 test("a satisfied review cannot interleave a stale integration stop across the target fence", async () => {
@@ -619,11 +613,11 @@ test("a satisfied review cannot interleave a stale integration stop across the t
   assert.equal(stillHeld, "blocked");
   held.close();
   const reviewed = await pending;
-  assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation"]);
-  assert.equal(reviewed.value.placement?.failure, "target-moved");
-  if (reviewed.value.placement?.failure === "target-moved") {
-    assert.equal(reviewed.value.placement.expected, targetHead);
-  }
+  assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation", "reintegrated", "claimed"]);
+  assert.equal(reviewed.value.placement, undefined);
+  const finalState = await bound.keiyaku.state();
+  assert.equal(finalState.terminal?.kind, "claimed");
+  assert.equal(finalState.currentIntegration?.snapshot, repository.run(["rev-parse", "refs/heads/main"]).trim());
 });
 
 test("a whitespace-only worktree change stales prior review testimony", async () => {

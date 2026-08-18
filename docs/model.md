@@ -182,7 +182,7 @@ of the source document's sections or syntax.
 The fact vocabulary is closed:
 
 ```text
-bind / amend / deliver / attestation
+bind / amend / deliver / reintegrated / attestation
 arc / bound / claimed / abandoned
 ```
 
@@ -200,6 +200,11 @@ type DeliverData = Readonly<{
   policy: Readonly<{
     requireBranchesToBeUpToDate: boolean
   }>
+}>
+
+type ReintegratedData = Readonly<{
+  predecessor: SnapshotId
+  snapshot: SnapshotId
 }>
 
 type AttestationData = Readonly<{
@@ -256,6 +261,11 @@ type ContractState = Readonly<{
   terms: ContractTerms
   bound: BoundEntry | null
   delivery: DeliverEntry | null
+  currentIntegration: Readonly<{
+    predecessor: SnapshotId
+    snapshot: SnapshotId
+    changeId: ChangeId
+  }> | null
   attestations: readonly AttestationEntry[]
   currentArc?: ArcEntry
   terminal: ClaimedEntry | AbandonedEntry | null

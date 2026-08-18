@@ -99,7 +99,7 @@ async function runFencedPlacement(
 }
 
 /** Hold the existing target-placement fence for one owner callback. */
-async function runUnderTargetPlacementFence<T>(
+export async function runUnderTargetPlacementFence<T>(
   repository: GitRepository,
   target: string,
   run: () => Promise<T>,

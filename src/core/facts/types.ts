@@ -134,6 +134,13 @@ export type DeliverData = Readonly<{
   }>;
 }>;
 
+export type CurrentIntegration = DeliverData["integration"];
+
+export type ReintegratedData = Readonly<{
+  predecessor: SnapshotId;
+  snapshot: SnapshotId;
+}>;
+
 export type AttestationData = Readonly<{
   gate: Gate;
   subject: DependencyKeySet;
@@ -170,6 +177,7 @@ export type BindEntry = JournalEnvelope<"bind", BindData>;
 type AmendEntry = JournalEnvelope<"amend", AmendData>;
 type BoundEntry = JournalEnvelope<"bound", BoundData>;
 type DeliverEntry = JournalEnvelope<"deliver", DeliverData>;
+export type ReintegratedEntry = JournalEnvelope<"reintegrated", ReintegratedData>;
 export type AttestationEntry = JournalEnvelope<"attestation", AttestationData>;
 type ClaimedEntry = JournalEnvelope<"claimed", ClaimedData>;
 export type ArcEntry = JournalEnvelope<"arc", ArcData>;
@@ -180,6 +188,7 @@ export type JournalEntry =
   | AmendEntry
   | BoundEntry
   | DeliverEntry
+  | ReintegratedEntry
   | AttestationEntry
   | ClaimedEntry
   | ArcEntry
@@ -196,6 +205,7 @@ export type ContractState = Readonly<{
   terms: ContractTerms;
   bound: BoundEntry | null;
   delivery: DeliverEntry | null;
+  currentIntegration: CurrentIntegration | null;
   attestations: readonly AttestationEntry[];
   currentArc?: ArcEntry;
   terminal: ContractTerminal | null;

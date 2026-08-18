@@ -41,6 +41,7 @@ function stateFromBind(
     terms: cloneTerms(bind.data.terms),
     bound: null,
     delivery: null,
+    currentIntegration: null,
     attestations,
     terminal: null,
   };
@@ -76,7 +77,17 @@ function foldEntry(
       return { ...state, bound: entry };
     case "deliver":
       if (state.bound === null) foldError("deliver requires bound");
-      return { ...state, delivery: entry };
+      return { ...state, delivery: entry, currentIntegration: { ...entry.data.integration } };
+    case "reintegrated":
+      if (state.delivery === null) foldError("reintegrated requires a deliver");
+      return {
+        ...state,
+        currentIntegration: {
+          predecessor: entry.data.predecessor,
+          snapshot: entry.data.snapshot,
+          changeId: state.delivery.data.integration.changeId,
+        },
+      };
     case "attestation":
       attestations.push(entry);
       return { ...state, attestations };

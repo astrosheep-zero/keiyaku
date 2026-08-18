@@ -210,12 +210,15 @@ Targeted claimed placement is one serialized Git operation per canonical
 target ref. Its fence begins before checkout preconditions are observed and
 ends only after the journal and target transaction has been published and the
 target checkout has followed it. Admission atomically asserts
-`target == integration.predecessor`, moves it to `integration.snapshot`, and appends
-`claimed`; filesystem materialization remains a second physical write inside
-that same fence. If the target moved after delivery admission or Verification,
-placement returns `target-moved` with the expected and freshly observed target
-coordinates. It appends no claimed fact, does not move the target, and never
-re-integrates or reuses Verification inside that attempt.
+`target == currentIntegration.predecessor`, moves it to
+`currentIntegration.snapshot`, and appends `claimed`; filesystem materialization
+remains a second physical write inside that same fence. If the target moved after
+delivery admission or Verification, the completion protocol acquires the same
+fence, integrates the persisted tender against the freshly observed target,
+materializes a new integration commit from the original delivery metadata, and
+admits `reintegrated` with the target assertion. Placement then retries against
+that folded integration. The original delivery bytes and ChangeId remain
+unchanged.
 
 The targeted checkout observation is a no-effects precheck. It accepts the
 targeted coordinates and prospective snapshots, lists registered checkouts,

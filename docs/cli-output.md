@@ -223,6 +223,13 @@ The renderer is a pure exhaustive projection over `InvocationResult`; it
 invents no fields, rereads no authority, and does not change exit semantics.
 JSON serializes that same public value.
 
+When accepted facts contain `reintegrated`, delivery and review text show each
+`re-integrated <predecessor> -> <snapshot>` row. Verification rerun or reuse is
+rendered from its typed result, and successful completion shows the target
+advancing to the latest integration snapshot. A repeated movement stop shows
+its integrated snapshot, observed target, and numeric attempts; the renderer
+does not infer these values from history.
+
 An accepted mutation receipt answers the caller's verb-specific question, not
 whether Protocol admitted an entry. Its first line names the world change made
 by that verb and the Contract identity. Decision-relevant consequences follow;

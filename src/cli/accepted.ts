@@ -6,6 +6,7 @@ import {
   type BindResult,
   type ContractId,
   type Delivery,
+  type Fact,
   type MutationResult,
   type Review,
 } from "../index.js";
@@ -32,11 +33,19 @@ type MutationCallOptions = Readonly<{
 }>;
 
 function acceptedFacts(result: MutationObservation): readonly AcceptedFact[] {
-  return result.facts.map((fact): AcceptedFact => ({
-    contract: fact.contract,
-    entry: fact.entry,
-    kind: fact.kind,
-  }));
+  return result.facts.map((fact): AcceptedFact => fact.kind === "reintegrated"
+    ? { contract: fact.contract, entry: fact.entry, kind: fact.kind, data: fact.data }
+    : { contract: fact.contract, entry: fact.entry, kind: fact.kind });
+}
+
+function attestationFor(
+  facts: readonly Fact[],
+  gate: "reviewed" | "verified",
+): Extract<Fact, { kind: "attestation" }> | undefined {
+  return facts.findLast(
+    (fact): fact is Extract<Fact, { kind: "attestation" }> =>
+      fact.kind === "attestation" && fact.data.gate === gate,
+  );
 }
 
 function acceptedEnvelope(
@@ -89,7 +98,7 @@ export function acceptedDeliver(
   coordinate: ContractId,
 ): AcceptedDeliverResult {
   const value = result.value;
-  const attestation = result.facts.find((fact) => fact.kind === "attestation");
+  const attestation = attestationFor(result.facts, "verified");
   const verificationVerdict = attestation?.data.verdict ?? value.verificationReuse?.verdict;
   return {
     ...acceptedEnvelope(result, coordinate),
@@ -108,14 +117,21 @@ export function acceptedReview(
   coordinate: ContractId,
 ): AcceptedReviewResult {
   const value = result.value;
-  const attestation = result.facts.find((fact) => fact.kind === "attestation");
-  if (attestation === undefined) throw new Error("accepted review is missing its attestation fact");
+  const reviewAttestation = attestationFor(result.facts, "reviewed");
+  if (reviewAttestation === undefined) throw new Error("accepted review is missing its attestation fact");
+  const verificationAttestation = attestationFor(result.facts, "verified");
+  const verificationVerdict = verificationAttestation?.data.verdict ?? value.verificationReuse?.verdict;
   return {
     ...acceptedEnvelope(result, coordinate),
     verb: "review",
-    verdict: attestation.data.verdict,
+    verdict: reviewAttestation.data.verdict,
+    ...(verificationVerdict === undefined ? {} : { verificationVerdict }),
+    ...(value.verification === undefined ? {} : { verification: value.verification }),
+    ...(value.verificationReuse === undefined ? {} : { verificationReuse: value.verificationReuse }),
     ...(value.placement === undefined ? {} : { placement: value.placement }),
     ...(value.workspace === undefined ? {} : { workspace: value.workspace }),
+    ...(value.cleanup === undefined ? {} : { cleanup: value.cleanup }),
+    ...(value.leak === undefined ? {} : { leak: value.leak }),
   };
 }
 

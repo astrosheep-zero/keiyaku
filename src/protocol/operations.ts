@@ -70,15 +70,28 @@ export type DocumentDerivation = Readonly<{
 }>;
 
 type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: IntentRetry; refusal?: never }>;
-export type VerificationStop = StepStop<AttestationRefusal> | VerificationRuntimeStop;
+export type VerificationStop = StepStop<AttestationRefusal | VerificationDeclarationRefusal> | VerificationRuntimeStop;
 export type PlacementStop =
-  | StepStop<PlacementRefusal | TargetPlacementRefusal | IntegrationPreparationRefusal>
+  | StepStop<
+      | PlacementRefusal
+      | TargetPlacementRefusal
+      | IntegrationPreparationRefusal
+      | Readonly<{ kind: "target-missing"; contractId: ContractId }>
+    >
   | Readonly<{
     failure: "target-moved";
     contractId: ContractId;
     target: string;
     expected: SnapshotId;
     observed: SnapshotId | null;
+  }>
+  | Readonly<{
+    failure: "target-moved";
+    contractId: ContractId;
+    target: string;
+    integratedAt: SnapshotId;
+    observed: SnapshotId | null;
+    attempts: number;
   }>
   | Readonly<{ failure: "target-placement-failed"; diagnostic: string }>;
 
@@ -172,7 +185,10 @@ export async function stateOperation(input: MutationOperationInput): Promise<Con
 
 export async function deliveryOperation(input: MutationOperationInput): Promise<DeliverData | null> {
   const state = (await observeContractAt(input.scope, input.channel, input.contractId)).state;
-  return state?.delivery?.data ?? null;
+  if (state === null || state === undefined || state.delivery === null) return null;
+  return state.currentIntegration === null
+    ? state.delivery.data
+    : { ...state.delivery.data, integration: state.currentIntegration };
 }
 
 export async function deliveryDiffOperation(input: Readonly<{

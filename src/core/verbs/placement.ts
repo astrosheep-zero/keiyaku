@@ -48,7 +48,8 @@ export function decidePlacement(
   const current = activeContract(observation, id);
   if ("kind" in current) return { kind: "refused", refusal: current };
   const delivery = current.delivery;
-  if (!delivery) {
+  const integration = current.currentIntegration;
+  if (!delivery || !integration) {
     return { kind: "refused", refusal: { kind: "delivery-missing", contractId: id } };
   }
   const unmet = unmetPrerequisites(current.terms.after, observation);
@@ -75,8 +76,8 @@ export function decidePlacement(
       ...(current.coordinates.target === undefined ? {} : {
         target: {
           target: current.coordinates.target,
-          expectedOid: delivery.data.integration.predecessor,
-          newOid: delivery.data.integration.snapshot,
+          expectedOid: integration.predecessor,
+          newOid: integration.snapshot,
         },
       }),
     },

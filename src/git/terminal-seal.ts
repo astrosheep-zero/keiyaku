@@ -35,7 +35,7 @@ export function terminalSealSnapshots(state: ContractState): readonly SnapshotId
     state.coordinates.start,
     ...(state.delivery === null ? [] : [
       state.delivery.data.tenderSnapshot,
-      state.delivery.data.integration.snapshot,
+      ...(state.currentIntegration === null ? [] : [state.currentIntegration.snapshot]),
     ]),
   ])];
 }
@@ -82,7 +82,7 @@ export function terminalSealExpectations(
       state.coordinates.start,
       ...(tenderParent === undefined ? [] : [tenderParent]),
       tender,
-      state.delivery.data.integration.snapshot,
+      state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot,
     ])],
     trees: [...treeBySnapshot.values()],
     treeBySnapshot,

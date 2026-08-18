@@ -92,12 +92,13 @@ export function parseDependencyKeySet(value: string): DependencyKeySet {
 }
 
 function currentKeys(state: ContractState): ReadonlySet<string> {
+  const integration = state.currentIntegration ?? state.delivery?.data.integration;
   return new Set([
     encodeKey({ kind: "document", value: state.terms.document.key }),
     ...state.terms.segments.map((value) => encodeKey({ kind: "segment", value })),
-    ...(state.delivery === null ? [] : [
-      encodeKey({ kind: "snapshot", value: state.delivery.data.integration.snapshot }),
-      encodeKey({ kind: "change", value: state.delivery.data.integration.changeId }),
+    ...(integration === undefined ? [] : [
+      encodeKey({ kind: "snapshot", value: integration.snapshot }),
+      encodeKey({ kind: "change", value: integration.changeId }),
     ]),
   ]);
 }

@@ -97,6 +97,20 @@ function prerequisiteRows(stop: VerificationStop | PlacementStop, columns: numbe
   return lines;
 }
 
+function targetMovedDetail(stop: Extract<PlacementStop, { failure: "target-moved" }>): readonly ReceiptSegment[] {
+  if ("integratedAt" in stop) {
+    return [
+      { text: stop.target, opaque: true },
+      { text: `${stop.integratedAt} -> ${stop.observed}`, opaque: true },
+      { text: `attempts=${stop.attempts}` },
+    ];
+  }
+  return [
+    { text: stop.target, opaque: true },
+    { text: `${stop.expected} -> ${stop.observed}`, opaque: true },
+  ];
+}
+
 export function stopLines(
   label: "verification" | "completion",
   stop: VerificationStop | PlacementStop,
@@ -116,7 +130,7 @@ export function stopLines(
     if (stop.failure === "environment-failure" && "command" in stop) {
       detail.push({ text: `command=${stop.command}` }, { text: hookFailureSummary(stop.detail), opaque: true });
     } else if (stop.failure === "target-moved") {
-      detail.push({ text: stop.target, opaque: true }, { text: `${stop.expected} -> ${stop.observed}`, opaque: true });
+      detail.push(...targetMovedDetail(stop));
     }
   }
   const lines: string[] = [];

@@ -414,7 +414,7 @@ export async function prepareTargetPlacement(
   state: ContractState,
   target: RefOperation,
 ): Promise<TargetPlacementPreparation> {
-  if (state.coordinates.target !== target.target || state.delivery?.data.integration.snapshot !== target.newOid) {
+  if (state.coordinates.target !== target.target || state.currentIntegration?.snapshot !== target.newOid) {
     throw new Error("placement state does not match its offered target movement");
   }
   const observation = await observeTargetPlacement(repository, {
@@ -513,10 +513,11 @@ export async function recoverTargetPlacement(
   const target = state.coordinates.target;
   const delivery = state.delivery;
   if (state.terminal?.kind !== "claimed" || target === undefined || delivery === null) return { effects: [], lag: [] };
-  if (await readRef(repository, target) !== delivery.data.integration.snapshot) return { effects: [], lag: [] };
+  const integration = state.currentIntegration;
+  if (integration === null || await readRef(repository, target) !== integration.snapshot) return { effects: [], lag: [] };
 
-  const candidateTree = await commitTree(repository, delivery.data.integration.snapshot);
-  const predecessorTree = await commitTree(repository, delivery.data.integration.predecessor);
+  const candidateTree = await commitTree(repository, integration.snapshot);
+  const predecessorTree = await commitTree(repository, integration.predecessor);
   const worktrees = (await registeredWorktrees(repository))
     .filter((worktree) => worktree.branch === target)
     .sort((left, right) => left.path.localeCompare(right.path));
@@ -527,8 +528,8 @@ export async function recoverTargetPlacement(
       const recovery = await recoverCheckout({
         repository,
         path: worktree.path,
-        predecessor: delivery.data.integration.predecessor,
-        candidate: delivery.data.integration.snapshot,
+        predecessor: integration.predecessor,
+        candidate: integration.snapshot,
         predecessorTree,
         candidateTree,
       });

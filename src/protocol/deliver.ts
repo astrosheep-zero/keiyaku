@@ -10,20 +10,14 @@ import {
   prepareDeliveryCommitMetadata,
 } from "../git/tender.js";
 import { currentBranch, observeContractsForAdmissionAt } from "../git/observe.js";
-import type { WorktreeLeak } from "../git/scratch.js";
 import type { AttemptContext } from "../core/decide.js";
 import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, ContractState, DeliverData } from "../core/facts/types.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
-import {
-  currentVerifiedAttestation,
-  verifyDelivery,
-  type CurrentVerifiedAttestation,
-  type VerificationCleanupFailure,
-} from "./intent.js";
-import { admitPlacement } from "./placement.js";
+import type { CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
-import { admitted, type AcceptedProtocolStep } from "./outcome.js";
+import { admitted } from "./outcome.js";
+import { completeCandidate, type CompletionEvidence } from "./completion.js";
 import { appointmentFor, readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import type {
   AttemptDecision,
@@ -31,25 +25,12 @@ import type {
   DocumentDerivation,
   IntentOutcome,
   MutationOperationInput,
-  PlacementStop,
-  VerificationStop,
 } from "./operations.js";
-import {
-  mergeAdmissions,
-  placementStop,
-  timestamp,
-  unpackVerificationOutcome,
-} from "./operations.js";
+import { timestamp } from "./operations.js";
 
 type DeliveryIdentity = DeliverData;
 export type VerificationReuse = CurrentVerifiedAttestation;
-export type DeliverValue = DeliveryIdentity & Readonly<{
-  verification?: VerificationStop;
-  verificationReuse?: VerificationReuse;
-  placement?: PlacementStop;
-  cleanup?: VerificationCleanupFailure;
-  leak?: WorktreeLeak;
-}>;
+export type DeliverValue = DeliveryIdentity & CompletionEvidence;
 
 type DeliverOperationInput = MutationOperationInput & Readonly<{
   deriveDocument: (state: ContractState) => DocumentDerivation;
@@ -200,49 +181,20 @@ async function completeDelivery(
   if (derivation.verification.kind !== "prepared") {
     throw new Error("accepted delivery is missing its Verification preparation");
   }
-  let admission: AcceptedProtocolStep = first;
-  let verificationValue: VerificationStop | undefined;
-  let verificationReuse: VerificationReuse | undefined;
-  let cleanup: VerificationCleanupFailure | undefined;
-  let leak: WorktreeLeak | undefined;
-  const currentVerified = currentVerifiedAttestation(first.state);
-  if (currentVerified !== undefined) {
-    verificationReuse = currentVerified;
-  } else {
-    const verification = await verifyDelivery({
-      channel: input.channel,
-      repository: input.scope,
-      contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      at: timestamp(),
-      state: first.state,
-      snapshot: first.value.delivery.integration.snapshot,
-      environment: process.env,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(derivation.verification.data === null ? {} : { verification: derivation.verification.data }),
-    });
-    if (verification !== null) {
-      const unpacked = unpackVerificationOutcome(verification);
-      cleanup = unpacked.cleanup;
-      leak = unpacked.leak;
-      verificationValue = unpacked.stop;
-      if (unpacked.admission !== undefined) admission = mergeAdmissions(admission, unpacked.admission);
-    }
-  }
-  const placement = await admitPlacement(input.channel, input.scope, first.state.coordinates.target, {
+  const completed = await completeCandidate({
+    channel: input.channel,
+    repository: input.scope,
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(first.state.coordinates.target === undefined ? {} : { target: first.state.coordinates.target }),
+    verification: derivation.verification,
+    initial: first,
+    verifyInitial: true,
   });
-  const placementValue = placementStop(placement);
-  if (placement.kind === "accepted") admission = mergeAdmissions(admission, placement);
-  return admitted(admission, {
+  return admitted(completed.admission, {
     ...first.value.delivery,
-    ...(verificationValue === undefined ? {} : { verification: verificationValue }),
-    ...(verificationReuse === undefined ? {} : { verificationReuse }),
-    ...(placementValue === undefined ? {} : { placement: placementValue }),
-    ...(cleanup === undefined ? {} : { cleanup }),
-    ...(leak === undefined ? {} : { leak }),
+    ...completed.evidence,
   });
 }
 
