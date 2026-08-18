@@ -16,7 +16,6 @@ import { worktreePath } from "./git/workspace.js";
 import {
   appointmentFor,
   placeRegisterPath,
-  readPlaceRegister,
   type PlaceRegister,
 } from "./workspace-place.js";
 
@@ -269,7 +268,7 @@ export async function projectContractWorktree(
   if (state.coordinates.workspace === "here") {
     return await here(repository, state, renderContractGuidance(state));
   }
-  const appointed = appointmentFor(register ?? await readPlaceRegister(repository), state.id);
+  const appointed = register === undefined ? undefined : appointmentFor(register, state.id);
   if (appointed === undefined) {
     return {
       effects: [],
