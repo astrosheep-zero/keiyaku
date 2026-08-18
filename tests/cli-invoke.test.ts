@@ -15,6 +15,8 @@ import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
 import { BindDraftError, preserveBindDraft } from "../src/cli/draft.js";
+import { acceptedDeliver } from "../src/cli/accepted.js";
+import { contractHead, contractId } from "../src/core/facts/types.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
 
@@ -128,6 +130,28 @@ test("show returns the canonical Contract guidance in text and JSON projections"
     (error: unknown) => error instanceof KeiyakuRefused
       && assert.deepEqual(error.refusal, { kind: "contract-missing", contractId: "kei/missing" }) === undefined,
   );
+});
+
+test("deliver exposes the core-owned unmet prerequisites unchanged in its JSON result", () => {
+  const dependentId = contractId("kei/dependent-delivery");
+  const prerequisiteId = contractId("kei/active-prerequisite");
+  const expected = {
+    kind: "prerequisites-unsatisfied" as const,
+    contractId: dependentId,
+    unmet: [{ contractId: prerequisiteId, state: "active" as const }],
+  };
+  const placement = { refusal: expected };
+  const delivered = acceptedDeliver({
+    facts: [],
+    head: contractHead("head"),
+    value: { placement } as Delivery,
+    effects: [],
+    lags: [],
+    settlement: { actions: [], lags: [] },
+  }, dependentId);
+
+  assert.strictEqual(delivered.placement, placement);
+  assert.deepEqual(JSON.parse(JSON.stringify(delivered)).placement, placement);
 });
 
 test("one CLI invocation reuses its Repo for selector, settings, and contract lookup", async () => {

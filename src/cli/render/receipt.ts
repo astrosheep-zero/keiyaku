@@ -84,6 +84,19 @@ export function reuseLines(reuse: VerificationReuse | undefined, columns: number
   return renderOpaqueBlock(`reuse verification ${reuse.entry} ${reuse.verdict}`, "   ", columns);
 }
 
+function prerequisiteRows(stop: VerificationStop | PlacementStop, columns: number): readonly string[] {
+  if (!("refusal" in stop) || stop.refusal?.kind !== "prerequisites-unsatisfied") return [];
+  const lines: string[] = [];
+  for (const prerequisite of stop.refusal.unmet) {
+    receiptRow(lines, " ", "prerequisite", [
+      { text: prerequisite.contractId, opaque: true },
+      { text: "·" },
+      { text: prerequisite.state },
+    ], columns);
+  }
+  return lines;
+}
+
 export function stopLines(
   label: "verification" | "completion",
   stop: VerificationStop | PlacementStop,
@@ -109,6 +122,7 @@ export function stopLines(
   const lines: string[] = [];
   const state = label === "verification" ? "failed" : "blocked";
   receiptRow(lines, "!", label, [{ text: state }, { text: "·" }, ...detail], columns);
+  lines.push(...prerequisiteRows(stop, columns));
   if ("failure" in stop && stop.failure === "environment-failure" && "command" in stop) {
     appendHookPayload(lines, stop.detail);
   }

@@ -1008,7 +1008,11 @@ test("delivery binds before after and placement reads amended prerequisites", as
   ));
   assert.deepEqual(waitingPlacement, {
     kind: "refused",
-    refusal: { kind: "prerequisites-unsatisfied", contractId: dependent.value.contractId },
+    refusal: {
+      kind: "prerequisites-unsatisfied",
+      contractId: dependent.value.contractId,
+      unmet: [{ contractId: originalPrerequisite.value.contractId, state: "active" }],
+    },
   });
 
   const deliveredState = (await observeContract(git, dependent.value.contractId)).state;

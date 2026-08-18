@@ -44,6 +44,13 @@ Both are placement obligations, but `after` remains an identity edge that reads
 another Contract's terminal fact while `terms.gates` remains an opaque token
 satisfied by current attestation evidence. Placement does not synthesize an
 attestation or gate token for a prerequisite.
+For `prerequisites-unsatisfied`, that same sole adjudicator projects the
+non-claimed direct prerequisites into `unmet`, retaining the declared `after`
+order. Each complete ContractId has one observed category: `missing` for a
+null observation, `abandoned` for an abandoned terminal, and `active` for every
+other non-claimed state. Claimed prerequisites are omitted, and this refusal
+always has a nonempty `unmet` collection. No later layer rereads Contract
+authority or adjudicates those categories.
 Admitting testimony does not itself invoke placement; `deliver` and a satisfied
 `review` explicitly request it as a later protocol step. That request is one
 target-fence placement attempt: a present delivery is judged as-is, and only a

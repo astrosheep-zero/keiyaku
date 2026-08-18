@@ -104,14 +104,22 @@ type AmendRefusal = Readonly<{
   contractId: ContractId
 }>
 
+type UnmetPrerequisite = Readonly<{
+  contractId: ContractId
+  state: "missing" | "active" | "abandoned"
+}>
+
 type PlacementRefusal = Readonly<{
   kind:
     | "contract-missing"
     | "delivery-missing"
     | "terminal"
-    | "prerequisites-unsatisfied"
     | "gates-unsatisfied"
   contractId: ContractId
+}> | Readonly<{
+  kind: "prerequisites-unsatisfied"
+  contractId: ContractId
+  unmet: readonly UnmetPrerequisite[]
 }>
 
 type IntegrationRefusal = Readonly<{
@@ -321,6 +329,13 @@ candidate provisioning, never a Verification verdict; `candidate-unavailable`
 identifies materialization failure; `unknown-exit`, `spawn-error`, and admission
 stops remain execution/admission stops. A declaration-owned timeout instead
 admits an unsatisfied attestation and therefore has no stop arm.
+
+`prerequisites-unsatisfied` carries a nonempty `unmet` collection exactly as
+projected by the placement decision. Its rows retain declared prerequisite
+order, each complete ContractId, and one `missing`, `active`, or `abandoned`
+category; claimed prerequisites do not appear. Protocol, Library, JSON, and
+text consume that same public value without another authority read or lifecycle
+derivation.
 
 `KeiyakuRefused` stores the complete structured `KeiyakuRefusal`; its `code`
 getter derives from `refusal.kind`. `KeiyakuRetry` does the same for

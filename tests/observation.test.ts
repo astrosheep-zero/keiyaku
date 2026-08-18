@@ -5,8 +5,10 @@ import { decideBind } from "../src/core/verbs/bind.js";
 import { decideAmend } from "../src/core/verbs/amend.js";
 import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
+import { decidePlacement } from "../src/core/verbs/placement.js";
 import { foldJournal } from "../src/core/facts/fold.js";
 import {
+  changeId,
   contractId,
   documentKey,
   entryUlid,
@@ -37,6 +39,74 @@ function waitingState(contract: ReturnType<typeof contractId>, after: readonly R
       terms: terms(after),
     },
   }]);
+}
+
+function deliveredState(contract: ReturnType<typeof contractId>, after: readonly ReturnType<typeof contractId>[] = []) {
+  return foldJournal(contract, [
+    {
+      v: 1,
+      kind: "bind",
+      contract,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+      at: "2026-08-07T00:00:00Z",
+      data: {
+        coordinates: { start: snapshotId("start"), workspace: "here" },
+        terms: terms(after),
+      },
+    },
+    {
+      v: 1,
+      kind: "bound",
+      contract,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+      at: "2026-08-07T00:00:01Z",
+      data: {},
+    },
+    {
+      v: 1,
+      kind: "deliver",
+      contract,
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
+      at: "2026-08-07T00:00:02Z",
+      data: {
+        tenderSnapshot: snapshotId("tender"),
+        integration: {
+          predecessor: snapshotId("predecessor"),
+          snapshot: snapshotId("snapshot"),
+          changeId: changeId("change"),
+        },
+        method: "squash",
+        policy: { requireBranchesToBeUpToDate: false },
+      },
+    },
+  ]);
+}
+
+function terminalState(
+  contract: ReturnType<typeof contractId>,
+  terminal: "claimed" | "abandoned",
+) {
+  const delivered = deliveredState(contract);
+  return {
+    ...delivered,
+    terminal: terminal === "claimed"
+      ? {
+        v: 1 as const,
+        kind: "claimed" as const,
+        contract,
+        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+        at: "2026-08-07T00:00:03Z",
+        data: { delivery: delivered.delivery!.entry },
+      }
+      : {
+        v: 1 as const,
+        kind: "abandoned" as const,
+        contract,
+        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+        at: "2026-08-07T00:00:03Z",
+        data: {},
+      },
+  };
 }
 
 test("decision accessor rejects a missing key, while explicit null is domain absence", () => {
@@ -94,6 +164,39 @@ test("decision accessor rejects a missing key, while explicit null is domain abs
     observation,
   });
   assert.deepEqual(bind, { kind: "refused", refusal: { kind: "unknown-prerequisite", contractId: id } });
+});
+
+test("placement projects every non-claimed prerequisite from its one observation", () => {
+  const active = contractId("kei/active-prerequisite");
+  const abandoned = contractId("kei/abandoned-prerequisite");
+  const claimed = contractId("kei/claimed-prerequisite");
+  const missing = contractId("kei/missing-prerequisite");
+  const dependent = deliveredState(id, [active, abandoned, claimed, missing]);
+
+  const decision = decidePlacement({
+    input: { contractId: id, at: "2026-08-07T00:00:04Z" },
+    attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAZ")] },
+    observation: new Map([
+      [id, dependent],
+      [active, waitingState(active)],
+      [abandoned, terminalState(abandoned, "abandoned")],
+      [claimed, terminalState(claimed, "claimed")],
+      [missing, null],
+    ]),
+  });
+
+  assert.deepEqual(decision, {
+    kind: "refused",
+    refusal: {
+      kind: "prerequisites-unsatisfied",
+      contractId: id,
+      unmet: [
+        { contractId: active, state: "active" },
+        { contractId: abandoned, state: "abandoned" },
+        { contractId: missing, state: "missing" },
+      ],
+    },
+  });
 });
 
 test("the decision map cannot carry a disagreeing state identity", () => {

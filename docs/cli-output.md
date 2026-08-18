@@ -262,6 +262,18 @@ terms diff
 ? <retry kind and exact diagnostic facts>
 ```
 
+A prerequisite completion stop is one completion row followed by the received
+public collection in its existing order:
+
+```text
+! completion blocked · prerequisites-unsatisfied
+  prerequisite <complete kei/...> · <missing|active|abandoned>
+```
+
+The renderer prints each typed `unmet` member exactly once. It does not read
+the board, inspect a Contract, or derive a lifecycle category; JSON serializes
+that same public collection unchanged.
+
 Bind reports its typed workspace coordinate and optional target; a missing
 target renders `no target`. Amend places the exact `terms diff` immediately
 after its first line because the diff is its product answer, not mechanical
