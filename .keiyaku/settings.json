@@ -3,10 +3,8 @@
     "create": [
       {
         "argv": [
-          "npm",
-          "ci",
-          "--ignore-scripts",
-          "--prefer-offline"
+          "node",
+          "scripts/provision-worktree-dependencies.js"
         ],
         "timeoutMs": 300000
       }
