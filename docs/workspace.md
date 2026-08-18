@@ -30,8 +30,12 @@ Contract data, lifecycle evidence, or a second appointment coordinate.
 Reviewer; the worker never infers an omitted seat. `Worktree` identifies this
 file as a derived view and requires work to remain in its Contract worktree.
 `Deliverer` implements and verifies the Contract terms without deciding the
-lifecycle and, when an Arc is active, stays within that current chapter. `Reviewer` reviews the complete current worktree snapshot without
-modifying it. Candidate commits are only for historical review.
+lifecycle and, when an Arc is active, stays within that current chapter. For
+work requiring three or more steps, it prefers `keiyaku task -C <worktree>`
+to organize and manage Tasks, and it promptly updates progress for Tasks
+already present in the current worktree. `Reviewer` reviews the complete
+current worktree snapshot without modifying it. Candidate commits are only
+for historical review.
 
 The same canonical frontmatter projection feeds initial here-worktree reservation
 and complete rendered guidance, so `Keiyaku.guidance()`, `keiyaku show`,

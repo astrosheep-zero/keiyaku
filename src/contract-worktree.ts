@@ -63,6 +63,9 @@ const FULFILLMENT = [
   "### Deliverer", "",
   "Implement and verify the Objective under the Design, Region, and Criteria in this Contract.",
   "When an Arc is active, stay within that current chapter.",
+  "For work requiring three or more steps, prefer `keiyaku task -C <worktree>` "
+    + "to organize and manage Tasks.",
+  "Promptly update progress for Tasks already present in the current worktree.",
   "Leave lifecycle decisions to the caller; report the candidate, verification performed, and any unmet term.", "",
   "### Reviewer", "",
   "Review this Contract worktree against the complete Contract.",

@@ -121,11 +121,17 @@ the test. Give each resulting Contract coherent terms. Connect them with
 `--after` only when one must proceed from another's settled result or their
 intended work is unsafe to run concurrently.
 
-When one acceptance boundary still spans several coherent chapters,
-organize them as arcs. An arc is a chapter of the delivery's
-story, not a task list: its title names the chapter, Objective is the
-chapter's aim, Brief opens the next chapter. When an Arc is active, stay
-within that current chapter. `.keiyaku/KEIYAKU.md` renders the current Arc.
+When a complex Keiyaku cannot be split without breaking one acceptance
+boundary, organize its fulfillment into arcs. Do not hand the whole
+undifferentiated Contract to one Deliverer and trust one pass to finish it.
+Record and work one current chapter at a time.
+
+An arc is a chapter as in a work of literature: one named part of the
+delivery's story, not a task list, progress slice, or claim that the work is
+mechanically sequential. Its title names the chapter, Objective states that
+chapter's aim, and Brief commissions work for that chapter. When an Arc is
+active, stay within that current chapter. `.keiyaku/KEIYAKU.md` renders the
+current Arc.
 Record the next chapter before entering it:
 
 ```bash

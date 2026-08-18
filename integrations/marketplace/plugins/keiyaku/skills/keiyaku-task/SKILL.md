@@ -1,6 +1,8 @@
 ---
 name: keiyaku-task
-description: "Use when planning work in a Keiyaku v4 repo: add tasks, wire dependencies, inspect readiness, and track lifecycle."
+description: >-
+  Use when recording, decomposing, or tracking a complex task, typically
+  involving three or more steps.
 ---
 
 # Keiyaku Task
