@@ -1,19 +1,12 @@
+import { TASK_MUTATION_ACTIONS } from "../task/mutation.js";
+
 export const ALLOWED_ACTIONS = Object.freeze([
   "akuma.call",
   "akuma.kill",
   "akuma.tell",
   "contract.deliver",
   "contract.review",
-  "task.add",
-  "task.addDocument",
-  "task.compose",
-  "task.done",
-  "task.drop",
-  "task.hold",
-  "task.resume",
-  "task.start",
-  "task.stop",
-  "task.update",
+  ...TASK_MUTATION_ACTIONS,
 ] as const);
 
 export type AllowedAction = (typeof ALLOWED_ACTIONS)[number];

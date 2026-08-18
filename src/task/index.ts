@@ -6,7 +6,7 @@ import {
 } from "./board.js";
 import { composeTasks, type TaskCompositionResult } from "./compose.js";
 import { TaskAuthorityCorruptionError, type TaskPriority, type TaskState } from "./document.js";
-import { isTaskSegment, parseTaskId, type TaskId } from "./identity.js";
+import type { TaskId } from "./identity.js";
 import {
   addTask, addTaskDocument, batchTasks, blockedTasks, currentNamespace, lifecycleTask, listTasks, queryTasks, readyTasks,
   setCurrentNamespace, taskView, updateTask, type AddTaskDocumentInput, type AddTaskInput, type TaskBatchResult,
@@ -14,9 +14,13 @@ import {
 } from "./operations.js";
 import { readBoard } from "./store.js";
 import {
-  isValidTaskLimit, normalizeTaskQuery, TASK_RELATION_PREDICATE_FIELDS,
+  actor, addInput, closed, limit, namespace, record, signal, sort,
+  taskId as id, taskIds, text, updateInput,
+} from "./input.js";
+import {
+  normalizeTaskQuery, TASK_RELATION_PREDICATE_FIELDS,
   type TaskPage, type TaskQueryExpression, type TaskQueryPredicate, type TaskQueryRow, type TaskQuerySort,
-  type TaskRelationPredicateField, MAX_TASK_LIMIT, DEFAULT_TASK_LIMIT,
+  type TaskRelationPredicateField, DEFAULT_TASK_LIMIT,
 } from "./query.js";
 
 export type TaskDetail = Omit<TaskDetailFacts, "task"> & Readonly<{ task: TaskView }>;
@@ -33,80 +37,6 @@ export type {
   TaskQueryRow, TaskQuerySort, TaskRelationPredicateField,
 };
 export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS };
-
-function record(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object`);
-  return value as Record<string, unknown>;
-}
-function closed(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
-  for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new TypeError(`${label} has unknown field: ${key}`);
-}
-function id(value: unknown): TaskId { if (typeof value !== "string") throw new TypeError("task ID must be a string"); parseTaskId(value); return value as TaskId; }
-function signal(value: unknown): AbortSignal | undefined {
-  if (value === undefined) return undefined;
-  if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal"); return value;
-}
-function strings(value: unknown, label: string): readonly string[] | undefined {
-  if (value === undefined) return undefined; if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) throw new TypeError(`${label} must be an array of strings`); return value;
-}
-function taskIds(value: unknown, label: string): readonly TaskId[] | undefined {
-  const values = strings(value, label)?.map(id);
-  if (values !== undefined && new Set(values).size !== values.length) throw new TypeError(`${label} must not contain duplicates`);
-  return values;
-}
-function namespace(value: unknown): readonly string[] | undefined {
-  const values = strings(value, "namespace"); if (values === undefined) return undefined;
-  if (!values.every(isTaskSegment)) throw new TypeError("namespace must contain canonical segments"); return values;
-}
-function text(value: unknown, label: string): string | undefined { if (value === undefined) return undefined; if (typeof value !== "string") throw new TypeError(`${label} must be a string`); return value; }
-function actor(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) throw new TypeError("actor must be a nonblank string");
-  return value;
-}
-function priority(value: unknown): TaskPriority | undefined { if (value === undefined) return undefined; if (!Number.isInteger(value) || typeof value !== "number" || value < 0 || value > 3) throw new TypeError("priority must be 0..3"); return value as TaskPriority; }
-function limit(value: unknown): number | undefined { if (value === undefined) return undefined; if (typeof value !== "number" || !isValidTaskLimit(value)) throw new TypeError(`limit must be an integer from 1 to ${MAX_TASK_LIMIT}`); return value; }
-function sort(value: unknown): TaskQuerySort | undefined {
-  if (value === undefined) return undefined;
-  if (value !== "priority" && value !== "created" && value !== "updated" && value !== "id") throw new TypeError("sort is invalid");
-  return value;
-}
-function state(value: unknown): TaskState | undefined {
-  if (value === undefined) return undefined;
-  if (value !== "open" && value !== "in_progress" && value !== "on_hold" && value !== "done" && value !== "drop") throw new TypeError("state is invalid");
-  return value;
-}
-function nullableId(value: unknown): TaskId | null | undefined { return value === undefined || value === null ? value : id(value); }
-function addInput(input: unknown): AddTaskInput {
-  const v = record(input, "add input");
-  closed(v, ["title", "namespace", "body", "note", "state", "priority", "needs", "parent", "supersedes", "relates", "actor", "signal"], "add input");
-  const title = text(v.title, "title"); if (title === undefined || title.trim() === "") throw new TypeError("title is required");
-  const ns = namespace(v.namespace), body = text(v.body, "body"), note = text(v.note, "note"), initialState = state(v.state), pri = priority(v.priority);
-  const needs = taskIds(v.needs, "needs"), parent = nullableId(v.parent), supersedes = taskIds(v.supersedes, "supersedes"), relates = taskIds(v.relates, "relates");
-  const createdBy = actor(v.actor), abort = signal(v.signal);
-  return { title, ...(ns === undefined ? {} : { namespace: ns }), ...(body === undefined ? {} : { body }), ...(note === undefined ? {} : { note }),
-    ...(initialState === undefined ? {} : { state: initialState }), ...(pri === undefined ? {} : { priority: pri }),
-    ...(needs === undefined ? {} : { needs }), ...(parent === undefined ? {} : { parent }),
-    ...(supersedes === undefined ? {} : { supersedes }), ...(relates === undefined ? {} : { relates }),
-    ...(createdBy === undefined ? {} : { actor: createdBy }),
-    ...(abort === undefined ? {} : { signal: abort }) };
-}
-function updateInput(input: unknown): UpdateTaskInput {
-  const v = record(input, "update input");
-  closed(v, ["title", "body", "appendBody", "note", "priority", "needs", "addNeeds", "dropNeeds", "parent", "supersedes", "addSupersedes", "dropSupersedes", "relates", "addRelates", "dropRelates", "signal"], "update input");
-  if (v.body !== undefined && v.appendBody !== undefined) throw new TypeError("body and appendBody are mutually exclusive");
-  const result: Record<string, unknown> = {};
-  const title = text(v.title, "title"); if (title !== undefined) { if (title.trim().length === 0) throw new TypeError("title must be nonblank"); result.title = title; }
-  const body = text(v.body, "body"); if (body !== undefined) result.body = body;
-  const appendBody = text(v.appendBody, "appendBody"); if (appendBody !== undefined) result.appendBody = appendBody;
-  const note = text(v.note, "note"); if (note !== undefined) result.note = note;
-  const pri = priority(v.priority); if (pri !== undefined) result.priority = pri;
-  for (const [key, value] of [["needs", taskIds(v.needs, "needs")], ["addNeeds", taskIds(v.addNeeds, "addNeeds")], ["dropNeeds", taskIds(v.dropNeeds, "dropNeeds")], ["supersedes", taskIds(v.supersedes, "supersedes")], ["addSupersedes", taskIds(v.addSupersedes, "addSupersedes")], ["dropSupersedes", taskIds(v.dropSupersedes, "dropSupersedes")], ["relates", taskIds(v.relates, "relates")], ["addRelates", taskIds(v.addRelates, "addRelates")], ["dropRelates", taskIds(v.dropRelates, "dropRelates")]] as const) if (value !== undefined) result[key] = value;
-  const parent = nullableId(v.parent); if (parent !== undefined) result.parent = parent;
-  const abort = signal(v.signal); if (abort !== undefined) result.signal = abort;
-  const update = result as UpdateTaskInput;
-  if (Object.keys(result).filter((key) => key !== "signal").length === 0) throw new TypeError("update requires at least one field change"); return update;
-}
 
 class TaskHandle {
   constructor(readonly id: TaskId, private readonly world: WorldRoot) {}

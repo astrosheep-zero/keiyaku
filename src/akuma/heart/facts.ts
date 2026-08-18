@@ -2,6 +2,7 @@ import type { AkuId } from "../identity.js";
 import type { ResumeCoordinate } from "../coordinate.js";
 import type { ProviderExecution, ProviderOptions, ReadonlyRestraint } from "../provider-recipe.js";
 import type { AllowedActions } from "../allowed.js";
+import type { TaskMutationAction, TaskMutationRequest } from "../../task/mutation.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
 export type AkumaOrigin =
@@ -115,6 +116,13 @@ export type TellReceiptInput = Readonly<{
   | Readonly<{ evidence: "fence"; turnSequence: number; fence: string }>
 );
 
+export type TaskRequestInput = Readonly<{
+  id: string;
+  action: TaskMutationAction;
+  world: string;
+  request: TaskMutationRequest;
+}>;
+
 export type RequestInput = Readonly<{
   id: string;
   action: "akuma.call";
@@ -152,7 +160,7 @@ export type RequestInput = Readonly<{
   contractId: string;
   verdict: "satisfied" | "unsatisfied";
   summary?: string;
-}>;
+}> | TaskRequestInput;
 
 export type UpstreamRequestService =
   | Readonly<{ action: "akuma.wait" }>
@@ -172,6 +180,9 @@ export type UpstreamRequestService =
       repoRoot: string;
       contractId: string;
       reviewFactId: string;
+    }>
+  | Readonly<{
+      action: TaskMutationRequest["action"];
     }>;
 
 type AdmittedRequest = RequestInput & Readonly<{

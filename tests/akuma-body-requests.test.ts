@@ -9,6 +9,7 @@ import { moveAlias } from "../src/alias/index.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import {
   HeldAkumaLeash,
+  admitRequest,
   initializeHeart,
   readHeart,
   readRequest,
@@ -23,7 +24,9 @@ import {
   requestBodyReview,
   requestBodyKill,
   requestBodyTell,
+  requestBodyTask,
   requestBodyWait,
+  settleBodyRequests,
   type UpstreamExecutionPort,
 } from "../src/akuma/requests.js";
 import { executeTellAkuma, executeWaitAkuma, waitAkuma } from "../src/library/fleet.js";
@@ -33,6 +36,8 @@ import { Delivery, Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { World, type WorldRoot } from "../src/world.js";
+import { Tasks } from "../src/task/index.js";
+import { executeTaskMutation } from "../src/task/mutation.js";
 import { appointedWorktreePath, makeGitRepository } from "./support/git.js";
 
 async function born(
@@ -287,6 +292,193 @@ test("contract review and delivery retain separate request permissions", async (
   }
 });
 
+test("all Task mutations preserve selected World and inputs while Heart keeps only service markers", async () => {
+  const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-forward-parent-")));
+  const selectedWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-forward-selected-")));
+  const parent = await born(parentRoot, "parent", "22222222", [
+    "task.add", "task.addDocument", "task.compose", "task.update", "task.start", "task.stop", "task.hold", "task.resume", "task.done", "task.drop",
+  ]);
+  const calls: { action: string; world: string; requester: string; request: unknown }[] = [];
+  const pump = await openPump(parent, {
+    wait: async () => { throw new Error("unexpected wait"); },
+    tell: async () => { throw new Error("unexpected tell"); },
+    kill: async () => { throw new Error("unexpected kill"); },
+    deliver: async () => { throw new Error("unexpected deliver"); },
+    task: async (input) => {
+      calls.push({ action: input.request.action, world: input.world, requester: input.requester, request: input.request });
+      if (input.request.action === "task.add" || input.request.action === "task.addDocument") {
+        return { kind: "accepted", value: { id: "task/created", body: "exact\nmarkdown", documentDiff: "must not persist" } };
+      }
+      if (input.request.action === "task.compose") {
+        return { kind: "accepted", documentChanges: [{ kind: "created", taskId: "task/composed", documentDiff: "must not persist" }] };
+      }
+      return { kind: "accepted", value: { task: { id: "task/target" }, documentDiff: "must not persist" } };
+    },
+  });
+  const requests = [
+    { action: "task.add" as const, input: { title: "Add", body: "exact\nbody" } },
+    { action: "task.addDocument" as const, input: { markdown: "# Exact\n\nbody\n" } },
+    { action: "task.compose" as const, markdown: "+ Compose\n" },
+    { action: "task.update" as const, id: "task/target" as const, input: { appendBody: "\nexact" } },
+    { action: "task.start" as const, id: "task/target" as const },
+    { action: "task.stop" as const, id: "task/target" as const },
+    { action: "task.hold" as const, ids: ["task/target"] as const },
+    { action: "task.resume" as const, id: "task/target" as const },
+    { action: "task.done" as const, ids: ["task/target"] as const, note: "exact note" },
+    { action: "task.drop" as const, ids: ["task/target"] as const, note: "exact note" },
+  ];
+  try {
+    for (const [index, request] of requests.entries()) {
+      const id = `00000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`;
+      if (index === 0) {
+        await Promise.all([1, 2].map(async () => await requestBodyTask({ directory: pump.directory, id, world: selectedWorld, request })));
+      } else {
+        await requestBodyTask({ directory: pump.directory, id, world: selectedWorld, request });
+      }
+      const fact = await readRequest(parent.paths, id);
+      assert.equal(fact?.state, "served");
+      if (fact?.state === "served" && "service" in fact) {
+        assert.deepEqual(fact.service, { action: request.action });
+        assert.equal(JSON.stringify(fact.service).includes(selectedWorld), false);
+        assert.equal(JSON.stringify(fact.service).includes("task/target"), false);
+      }
+    }
+    assert.equal(calls.length, requests.length);
+    assert.deepEqual(calls.map((call) => call.action), requests.map((request) => request.action));
+    assert.equal(calls.every((call) => call.world === selectedWorld && call.requester === parent.id), true);
+    assert.equal((calls[0]?.request as { input: { body: string } }).input.body, "exact\nbody");
+    assert.equal((calls[1]?.request as { input: { markdown: string } }).input.markdown, "# Exact\n\nbody\n");
+    assert.equal((calls[8]?.request as { note: string }).note, "exact note");
+
+    await pump.close();
+    const replayPump = await openPump(parent, {
+      wait: async () => { throw new Error("unexpected wait"); },
+      tell: async () => { throw new Error("unexpected tell"); },
+      kill: async () => { throw new Error("unexpected kill"); },
+      deliver: async () => { throw new Error("unexpected deliver"); },
+      task: async () => { throw new Error("Task must not replay"); },
+    });
+    try {
+      assert.deepEqual(await requestBodyTask({
+        directory: replayPump.directory,
+        id: "00000000-0000-4000-8000-000000000100",
+        world: selectedWorld,
+        request: requests[0]!,
+      }), { kind: "served-reference", action: "task.add" });
+      assert.equal(calls.length, requests.length);
+    } finally { await replayPump.close(); }
+  } finally {
+    await pump.close();
+    rmSync(parentRoot, { recursive: true, force: true });
+    rmSync(selectedWorld, { recursive: true, force: true });
+  }
+});
+
+test("every native Task return is served unchanged without result classification", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-forward-results-")));
+  const parent = await born(root, "parent", "23232323", ["task.start", "task.stop", "task.compose", "task.done"]);
+  const results = [
+    { kind: "refused", refusal: { kind: "task-missing", taskId: "task/missing" } },
+    { kind: "retry", reason: "busy" },
+    {
+      kind: "incomplete",
+      documentChanges: [],
+      stopped: { kind: "retry", reason: "concurrent-modification" },
+      draft: "+ Remaining\n",
+    },
+    {
+      kind: "accepted",
+      value: {
+        results: [
+          { taskId: "task/one", kind: "accepted" },
+          { taskId: "task/two", kind: "refused", refusal: { kind: "task-missing", taskId: "task/two" } },
+        ],
+      },
+    },
+  ] as const;
+  let call = 0;
+  const pump = await openPump(parent, {
+    wait: async () => { throw new Error("unexpected wait"); },
+    tell: async () => { throw new Error("unexpected tell"); },
+    kill: async () => { throw new Error("unexpected kill"); },
+    deliver: async () => { throw new Error("unexpected deliver"); },
+    task: async () => results[call++]!,
+  });
+  const requests = [
+    { action: "task.start" as const, id: "task/missing" as const },
+    { action: "task.stop" as const, id: "task/target" as const },
+    { action: "task.compose" as const, markdown: "+ Remaining\n" },
+    { action: "task.done" as const, ids: ["task/one", "task/two"] as const },
+  ];
+  try {
+    for (const [index, request] of requests.entries()) {
+      const id = `00000000-0000-4000-8000-${String(index + 400).padStart(12, "0")}`;
+      assert.deepEqual(await requestBodyTask({ directory: pump.directory, id, world: root, request }), results[index]);
+      const fact = await readRequest(parent.paths, id);
+      assert.equal(fact?.state, "served");
+      if (fact?.state === "served" && "service" in fact) {
+        assert.deepEqual(fact.service, { action: request.action });
+        assert.doesNotMatch(JSON.stringify(fact.service), /task\/missing|concurrent-modification|Remaining/u);
+      }
+    }
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI forwards Task mutations through the parent and renders the native Task result", async () => {
+  const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-cli-parent-")));
+  const selectedWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-cli-selected-")));
+  const parent = await born(parentRoot, "parent", "33333333", ["task.add"]);
+  const pump = await openPump(parent, {
+    wait: async () => { throw new Error("unexpected wait"); },
+    tell: async () => { throw new Error("unexpected tell"); },
+    kill: async () => { throw new Error("unexpected kill"); },
+    deliver: async () => { throw new Error("unexpected deliver"); },
+    task: async (input) => await executeTaskMutation({
+      world: input.world as WorldRoot,
+      request: input.request,
+      requester: input.requester,
+      signal: input.signal,
+    }),
+  });
+  const previous = process.env[AKUMA_REQUESTS_ENV];
+  try {
+    process.env[AKUMA_REQUESTS_ENV] = pump.directory;
+    const result = await invoke(parseArgv(["-C", selectedWorld, "task", "add", "CLI forwarded", "--body", "exact\nbody"]));
+    assert.equal((result as { kind: string }).kind, "accepted");
+    const created = await Tasks.of(selectedWorld).task({ id: "task/cli-forwarded" }).read();
+    assert.equal(created?.task.body, "exact\nbody");
+    assert.equal(created?.task.createdBy, parent.id);
+  } finally {
+    if (previous === undefined) delete process.env[AKUMA_REQUESTS_ENV];
+    else process.env[AKUMA_REQUESTS_ENV] = previous;
+    await pump.close();
+    rmSync(parentRoot, { recursive: true, force: true });
+    rmSync(selectedWorld, { recursive: true, force: true });
+  }
+});
+
+test("Task request recovery voids an unserved claim without replaying Task authority", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-recovery-")));
+  const parent = await born(root, "parent", "44444444", ["task.add"]);
+  const id = "00000000-0000-4000-8000-000000000301";
+  try {
+    await admitRequest(parent.paths, {
+      id,
+      action: "task.add",
+      world: root,
+      request: { action: "task.add", input: { title: "Never replayed" } },
+      admittedAt: "2026-08-18T00:00:01.000Z",
+    });
+    assert.equal(await settleBodyRequests(parent.paths, parent.soul, () => "2026-08-18T00:00:02.000Z"), "settled");
+    assert.equal((await readRequest(parent.paths, id))?.state, "voided");
+    const board = await Tasks.of(root).list({ selection: "all", scope: "world" });
+    assert.equal(board.kind, "accepted");
+    if (board.kind === "accepted") assert.equal(board.value.total, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 test("CLI forwarded deliver preserves its selected Repo and uses parent Settings and execution", async () => {
   const parentRepository = makeGitRepository();
   const contractRepository = makeGitRepository();

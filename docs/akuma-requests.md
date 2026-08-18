@@ -13,9 +13,9 @@ re-executes one, and never needs an exactly-once claim.
 
 The body creates a request transport for every provider drive, and the adapter
 injects `AKUMA_REQUESTS` into that drive's command environment. Nested call,
-wait, tell, kill, `contract.deliver`, and `contract.review` operations reroute
-exactly when that variable exists. There is no second public verb or generic
-messaging surface.
+wait, tell, kill, `contract.deliver`, `contract.review`, and mutable `task.*`
+operations reroute exactly when that variable exists. There is no second public
+verb or generic messaging surface.
 
 ### Transport, authority, and judge
 
@@ -143,6 +143,23 @@ coordinate, ContractId, and owner-minted review fact id in Heart. Refusal,
 retry, or execution failure without that reference settles `voided` while the
 live typed result remains in the receipt. A later pump projects only the
 accepted reference and never reads or replays Contract state.
+
+Each advertised `task.*` mutation carries its caller-selected normalized World,
+the exact public structured input or Markdown bytes, and every complete TaskId
+it addresses. The parent Heart judges that exact independent action key, then
+the detached Body reconstructs the selected World and enters Task's one
+forced-local mutation executor. Creation (`task.add`, `task.addDocument`, and
+`task.compose`) supplies the authenticated requester as Task actor; later Task
+mutations carry no actor. Signals and callbacks do not cross this edge.
+
+The live receipt is the unchanged Task result. Every normal Task return settles
+the request served, including refused, retry, incomplete compose, and mixed
+batch results. Heart retains only `{ action }`; it never retains World, TaskIds,
+Task Markdown, document diffs, verdicts, retries, or a generic result, and the
+forwarder never parses the result. A later duplicate terminal claim projects a
+typed `served-reference` without executing Task again or recreating the expired
+result. Executor loss before a return is voided, and recovery voids every
+nonterminal Task request without reading or changing Task authority.
 
 ### Recovery and pump
 

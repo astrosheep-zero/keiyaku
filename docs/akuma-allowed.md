@@ -55,3 +55,7 @@ action coordinate or refuses `not-allowed: <action>` before the operation owner
 runs. The child performs no duplicate precheck. Request transport remains one
 hop, and Contract, Task, and Akuma owners remain the sole authorities for their
 operation outcomes.
+
+Every `task.*` member is independently keyed. Permission for one Task mutation
+does not imply another Task action or any Contract action; Task requires no
+Contract association or permission.

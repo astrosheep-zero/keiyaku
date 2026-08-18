@@ -18,6 +18,7 @@ import {
   type Soul,
   type UpstreamRequestService,
 } from "./heart/index.js";
+import type { TaskRequestInput } from "./heart/facts.js";
 import {
   parseAkuId,
   pathsForAkuId,
@@ -32,6 +33,12 @@ import { AKUMA_REQUESTS_ENV } from "./provider.js";
 import { decodeProviderOptions, decodeReadonlyRestraint } from "./provider-recipe.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { decodeAllowedActions } from "./allowed.js";
+import {
+  decodeTaskMutationRequest,
+  isTaskMutationAction,
+  type TaskMutationAction,
+  type TaskMutationRequest,
+} from "../task/mutation.js";
 
 const POLL_MS = 25;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -85,13 +92,17 @@ type ReviewRequestClaim = Readonly<{
   summary?: string;
 }>;
 
-type RequestClaim = CallRequestClaim | WaitRequestClaim | TellRequestClaim | KillRequestClaim | DeliverRequestClaim | ReviewRequestClaim;
+type TaskRequestClaim = TaskRequestInput;
+
+type RequestClaim = CallRequestClaim | WaitRequestClaim | TellRequestClaim | KillRequestClaim
+  | DeliverRequestClaim | ReviewRequestClaim | TaskRequestClaim;
 type StructuralRequestClaim = (Omit<CallRequestClaim, "recipe"> & Readonly<{ recipe: unknown }>)
   | WaitRequestClaim
   | TellRequestClaim
   | KillRequestClaim
   | DeliverRequestClaim
-  | ReviewRequestClaim;
+  | ReviewRequestClaim
+  | TaskRequestClaim;
 
 type UpstreamRequestFailure =
   | Readonly<{ kind: "akuma-not-born"; id: AkuId }>
@@ -115,6 +126,11 @@ export type ForwardedReviewReference = Readonly<{
   reviewFactId: string;
 }>;
 
+export type ForwardedTaskReference = Readonly<{
+  kind: "served-reference";
+  action: TaskMutationAction;
+}>;
+
 export type UpstreamExecutionPort = Readonly<{
   wait(input: Omit<WaitRequestClaim, "id" | "action"> & Readonly<{ signal: AbortSignal }>): Promise<unknown>;
   tell(input: Omit<TellRequestClaim, "id" | "action"> & Readonly<{
@@ -134,6 +150,12 @@ export type UpstreamExecutionPort = Readonly<{
     requester: AkuId;
     signal: AbortSignal;
   }>): Promise<Readonly<{ result: unknown; reviewFactId?: string }>>;
+  task(input: Readonly<{
+    world: string;
+    request: TaskMutationRequest;
+    requester: AkuId;
+    signal: AbortSignal;
+  }>): Promise<unknown>;
 }>;
 
 type RequestReceipt =
@@ -149,6 +171,12 @@ type RequestReceipt =
       action: "contract.review";
       state: "served";
       reference: ForwardedReviewReference;
+    }>
+  | Readonly<{
+      id: string;
+      action: TaskMutationAction;
+      state: "served";
+      reference: ForwardedTaskReference;
     }>
   | Readonly<{
       id: string;
@@ -366,6 +394,26 @@ function decodeReviewClaim(
   };
 }
 
+function isTaskClaim<T extends Readonly<{ action: string }>>(value: T): value is T & TaskRequestClaim {
+  return isTaskMutationAction(value.action);
+}
+
+function decodeTaskClaim(
+  id: string,
+  action: TaskMutationAction,
+  payload: Readonly<Record<string, unknown>>,
+): TaskRequestClaim | null {
+  if (!exactKeys(payload, ["request", "world"]) || !absolute(payload.world)) return null;
+  try {
+    return {
+      id,
+      action,
+      world: payload.world,
+      request: decodeTaskMutationRequest(action, payload.request),
+    };
+  } catch { return null; }
+}
+
 function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | null {
   let decoded: unknown;
   try { decoded = JSON.parse(bytes); } catch { return null; }
@@ -383,6 +431,7 @@ function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | nu
   if (value.action === "akuma.kill") return decodeKillClaim(value.id, payload);
   if (value.action === "contract.deliver") return decodeDeliverClaim(value.id, payload);
   if (value.action === "contract.review") return decodeReviewClaim(value.id, payload);
+  if (isTaskMutationAction(value.action)) return decodeTaskClaim(value.id, value.action, payload);
   return null;
 }
 
@@ -515,6 +564,72 @@ const CONTRACT_RECEIPT_DECODERS: Partial<Record<RequestClaim["action"], (
   "contract.review": decodeReviewReceipt,
 };
 
+function decodeTaskReceipt(
+  value: Readonly<Record<string, unknown>>,
+  requestId: string,
+  action: TaskMutationAction,
+): RequestReceipt | null {
+  if (value.state === "served" && exactKeys(value, ["action", "id", "reference", "state"])) {
+    const reference = object(value.reference);
+    if (reference === null
+      || !exactKeys(reference, ["action", "kind"])
+      || reference.kind !== "served-reference"
+      || reference.action !== action) return null;
+    return { id: requestId, action, state: "served", reference: { kind: reference.kind, action } };
+  }
+  if (value.state === "served" && exactKeys(value, ["action", "id", "outcome", "state"])) {
+    const outcome = decodeUpstreamOutcome(value.outcome);
+    return outcome === null ? null : { id: requestId, action, state: value.state, outcome };
+  }
+  if (value.state === "refused"
+    && exactKeys(value, ["action", "diagnostic", "id", "state"])
+    && typeof value.diagnostic === "string") return { id: requestId, action, state: value.state, diagnostic: value.diagnostic };
+  if (value.state === "voided"
+    && exactKeys(value, ["action", "evidence", "id", "state"])
+    && typeof value.evidence === "string") return { id: requestId, action, state: value.state, evidence: value.evidence };
+  return null;
+}
+
+function decodeOrdinaryReceipt(
+  value: Readonly<Record<string, unknown>>,
+  requestId: string,
+  action: Exclude<RequestClaim["action"], "akuma.call">,
+): RequestReceipt | null {
+  if (value.state === "served" && exactKeys(value, ["action", "id", "outcome", "state"])) {
+    const outcome = decodeUpstreamOutcome(value.outcome);
+    return outcome === null ? null : { id: requestId, action, state: value.state, outcome };
+  }
+  if (value.state === "refused" && exactKeys(value, ["action", "diagnostic", "id", "state"])
+    && typeof value.diagnostic === "string") {
+    return { id: requestId, action, state: value.state, diagnostic: value.diagnostic };
+  }
+  if (value.state === "voided" && exactKeys(value, ["action", "evidence", "id", "state"])
+    && typeof value.evidence === "string") {
+    return { id: requestId, action, state: value.state, evidence: value.evidence };
+  }
+  return null;
+}
+
+function decodeCallReceipt(
+  value: Readonly<Record<string, unknown>>,
+  requestId: string,
+): RequestReceipt | null {
+  if (value.state === "served"
+    && exactKeys(value, ["action", "child", "id", "state"])) {
+    const child = canonicalAkuId(value.child);
+    return child === null ? null : { id: requestId, action: "akuma.call", state: value.state, child };
+  }
+  if (value.state === "refused" && exactKeys(value, ["action", "diagnostic", "id", "state"])
+    && typeof value.diagnostic === "string") {
+    return { id: requestId, action: "akuma.call", state: value.state, diagnostic: value.diagnostic };
+  }
+  if (value.state === "voided" && exactKeys(value, ["action", "evidence", "id", "state"])
+    && typeof value.evidence === "string") {
+    return { id: requestId, action: "akuma.call", state: value.state, evidence: value.evidence };
+  }
+  return null;
+}
+
 function decodeReceipt(bytes: string, requestId: string, action: RequestClaim["action"]): RequestReceipt | null {
   let decoded: unknown;
   try { decoded = JSON.parse(bytes); } catch { return null; }
@@ -522,29 +637,10 @@ function decodeReceipt(bytes: string, requestId: string, action: RequestClaim["a
   if (value === null || value.id !== requestId || value.action !== action) return null;
   const contractDecoder = CONTRACT_RECEIPT_DECODERS[action];
   if (contractDecoder !== undefined) return contractDecoder(value, requestId);
-  if (action === "akuma.call"
-    && value.state === "served"
-    && exactKeys(value, ["action", "child", "id", "state"])) {
-    const child = canonicalAkuId(value.child);
-    return child === null ? null : { id: requestId, action, state: value.state, child };
-  }
-  if (action !== "akuma.call"
-    && value.state === "served"
-    && exactKeys(value, ["action", "id", "outcome", "state"])) {
-    const outcome = decodeUpstreamOutcome(value.outcome);
-    return outcome === null ? null : { id: requestId, action, state: value.state, outcome };
-  }
-  if (value.state === "refused"
-    && exactKeys(value, ["action", "diagnostic", "id", "state"])
-    && typeof value.diagnostic === "string") {
-    return { id: requestId, action, state: value.state, diagnostic: value.diagnostic };
-  }
-  if (value.state === "voided"
-    && exactKeys(value, ["action", "evidence", "id", "state"])
-    && typeof value.evidence === "string") {
-    return { id: requestId, action, state: value.state, evidence: value.evidence };
-  }
-  return null;
+  if (isTaskMutationAction(action)) return decodeTaskReceipt(value, requestId, action);
+  return action === "akuma.call"
+    ? decodeCallReceipt(value, requestId)
+    : decodeOrdinaryReceipt(value, requestId, action);
 }
 
 async function atomicJson(path: string, value: unknown): Promise<void> {
@@ -591,6 +687,17 @@ function receiptFor(fact: RequestFact): RequestReceipt | null {
       },
     };
   }
+  if (isTaskClaim(fact) && fact.state === "served") {
+    return {
+      id: fact.id,
+      action: fact.action,
+      state: fact.state,
+      reference: {
+        kind: "served-reference",
+        action: fact.action as TaskMutationAction,
+      },
+    };
+  }
   return null;
 }
 
@@ -621,7 +728,13 @@ async function requestBody(input: Readonly<{
 }>): Promise<RequestReceipt> {
   const { id, action, ...payload } = input.claim;
   input.signal?.throwIfAborted();
-  await atomicJson(join(input.directory, `${id}.request.json`), { id, action, payload });
+  const requestPayload = isTaskClaim(input.claim)
+    ? (() => {
+        const { action: ignoredAction, ...request } = input.claim.request;
+        return { world: input.claim.world, request };
+      })()
+    : payload;
+  await atomicJson(join(input.directory, `${id}.request.json`), { id, action, payload: requestPayload });
   const receiptPath = join(input.directory, `${id}.receipt.json`);
   for (;;) {
     try {
@@ -648,7 +761,7 @@ export async function requestBodyCall(
   if (receipt.action !== "akuma.call" || receipt.state !== "served") {
     throw new Error(`Akuma body request ${input.id} returned the wrong action`);
   }
-  return receipt.child;
+  return (receipt as Extract<RequestReceipt, { action: "akuma.call"; state: "served" }>).child;
 }
 
 async function requestUpstream(
@@ -660,7 +773,32 @@ async function requestUpstream(
   if (receipt.action === "akuma.call" || receipt.state !== "served" || !("outcome" in receipt)) {
     throw new Error(`Akuma body request ${claim.id} returned the wrong action`);
   }
-  return receipt.outcome;
+  return (receipt as Extract<RequestReceipt, { state: "served" }> & Readonly<{ outcome: UpstreamRequestOutcome }>).outcome;
+}
+
+export async function requestBodyTask(input: Readonly<{
+  directory: string;
+  world: string;
+  request: TaskMutationRequest;
+  id?: string;
+}>): Promise<unknown> {
+  const requestId = input.id ?? randomUUID();
+  const receipt = await requestBody({
+    directory: input.directory,
+    claim: {
+      id: requestId,
+      action: input.request.action,
+      world: input.world,
+      request: input.request,
+    },
+  });
+  if (!isTaskMutationAction(receipt.action) || receipt.action !== input.request.action || receipt.state !== "served") {
+    throw new Error(`Akuma body request ${requestId} returned the wrong action`);
+  }
+  if ("reference" in receipt) return receipt.reference;
+  return receipt.outcome.kind === "returned"
+    ? receipt.outcome.result
+    : (() => { throw new Error(receipt.outcome.failure.kind === "failed" ? receipt.outcome.failure.diagnostic : "Akuma body request parent is not born"); })();
 }
 
 export async function requestBodyWait(
@@ -720,7 +858,9 @@ export async function requestBodyDeliver(
   if (receipt.action !== "contract.deliver" || receipt.state !== "served") {
     throw new Error(`Akuma body request ${id} returned the wrong action`);
   }
-  return "reference" in receipt ? receipt.reference : receipt.outcome;
+  return "reference" in receipt && "repoRoot" in receipt.reference
+    ? receipt.reference
+    : (receipt as Extract<RequestReceipt, { state: "served" }> & Readonly<{ outcome: UpstreamRequestOutcome }>).outcome;
 }
 
 type BodyReviewInput = Omit<ReviewRequestClaim, "action" | "id"> & Readonly<{
@@ -841,6 +981,20 @@ function upstreamFailure(error: unknown): UpstreamRequestFailure {
   return { kind: "failed", diagnostic: diagnostic(error) };
 }
 
+async function executeTaskClaim(
+  upstream: UpstreamExecutionPort,
+  signal: AbortSignal,
+  task: TaskRequestClaim & Readonly<{ requester: AkuId }>,
+): Promise<Readonly<{ result: unknown; service: UpstreamRequestService }>> {
+  const result = await upstream.task({
+    world: task.world,
+    request: task.request,
+    requester: task.requester,
+    signal,
+  });
+  return { result, service: { action: task.action } };
+}
+
 async function executeUpstreamClaim(
   input: ServeRequestInput,
   request: Exclude<Extract<RequestFact, { state: "admitted" }>, Extract<RequestFact, { action: "akuma.call" }>>,
@@ -893,21 +1047,29 @@ async function executeUpstreamClaim(
       }),
     };
   }
+  if (isTaskClaim(request)) {
+    return await executeTaskClaim(
+      input.upstream,
+      input.signal,
+      request as TaskRequestClaim & Readonly<{ requester: AkuId }>,
+    );
+  }
+  const delivery = request as Extract<RequestFact, { action: "contract.deliver"; state: "admitted" }>;
   const served = await input.upstream.deliver({
-    repoRoot: request.repoRoot,
-    contractId: request.contractId,
-    ...(request.message === undefined ? {} : { message: request.message }),
-    includeDirty: request.includeDirty,
-    requester: request.requester,
+    repoRoot: delivery.repoRoot,
+    contractId: delivery.contractId,
+    ...(delivery.message === undefined ? {} : { message: delivery.message }),
+    includeDirty: delivery.includeDirty,
+    requester: delivery.requester,
     signal: input.signal,
   });
   return {
     result: served.result,
     ...(served.deliveryFactId === undefined ? {} : {
       service: {
-        action: request.action,
-        repoRoot: request.repoRoot,
-        contractId: request.contractId,
+        action: delivery.action,
+        repoRoot: delivery.repoRoot,
+        contractId: delivery.contractId,
         deliveryFactId: served.deliveryFactId,
       },
     }),

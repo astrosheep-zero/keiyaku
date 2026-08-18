@@ -101,6 +101,13 @@ Markdown edits remain authoritative, Task does not promise complete
 change-since-observation, history, or event-log reads; a partial journal
 would be dishonest.
 
+Task may be reached through one direct-parent Akuma Body Request, but that is
+an integration edge, not Task authority. The Task owner decodes the same public
+mutation inputs and runs the same forced-local operation for the caller-selected
+World. The authenticated requester supplies creation actor on that edge; Task
+does not inspect Akuma, Heart, Contract, or transport state, and retains no
+request lifecycle fact.
+
 ## Lifecycle And Graph
 
 Persisted states are `open`, `in_progress`, `on_hold`, `done`, and `drop`.

@@ -17,6 +17,7 @@ import {
 } from "./library/contract.js";
 import { Repo } from "./library/repo.js";
 import { settings } from "./settings.js";
+import { executeTaskMutation } from "./task/mutation.js";
 
 export function upstreamFor(
   launch: BodyLaunch,
@@ -76,6 +77,12 @@ export function upstreamFor(
         hooks: worktreeHooksFrom({ settings: configuration }),
       });
     },
+    task: async (input) => await executeTaskMutation({
+      world: input.world as WorldRoot,
+      request: input.request,
+      requester: input.requester,
+      signal: input.signal,
+    }),
   };
 }
 
