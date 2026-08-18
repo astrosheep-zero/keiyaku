@@ -2,6 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { open } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
+import crossSpawn from "cross-spawn";
 
 const TERMINATION_GRACE_MS = 250;
 const STREAM_TAIL_BYTES = 16 * 1024;
@@ -12,6 +13,16 @@ type ProcessLaunch = Readonly<{
   readonly env?: NodeJS.ProcessEnv;
   readonly signal?: AbortSignal;
 }>;
+
+type ProcessSpawnOptions = Readonly<{
+  cwd: string | undefined;
+  env: NodeJS.ProcessEnv | undefined;
+  detached: boolean;
+  stdio: ["ignore", "pipe", "pipe"];
+  windowsHide: boolean;
+}>;
+
+type ProcessSpawner = (command: string, args: readonly string[], options: ProcessSpawnOptions) => ChildProcess;
 
 export type ProcessInput = ProcessLaunch & Readonly<{
   readonly timeoutMs?: number;
@@ -201,9 +212,10 @@ async function executeProcess(
   input: ProcessLaunch,
   timeoutMs: number | undefined,
   consumeStdout?: (chunk: Buffer) => void,
+  spawnProcess: ProcessSpawner = spawn,
 ): Promise<ProcessConsumption> {
   if (input.signal?.aborted === true) return { outcome: { kind: "cancelled" }, pid: null };
-  const child = spawn(input.argv[0]!, input.argv.slice(1), {
+  const child = spawnProcess(input.argv[0]!, input.argv.slice(1), {
     cwd: input.cwd,
     env: input.env,
     detached: true,
@@ -226,7 +238,7 @@ async function executeProcess(
     streamError = error;
     requestStop("cancelled");
   };
-  child.stdout.on("data", (chunk: Buffer) => {
+  child.stdout!.on("data", (chunk: Buffer) => {
     if (consumeStdout === undefined) {
       stdout.append(chunk);
       return;
@@ -237,10 +249,10 @@ async function executeProcess(
       failStream(error);
     }
   });
-  child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
+  child.stderr!.on("data", (chunk: Buffer) => stderr.append(chunk));
   if (consumeStdout !== undefined) {
-    child.stdout.once("error", failStream);
-    child.stderr.once("error", failStream);
+    child.stdout!.once("error", failStream);
+    child.stderr!.once("error", failStream);
   }
   const cancel = (): void => requestStop("cancelled");
   input.signal?.addEventListener("abort", cancel, { once: true });
@@ -282,6 +294,12 @@ async function executeProcess(
 
 export async function runProcess(input: ProcessInput): Promise<ProcessOutcome> {
   const result = await executeProcess(input, input.timeoutMs);
+  if (result.outcome.kind === "stream-error") throw new Error("buffered process produced a stream consumer error");
+  return result.outcome;
+}
+
+export async function runCrossPlatformProcess(input: ProcessInput): Promise<ProcessOutcome> {
+  const result = await executeProcess(input, input.timeoutMs, undefined, crossSpawn);
   if (result.outcome.kind === "stream-error") throw new Error("buffered process produced a stream consumer error");
   return result.outcome;
 }

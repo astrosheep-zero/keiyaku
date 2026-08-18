@@ -1,6 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runProcess, type ProcessInput, type ProcessOutcome } from "../../runtime/proc/run.js";
+import { runCrossPlatformProcess, type ProcessInput, type ProcessOutcome } from "../../runtime/proc/run.js";
 import { CliUsageError, usageLine, withJsonAutomationHelp } from "../usage.js";
 
 export const HARNESS_NAMES = ["codex", "claude", "opencode", "pi"] as const;
@@ -102,7 +102,7 @@ export function installAssetsRoot(): string {
 export async function installHarnesses(
   harnesses: readonly HarnessName[],
   environment: NodeJS.ProcessEnv,
-  runner: InstallRunner = runProcess,
+  runner: InstallRunner = runCrossPlatformProcess,
 ): Promise<InstallInvocationResult> {
   const results: HarnessInstallResult[] = [];
   for (const harness of harnesses) {
