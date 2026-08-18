@@ -57,7 +57,6 @@ async function bornAkuma(root: string, suffix: string) {
     options: {},
     cwd: root,
     origin: { kind: "direct" },
-    confinement: { kind: "unconfined" },
     createdAt: "2026-08-09T00:00:00.000Z",
   });
   leash.release();
@@ -712,13 +711,13 @@ function attentionReport(): KanshiReport {
       value: {
         searched: ["/repo/.keiyaku/akuma/run"],
         rows: [
-          { id: "aku/worker/a0000001", archetype: "worker", life: "running", lifeAt: "2026-08-11T23:56:00.000Z", confinement: { kind: "unconfined" }, pending: [], aliases: ["@lead"], contract: { id: "kei/active-contract", observed: "active" } },
-          { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", lifeAt: "2026-08-11T00:00:00.000Z", confinement: { kind: "unconfined" }, pending: [], aliases: [] },
-          { id: "aku/worker/a0000003", archetype: "worker", life: "killed", lifeAt: "2026-08-11T23:59:30.000Z", confinement: { kind: "unconfined" }, pending: [], aliases: [] },
+          { id: "aku/worker/a0000001", archetype: "worker", life: "running", lifeAt: "2026-08-11T23:56:00.000Z", pending: [], aliases: ["@lead"], contract: { id: "kei/active-contract", observed: "active" } },
+          { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", lifeAt: "2026-08-11T00:00:00.000Z", pending: [], aliases: [] },
+          { id: "aku/worker/a0000003", archetype: "worker", life: "killed", lifeAt: "2026-08-11T23:59:30.000Z", pending: [], aliases: [] },
           { id: "aku/worker/a0000004", life: "stillborn", seal: { at: "2026-08-10T00:00:00.000Z", evidence: "stillborn" }, aliases: [] },
           { id: "aku/worker/a0000005", life: "unborn", aliases: [] },
-          { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", lifeAt: "2026-08-11T22:00:00.000Z", strandedReason: "resume-unsupported", confinement: { kind: "unconfined" }, pending: ["pending"], aliases: [], contract: { id: "kei/missing-contract", observed: "missing" } },
-          { id: "aku/worker/a0000007", archetype: "worker", life: "hung", lifeAt: null, confinement: { kind: "unconfined" }, pending: [], aliases: [] },
+          { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", lifeAt: "2026-08-11T22:00:00.000Z", strandedReason: "resume-unsupported", pending: ["pending"], aliases: [], contract: { id: "kei/missing-contract", observed: "missing" } },
+          { id: "aku/worker/a0000007", archetype: "worker", life: "hung", lifeAt: null, pending: [], aliases: [] },
         ],
       },
     },

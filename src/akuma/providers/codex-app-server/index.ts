@@ -216,7 +216,6 @@ export function createCodexAppServerProvider(input: string | ProviderExecution =
     ? { name: "codex-app-server", kind: "codex-app-server", executable: input }
     : input;
   return {
-    confinement: ({ cwd }) => ({ kind: "declared", writableRoots: [cwd] }),
     admitOptions(options) {
       return {
         kind: "admitted",

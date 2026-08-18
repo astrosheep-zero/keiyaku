@@ -72,7 +72,6 @@ export type {
   AkumaOrigin,
   BodyEnd,
   BodyFact,
-  Confinement,
   HeartSnapshot,
   ForkPoint,
   KillEvidence,

@@ -49,7 +49,6 @@ async function born(
     options: {},
     cwd: root,
     origin: { kind: "direct" },
-    confinement: { kind: "declared", writableRoots: [root] },
     allowed,
     createdAt: "2026-08-18T00:00:00.000Z",
   };

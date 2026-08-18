@@ -55,7 +55,6 @@ export type {
 export type { AgentEvent, ToolCall, ToolEvent, ToolResult } from "./provider.js";
 export type { AkuId } from "./identity.js";
 export type {
-  Confinement,
   KillEvidence,
   ResumeCoordinate,
   TurnFact,

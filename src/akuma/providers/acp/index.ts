@@ -105,7 +105,6 @@ export function createAcpProvider(
     return (await startAcpSession(launch, input, dependencies)).session;
   };
   return {
-    confinement: () => ({ kind: "unconfined" }),
     admitOptions: (options) => optionAdmission(options, config),
     start: async (input) => await drive(input),
     resume: async (input) => await drive(input),

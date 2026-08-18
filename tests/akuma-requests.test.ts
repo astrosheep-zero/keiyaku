@@ -47,7 +47,6 @@ async function fixture(allowed?: Soul["allowed"]) {
     readonly: { enforcement: "native" },
     cwd: root,
     origin: { kind: "direct" },
-    confinement: { kind: "declared", writableRoots: [root] },
     allowed: allowed ?? ALLOWED_ACTIONS,
     createdAt: "2026-08-09T00:00:00.000Z",
   };
@@ -207,7 +206,7 @@ test("publication preserves a Body failure that occurs before birth", async () =
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("a declared drive serves Body Requests through transport while Heart remains authoritative", async () => {
+test("a drive serves Body Requests through transport while Heart remains authoritative", async () => {
   const value = await fixture();
   const priorHome = process.env.HOME;
   const priorRequests = process.env[AKUMA_REQUESTS_ENV];
@@ -215,7 +214,7 @@ test("a declared drive serves Body Requests through transport while Heart remain
   mkdirSync(join(home, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\nreadonly: true\n---\nWork.\n");
   writeFileSync(
-    join(home, ".keiyaku", "akuma", "declared.md"),
+    join(home, ".keiyaku", "akuma", "codex.md"),
     "---\nprovider: codex-app-server\nreadonly: true\n---\nWork.\n",
   );
   process.env.HOME = home;
@@ -251,13 +250,12 @@ test("a declared drive serves Body Requests through transport while Heart remain
       requestId,
     });
 
-    const declaredId = (await (await akumaAt(value.root)).call({
-      archetype: "declared",
-      body: "declared confinement",
+    const codexId = (await (await akumaAt(value.root)).call({
+      archetype: "codex",
+      body: "codex work",
     })).id;
-    const declaredSoul = await readSoul(pathsForAkuId(value.root, declaredId));
-    assert.equal(declaredSoul?.cwd, value.soul.cwd);
-    assert.deepEqual(declaredSoul?.confinement, { kind: "declared", writableRoots: [value.soul.cwd] });
+    const codexSoul = await readSoul(pathsForAkuId(value.root, codexId));
+    assert.equal(codexSoul?.cwd, value.soul.cwd);
 
     const explicit = join(value.root, "explicit");
     mkdirSync(explicit);
@@ -330,14 +328,14 @@ test("a new body settles old requests by observation without replay", async () =
       archetype: "worker",
       body: "never spawned",
       world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement, allowed: value.soul.allowed },
+      recipe: { provider: value.soul.provider, options: value.soul.options, allowed: value.soul.allowed },
       admittedAt: "2026-08-09T00:00:01.000Z",
     });
 
     const bornId = "00000000-0000-4000-8000-000000000012";
     await admitRequest(value.parent.paths, {
       id: bornId, action: "akuma.call", archetype: "worker", body: "born", world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement, allowed: value.soul.allowed },
+      recipe: { provider: value.soul.provider, options: value.soul.options, allowed: value.soul.allowed },
       admittedAt: "2026-08-09T00:00:02.000Z",
     });
     const born = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000012" });
@@ -355,7 +353,7 @@ test("a new body settles old requests by observation without replay", async () =
     const unbornId = "00000000-0000-4000-8000-000000000013";
     await admitRequest(value.parent.paths, {
       id: unbornId, action: "akuma.call", archetype: "worker", body: "unborn", world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement, allowed: value.soul.allowed },
+      recipe: { provider: value.soul.provider, options: value.soul.options, allowed: value.soul.allowed },
       admittedAt: "2026-08-09T00:00:03.000Z",
     });
     const unborn = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000013" });
@@ -365,7 +363,7 @@ test("a new body settles old requests by observation without replay", async () =
     const mismatchId = "00000000-0000-4000-8000-000000000014";
     await admitRequest(value.parent.paths, {
       id: mismatchId, action: "akuma.call", archetype: "worker", body: "mismatch", world: value.root,
-      recipe: { provider: value.soul.provider, options: value.soul.options, confinement: value.soul.confinement, allowed: value.soul.allowed },
+      recipe: { provider: value.soul.provider, options: value.soul.options, allowed: value.soul.allowed },
       admittedAt: "2026-08-09T00:00:04.000Z",
     });
     const mismatch = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000014" });

@@ -330,13 +330,11 @@ test("Akuma status, wait, and history share public observations without embeddin
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       cwd: root,
       createdAt: "2026-08-08T00:00:00.000Z",
     });
     leash.release();
     const provider: ProviderAdapter = {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         let finishEvents!: () => void;
@@ -367,7 +365,6 @@ test("Akuma status, wait, and history share public observations without embeddin
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "work",
@@ -423,13 +420,11 @@ test("packaged CLI call writes representative success and failure exits", async 
     options: {},
     cwd: root,
     origin: { kind: "direct" },
-    confinement: { kind: "unconfined" },
     createdAt: "2026-08-15T00:00:00.000Z",
   };
   const leash = (await HeldAkumaLeash.try(parent.paths))!;
   await leash.birth(parent.paths, soul);
   const answering: ProviderAdapter = {
-    confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
     async start() {
       let finishEvents!: () => void;
@@ -530,7 +525,6 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
   const environment = { ...process.env };
   delete environment[AKUMA_REQUESTS_ENV];
   const answering = (answer: string): ProviderAdapter => ({
-    confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
     async start() {
       return {
@@ -553,7 +547,6 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       cwd: root,
       createdAt: "2026-08-16T00:00:00.000Z",
     });
@@ -566,7 +559,6 @@ test("packaged CLI wait and history --last write exact multiline and empty answe
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
         createdAt: "2026-08-16T00:00:00.000Z",
       },
@@ -605,7 +597,6 @@ function fixtureSoul(id: Soul["id"], name: string): Record<string, unknown> {
     options: {},
     cwd: "/tmp",
     origin: { kind: "direct" },
-    confinement: { kind: "unconfined" },
     createdAt: "2026-08-15T00:00:00.000Z",
   };
 }
@@ -625,7 +616,6 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
   });
   await initializeHeart(allocated.paths);
   const provider: ProviderAdapter = {
-    confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
     async start() {
       return {
@@ -644,7 +634,6 @@ test("linked and primary worktrees observe one Akuma World while Soul retains it
       provider: { name: "worker", kind: "codex-app-server" },
       options: {},
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       cwd: linked,
     },
     initialBody: "work",
@@ -726,7 +715,6 @@ test("packaged CLI status writes the Soul name-agreement diagnostic", async () =
       options: {},
       cwd: root,
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       createdAt: "2026-08-15T00:00:00.000Z",
     });
     leash.release();

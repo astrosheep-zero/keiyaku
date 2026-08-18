@@ -1,5 +1,6 @@
 import {
   createAgentSession,
+  createBashToolDefinition,
   DefaultResourceLoader,
   getAgentDir,
   ModelRuntime,
@@ -9,7 +10,13 @@ import {
 import { abortable } from "../../abort.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import type { ResumeCoordinate } from "../../coordinate.js";
-import { AgentEventChannel, type ProviderAdapter, type Session, type TurnResult } from "../../provider.js";
+import {
+  AKUMA_REQUESTS_ENV,
+  AgentEventChannel,
+  type ProviderAdapter,
+  type Session,
+  type TurnResult,
+} from "../../provider.js";
 import { piTerminalFailure, translatePiEvent, type PiEventState } from "./events.js";
 
 export type PiSdk = Readonly<{
@@ -22,7 +29,7 @@ export type PiSdk = Readonly<{
 
 type PiThinkingLevel = NonNullable<CreateAgentSessionOptions["thinkingLevel"]>;
 const PI_THINKING_LEVELS = new Set<PiThinkingLevel>(["minimal", "low", "medium", "high", "xhigh", "max"]);
-const MODEL_PATTERN = /^[^/\s]+\/[^/\s]+$/u;
+const MODEL_PATTERN = /^[^/\s]+\/[^\s]+$/u;
 
 function diagnostic(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
@@ -68,6 +75,14 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
     ...(resourceLoader === undefined ? {} : { resourceLoader }),
     ...(input.options.effort === undefined ? {} : { thinkingLevel: input.options.effort as PiThinkingLevel }),
     ...(input.options.readonly === undefined ? {} : { tools: ["read", "grep", "find", "ls"] }),
+    ...(input.requests === undefined || input.options.readonly === true
+      ? {}
+      : { customTools: [createBashToolDefinition(input.cwd, {
+          spawnHook: (context) => ({
+            ...context,
+            env: { ...context.env, [AKUMA_REQUESTS_ENV]: input.requests.dir },
+          }),
+        }) as NonNullable<CreateAgentSessionOptions["customTools"]>[number]] }),
   };
 }
 
@@ -190,7 +205,6 @@ export function createPiProvider(
     return drivePi(await abortable(load(), signal), input, signal);
   };
   return {
-    confinement: ({ cwd }) => ({ kind: "declared", writableRoots: [cwd] }),
     admitOptions: admitPiOptions,
     start: drive,
     resume: async (input) => {

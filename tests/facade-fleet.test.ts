@@ -28,7 +28,6 @@ import { akuId } from "../src/akuma/identity.js";
 import { contractId } from "../src/core/facts/types.js";
 
 const provider: ProviderAdapter = {
-  confinement: () => ({ kind: "unconfined" }),
   admitOptions(options) { return { kind: "admitted", options }; },
   async start() {
     let finishEvents!: () => void;
@@ -124,7 +123,6 @@ async function answered(root: string, archetype: string, suffix: string) {
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       cwd: root,
     },
     initialBody: "work",

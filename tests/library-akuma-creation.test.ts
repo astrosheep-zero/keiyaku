@@ -121,7 +121,6 @@ async function requestPump(root: string) {
     options: {},
     cwd: root,
     origin: { kind: "direct" },
-    confinement: { kind: "unconfined" },
     createdAt: "2026-08-11T00:00:00.000Z",
   };
   const leash = (await HeldAkumaLeash.try(parent.paths))!;
@@ -483,12 +482,10 @@ test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async ()
       options: {},
       cwd: process.cwd(),
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       allowed: ["akuma.call"],
     },
     initialBody: "work",
   }, {
-    confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
     async start() {
       let finishEvents!: () => void;

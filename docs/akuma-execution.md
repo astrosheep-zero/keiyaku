@@ -68,7 +68,7 @@ cancellation cannot produce `hung`.
 
 The detached launch carries a soul seed only before birth. Once birth returns,
 including `already-born`, the persisted soul is the only source for provider,
-cwd, origin, and confinement; an existing-soul wake carries only heart paths.
+cwd, and origin; an existing-soul wake carries only heart paths.
 
 If the heart disappears while a drive is live, the Body aborts that drive
 through the provider capability it owns and exits.

@@ -6,8 +6,10 @@ import { PassThrough, Readable, Writable } from "node:stream";
 import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as acp from "@agentclientprotocol/sdk";
+import type { CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
 import {
   AGENT_EVENT_TEXT_LIMIT,
+  AKUMA_REQUESTS_ENV,
   AgentEventChannel,
   decodeAgentEvent,
   encodeAgentEvent,
@@ -15,7 +17,7 @@ import {
   type AgentEvent,
   type TurnResult,
 } from "../src/akuma/provider.js";
-import { decodeReadonlyRestraint } from "../src/akuma/provider-recipe.js";
+import { decodeReadonlyRestraint, type ProviderExecution } from "../src/akuma/provider-recipe.js";
 import {
   CLAUDE_MESSAGE_DISPOSITIONS,
   CLAUDE_SYSTEM_DISPOSITIONS,
@@ -43,6 +45,7 @@ import type { StdioProcess } from "../src/runtime/proc/stdio.js";
 function fakeOpencode() {
   let closed = 0;
   const prompts: unknown[] = [];
+  const executions: ProviderExecution[] = [];
   let activeSession = "session-fresh";
   let activeMessage = "msg_unset";
   let admit!: () => void;
@@ -85,11 +88,14 @@ function fakeOpencode() {
     async fork() { return { data: { id: "session-child" } }; },
     async abort() { return { data: true }; },
   } as unknown as OpencodeSdkSession;
-  const loader: OpencodeSdkLoader = async () => ({
-    client: { session, event: { async subscribe() { return { stream: stream() }; } } as never },
-    close: () => { closed += 1; },
-  });
-  return { loader, closed: () => closed, prompts };
+  const loader: OpencodeSdkLoader = async (_cwd, execution) => {
+    executions.push(execution);
+    return {
+      client: { session, event: { async subscribe() { return { stream: stream() }; } } as never },
+      close: () => { closed += 1; },
+    };
+  };
+  return { loader, closed: () => closed, executions, prompts };
 }
 
 test("provider answered results may omit an exact fork point", () => {
@@ -125,7 +131,7 @@ const app = acp.agent({ name: "fake-acp" })
     return {};
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
-    log({ kind: "prompt", params, argv: process.argv.slice(2) });
+    log({ kind: "prompt", params, argv: process.argv.slice(2), requests: process.env.AKUMA_REQUESTS });
     if (process.env.ACP_TEST_MODE === "prompt-error") throw new acp.RequestError(-32603, "Internal error", "native detail");
     if (process.env.ACP_TEST_MODE === "cancel") return await new Promise(() => {});
     if (process.env.ACP_TEST_MODE === "reverse") {
@@ -193,7 +199,6 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
   try {
     const fake = fakeAcp(root);
     const provider = createAcpProvider(fake.execution);
-    assert.deepEqual(provider.confinement({ cwd: root, options: {} }), { kind: "unconfined" });
     assert.deepEqual(provider.admitOptions({ readonly: true }), {
       kind: "admitted",
       options: { readonly: true },
@@ -203,6 +208,7 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
     const drive = await provider.start({
       body: "build", launchTells: [{ id: "tell-1", text: "then test" }], cwd: root,
       options: { model: "grok-4", effort: "high", systemPrompt: "Be precise." }, session: { kind: "fresh" },
+      requests: { dir: join(root, "requests") },
     });
     const events = [];
     for await (const event of drive.events) events.push(event);
@@ -223,6 +229,7 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
       { type: "text", text: "then test" },
     ]);
     assert.deepEqual((records[2]!.argv as readonly string[]).slice(-7), ["--model", "grok-4", "--effort", "high", "--system-prompt", "Be precise.", "stdio"]);
+    assert.equal(records[2]!.requests, join(root, "requests"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -903,7 +910,10 @@ test("OpenCode V1 adapter admits with promptAsync and completes from terminal ev
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
   assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
-  const drive = await provider.start({ body: "build", launchTells: [{ id: "tell-1", text: "also check" }], cwd: "/tmp", options: {}, session: { kind: "fresh" } });
+  const drive = await provider.start({
+    body: "build", launchTells: [{ id: "tell-1", text: "also check" }], cwd: "/tmp", options: {},
+    session: { kind: "fresh" }, requests: { dir: "/tmp/requests" },
+  });
   assert.equal(drive.admission.fence, "session-fresh");
   const observed = [];
   for await (const event of drive.events) observed.push(event);
@@ -911,6 +921,7 @@ test("OpenCode V1 adapter admits with promptAsync and completes from terminal ev
   assert.deepEqual(observed.map((event) => event.type), ["session", "tool", "tool", "thought", "assistant", "unknown"]);
   assert.equal(JSON.stringify(observed).includes("secret"), false);
   assert.equal(fake.closed(), 1);
+  assert.equal(fake.executions[0]!.env?.[AKUMA_REQUESTS_ENV], "/tmp/requests");
 });
 
 test("OpenCode V1 start waits for native prompt admission", async () => {
@@ -1226,9 +1237,10 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   const drive = await provider.start({
     body: "work",
     launchTells: [{ id: "tell-1", text: "also" }],
-    cwd: "/work",
+    cwd: tmpdir(),
     options: {},
     session: { kind: "fresh" },
+    requests: { dir: "/work/requests" },
   });
   assert.equal(drive.tell, undefined);
   const events = [];
@@ -1242,6 +1254,15 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     { type: "unknown", kind: "future_event" },
   ]);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
+  const customTools = fake.seen.options?.customTools as NonNullable<CreateAgentSessionOptions["customTools"]>;
+  const result = await customTools[0]!.execute(
+    "request-env",
+    { command: `printf %s "$${AKUMA_REQUESTS_ENV}"` },
+    new AbortController().signal,
+    undefined,
+    {} as never,
+  );
+  assert.deepEqual(result.content, [{ type: "text", text: "/work/requests" }]);
   assert.equal(fake.seen.disposed, 1);
 });
 
@@ -1438,10 +1459,12 @@ test("Pi readonly admits native enforcement and removes every task-surface mutat
     cwd: "/work",
     options: { readonly: true },
     session: { kind: "fresh" },
+    requests: { dir: "/work/requests" },
   });
   for await (const _event of drive.events) { /* drain */ }
   await drive.completion;
   assert.deepEqual(fake.seen.options?.tools, ["read", "grep", "find", "ls"]);
+  assert.equal(fake.seen.options?.customTools, undefined);
   assert.deepEqual(provider.admitOptions({ readonly: true }), {
     kind: "admitted",
     options: { readonly: true },
@@ -1453,7 +1476,7 @@ test("Pi readonly admits native enforcement and removes every task-surface mutat
   );
 });
 
-test("readonly restraint codec admits only native or none with a concrete diagnostic", () => {
+test("readonly restraint codec validates known members and ignores additions", () => {
   assert.deepEqual(decodeReadonlyRestraint({ enforcement: "native" }), { enforcement: "native" });
   assert.deepEqual(decodeReadonlyRestraint({ enforcement: "none", diagnostic: "enforcement gap" }), {
     enforcement: "none",
@@ -1461,7 +1484,9 @@ test("readonly restraint codec admits only native or none with a concrete diagno
   });
   assert.throws(() => decodeReadonlyRestraint({ enforcement: "none" }), /native or none with a diagnostic/u);
   assert.throws(() => decodeReadonlyRestraint({ enforcement: "none", diagnostic: "  " }), /native or none with a diagnostic/u);
-  assert.throws(() => decodeReadonlyRestraint({ enforcement: "native", diagnostic: "extra" }), /native or none with a diagnostic/u);
+  assert.deepEqual(decodeReadonlyRestraint({ enforcement: "native", diagnostic: "extra" }), {
+    enforcement: "native",
+  });
   assert.throws(() => decodeReadonlyRestraint({ enforcement: "magic" }), /native or none with a diagnostic/u);
 });
 
@@ -2744,12 +2769,19 @@ test("Claude execution overlays literal env and selects its executable", async (
   }), { executable: "/custom/claude", env: { SETTINGS_LITERAL: "yes" } });
   const drive = await provider.start({
     body: "inspect", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+    requests: { dir: "/work/requests" },
   });
   for await (const _event of drive.events) { /* drain */ }
   await drive.completion;
-  const options = seen as { pathToClaudeCodeExecutable: string; env: NodeJS.ProcessEnv };
+  const options = seen as {
+    additionalDirectories: readonly string[];
+    pathToClaudeCodeExecutable: string;
+    env: NodeJS.ProcessEnv;
+  };
+  assert.deepEqual(options.additionalDirectories, ["/work/requests"]);
   assert.equal(options.pathToClaudeCodeExecutable, "/custom/claude");
   assert.equal(options.env.SETTINGS_LITERAL, "yes");
+  assert.equal(options.env[AKUMA_REQUESTS_ENV], "/work/requests");
   assert.equal(options.env.PATH, process.env.PATH);
 });
 
@@ -3066,7 +3098,6 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
       systemPrompt: "Work precisely.",
     };
     assert.deepEqual(provider.admitOptions(options), { kind: "admitted", options });
-    assert.deepEqual(provider.confinement({ cwd: root, options }), { kind: "declared", writableRoots: [root] });
     assert.deepEqual(provider.admitOptions({ readonly: true }), {
       kind: "admitted",
       options: { readonly: true },

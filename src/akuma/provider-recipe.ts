@@ -48,9 +48,6 @@ function optionText(
 export function decodeProviderOptions(value: unknown): ProviderOptions {
   const options = record(value);
   if (options === null) throw new TypeError("provider options must be an object");
-  const allowed = ["effort", "model", "network", "readonly", "systemPrompt"];
-  const unknown = Object.keys(options).find((key) => !allowed.includes(key));
-  if (unknown !== undefined) throw new TypeError(`provider options have unknown field ${unknown}`);
   const model = optionText(options, "model", "refuse");
   const effort = optionText(options, "effort", "refuse");
   if (options.readonly !== undefined && options.readonly !== true) {
@@ -73,12 +70,10 @@ export function decodeProviderOptions(value: unknown): ProviderOptions {
 export function decodeReadonlyRestraint(value: unknown): ReadonlyRestraint {
   const restraint = record(value);
   if (restraint === null) throw new TypeError("readonly restraint must be an object");
-  const keys = Object.keys(restraint).sort();
-  if (restraint.enforcement === "native" && keys.length === 1 && keys[0] === "enforcement") {
+  if (restraint.enforcement === "native") {
     return Object.freeze({ enforcement: "native" });
   }
   if (restraint.enforcement === "none"
-    && keys.length === 2 && keys[0] === "diagnostic" && keys[1] === "enforcement"
     && typeof restraint.diagnostic === "string" && restraint.diagnostic.trim().length > 0) {
     return Object.freeze({ enforcement: "none", diagnostic: restraint.diagnostic });
   }
@@ -93,9 +88,6 @@ function providerKind(value: unknown): value is ProviderExecution["kind"] {
 export function decodeProviderRecipe(input: unknown): ProviderExecution {
   const value = record(input);
   if (value === null) throw new TypeError("provider execution must be an object");
-  const allowed = ["config", "env", "executable", "kind", "name"];
-  const unknown = Object.keys(value).find((key) => !allowed.includes(key));
-  if (unknown !== undefined) throw new TypeError(`provider execution has unknown field ${unknown}`);
   if (typeof value.name !== "string" || value.name.trim().length === 0) {
     throw new TypeError("provider execution name must be a nonblank string");
   }

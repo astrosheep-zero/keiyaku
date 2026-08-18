@@ -1,4 +1,9 @@
-import type { ProviderAdapter, ProviderOptionAdmission, Session, ToolCall } from "../../provider.js";
+import type {
+  ProviderAdapter,
+  ProviderOptionAdmission,
+  Session,
+  ToolCall,
+} from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import {
   startAcpSession,
@@ -152,7 +157,6 @@ export function createGrokBuildProvider(
     }));
   };
   return {
-    confinement: () => ({ kind: "unconfined" }),
     admitOptions: optionAdmission,
     start: async (input) => await drive(input),
     resume: async (input) => await drive(input),

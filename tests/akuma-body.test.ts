@@ -34,7 +34,7 @@ function adapter(input: Readonly<{
   ) => {
     let finishEvents!: () => void;
     const eventsFinished = new Promise<void>((resolve) => { finishEvents = resolve; });
-    assert.equal(call.requests, undefined);
+    assert.ok(call.requests);
     input.starts.push({
       body: call.body,
       launchTells: call.launchTells,
@@ -54,7 +54,6 @@ function adapter(input: Readonly<{
     };
   };
   return {
-    confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
     start: drive,
     resume: drive,
@@ -74,7 +73,6 @@ test("body births, admits native session, records the turn, and exits only when 
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { model: "claude-sonnet-4-5", effort: "high", systemPrompt: "Build carefully." },
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "build it",
@@ -170,7 +168,6 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
     let tellObserved!: () => void;
     const observed = new Promise<void>((resolve) => { tellObserved = resolve; });
     const live: ProviderAdapter = {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
@@ -207,7 +204,6 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "work",
@@ -237,7 +233,6 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
     let tellObserved!: () => void;
     const observed = new Promise<void>((resolve) => { tellObserved = resolve; });
     const live: ProviderAdapter = {
-      confinement: () => ({ kind: "declared", writableRoots: [root] }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
@@ -264,7 +259,6 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
         provider: { name: "codex", kind: "codex-app-server" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "declared", writableRoots: [root] },
         cwd: root,
       },
       initialBody: "work",
@@ -297,7 +291,6 @@ test("a Session without live tell hands off while narration remains open", async
     await initializeHeart(allocated.paths);
     let aborts = 0;
     const incumbent: ProviderAdapter = {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
@@ -324,7 +317,6 @@ test("a Session without live tell hands off while narration remains open", async
         provider: { name: "acp", kind: "acp" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "work",
@@ -363,7 +355,6 @@ test("a Session without live tell hands off while narration remains open", async
       };
     };
     await driveAkumaBody({ paths: allocated.paths }, {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       start: successorStart,
       resume: successorStart,
@@ -395,7 +386,6 @@ test("closed narration settles before a later Tell on a Session without live tel
     let settle!: (result: TurnResult) => void;
     let aborts = 0;
     const incumbent: ProviderAdapter = {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         started();
@@ -421,7 +411,6 @@ test("closed narration settles before a later Tell on a Session without live tel
         provider: { name: "acp", kind: "acp" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "work",
@@ -459,7 +448,6 @@ test("closed narration settles before a later Tell on a Session without live tel
       };
     };
     await driveAkumaBody({ paths: allocated.paths }, {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       start: successorStart,
       resume: successorStart,
@@ -510,7 +498,6 @@ test("a Tell after Session terminality stays pending without replacing the answe
         };
       };
     const provider: ProviderAdapter = {
-      confinement: () => ({ kind: "declared", writableRoots: [root] }),
       admitOptions(options) { return { kind: "admitted", options }; },
       start: drive,
       resume: drive,
@@ -523,7 +510,6 @@ test("a Tell after Session terminality stays pending without replacing the answe
         provider: { name: "codex", kind: "codex-app-server" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "declared", writableRoots: [root] },
         cwd: root,
       },
       initialBody: "work",
@@ -593,7 +579,6 @@ test("Claude settles a live Tell in the current Body through its result receipt"
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "initial work",
@@ -637,12 +622,10 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "work",
     }, {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
@@ -678,7 +661,7 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
   }
 });
 
-test("a declared drive drains Body Requests before recording its terminal turn", async () => {
+test("a drive drains Body Requests before recording its terminal turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-body-requests-"));
   const priorHome = process.env.HOME;
   const home = join(root, "home");
@@ -694,7 +677,6 @@ test("a declared drive drains Body Requests before recording its terminal turn",
       provider: { name: "codex-app-server", kind: "codex-app-server" } as const,
       options: {},
       origin: { kind: "direct" } as const,
-      confinement: { kind: "declared", writableRoots: [root] } as const,
       allowed: ALLOWED_ACTIONS,
       cwd: root,
     };
@@ -711,7 +693,6 @@ test("a declared drive drains Body Requests before recording its terminal turn",
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { systemPrompt: "Work.\n" },
-        confinement: { kind: "unconfined" },
         allowed: ALLOWED_ACTIONS,
       },
       admittedAt: "2026-08-09T00:00:00.000Z",
@@ -722,7 +703,6 @@ test("a declared drive drains Body Requests before recording its terminal turn",
     let requestDirectory: string | undefined;
     let childId: AkuId | undefined;
     const provider: ProviderAdapter = {
-      confinement: () => ({ kind: "declared", writableRoots: [root] }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start(input) {
         let finishEvents!: () => void;
@@ -807,7 +787,6 @@ test("a fork-born body sleeps without a turn and its first tell resumes the chil
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { model: "soul-model" },
         origin: { kind: "fork", parent: "aku/claude/1234abcd" as typeof allocated.id, at: "history-1" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       birthSession: {
@@ -866,7 +845,6 @@ test("the soul retains the summon cwd before native session admission", async ()
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: join(root, "custom-seat"),
       },
       initialBody: "start",
@@ -900,7 +878,6 @@ test("an answer without an admitted or resumed session is retained as a failed t
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "start",
@@ -932,7 +909,6 @@ test("a successor admits through the leash without reconstructing custody of an 
       provider: { name: "claude", kind: "claude-agent-sdk" as const },
       options: {},
       origin: { kind: "direct" as const },
-      confinement: { kind: "unconfined" as const },
       cwd: root,
       createdAt: "2026-08-08T00:00:00.000Z",
     };
@@ -993,12 +969,10 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "work",
     }, {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start(input) {
         setupStarted();
@@ -1039,7 +1013,6 @@ test("pause interrupts pre-drive request settlement within the control window", 
       provider: { name: "claude", kind: "claude-agent-sdk" } as const,
       options: {},
       origin: { kind: "direct" } as const,
-      confinement: { kind: "unconfined" } as const,
       allowed: ALLOWED_ACTIONS,
       cwd: root,
       createdAt: "2026-08-08T00:00:00.000Z",
@@ -1050,7 +1023,7 @@ test("pause interrupts pre-drive request settlement within the control window", 
     const requestId = "00000000-0000-4000-8000-000000000099";
     await admitRequest(allocated.paths, {
       id: requestId, action: "akuma.call", archetype: "worker", body: "wait", world: root,
-      recipe: { provider: soul.provider, options: {}, confinement: soul.confinement, allowed: soul.allowed },
+      recipe: { provider: soul.provider, options: {}, allowed: soul.allowed },
       admittedAt: "2026-08-08T00:00:01.000Z",
     });
     const child = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "c0ffed02" });
@@ -1084,7 +1057,6 @@ test("pause aborts the current drive and records the body as put down", async ()
     let settle!: (result: TurnResult) => void;
     const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
     const running: ProviderAdapter = {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
@@ -1113,7 +1085,6 @@ test("pause aborts the current drive and records the body as put down", async ()
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "work",
@@ -1156,12 +1127,10 @@ test("durable control aborts an owned session while a live tell is stalled", asy
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "work",
     }, {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
@@ -1226,11 +1195,10 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
       seed: {
         id: allocated.id, archetype: "claude",
         provider: { name: "claude", kind: "claude-agent-sdk" }, options: {},
-        origin: { kind: "direct" }, confinement: { kind: "unconfined" }, cwd: root,
+        origin: { kind: "direct" }, cwd: root,
       },
       initialBody: "work",
     }, {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
@@ -1263,7 +1231,6 @@ test("a body aborts its owned provider session when the heart disappears during 
   await initializeHeart(allocated.paths);
   let aborted = false;
   const failing: ProviderAdapter = {
-    confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
     async start() {
       return {
@@ -1287,7 +1254,6 @@ test("a body aborts its owned provider session when the heart disappears during 
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       cwd: root,
     },
     initialBody: "start",
@@ -1313,12 +1279,10 @@ test("heart loss wakes a Body stalled on provider observation", async () => {
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       cwd: root,
     },
     initialBody: "start",
   }, {
-    confinement: () => ({ kind: "unconfined" }),
     admitOptions(options) { return { kind: "admitted", options }; },
     async start() {
       markStarted();

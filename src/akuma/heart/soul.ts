@@ -5,17 +5,13 @@ import {
   decodeProviderRecipe,
   decodeReadonlyRestraint,
 } from "../provider-recipe.js";
-import type { AkumaOrigin, Confinement, Soul, SoulRow } from "./facts.js";
+import type { AkumaOrigin, Soul, SoulRow } from "./facts.js";
 import { effectiveAllowedActions } from "../allowed.js";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Readonly<Record<string, unknown>>
     : null;
-}
-
-function unknownKey(value: Readonly<Record<string, unknown>>, allowed: readonly string[]): string | undefined {
-  return Object.keys(value).find((key) => !allowed.includes(key));
 }
 
 function nonblank(value: unknown, what: string): string {
@@ -37,13 +33,9 @@ function decodeOrigin(value: unknown): AkumaOrigin {
   const origin = record(value);
   if (origin === null) throw new Error("Akuma soul origin must be an object");
   if (origin.kind === "direct") {
-    if (unknownKey(origin, ["kind"]) !== undefined) throw new Error("Akuma soul direct origin must have only kind");
     return { kind: "direct" };
   }
   if (origin.kind === "request") {
-    if (unknownKey(origin, ["kind", "parent", "requestId"]) !== undefined) {
-      throw new Error("Akuma soul request origin must have only kind, parent, and requestId");
-    }
     return {
       kind: "request",
       parent: soulAkuIdentity(origin.parent, "request parent").id,
@@ -51,9 +43,6 @@ function decodeOrigin(value: unknown): AkumaOrigin {
     };
   }
   if (origin.kind === "fork") {
-    if (unknownKey(origin, ["at", "kind", "parent"]) !== undefined) {
-      throw new Error("Akuma soul fork origin must have only kind, parent, and at");
-    }
     return {
       kind: "fork",
       parent: soulAkuIdentity(origin.parent, "fork parent").id,
@@ -63,32 +52,9 @@ function decodeOrigin(value: unknown): AkumaOrigin {
   throw new Error("Akuma soul origin must be direct, request, or fork");
 }
 
-function decodeConfinement(value: unknown): Confinement {
-  const confinement = record(value);
-  if (confinement === null) throw new Error("Akuma soul confinement must be an object");
-  if (confinement.kind === "unconfined") {
-    if (unknownKey(confinement, ["kind"]) !== undefined) throw new Error("Akuma soul unconfined confinement must have only kind");
-    return { kind: "unconfined" };
-  }
-  if (confinement.kind === "declared") {
-    if (unknownKey(confinement, ["kind", "writableRoots"]) !== undefined) {
-      throw new Error("Akuma soul declared confinement must have only kind and writableRoots");
-    }
-    if (!Array.isArray(confinement.writableRoots)
-      || confinement.writableRoots.some((root) => typeof root !== "string" || root.trim().length === 0)) {
-      throw new Error("Akuma soul declared confinement writableRoots must be nonblank strings");
-    }
-    return { kind: "declared", writableRoots: [...confinement.writableRoots] as string[] };
-  }
-  throw new Error("Akuma soul confinement must be unconfined or declared");
-}
-
 function validateSoul(value: unknown): Soul {
   const soul = record(value);
   if (soul === null) throw new Error("Akuma soul must be an object");
-  if (unknownKey(soul, ["allowed", "archetype", "confinement", "createdAt", "cwd", "description", "id", "options", "origin", "provider", "readonly"]) !== undefined) {
-    throw new Error("Akuma soul has an unknown field");
-  }
   const identity = soulAkuIdentity(soul.id, "id");
   const id: AkuId = identity.id;
   const archetype = nonblank(soul.archetype, "name");
@@ -109,7 +75,6 @@ function validateSoul(value: unknown): Soul {
     ...(restraint === undefined ? {} : { readonly: restraint }),
     cwd: nonblank(soul.cwd, "cwd"),
     origin: decodeOrigin(soul.origin),
-    confinement: decodeConfinement(soul.confinement),
     allowed: effectiveAllowedActions(soul.allowed),
     createdAt: nonblank(soul.createdAt, "createdAt"),
   };

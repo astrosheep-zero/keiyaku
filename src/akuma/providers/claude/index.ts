@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { abortable } from "../../abort.js";
 import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
+  AKUMA_REQUESTS_ENV,
   AgentEventChannel,
   type ProviderAdapter,
   type Session,
@@ -93,8 +94,13 @@ function claudeQueryOptions(
   return {
     cwd: input.cwd,
     abortController,
+    ...(input.requests === undefined ? {} : { additionalDirectories: [input.requests.dir] }),
     ...(execution.executable === undefined ? {} : { pathToClaudeCodeExecutable: execution.executable }),
-    ...(execution.env === undefined ? {} : { env: { ...process.env, ...execution.env } }),
+    ...((execution.env === undefined && input.requests === undefined) ? {} : { env: {
+      ...process.env,
+      ...execution.env,
+      ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
+    } }),
     permissionMode: mode,
     ...(mode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
     settingSources: ["user", "project", "local"],
@@ -320,7 +326,6 @@ export function createClaudeProvider(
   execution: ClaudeExecution = {},
 ): ProviderAdapter {
   return {
-    confinement: () => ({ kind: "unconfined" }),
     admitOptions: admitClaudeOptions,
     fork: (input) => forkClaude(load, execution, input),
     start: (input) => driveClaude(load, execution, input),

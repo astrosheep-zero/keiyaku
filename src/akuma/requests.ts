@@ -36,8 +36,6 @@ import { decodeAllowedActions } from "./allowed.js";
 const POLL_MS = 25;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
-type RequestClaimRecipe = Omit<RequestRecipe, "confinement">;
-
 type CallRequestClaim = Readonly<{
   id: string;
   action: "akuma.call";
@@ -45,7 +43,7 @@ type CallRequestClaim = Readonly<{
   archetype: string;
   body: string;
   cwd?: string;
-  recipe: RequestClaimRecipe;
+  recipe: RequestRecipe;
 }>;
 
 type WaitRequestClaim = Readonly<{
@@ -170,7 +168,7 @@ function absolute(value: unknown): value is string {
   return typeof value === "string" && isAbsolute(value) && resolve(value) === value;
 }
 
-function decodeRecipe(value: unknown, cwd: string): RequestRecipe | null {
+function decodeRecipe(value: unknown): RequestRecipe | null {
   const recipe = object(value);
   if (recipe === null) return null;
   const expectedKeys = [
@@ -184,20 +182,16 @@ function decodeRecipe(value: unknown, cwd: string): RequestRecipe | null {
   if (recipe.description !== undefined
     && (typeof recipe.description !== "string" || recipe.description.trim().length === 0)) return null;
   try {
-    const selected = resolveProviderExecution(recipe.provider);
-    const provider = selected.execution;
-    const adapter = selected.adapter;
+    const provider = resolveProviderExecution(recipe.provider).execution;
     const decodedOptions = decodeProviderOptions(recipe.options);
     const readonly = recipe.readonly === undefined ? undefined : decodeReadonlyRestraint(recipe.readonly);
     if ((decodedOptions.readonly === true) !== (readonly !== undefined)) return null;
-    const confinement = adapter.confinement({ cwd, options: decodedOptions });
     return Object.freeze({
       ...(recipe.description === undefined ? {} : { description: recipe.description }),
       allowed: decodeAllowedActions(recipe.allowed),
       provider,
       options: decodedOptions,
       ...(readonly === undefined ? {} : { readonly }),
-      confinement,
     });
   } catch {
     return null;
@@ -628,7 +622,7 @@ async function serveCallClaim(
 ): Promise<void> {
   input.signal.throwIfAborted();
   const cwd = input.claim.cwd ?? input.parent.cwd;
-  const recipe = decodeRecipe(input.claim.recipe, cwd);
+  const recipe = decodeRecipe(input.claim.recipe);
   if (recipe === null) return;
   let fact = await admitRequest(input.paths, { ...input.claim, recipe, admittedAt: input.now() });
   const existing = receiptFor(fact);
@@ -670,7 +664,6 @@ async function serveCallClaim(
           allowed: request.recipe.allowed,
           cwd,
           origin: { kind: "request", parent: input.parent.id, requestId: request.id },
-          confinement: request.recipe.confinement,
         },
         initialBody: request.body,
       }),

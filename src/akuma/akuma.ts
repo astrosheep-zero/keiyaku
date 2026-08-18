@@ -75,7 +75,6 @@ export type AkumaListRow = Readonly<{
   description?: string;
   life: AkumaLife;
   lifeAt: string | null;
-  confinement: Soul["confinement"];
   pending: readonly string[];
 }>;
 
@@ -234,7 +233,6 @@ async function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot?: HeartS
     ...(snapshot.soul.description === undefined ? {} : { description: snapshot.soul.description }),
     life: currentLife,
     lifeAt: lifeAt(currentLife, snapshot.latestBody, snapshot.latestKill, snapshot.soul.createdAt),
-    confinement: snapshot.soul.confinement,
     pending: snapshot.pending.map((tell) => tell.id),
   };
 }
@@ -440,7 +438,6 @@ export class AkumaHandle {
             allowed: source.allowed,
             cwd: source.cwd,
             origin: { kind: "fork", parent: this.id, at: input.at },
-            confinement: source.confinement,
           },
           birthSession,
         }),
@@ -565,10 +562,7 @@ export class Akuma {
     const cwd = input.cwd !== undefined && context?.cwdCanonical === true
       ? input.cwd
       : await canonicalBirthCwd(selectedCwd);
-    const recipe = Object.freeze({
-      ...requestRecipe,
-      confinement: archetype.adapter.confinement({ cwd, options: archetype.options }),
-    });
+    const recipe = requestRecipe;
     const published = await publishAkuma({
       worldPath: this.path,
       archetype: archetype.name,

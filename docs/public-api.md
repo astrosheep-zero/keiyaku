@@ -292,7 +292,7 @@ result to carry the prospective predecessor-to-candidate `diff` and `scope.paths
 omission leaves those bytes off the report. An explicitly requested empty
 string remains visible.
 
-When a declared Akuma request channel is present, `deliver` forwards the pinned
+When an Akuma request channel is present, `deliver` forwards the pinned
 Repo's normalized primary-worktree coordinate, its complete ContractId,
 optional message, and `includeDirty` to the direct parent. The parent
 reconstructs that Repo instead of substituting its own World, supplies the

@@ -20,10 +20,6 @@ outcome.
 
 ```ts
 type ProviderAdapter = {
-  confinement(input: {
-    cwd: string;
-    options: ProviderOptions;
-  }): Confinement;
   admitOptions(options: ProviderOptions): ProviderOptionAdmission;
   start(input: FreshDrive): Promise<Session>;
   resume?(input: ResumeDrive): Promise<Session>;
@@ -83,7 +79,7 @@ the adapter boundary.
 `ReceiptKind` is the provider-authored receipt word; Provider Core does not
 close or reinterpret that vocabulary.
 
-Fresh start, typed events, completion, abort, confinement and option admission,
+Fresh start, typed events, completion, abort, Body Request transport, option admission,
 and `launchTells` are unconditional Provider Core. Resume, fork, and live tell
 are capabilities expressed only by the corresponding optional operation. An
 adapter without live tell still receives pending tells through `launchTells`
@@ -314,6 +310,8 @@ alone judges readonly realization. Native restraint has no diagnostic; `none`
 names the enforcement gap, and missing enforcement remains admitted. Sessions
 persist execution name and exact options, from which tell, resume, recovery,
 and fork reconstruct adapters. Fork inherits execution and restraint.
+Generic provider execution, option, and restraint decoders validate known
+members and ignore additional members.
 `executable` constrains process start; literal `env` overlays only ambient
 launch environment and is neither durable nor interpolated. Claude execution
 with `env` refuses fork because native `forkSession` cannot accept it.
@@ -323,11 +321,16 @@ requires a distinct nonblank child session. Pi uses the exact answered
 `sessionFile` and `historyId` and requires a distinct returned file. Missing
 source points, native failure, or reused coordinates are `fork-failed`.
 
-Alongside its adapter, each provider states its confinement for a
-given call: declared writable roots, or `unconfined`. The soul records it;
-nothing gates call admission on it. During a declared drive the adapter grants
-the body-owned request transport as one additional writable root and injects
-`AKUMA_REQUESTS`; an unconfined adapter never receives that input.
+Every drive receives a body-owned request transport. Each adapter injects its
+absolute path as `AKUMA_REQUESTS` into the provider command environment. A
+Codex app-server `workspaceWrite` turn additionally grants the directory as a
+writable root of its native sandbox; a `readOnly` turn does not. Claude passes
+the directory as an SDK `additionalDirectories` permission root so a configured
+Claude sandbox can reach it without replacing the caller's sandbox settings.
+When Pi admits bash, it injects the path through that drive-local bash spawn
+environment rather than mutating the Body process environment; readonly Pi
+still excludes bash. Provider-specific transport wiring does not change the one
+provider-neutral drive contract.
 
 ## ACP
 

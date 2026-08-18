@@ -8,7 +8,7 @@ import type { ProviderExecution } from "../../provider-recipe.js";
 export type OpencodeSdkSession = Pick<OpencodeClient["session"],
   "create" | "get" | "fork" | "abort" | "promptAsync" | "messages">;
 export type OpencodeSdkEvent = Pick<OpencodeClient["event"], "subscribe">;
-export type OpencodeSdkLoader = (cwd: string) => Promise<Readonly<{
+export type OpencodeSdkLoader = (cwd: string, execution: ProviderExecution) => Promise<Readonly<{
   client: { session: OpencodeSdkSession; event: OpencodeSdkEvent };
   close?: () => Promise<void> | void;
 }>>;
@@ -62,7 +62,7 @@ export async function loadOpencode(
   loader?: OpencodeSdkLoader,
 ): Promise<OpencodeRuntime> {
   if (loader) {
-    const loaded = await loader(cwd);
+    const loaded = await loader(cwd, execution);
     return { client: loaded.client, close: async () => { await loaded.close?.(); } };
   }
   const port = await availablePort();

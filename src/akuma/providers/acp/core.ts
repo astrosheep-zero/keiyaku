@@ -3,6 +3,7 @@ import { Readable, Writable } from "node:stream";
 import { spawnStdioProcess, type StdioProcess } from "../../../runtime/proc/stdio.js";
 import { abortable } from "../../abort.js";
 import {
+  AKUMA_REQUESTS_ENV,
   AgentEventChannel,
   type ProviderAdapter,
   type Session,
@@ -156,7 +157,11 @@ export async function startAcpSession(
   const child = (dependencies.spawnProcess ?? spawnStdioProcess)({
     argv: launch.argv,
     cwd: input.cwd,
-    env: { ...globalThis.process.env, ...launch.env },
+    env: {
+      ...globalThis.process.env,
+      ...launch.env,
+      ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
+    },
   });
   let sessionId: string | undefined;
   let turn!: ReturnType<typeof createAcpTurn>;

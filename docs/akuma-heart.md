@@ -83,11 +83,11 @@ dies; their existence does not depend on a current control-flow reader.
 
 - **soul** — one row, written at birth: id, archetype, optional description,
   resolved provider execution, admitted options, optional `ReadonlyRestraint`,
-  summon cwd, origin, confinement, effective allowed actions, created-at. The
+  summon cwd, origin, effective allowed actions, created-at. The
   restraint is the exact
-  provider-admission fact, not a Heart judgment. Heart owns the exact Soul
-  envelope and its cross-field consistency; identity and provider-recipe
-  members are decoded only by their own authorities.
+  provider-admission fact, not a Heart judgment. Heart validates known Soul
+  members and their cross-field consistency while ignoring additional members;
+  identity and provider-recipe members are decoded only by their own authorities.
 - **bodies** — one row per Body: sequence, leash-taken-at, and optional explicit
   end (`exited` / `broke-off` / `put-down`). No process coordinate or
   reconstructable termination authority is durable.

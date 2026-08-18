@@ -11,23 +11,21 @@ the provider caller is already gone or is put down by predecessor settlement.
 Therefore a later body closes old requests by observation only: it never
 re-executes one, and never needs an exactly-once claim.
 
-Body Requests exist only for a provider whose confinement is `declared`.
-The body injects `AKUMA_REQUESTS` for that drive; nested call, wait, tell,
-kill, and `contract.deliver` operations reroute exactly when that variable
-exists. An unconfined provider receives no injection and performs the ordinary
-local operation.
-There is no third mode, second public verb, or generic messaging surface.
+The body creates a request transport for every provider drive, and the adapter
+injects `AKUMA_REQUESTS` into that drive's command environment. Nested call,
+wait, tell, kill, and `contract.deliver` operations reroute exactly when that
+variable exists. There is no second public verb or generic messaging surface.
 
 ### Transport, authority, and judge
 
-Each declared drive gets an ephemeral transport directory owned by the akuma:
+Each drive gets an ephemeral transport directory owned by the akuma:
 
 ```text
 <akuma-dir>/requests/<body-sequence>/
 ```
 
-The adapter grants that directory as an additional provider writable root and
-injects its absolute path. A caller atomically writes `{ id, action, payload }`
+The adapter injects its absolute path; a native sandbox also grants the
+directory as writable. A caller atomically writes `{ id, action, payload }`
 to `<request-id>.request.json` and polls `<request-id>.receipt.json` without a
 deadline.
 The body writes the receipt projection. The request id is a caller-minted UUID.
@@ -53,9 +51,9 @@ one fact. There is no second store.
 
 For call, the claim decoder first validates the action envelope, then selects
 the stated cwd or the hosting parent Soul cwd. Only then does it decode the frozen provider and
-options with the existing owners and project confinement for that final cwd.
-The complete validated payload enters Heart; transport never supplies a second
-confinement or allowed-action judgment. A malformed payload is a malformed
+options with the existing owners for that final cwd. The complete validated
+payload enters Heart; transport never supplies a second allowed-action
+judgment. A malformed payload is a malformed
 claim and never becomes a durable request fact.
 
 The child directory and its leash remain the sole judge of child birth. The
@@ -164,5 +162,4 @@ orchestration, so they must always be cancelable and cannot make Body `hung`.
 Requests do not enter the idle predicate.
 
 One hop holds at every depth: each provider talks only to its own unsandboxed
-body, and each child body grants a fresh drive-local transport when its own
-provider is declared.
+body, and each child body grants a fresh drive-local transport.

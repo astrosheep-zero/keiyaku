@@ -1,4 +1,3 @@
-import type { Confinement } from "./heart/index.js";
 import { decodeResumeCoordinate, encodeResumeCoordinate, type ResumeCoordinate } from "./coordinate.js";
 import type { ProviderOptions, ReadonlyRestraint } from "./provider-recipe.js";
 export type { ResumeCoordinate } from "./coordinate.js";
@@ -393,7 +392,7 @@ export type DriveInput = Readonly<{
   cwd: string;
   options: ProviderOptions;
   signal: AbortSignal;
-  requests?: Readonly<{ dir: string }>;
+  requests: Readonly<{ dir: string }>;
 }>;
 
 export type ProviderOptionAdmission =
@@ -401,7 +400,6 @@ export type ProviderOptionAdmission =
   | Readonly<{ kind: "refused"; diagnostic: string }>;
 
 export type ProviderAdapter = Readonly<{
-  confinement(input: Readonly<{ cwd: string; options: ProviderOptions }>): Confinement;
   admitOptions(options: ProviderOptions): ProviderOptionAdmission;
   fork?(input: Readonly<{
     session: ResumeCoordinate;

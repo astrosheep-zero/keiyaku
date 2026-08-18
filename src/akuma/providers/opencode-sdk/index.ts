@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { abortable } from "../../abort.js";
-import { AgentEventChannel, type ProviderAdapter, type Session, type TurnResult } from "../../provider.js";
+import {
+  AKUMA_REQUESTS_ENV,
+  AgentEventChannel,
+  type ProviderAdapter,
+  type Session,
+  type TurnResult,
+} from "../../provider.js";
 import type { ResumeCoordinate } from "../../heart/index.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import { createEventState, mapEvent } from "./events.js";
@@ -217,7 +223,13 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
   signal.addEventListener("abort", abortSetup, { once: true });
   signal.throwIfAborted();
   const runtime = await abortable(
-    loadOpencode(execution, input.cwd, abortController.signal, loader),
+    loadOpencode({
+      ...execution,
+      env: {
+        ...execution.env,
+        ...(input.requests === undefined ? {} : { [AKUMA_REQUESTS_ENV]: input.requests.dir }),
+      },
+    }, input.cwd, abortController.signal, loader),
     abortController.signal,
     async (late) => await late.close(),
   );
@@ -283,7 +295,6 @@ export function createOpencodeProvider(input: ProviderExecution | OpencodeProvid
   const execution: ProviderExecution = "kind" in input ? input : { name: OPENCODE_SDK_PROVIDER, kind: "opencode-sdk" };
   const loader = "loader" in input ? input.loader : undefined;
   return {
-    confinement: ({ cwd }) => ({ kind: "declared", writableRoots: [cwd] }),
     admitOptions(options: ProviderOptions) {
       try { admit(options); } catch (error) { return { kind: "refused", diagnostic: diagnostic(error) }; }
       return {

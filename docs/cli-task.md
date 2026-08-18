@@ -149,8 +149,8 @@ fresh target observation, and every declared gate's current report. Kanshi and
 the renderer copy those discriminants and do not evaluate gate currency, infer
 claimability, or derive terminality.
 Its Akuma section is supplied by `Akuma.list()` as specified by
-[kanshi.md](kanshi.md); the board copies life, identity, pending count,
-confinement, and searched coordinates
+[kanshi.md](kanshi.md); the board copies life, identity, pending count, and
+searched coordinates
 without probing, reading history, or reclassifying them.
 
 JSON serializes that complete report without a text-specific projection or

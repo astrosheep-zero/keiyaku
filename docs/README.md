@@ -24,12 +24,12 @@ surface. Read every owner named for the surface being changed.
 | [cli-task.md](cli-task.md) | Task command grammar and Task text presentation. |
 | [cli-output.md](cli-output.md) | Help composition, shared rendering, exit status, and install output. |
 | [task.md](task.md) | Separate in-package task product: document authority, identity, lifecycle, associations, concurrency, and persistence. |
-| [akuma.md](akuma.md) | Akuma identity, birth, life, Archetypes, placement, and confinement. |
+| [akuma.md](akuma.md) | Akuma identity, birth, life, Archetypes, and placement. |
 | [akuma-allowed.md](akuma-allowed.md) | Forwarded mutable-action vocabulary, birth-time reduction, Soul interpretation, and keyed admission. |
 | [akuma-heart.md](akuma-heart.md) | Akuma durable facts, custody, schema gates, activity retention, and projections. |
 | [akuma-execution.md](akuma-execution.md) | Body execution and tell, interrupt, kill, fork, and wake semantics. |
 | [akuma-requests.md](akuma-requests.md) | Body Request admission, forwarding, serving, and recovery protocol. |
-| [akuma-provider.md](akuma-provider.md) | Provider-neutral event vocabulary, native adapters, execution recipes, and confinement. |
+| [akuma-provider.md](akuma-provider.md) | Provider-neutral event vocabulary, native adapters, and execution recipes. |
 | [akuma-public.md](akuma-public.md) | Separate Akuma product handles, status, wait, history, and fleet values. |
 | [settings.md](settings.md) | Shared Settings resource: coordinates, scope, shadowing, failure isolation, provenance, and observation. |
 | [kanshi.md](kanshi.md) | Composite world observation: section availability, read-time associations, selection, and public report shape. |

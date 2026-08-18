@@ -266,7 +266,7 @@ type DriveTurnInput = Readonly<{
 type ActiveTurn = Readonly<{
   turnSequence: number;
   drive: Session;
-  requests: BodyRequestPump | null;
+  requests: BodyRequestPump;
   cwd: string;
   options: Soul["options"];
   resume?: ResumeCoordinate;
@@ -297,24 +297,22 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     startedAt: input.now(),
     ...(input.call === undefined ? {} : { call: input.call }),
   });
-  const requests = input.soul.confinement.kind === "declared"
-    ? await BodyRequestPump.open({
-        paths: input.paths,
-        parent: input.soul,
-        bodySequence: input.bodySequence,
-        now: input.now,
-        spawn: input.runtimeSpawn,
-        ...(input.upstream === undefined ? {} : { upstream: input.upstream }),
-        signal: input.supervisor.signal,
-      })
-    : null;
+  const requests = await BodyRequestPump.open({
+    paths: input.paths,
+    parent: input.soul,
+    bodySequence: input.bodySequence,
+    now: input.now,
+    spawn: input.runtimeSpawn,
+    ...(input.upstream === undefined ? {} : { upstream: input.upstream }),
+    signal: input.supervisor.signal,
+  });
   const driveInput = {
     body: input.body,
     launchTells: input.launchTells.map((tell) => ({ id: tell.id, text: tell.body })),
     cwd,
     options,
     signal: input.supervisor.signal,
-    ...(requests === null ? {} : { requests: { dir: requests.directory } }),
+    requests: { dir: requests.directory },
   };
   const setup = session === undefined
     ? input.adapter.start({ ...driveInput, session: { kind: "fresh" } })
@@ -323,7 +321,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     const selected = await setup;
     if (input.supervisor.signal.aborted) {
       await retireProviderCustody(input, turn.sequence, selected);
-      await requests?.close();
+      await requests.close();
       return { kind: "stopped" };
     }
     if (input.launchTells.length > 0) {
@@ -335,11 +333,11 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
         deliveredAt: input.now(),
       })));
     }
-    if (requests !== null) void selected.completion.then(() => requests.stopAdmission());
+    void selected.completion.then(() => requests.stopAdmission());
     return { turnSequence: turn.sequence, drive: selected, requests, cwd, options,
       ...(session === undefined ? {} : { resume: session }) };
   } catch (error) {
-    await requests?.close();
+    await requests.close();
     if (input.supervisor.signal.aborted) {
       if (input.supervisor.reason === "heart-gone") throw error;
       return { kind: "stopped" };
@@ -436,7 +434,7 @@ async function stopActiveDrive(
   active: ActiveTurn,
 ): Promise<void> {
   await retireProviderCustody(input, active.turnSequence, active.drive);
-  await active.requests?.close();
+  await active.requests.close();
 }
 
 function hasUnattemptedTell(
@@ -459,9 +457,9 @@ function persistProviderEvent(
 async function settleCompletion(
   result: TurnResult,
   session: ResumeCoordinate | undefined,
-  requests: BodyRequestPump | null,
+  requests: BodyRequestPump,
 ): Promise<DrivenTurn> {
-  await requests?.close();
+  await requests.close();
   return result.kind === "answered" ? { ...result, ...(session === undefined ? {} : { session }) } : result;
 }
 
@@ -505,7 +503,7 @@ async function consumeTurnDrive(
         input.supervisor.next(heart).then((observation) => ({ kind: "heart" as const, observation })),
         ...(tellObservation === null ? [] : [tellObservation]),
         receiptFailure,
-        ...(requests === null ? [] : [requests.failure]),
+        requests.failure,
       ]);
       if (next.kind === "event" && !next.event.done) {
         await writeProviderEvent(input, active, next.event.value);
@@ -536,7 +534,7 @@ async function consumeTurnDrive(
       return { kind: "stopped" };
     }
     await retireProviderCustody(input, turnSequence, drive);
-    try { await requests?.close(); } catch { /* preserve the first pump failure */ }
+    try { await requests.close(); } catch { /* preserve the first pump failure */ }
     return { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -566,7 +564,7 @@ async function driveTurn(
       : { ...result, turnSequence: active.turnSequence };
   } catch (error) {
     if (await heartExists(input.paths)) {
-      await active.requests?.close();
+      await active.requests.close();
       return { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error),
         turnSequence: active.turnSequence };
     }

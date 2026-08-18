@@ -30,7 +30,7 @@ synchronous.
   transaction language.
 - **soul** — the immutable birth facts: id, archetype, description, resolved
   provider execution, provider options, optional readonly restraint, summon
-  cwd, origin, confinement, and effective allowed actions.
+  cwd, origin, and effective allowed actions.
   The cwd is the akuma's seat, not a native resume coordinate; resumability
   remains a session fact.
 - **body** — the detached, unsandboxed process currently driving the akuma.
@@ -44,8 +44,7 @@ synchronous.
   Written only under the leash; a late body's birth claim checks the seal
   in the same transaction and self-aborts if present.
 - **provider** — the agent process the body drives through the built-in adapter
-  kind selected by its frozen execution recipe. Its writable reach is a typed
-  confinement fact, never an admission gate.
+  kind selected by its frozen execution recipe.
 
 Dependency direction is fixed: the public Akuma surface composes identity,
 Archetype, Heart, Body, provider, Request, publication, Settings, and runtime
@@ -130,7 +129,7 @@ Every birth chooses cwd from the first available source: stated input, an
 appointed Contract worktree, the hosting caller Soul for a Body Request, the
 direct initiator process, then the World root. The selected path must be an
 existing canonical absolute directory; an invalid selected path fails instead
-of falling through. Soul cwd, provider confinement, launch, and public call
+of falling through. Soul cwd, launch, and public call
 provenance use that one value. Contract appointment remains a Library concern,
 while a hosting Body knows only its own Soul and the request claim.
 
@@ -254,8 +253,8 @@ Provider kind `pi` uses the in-process `@earendil-works/pi-coding-agent`
 SDK. Model is an exact `<provider>/<id>` lookup through `ModelRuntime`; effort
 is one native thinking level; the system prompt is supplied through the native
 resource loader. For `readonly: true`, its admitted tool set excludes `bash`,
-`edit`, and `write`, and records native enforcement. Its confinement is the
-call cwd. Resume and fork use the exact persisted session file. Native steer
+`edit`, and `write`, and records native enforcement. Resume and fork use the
+exact persisted session file. Native steer
 proves queueing only, so Pi does not expose live tell.
 
 Provider kind `grok-build` uses the shared ACP lifecycle under its own `x.ai`
@@ -292,24 +291,3 @@ Hearts live in the primary world:
   No defense is built.
 - Home keeps Archetype configuration only, never state. Nothing reads it back
   after call.
-
-## Confinement
-
-Threat model, ruled: users and agents are assumed **non-malicious**;
-malignant errors — a lying ledger, silent loss of recorded facts — are
-barred; kernel-grade correctness is not the bar. Defenses against
-deliberate forgery are out of scope: a hostile process with host authority
-can falsify anything, and no placement law changes that, so none pretends
-to.
-
-What remains is accident isolation, and placement already buys it: hearts
-never live in a contract worktree — the provider's task surface — so a
-zako's `rm -rf` or `git clean` in its own workspace cannot reach them.
-When cwd is the primary world itself, the heart sits inside the provider's
-reach; that is the same accepted repo-local risk as anyone running
-`git clean -fdx` there, and **no refusal is built**.
-
-The adapter still states the provider's writable surface. During a declared
-drive it can grant the body-owned request transport as an additional writable
-root; the transport never moves into the user's worktree. The statement rides
-into the soul as a typed `confinement` fact — evidence for triage, never a gate.

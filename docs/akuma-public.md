@@ -98,8 +98,8 @@ history like other settled activity. Text and
 JSON expose the same two-state row and no provider fence, five-stage
 lifecycle, or stage timeline. Tell
 rows are the sole detailed public tell projection; `AkumaStatus` carries no
-pending-ID collection, description, Archetype name, or confinement. Those stay
-on the fleet row, the identity, or the soul. There
+pending-ID collection, description, or Archetype name. Those stay on the fleet
+row or the identity. There
 is no separate public TellId browsing workflow. A global `status()` value is
 useful context but is not a mutation receipt and cannot alter this result.
 
@@ -141,8 +141,8 @@ flagship's decision; the surface puts the state and available verbs in front of
 her and says nothing more.
 
 `list()` is the compact fleet scan, not a smaller `status()`. Born fleet rows expose id,
-Archetype and description snapshots, life and its source Heart timestamp,
-confinement, and pending tell count, but no activity, history, or latest outcome. The public
+Archetype and description snapshots, life and its source Heart timestamp, and
+pending tell count, but no activity, history, or latest outcome. The public
 types share `id` and `life` by coincidence, not by inheritance. The id is
 projected verbatim and has no endpoint-state interpretation here. Unborn/stillborn rows retain
 their existing evidence. A valid allocated directory is never omitted: missing
@@ -152,8 +152,7 @@ Other failures while projecting one valid physical identity silently omit that
 row and do not suppress readable peers. There is no public per-row failure arm,
 diagnostic row, or retry. Direct reads of that AkuId retain their ordinary
 failure. This keeps a fleet read from scanning the complete
-turn history of every akuma. Confinement is triage evidence and future Body Request
-placement input, never an admission result; no read reaches back into home.
+turn history of every akuma. No read reaches back into home.
 The life timestamp is the current Body's leash time for running, its hung
 evidence for hung, the matching kill witness for killed, and the latest Body end
 for asleep or stranded. Untidy has no honest beginning time. Unborn and

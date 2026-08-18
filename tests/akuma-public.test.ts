@@ -58,7 +58,6 @@ async function bornHistoryHandle(root: string, suffix: string) {
     options: {},
     cwd: root,
     origin: { kind: "direct" },
-    confinement: { kind: "unconfined" },
     createdAt: "2026-08-10T00:00:00.000Z",
   });
   const body = await holder.recordBody(allocated.paths, {
@@ -229,7 +228,6 @@ test("public fleet rows wire every Heart life to its source timestamp", async ()
         options: {},
         cwd: root,
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         createdAt,
       });
       return { allocated, holder };
@@ -306,7 +304,6 @@ test("interrupt refuses an unborn address without leaving durable input or contr
 });
 
 const provider: ProviderAdapter = {
-  confinement: () => ({ kind: "unconfined" }),
   admitOptions(options) { return { kind: "admitted", options }; },
   async start() {
     let finishEvents!: () => void;
@@ -342,7 +339,6 @@ async function answeredSource(root: string, suffix: string, readonly?: Soul["rea
       options: { model: "fixture-model", ...(readonly === undefined ? {} : { readonly: true }) },
       ...(readonly === undefined ? {} : { readonly }),
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       cwd: world,
     },
     initialBody: "work",
@@ -669,7 +665,6 @@ test("an answered Turn without a fork point remains visible and keeps its answer
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10006" });
     await initializeHeart(allocated.paths);
     const noPointProvider: ProviderAdapter = {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         let finishEvents!: () => void;
@@ -698,7 +693,6 @@ test("an answered Turn without a fork point remains visible and keeps its answer
         provider: CLAUDE_EXECUTION,
         options: { model: "fixture-model" },
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "work",
@@ -882,7 +876,6 @@ test("public Akuma handles separate compact list rows from full status and wait"
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "work",
@@ -899,13 +892,11 @@ test("public Akuma handles separate compact list rows from full status and wait"
     assert.equal("answer" in listed, false);
     assert.equal(listed.archetype, "claude");
     assert.equal(listed.description, "Fixture akuma");
-    assert.deepEqual(listed.confinement, { kind: "unconfined" });
     assert.deepEqual(listed.pending, []);
     const status = (await handle.status());
     assert.equal(status.life, "asleep");
     assert.equal("archetype" in status, false);
     assert.equal("description" in status, false);
-    assert.equal("confinement" in status, false);
     assert.equal("pending" in status, false);
     assert.equal(status.timeline.kind, "idle");
     assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.outcome.kind === "answered", true);
@@ -951,7 +942,6 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
         provider: CLAUDE_EXECUTION,
         options: { model: "fixture-model" },
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: seat,
       },
       initialBody: "first",
@@ -970,7 +960,6 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
 
     let resumed: Parameters<NonNullable<ProviderAdapter["resume"]>>[0] | undefined;
     const successor: ProviderAdapter = {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() { throw new Error("retained Akuma must resume"); },
       async resume(input) {
@@ -988,8 +977,9 @@ test("tell after an already stopped Body wakes the same Akuma through its retain
     });
 
     assert.notEqual(resumed, undefined);
-    const { signal, ...resumedInput } = resumed!;
+    const { requests, signal, ...resumedInput } = resumed!;
     assert.equal(signal.aborted, false);
+    assert.equal(requests.dir, join(allocated.paths.directory, "requests", "2"));
     assert.deepEqual(resumedInput, {
       body: "",
       launchTells: [{ id: told.admission.tellId, text: "continue" }],
@@ -1024,7 +1014,6 @@ test("interrupt records a tell only after taking an idle leash", async () => {
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: seat,
       },
       initialBody: "first",
@@ -1063,12 +1052,10 @@ test("interrupt waits for a running body to self-abort before recording the tell
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: seat,
       },
       initialBody: "work",
     }, {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
@@ -1118,7 +1105,6 @@ test("interrupt reports untidy when a free leash has no clean Body settlement", 
       provider: CLAUDE_EXECUTION,
       options: {},
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       cwd: root,
       createdAt: "2026-08-08T00:00:00.000Z",
     });
@@ -1147,7 +1133,6 @@ test("interrupt reports hung when the Body does not release its held leash", asy
       provider: CLAUDE_EXECUTION,
       options: {},
       origin: { kind: "direct" },
-      confinement: { kind: "unconfined" },
       cwd: root,
       createdAt: "2026-08-08T00:00:00.000Z",
     });
@@ -1467,12 +1452,10 @@ test("a failed turn is durable public evidence and never masquerades as provider
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "fail",
     }, {
-      confinement: () => ({ kind: "unconfined" }),
       async start() {
         return {
           events: { async *[Symbol.asyncIterator]() {} },
@@ -1535,7 +1518,6 @@ test("kill gives the Body a grace window to abort its owned provider session", a
     let settle!: (result: { kind: "failed"; diagnostic: string }) => void;
     const completion = new Promise<{ kind: "failed"; diagnostic: string }>((resolve) => { settle = resolve; });
     const running: ProviderAdapter = {
-      confinement: () => ({ kind: "unconfined" }),
       admitOptions(options) { return { kind: "admitted", options }; },
       async start() {
         return {
@@ -1564,7 +1546,6 @@ test("kill gives the Body a grace window to abort its owned provider session", a
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
-        confinement: { kind: "unconfined" },
         cwd: root,
       },
       initialBody: "keep working",

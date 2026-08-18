@@ -4,10 +4,6 @@ import type { ProviderExecution, ProviderOptions, ReadonlyRestraint } from "../p
 import type { AllowedActions } from "../allowed.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
-export type Confinement =
-  | Readonly<{ kind: "unconfined" }>
-  | Readonly<{ kind: "declared"; writableRoots: readonly string[] }>;
-
 export type AkumaOrigin =
   | Readonly<{ kind: "direct" }>
   | Readonly<{ kind: "request"; parent: AkuId; requestId: string }>
@@ -22,12 +18,11 @@ export type Soul = Readonly<{
   readonly?: ReadonlyRestraint;
   cwd: string;
   origin: AkumaOrigin;
-  confinement: Confinement;
   allowed: AllowedActions;
   createdAt: string;
 }>;
 
-export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "readonly" | "confinement" | "allowed">;
+export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "readonly" | "allowed">;
 
 export type BodyEnd = "exited" | "broke-off" | "put-down";
 
