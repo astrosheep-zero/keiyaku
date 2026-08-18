@@ -68,6 +68,9 @@ shared batch process itself dies, every remaining section that requires it
 fails from that one transport failure; Kanshi does not retry through another
 reader. Task files, Alias files, branch metadata, and the compact Akuma fleet
 retain their existing independent failure boundaries.
+The Akuma owner silently omits an individual physical identity whose compact
+row cannot be read; one bad Heart or Leash therefore does not fail the Fleet
+section or suppress other readable rows.
 
 The observation exists only for this report call. Kanshi keeps no cross-report
 cache and has no prepare/finish exchange with the product owners. It never
@@ -144,6 +147,16 @@ Contract. The selected Contract row already carries `namespaceTasks`; do not
 copy namespace matches into the TASK section. Section presence, absence, and
 failure remain unchanged. The text renderer consumes only this public report
 and renders each present endpoint as `keiyaku <id> (<observed>)`.
+
+Exact Contract text is not a world board. It renders the one selected Contract
+row and its subordinate holder, Fleet attachment, namespace, workspace, and
+gate facts without the Split Horizon, section apertures, top-level Task or
+Fleet rows, or aggregate counts. The JSON projection keeps the assembled
+selected report; text does not repeat those joined relations as world sections.
+Kanshi owns that assembled observation: a complete Contract ID reads that one
+Contract and joins only its contextual relations. It never builds the complete
+Contract board and filters it afterward. Selectors that require world lookup may
+read the world to resolve the identity before requesting the same observation.
 
 For named status, the same call-scoped observation supplies the complete Alias
 register and report to Address. Address resolves active managed Contract short

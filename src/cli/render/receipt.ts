@@ -54,6 +54,18 @@ export function outcomeLines(
   return [`${base} —`, `  ${safeText(contract)}`];
 }
 
+export function titleLines(
+  mark: string,
+  title: string,
+  contract: string,
+  columns = 80,
+): string[] {
+  const base = `${mark} ${title}`;
+  const inline = `${base} — ${contract}`;
+  if (displayColumns(inline) <= columns) return [inline];
+  return [`${base} —`, `  ${safeText(contract)}`];
+}
+
 export function hookFailureSummary(failure: HookFailure): string {
   if (failure.kind === "timeout" || failure.kind === "unknown-exit") return failure.kind;
   if (failure.kind === "spawn-error") return failure.kind;
@@ -73,7 +85,7 @@ export function reuseLines(reuse: VerificationReuse | undefined, columns: number
 }
 
 export function stopLines(
-  label: "verification" | "claim",
+  label: "verification" | "completion",
   stop: VerificationStop | PlacementStop,
   columns: number,
   addressed: string,
@@ -95,7 +107,8 @@ export function stopLines(
     }
   }
   const lines: string[] = [];
-  receiptRow(lines, "!", label, detail, columns);
+  const state = label === "verification" ? "failed" : "blocked";
+  receiptRow(lines, "!", label, [{ text: state }, { text: "·" }, ...detail], columns);
   if ("failure" in stop && stop.failure === "environment-failure" && "command" in stop) {
     appendHookPayload(lines, stop.detail);
   }

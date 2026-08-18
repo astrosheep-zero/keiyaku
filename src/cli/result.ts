@@ -44,6 +44,7 @@ export type AcceptedEnvelope = Readonly<{
 
 export type AcceptedBindResult = AcceptedEnvelope & Readonly<{
   verb: "bind";
+  workspace: "worktree" | "here";
   target: string | null;
   verification?: never;
   verificationReuse?: never;
@@ -51,8 +52,11 @@ export type AcceptedBindResult = AcceptedEnvelope & Readonly<{
   cleanup?: never;
   leak?: never;
   report?: never;
-  workspace?: never;
   diff?: never;
+  verificationVerdict?: never;
+  verdict?: never;
+  chapter?: never;
+  note?: never;
 }> & RegionObservation;
 
 export type AcceptedAmendResult = AcceptedEnvelope & Readonly<{
@@ -66,10 +70,15 @@ export type AcceptedAmendResult = AcceptedEnvelope & Readonly<{
   leak?: never;
   report?: never;
   workspace?: never;
+  verificationVerdict?: never;
+  verdict?: never;
+  chapter?: never;
+  note?: never;
 }> & RegionObservation;
 
 export type AcceptedDeliverResult = AcceptedEnvelope & Readonly<{
   verb: "deliver";
+  verificationVerdict?: "satisfied" | "unsatisfied";
   verification?: VerificationStop;
   verificationReuse?: VerificationReuse;
   placement?: PlacementStop;
@@ -81,10 +90,14 @@ export type AcceptedDeliverResult = AcceptedEnvelope & Readonly<{
   report?: never;
   workspace?: never;
   diff?: never;
+  verdict?: never;
+  chapter?: never;
+  note?: never;
 }>;
 
 export type AcceptedReviewResult = AcceptedEnvelope & Readonly<{
   verb: "review";
+  verdict: "satisfied" | "unsatisfied";
   placement?: PlacementStop;
   workspace?: Review["workspace"];
   target?: never;
@@ -96,10 +109,14 @@ export type AcceptedReviewResult = AcceptedEnvelope & Readonly<{
   overlapFailure?: never;
   report?: never;
   diff?: never;
+  verificationVerdict?: never;
+  chapter?: never;
+  note?: never;
 }>;
 
 export type AcceptedArcResult = AcceptedEnvelope & Readonly<{
   verb: "arc";
+  chapter: Readonly<{ seq: number; title: string }>;
   target?: never;
   verification?: never;
   verificationReuse?: never;
@@ -111,10 +128,14 @@ export type AcceptedArcResult = AcceptedEnvelope & Readonly<{
   report?: never;
   workspace?: never;
   diff?: never;
+  verificationVerdict?: never;
+  verdict?: never;
+  note?: never;
 }>;
 
 export type AcceptedAbandonResult = AcceptedEnvelope & Readonly<{
   verb: "abandon";
+  note?: string;
   target?: never;
   verification?: never;
   verificationReuse?: never;
@@ -126,6 +147,9 @@ export type AcceptedAbandonResult = AcceptedEnvelope & Readonly<{
   report?: never;
   workspace?: never;
   diff?: never;
+  verificationVerdict?: never;
+  verdict?: never;
+  chapter?: never;
 }>;
 
 export type AcceptedAuditResult = AcceptedEnvelope & Readonly<{
@@ -141,6 +165,10 @@ export type AcceptedAuditResult = AcceptedEnvelope & Readonly<{
   overlapFailure?: never;
   workspace?: never;
   diff?: never;
+  verificationVerdict?: never;
+  verdict?: never;
+  chapter?: never;
+  note?: never;
 }>;
 
 export type AcceptedResult =

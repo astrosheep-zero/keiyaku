@@ -148,9 +148,10 @@ projected verbatim and has no endpoint-state interpretation here. Unborn/stillbo
 their existing evidence. A valid allocated directory is never omitted: missing
 Heart or leash in the initialization window is `unborn`; seal without Soul is
 `stillborn`; Soul selects the born row. Invalid directory names may be ignored.
-Other failures after a valid physical identity fail the fleet read and name
-that AkuId and directory while retaining the original cause. There is no public
-per-row failure arm. This keeps a fleet read from scanning the complete
+Other failures while projecting one valid physical identity silently omit that
+row and do not suppress readable peers. There is no public per-row failure arm,
+diagnostic row, or retry. Direct reads of that AkuId retain their ordinary
+failure. This keeps a fleet read from scanning the complete
 turn history of every akuma. Confinement is triage evidence and future Body Request
 placement input, never an admission result; no read reaches back into home.
 The life timestamp is the current Body's leash time for running, its hung

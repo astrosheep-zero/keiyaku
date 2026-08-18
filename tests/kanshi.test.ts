@@ -191,6 +191,38 @@ test("named status selects an active Contract from one pinned Kanshi observation
   assert.equal(repository.run(["rev-parse", GIT_REF]).trim(), terminal);
 });
 
+test("complete Contract status does not read an unrelated Contract journal", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repo = await Repo.at({ path: repository.path });
+  const selected = await Keiyaku.bind({ repo, markdown: document("Selected"), workspace: "worktree" });
+  const unrelated = await Keiyaku.bind({ repo, markdown: document("Unrelated"), workspace: "worktree" });
+  const selectedId = selected.keiyaku.id;
+  const unrelatedId = unrelated.keiyaku.id;
+  const git = await repositoryAt(repository.path);
+  const snapshot = await readGit(git);
+  const tree = await updateGitTree(git, snapshot.tree, new Map([
+    [contractJournalPath(unrelatedId), { oid: await writeBlob(git, "not a Contract journal\n") }],
+  ]));
+  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal((await updateRefsAtomically(git, [{
+    ref: GIT_REF,
+    newOid: commit,
+    expectedOid: snapshot.commit,
+  }])).kind, "published");
+
+  const result = await invoke(parseArgv(["-C", repository.path, "status", selectedId]));
+
+  assert.equal(result.kind, "status");
+  if (result.kind !== "status") return;
+  assert.equal(result.selection, "contract");
+  assert.equal(result.report.contracts.kind, "present");
+  if (result.report.contracts.kind !== "present") return;
+  assert.deepEqual(result.report.contracts.value.rows.map((row) => row.id), [selectedId]);
+});
+
 test("same-target lag counts each workspace HEAD against the one frozen target head", async () => {
   const { repository, contract } = await populatedWorld();
   const tasks = Tasks.of(await World.at(repository.path));
@@ -884,6 +916,9 @@ test("exact Contract Kanshi text keeps terminal gates and testimony summaries", 
   assert.match(text, /gates: ✓ reviewed/u);
   assert.match(text, /reviewed: terminal review summary/u);
   assert.doesNotMatch(text, /kei\/active-contract/u);
+  assert.doesNotMatch(text, /^kanshi /u);
+  assert.doesNotMatch(text, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
+  assert.doesNotMatch(text, /\d+ (?:keiyaku|task|akuma) · \d+ attention/u);
 });
 
 test("Kanshi wraps titles without dropping coordinates or gates", () => {
@@ -1171,12 +1206,11 @@ test("Contract namespace Tasks come from one Task board observation", async () =
   const worldText = renderKanshiText(report, { columns: 120, color: false });
   const selectedText = renderKanshiText(selected, { columns: 120, color: false }, "contract");
   assert.doesNotMatch(sectionBody(worldText, "KEIYAKU"), /namespace tasks /u);
-  assert.match(sectionBody(selectedText, "KEIYAKU"), new RegExp(String.raw`task ${taskId}`, "u"));
-  assert.match(sectionBody(selectedText, "KEIYAKU"), /namespace tasks 2/u);
-  assert.match(sectionBody(selectedText, "KEIYAKU"), new RegExp(String.raw`⧗ task/${segment}/zeta · P0 on_hold — Namespace zeta`, "u"));
-  assert.match(sectionBody(selectedText, "KEIYAKU"), new RegExp(String.raw`✓ task/${segment}/alpha · P3 done — Namespace alpha`, "u"));
-  assert.doesNotMatch(sectionBody(selectedText, "TASK"), /namespace tasks /u);
-  assert.doesNotMatch(sectionBody(selectedText, "TASK"), new RegExp(String.raw`task/${segment}/zeta`, "u"));
+  assert.match(selectedText, new RegExp(String.raw`task ${taskId}`, "u"));
+  assert.match(selectedText, /namespace tasks 2/u);
+  assert.match(selectedText, new RegExp(String.raw`⧗ task/${segment}/zeta · P0 on_hold — Namespace zeta`, "u"));
+  assert.match(selectedText, new RegExp(String.raw`✓ task/${segment}/alpha · P3 done — Namespace alpha`, "u"));
+  assert.doesNotMatch(selectedText, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });
 
 test("Task board failure fails namespace context without suppressing Contract or Akuma", async () => {
@@ -1192,7 +1226,6 @@ test("Task board failure fails namespace context without suppressing Contract or
   if (row?.namespaceTasks.kind === "failed") assert.match(row.namespaceTasks.failure.message, /front matter/u);
   assert.equal(report.akuma.value.rows.some((candidate) => candidate.id === akumaId), true);
   const selected = renderKanshiText(selectKanshi({ report, contract: contract.id }), { columns: 80, color: false }, "contract");
-  assert.match(sectionBody(selected, "KEIYAKU"), /namespace tasks failed /u);
-  assert.match(selected, /──\[ KEIYAKU \]/u);
-  assert.match(selected, /──\[ FLEET \]/u);
+  assert.match(selected, /namespace tasks failed /u);
+  assert.doesNotMatch(selected, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });

@@ -18,6 +18,16 @@ export type TerminalSealExpectations = Readonly<{
 export type TerminalSealObject = Readonly<{ kind: "present"; type: string; bytes: Buffer }>
   | Readonly<{ kind: "missing" }>;
 type CommitMetadata = Readonly<{ tree: GitObjectId; parents: readonly SnapshotId[] }>;
+type WorkspaceTree = Awaited<ReturnType<typeof captureWorkspaceTree>>;
+export type TerminalWorkspace = Readonly<{
+  tree: GitObjectId;
+  head: SnapshotId;
+  submodules: readonly string[];
+}>;
+export type TerminalWorkspaceObservation = Readonly<{
+  workspace: TerminalWorkspace;
+  unsealed: UnsealedBytes | null;
+}>;
 
 export function terminalSealSnapshots(state: ContractState): readonly SnapshotId[] {
   return [...new Set([
@@ -84,12 +94,12 @@ async function changedPaths(repository: GitRepository, left: string, right: stri
   return fields.slice(0, -1).sort();
 }
 
-export async function unsealedBytes(
+export async function unsealedWorkspaceBytes(
   repository: GitRepository,
   path: string,
   expected: TerminalSealExpectations,
+  workspace: WorkspaceTree,
 ): Promise<UnsealedBytes | null> {
-  const workspace = await captureWorkspaceTree(repository, path);
   const headIsSealed = expected.heads.includes(workspace.head);
   if (workspace.changes.submodules.length > 0) {
     return {
@@ -108,5 +118,29 @@ export async function unsealedBytes(
     path,
     paths: alternatives[0] ?? [],
     ...(headIsSealed ? {} : { head: workspace.head }),
+  };
+}
+
+export async function unsealedBytes(
+  repository: GitRepository,
+  path: string,
+  expected: TerminalSealExpectations,
+): Promise<UnsealedBytes | null> {
+  return (await observeTerminalWorkspace(repository, path, expected)).unsealed;
+}
+
+export async function observeTerminalWorkspace(
+  repository: GitRepository,
+  path: string,
+  expected: TerminalSealExpectations,
+): Promise<TerminalWorkspaceObservation> {
+  const captured = await captureWorkspaceTree(repository, path);
+  return {
+    workspace: {
+      tree: captured.tree,
+      head: captured.head,
+      submodules: captured.changes.submodules,
+    },
+    unsealed: await unsealedWorkspaceBytes(repository, path, expected, captured),
   };
 }

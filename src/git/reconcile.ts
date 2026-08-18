@@ -11,6 +11,7 @@ import {
   readRef,
   registeredWorktreePaths,
   runGit,
+  writeCommit,
   worktreeGitDirectory,
   type GitOid,
   type GitRepository,
@@ -41,8 +42,9 @@ import { collectableScratchWorktrees } from "./scratch.js";
 import {
   terminalSealExpectations as decodeTerminalSealExpectations,
   terminalSealSnapshots,
-  unsealedBytes,
+  observeTerminalWorkspace,
   type TerminalSealExpectations,
+  type TerminalWorkspace,
   type UnsealedBytes,
 } from "./terminal-seal.js";
 
@@ -50,6 +52,12 @@ const pathExists = (path: string) => access(path).then(() => true, () => false);
 
 export type Effect =
   | Readonly<{ kind: "worktree"; path: string; action: "created" | "removed" | "unchanged" }>
+  | Readonly<{
+      kind: "recovery-snapshot";
+      action: "created";
+      snapshot: SnapshotId;
+      retention: "ephemeral";
+    }>
   | TargetCheckoutEffect
   | Readonly<{
       kind: "ref";
@@ -92,10 +100,12 @@ export type GitReconcileObservation = Readonly<{
 }>;
 type WorktreeTopology = Readonly<{ paths: Set<string> }>;
 type ReconcileAccumulation = Readonly<{ effects: Effect[]; lag: ReconcileLag[] }>;
+type EphemeralRecovery = Readonly<{ snapshot: SnapshotId; workspace: TerminalWorkspace }>;
 type TerminalWorktreeCleanup = Readonly<{
   repository: GitRepository;
   topology: WorktreeTopology;
   path: string;
+  state: ContractState;
   expected: TerminalSealExpectations;
   hooks: WorktreeHooks;
   retryHooks: boolean;
@@ -354,15 +364,63 @@ async function terminalSealExpectations(
 }
 
 async function removeSealedTerminalWorktree(
-  { repository, topology, path, expected, hooks, retryHooks, acc }: TerminalWorktreeCleanup,
+  { repository, topology, path, state, expected, hooks, retryHooks, acc }: TerminalWorktreeCleanup,
 ): Promise<ReconcileResult | null> {
   if (topology.paths.has(path) && await pathExists(path)) {
-    const beforeHooks = await unsealedBytes(repository, path, expected);
-    if (beforeHooks !== null) return retainTerminalWorktree(path, beforeHooks, acc);
+    const terminal = state.terminal;
+    if (terminal === null) throw new Error(`terminal worktree cleanup received active Contract ${state.id}`);
+    const canRecover = terminal.kind === "abandoned";
+    let recovery: EphemeralRecovery | null = null;
+
+    const recordRecovery = async (workspace: TerminalWorkspace): Promise<EphemeralRecovery> => {
+      const snapshot = mintSnapshotId(await writeCommit({
+        repository,
+        tree: workspace.tree,
+        parent: gitObjectIdForSnapshot(recovery?.snapshot ?? workspace.head),
+        message: `${state.id}: ephemeral abandoned-workspace recovery\n\nKeiyaku-Contract: ${state.id}`,
+        actor: "Keiyaku Recovery",
+        at: terminal.at,
+      }));
+      const effect = {
+        kind: "recovery-snapshot" as const,
+        action: "created" as const,
+        snapshot,
+        retention: "ephemeral" as const,
+      };
+      const existing = acc.effects.findIndex((item) => item.kind === "recovery-snapshot");
+      if (existing < 0) acc.effects.push(effect);
+      else acc.effects[existing] = effect;
+      return { snapshot, workspace };
+    };
+
+    const before = await observeTerminalWorkspace(repository, path, expected);
+    const beforeWorkspace = before.workspace;
+    const beforeHooks = before.unsealed;
+    if (beforeHooks !== null) {
+      if (!canRecover || beforeWorkspace.submodules.length > 0) {
+        return retainTerminalWorktree(path, beforeHooks, acc);
+      }
+      recovery = await recordRecovery(beforeWorkspace);
+    }
     const hookLag = await runDestroyHooks(path, await worktreeGitDirectory(repository, path), hooks, retryHooks);
     if (hookLag !== null) return retainTerminalWorktree(path, hookLag, acc);
-    const afterHooks = await unsealedBytes(repository, path, expected);
-    if (afterHooks !== null) return retainTerminalWorktree(path, afterHooks, acc);
+    const after = await observeTerminalWorkspace(repository, path, expected);
+    const afterWorkspace = after.workspace;
+    const afterHooks = after.unsealed;
+    if (afterHooks !== null) {
+      if (!canRecover || afterWorkspace.submodules.length > 0) {
+        return retainTerminalWorktree(path, afterHooks, acc);
+      }
+    }
+    if (
+      canRecover
+      && (recovery === null
+        || recovery.workspace.head !== afterWorkspace.head
+        || recovery.workspace.tree !== afterWorkspace.tree)
+      && (recovery !== null || beforeWorkspace.head !== afterWorkspace.head || beforeWorkspace.tree !== afterWorkspace.tree)
+    ) {
+      recovery = await recordRecovery(afterWorkspace);
+    }
   }
   const removal = await removeWorktree(repository, topology, path, true);
   if (removal.retained) return retainTerminalWorktree(path, { kind: "worktree-retained", path }, acc);
@@ -430,6 +488,7 @@ async function reconcileTerminalManagedWorktree(
     repository: primary,
     topology,
     path,
+    state,
     expected,
     hooks,
     retryHooks,

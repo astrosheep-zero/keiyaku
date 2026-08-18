@@ -3,10 +3,10 @@ import type { AcceptedAuditResult } from "../result.js";
 import {
   cleanupLines,
   leakLines,
-  outcomeLines,
   receiptPayload,
   receiptRow,
   stopLines,
+  titleLines,
 } from "./receipt.js";
 import { renderRefusalFacts } from "./refusal.js";
 import {
@@ -126,14 +126,28 @@ function obligationLines(result: AcceptedAuditResult, columns: number): readonly
   ];
 }
 
+function recordLines(result: AcceptedAuditResult, columns: number): readonly string[] {
+  if (result.facts.length === 0) return [];
+  const rows: string[] = [];
+  for (const fact of result.facts) {
+    receiptRow(rows, " ", "journal", [
+      { text: fact.entry, opaque: true },
+      { text: `· ${fact.kind}` },
+    ], columns);
+  }
+  receiptRow(rows, " ", "head", [{ text: result.head, opaque: true }], columns);
+  return ["  record", ...rows.map((line) => `  ${line}`)];
+}
+
 export function renderAcceptedAudit(result: AcceptedAuditResult, context?: TextRenderContext): string {
   const report = result.report;
   const columns = context?.columns ?? 80;
   return [
-    ...outcomeLines("✓", result.verb, "accepted", result.contract, columns),
+    ...titleLines("✓", "audit", result.contract, columns),
     ...candidateLines(report, columns, result.contract),
     ...verificationLines(report.verification, columns, result.contract),
     ...targetLines(report.target, columns, result.contract),
     ...obligationLines(result, columns),
+    ...recordLines(result, columns),
   ].join("\n");
 }

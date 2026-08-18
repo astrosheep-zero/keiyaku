@@ -29,6 +29,7 @@ import {
   receiptRow,
   reuseLines,
   stopLines,
+  titleLines,
 } from "./receipt.js";
 import { gitShortStat, renderOpaqueBlock, type TextRenderContext } from "./terminal.js";
 
@@ -61,6 +62,12 @@ function effectRows(effect: Effect, columns: number): readonly string[] {
       { text: effect.action },
       { text: effect.target, opaque: true },
       { text: effect.path, opaque: true },
+    ], columns);
+  } else if (effect.kind === "recovery-snapshot") {
+    receiptRow(lines, mark, "recovery-snapshot", [
+      { text: effect.action },
+      { text: effect.snapshot, opaque: true },
+      { text: effect.retention },
     ], columns);
   } else {
     receiptRow(lines, mark, "ref", [
@@ -142,7 +149,6 @@ function acceptedRecord(
   columns: number,
 ): readonly string[] {
   const record: string[] = [];
-  receiptRow(record, " ", "head", [{ text: result.head, opaque: true }], columns);
   for (const fact of result.facts) {
     const contract = fact.contract === result.contract ? [] : [{ text: fact.contract, opaque: true }];
     receiptRow(record, " ", "journal", [
@@ -151,14 +157,9 @@ function acceptedRecord(
       { text: `· ${fact.kind}` },
     ], columns);
   }
-  if (result.verb === "bind") {
-    receiptRow(record, " ", "target", [{ text: result.target ?? "null", opaque: true }], columns);
-  }
+  receiptRow(record, " ", "head", [{ text: result.head, opaque: true }], columns);
   if (result.verb === "deliver") {
     pushBlock(record, reuseLines(result.verificationReuse, columns));
-  }
-  if (result.verb === "amend") {
-    receiptPayload(record, "diff", result.diff);
   }
   const changed = result.effects.filter(changedEffect);
   const unchanged = result.effects.filter((effect) => !changedEffect(effect));
@@ -184,23 +185,15 @@ function acceptedLagRows(result: AcceptedEnvelope, columns: number): readonly st
   return obligations;
 }
 
-function acceptedObligations(
-  result: AcceptedDeliverResult | AcceptedReviewResult,
-  columns: number,
-): readonly string[] {
-  const obligations: string[] = [];
-  if (result.verb === "deliver" && result.verification !== undefined) {
-    obligations.push(...stopLines("verification", result.verification, columns, result.contract));
-  }
-  if (result.placement !== undefined) {
-    obligations.push(...stopLines("claim", result.placement, columns, result.contract));
-  }
-  if (result.verb === "deliver") {
-    if (result.cleanup !== undefined) pushBlock(obligations, cleanupLines(result.cleanup, columns));
-    if (result.leak !== undefined) pushBlock(obligations, leakLines(result.leak, columns));
-  }
-  obligations.push(...acceptedLagRows(result, columns));
-  return obligations;
+function indentRecord(lines: readonly string[]): readonly string[] {
+  let payload = false;
+  return lines.map((line) => {
+    if (line.length === 0) {
+      payload = !payload;
+      return line;
+    }
+    return payload ? line : `  ${line}`;
+  });
 }
 
 function acceptedDeviations(
@@ -220,35 +213,125 @@ function acceptedDeviations(
   return deviations;
 }
 
-function renderAcceptedReceipt(
+function recordBlock(
   result: AcceptedBindResult | AcceptedAmendResult | AcceptedDeliverResult | AcceptedReviewResult | AcceptedArcResult | AcceptedAbandonResult,
-  context?: TextRenderContext,
-): string {
-  const columns = context?.columns ?? 80;
-  const lines = outcomeLines("✓", result.verb, "accepted", result.contract, columns);
-  if (result.verb === "deliver" || result.verb === "review") {
-    lines.push(...acceptedObligations(result, columns));
-  } else {
-    lines.push(...acceptedLagRows(result, columns));
+  columns: number,
+): readonly string[] {
+  const rows = [...acceptedRecord(result, columns), ...acceptedLagRows(result, columns)];
+  return ["  record", ...indentRecord(rows)];
+}
+
+function verificationVerdictLine(
+  verdict: "satisfied" | "unsatisfied",
+  columns: number,
+): readonly string[] {
+  const lines: string[] = [];
+  receiptRow(lines, verdict === "satisfied" ? "✓" : "!", "verification", [
+    { text: verdict === "satisfied" ? "passed" : "failed" },
+  ], columns);
+  return lines;
+}
+
+function renderAcceptedBind(result: AcceptedBindResult, columns: number): string {
+  const lines = titleLines("✓", "bound", result.contract, columns);
+  receiptRow(lines, " ", "workspace", [
+    { text: result.workspace === "worktree" ? "managed worktree" : "here" },
+  ], columns);
+  if (result.target === null) receiptRow(lines, " ", "no target", [], columns);
+  else receiptRow(lines, " ", "target", [{ text: result.target, opaque: true }], columns);
+  lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
+  return lines.join("\n");
+}
+
+function renderAcceptedAmend(result: AcceptedAmendResult, columns: number): string {
+  const lines = titleLines("✓", "terms replaced", result.contract, columns);
+  receiptPayload(lines, "  terms diff", result.diff);
+  lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
+  return lines.join("\n");
+}
+
+function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): string {
+  const complete = result.facts.some((fact) => fact.kind === "claimed");
+  const title = complete ? "delivered" : "deliver — not complete";
+  const lines = titleLines("✓", title, result.contract, columns);
+  if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
+  if (result.verification !== undefined) {
+    lines.push(...stopLines("verification", result.verification, columns, result.contract));
+  } else if (result.verificationVerdict !== undefined) {
+    lines.push(...verificationVerdictLine(result.verificationVerdict, columns));
   }
-  if (result.verb === "bind" || result.verb === "amend" || result.verb === "review") {
-    lines.push(...acceptedDeviations(result, columns));
+  if (!complete && result.placement !== undefined) {
+    lines.push(...stopLines("completion", result.placement, columns, result.contract));
+  } else if (!complete && (result.verification !== undefined || result.verificationVerdict === "unsatisfied")) {
+    receiptRow(lines, "·", "completion", [{ text: "not attempted" }], columns);
   }
-  lines.push(...acceptedRecord(result, columns));
+  if (result.cleanup !== undefined) pushBlock(lines, cleanupLines(result.cleanup, columns));
+  if (result.leak !== undefined) pushBlock(lines, leakLines(result.leak, columns));
+  lines.push(...recordBlock(result, columns));
+  return lines.join("\n");
+}
+
+function renderAcceptedReview(result: AcceptedReviewResult, columns: number): string {
+  const complete = result.facts.some((fact) => fact.kind === "claimed");
+  const lines = titleLines("✓", `review ${result.verdict}`, result.contract, columns);
+  receiptRow(lines, complete ? "✓" : "!", "contract", [
+    { text: complete ? "complete" : "not complete" },
+  ], columns);
+  if (result.placement !== undefined) {
+    lines.push(...stopLines("completion", result.placement, columns, result.contract));
+  }
+  lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));
+  return lines.join("\n");
+}
+
+function renderAcceptedArc(result: AcceptedArcResult, columns: number): string {
+  const lines = titleLines("✓", "chapter recorded", result.contract, columns);
+  receiptRow(lines, " ", "chapter", [
+    { text: String(result.chapter.seq) },
+    { text: "·" },
+    { text: result.chapter.title },
+  ], columns);
+  lines.push(...recordBlock(result, columns));
+  return lines.join("\n");
+}
+
+function renderAcceptedAbandon(result: AcceptedAbandonResult, columns: number): string {
+  const lines = titleLines("✓", "abandoned", result.contract, columns);
+  if (result.note !== undefined) receiptRow(lines, " ", "note", [{ text: result.note }], columns);
+  for (const effect of result.effects) {
+    if (effect.kind === "worktree") {
+      receiptRow(lines, " ", "workspace", [
+        { text: effect.action },
+        { text: effect.path, opaque: true },
+      ], columns);
+    } else if (effect.kind === "recovery-snapshot") {
+      receiptRow(lines, " ", "recovery snapshot", [
+        { text: effect.snapshot, opaque: true },
+        { text: `· ${effect.retention}` },
+      ], columns);
+    }
+  }
+  lines.push(...recordBlock(result, columns));
   return lines.join("\n");
 }
 
 export function renderAccepted(result: AcceptedResult, context?: TextRenderContext): string {
+  const columns = context?.columns ?? 80;
   switch (result.verb) {
     case "audit":
       return renderAcceptedAudit(result, context);
     case "bind":
+      return renderAcceptedBind(result, columns);
     case "amend":
-    case "deliver":
+      return renderAcceptedAmend(result, columns);
     case "review":
+      return renderAcceptedReview(result, columns);
     case "arc":
+      return renderAcceptedArc(result, columns);
     case "abandon":
-      return renderAcceptedReceipt(result, context);
+      return renderAcceptedAbandon(result, columns);
+    case "deliver":
+      return renderAcceptedDeliver(result, columns);
   }
 }
 

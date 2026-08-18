@@ -307,10 +307,21 @@ journal-sealed start, tender, or integration trees and separately requires
 `HEAD` to be a sealed start, tender, integration, or dirty-tender base commit
 identity. The dirty-tender base is the sealed tender commit's first parent and
 only matters when the complete workspace bytes equal a sealed tree. Matching
-bytes therefore remain removable even when ordinary status is dirty, while a
-new same-tree commit remains user work and is retained. No-delivery abandon
-permits only the start tree and start `HEAD`. Dirty submodule internals are
-never sealed by this proof.
+bytes therefore remain removable even when ordinary status is dirty.
+
+An abandoned managed worktree whose `HEAD` or complete non-ignored tree is not
+sealed receives one ephemeral recovery commit before removal. The commit names
+the captured tree, parents the observed workspace `HEAD`, carries the Contract
+identity in its message, and is deliberately left without a ref or durable
+fact. If destroy hooks change the captured `HEAD` or tree, cleanup writes a
+second recovery commit over the final tree with the first recovery as parent;
+the reported tip therefore keeps both captures reachable together while it
+survives. The result exposes only that final tip and labels it ephemeral. Git
+may prune the entire recovery chain at any time allowed by repository policy.
+Ignored bytes are outside the capture and are removed with the worktree. Dirty
+submodule internals cannot be represented by the superproject tree and still
+retain the worktree. Claimed cleanup likewise retains every unsealed `HEAD` or
+tree rather than manufacturing recovery evidence.
 
 Every Keiyaku-owned ref deletion is one atomic transaction that verifies its
 surviving custodian ref. A candidate pin is released only when that ref preserves

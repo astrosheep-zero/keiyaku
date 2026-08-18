@@ -92,7 +92,11 @@ opaque testimony and does not participate in a gate.
 
 `abandon` admits one `abandoned` terminal fact with `{ note? }`. Optional
 `note` remains opaque testimony rather than a gate input. The decision neither
-reads nor changes a target ref.
+reads nor changes a target ref. Managed-worktree cleanup may return an
+invocation-scoped ephemeral recovery snapshot when the captured `HEAD` or
+non-ignored workspace tree is not already sealed by Contract facts. That Git
+object is neither part of the abandoned fact nor Contract state and may
+disappear through ordinary Git garbage collection.
 
 An arc is a narrative chapter within one contract lifetime:
 

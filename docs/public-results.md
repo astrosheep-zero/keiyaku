@@ -40,6 +40,13 @@ type MutationResult<A> = Readonly<{
   leak?: WorktreeLeak
 }>
 
+type RecoverySnapshotEffect = Readonly<{
+  kind: "recovery-snapshot"
+  action: "created"
+  snapshot: SnapshotId
+  retention: "ephemeral"
+}>
+
 class KeiyakuRefused extends Error {
   readonly refusal: KeiyakuRefusal
   readonly code: KeiyakuRefusal["kind"] // derived getter over refusal.kind

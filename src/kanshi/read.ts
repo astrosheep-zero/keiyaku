@@ -12,7 +12,7 @@ import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation }
 import { readDocuments } from "../protocol/read/documents.js";
 import { readRegionDeclarations, validateRegionPath } from "../library/region.js";
 import { contractId } from "../core/facts/types.js";
-import { selectRegion } from "./select.js";
+import { selectKanshi, selectRegion } from "./select.js";
 import type { TaskRow } from "../task/index.js";
 import type {
   AkumaKanshiWorld,
@@ -28,7 +28,12 @@ import type {
 } from "./report.js";
 import type { WorldRoot } from "../world.js";
 
-export type KanshiInput = Readonly<{ world: WorldRoot | null; repo?: Repo; region?: KanshiRegionSelection }>;
+export type KanshiInput = Readonly<{
+  world: WorldRoot | null;
+  repo?: Repo;
+  region?: KanshiRegionSelection;
+  contract?: ContractBoard["rows"][number]["id"];
+}>;
 
 export type KanshiObservation = Readonly<{
   report: KanshiReport;
@@ -85,12 +90,20 @@ function regionSelection(value: unknown): KanshiRegionSelection {
 
 function coordinate(input: KanshiInput): KanshiInput {
   if (typeof input !== "object" || input === null || Array.isArray(input)) throw new TypeError("kanshi input must be an object");
-  for (const key of Object.keys(input)) if (key !== "world" && key !== "repo" && key !== "region") throw new TypeError(`kanshi input has unknown field: ${key}`);
+  for (const key of Object.keys(input)) {
+    if (!["world", "repo", "region", "contract"].includes(key)) {
+      throw new TypeError(`kanshi input has unknown field: ${key}`);
+    }
+  }
   if (input.world !== null && (typeof input.world !== "string" || input.world.trim().length === 0)) {
     throw new TypeError("kanshi world must be a WorldRoot or null");
   }
   if (input.repo !== undefined && !(input.repo instanceof Repo)) throw new TypeError("kanshi repo must be a Repo");
-  return input.region === undefined ? input : { ...input, region: regionSelection(input.region) };
+  return {
+    ...input,
+    ...(input.region === undefined ? {} : { region: regionSelection(input.region) }),
+    ...(input.contract === undefined ? {} : { contract: contractId(input.contract) }),
+  };
 }
 
 async function readRegion(observation: GitReadObservation, selection: KanshiRegionSelection): Promise<Section<RegionRead>> {
@@ -111,9 +124,12 @@ async function readBranch(repo?: Repo): Promise<string | null> {
   }
 }
 
-async function readContracts(observation: GitReadObservation): Promise<Section<ContractBoard>> {
+async function readContracts(
+  observation: GitReadObservation,
+  selected?: ContractBoard["rows"][number]["id"],
+): Promise<Section<ContractBoard>> {
   try {
-    return { kind: "present", value: await readContractBoard(observation) };
+    return { kind: "present", value: await readContractBoard(observation, selected) };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
   }
@@ -326,7 +342,7 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
     const repository = scopeForRepo(repo);
     return await withGitDecodeChannel(repository, (channel) => withGitReadObservation(repository, channel, async (observation) => {
       const [contractSection, holders, dispatches, region, board] = await Promise.all([
-        readContracts(observation),
+        readContracts(observation, input.contract),
         readHolders(observation),
         readDispatches(observation),
         input.region === undefined ? Promise.resolve(undefined) : readRegion(observation, input.region),
@@ -341,16 +357,19 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
         : dispatches.kind === "failed"
           ? dispatches
           : await joinAkuma(world, observeContract, dispatches.value, aliases);
+      const report = {
+        root: world,
+        observedAt,
+        branch,
+        contracts: attachFleet(contracts, akuma),
+        tasks,
+        akuma,
+        ...(region === undefined ? {} : { region }),
+      } satisfies KanshiReport;
       return {
-        report: {
-          root: world,
-          observedAt,
-          branch,
-          contracts: attachFleet(contracts, akuma),
-          tasks,
-          akuma,
-          ...(region === undefined ? {} : { region }),
-        },
+        report: input.contract === undefined
+          ? report
+          : selectKanshi({ report, contract: input.contract }),
         aliases,
       };
     }));

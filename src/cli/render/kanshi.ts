@@ -209,7 +209,39 @@ function renderNamespaceTasks(row: ContractKanshiRow, context: TextRenderContext
   return lines;
 }
 
-function renderContracts(report: KanshiReport, context: TextRenderContext, selection: "world" | "contract"): readonly string[] {
+function renderContractRow(
+  row: ContractKanshiRow,
+  report: KanshiReport,
+  context: TextRenderContext,
+  selection: "world" | "contract",
+): readonly string[] {
+  const hot = contractHot(row);
+  const compact = !hot && selection !== "contract";
+  const title = row.title ?? "title unavailable";
+  const phase = `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`;
+  const lines = [identityLine(contractMark(row), row.id)];
+  lines.push(...plumbFacts(compact ? [title, phase, ...targetFacts(row)] : [title], context.columns));
+  if (!compact) lines.push(...plumbFacts([phase, ...targetFacts(row)], context.columns));
+  lines.push(...plumbFacts([workspaceState(row)], context.columns));
+  if (
+    showWorkspacePath(row, hot || selection === "contract")
+    && row.workspaceObservation.kind !== "unappointed"
+    && row.workspaceObservation.location.kind === "worktree"
+  ) {
+    lines.push(plumbPath(row.workspaceObservation.location.path));
+  }
+  lines.push(...renderGates(row.gates.reports, report.observedAt, context.columns, selection === "contract"));
+  if (row.holder.kind === "held") lines.push(...plumbFacts([`task ${row.holder.taskId}`], context.columns));
+  if (row.holder.kind === "unavailable") lines.push(...plumbFacts(["holder unavailable"], context.columns));
+  for (const attached of row.fleet) {
+    const aliases = attached.aliases.length === 0 ? "" : ` (${attached.aliases.join(" ")})`;
+    lines.push(...plumbFacts([`akuma ${attached.id}${aliases}`], context.columns));
+  }
+  if (selection === "contract") lines.push(...renderNamespaceTasks(row, context));
+  return lines;
+}
+
+function renderContracts(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.contracts;
   if (section.kind === "absent") return sectionAbsent("KEIYAKU", context.columns);
   if (section.kind === "failed") return failure("KEIYAKU", section, context);
@@ -218,39 +250,18 @@ function renderContracts(report: KanshiReport, context: TextRenderContext, selec
     ...section.value.rows.filter((row) => !contractHot(row)),
   ];
   const lines = [aperture("KEIYAKU", context.columns)];
-  for (const row of rows) {
-    const hot = contractHot(row);
-    const compact = !hot && selection !== "contract";
-    const title = row.title ?? "title unavailable";
-    const phase = `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`;
-    lines.push(identityLine(contractMark(row), row.id));
-    lines.push(...plumbFacts(
-      compact
-        ? [title, phase, ...targetFacts(row)]
-        : [title],
-      context.columns,
-    ));
-    if (!compact) lines.push(...plumbFacts([phase, ...targetFacts(row)], context.columns));
-    lines.push(...plumbFacts([workspaceState(row)], context.columns));
-    if (
-      showWorkspacePath(row, hot || selection === "contract")
-      && row.workspaceObservation.kind !== "unappointed"
-      && row.workspaceObservation.location.kind === "worktree"
-    ) {
-      lines.push(plumbPath(row.workspaceObservation.location.path));
-    }
-    lines.push(...renderGates(row.gates.reports, report.observedAt, context.columns, selection === "contract"));
-    if (row.holder.kind === "held") lines.push(...plumbFacts([`task ${row.holder.taskId}`], context.columns));
-    if (row.holder.kind === "unavailable") lines.push(...plumbFacts(["holder unavailable"], context.columns));
-    for (const attached of row.fleet) {
-      const aliases = attached.aliases.length === 0 ? "" : ` (${attached.aliases.join(" ")})`;
-      lines.push(...plumbFacts([`akuma ${attached.id}${aliases}`], context.columns));
-    }
-    if (selection === "contract") lines.push(...renderNamespaceTasks(row, context));
-  }
+  for (const row of rows) lines.push(...renderContractRow(row, report, context, "world"));
   const attention = rows.filter(contractHot).length;
   lines.push(aperture(`${rows.length} keiyaku · ${attention} attention`, context.columns));
   return lines;
+}
+
+function renderSelectedContract(report: KanshiReport, context: TextRenderContext): readonly string[] {
+  const section = report.contracts;
+  if (section.kind === "absent") return [`${PLUMB}keiyaku absent`];
+  if (section.kind === "failed") return [tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
+  const row = section.value.rows[0];
+  return row === undefined ? [`${PLUMB}keiyaku absent`] : renderContractRow(row, report, context, "contract");
 }
 
 function renderTasks(report: KanshiReport, context: TextRenderContext): readonly string[] {
@@ -354,10 +365,11 @@ export function renderKanshiText(
   context: TextRenderContext = { columns: 80, color: false },
   selection: "world" | "contract" = "world",
 ): string {
+  if (selection === "contract") return renderSelectedContract(report, context).join("\n");
   return [
     ...splitHorizon(report, context.columns),
     "",
-    ...renderContracts(report, context, selection),
+    ...renderContracts(report, context),
     "",
     ...renderTasks(report, context),
     "",

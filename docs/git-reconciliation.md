@@ -59,33 +59,39 @@ Keiyaku-owned refs in either workspace mode. Cleanup never moves the target ref.
 
 Terminal removal of a managed worktree resolves the immutable tree and parent
 metadata for its sealed commit identities once through the current Git decode
-channel. It then begins by capturing its complete
-non-ignored workspace tree through the same private-index mechanism as delivery.
-The tree must equal one of the journal-sealed trees and `HEAD` must independently
-name one of the journal-sealed commit identities. With no delivery, only start
-is sealed. With a delivery, tender and integration trees are sealed, while
-start, tender, integration, and the sealed tender commit's first parent are
-permitted `HEAD` identities. That tender-parent case permits the ordinary
-base-`HEAD` plus dirty tender-bytes shape only when the complete captured tree
-equals a sealed tree. Dirty submodule internals are never sealed. The proof
-rejects a later same-tree commit and every byte not represented by a sealed
-tree.
+channel. It then begins by capturing its complete non-ignored workspace tree
+through the same private-index mechanism as delivery. The tree is sealed when
+it equals one of the journal-sealed trees and `HEAD` independently names one of
+the journal-sealed commit identities. With no delivery, only start is sealed.
+With a delivery, tender and integration trees are sealed, while start, tender,
+integration, and the sealed tender commit's first parent are permitted `HEAD`
+identities. That tender-parent case permits the ordinary base-`HEAD` plus dirty
+tender-bytes shape only when the complete captured tree equals a sealed tree.
+Dirty submodule internals are never sealed.
 
-The resolved commit metadata is reused by both the proof before destroy hooks,
-the proof after them, and same-tree custody comparison; those proofs still
-capture the complete workspace independently. Failure retains the worktree and every required reachability ref, then reports
-`unsealed-bytes` with the least differing path set and, when applicable, the
-unsealed `HEAD`. Destroy hooks run only after the initial proof, and Keiyaku
-repeats the complete proof after the hooks return. An eligible worktree is then
-removed with `git worktree remove --force`; force is legal here only because the
-complete byte and `HEAD` proof has already succeeded twice. Removal precedes ref
-cleanup. That result must prove the appointed path is physically absent
-before Place release; leftover bytes at an unregistered appointed path
-are retention, not a completed cleanup. Each Keiyaku-owned ref deletion atomically verifies its surviving
-custodian ref. Integration custody requires the exact integration commit;
-tender custody requires the exact tender tree and may therefore pass to the
-claimed integration when their trees match. Nonredundant custody remains.
-Retention never reverses or changes an accepted outcome.
+The resolved commit metadata is reused by both the judgment before destroy
+hooks, the judgment after them, and same-tree custody comparison; both captures
+still observe the complete workspace independently. An unsealed claimed
+worktree or any worktree with dirty submodule internals is retained with every
+required reachability ref and reports `unsealed-bytes` with the least differing
+path set and, when applicable, the unsealed `HEAD`.
+
+An unsealed abandoned worktree instead writes one ref-free recovery commit over
+the first captured tree, runs the frozen destroy hooks, and captures again. If
+the hook changes the tree or `HEAD`, a second recovery commit records that final
+capture with the first recovery as parent. Hook failure still retains the
+worktree and reports its lag; the already-created recovery remains an ephemeral
+effect. A successful final capture with no dirty submodule internals permits
+`git worktree remove --force`. The recovery tip appears only in that invocation's
+effects, creates no ref or journal fact, and may be pruned by Git. Removal
+precedes ref cleanup. That result must prove the appointed path is physically
+absent before Place release; leftover bytes at an unregistered appointed path
+are retention, not completed cleanup. Each Keiyaku-owned ref deletion
+atomically verifies its surviving custodian ref. Integration custody requires
+the exact integration commit; tender custody requires the exact tender tree and
+may therefore pass to the claimed integration when their trees match.
+Nonredundant custody remains. Retention never reverses or changes an accepted
+outcome.
 
 ### Managed Worktree Hooks
 
@@ -144,8 +150,9 @@ recovery state exists.
 
 The create order is worktree add, marker freeze, then create commands. A create
 failure retains the worktree and does not reverse or abandon the accepted
-Contract. The destroy order is initial sealed-byte proof, frozen destroy
-commands, repeated sealed-byte proof, worktree removal, and atomic ref cleanup.
+Contract. The destroy order is initial capture and sealed-byte judgment,
+optional abandonment recovery, frozen destroy commands, repeated capture and
+optional recovery chaining, worktree removal, and atomic ref cleanup.
 A destroy failure retains the worktree and all reachability refs. Settings
 changes affect only a future worktree whose marker has not yet been frozen. Git
 does not expose a generic hook registry, lifecycle event bus, backend interface,

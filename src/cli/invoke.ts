@@ -41,7 +41,13 @@ import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js
 import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
 import { isBlankInput } from "./usage.js";
 import type { InvocationResult, RegionResult } from "./result.js";
-import { contractFromInput, resolveContextualContract, resolveKanshiContract, type SelectedContract } from "./selectors.js";
+import {
+  canonicalContractSelector,
+  contractFromInput,
+  resolveContextualContract,
+  resolveKanshiContract,
+  type SelectedContract,
+} from "./selectors.js";
 import { resolveNamedAddress } from "../library/address.js";
 import type { WorldRoot } from "../world.js";
 import { assertExplicitRepoUse, resolveCliCoordinates } from "./coordinates.js";
@@ -187,7 +193,7 @@ async function invokeBind({ parsed, repo, edge, configuration, hooks, establishW
       (accepted) => {
         const bound = accepted.facts.find((fact) => fact.kind === "bind");
         if (bound === undefined || bound.kind !== "bind") throw new Error("accepted bind is missing its bind fact");
-        return acceptedBind(accepted, bound.data.coordinates.target ?? null);
+        return acceptedBind(accepted, bound.data.coordinates);
       },
     );
     if (result.kind !== "refused") return result;
@@ -424,6 +430,15 @@ async function invokeStatus(
       if (error instanceof TypeError) throw new CliUsageError(error.message);
       throw error;
     }
+  }
+  if (parsed.contract.startsWith("kei/")) {
+    if (repo === undefined) throw new CliUsageError("cannot select a contract while the Contract world is absent");
+    const contract = canonicalContractSelector(parsed.contract);
+    return {
+      kind: "status" as const,
+      report: await kanshi({ world, repo, contract }),
+      selection: "contract" as const,
+    };
   }
   const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
   const contract = resolveKanshiContract(report, parsed.contract);

@@ -157,7 +157,18 @@ async function rowFor(
 }
 
 /** Build the Contract board from one immutable git observation. */
-export async function readContractBoard(observation: GitReadObservation): Promise<ContractBoard> {
+export async function readContractBoard(
+  observation: GitReadObservation,
+  selected?: ContractId,
+): Promise<ContractBoard> {
+  if (selected !== undefined) {
+    const contract = await readContractObservation(observation, selected);
+    return {
+      root: observation.repository.primaryWorktree,
+      state: observation.snapshot.commit as SnapshotId | null,
+      rows: contract.kind === "missing" ? [] : [contract.row],
+    };
+  }
   const observed = await observeActiveContractWorld(observation);
   const register = await readPlaceRegister(observation.repository);
   const rows: Promise<ContractRow>[] = [];
@@ -172,27 +183,38 @@ export async function readContractBoard(observation: GitReadObservation): Promis
 }
 
 /** Observe one Contract and its target from one fresh ref epoch. */
+export async function readContractObservation(
+  observation: GitReadObservation,
+  id: ContractId,
+): Promise<ContractObservation> {
+  const observed = await observeContractsForAdmissionInObservationAt(observation, [id]);
+  const record = observed.journals.get(id);
+  if (record === undefined) throw new Error(`missing requested Contract observation: ${id}`);
+  const state = record.state;
+  return state === null
+    ? { kind: "missing", id }
+    : {
+        kind: "present",
+        row: await rowFor(
+          observation.repository,
+          state,
+          record.entries[0]!.at,
+          await observeDeliveryTargetAt(observation, state),
+          await readPlaceRegister(observation.repository),
+        ),
+      };
+}
+
+/** Observe one Contract and its target from one fresh ref epoch. */
 export async function readContractObservationAt(
   repository: GitRepository,
   channel: GitDecodeChannel,
   id: ContractId,
 ): Promise<ContractObservation> {
-  return withContractReadObservationAt(repository, channel, id, async (observation) => {
-    const observed = await observeContractsForAdmissionInObservationAt(observation, [id]);
-    const record = observed.journals.get(id);
-    if (record === undefined) throw new Error(`missing requested Contract observation: ${id}`);
-    const state = record.state;
-    return state === null
-      ? { kind: "missing", id }
-      : {
-          kind: "present",
-          row: await rowFor(
-            observation.repository,
-            state,
-            record.entries[0]!.at,
-            await observeDeliveryTargetAt(observation, state),
-            await readPlaceRegister(observation.repository),
-          ),
-        };
-  });
+  return withContractReadObservationAt(
+    repository,
+    channel,
+    id,
+    async (observation) => await readContractObservation(observation, id),
+  );
 }

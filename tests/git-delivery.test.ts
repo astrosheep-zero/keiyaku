@@ -12,7 +12,13 @@ import { readDeliveryDiff } from "../src/git/integration.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { worktreePath } from "../src/git/workspace.js";
-import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId } from "../src/index.js";
+import {
+  AuthorityCorruptionError,
+  Keiyaku,
+  Repo,
+  type ContractId,
+  type TopologyEffect,
+} from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
 import { appointedWorktreePath, makeGitRepository, observeContract, type TestGitRepository, withGitShim } from "./support/git.js";
 
@@ -71,6 +77,12 @@ function deliveryRefFor(contract: ContractId): string {
 
 function candidatePinRefFor(contract: ContractId): string {
   return `refs/heads/keiyaku-candidate/kei-${contract.slice("kei/".length)}`;
+}
+
+function recoverySnapshot(effects: readonly TopologyEffect[]): string {
+  const recovery = effects.find((effect) => effect.kind === "recovery-snapshot");
+  assert.ok(recovery);
+  return recovery.snapshot;
 }
 
 function commitMessage(repository: TestGitRepository, commit: string): string {
@@ -1083,7 +1095,7 @@ test("targetless terminal cleanup retains tender custody for Delivery.diff", asy
   assert.match(await recovered.diff() ?? "", /candidate\.txt/);
 });
 
-test("terminal reconcile retains an untracked managed worktree and its reachability refs", async () => {
+test("abandon salvages untracked managed-worktree bytes without retaining the worktree", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
@@ -1095,18 +1107,22 @@ test("terminal reconcile retains an untracked managed worktree and its reachabil
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
   await bound.keiyaku.deliver();
   writeFileSync(join(path, "untracked-agent-work.txt"), "retain me\n");
-  await bound.keiyaku.abandon();
+  const abandoned = await bound.keiyaku.abandon();
+  const recovery = recoverySnapshot(abandoned.effects);
 
-  const reconciled = await bound.keiyaku.reconcile();
+  assert.deepEqual(abandoned.lags, []);
+  assert.equal(existsSync(path), false);
+  assert.equal(repository.run(["show", `${recovery}:untracked-agent-work.txt`]), "retain me\n");
+  assert.equal(repository.run(["for-each-ref", "--format=%(refname)", "--points-at", recovery]), "");
+  const id = (await bound.keiyaku.state()).id;
+  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)), candidate);
+  assert.equal(await readRef(await repositoryAt(repository.path), candidatePinRefFor(id)), null);
 
-  assert.deepEqual(reconciled.lag, [{ kind: "unsealed-bytes", path, paths: ["untracked-agent-work.txt"] }]);
-  assert.equal(existsSync(path), true);
-  assert.equal(repository.run(["-C", path, "status", "--porcelain", "--untracked-files=all"]), "?? untracked-agent-work.txt\n");
-  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor((await bound.keiyaku.state()).id)), candidate);
-  assert.equal(await readRef(await repositoryAt(repository.path), candidatePinRefFor((await bound.keiyaku.state()).id)), candidate);
+  repository.run(["prune", "--expire=now"]);
+  assert.throws(() => repository.run(["cat-file", "-e", `${recovery}^{commit}`]));
 });
 
-test("terminal reconcile retains a clean managed worktree whose HEAD is not the tender", async () => {
+test("abandon salvages a later managed-worktree commit without retaining the worktree", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
@@ -1119,15 +1135,52 @@ test("terminal reconcile retains a clean managed worktree whose HEAD is not the 
   await bound.keiyaku.deliver();
   repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "later agent work"]);
   const later = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
-  await bound.keiyaku.abandon();
+  const abandoned = await bound.keiyaku.abandon();
+  const recovery = recoverySnapshot(abandoned.effects);
 
-  const reconciled = await bound.keiyaku.reconcile();
+  assert.deepEqual(abandoned.lags, []);
+  assert.equal(existsSync(path), false);
+  assert.equal(repository.run(["rev-parse", `${recovery}^`]).trim(), later);
+  const id = (await bound.keiyaku.state()).id;
+  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)), candidate);
+  assert.equal(await readRef(await repositoryAt(repository.path), candidatePinRefFor(id)), null);
+});
 
-  assert.deepEqual(reconciled.lag, [{ kind: "unsealed-bytes", path, paths: [], head: later }]);
-  assert.equal(repository.run(["-C", path, "status", "--porcelain", "--untracked-files=all"]), "");
-  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), later);
-  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor((await bound.keiyaku.state()).id)), candidate);
-  assert.equal(await readRef(await repositoryAt(repository.path), candidatePinRefFor((await bound.keiyaku.state()).id)), candidate);
+test("abandon retains dirty submodule internals that a recovery snapshot cannot capture", async () => {
+  const child = makeGitRepository();
+  child.run(["config", "user.name", "Test User"]);
+  child.run(["config", "user.email", "test@example.com"]);
+  writeFileSync(join(child.path, "child.txt"), "child\n");
+  child.run(["add", "child.txt"]);
+  child.run(["commit", "--quiet", "-m", "child"]);
+
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody(),
+    workspace: "worktree",
+  });
+  await bound.keiyaku.reconcile();
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  repository.run(["-C", path, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", child.path, "module"]);
+  repository.run(["-C", path, "commit", "--quiet", "-am", "submodule"]);
+  writeFileSync(join(path, "module", "child.txt"), "dirty child\n");
+
+  const abandoned = await bound.keiyaku.abandon();
+
+  assert.equal(abandoned.effects.some((effect) => effect.kind === "recovery-snapshot"), false);
+  const head = mintSnapshotId(repository.run(["-C", path, "rev-parse", "HEAD"]).trim());
+  assert.deepEqual(abandoned.lags, [{
+    kind: "unsealed-bytes",
+    path,
+    paths: ["module"],
+    head,
+  }]);
+  assert.equal(existsSync(path), true);
+  assert.equal(readFileSync(join(path, "module", "child.txt"), "utf8"), "dirty child\n");
 });
 
 test("terminal reconcile removes a delivered managed worktree reset to its sealed start", async () => {
@@ -1176,7 +1229,7 @@ test("terminal reconcile removes dirty deliver bytes over their sealed base HEAD
   assert.equal(existsSync(path), false);
 });
 
-test("terminal reconcile retains a tender merge second parent despite sealed bytes", async () => {
+test("abandon salvages an unsealed tender parent without retaining the worktree", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
@@ -1194,13 +1247,13 @@ test("terminal reconcile retains a tender merge second parent despite sealed byt
   repository.run(["-C", path, "checkout", "--quiet", "--detach", mergeTender]);
   await bound.keiyaku.deliver();
   repository.run(["-C", path, "reset", "--soft", secondParent]);
-  await bound.keiyaku.abandon();
+  const abandoned = await bound.keiyaku.abandon();
+  const recovery = recoverySnapshot(abandoned.effects);
 
-  const reconciled = await bound.keiyaku.reconcile();
-
-  assert.deepEqual(reconciled.lag, [{ kind: "unsealed-bytes", path, paths: [], head: secondParent }]);
-  assert.equal(existsSync(path), true);
-  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), secondParent);
+  assert.deepEqual(abandoned.lags, []);
+  assert.equal(existsSync(path), false);
+  assert.equal(repository.run(["rev-parse", `${recovery}^`]).trim(), secondParent);
+  assert.equal(repository.run(["show", `${recovery}:candidate.txt`]), "candidate\n");
 });
 
 test("a clean no-delivery abandonment releases the managed worktree from its start", async () => {

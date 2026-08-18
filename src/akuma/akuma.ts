@@ -620,9 +620,7 @@ export class Akuma {
       const paths = akumaPaths({ runRoot, archetype: physical.archetype, suffix: physical.suffix });
       try {
         rows.push(await fleetListRow(paths, physical.id));
-      } catch (error) {
-        throw new Error(`Akuma list failed for ${physical.id} at ${paths.directory}`, { cause: error });
-      }
+      } catch {}
     }
     return {
       rows,

@@ -223,24 +223,33 @@ The renderer is a pure exhaustive projection over `InvocationResult`; it
 invents no fields, rereads no authority, and does not change exit semantics.
 JSON serializes that same public value.
 
-The receipt answers four things in a fixed order: the invocation verdict, the
-Contract identity, unresolved obligations, then deviations and the exact record.
-The public result taxonomy is not a visual section taxonomy. There are no
-`facts`, `effects`, `stops`, or `settlement` section headings, and no nested
-`stop` -> `refusal`/`retry` tree. A lowercase label names one row only.
+An accepted mutation receipt answers the caller's verb-specific question, not
+whether Protocol admitted an entry. Its first line names the world change made
+by that verb and the Contract identity. Decision-relevant consequences follow;
+the exact mechanical record is last. The renderer uses only typed fields on the
+invocation result. It never rereads authority, parses prose, or infers state
+from a missing effect.
 
 ```text
-✓ <verb> accepted — <complete kei/...>
+✓ bound — <complete kei/...>
+✓ terms replaced — <complete kei/...>
+✓ delivered — <complete kei/...>
+✓ deliver — not complete — <complete kei/...>
+✓ review <satisfied|unsatisfied> — <complete kei/...>
+✓ chapter recorded — <complete kei/...>
+✓ abandoned — <complete kei/...>
+✓ audit — <complete kei/...>
+
+  record
+    journal <entry> · <kind>
+    head <ContractHead>
+
 ! verification <typed stop kind and exact scalar facts>
-! claim <typed stop kind and exact scalar facts>
+! completion blocked · <typed reason and exact scalar facts>
 ~ workspace <N files changed, N insertions(+), N deletions(-)>
   staged <complete path>
 ~ overlap <warning or witness>
-journal <entry> · <kind>
-✓ ref <action> · <exact ref> · <before> -> <after>
-· worktree <action> · <exact path>
-· settle <action> · <exact task or namespace path>
-diff
+terms diff
 
 <exact diff bytes>
 
@@ -253,28 +262,38 @@ diff
 ? <retry kind and exact diagnostic facts>
 ```
 
-Bind retry has no Contract relation because no identity was admitted. The
-addressed Contract coordinate appears once on the verdict line. Accepted
-trailing obligations never change the accepted verdict or exit status. The
-outcome glyphs and lowercase vocabulary remain the shared scanner vocabulary.
+Bind reports its typed workspace coordinate and optional target; a missing
+target renders `no target`. Amend places the exact `terms diff` immediately
+after its first line because the diff is its product answer, not mechanical
+record. Deliver is `delivered` exactly when its closed admitted-fact list
+contains `claimed`. Otherwise it is `deliver — not complete`, says `candidate
+kept`, reports the typed Verification verdict when present, and names the typed
+completion stop without exposing the internal `placement` channel name. Review
+reports its admitted attestation verdict and whether the same fact list contains
+`claimed`. Arc reports its typed sequence and title as `chapter <N> · <title>`.
+Abandon reports its optional note and only the explicit workspace and recovery
+snapshot effects that occurred. Audit reports candidate, Verification, and
+target observations without describing the candidate as accepted or approved.
 
-Obligation rows come first and contain only unresolved verification or
-placement stops, lags, cleanup failures, and leaks. The public `placement`
-channel keeps that lifecycle and JSON name; text projects it to the lowercase
-label `claim`. Every obligation row uses its product subject as the label:
-`verification`, `claim`, `cleanup`, `leak`, `lag`, or `settlement`. Audit
-Verification answers use the existing glyph vocabulary and the `verification`
-label. Never render `gate` as the label for verification or claim, and never render
-the stop-union prefixes `refusal=`, `retry=`, or `failure=` inside an accepted
-receipt. The typed reason word is followed only by existing public scalar
-evidence. A foreign refusal coordinate appears only when it differs from the
-addressed Contract. `target-moved` uses `<expected> -> <observed>`. Deviation
-rows contain Region warnings and accepted review workspace bytes. The record
-tail contains admitted journal facts, head, bind `target`, deliver
-`verificationReuse`, normal Git effects, normal settlement actions, and the
-document diff. Changed effects precede unchanged confirmations; unchanged
-effects remain visible. Accepted audit text does not fall through to those
-generic unchanged effects or settlement actions.
+The primary UI does not use `accepted`, `admitted`, `recorded` as an admission
+synonym, `placement`, `claim`, `stopped`, `mutation`, or an internal result-arm
+name. Journal kinds retain their exact names only inside the record. The clear
+domain words `verification`, `target`, `workspace`, `testimony`, `terms`, and
+`candidate` remain available. Refused and retry glyphs and exit semantics do not
+change.
+
+The record contains every admitted fact identity, head, Git effect, settlement
+action and lag. Fact data needed by the first screen is projected into a named
+verb field: bind workspace, deliver and review attestation verdict, arc sequence
+and title, and abandon note. Shared facts remain identity-only; the adapter does
+not expose a generic JournalEntry-data dump. Changed effects precede unchanged
+confirmations. Audit text shows admitted testimony but does not fall through to
+unrelated reconciliation effects or settlement actions.
+
+An abandonment recovery effect renders
+`✓ recovery-snapshot created <SnapshotId> ephemeral`. The word `ephemeral` is
+literal: the snapshot has no ref or durable fact and may already be unavailable
+after repository garbage collection.
 
 An opaque Contract ID, entry, ref, path, hash, diagnostic, or diff coordinate
 is indivisible. The renderer never inserts bytes, whitespace, ellipses, or a

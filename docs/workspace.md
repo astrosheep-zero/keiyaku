@@ -196,8 +196,9 @@ After every successful guidance create or replacement, Keiyaku attempts
 
 A write or cleanup failure returns a `contract-file-failed` lag naming the
 worktree, path, and diagnostic while preserving admitted facts and completed
-effects. Managed terminal cleanup stays governed by Git's sealed-byte law; a
-here terminal removes only its matching appointment projection.
+effects. Managed terminal cleanup stays governed by Git's sealed-byte and
+ephemeral-abandonment-recovery law; a here terminal removes only its matching
+appointment projection.
 
 Git reconciliation has no projection callback, does not parse the frontmatter,
 and neither reads nor writes these files. Explicit reconcile remains a public

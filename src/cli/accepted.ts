@@ -62,11 +62,15 @@ function acceptedRegion(result: AmendResult | BindResult): RegionObservation {
   return { overlaps: result.overlaps };
 }
 
-export function acceptedBind(result: BindResult, target: string | null): AcceptedBindResult {
+export function acceptedBind(
+  result: BindResult,
+  coordinates: Readonly<{ workspace: "worktree" | "here"; target?: string }>,
+): AcceptedBindResult {
   return {
     ...acceptedEnvelope(result, undefined),
     verb: "bind",
-    target,
+    workspace: coordinates.workspace,
+    target: coordinates.target ?? null,
     ...acceptedRegion(result),
   };
 }
@@ -85,9 +89,12 @@ export function acceptedDeliver(
   coordinate: ContractId,
 ): AcceptedDeliverResult {
   const value = result.value;
+  const attestation = result.facts.find((fact) => fact.kind === "attestation");
+  const verificationVerdict = attestation?.data.verdict ?? value.verificationReuse?.verdict;
   return {
     ...acceptedEnvelope(result, coordinate),
     verb: "deliver",
+    ...(verificationVerdict === undefined ? {} : { verificationVerdict }),
     ...(value.verification === undefined ? {} : { verification: value.verification }),
     ...(value.verificationReuse === undefined ? {} : { verificationReuse: value.verificationReuse }),
     ...(value.placement === undefined ? {} : { placement: value.placement }),
@@ -101,20 +108,35 @@ export function acceptedReview(
   coordinate: ContractId,
 ): AcceptedReviewResult {
   const value = result.value;
+  const attestation = result.facts.find((fact) => fact.kind === "attestation");
+  if (attestation === undefined) throw new Error("accepted review is missing its attestation fact");
   return {
     ...acceptedEnvelope(result, coordinate),
     verb: "review",
+    verdict: attestation.data.verdict,
     ...(value.placement === undefined ? {} : { placement: value.placement }),
     ...(value.workspace === undefined ? {} : { workspace: value.workspace }),
   };
 }
 
 export function acceptedArc(result: MutationResult<void>, coordinate: ContractId): AcceptedArcResult {
-  return { ...acceptedEnvelope(result, coordinate), verb: "arc" };
+  const arc = result.facts.find((fact) => fact.kind === "arc");
+  if (arc === undefined) throw new Error("accepted arc is missing its arc fact");
+  return {
+    ...acceptedEnvelope(result, coordinate),
+    verb: "arc",
+    chapter: { seq: arc.data.seq, title: arc.data.title },
+  };
 }
 
 export function acceptedAbandon(result: MutationResult<void>, coordinate: ContractId): AcceptedAbandonResult {
-  return { ...acceptedEnvelope(result, coordinate), verb: "abandon" };
+  const abandoned = result.facts.find((fact) => fact.kind === "abandoned");
+  if (abandoned === undefined) throw new Error("accepted abandon is missing its abandoned fact");
+  return {
+    ...acceptedEnvelope(result, coordinate),
+    verb: "abandon",
+    ...(abandoned.data.note === undefined ? {} : { note: abandoned.data.note }),
+  };
 }
 
 export function acceptedAudit(

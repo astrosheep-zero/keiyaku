@@ -123,6 +123,37 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
   held.close();
 });
 
+test("abandon chains destroy-hook changes after the initial ephemeral recovery", async () => {
+  const repository = repositoryWithMain();
+  const hooks: WorktreeHooks = {
+    create: [],
+    destroy: [{
+      argv: [process.execPath, "-e", 'require("node:fs").writeFileSync("from-destroy-hook.txt", "hook bytes\\n")'],
+      timeoutMs: 5_000,
+    }],
+  };
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("Recovery around destroy hooks"),
+    hooks,
+  });
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), bound.keiyaku.id);
+  const originalHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+  writeFileSync(join(worktree, "before-destroy-hook.txt"), "initial bytes\n");
+
+  const abandoned = await bound.keiyaku.abandon();
+  const recovery = abandoned.effects.find((effect) => effect.kind === "recovery-snapshot");
+
+  assert.ok(recovery);
+  assert.equal(existsSync(worktree), false);
+  assert.equal(repository.run(["show", `${recovery.snapshot}:before-destroy-hook.txt`]), "initial bytes\n");
+  assert.equal(repository.run(["show", `${recovery.snapshot}:from-destroy-hook.txt`]), "hook bytes\n");
+  assert.equal(repository.run(["show", `${recovery.snapshot}^:before-destroy-hook.txt`]), "initial bytes\n");
+  const beforeHookPaths = repository.run(["ls-tree", "--name-only", `${recovery.snapshot}^`]);
+  assert.equal(beforeHookPaths.includes("from-destroy-hook.txt"), false);
+  assert.equal(repository.run(["rev-parse", `${recovery.snapshot}^^`]).trim(), originalHead);
+});
+
 test("a reconcile queued on the effect lock reobserves terminal state before applying topology", async () => {
   const repository = repositoryWithMain();
   const git = await repositoryAt(repository.path);

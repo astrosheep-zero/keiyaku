@@ -57,15 +57,19 @@ export function resolveContextualContract(board: ContractBoard, selector: string
   return selectorError(`contract selector must be kei/<contract-segment> or @<contract-segment>: ${selector}`);
 }
 
-export function resolveKanshiContract(report: KanshiReport, selector: string): string {
-  if (report.contracts.kind !== "present") {
-    return selectorError(`cannot select a contract while the Contract world is ${report.contracts.kind}`);
-  }
-  if (selector.startsWith("@")) return resolveShortContract(report.contracts.value.rows, selector);
+export function canonicalContractSelector(selector: string): ContractId {
   try {
     identitySegments({ family: "kei", value: selector });
   } catch {
     return selectorError(`contract selector must use kei/: ${selector}`);
   }
-  return selector;
+  return selector as ContractId;
+}
+
+export function resolveKanshiContract(report: KanshiReport, selector: string): string {
+  if (report.contracts.kind !== "present") {
+    return selectorError(`cannot select a contract while the Contract world is ${report.contracts.kind}`);
+  }
+  if (selector.startsWith("@")) return resolveShortContract(report.contracts.value.rows, selector);
+  return canonicalContractSelector(selector);
 }

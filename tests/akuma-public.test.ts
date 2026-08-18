@@ -1414,7 +1414,7 @@ test("list keeps every ordinary birth window visible without creating files", as
   }
 });
 
-test("list rejects post-identity schema corruption with AkuId and directory", async () => {
+test("list silently skips identities whose compact row cannot be read", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-list-schema-cut-"));
   try {
     const heartCut = await allocateAkumaDirectory({
@@ -1428,19 +1428,12 @@ test("list rejects post-identity schema corruption with AkuId and directory", as
     heart.close();
     const noise = join(akumaRunRoot(root), "NOISE-notid");
     mkdirSync(noise);
+    const visible = await allocateAkumaDirectory({
+      worldRoot: root, archetype: "claude", draw: () => "c1000003",
+    });
 
     const world = await akumaAt(root);
-    const worldRoot = await World.at(root);
-    await assert.rejects(world.list(), (error: unknown) => {
-      assert.ok(error instanceof Error);
-      assert.equal(
-        error.message,
-        `Akuma list failed for ${heartCut.id} at ${pathsForAkuId(worldRoot, heartCut.id).directory}`,
-      );
-      assert.ok(error.cause instanceof Error);
-      assert.match(error.cause.message, /heart schema version must be 16/u);
-      return true;
-    });
+    assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn" }]);
     assert.equal(existsSync(noise), true);
 
     rmSync(heartCut.paths.directory, { recursive: true, force: true });
@@ -1455,16 +1448,7 @@ test("list rejects post-identity schema corruption with AkuId and directory", as
       "INSERT INTO leash_schema VALUES (1, 2)",
     ].join(""));
     leash.close();
-    await assert.rejects(world.list(), (error: unknown) => {
-      assert.ok(error instanceof Error);
-      assert.equal(
-        error.message,
-        `Akuma list failed for ${leashCut.id} at ${pathsForAkuId(worldRoot, leashCut.id).directory}`,
-      );
-      assert.ok(error.cause instanceof Error);
-      assert.match(error.cause.message, /leash schema version must be 4/u);
-      return true;
-    });
+    assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn" }]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
