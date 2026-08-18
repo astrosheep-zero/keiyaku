@@ -4,19 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
-  appointManagedWorktree,
   appointManagedWorktrees,
   canonicalPlaceRegister,
   CONTRACT_PLACES,
   decodePlaceRegister,
   emptyPlaceRegister,
-  firstFreePlace,
   nextPlace,
   place,
   placeRegisterPath,
   readManagedWorktreeAppointment,
   readPlaceRegister,
-  releaseManagedWorktree,
+  releaseManagedWorktrees,
 } from "../src/workspace-place.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
@@ -67,7 +65,7 @@ test("Place register bytes are one canonical JSON line", () => {
   assert.deepEqual(decodePlaceRegister("places.json", EMPTY).appointments, []);
 });
 
-test("Place allocation is generation-major and first-free", () => {
+test("Place allocation is generation-major and first-free", async () => {
   assert.equal(CONTRACT_PLACES.length, 173);
   assert.equal(CONTRACT_PLACES[0], "atlantis");
   assert.equal(CONTRACT_PLACES[1], "hogwarts");
@@ -84,15 +82,17 @@ test("Place allocation is generation-major and first-free", () => {
   assert.throws(() => place("atlantis1"), TypeError);
   assert.throws(() => place("atlantis01"), TypeError);
   assert.throws(() => place("not-a-place"), TypeError);
-  const occupied = registerOf([
-    { place: ATLANTIS, contract: EXAMPLE },
-    { place: place("narnia"), contract: OTHER },
-  ]);
-  assert.equal(firstFreePlace(occupied), HOGWARTS);
-  assert.equal(firstFreePlace(registerOf(CONTRACT_PLACES.map((name, index) => ({
-    place: place(name),
-    contract: contractId(`kei/letter-${index}`),
-  })))), place("atlantis2"));
+  const repository = await repositoryAt(repositoryWithCommit().path);
+  const seed = [EXAMPLE, contractId("kei/seed-hogwarts"), OTHER];
+  await appointManagedWorktrees(repository, seed);
+  await releaseManagedWorktrees(repository, [seed[1]!]);
+  const firstFree = await appointManagedWorktrees(repository, [contractId("kei/first-free")]);
+  assert.equal(firstFree.byContract.get(contractId("kei/first-free"))?.place, HOGWARTS);
+
+  const fullRepository = await repositoryAt(repositoryWithCommit().path);
+  await appointManagedWorktrees(fullRepository, CONTRACT_PLACES.map((_, index) => contractId(`kei/letter-${index}`)));
+  const nextGeneration = await appointManagedWorktrees(fullRepository, [contractId("kei/next-generation")]);
+  assert.equal(nextGeneration.byContract.get(contractId("kei/next-generation"))?.place, place("atlantis2"));
 });
 
 test("missing Place file is empty and written empty remains canonical", async () => {
@@ -100,7 +100,7 @@ test("missing Place file is empty and written empty remains canonical", async ()
   const path = join(repository.commonDirectory, "keiyaku", "places.json");
   assert.equal(existsSync(path), false);
   assert.deepEqual(await readPlaceRegister(repository), emptyPlaceRegister());
-  await releaseManagedWorktree(repository, EXAMPLE);
+  await releaseManagedWorktrees(repository, [EXAMPLE]);
   assert.equal(readFileSync(path, "utf8"), EMPTY);
 });
 
@@ -118,10 +118,10 @@ test("concurrent appoint and release preserve every mapping", async () => {
   const repository = await repositoryAt(repositoryWithCommit().path);
   const first = Array.from({ length: 8 }, (_, index) => contractId(`kei/first-${index}`));
   const second = Array.from({ length: 8 }, (_, index) => contractId(`kei/second-${index}`));
-  await Promise.all(first.map((contract) => appointManagedWorktree(repository, contract)));
+  await appointManagedWorktrees(repository, first);
   await Promise.all([
-    ...first.map((contract) => releaseManagedWorktree(repository, contract)),
-    ...second.map((contract) => appointManagedWorktree(repository, contract)),
+    releaseManagedWorktrees(repository, first),
+    appointManagedWorktrees(repository, second),
   ]);
   const register = await readPlaceRegister(repository);
   assert.equal(register.appointments.length, second.length);
@@ -141,10 +141,12 @@ test("concurrent appoint and release preserve every mapping", async () => {
 
 test("appointment after a concurrent release uses the locked on-disk register", async () => {
   const repository = await repositoryAt(repositoryWithCommit().path);
-  const first = await appointManagedWorktree(repository, EXAMPLE);
+  const firstRegister = await appointManagedWorktrees(repository, [EXAMPLE]);
+  const first = firstRegister.byContract.get(EXAMPLE)!;
   const snapshot = await readPlaceRegister(repository);
-  await releaseManagedWorktree(repository, EXAMPLE);
-  const reused = await appointManagedWorktree(repository, OTHER);
+  await releaseManagedWorktrees(repository, [EXAMPLE]);
+  const reusedRegister = await appointManagedWorktrees(repository, [OTHER]);
+  const reused = reusedRegister.byContract.get(OTHER)!;
   const appointed = await appointManagedWorktrees(repository, [EXAMPLE]);
   assert.equal(snapshot.byContract.get(EXAMPLE)?.place, first.place);
   assert.equal(reused.place, first.place);
@@ -155,20 +157,22 @@ test("appointment after a concurrent release uses the locked on-disk register", 
 
 test("retry reuses the durable Place and never inspects Git topology", async () => {
   const repository = await repositoryAt(repositoryWithCommit().path);
-  const first = await appointManagedWorktree(repository, EXAMPLE);
+  const firstRegister = await appointManagedWorktrees(repository, [EXAMPLE]);
+  const first = firstRegister.byContract.get(EXAMPLE)!;
   assert.equal(first.place, ATLANTIS);
   mkdirSync(worktreePath(repository, "hogwarts"), { recursive: true });
   writeFileSync(join(worktreePath(repository, "hogwarts"), "noise.txt"), "not an appointment\n");
-  const retry = await appointManagedWorktree(repository, EXAMPLE);
-  assert.deepEqual(retry, first);
-  const other = await appointManagedWorktree(repository, OTHER);
-  assert.equal(other.place, HOGWARTS);
+  const retry = await appointManagedWorktrees(repository, [EXAMPLE]);
+  assert.deepEqual(retry.byContract.get(EXAMPLE), first);
+  const other = await appointManagedWorktrees(repository, [OTHER]);
+  assert.equal(other.byContract.get(OTHER)?.place, HOGWARTS);
 });
 
 test("the three-arm reader does not inspect the journal or filesystem", async () => {
   const repository = await repositoryAt(repositoryWithCommit().path);
   assert.deepEqual(await readManagedWorktreeAppointment(repository, EXAMPLE), { kind: "unappointed" });
-  const appointed = await appointManagedWorktree(repository, EXAMPLE);
+  const appointedRegister = await appointManagedWorktrees(repository, [EXAMPLE]);
+  const appointed = appointedRegister.byContract.get(EXAMPLE)!;
   assert.deepEqual(await readManagedWorktreeAppointment(repository, EXAMPLE), {
     kind: "appointed",
     place: appointed.place,
@@ -212,12 +216,14 @@ test("a 10000-appointment observation decodes the register once", async () => {
   mkdirSync(join(git.commonDirectory, "keiyaku"), { recursive: true });
   writeFileSync(path, bytes);
   const register = decodePlaceRegister(path, bytes);
+  const nextContract = contractId("kei/bulk-next");
+  const next = await appointManagedWorktrees(git, [nextContract]);
   writeFileSync(path, "not-canonical\n");
   assert.equal(register.byPlace.size, 10_000);
   assert.equal(register.byContract.size, 10_000);
   assert.equal(register.byContract.get(appointments[0]!.contract)?.place, appointments[0]!.place);
   assert.equal(register.byPlace.get(appointments[9_999]!.place)?.contract, appointments[9_999]!.contract);
-  assert.equal(firstFreePlace(register), placeAt(10_000));
+  assert.equal(next.byContract.get(nextContract)?.place, placeAt(10_000));
   for (const appointment of appointments) {
     assert.deepEqual(await readManagedWorktreeAppointment(git, appointment.contract, register), {
       kind: "appointed",
@@ -232,7 +238,8 @@ test("a 10000-appointment observation decodes the register once", async () => {
 test("current path projection is the appointed Place", async () => {
   assert.equal("deliveryWorktreePath" in workspace, false);
   const git = await repositoryAt(repositoryWithCommit().path);
-  const appointed = await appointManagedWorktree(git, EXAMPLE);
+  const appointedRegister = await appointManagedWorktrees(git, [EXAMPLE]);
+  const appointed = appointedRegister.byContract.get(EXAMPLE)!;
   const current = await readManagedWorktreeAppointment(git, EXAMPLE);
   assert.equal(current.kind, "appointed");
   if (current.kind !== "appointed") throw new Error("expected appointed path");
@@ -245,7 +252,8 @@ test("linked worktrees share the appointed Place under the common directory", as
   repository.run(["worktree", "add", "--quiet", "--detach", linked]);
   const primary = await repositoryAt(repository.path);
   const secondary = await repositoryAt(linked);
-  const appointed = await appointManagedWorktree(primary, EXAMPLE);
+  const appointedRegister = await appointManagedWorktrees(primary, [EXAMPLE]);
+  const appointed = appointedRegister.byContract.get(EXAMPLE)!;
   assert.deepEqual(await readManagedWorktreeAppointment(secondary, EXAMPLE), {
     kind: "appointed",
     place: appointed.place,
@@ -312,8 +320,8 @@ test("terminal cleanup releases the Place only after hooks and removal succeed",
   assert.ok(failed.lags.length > 0);
   assert.equal(existsSync(appointment.path), true);
   assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), appointment);
-  const other = await appointManagedWorktree(git, OTHER);
-  assert.equal(other.place, HOGWARTS);
+  const other = await appointManagedWorktrees(git, [OTHER]);
+  assert.equal(other.byContract.get(OTHER)?.place, HOGWARTS);
   writeFileSync(ready, "ready\n");
   const released = await bound.keiyaku.reconcile({ hooks, retryHooks: true });
   assert.deepEqual(released.lag, []);

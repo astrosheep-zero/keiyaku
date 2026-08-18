@@ -251,12 +251,6 @@ export function nextPlace(current?: Place): Place {
     : composePlace(CONTRACT_PLACES[0]!, parsed.generation + 1n);
 }
 
-export function firstFreePlace(register: PlaceRegister): Place {
-  for (let candidate = nextPlace(); ; candidate = nextPlace(candidate)) {
-    if (!register.byPlace.has(candidate)) return candidate;
-  }
-}
-
 export function canonicalPlaceRegister(register: PlaceRegister): string {
   const appointments = Object.fromEntries(
     register.appointments
@@ -377,15 +371,6 @@ export async function appointManagedWorktrees(
   return await mutatePlaceRegister(repository, (current) => withAppointments(current, contracts));
 }
 
-export async function appointManagedWorktree(
-  repository: GitRepository,
-  contract: ContractId,
-): Promise<PlaceAppointment> {
-  const appointed = appointmentFor(await appointManagedWorktrees(repository, [contract]), contract);
-  if (appointed === undefined) throw new Error(`Place appointment was not recorded: ${contract}`);
-  return appointed;
-}
-
 export async function releaseManagedWorktrees(
   repository: GitRepository,
   contracts: readonly ContractId[],
@@ -396,10 +381,6 @@ export async function releaseManagedWorktrees(
     const kept = current.appointments.filter((appointment) => !drop.has(appointment.contract));
     return kept.length === current.appointments.length ? current : indexedRegister(kept);
   });
-}
-
-export async function releaseManagedWorktree(repository: GitRepository, contract: ContractId): Promise<void> {
-  await releaseManagedWorktrees(repository, [contract]);
 }
 
 export async function readManagedWorktreeAppointment(

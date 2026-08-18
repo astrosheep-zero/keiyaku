@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { releaseManagedWorktree } from "../src/workspace-place.js";
+import { releaseManagedWorktrees } from "../src/workspace-place.js";
 import { appointedWorktreePath, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
@@ -347,7 +347,7 @@ test("audit blocks an active unappointed workspace without inventing a path", as
     gates: ["reviewed"],
   });
   const state = await bound.keiyaku.state();
-  await releaseManagedWorktree(await repositoryAt(repository.path), state.id);
+  await releaseManagedWorktrees(await repositoryAt(repository.path), [state.id]);
 
   const audited = await bound.keiyaku.audit();
   assert.deepEqual(audited.value.candidate, {
