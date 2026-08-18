@@ -32,7 +32,8 @@ function akumaObservation(
 ): AkumaObservation {
   return {
     status: { ...status, timeline: { ...emptyReported, ...status.timeline } },
-    createdTasks: emptyCreatedTasks,
+    contract: { kind: "none" },
+    createdTasks: extra.createdTasks ?? emptyCreatedTasks,
     ...extra,
   };
 }
@@ -285,13 +286,13 @@ test("Akuma output preserves a complete associated Contract identity", () => {
     historyResult: {
       kind: "no-answer" as const,
       id: "aku/worker/00000001" as const,
-      contractId: "kei/provider-core-review" as const,
+      contract: { kind: "associated" as const, contractId: "kei/provider-core-review" as const },
     },
   };
   assert.deepEqual(akumaJsonValue(result), {
     kind: "no-answer",
     id: "aku/worker/00000001",
-    contractId: "kei/provider-core-review",
+    contract: { kind: "associated", contractId: "kei/provider-core-review" },
   });
 });
 
@@ -301,7 +302,7 @@ test("Akuma status keeps a complete Contract ID at narrow width", () => {
     id: "aku/worker/00000001",
     life: "asleep" as const,
     timeline: { kind: "idle" as const, entries: [], omitted: 0, ...emptyReported },
-  }, { contractId });
+  }, { contract: { kind: "associated", contractId } });
   const context: TextRenderContext = { columns: 20, color: false };
   const text = renderAkumaText(
     parseArgv(["status", status.status.id]).command,
@@ -673,7 +674,7 @@ test("raw-answer selection preserves exact bytes and unfinished snapshots", () =
   const wait = (status: AkumaObservation["status"]) => ({
     kind: "akuma" as const,
     action: "wait" as const,
-    result: { completion: "all" as const, observations: [akumaObservation(status)] },
+    result: { completion: "all" as const, observations: [akumaObservation(status)], unobserved: [] },
   });
   const multiline = wait(observation("line one\nline two\n").status);
   assert.equal(akumaRawAnswer(multiline), "line one\nline two\n");

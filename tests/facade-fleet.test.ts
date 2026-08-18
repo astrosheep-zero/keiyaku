@@ -502,6 +502,7 @@ test("history last bypasses activity and glob grammar follows normalized archety
       kind: "last",
       id: source.id,
       answer: "done",
+      contract: { kind: "none" },
     });
     await assert.rejects(() => Keiyaku.history({ path: root, akuma: source.id }), /invalid event shape/u);
 
@@ -533,17 +534,17 @@ test("history last selects exactly one latest answered TurnFact by durable seque
     }
     const last = async () => Keiyaku.history({ path: root, akuma: source.id, last: true });
 
-    assert.deepEqual(await last(), { kind: "no-answer", id: source.id });
+    assert.deepEqual(await last(), { kind: "no-answer", id: source.id, contract: { kind: "none" } });
     await completeTurn(source.paths, body.sequence, { kind: "failed", diagnostic: "first failure" }, "2026-08-11T00:00:01.000Z");
-    assert.deepEqual(await last(), { kind: "no-answer", id: source.id });
+    assert.deepEqual(await last(), { kind: "no-answer", id: source.id, contract: { kind: "none" } });
     await completeTurn(source.paths, body.sequence, { kind: "answered", answer: "first", historyId: "history-1", session: { sessionId: "session-1" } }, "2026-08-11T00:00:02.000Z");
-    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "first" });
+    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "first", contract: { kind: "none" } });
     await completeTurn(source.paths, body.sequence, { kind: "answered", answer: "second", historyId: "history-2", session: { sessionId: "session-2" } }, "2026-08-11T00:00:03.000Z");
-    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "second" });
+    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "second", contract: { kind: "none" } });
     await completeTurn(source.paths, body.sequence, { kind: "failed", diagnostic: "later failure" }, "2026-08-11T00:00:04.000Z");
-    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "second" });
+    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "second", contract: { kind: "none" } });
     await completeTurn(source.paths, body.sequence, { kind: "answered", answer: "", historyId: "history-3", session: { sessionId: "session-3" } }, "2026-08-11T00:00:05.000Z");
-    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "" });
+    assert.deepEqual(await last(), { kind: "last", id: source.id, answer: "", contract: { kind: "none" } });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -725,7 +726,14 @@ test("plural wait returns no observations when every status is unreadable", asyn
         akuma: [earlier, later],
         completion,
         timeoutMs: 0,
-      }), { completion, observations: [] });
+      }), {
+        completion,
+        observations: [],
+        unobserved: [
+          { id: earlier, diagnostic: "file is not a database" },
+          { id: later, diagnostic: "file is not a database" },
+        ],
+      });
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -745,7 +753,7 @@ test("fleet status projects Dispatch association without changing Akuma core", a
   assert.equal("contractId" in plain, false);
   assert.equal(plain.status.id, source.id);
   const projected = await Keiyaku.status({ path: repository.path, akuma: source.id, repo: await Repo.at({ path: repository.path }) });
-  assert.equal(projected.contractId, owner);
+  assert.deepEqual(projected.contract, { kind: "associated", contractId: owner });
   assert.equal(projected.status.id, source.id);
   const waited = await Keiyaku.wait({
     path: repository.path,
@@ -753,7 +761,7 @@ test("fleet status projects Dispatch association without changing Akuma core", a
     repo: await Repo.at({ path: repository.path }),
     timeoutMs: 0,
   });
-  assert.equal(waited.observations[0]!.contractId, owner);
+  assert.deepEqual(waited.observations[0]!.contract, { kind: "associated", contractId: owner });
 });
 
 test("CLI wait and kill expose Contract selector world refusal as typed usage", async () => {

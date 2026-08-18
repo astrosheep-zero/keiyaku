@@ -268,10 +268,12 @@ globs and complete Contract worker selectors; their set expands once,
 deduplicates, and byte-sorts. A Contract selector reads Dispatch from the
 selected Repo and operates only in the invocation World. A foreign member
 refuses the whole set as `akuma-not-in-world`; an unreadable Heart remains in
-the frozen selection rather than becoming that refusal. Plural wait omits its
-failed status read for that polling round, while one-member wait and the other
-verbs retain their ordinary diagnostics; a missing direct AkuId remains
-not-born. Multi-wait requires exactly one of `--any` or `--all`; kill covers the
+the frozen selection rather than becoming that refusal. Plural wait discards
+failed status reads in intermediate rounds and retries them. Its completing or
+timed-out round partitions every frozen member exactly once between
+`observations` and `unobserved: [{ id, diagnostic }]`; one-member wait and the
+other verbs retain their ordinary diagnostics, while a missing direct AkuId
+remains not-born. Multi-wait requires exactly one of `--any` or `--all`; kill covers the
 frozen set. Bare `status`
 uses Kanshi. Named `status @name` resolves active Contract short names and the
 retained Alias register from one Kanshi observation, refuses cross-kind
@@ -308,7 +310,7 @@ is mutually exclusive with `--before`, `--since`, and `--limit`; it writes the
 complete answer from the last answered turn,
 skipping later failed turns; it does not read activity or append framing. With
 no answered turn, text writes `no answer retained` and JSON exposes the typed
-`{ "kind": "no-answer", "id": "..." }` arm. An answered empty string remains
+`{ "kind": "no-answer", "id": "...", "contract": ... }` arm. An answered empty string remains
 an answer and writes zero bytes in text mode. Both last-answer arms exit zero
 because each is a successful read result.
 `fork` requires one nonblank `--at` history id and has no stdin body.
@@ -324,8 +326,8 @@ glyphs, omission placement, tool presentation, and snapshot framing are owned
 by [cli-output.md](cli-output.md).
 
 Readonly `none` renders its diagnostic; native or absent restraint renders
-nothing. Snapshots name the complete AkuId, optional frozen Alias, and optional
-Contract relation. Status, non-answer waits, multi-waits, unfinished call, and
+nothing. Snapshots name the complete AkuId, optional frozen Alias, and Dispatch
+relation. Dispatch read failures render their diagnostic. Status, non-answer waits, multi-waits, unfinished call, and
 kill include public life; tell and history do not. Answered default call,
 answered single wait, and `history --last` write exact answer bytes. Detached
 call prints the copyable canonical-world wait command. Text never exposes
@@ -350,8 +352,10 @@ consumes the timeline budget. Exact-answer call/wait and `history --last`
 remain raw and have no snapshot block; JSON retains the complete observation.
 
 Tell appears once as pending (`⧗ tell`) or terminally evidenced (`told`), and
-pending tells survive the snapshot budget. JSON preserves
-`{ akuma, tell, observation }`. `tell --interrupt` selects the Library's fenced
+pending tells survive the snapshot budget. Post-primary observation failures
+render `! <id> unobserved: <diagnostic>` and JSON preserves the typed stage.
+JSON for tell/interrupt/kill preserves the corresponding primary result beside
+`observation`. `tell --interrupt` selects the Library's fenced
 composition and reports hung or untidy outcomes without external signaling.
 A stranded unresumable Akuma prints `resume unsupported`; the CLI never creates
 a fresh fallback or deletes its coordinate.

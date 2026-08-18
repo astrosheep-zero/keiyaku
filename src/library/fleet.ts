@@ -28,10 +28,24 @@ export type CreatedTaskObservation =
   | Readonly<{ kind: "present"; rows: readonly TaskRow[] }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 
+export type DispatchAssociation =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{ kind: "associated"; contractId: ContractId }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+
 export type AkumaObservation = Readonly<{
   status: AkumaStatus;
-  contractId?: ContractId;
+  contract: DispatchAssociation;
   createdTasks: CreatedTaskObservation;
+}>;
+
+export type AkumaObservationStage =
+  | (Readonly<{ kind: "observed" }> & AkumaObservation)
+  | Readonly<{ kind: "unobserved"; diagnostic: string }>;
+
+export type AkumaUnobserved = Readonly<{
+  id: AkumaStatus["id"];
+  diagnostic: string;
 }>;
 
 export type AkumaWaitInput = AkumaSetAddressInput & Readonly<{
@@ -42,19 +56,24 @@ export type AkumaWaitInput = AkumaSetAddressInput & Readonly<{
 export type AkumaWaitResult = Readonly<{
   completion: "any" | "all";
   observations: readonly AkumaObservation[];
+  unobserved: readonly AkumaUnobserved[];
 }>;
 
 export type AkumaKillResult = Readonly<{
-  results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence; observation: AkumaObservation }>[];
+  results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence; observation: AkumaObservationStage }>[];
 }>;
 
 export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string }>;
-export type AkumaTellResult = Readonly<{ akuma: AkumaStatus["id"]; tell: TellResult; observation: AkumaObservation }>;
+export type AkumaTellResult = Readonly<{
+  akuma: AkumaStatus["id"];
+  tell: TellResult;
+  observation: AkumaObservationStage;
+}>;
 export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string }>;
 export type AkumaInterruptResult = Readonly<{
   id: AkumaStatus["id"];
   receipt: InterruptReceipt;
-  observation: AkumaObservation;
+  observation: AkumaObservationStage;
 }>;
 export type AkumaHistoryInput = AkumaAddressInput & Readonly<{
   before?: number;
@@ -63,21 +82,35 @@ export type AkumaHistoryInput = AkumaAddressInput & Readonly<{
   last?: boolean;
 }>;
 export type AkumaHistoryResult =
-  | Readonly<{ kind: "history"; id: AkumaStatus["id"]; history: ActivityHistory; contractId?: ContractId }>
-  | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer: string; contractId?: ContractId }>
-  | Readonly<{ kind: "no-answer"; id: AkumaStatus["id"]; contractId?: ContractId }>;
+  | Readonly<{ kind: "history"; id: AkumaStatus["id"]; history: ActivityHistory; contract: DispatchAssociation }>
+  | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer: string; contract: DispatchAssociation }>
+  | Readonly<{ kind: "no-answer"; id: AkumaStatus["id"]; contract: DispatchAssociation }>;
 
 function source(path: WorldRoot): Akuma {
   return Akuma.of(path);
 }
 
-async function contractFor(repo: Repo | undefined, id: AkumaStatus["id"]): Promise<ContractId | undefined> {
-  const dispatch = repo === undefined ? null : await readDispatch(scopeForRepo(repo), id);
-  return dispatch?.contractId;
+function observationDiagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+const NO_DISPATCH: DispatchAssociation = { kind: "none" };
+
+async function dispatchAssociation(
+  repo: Repo | undefined,
+  id: AkumaStatus["id"],
+): Promise<DispatchAssociation> {
+  if (repo === undefined) return NO_DISPATCH;
+  try {
+    const dispatch = await readDispatch(scopeForRepo(repo), id);
+    return dispatch === null ? NO_DISPATCH : { kind: "associated", contractId: dispatch.contractId };
+  } catch (error) {
+    return { kind: "failed", diagnostic: observationDiagnostic(error) };
+  }
 }
 
 function createdTaskDiagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return observationDiagnostic(error);
 }
 
 async function createdTasksFor(
@@ -98,20 +131,30 @@ async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): 
   return (await observeAkumaSet([status], path, repo))[0]!;
 }
 
+async function observeAkumaStage(
+  path: WorldRoot,
+  id: AkumaStatus["id"],
+  repo?: Repo,
+): Promise<AkumaObservationStage> {
+  try {
+    return { kind: "observed", ...await observeAkuma(await source(path).of({ id }).status(), path, repo) };
+  } catch (error) {
+    if (error instanceof AkumaNotBornError) throw error;
+    return { kind: "unobserved", diagnostic: observationDiagnostic(error) };
+  }
+}
+
 async function observeAkumaSet(
   statuses: readonly AkumaStatus[],
   path: WorldRoot,
   repo?: Repo,
 ): Promise<readonly AkumaObservation[]> {
   const created = await createdTasksFor(path, statuses);
-  return await Promise.all(statuses.map(async (status, index) => {
-    const contractId = await contractFor(repo, status.id);
-    return {
-      status,
-      createdTasks: created[index]!,
-      ...(contractId === undefined ? {} : { contractId }),
-    };
-  }));
+  return await Promise.all(statuses.map(async (status, index) => ({
+    status,
+    contract: await dispatchAssociation(repo, status.id),
+    createdTasks: created[index]!,
+  })));
 }
 
 function timeout(value: unknown): number | undefined {
@@ -142,17 +185,26 @@ function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
 
 const SHARED_ORDINARY_BUDGET = 30;
 
-async function observeWaitStatuses(
+type WaitRound = Readonly<{
+  statuses: readonly AkumaStatus[];
+  unobserved: readonly AkumaUnobserved[];
+}>;
+
+async function observeWaitRound(
   path: WorldRoot,
   ids: readonly AkumaStatus["id"][],
   signal?: AbortSignal,
-): Promise<readonly AkumaStatus[]> {
+): Promise<WaitRound> {
   signal?.throwIfAborted();
   if (ids.length <= 1) {
-    return await Promise.all(ids.map(async (id) => await source(path).of({ id }).status()));
+    return {
+      statuses: await Promise.all(ids.map(async (id) => await source(path).of({ id }).status())),
+      unobserved: [],
+    };
   }
   let remaining = SHARED_ORDINARY_BUDGET;
   const statuses: AkumaStatus[] = [];
+  const unobserved: AkumaUnobserved[] = [];
   for (const id of ids) {
     signal?.throwIfAborted();
     try {
@@ -161,10 +213,10 @@ async function observeWaitStatuses(
       remaining -= observed.ordinarySelected;
     } catch (error) {
       if (error instanceof AkumaNotBornError) throw error;
-      // Plural wait omits one unreadable status without spending its shared budget.
+      unobserved.push({ id, diagnostic: observationDiagnostic(error) });
     }
   }
-  return statuses;
+  return { statuses, unobserved };
 }
 
 type WaitExecutionInput = Readonly<{
@@ -179,15 +231,16 @@ type WaitExecutionInput = Readonly<{
 export async function executeWaitAkuma(input: WaitExecutionInput): Promise<AkumaWaitResult> {
   const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
   for (;;) {
-    const statuses = await observeWaitStatuses(input.path, input.ids, input.signal);
-    const settled = statuses.map((status) => status.life !== "running");
-    const completed = statuses.length > 0
+    const round = await observeWaitRound(input.path, input.ids, input.signal);
+    const settled = round.statuses.map((status) => status.life !== "running");
+    const completed = round.statuses.length > 0
       && (input.completion === "any" ? settled.some(Boolean) : settled.every(Boolean));
     if (completed
       || (deadline !== undefined && performance.now() >= deadline)) {
       return {
         completion: input.completion,
-        observations: await observeAkumaSet(statuses, input.path, input.repo),
+        observations: await observeAkumaSet(round.statuses, input.path, input.repo),
+        unobserved: round.unobserved,
       };
     }
     await delay(deadline === undefined ? 25 : Math.min(25, Math.max(0, deadline - performance.now())), input.signal);
@@ -214,7 +267,7 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
   return {
     akuma: input.id,
     tell,
-    observation: await observeAkuma(await handle.status(), input.path, input.repo),
+    observation: await observeAkumaStage(input.path, input.id, input.repo),
   };
 }
 
@@ -230,10 +283,12 @@ export async function executeKillAkuma(input: KillExecutionInput): Promise<Akuma
   const handles = input.ids.map((id) => source(input.path).of({ id }));
   const evidence = await Promise.all(handles.map(async (handle) => await handle.kill()));
   input.signal?.throwIfAborted();
-  const statuses = await Promise.all(input.ids.map(async (id) => await source(input.path).of({ id }).status()));
-  const observations = await observeAkumaSet(statuses, input.path, input.repo);
   return {
-    results: input.ids.map((id, index) => ({ id, evidence: evidence[index]!, observation: observations[index]! })),
+    results: await Promise.all(input.ids.map(async (id, index) => ({
+      id,
+      evidence: evidence[index]!,
+      observation: await observeAkumaStage(input.path, id, input.repo),
+    }))),
   };
 }
 
@@ -243,10 +298,18 @@ function upstreamResult<T>(outcome: UpstreamRequestOutcome): T {
   throw new Error(outcome.failure.diagnostic);
 }
 
-async function attachContract(repo: Repo | undefined, observation: AkumaObservation): Promise<AkumaObservation> {
-  if (repo === undefined || observation.contractId !== undefined) return observation;
-  const contractId = await contractFor(repo, observation.status.id);
-  return contractId === undefined ? observation : { ...observation, contractId };
+function needsDispatchAttach(association: DispatchAssociation): boolean {
+  return association.kind === "none";
+}
+
+async function attachObservationContract(repo: Repo | undefined, observation: AkumaObservation): Promise<AkumaObservation> {
+  if (repo === undefined || !needsDispatchAttach(observation.contract)) return observation;
+  return { ...observation, contract: await dispatchAssociation(repo, observation.status.id) };
+}
+
+async function attachObservationStage(repo: Repo | undefined, observation: AkumaObservationStage): Promise<AkumaObservationStage> {
+  if (repo === undefined || observation.kind !== "observed") return observation;
+  return { ...observation, ...(await attachObservationContract(repo, observation)) };
 }
 
 async function attachWaitContracts(repo: Repo | undefined, result: AkumaWaitResult): Promise<AkumaWaitResult> {
@@ -254,12 +317,12 @@ async function attachWaitContracts(repo: Repo | undefined, result: AkumaWaitResu
     ? result
     : {
         ...result,
-        observations: await Promise.all(result.observations.map((observation) => attachContract(repo, observation))),
+        observations: await Promise.all(result.observations.map((observation) => attachObservationContract(repo, observation))),
       };
 }
 
 async function attachTellContract(repo: Repo | undefined, result: AkumaTellResult): Promise<AkumaTellResult> {
-  return repo === undefined ? result : { ...result, observation: await attachContract(repo, result.observation) };
+  return repo === undefined ? result : { ...result, observation: await attachObservationStage(repo, result.observation) };
 }
 
 async function attachKillContracts(repo: Repo | undefined, result: AkumaKillResult): Promise<AkumaKillResult> {
@@ -269,7 +332,7 @@ async function attachKillContracts(repo: Repo | undefined, result: AkumaKillResu
         ...result,
         results: await Promise.all(result.results.map(async (entry) => ({
           ...entry,
-          observation: await attachContract(repo, entry.observation),
+          observation: await attachObservationStage(repo, entry.observation),
         }))),
       };
 }
@@ -382,7 +445,7 @@ export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaI
   const addressed = await addressAkuma(directAddress(values));
   const handle = source(addressed.path).of({ id: addressed.id });
   const receipt = await handle.interrupt(values.body);
-  const observation = await observeAkuma(await handle.status(), addressed.path, values.repo as Repo | undefined);
+  const observation = await observeAkumaStage(addressed.path, addressed.id, values.repo as Repo | undefined);
   return { id: addressed.id, receipt, observation };
 }
 
@@ -396,18 +459,17 @@ export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHisto
   if (values.last !== undefined && typeof values.last !== "boolean") throw new TypeError("last must be a boolean");
   const addressed = await addressAkuma(directAddress(values));
   const handle = source(addressed.path).of({ id: addressed.id });
+  const contract = await dispatchAssociation(values.repo as Repo | undefined, addressed.id);
   if (values.last === true) {
     const answer = await handle.lastAnswer();
-    const contractId = await contractFor(values.repo as Repo | undefined, addressed.id);
     return answer.kind === "answer"
-      ? { kind: "last", id: addressed.id, answer: answer.answer, ...(contractId === undefined ? {} : { contractId }) }
-      : { kind: "no-answer", id: addressed.id, ...(contractId === undefined ? {} : { contractId }) };
+      ? { kind: "last", id: addressed.id, answer: answer.answer, contract }
+      : { kind: "no-answer", id: addressed.id, contract };
   }
   const history = await handle.history({
     ...(values.before === undefined ? {} : { before: values.before as number }),
     ...(values.since === undefined ? {} : { since: values.since as number }),
     ...(values.limit === undefined ? {} : { limit: values.limit as number }),
   });
-  const contractId = await contractFor(values.repo as Repo | undefined, addressed.id);
-  return { kind: "history", id: addressed.id, history, ...(contractId === undefined ? {} : { contractId }) };
+  return { kind: "history", id: addressed.id, history, contract };
 }

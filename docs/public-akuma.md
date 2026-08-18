@@ -197,21 +197,31 @@ type CreatedTaskObservation =
   | Readonly<{ kind: "present"; rows: readonly TaskRow[] }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 
+type DispatchAssociation =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{ kind: "associated"; contractId: ContractId }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+
 type AkumaObservation = Readonly<{
   status: AkumaStatus;
-  contractId?: ContractId;
+  contract: DispatchAssociation;
   createdTasks: CreatedTaskObservation;
 }>;
 
 type AkumaWaitResult = Readonly<{
   completion: "any" | "all";
   observations: readonly AkumaObservation[];
+  unobserved: readonly Readonly<{ id: AkuId; diagnostic: string }>[];
 }>;
+
+type AkumaObservationStage =
+  | (Readonly<{ kind: "observed" }> & AkumaObservation)
+  | Readonly<{ kind: "unobserved"; diagnostic: string }>;
 
 type AkumaTellResult = {
   akuma: AkuId;
   tell: TellResult;
-  observation: AkumaObservation;
+  observation: AkumaObservationStage;
 };
 
 type AkumaInterruptResult = {
@@ -219,22 +229,24 @@ type AkumaInterruptResult = {
   receipt:
     | { kind: "interrupted"; putDown: "was-idle" | "self-aborted"; tell: TellResult }
     | { kind: "unavailable"; evidence: "hung" | "untidy" | "unavailable" };
-  observation: AkumaObservation;
+  observation: AkumaObservationStage;
 };
 
 type AkumaKillResult = {
   results: readonly {
     id: AkuId;
     evidence: KillEvidence;
-    observation: AkumaObservation;
+    observation: AkumaObservationStage;
   }[];
 };
 ```
 
 The optional `repo` coordinate enables this read-only Dispatch composition.
-`status` is always the unmodified Akuma observation; the optional neighboring
-`contractId` comes only from Dispatch. `createdTasks` are the current Task
-rows whose parsed `createdBy` equals `status.id` by exact string bytes. Do not
+`status` is always the unmodified Akuma observation; `contract` is a required
+Dispatch association union. `{ kind: "none" }` means no Repo was supplied or a
+supplied Repo had no Dispatch; `{ kind: "failed" }` preserves the Akuma status
+when the Dispatch read itself fails. `createdTasks` are the current Task rows
+whose parsed `createdBy` equals `status.id` by exact string bytes. Do not
 parse `createdBy` as AkuId, authenticate it, normalize it, or infer it from
 namespace, Dispatch, cwd, Git author, TaskHolder, or later Task mutations.
 Missing `createdBy` does not match. Manual testimony remains authoritative
@@ -251,28 +263,33 @@ Multi-member kill likewise reads the Task board once for all post-action
 observations. There is no `AkumaStatusView` export, type alias, or wait
 `statuses` compatibility field. Fleet never intersects the association into
 `AkumaStatus`. Akuma core still knows no Contract, Dispatch, Task, or Repo,
-and renderers perform no lookup. `CallObservation` and `AkumaHistoryResult`
-remain on their current raw status/history shapes.
+and renderers perform no lookup. `CallObservation` remains on its current raw
+status shape; history keeps its history-specific value beside its association.
 
 Wait and kill freeze their subject set at entry. A one-member wait defaults to
 `all` and retains the ordinary hard status failure. A multi-member wait requires
 `completion: "any" | "all"`. In each plural polling round, Fleet reads every
-frozen id in byte order. A status-read failure omits only that id from that
-round; it creates no result arm, diagnostic, retry record, or compatibility
-decode, and the next round attempts that id again. `any` and `all` apply only
-to the readable statuses and require at least one readable status. Thus a
-readable settled peer may complete either mode; an all-unreadable round does not
-fabricate completion. An explicit timeout then returns observations from that
-round, including `[]`, while an unbounded wait continues. Returned observations
-are exactly the readable statuses from the completing or timed-out round in
-frozen byte order. A plural aggregate carries one shared 30-row
+frozen id in byte order. A status-read failure is discarded in an intermediate
+round; it creates no history or retry record, and the next round attempts that
+id again. `any` and `all` apply only to the readable statuses and require at
+least one readable status. Thus a readable settled peer may complete either
+mode; an all-unreadable round does not fabricate completion. On the completing
+or timed-out round, Fleet freezes every selected id exactly once: readable
+members appear in `observations`, while unreadable members appear in
+`unobserved` as verbatim diagnostics. An all-unreadable timeout therefore
+returns `observations: []` plus all diagnostics. A plural aggregate carries one
+shared 30-row
 ordinary-detail budget, equal to five complete default `3 + 3` snapshots. Each
 successful read uses the same `tail=3`, `voice=3` selector as ordinary status;
 an omitted read spends none of that budget. After that budget is spent, later
 members retain life, outcome, every running tool and pending tell while ordinary
 detail collapses into typed gaps. When only part of one member fits, its newest
-ordinary detail consumes the remainder. Kill returns one evidence and compact
-post-action observation per selected AkuId in stable order.
+ordinary detail consumes the remainder. Kill returns one evidence and a
+post-action `AkumaObservationStage` per selected AkuId in stable order. `tell`,
+`interrupt`, and `kill` preserve their primary receipt/evidence even when the
+later status observation is `{ kind: "unobserved", diagnostic }`; successful
+stages flatten the observation (`result.observation.status`), rather than
+nested observation data.
 `Keiyaku.tell` composes the handle's
 typed mutation result with one subsequent whole-Akuma status observation. The
 two fields have separate authority: `tell` alone states what this invocation
@@ -280,7 +297,7 @@ caused; `observation` gives the flagship current life, activity, outcomes, and
 the two-state tell projection. Facade code never derives delivery or receipt
 facts from that observation. Direct verbs accept only AkuId or Alias.
 Their result carries the resolved AkuId, so an adapter never resolves a movable
-Alias twice. History carries the same optional association beside its
+Alias twice. History carries the same required Dispatch association beside its
 history-specific value rather than inside it. `history({ last: true })` is the distinct last-answer arm: it reads
 only the last answered turn by durable sequence and never reads status or
 activity history. Its typed result is either `{ kind: "last", answer }`
