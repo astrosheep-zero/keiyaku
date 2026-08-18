@@ -1,15 +1,13 @@
 import { mintDocumentKey, mintDocumentSegmentKey } from "./keys.js";
 import type { ContractBody, ContractCriterion, DecodedContractDocument } from "./types.js";
-import { parseToAST } from "../markdown/parse.js";
+import { decodeDocumentEnvelope } from "./envelope.js";
 import {
   directChildren,
-  indexDocument,
-  indexedHeadings,
   normalizeTitle,
   rawSlice,
   sectionContent,
 } from "../markdown/query.js";
-import type { DocumentNode, MarkdownBlockNode, SectionNode } from "../markdown/types.js";
+import type { DocumentNode, SectionNode } from "../markdown/types.js";
 import { CONTRACT_SECTIONS, RESERVED_SECTIONS, type ContractSectionName } from "./shape.js";
 import { decodeRegion, RegionDocumentError } from "./region.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
@@ -21,25 +19,6 @@ type RequiredSectionName = {
 
 function refusal(message: string): never {
   throw new TypeError(message);
-}
-
-function nonblankRaw(document: DocumentNode, node: MarkdownBlockNode): boolean {
-  return rawSlice(document, node.span).trim().length > 0;
-}
-
-function topLevelSections(document: DocumentNode): readonly SectionNode[] {
-  return indexedHeadings(indexDocument(document), { level: 2 })
-    .filter((node): node is SectionNode => node.type === "section");
-}
-
-function indexedSections(document: DocumentNode): ReadonlyMap<string, SectionNode> {
-  const sections = new Map<string, SectionNode>();
-  for (const section of topLevelSections(document)) {
-    const title = normalizeTitle(section.title);
-    if (sections.has(title)) refusal(`duplicate contract section '${section.title}'`);
-    sections.set(title, section);
-  }
-  return sections;
 }
 
 function requireSections(sections: ReadonlyMap<string, SectionNode>): void {
@@ -87,14 +66,6 @@ function criteria(document: DocumentNode, section: SectionNode): readonly Contra
   });
 }
 
-function rejectUnownedBytes(document: DocumentNode, title: SectionNode): void {
-  if (title.children.some((node) => nonblankRaw(document, node))) {
-    refusal("contract title may not contain content before the first H2 section");
-  }
-  const stray = document.children.filter((node) => node.type !== "section" && nonblankRaw(document, node));
-  if (stray.length > 0) refusal("contract document contains content outside an H1 or H2 section");
-}
-
 function verification(document: DocumentNode, section: SectionNode) {
   try {
     return decodeVerificationDeclarations(document, section);
@@ -105,19 +76,13 @@ function verification(document: DocumentNode, section: SectionNode) {
 }
 
 export function decodeContractDocument(source: string): DecodedContractDocument {
-  let document: DocumentNode;
+  let envelope: ReturnType<typeof decodeDocumentEnvelope>;
   try {
-    document = parseToAST(source);
+    envelope = decodeDocumentEnvelope(source, "contract");
   } catch (error) {
     refusal(error instanceof Error ? error.message : String(error));
   }
-  if (document.frontmatter !== undefined) refusal("contract document may not contain frontmatter");
-  const titles = indexedHeadings(indexDocument(document), { level: 1 })
-    .filter((node): node is SectionNode => node.type === "section");
-  if (titles.length !== 1) refusal("contract document requires exactly one H1 title");
-  const title = titles[0]!;
-  rejectUnownedBytes(document, title);
-  const sections = indexedSections(document);
+  const { document, title, sections, sectionNodes } = envelope;
   requireSections(sections);
   for (const name of RESERVED_SECTIONS) {
     if (sections.has(name)) refusal(`${name} is not a contract Markdown section`);
@@ -140,7 +105,6 @@ export function decodeContractDocument(source: string): DecodedContractDocument 
     verification: verificationSection === undefined ? [] : verification(document, verificationSection),
     extensions,
   };
-  const sectionNodes = topLevelSections(document);
   const segments = sectionNodes.map((section) => mintDocumentSegmentKey(document.source, section.span));
   return {
     ...body,

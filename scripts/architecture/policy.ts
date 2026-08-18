@@ -808,6 +808,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "body/**",
       allow: [
+        any("body/envelope.ts"),
         any("body/keys.ts"),
         any("body/region.ts"),
         any("body/shape.ts"),
