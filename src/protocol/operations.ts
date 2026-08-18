@@ -365,7 +365,7 @@ type AttemptDecision<Value, Refusal = IntentRefusal> =
   | Extract<DecidedOfferResult, { kind: "publication-failed" }>;
 
 type DeliverOperationInput = MutationOperationInput & Readonly<{
-  deriveDocument?: (state: ContractState) => DocumentDerivation;
+  deriveDocument: (state: ContractState) => DocumentDerivation;
   message?: string;
   requireBranchesToBeUpToDate: boolean;
   includeDirty: boolean;
@@ -391,7 +391,6 @@ export async function prepareDelivery(
   }>,
 ): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal }> {
   const { contractId, coordinates } = stage;
-  const at = timestamp();
   if (coordinates.workspace === "here" && coordinates.target !== undefined) {
     const branch = await currentBranch(repository);
     if (branch !== coordinates.target) {
@@ -416,7 +415,7 @@ export async function prepareDelivery(
     contractId,
     title: input.title,
     document: input.document,
-    at,
+    at: tender.data.at,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(input.message === undefined ? {} : { message: input.message }),
   });

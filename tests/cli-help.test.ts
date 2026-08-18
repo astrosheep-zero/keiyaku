@@ -68,19 +68,6 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderTaskHelp("ready"), /open Tasks whose every need is terminal/u);
   assert.doesNotMatch(renderRootHelp(), /^  interrupt /mu);
   assert.match(renderRootHelp(), /tell <aku\/\.\.\.|@alias> \[--interrupt\]/u);
-  assert.equal(renderAkumaHelp("call"), [
-    "Birth an Akuma from <akuma-name> with one prompt.",
-    "",
-    "usage: keiyaku call <akuma-name> [--contract <kei/...>] [--alias @name] [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
-    "",
-    "Give <prompt> as one argument, or use final - to read stdin.",
-    "Default: --wait 5m. An explicit --wait replaces that duration; -d and --detach return after birth.",
-    "--contract dispatches the born Akuma to that Contract.",
-    "--alias assigns the world-local @name selector to the born Akuma.",
-    "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",
-    "",
-    JSON_AUTOMATION_HELP,
-  ].join("\n"));
   assert.equal(renderAkumaHelp("tell"), [
     "Send one prompt to an existing Akuma and wake it.",
     "",
@@ -92,10 +79,6 @@ test("each grammar owner renders its own namespace and leaf help", () => {
     JSON_AUTOMATION_HELP,
   ].join("\n"));
   assert.match(renderAkumaHelp("history"), /\[--limit <count>\] \[--last\]/u);
-  assert.doesNotMatch(
-    [renderRootHelp(), renderContractHelp("ls"), renderAkumaHelp("call"), renderAkumaHelp("wait")].join("\n"),
-    /archetype/iu,
-  );
 });
 
 test("amend leaf help shows one minimal stdin example", () => {

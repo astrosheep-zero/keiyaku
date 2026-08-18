@@ -17,6 +17,7 @@ export type WorkspaceChanges = Readonly<{
 export type WorkspaceTree = Readonly<{
   tree: GitObjectId;
   head: SnapshotId;
+  at: string;
   dirty: boolean;
   changes: WorkspaceChanges;
 }>;
@@ -156,17 +157,25 @@ export async function observeTargetLag(
 
 /** Capture tracked and untracked workspace bytes without changing its real index. */
 export async function captureWorkspaceTree(repository: GitRepository, workspace: string): Promise<WorkspaceTree> {
-  const identities = (await runGit(repository, ["-C", workspace, "show", "-s", "--format=%H%n%T", "HEAD"]))
+  const identities = (await runGit(repository, ["-C", workspace, "show", "-s", "--format=%H%n%T%n%cI", "HEAD"]))
     .toString("utf8")
     .split("\n");
-  if (identities.length !== 3 || identities[0] === undefined || identities[1] === undefined || identities[2] !== "") {
-    throw new Error("workspace HEAD/tree resolution did not return exactly two object IDs");
+  if (
+    identities.length !== 4
+    || identities[0] === undefined
+    || identities[1] === undefined
+    || identities[2] === undefined
+    || identities[3] !== ""
+  ) {
+    throw new Error("workspace HEAD/tree/time resolution returned an unexpected shape");
   }
   const head = mintSnapshotId(identities[0]);
   const tree = gitObjectId(identities[1], "workspace tree");
+  const at = identities[2];
+  if (Number.isNaN(Date.parse(at))) throw new Error("workspace HEAD has an invalid committer timestamp");
   const changes = await workspaceChanges(repository, workspace);
   const dirty = changes.staged.length > 0 || changes.unstaged.length > 0 || changes.untracked.length > 0;
-  if (!dirty) return { tree, head, dirty, changes };
+  if (!dirty) return { tree, head, at, dirty, changes };
 
   return await withPrivateGitIndex(async (environment) => {
     await runGitWithEnvironment(repository, ["-C", workspace, "read-tree", "HEAD"], undefined, environment);
@@ -177,6 +186,7 @@ export async function captureWorkspaceTree(repository: GitRepository, workspace:
         "workspace tree",
       ),
       head,
+      at,
       dirty,
       changes,
     };

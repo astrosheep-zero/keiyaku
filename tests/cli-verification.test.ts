@@ -107,12 +107,13 @@ test("dirty --here delivery materializes and lands the verified candidate cleanl
   mkdirSync(resolve(setup.raw.path, ".keiyaku"), { recursive: true });
   writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: ["verified"] } }));
 
+  const contractDocument = document('test "$(cat candidate.txt)" = "passing"');
   const bound = await invoke(parseArgv([
     "bind", "--target", "refs/heads/main", "--here", "--actor", "external-test", "-",
   ]), {
     cwd: setup.raw.path,
     environment: {},
-    readStdin: () => document('test "$(cat candidate.txt)" = "passing"'),
+    readStdin: () => contractDocument,
   });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") return;
@@ -138,7 +139,7 @@ test("dirty --here delivery materializes and lands the verified candidate cleanl
   assert.equal(setup.raw.run(["show", `${state?.delivery?.data.integration.snapshot}:candidate.txt`]), "passing\n");
   assert.equal(
     setup.raw.run(["show", "-s", "--format=%B", state?.delivery?.data.integration.snapshot ?? "HEAD"]),
-    `Verified dirty candidate\n\nKeiyaku-Contract: ${bound.contract}\n\n`,
+    `Verified dirty candidate\n\n${contractDocument.trimEnd()}\n\nKeiyaku-Contract: ${bound.contract}\n\n`,
   );
   assert.equal(setup.raw.run(["diff", "--cached", "--binary"]), indexBefore);
   assert.deepEqual(

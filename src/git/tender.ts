@@ -43,6 +43,7 @@ export type DirtyWorkspaceRefusal = Readonly<{
 export type TenderCapture = Readonly<{
   tree: GitObjectId;
   head: SnapshotId;
+  at: string;
   dirty: boolean;
   changes: Awaited<ReturnType<typeof captureWorkspaceTree>>["changes"];
 }>;

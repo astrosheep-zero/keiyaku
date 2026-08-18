@@ -170,8 +170,10 @@ Its commit message is the default `<contract-id>: <title>` subject or the
 caller-supplied subject, one blank line, the complete current Contract Markdown
 with one trailing newline, then one blank line and the final
 `Keiyaku-Contract: <contract-id>` trailer. A supplied message replaces only the
-subject. Tender and integration materialized by one preparation share one real
-non-epoch timestamp and one author/committer pair. Actor testimony wins and
+subject. Tender and integration materialized by one preparation share the
+captured workspace `HEAD` committer timestamp and one author/committer pair.
+Reusing that timestamp keeps an unchanged prospective audit identity stable for
+a later delivery. Actor testimony wins and
 uses `keiyaku@localhost`; otherwise a complete repository-effective
 `user.name`/`user.email` pair wins, with `Keiyaku <keiyaku@localhost>` as the
 fallback when either value is absent. Private state commits retain their own
@@ -280,17 +282,15 @@ corruption, not a recoverable state.
 
 ## Document Boundary
 
-Git and protocol have no document callback, decoded-document import, or
-document interpretation. They receive no raw document projection for a write
-attempt. Bind protocol receives the title scalar only to mint the normalized
-ContractId defined in [model.md](model.md); Git receives only the resulting
-identity. The only document-derived Git input to delivery preparation is
-the title scalar stamped by its `DocumentKey`, as defined in
-[document.md](document.md); Git does not persist or cache either
-derivation. Review preparation receives no document-derived value. Protocol
-combines its mechanical patch identity with the document key from the attempt
-observation to form the testimony subject. Git does not judge whether that
-subject is current.
+The library owns document decoding. Protocol derives the current document once
+from its observed attempt, verifies the stamped `DocumentKey`, and passes the
+title and complete Markdown bytes to Git for delivery preparation. Git treats
+both as opaque commit-message inputs and neither decodes nor caches them. Bind
+protocol receives the title scalar only to mint the normalized ContractId
+defined in [model.md](model.md). Review preparation receives no
+document-derived value. Protocol combines its mechanical patch identity with
+the document key from the attempt observation to form the testimony subject.
+Git does not judge whether that subject is current.
 
 ## Identities And Bytes
 

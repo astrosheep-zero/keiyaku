@@ -171,6 +171,7 @@ test("audit without Verification still returns an accepted ready candidate", asy
     contractId,
     deriveDocument: () => ({
       document: decoded.document.key,
+      bytes: decoded.document.bytes,
       title: decoded.title,
       verification: prepareVerificationDeclaration({
         gates: observed.state!.terms.gates,

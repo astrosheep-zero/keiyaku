@@ -345,7 +345,7 @@ test("one preparation freezes Contract content, actor identity, and dates across
   const { repository, state, worktree } = await targetedContract();
   writeFileSync(join(worktree, "candidate.txt"), "dirty candidate\n");
   const document = `${contractBody()}\n\n`;
-  const started = Date.now();
+  const expectedAt = repository.run(["-C", worktree, "show", "-s", "--format=%cI", "HEAD"]).trim();
   const prepared = await prepareDelivery(await repositoryAt(repository.path), preparationCoordinates(state), {
     title: "Ignored default subject",
     document,
@@ -353,7 +353,6 @@ test("one preparation freezes Contract content, actor identity, and dates across
     message: "Chosen subject",
     includeDirty: true,
   });
-  const finished = Date.now();
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind !== "prepared") return;
 
@@ -372,10 +371,7 @@ test("one preparation freezes Contract content, actor identity, and dates across
       "keiyaku@localhost",
     ]);
     assert.equal(authoredAt, committedAt);
-    const time = Date.parse(authoredAt ?? "");
-    assert.equal(Number.isNaN(time), false);
-    assert.equal(time >= Math.floor(started / 1_000) * 1_000, true);
-    assert.equal(time <= Math.ceil(finished / 1_000) * 1_000, true);
+    assert.equal(authoredAt, expectedAt);
   }
   assert.deepEqual(commitSignature(repository, commits[0]), commitSignature(repository, commits[1]));
 });
@@ -958,7 +954,7 @@ test("clean delivery resolves its workspace head and tree in one Git call", asyn
   );
 
   assert.equal(prepared.kind, "prepared");
-  assert.equal(readFileSync(calls, "utf8"), "show|-s|--format=%H%n%T|HEAD\n");
+  assert.equal(readFileSync(calls, "utf8"), "show|-s|--format=%H%n%T%n%cI|HEAD\n");
 });
 
 test("delivery diff preserves an empty patch and treats a clean missing object as Git absence", async () => {
