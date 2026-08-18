@@ -4,13 +4,15 @@ title: Split protocol operations by change reason
 state: open
 priority: 1
 needs:
+  - task/replace-source-topology-architecture-allowlists
+  - task/require-delivery-document-derivation-at-the-prot
   - task/unify-protocol-attempt-retry-orchestration
 parent: task/审计项目架构边界-重复与-owner-错位
 supersedes: []
 relates: []
 note: ""
 createdAt: 2026-08-18T03:33:12.842Z
-updatedAt: 2026-08-18T03:33:21.432Z
+updatedAt: 2026-08-18T03:56:24.400Z
 ---
 在 retry orchestration 收敛后，将 protocol/operations.ts 按真实变化原因拆为 coherent owner modules：amend、delivery/review、audit、reconcile/read。保持现有 public surface 和 durable semantics；不要保留仅用于转发全部 exports 的第二 public surface，除非当前消费者确实需要。
 
