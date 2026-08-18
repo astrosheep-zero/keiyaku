@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Tasks, type TaskId, type TaskTreeNode } from "../src/task/index.js";
+import { TaskAuthorityCorruptionError, Tasks, type TaskId, type TaskTreeNode } from "../src/task/index.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskDocument, serializeTaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
@@ -507,4 +507,27 @@ test("public inputs reject unknown fields before observing authority", async () 
   assert.throws(() => tasks.task({ id }).start({ extra: true } as never), /unknown field/u);
   await assert.rejects(tasks.list({ scope: "nearby" } as never), /scope must be namespace or world/u);
   assert.throws(() => Tasks.of({ root: tasks.root } as never), /WorldRoot/u);
+});
+
+test("board ignores non-Markdown regular files including writer temporary files", async () => {
+  const { root, tasks } = await world();
+  const id = acceptedId(await tasks.add({ title: "Markdown authority" }));
+  const directory = join(root, ".keiyaku", "tasks");
+  writeFileSync(join(directory, "notes.txt"), "not Task authority\n");
+  writeFileSync(join(directory, ".tmp-0123456789abcdef"), "writer temporary\n");
+
+  const listed = await tasks.list({ scope: "world", selection: "all" });
+  assert.equal(listed.kind, "accepted");
+  if (listed.kind === "accepted") assert.deepEqual(listed.value.rows.map((row) => row.id), [id]);
+});
+
+test("board reports malformed Markdown Task authority as corruption", async () => {
+  const { root, tasks } = await world();
+  acceptedId(await tasks.add({ title: "Corrupted authority" }));
+  writeFileSync(join(root, ".keiyaku", "tasks", "corrupted-authority.md"), "not a Task document\n");
+
+  await assert.rejects(
+    tasks.list({ scope: "world", selection: "all" }),
+    TaskAuthorityCorruptionError,
+  );
 });

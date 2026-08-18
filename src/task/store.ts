@@ -37,7 +37,6 @@ async function authorityFiles(directory: string): Promise<readonly string[]> {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) files.push(...await authorityFiles(path));
     else if (entry.isFile() && entry.name.endsWith(".md")) files.push(path);
-    else throw new Error(`unexpected Task authority entry: ${path}`);
   }
   return files.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
 }

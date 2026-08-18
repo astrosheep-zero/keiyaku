@@ -53,6 +53,12 @@ The sole Task authority is canonical Markdown at:
 .keiyaku/tasks/<namespace...>/<local-id>.md
 ```
 
+Recursive board enumeration descends real directories under `.keiyaku/tasks/**`
+and selects only regular files whose names end in `.md`. Every other filesystem
+entry is ignored; it is not Task authority. Selected `.md` authority retains
+its path witness, regular-file observation, document parsing, and corruption
+behavior.
+
 Task authority is ordinary repository-visible content. A repository-level
 ignore policy must leave `.keiyaku/tasks/**` visible to Git so Task state can
 be reviewed and shared; runtime siblings such as locks, Akuma runs, responses,
