@@ -171,6 +171,33 @@ test("audit stays accepted when it admits a verified attestation", async () => {
   assert.equal((await observeContract(pending.repository, pending.id)).state?.attestations.at(-1)?.actor, "audit-user");
 });
 
+test("audit renders the complete producer-bounded Verification summary as a subordinate payload", async () => {
+  const pending = await bindAndDeliver([
+    "printf 'stdout one\\nstdout two\\nstdout three\\nstdout four\\n'",
+    "printf 'final stderr diagnostic\\n' >&2",
+    "exit 1",
+  ].join("; "));
+  const audit = await invoke(parseArgv(["audit", pending.id, "--actor", "audit-user"]), {
+    cwd: pending.raw.path,
+    environment: {},
+  });
+
+  assert.equal(audit.kind, "accepted");
+  if (audit.kind !== "accepted") return;
+  assert.equal(audit.report.verification.kind, "unsatisfied");
+  if (audit.report.verification.kind !== "unsatisfied") return;
+  const summary = audit.report.verification.summary;
+  assert.notEqual(summary, undefined);
+  if (summary === undefined) return;
+
+  const text = renderText(audit, { columns: 20, color: false });
+  const payload = `summary\n\n${summary}\n\n`;
+  assert.equal(text.includes(payload), true);
+  assert.equal(text.includes("final stderr diagnostic"), true);
+  assert.ok(text.indexOf("✓ candidate") < text.indexOf("! verification"));
+  assert.ok(text.indexOf(payload) < text.indexOf("✓ target"));
+});
+
 test("audit refuses a claimed contract before observing its released workspace", async () => {
   const complete = await bindAndDeliver(undefined, []);
   assert.deepEqual(

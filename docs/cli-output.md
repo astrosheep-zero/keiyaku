@@ -339,7 +339,11 @@ Recorded delivery evidence is `delivery change=<id>` with its relation.
 Verification `summary` is a subordinate bounded payload, not inline. Each
 answer uses the existing glyph vocabulary. `--json` retains the complete typed
 mutation result. Deliver text makes `verificationReuse` visible when present.
-Audit text does not inspect journal entries or raw process output.
+For terminal Verification, audit renders the complete already-producer-bounded
+`summary` with the receipt payload grammar: its original bytes and line
+structure remain intact, with no parsing, whitespace collapse, or second
+truncation. It omits that payload only when the public summary is absent. Audit
+text does not inspect journal entries or raw process output.
 
 The flat `lag` array remains the public `ReconcileResult` shape defined in
 [git-reconciliation.md](git-reconciliation.md). JSON exposes that same array.

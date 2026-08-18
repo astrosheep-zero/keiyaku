@@ -11,7 +11,6 @@ import {
 import { renderRefusalFacts } from "./refusal.js";
 import {
   gitShortStat,
-  renderBoundedTextBlock,
   renderOpaqueBlock,
   type TextRenderContext,
 } from "./terminal.js";
@@ -78,11 +77,7 @@ function verificationLines(
     { text: `${verification.passed} of ${verification.total}` },
   ], columns);
   if (verification.summary !== undefined) {
-    lines.push(...renderBoundedTextBlock(verification.summary, {
-      first: `${CHILD}summary `,
-      continuation: CHILD,
-      columns,
-    }));
+    receiptPayload(lines, "summary", verification.summary);
   }
   return lines;
 }
