@@ -46,10 +46,10 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.equal(renderContractHelp("ls"), [
     "List one identity directory.",
     "",
-    "usage: keiyaku ls task/ [--json]",
-    "       keiyaku ls kei/ [--json]",
-    "       keiyaku ls aku/ [--json]",
-    "       keiyaku ls aku/<akuma>/ [--json]",
+    "usage: keiyaku ls task[/] [--json]",
+    "       keiyaku ls kei[/] [--json]",
+    "       keiyaku ls aku[/] [--json]",
+    "       keiyaku ls aku/<akuma>[/] [--json]",
     "       keiyaku ls \"aku/*/*\" [--json]",
     "",
     JSON_AUTOMATION_HELP,
@@ -196,6 +196,6 @@ test("bare ls is help-only even when its cwd cannot be read", async () => {
     process.stdout.write = writeStdout;
     process.stderr.write = writeStderr;
   }
-  assert.match(stdout, /^List one identity directory\.\n\nusage: keiyaku ls task\//u);
+  assert.match(stdout, /^List one identity directory\.\n\nusage: keiyaku ls task\[\/\]/u);
   assert.equal(stderr, "");
 });

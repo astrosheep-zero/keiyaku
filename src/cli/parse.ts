@@ -366,11 +366,11 @@ function parseRegion(parts: ParsedParts): ParsedRegion {
 
 function parseLs(parts: ParsedParts): ParsedLs {
   const path = parts.positionals[0]!;
-  if (path === "task/") return { command: "ls", query: { kind: "tasks" }, output: parts.output };
-  if (path === "kei/") return { command: "ls", query: { kind: "contracts" }, output: parts.output };
+  if (path === "task" || path === "task/") return { command: "ls", query: { kind: "tasks" }, output: parts.output };
+  if (path === "kei" || path === "kei/") return { command: "ls", query: { kind: "contracts" }, output: parts.output };
   try {
     const query = parseAkumaCatalogPath(path);
-    if (query === null) refuse("ls", "ls requires an identity directory with a trailing slash");
+    if (query === null) refuse("ls", "ls requires a supported identity directory selector");
     return { command: "ls", query, output: parts.output };
   } catch (error) {
     if (error instanceof CliUsageError) throw error;

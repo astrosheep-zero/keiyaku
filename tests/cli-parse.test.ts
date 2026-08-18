@@ -125,22 +125,30 @@ test("show parses one optional Contract selector and JSON output", () => {
 });
 
 test("ls parses only canonical identity directories", () => {
-  assert.deepEqual(parseArgv(["ls", "task/"]), {
-    command: { command: "ls", query: { kind: "tasks" }, output: "text" },
-  });
-  assert.deepEqual(parseArgv(["ls", "kei/", "--json"]), {
-    command: { command: "ls", query: { kind: "contracts" }, output: "json" },
-  });
-  assert.deepEqual(parseArgv(["ls", "aku/"]), {
-    command: { command: "ls", query: { kind: "archetypes" }, output: "text" },
-  });
-  assert.deepEqual(parseArgv(["ls", "aku/worker/"]), {
-    command: { command: "ls", query: { kind: "akuma", archetype: "worker" }, output: "text" },
-  });
+  for (const path of ["task", "task/"]) {
+    assert.deepEqual(parseArgv(["ls", path]), {
+      command: { command: "ls", query: { kind: "tasks" }, output: "text" },
+    });
+  }
+  for (const path of ["kei", "kei/"]) {
+    assert.deepEqual(parseArgv(["ls", path, "--json"]), {
+      command: { command: "ls", query: { kind: "contracts" }, output: "json" },
+    });
+  }
+  for (const path of ["aku", "aku/"]) {
+    assert.deepEqual(parseArgv(["ls", path]), {
+      command: { command: "ls", query: { kind: "archetypes" }, output: "text" },
+    });
+  }
+  for (const path of ["aku/worker", "aku/worker/"]) {
+    assert.deepEqual(parseArgv(["ls", path]), {
+      command: { command: "ls", query: { kind: "akuma", archetype: "worker" }, output: "text" },
+    });
+  }
   assert.deepEqual(parseArgv(["ls", "aku/*/*"]), {
     command: { command: "ls", query: { kind: "akuma" }, output: "text" },
   });
-  for (const path of ["task", "kei", "aku", "keiy/", "@review", "kei/review", "aku/worker/1234abcd", "aku/*/"]) {
+  for (const path of ["keiy/", "@review", "kei/review", "task/namespace", "aku//", "aku/worker/1234abcd", "aku/*/", "aku/worker/extra/"]) {
     assert.throws(() => parseArgv(["ls", path]), CliUsageError);
   }
 });

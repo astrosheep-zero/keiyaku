@@ -130,9 +130,9 @@ export function renderAkumaUsage(action: AkumaAction): string {
 }
 
 export function parseAkumaCatalogPath(value: string): Readonly<{ kind: "archetypes" } | { kind: "akuma"; archetype?: string }> | null {
-  if (value === "aku/") return { kind: "archetypes" };
+  if (value === "aku" || value === "aku/") return { kind: "archetypes" };
   if (value === "aku/*/*") return { kind: "akuma" };
-  const match = /^aku\/(.+)\/$/u.exec(value);
+  const match = /^aku\/([^/]+)\/?$/u.exec(value);
   if (match === null) return null;
   return { kind: "akuma", archetype: archetypeName(match[1]!) };
 }

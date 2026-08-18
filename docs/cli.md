@@ -90,10 +90,10 @@ abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
 status [<contract>|@name|<aku/...>] [--json]
 show [<contract>|@<contract>] [--json]
-ls task/ [--json]
-ls kei/ [--json]
-ls aku/ [--json]
-ls aku/<akuma>/ [--json]
+ls task[/] [--json]
+ls kei[/] [--json]
+ls aku[/] [--json]
+ls aku/<akuma>[/] [--json]
 ls "aku/*/*" [--json]
 audit [<contract>|@<contract>] [--include-dirty] [--diff] [--actor <actor>] [--json]
 reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
@@ -262,9 +262,10 @@ and kill use the same package-root operations but are served one hop by that
 provider's direct parent; CLI parsing and rendering do not change.
 Bare `ls` renders the command's own help and exits successfully. It does not
 locate or create a World, construct a Repo or Settings value, or read Git,
-Task, Akuma configuration, or Akuma state. The accepted path grammar is closed and uses
-the canonical directory spellings above; missing trailing slashes, exact
-identities, Alias selectors, and other paths are usage errors.
+Task, Akuma configuration, or Akuma state. The accepted path grammar is closed
+and uses the canonical directory spellings above; the final slash is optional
+for those directory selectors. Exact identities, Alias selectors, and other
+paths are usage errors.
 
 Each `ls` path reads only its selected Task, Contract, Akuma configuration, or
 Akuma identity catalog. JSON is that catalog, not an aggregate envelope.
