@@ -883,6 +883,31 @@ async function auditTargetAnswer(
   });
 }
 
+function blockedAudit(refusal: DeliveryPreparationRefusal): AuditReport {
+  return {
+    candidate: { kind: "blocked", refusal },
+    verification: { kind: "not-run" },
+    target: { kind: "not-observed" },
+  };
+}
+
+function completedAudit(
+  state: ContractState,
+  verified: ReturnType<typeof unpackVerificationOutcome> | undefined,
+  value: AuditReport,
+): IntentOutcome<AuditReport> {
+  const obligations = {
+    ...(verified?.cleanup === undefined ? {} : { cleanup: verified.cleanup }),
+    ...(verified?.leak === undefined ? {} : { leak: verified.leak }),
+  };
+  return verified?.admission === undefined
+    ? accepted(state, [], value, undefined, obligations)
+    : {
+      ...admitted(verified.admission, value),
+      ...obligations,
+    };
+}
+
 export async function auditOperation(input: AuditOperationInput): Promise<IntentOutcome<AuditReport>> {
   const observed = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = activeContract(observed.decision, input.contractId);
@@ -897,11 +922,7 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
 
   const workspace = await auditWorkspace(input.scope, state);
   if (workspace.kind === "unappointed") {
-    return accepted(state, [], {
-      candidate: { kind: "blocked", refusal: { kind: "worktree-missing", contractId: state.id } },
-      verification: { kind: "not-run" },
-      target: { kind: "not-observed" },
-    });
+    return accepted(state, [], blockedAudit({ kind: "worktree-missing", contractId: state.id }));
   }
   const prepared = await prepareDelivery(input.scope, {
     contractId: state.id,
@@ -915,11 +936,7 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
     includeDirty: input.includeDirty ?? false,
   });
   if (prepared.kind === "refused") {
-    return accepted(state, [], {
-      candidate: { kind: "blocked", refusal: prepared.refusal },
-      verification: { kind: "not-run" },
-      target: { kind: "not-observed" },
-    });
+    return accepted(state, [], blockedAudit(prepared.refusal));
   }
 
   const verified = derivation.verification.data === null
@@ -940,16 +957,7 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
       : await auditTargetAnswer(input.scope, state, prepared.data),
     ...(delivery === undefined ? {} : { delivery }),
   };
-  const obligations = {
-    ...(verified?.cleanup === undefined ? {} : { cleanup: verified.cleanup }),
-    ...(verified?.leak === undefined ? {} : { leak: verified.leak }),
-  };
-  return verified?.admission === undefined
-    ? accepted(state, [], value, undefined, obligations)
-    : {
-      ...admitted(verified.admission, value),
-      ...obligations,
-    };
+  return completedAudit(state, verified, value);
 }
 
 export type ReconcileReport = ReconcileResult;

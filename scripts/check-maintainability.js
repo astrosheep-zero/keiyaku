@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
-import { FILE_LINE_EXEMPTIONS, FILE_LINES, MARKDOWN_CHARACTERS } from "./maintainability/config.js";
+import { FILE_LINE_EXEMPTIONS, MARKDOWN_CHARACTERS } from "./maintainability/config.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKDOWN_EXCLUDED_DIRECTORIES = new Set([
@@ -35,25 +35,6 @@ export function validateExemptions(exemptions, rootDirectory = root) {
   return exemptions
     .map((exemption, index) => exemptionError(exemption, index, seen, rootDirectory))
     .filter((error) => error !== null);
-}
-
-function effectiveLineCount(message) {
-  if (message.ruleId !== "max-lines" || message.messageId !== "exceed") return null;
-  const match = /^File has too many lines \((\d+)\)\./u.exec(message.message);
-  return match === null ? null : Number.parseInt(match[1], 10);
-}
-
-export function promoteHardLineLimit(results) {
-  return results.map((result) => {
-    const messages = result.messages.map((message) =>
-      (effectiveLineCount(message) ?? 0) > FILE_LINES.error ? { ...message, severity: 2 } : message);
-    return {
-      ...result,
-      messages,
-      errorCount: messages.filter((message) => message.severity === 2).length,
-      warningCount: messages.filter((message) => message.severity === 1).length,
-    };
-  });
 }
 
 export function markdownCharacterCount(source) {
@@ -104,7 +85,7 @@ async function run() {
   }
 
   const eslint = new ESLint({ cwd: root });
-  const results = promoteHardLineLimit(await eslint.lintFiles(["src", "scripts"]));
+  const results = await eslint.lintFiles(["src", "scripts"]);
   const formatter = await eslint.loadFormatter("stylish");
   const output = formatter.format(results);
   if (output.length > 0) console.log(output);
