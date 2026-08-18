@@ -12,9 +12,10 @@ Therefore a later body closes old requests by observation only: it never
 re-executes one, and never needs an exactly-once claim.
 
 Body Requests exist only for a provider whose confinement is `declared`.
-The body injects `AKUMA_REQUESTS` for that drive; nested call, wait, tell, and
-kill operations reroute exactly when that variable exists. An unconfined
-provider receives no injection and performs the ordinary local operation.
+The body injects `AKUMA_REQUESTS` for that drive; nested call, wait, tell,
+kill, and `contract.deliver` operations reroute exactly when that variable
+exists. An unconfined provider receives no injection and performs the ordinary
+local operation.
 There is no third mode, second public verb, or generic messaging surface.
 
 ### Transport, authority, and judge
@@ -41,11 +42,12 @@ does not alter the serial service law below: Heart admission precedes directory
 allocation, reservation precedes spawn, and terminal Heart settlement precedes
 receipt projection.
 
-Transport bytes are not facts. Before heart admission they are claims; after
-settlement receipts are projections that may be reproduced from the heart.
+Transport bytes are not facts. Before Heart admission they are claims. A live
+receipt may carry a one-time operation result that Heart does not retain;
+durable terminal facts and an accepted deliver reference remain reproducible.
 Missing, malformed, or discarded transport bytes therefore do not create or
-erase authority. The parent heart's request facts are the only durable request
-authority and have one writer: the body holding its leash. Admission uses the
+erase authority. The parent Heart's request facts are the only durable request
+authority and have one writer: the Body holding its leash. Admission uses the
 request id for idempotence, so at-least-once claim observation produces at most
 one fact. There is no second store.
 
@@ -116,12 +118,27 @@ TellId. A served kill stores only ordered target/evidence references; lifecycle
 facts remain in each target Heart. Verb results and operation failures travel only
 in the live receipt and never become permission refusals or a generic result store.
 
+`contract.deliver` carries the selected Repo's normalized primary-worktree
+coordinate, a complete ContractId, optional message, and `includeDirty`. The
+parent Body reconstructs that Repo rather than replacing it with the parent
+World, supplies the authenticated requester as actor, reads Settings scoped to
+the selected Repo for Git policy and hooks, and enters the same forced-local
+Library deliver executor used by ordinary delivery. A live accepted receipt
+carries the complete ordinary mutation result; Heart stores only the Repo
+coordinate, ContractId, and owner-minted delivery fact id. A later pump
+projects that durable accepted reference for the same request id without
+replaying delivery. Contract refusal and Protocol retry remain live receipt
+results but settle Heart as `voided`. Forwarding never carries actor, Settings,
+hooks, policy, callbacks, or an unresolved selector, and it never routes beyond
+the direct parent.
+
 ### Recovery and pump
 
 After predecessor settlement and before driving a turn, a body sweeps every
-nonterminal request. An `admitted` request without a reservation becomes
-`voided`: its old caller is gone and no body was spawned. For a reserved
-request:
+nonterminal request. An admitted request without a reservation becomes
+`voided`: its old caller is gone and no body was spawned. This includes every
+admitted `contract.deliver`; the sweep does not read Contract state, infer an
+attempt from actor, time, or head, or replay delivery. For a reserved request:
 
 1. A missing child directory becomes `voided` with evidence.
 2. A lock-free child-soul read that finds a matching origin becomes `served`;
@@ -133,7 +150,7 @@ request:
    remains nonterminal for the next wake.
 
 Soul presence is monotonic, so settlement never takes a healthy child's leash.
-The sweep never spawns, replays, or reprojects receipts: its caller is gone.
+The sweep never spawns, replays, or reprojects live receipts: its caller is gone.
 
 The live request pump runs concurrently with one provider drive and only inside
 the body that holds the parent leash. The entrance opens when the adapter starts

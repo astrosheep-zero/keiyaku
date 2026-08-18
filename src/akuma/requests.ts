@@ -16,6 +16,7 @@ import {
   type RequestFact,
   type RequestRecipe,
   type Soul,
+  type UpstreamRequestService,
 } from "./heart/index.js";
 import {
   parseAkuId,
@@ -68,11 +69,21 @@ type KillRequestClaim = Readonly<{
   targets: readonly AkuId[];
 }>;
 
-type RequestClaim = CallRequestClaim | WaitRequestClaim | TellRequestClaim | KillRequestClaim;
+type DeliverRequestClaim = Readonly<{
+  id: string;
+  action: "contract.deliver";
+  repoRoot: string;
+  contractId: string;
+  message?: string;
+  includeDirty: boolean;
+}>;
+
+type RequestClaim = CallRequestClaim | WaitRequestClaim | TellRequestClaim | KillRequestClaim | DeliverRequestClaim;
 type StructuralRequestClaim = (Omit<CallRequestClaim, "recipe"> & Readonly<{ recipe: unknown }>)
   | WaitRequestClaim
   | TellRequestClaim
-  | KillRequestClaim;
+  | KillRequestClaim
+  | DeliverRequestClaim;
 
 type UpstreamRequestFailure =
   | Readonly<{ kind: "akuma-not-born"; id: AkuId }>
@@ -81,6 +92,13 @@ type UpstreamRequestFailure =
 export type UpstreamRequestOutcome =
   | Readonly<{ kind: "returned"; result: unknown }>
   | Readonly<{ kind: "failed"; failure: UpstreamRequestFailure }>;
+
+export type ForwardedDeliveryReference = Readonly<{
+  kind: "accepted-reference";
+  repoRoot: string;
+  contractId: string;
+  deliveryFactId: string;
+}>;
 
 export type UpstreamExecutionPort = Readonly<{
   wait(input: Omit<WaitRequestClaim, "id" | "action"> & Readonly<{ signal: AbortSignal }>): Promise<unknown>;
@@ -93,10 +111,20 @@ export type UpstreamExecutionPort = Readonly<{
     result: unknown;
     service: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[];
   }>>;
+  deliver(input: Omit<DeliverRequestClaim, "id" | "action"> & Readonly<{
+    requester: AkuId;
+    signal: AbortSignal;
+  }>): Promise<Readonly<{ result: unknown; deliveryFactId?: string }>>;
 }>;
 
 type RequestReceipt =
   | Readonly<{ id: string; action: "akuma.call"; state: "served"; child: AkuId }>
+  | Readonly<{
+      id: string;
+      action: "contract.deliver";
+      state: "served";
+      reference: ForwardedDeliveryReference;
+    }>
   | Readonly<{
       id: string;
       action: Exclude<RequestClaim["action"], "akuma.call">;
@@ -268,6 +296,32 @@ function decodeKillClaim(
     : null;
 }
 
+function canonicalContractId(value: unknown): string | null {
+  return typeof value === "string" && /^kei\/[^/\s]+$/u.test(value) ? value : null;
+}
+
+function decodeDeliverClaim(
+  id: string,
+  payload: Readonly<Record<string, unknown>>,
+): DeliverRequestClaim | null {
+  const expected = ["contractId", "includeDirty", ...(payload.message === undefined ? [] : ["message"]), "repoRoot"];
+  const contract = canonicalContractId(payload.contractId);
+  if (!exactKeys(payload, expected)
+    || contract === null
+    || !absolute(payload.repoRoot)
+    || typeof payload.includeDirty !== "boolean"
+    || (payload.message !== undefined
+      && (typeof payload.message !== "string" || payload.message.trim().length === 0))) return null;
+  return {
+    id,
+    action: "contract.deliver",
+    repoRoot: payload.repoRoot,
+    contractId: contract,
+    includeDirty: payload.includeDirty,
+    ...(payload.message === undefined ? {} : { message: payload.message as string }),
+  };
+}
+
 function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | null {
   let decoded: unknown;
   try { decoded = JSON.parse(bytes); } catch { return null; }
@@ -283,6 +337,7 @@ function decodeClaim(bytes: string, fileId: string): StructuralRequestClaim | nu
   if (value.action === "akuma.wait") return decodeWaitClaim(value.id, payload);
   if (value.action === "akuma.tell") return decodeTellClaim(value.id, payload);
   if (value.action === "akuma.kill") return decodeKillClaim(value.id, payload);
+  if (value.action === "contract.deliver") return decodeDeliverClaim(value.id, payload);
   return null;
 }
 
@@ -311,11 +366,63 @@ function decodeUpstreamOutcome(value: unknown): UpstreamRequestOutcome | null {
   return failure === null ? null : { kind: outcome.kind, failure };
 }
 
+function decodeDeliveryReferenceReceipt(
+  value: Readonly<Record<string, unknown>>,
+  requestId: string,
+): Extract<RequestReceipt, { reference: ForwardedDeliveryReference }> | null {
+  if (value.state !== "served" || !exactKeys(value, ["action", "id", "reference", "state"])) return null;
+  const reference = object(value.reference);
+  if (reference === null
+    || !exactKeys(reference, ["contractId", "deliveryFactId", "kind", "repoRoot"])
+    || reference.kind !== "accepted-reference"
+    || !absolute(reference.repoRoot)
+    || canonicalContractId(reference.contractId) === null
+    || typeof reference.deliveryFactId !== "string"
+    || reference.deliveryFactId.trim().length === 0) return null;
+  return {
+    id: requestId,
+    action: "contract.deliver",
+    state: value.state,
+    reference: {
+      kind: reference.kind,
+      repoRoot: reference.repoRoot,
+      contractId: reference.contractId as string,
+      deliveryFactId: reference.deliveryFactId,
+    },
+  };
+}
+
+function decodeDeliverReceipt(
+  value: Readonly<Record<string, unknown>>,
+  requestId: string,
+): RequestReceipt | null {
+  const reference = decodeDeliveryReferenceReceipt(value, requestId);
+  if (reference !== null) return reference;
+  if (value.state === "served" && exactKeys(value, ["action", "id", "outcome", "state"])) {
+    const outcome = decodeUpstreamOutcome(value.outcome);
+    return outcome === null
+      ? null
+      : { id: requestId, action: "contract.deliver", state: value.state, outcome };
+  }
+  if (value.state === "refused"
+    && exactKeys(value, ["action", "diagnostic", "id", "state"])
+    && typeof value.diagnostic === "string") {
+    return { id: requestId, action: "contract.deliver", state: value.state, diagnostic: value.diagnostic };
+  }
+  if (value.state === "voided"
+    && exactKeys(value, ["action", "evidence", "id", "state"])
+    && typeof value.evidence === "string") {
+    return { id: requestId, action: "contract.deliver", state: value.state, evidence: value.evidence };
+  }
+  return null;
+}
+
 function decodeReceipt(bytes: string, requestId: string, action: RequestClaim["action"]): RequestReceipt | null {
   let decoded: unknown;
   try { decoded = JSON.parse(bytes); } catch { return null; }
   const value = object(decoded);
   if (value === null || value.id !== requestId || value.action !== action) return null;
+  if (action === "contract.deliver") return decodeDeliverReceipt(value, requestId);
   if (action === "akuma.call"
     && value.state === "served"
     && exactKeys(value, ["action", "child", "id", "state"])) {
@@ -357,6 +464,20 @@ function receiptFor(fact: RequestFact): RequestReceipt | null {
     return { id: fact.id, action: fact.action, state: fact.state, diagnostic: fact.diagnostic };
   }
   if (fact.state === "voided") return { id: fact.id, action: fact.action, state: fact.state, evidence: fact.evidence };
+  if (fact.action === "contract.deliver" && fact.state === "served") {
+    const service = fact.service as Extract<UpstreamRequestService, { action: "contract.deliver" }>;
+    return {
+      id: fact.id,
+      action: fact.action,
+      state: fact.state,
+      reference: {
+        kind: "accepted-reference",
+        repoRoot: service.repoRoot,
+        contractId: service.contractId,
+        deliveryFactId: service.deliveryFactId,
+      },
+    };
+  }
   return null;
 }
 
@@ -367,9 +488,9 @@ async function projectReceipt(
 ): Promise<void> {
   const receipt = outcome === undefined
     ? receiptFor(fact)
-    : fact.action === "akuma.call" || fact.state !== "served"
+    : fact.action === "akuma.call"
       ? null
-      : { id: fact.id, action: fact.action, state: fact.state, outcome } as RequestReceipt;
+      : { id: fact.id, action: fact.action, state: "served", outcome } as RequestReceipt;
   if (receipt !== null) await atomicJson(join(directory, `${fact.id}.receipt.json`), receipt);
 }
 
@@ -380,8 +501,13 @@ export function injectedBodyRequests(): string | null {
   return directory;
 }
 
-async function requestBody(input: Readonly<{ directory: string; claim: RequestClaim }>): Promise<RequestReceipt> {
+async function requestBody(input: Readonly<{
+  directory: string;
+  claim: RequestClaim;
+  signal?: AbortSignal;
+}>): Promise<RequestReceipt> {
   const { id, action, ...payload } = input.claim;
+  input.signal?.throwIfAborted();
   await atomicJson(join(input.directory, `${id}.request.json`), { id, action, payload });
   const receiptPath = join(input.directory, `${id}.receipt.json`);
   for (;;) {
@@ -397,7 +523,7 @@ async function requestBody(input: Readonly<{ directory: string; claim: RequestCl
     if (!await access(input.directory).then(() => true, () => false)) {
       throw new AkumaBodyRequestError("voided", "parent request channel closed before a receipt");
     }
-    await abortableDelay(POLL_MS);
+    await abortableDelay(POLL_MS, input.signal);
   }
 }
 
@@ -415,9 +541,10 @@ export async function requestBodyCall(
 async function requestUpstream(
   directory: string,
   claim: WaitRequestClaim | TellRequestClaim | KillRequestClaim,
+  signal?: AbortSignal,
 ): Promise<UpstreamRequestOutcome> {
-  const receipt = await requestBody({ directory, claim });
-  if (receipt.action === "akuma.call" || receipt.state !== "served") {
+  const receipt = await requestBody({ directory, claim, ...(signal === undefined ? {} : { signal }) });
+  if (receipt.action === "akuma.call" || receipt.state !== "served" || !("outcome" in receipt)) {
     throw new Error(`Akuma body request ${claim.id} returned the wrong action`);
   }
   return receipt.outcome;
@@ -451,6 +578,36 @@ export async function requestBodyKill(
 ): Promise<UpstreamRequestOutcome> {
   const { directory, id = randomUUID(), ...claim } = input;
   return await requestUpstream(directory, { ...claim, id, action: "akuma.kill" });
+}
+
+type BodyDeliverInput = Omit<DeliverRequestClaim, "action" | "id"> & Readonly<{
+  directory: string;
+  signal?: AbortSignal;
+}>;
+
+export function requestBodyDeliver(
+  input: BodyDeliverInput & Readonly<{ id?: never }>,
+): Promise<UpstreamRequestOutcome>;
+export function requestBodyDeliver(
+  input: BodyDeliverInput & Readonly<{ id: string }>,
+): Promise<UpstreamRequestOutcome | ForwardedDeliveryReference>;
+export async function requestBodyDeliver(
+  input: Omit<DeliverRequestClaim, "action" | "id"> & Readonly<{
+    directory: string;
+    id?: string;
+    signal?: AbortSignal;
+  }>,
+): Promise<UpstreamRequestOutcome | ForwardedDeliveryReference> {
+  const { directory, id = randomUUID(), signal, ...claim } = input;
+  const receipt = await requestBody({
+    directory,
+    claim: { ...claim, id, action: "contract.deliver" },
+    ...(signal === undefined ? {} : { signal }),
+  });
+  if (receipt.action !== "contract.deliver" || receipt.state !== "served") {
+    throw new Error(`Akuma body request ${id} returned the wrong action`);
+  }
+  return "reference" in receipt ? receipt.reference : receipt.outcome;
 }
 
 type ServeRequestInput = Readonly<{
@@ -542,6 +699,69 @@ function upstreamFailure(error: unknown): UpstreamRequestFailure {
   return { kind: "failed", diagnostic: diagnostic(error) };
 }
 
+async function executeUpstreamClaim(
+  input: ServeRequestInput,
+  request: Exclude<Extract<RequestFact, { state: "admitted" }>, Extract<RequestFact, { action: "akuma.call" }>>,
+): Promise<Readonly<{ result: unknown; service?: UpstreamRequestService }>> {
+  if (input.upstream === undefined) throw new Error("upstream execution port is unavailable");
+  if (request.action === "akuma.wait") {
+    const result = await input.upstream.wait({
+      targets: request.targets,
+      completion: request.completion,
+      ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
+      signal: input.signal,
+    });
+    return { result, service: { action: request.action } };
+  }
+  if (request.action === "akuma.tell") {
+    const result = await input.upstream.tell({
+      target: request.target,
+      body: request.body,
+      tellId: request.id,
+      recordedAt: request.admittedAt,
+      signal: input.signal,
+    });
+    return {
+      result,
+      service: { action: request.action, target: request.target, tellId: request.id },
+    };
+  }
+  if (request.action === "akuma.kill") {
+    const served = await input.upstream.kill({ targets: request.targets, signal: input.signal });
+    return { result: served.result, service: { action: request.action, results: served.service } };
+  }
+  const served = await input.upstream.deliver({
+    repoRoot: request.repoRoot,
+    contractId: request.contractId,
+    ...(request.message === undefined ? {} : { message: request.message }),
+    includeDirty: request.includeDirty,
+    requester: request.requester,
+    signal: input.signal,
+  });
+  return {
+    result: served.result,
+    ...(served.deliveryFactId === undefined ? {} : {
+      service: {
+        action: request.action,
+        repoRoot: request.repoRoot,
+        contractId: request.contractId,
+        deliveryFactId: served.deliveryFactId,
+      },
+    }),
+  };
+}
+
+function pendingService(
+  request: Exclude<Extract<RequestFact, { state: "admitted" }>, Extract<RequestFact, { action: "akuma.call" }>>,
+): UpstreamRequestService | undefined {
+  if (request.action === "akuma.wait") return { action: request.action };
+  if (request.action === "akuma.tell") {
+    return { action: request.action, target: request.target, tellId: request.id };
+  }
+  if (request.action === "akuma.kill") return { action: request.action, results: [] };
+  return undefined;
+}
+
 async function serveUpstreamClaim(
   input: ServeRequestInput & Readonly<{
     claim: Exclude<StructuralRequestClaim, { action: "akuma.call" }>;
@@ -570,45 +790,31 @@ async function serveUpstreamClaim(
   >;
 
   let outcome: UpstreamRequestOutcome;
-  let killService: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[] = [];
+  let service = pendingService(request);
   try {
-    if (input.upstream === undefined) throw new Error("upstream execution port is unavailable");
-    let result: unknown;
-    if (request.action === "akuma.wait") {
-      const waitRequest = request as Extract<RequestFact, { action: "akuma.wait"; state: "admitted" }>;
-      result = await input.upstream.wait({
-        targets: waitRequest.targets,
-        completion: waitRequest.completion,
-        ...(waitRequest.timeoutMs === undefined ? {} : { timeoutMs: waitRequest.timeoutMs }),
-        signal: input.signal,
-      });
-    } else if (request.action === "akuma.tell") {
-      const tellRequest = request as Extract<RequestFact, { action: "akuma.tell"; state: "admitted" }>;
-      result = await input.upstream.tell({
-        target: tellRequest.target,
-        body: tellRequest.body,
-        tellId: tellRequest.id,
-        recordedAt: tellRequest.admittedAt,
-        signal: input.signal,
-      });
-    } else {
-      const killRequest = request as Extract<RequestFact, { action: "akuma.kill"; state: "admitted" }>;
-      const served = await input.upstream.kill({ targets: killRequest.targets, signal: input.signal });
-      killService = served.service;
-      result = served.result;
+    const served = await executeUpstreamClaim(input, request);
+    outcome = { kind: "returned", result: served.result };
+    if (served.service === undefined) {
+      fact = await voidRequest(input.paths, request.id, "body completed without a durable delivery reference");
+      await projectReceipt(input.directory, fact, outcome);
+      return;
     }
-    outcome = { kind: "returned", result };
+    service = served.service;
   } catch (error) {
     if (input.signal.aborted) return;
     outcome = { kind: "failed", failure: upstreamFailure(error) };
+    if (request.action === "contract.deliver") {
+      fact = await voidRequest(input.paths, request.id, "body failed before serving the request");
+      await projectReceipt(input.directory, fact, outcome);
+      return;
+    }
   }
   input.signal.throwIfAborted();
-  const service = request.action === "akuma.wait"
-    ? { action: request.action } as const
-    : request.action === "akuma.tell"
-      ? { action: request.action, target: request.target, tellId: request.id } as const
-      : { action: request.action, results: killService } as const;
-  fact = await serveUpstreamRequest(input.paths, request.id, service);
+  if (service === undefined) {
+    fact = await voidRequest(input.paths, request.id, "body completed without a durable delivery reference");
+  } else {
+    fact = await serveUpstreamRequest(input.paths, request.id, service);
+  }
   await projectReceipt(input.directory, fact, outcome);
 }
 

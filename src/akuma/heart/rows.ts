@@ -140,6 +140,22 @@ function decodeRequestService(
     }
     return { action: input.action, target: input.target, tellId: input.id };
   }
+  if (input.action === "contract.deliver") {
+    const expected = ["action", "contractId", "deliveryFactId", "repoRoot"];
+    if (!exactKeys(service, expected)
+      || service.repoRoot !== input.repoRoot
+      || service.contractId !== input.contractId
+      || typeof service.deliveryFactId !== "string"
+      || service.deliveryFactId.trim().length === 0) {
+      throw new Error("Akuma authority contains an invalid deliver service reference");
+    }
+    return {
+      action: input.action,
+      repoRoot: input.repoRoot,
+      contractId: input.contractId,
+      deliveryFactId: service.deliveryFactId,
+    };
+  }
   if (!exactKeys(service, ["action", "results"]) || !Array.isArray(service.results)) {
     throw new Error("Akuma authority contains an invalid kill service reference");
   }
@@ -230,7 +246,7 @@ export function decodeCallRow(row: CallRow): CallFact {
 }
 
 export function decodeRequestRow(row: RequestRow): RequestFact {
-  if (!["akuma.call", "akuma.wait", "akuma.tell", "akuma.kill"].includes(row.action)) {
+  if (!["akuma.call", "akuma.wait", "akuma.tell", "akuma.kill", "contract.deliver"].includes(row.action)) {
     throw new Error(`Akuma authority contains an unknown request action: ${row.action}`);
   }
   const payload = parsed<Omit<RequestInput, "action" | "id">>(row.payload_json);

@@ -72,6 +72,11 @@ import {
 } from "../settlement/holder.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
+import {
+  injectedBodyRequests,
+  requestBodyDeliver,
+  type UpstreamRequestOutcome,
+} from "../akuma/requests.js";
 import { auditContract, type AuditInput } from "./audit.js";
 import { Delivery, deliveryHandle } from "./delivery.js";
 import {
@@ -81,14 +86,19 @@ import {
 } from "./mutation.js";
 import { completeReconcile } from "./reconcile.js";
 import { admitBindWithAppointment } from "./bind.js";
-import { KeiyakuRefused, requireAccepted } from "./refusal.js";
-export {
+import {
   KeiyakuRefused,
   KeiyakuRetry,
-  type ContractAppointmentRefusal,
+  requireAccepted,
   type KeiyakuRefusal,
   type KeiyakuRetryReason,
 } from "./refusal.js";
+export {
+  KeiyakuRefused,
+  type ContractAppointmentRefusal,
+} from "./refusal.js";
+export { KeiyakuRetry };
+export type { KeiyakuRefusal, KeiyakuRetryReason };
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "./configuration.js";
 export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks } from "./configuration.js";
 
@@ -178,6 +188,22 @@ export type DeliverInput = ActorOptions & Readonly<{
   includeDirty?: boolean;
   signal?: AbortSignal;
 }>;
+
+type DeliveryExecutionInput = Readonly<{
+  scope: RepositoryScope;
+  contractId: ContractId;
+  actor?: ReturnType<typeof actorOption>["actor"];
+  message?: string;
+  requireBranchesToBeUpToDate: boolean;
+  includeDirty: boolean;
+  signal?: AbortSignal;
+  hooks: WorktreeHooks;
+}>;
+
+type ForwardedDeliveryReceipt =
+  | Readonly<{ kind: "accepted"; result: MutationResult<DeliverValue> }>
+  | Readonly<{ kind: "refused"; refusal: KeiyakuRefusal }>
+  | Readonly<{ kind: "retry"; reason: KeiyakuRetryReason }>;
 export type { AuditInput };
 
 function taskOption(value: unknown): TaskId | undefined {
@@ -199,6 +225,79 @@ function completion<Value, PublicValue>(
   hooks: WorktreeHooks,
 ): Readonly<Omit<Parameters<typeof completeMutation<Value, PublicValue>>[0], "accepted">> {
   return { scope, channel, contractId: id, value, hooks };
+}
+
+async function executeLocalDelivery(input: DeliveryExecutionInput): Promise<MutationResult<DeliverValue>> {
+  return withGitDecodeChannel(input.scope, async (channel) => {
+    const accepted = requireAccepted(await deliverOperation({
+      scope: input.scope,
+      channel,
+      contractId: input.contractId,
+      deriveDocument: (state) => documentDerivation(
+        decodeContractDocument(state.terms.document.bytes),
+        state.terms.gates,
+        state.id,
+      ),
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+      ...(input.message === undefined ? {} : { message: input.message }),
+      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+      includeDirty: input.includeDirty,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }));
+    return completeMutation({
+      ...completion(input.scope, channel, input.contractId, (delivery: DeliverValue) => delivery, input.hooks),
+      accepted,
+    });
+  });
+}
+
+function forwardedReceipt(outcome: UpstreamRequestOutcome): ForwardedDeliveryReceipt {
+  if (outcome.kind === "failed") {
+    throw new Error(outcome.failure.kind === "failed"
+      ? outcome.failure.diagnostic
+      : `Unexpected Akuma target failure for deliver: ${outcome.failure.id}`);
+  }
+  return outcome.result as ForwardedDeliveryReceipt;
+}
+
+function requireForwardedDelivery(receipt: ForwardedDeliveryReceipt): MutationResult<DeliverValue> {
+  if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
+  if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
+  return receipt.result;
+}
+
+export async function executeForwardedDeliver(input: Readonly<{
+  repo: Repo;
+  contractId: string;
+  requester: string;
+  message?: string;
+  includeDirty: boolean;
+  requireBranchesToBeUpToDate: boolean;
+  hooks: WorktreeHooks;
+  signal?: AbortSignal;
+}>): Promise<Readonly<{ result: ForwardedDeliveryReceipt; deliveryFactId?: string }>> {
+  const id = contractId(input.contractId);
+  const actor = actorOption(input.requester).actor;
+  const message = optionalNonblank(input.message, "deliver message");
+  try {
+    const result = await executeLocalDelivery({
+      scope: scopeForRepo(input.repo),
+      contractId: id,
+      ...(actor === undefined ? {} : { actor }),
+      ...(message === undefined ? {} : { message }),
+      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+      includeDirty: input.includeDirty,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      hooks: input.hooks,
+    });
+    const delivery = result.facts.find((fact) => fact.kind === "deliver");
+    if (delivery === undefined) throw new Error("accepted delivery is missing its journal fact");
+    return { result: { kind: "accepted", result }, deliveryFactId: delivery.entry };
+  } catch (error) {
+    if (error instanceof KeiyakuRefused) return { result: { kind: "refused", refusal: error.refusal } };
+    if (error instanceof KeiyakuRetry) return { result: { kind: "retry", reason: error.reason } };
+    throw error;
+  }
 }
 
 export class KeiyakuHandle {
@@ -337,27 +436,27 @@ export class KeiyakuHandle {
     const includeDirty = optionalBoolean(values?.includeDirty, "includeDirty") ?? false;
     const actor = actorOption(values?.actor);
     const signal = optionalSignal(values?.signal);
-    return withGitDecodeChannel(this.scope, async (channel) => {
-      const accepted = requireAccepted(await deliverOperation({
+    const requests = injectedBodyRequests();
+    const result = requests === null
+      ? await executeLocalDelivery({
         scope: this.scope,
-        channel,
         contractId: this.id,
-        deriveDocument: (state) => documentDerivation(
-          decodeContractDocument(state.terms.document.bytes),
-          state.terms.gates,
-          state.id,
-        ),
         ...actor,
         ...(message === undefined ? {} : { message }),
         requireBranchesToBeUpToDate,
         includeDirty,
         ...(signal === undefined ? {} : { signal }),
-      }));
-      return completeMutation({
-        ...completion(this.scope, channel, this.id, (delivery: DeliverValue) => this.deliveryHandle(delivery), hooks),
-        accepted,
-      });
-    });
+        hooks,
+      })
+      : requireForwardedDelivery(forwardedReceipt(await requestBodyDeliver({
+          directory: requests,
+          repoRoot: this.scope.primaryWorktree,
+          contractId: this.id,
+          ...(message === undefined ? {} : { message }),
+          includeDirty,
+          ...(signal === undefined ? {} : { signal }),
+        })));
+    return { ...result, value: this.deliveryHandle(result.value) };
   }
 
   async review(input: ReviewInput): Promise<MutationResult<Review>> {

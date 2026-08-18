@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 16;
+const HEART_SCHEMA_VERSION = 17;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(
@@ -120,7 +120,9 @@ export const HEART_SCHEMA = `
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     requester TEXT NOT NULL,
-    action TEXT NOT NULL CHECK (action IN ('akuma.call', 'akuma.wait', 'akuma.tell', 'akuma.kill')),
+    action TEXT NOT NULL CHECK (
+      action IN ('akuma.call', 'akuma.wait', 'akuma.tell', 'akuma.kill', 'contract.deliver')
+    ),
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     admitted_at TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('admitted', 'reserved', 'served', 'refused', 'voided')),

@@ -143,6 +143,13 @@ export type RequestInput = Readonly<{
   id: string;
   action: "akuma.kill";
   targets: readonly AkuId[];
+}> | Readonly<{
+  id: string;
+  action: "contract.deliver";
+  repoRoot: string;
+  contractId: string;
+  message?: string;
+  includeDirty: boolean;
 }>;
 
 export type UpstreamRequestService =
@@ -151,6 +158,12 @@ export type UpstreamRequestService =
   | Readonly<{
       action: "akuma.kill";
       results: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[];
+    }>
+  | Readonly<{
+      action: "contract.deliver";
+      repoRoot: string;
+      contractId: string;
+      deliveryFactId: string;
     }>;
 
 type AdmittedRequest = RequestInput & Readonly<{

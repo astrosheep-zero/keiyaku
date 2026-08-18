@@ -79,6 +79,17 @@ the reported `worktreePath` of exactly one active worktree contract. A here
 workspace never supplies omitted-selector inference. The adapter issues a
 typed usage refusal when this test has no unique match.
 
+Inside a declared Akuma request channel, `deliver` still resolves its Contract
+selector to one complete ContractId before publishing the claim and preserves
+the selected Contract Repo as its normalized primary-worktree coordinate. The
+claim also contains only that id, optional message, and `includeDirty`; the
+direct parent reconstructs the selected Repo, reads Settings and hooks scoped
+to it at execution time, and uses the same local Contract executor. It never
+substitutes the parent World for an explicit `--repo`. The CLI does not create
+a second delivery path or carry its own actor or Git policy across the channel.
+The live command receives the ordinary Contract result; later request
+settlement neither replays delivery nor fabricates that live result.
+
 Command syntax:
 
 ```text

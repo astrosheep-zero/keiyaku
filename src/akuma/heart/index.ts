@@ -201,6 +201,16 @@ export async function recordTellReceipt(
     }));
 }
 
+function sameDeliverRequestInput(
+  fact: Extract<RequestFact, { action: "contract.deliver" }>,
+  input: Extract<RequestInput, { action: "contract.deliver" }>,
+): boolean {
+  return fact.repoRoot === input.repoRoot
+    && fact.contractId === input.contractId
+    && fact.message === input.message
+    && fact.includeDirty === input.includeDirty;
+}
+
 function sameRequestInput(fact: RequestFact, input: RequestInput): boolean {
   if (fact.id !== input.id || fact.action !== input.action) return false;
   if (fact.action === "akuma.call" && input.action === "akuma.call") {
@@ -217,6 +227,9 @@ function sameRequestInput(fact: RequestFact, input: RequestInput): boolean {
   }
   if (fact.action === "akuma.tell" && input.action === "akuma.tell") {
     return fact.target === input.target && fact.body === input.body;
+  }
+  if (fact.action === "contract.deliver" && input.action === "contract.deliver") {
+    return sameDeliverRequestInput(fact, input);
   }
   return fact.action === "akuma.kill" && input.action === "akuma.kill"
     && JSON.stringify(fact.targets) === JSON.stringify(input.targets);

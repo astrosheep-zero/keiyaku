@@ -49,6 +49,8 @@ import {
   type SelectedContract,
 } from "./selectors.js";
 import { resolveNamedAddress } from "../library/address.js";
+import { injectedBodyRequests } from "../akuma/requests.js";
+import { EMPTY_WORKTREE_HOOKS } from "../library/configuration.js";
 import type { WorldRoot } from "../world.js";
 import { assertExplicitRepoUse, resolveCliCoordinates } from "./coordinates.js";
 import { BindDraftError, preserveBindDraft } from "./draft.js";
@@ -278,10 +280,18 @@ type ExistingInvocation = Readonly<{
   hooks: WorktreeHooks;
 }>;
 
-async function invokeExisting({ parsed, repo, edge, scope, configuration, hooks }: ExistingInvocation): Promise<InvocationResult> {
+async function existingSeat(
+  { parsed, repo, edge, scope, hooks }: Omit<ExistingInvocation, "configuration">,
+): Promise<ExistingSeat> {
   const { id, contract } = await selectContract(repo, parsed.contract, scope);
   const actor = actorFromEdge(parsed.actor, edge.environment);
-  const seat: ExistingSeat = { contract, id, ...(actor === undefined ? {} : { actor }), hooks };
+  return { contract, id, ...(actor === undefined ? {} : { actor }), hooks };
+}
+
+async function invokeExisting(input: ExistingInvocation): Promise<InvocationResult> {
+  const { parsed, repo, edge, configuration, hooks } = input;
+  const seat = await existingSeat(input);
+  const { id, contract, actor } = seat;
 
   switch (parsed.command) {
     case "amend": {
@@ -538,6 +548,10 @@ async function invokeParsed(
   if (repo === undefined) throw new Error(`${parsed.command} requires a resolved Repo`);
   if (parsed.command === "region") return invokeRegion(parsed, world, repo);
   const scope = cwd;
+  if (parsed.command === "deliver" && injectedBodyRequests() !== null) {
+    const seat = await existingSeat({ parsed, repo, edge, scope, hooks: EMPTY_WORKTREE_HOOKS });
+    return invokeDeliver(parsed, seat, false);
+  }
   const configuration = await settingsAt(world ?? undefined, home);
   const hooks = consumeSettings(() => worktreeHooksFrom({ settings: configuration }));
 

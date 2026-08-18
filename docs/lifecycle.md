@@ -71,6 +71,17 @@ testimony for that exact delivery and Verification segment is reused, whether
 satisfied or unsatisfied; otherwise Verification runs. Placement consumes only
 generic current gate evidence. Git owns preparation details.
 
+An authenticated Akuma `contract.deliver` is the same Contract operation at a
+different process boundary: the claim preserves the caller-selected Repo as
+its normalized primary-worktree coordinate, and the direct parent reconstructs
+that Repo, supplies the requester as actor, reads Settings scoped to it for
+policy and hooks, and calls the same local executor. The request claim also
+carries only the complete ContractId, optional message, and `includeDirty`; it
+creates no second delivery authority. Its Heart reference is the Repo
+coordinate, ContractId, and accepted delivery fact id. The live exchange
+retains the normal accepted, refusal, retry, and trailing projections; later
+pumps retain only that accepted reference and never infer or replay a delivery.
+
 `review` is a contract operation and may record testimony before any `deliver`.
 Git captures its subject as the document key projected by the decision
 observation and the ChangeId of the complete reviewable worktree content. This

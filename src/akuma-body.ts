@@ -7,8 +7,20 @@ import {
   executeTellAkuma,
   executeWaitAkuma,
 } from "./library/fleet.js";
+import {
+  requireBranchesToBeUpToDateFrom,
+  worktreeHooksFrom,
+} from "./library/configuration.js";
+import {
+  executeForwardedDeliver,
+} from "./library/contract.js";
+import { Repo } from "./library/repo.js";
+import { settings } from "./settings.js";
 
-function upstreamFor(launch: BodyLaunch): UpstreamExecutionPort {
+export function upstreamFor(
+  launch: BodyLaunch,
+  settingsCoordinates: Readonly<{ home?: string }>,
+): UpstreamExecutionPort {
   const path = worldRootForAkumaPaths(launch.paths) as WorldRoot;
   return {
     wait: async (input) => await executeWaitAkuma({
@@ -32,6 +44,22 @@ function upstreamFor(launch: BodyLaunch): UpstreamExecutionPort {
         result,
         service: result.results.map(({ id, evidence }) => ({ id, evidence })),
       };
+    },
+    deliver: async (input) => {
+      const [repo, configuration] = await Promise.all([
+        Repo.at({ path: input.repoRoot }),
+        settings({ root: input.repoRoot as WorldRoot, ...settingsCoordinates }),
+      ]);
+      return await executeForwardedDeliver({
+        repo,
+        contractId: input.contractId,
+        requester: input.requester,
+        ...(input.message === undefined ? {} : { message: input.message }),
+        includeDirty: input.includeDirty,
+        requireBranchesToBeUpToDate: requireBranchesToBeUpToDateFrom({ settings: configuration }),
+        hooks: worktreeHooksFrom({ settings: configuration }),
+        signal: input.signal,
+      });
     },
   };
 }

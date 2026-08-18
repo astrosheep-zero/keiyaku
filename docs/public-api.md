@@ -292,6 +292,19 @@ result to carry the prospective predecessor-to-candidate `diff` and `scope.paths
 omission leaves those bytes off the report. An explicitly requested empty
 string remains visible.
 
+When a declared Akuma request channel is present, `deliver` forwards the pinned
+Repo's normalized primary-worktree coordinate, its complete ContractId,
+optional message, and `includeDirty` to the direct parent. The parent
+reconstructs that Repo instead of substituting its own World, supplies the
+requester actor, and reads Settings scoped to the selected Repo for Git policy
+and hooks; caller-provided actor, policy, and hooks do not cross the boundary.
+The parent invokes the same local executor as ordinary delivery, and the live
+exchange returns the ordinary mutation result. Heart persists only the Repo
+coordinate, ContractId, and accepted delivery fact id; a later pump projects
+that typed reference for the same request id without reconstructing live
+trailing channels. No second delivery result or automatic multi-hop route
+exists.
+
 When a delivery or audit runs Verification, the library materializes the
 integration snapshot into a private scratch worktree and derives its worktree
 commands from that snapshot's tracked project Settings. Caller Settings and

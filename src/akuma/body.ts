@@ -650,7 +650,12 @@ async function prepareBodyStart(paths: AkumaPaths, leash: HeldAkumaLeash): Promi
 async function recoverBodyRequests(input: BodyExecution): Promise<boolean> {
   const { launch, soul, bodySequence, supervisor, runtime } = input;
   try {
-    const result = await settleBodyRequests(launch.paths, soul, runtime.now, supervisor.signal);
+    const result = await settleBodyRequests(
+      launch.paths,
+      soul,
+      runtime.now,
+      supervisor.signal,
+    );
     await clearBodyRequestTransport(launch.paths);
     if (result === "settled") return true;
     await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
@@ -759,14 +764,21 @@ export async function spawnAkumaBody(launch: BodyLaunch): Promise<void> {
 }
 
 export async function runAkumaBody(
-  upstreamFor: (launch: BodyLaunch) => UpstreamExecutionPort,
+  upstreamFor: (
+    launch: BodyLaunch,
+    configuration: Readonly<{ home?: string }>,
+  ) => UpstreamExecutionPort,
 ): Promise<void> {
   const encoded = process.argv[2];
   if (encoded === undefined) throw new TypeError("Akuma body launch payload is missing");
   const launch = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as BodyLaunch;
+  const mappedHome = process.env.KEIYAKU_HOME?.trim();
+  const configuration = mappedHome === undefined || mappedHome.length === 0
+    ? {}
+    : { home: mappedHome };
   await driveAkumaBody(launch, undefined, {
     now: () => new Date().toISOString(),
     spawnChild: spawnAkumaBody,
-    upstream: upstreamFor(launch),
+    upstream: upstreamFor(launch, configuration),
   });
 }
