@@ -28,7 +28,7 @@ export default [
   ...FILE_LINE_EXEMPTIONS.map((exemption) => ({
     files: [exemption.file],
     rules: {
-      "max-lines": "off",
+      "max-lines": codeLineLimit("warn", exemption.maxEffectiveLines),
     },
   })),
 ];

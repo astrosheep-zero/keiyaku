@@ -17,7 +17,7 @@ const MARKDOWN_EXCLUDED_DIRECTORIES = new Set([
 function exemptionError(exemption, index, seen, rootDirectory) {
   const label = `maintainability exemption ${index + 1}`;
   if (!exemption || typeof exemption !== "object") return `${label} must be an object`;
-  const { file } = exemption;
+  const { file, reason, maxEffectiveLines } = exemption;
   if (typeof file !== "string" || file.length === 0) return `${label} needs a file`;
   if (path.isAbsolute(file) || path.posix.normalize(file) !== file || /[*?[\]{}!]/.test(file)) {
     return `${label} must use one exact normalized relative file path`;
@@ -26,6 +26,10 @@ function exemptionError(exemption, index, seen, rootDirectory) {
   if (seen.has(file)) return `${label} duplicates ${file}`;
   seen.add(file);
   if (!existsSync(path.join(rootDirectory, file))) return `${label} targets missing file ${file}`;
+  if (typeof reason !== "string" || reason.trim().length === 0) return `${label} needs a reason`;
+  if (!Number.isSafeInteger(maxEffectiveLines) || maxEffectiveLines <= FILE_LINES.error) {
+    return `${label} needs a useful maxEffectiveLines cap above ${FILE_LINES.error}`;
+  }
   return null;
 }
 
@@ -44,8 +48,11 @@ function effectiveLineCount(message) {
 
 export function promoteHardLineLimit(results) {
   return results.map((result) => {
+    const file = path.relative(root, result.filePath ?? "").split(path.sep).join("/");
+    const exemption = FILE_LINE_EXEMPTIONS.find((entry) => entry.file === file);
+    const limit = exemption?.maxEffectiveLines ?? FILE_LINES.error;
     const messages = result.messages.map((message) =>
-      (effectiveLineCount(message) ?? 0) > FILE_LINES.error ? { ...message, severity: 2 } : message);
+      (effectiveLineCount(message) ?? 0) > limit ? { ...message, severity: 2 } : message);
     return {
       ...result,
       messages,
@@ -98,7 +105,7 @@ async function run() {
   else {
     console.log("maintainability exemptions:");
     for (const exemption of FILE_LINE_EXEMPTIONS) {
-      console.log(`- ${exemption.file}: max-lines (${exemption.reason})`);
+      console.log(`- ${exemption.file}: ${exemption.maxEffectiveLines} max-lines (${exemption.reason})`);
     }
   }
 

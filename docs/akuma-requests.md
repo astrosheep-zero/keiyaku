@@ -126,10 +126,11 @@ Library deliver executor used by ordinary delivery. A live accepted receipt
 carries the complete ordinary mutation result; Heart stores only the Repo
 coordinate, ContractId, and owner-minted delivery fact id. A later pump
 projects that durable accepted reference for the same request id without
-replaying delivery. Contract refusal and Protocol retry remain live receipt
-results but settle Heart as `voided`. Forwarding never carries actor, Settings,
-hooks, policy, callbacks, or an unresolved selector, and it never routes beyond
-the direct parent.
+replaying delivery. A normal return without that owner-minted reference, or an
+executor throw or cancellation, settles Heart `voided`; the durable fact is the
+only settlement authority. Forwarding never carries actor, Settings, hooks,
+policy, callbacks, or an unresolved selector, and it never routes beyond the
+direct parent.
 
 `contract.review` is independent of `contract.deliver`. Its claim carries the
 selected Repo's normalized primary-worktree coordinate, a complete ContractId,
@@ -139,10 +140,10 @@ worktree hooks, and calls the same forced-local Library review executor as
 ordinary review. The live receipt preserves the complete ordinary review result,
 including its attestation, workspace disclosure, placement stop, physical
 effects, lag, and claim projection. An accepted request stores only the Repo
-coordinate, ContractId, and owner-minted review fact id in Heart. Refusal,
-retry, or execution failure without that reference settles `voided` while the
-live typed result remains in the receipt. A later pump projects only the
-accepted reference and never reads or replays Contract state.
+coordinate, ContractId, and owner-minted review fact id in Heart. A normal
+return without that reference, or an executor throw or cancellation, settles
+Heart `voided`; a later pump projects only an accepted reference and never reads
+or replays Contract state.
 
 Each advertised `task.*` mutation carries its caller-selected normalized World,
 the exact public structured input or Markdown bytes, and every complete TaskId
@@ -183,14 +184,17 @@ Soul presence is monotonic, so settlement never takes a healthy child's leash.
 The sweep never spawns, replays, or reprojects live receipts: its caller is gone.
 
 The live request pump runs concurrently with one provider drive and only inside
-the body that holds the parent leash. The entrance opens when the adapter starts
-with the drive's request directory. Provider completion, stop, pause, or heart
-loss closes it immediately. Cancellation fences local admission, reservation,
-spawn, and receipt projection before Body releases the leash. A claim already
-durably admitted or reserved at that boundary remains nonterminal; cancellation
-does not invent a terminal request or receipt. The next wake's observation
-sweep settles that durable state. Request recovery and the live pump are local
-orchestration, so they must always be cancelable and cannot make Body `hung`.
+the body that holds the parent leash. Provider completion, stop, pause, or heart
+loss closes admission: no later claim is admitted and no admitted claim begins
+reservation, spawn, or owner execution. The Body keeps the leash while every
+in-flight serve drains to terminal Heart settlement, then removes the
+best-effort transport. A returned durable reference settles `served` with that
+reference; a normal return without one and an executor throw or cancellation
+settle `voided`. An admitted claim fenced before invocation is also `voided`.
+Heart settlement precedes live receipt projection. A missing caller or removed
+transport silently loses that projection and cannot reverse settlement or make
+the Body `broke-off`; only physical Heart loss can leave a request nonterminal
+for the existing recovery sweep.
 Requests do not enter the idle predicate.
 
 One hop holds at every depth: each provider talks only to its own unsandboxed

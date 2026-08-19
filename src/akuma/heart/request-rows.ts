@@ -3,7 +3,6 @@ import type { AkuId } from "../identity.js";
 import type {
   RequestFact,
   RequestInput,
-  TaskRequestInput,
   UpstreamRequestService,
 } from "./facts.js";
 import { isTaskMutationAction } from "../../task/mutation.js";
@@ -31,104 +30,30 @@ function parsed<T>(value: unknown): T {
   return JSON.parse(value) as T;
 }
 
-function object(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : null;
-}
-
-function exactKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
-}
-
-const KILL_EVIDENCE = [
-  "already-killed",
-  "already-stopped",
-  "hung",
-  "killed",
-  "untidy",
-  "unavailable",
-] as const;
-
-function decodeContractRequestService(
-  input: Extract<RequestInput, { action: "contract.deliver" | "contract.review" }>,
-  service: Readonly<Record<string, unknown>>,
-): UpstreamRequestService {
-  const factField = input.action === "contract.deliver" ? "deliveryFactId" : "reviewFactId";
-  const factId = service[factField];
-  const expected = ["action", "contractId", "repoRoot", factField].sort();
-  if (!exactKeys(service, expected)
-    || service.repoRoot !== input.repoRoot
-    || service.contractId !== input.contractId
-    || typeof factId !== "string"
-    || factId.trim().length === 0) {
-    const serviceName = input.action.slice("contract.".length);
-    throw new Error(`Akuma authority contains an invalid ${serviceName} service reference`);
-  }
-  return input.action === "contract.deliver"
-    ? { action: input.action, repoRoot: input.repoRoot, contractId: input.contractId, deliveryFactId: factId }
-    : { action: input.action, repoRoot: input.repoRoot, contractId: input.contractId, reviewFactId: factId };
-}
-
-function isTaskRequest(input: RequestInput): input is TaskRequestInput {
-  return input.action.startsWith("task.");
-}
-
-function decodeRequestService(
-  value: unknown,
-  input: Exclude<RequestInput, { action: "akuma.call" }>,
-): UpstreamRequestService {
-  const service = object(value);
-  if (service === null || service.action !== input.action) {
-    throw new Error("Akuma authority contains a mismatched request service reference");
-  }
-  if (input.action === "contract.deliver" || input.action === "contract.review") {
-    return decodeContractRequestService(input, service);
-  }
-  if (input.action === "akuma.wait") {
-    if (!exactKeys(service, ["action"])) {
-      throw new Error("Akuma authority contains an invalid wait service reference");
-    }
-    return { action: input.action };
-  }
-  if (input.action === "akuma.tell") {
-    if (!exactKeys(service, ["action", "target", "tellId"])
-      || service.target !== input.target
-      || service.tellId !== input.id) {
-      throw new Error("Akuma authority contains an invalid tell service reference");
-    }
-    return { action: input.action, target: input.target, tellId: input.id };
-  }
-  if (isTaskRequest(input)) {
-    if (!exactKeys(service, ["action"])) {
-      throw new Error("Akuma authority contains an invalid Task service reference");
-    }
-    return { action: input.action };
-  }
-  if (!exactKeys(service, ["action", "results"]) || !Array.isArray(service.results)) {
-    throw new Error("Akuma authority contains an invalid kill service reference");
-  }
-  let targetIndex = -1;
-  const results = service.results.map((value) => {
-    const result = object(value);
-    if (result === null
-      || !exactKeys(result, ["evidence", "id"])
-      || typeof result.id !== "string"
-      || !KILL_EVIDENCE.includes(result.evidence as typeof KILL_EVIDENCE[number])) {
-      throw new Error("Akuma authority contains an invalid kill service reference");
-    }
-    const index = input.targets.indexOf(result.id as AkuId);
-    if (index <= targetIndex) {
-      throw new Error("Akuma authority contains an invalid kill service reference");
-    }
-    targetIndex = index;
-    return {
-      id: result.id as AkuId,
-      evidence: result.evidence as typeof KILL_EVIDENCE[number],
-    };
-  });
-  return { action: input.action, results };
+export function requestPayloadJson(input: RequestInput): string {
+  const {
+    id: _id,
+    action: _action,
+    requester: _requester,
+    admittedAt: _admittedAt,
+    state: _state,
+    child: _child,
+    service: _service,
+    diagnostic: _diagnostic,
+    evidence: _evidence,
+    refusal: _refusal,
+    ...payload
+  } = input as RequestInput & Readonly<{
+    requester?: AkuId;
+    admittedAt?: string;
+    state?: RequestFact["state"];
+    child?: AkuId;
+    service?: UpstreamRequestService;
+    diagnostic?: string;
+    evidence?: string;
+    refusal?: string;
+  }>;
+  return json(payload);
 }
 
 function decodeRequestRow(row: RequestRow): RequestFact {
@@ -158,10 +83,7 @@ function decodeRequestRow(row: RequestRow): RequestFact {
     if (row.service_json === null) {
       throw new Error("Akuma authority contains a served request without a service reference");
     }
-    const service = decodeRequestService(
-      parsed<unknown>(row.service_json),
-      input as Exclude<RequestInput, { action: "akuma.call" }>,
-    );
+    const service = parsed<UpstreamRequestService>(row.service_json);
     return { ...input, state: row.state, service } as Extract<RequestFact, { state: "served" }>;
   }
   if (row.state === "refused") return { ...input, state: row.state, diagnostic: row.diagnostic! };
@@ -176,14 +98,14 @@ export function insertRequestFact(
   database: DatabaseSync,
   input: RequestInput & Readonly<{ requester: AkuId; admittedAt: string; refusal?: string }>,
 ): void {
-  const { id, action, requester, admittedAt, refusal, ...payload } = input;
+  const { id, action, requester, admittedAt, refusal } = input;
   database.prepare(`INSERT OR IGNORE INTO requests(
     id, requester, action, payload_json, admitted_at, state, diagnostic
   ) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
     id,
     requester,
     action,
-    json(payload),
+    requestPayloadJson(input),
     admittedAt,
     refusal === undefined ? "admitted" : "refused",
     refusal ?? null,

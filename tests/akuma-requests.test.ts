@@ -17,23 +17,16 @@ import {
   type Soul,
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
-import { BIRTH_TIMEOUT_MS, publishAkuma } from "../src/akuma/publication.js";
+import { publishAkuma } from "../src/akuma/publication.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import {
   AkumaBodyRequestError,
-  BodyRequestPump,
   requestBodyCall,
-  settleBodyRequests,
 } from "../src/akuma/requests.js";
-import { Keiyaku, Repo } from "../src/index.js";
+import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { World } from "../src/world.js";
-import { makeGitRepository } from "./support/git.js";
 
 async function akumaAt(root: string) { return Akuma.of(await World.at(root)); }
-
-test("ordinary Akuma birth allows 30 seconds", () => {
-  assert.equal(BIRTH_TIMEOUT_MS, 30_000);
-});
 
 async function fixture(allowed?: Soul["allowed"]) {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-")));
@@ -391,96 +384,5 @@ test("a new body settles old requests by observation without replay", async () =
   } finally {
     value.leash.release();
     value.close();
-  }
-});
-
-test("a later body leaves same-actor Contract deliveries unattributed", async () => {
-  const value = await fixture(["contract.deliver"]);
-  const repository = makeGitRepository();
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  try {
-    const bound = await Keiyaku.bind({
-      repo: await Repo.at({ path: repository.path }),
-      markdown: "# Delivery recovery\n\n## Context\nC\n\n## Objective\nO\n\n## Design\nD\n\n## Region\n```\nsrc/**\n```\n\n## Criteria\n### C\nC\n",
-      workspace: "here",
-      gates: ["reviewed"],
-    });
-    await bound.keiyaku.deliver({ actor: value.soul.id });
-    await bound.keiyaku.deliver({ actor: value.soul.id });
-    const before = (await bound.keiyaku.history()).events
-      .filter((event) => event.source === "journal" && event.fact.kind === "deliver")
-      .map((event) => event.source === "journal" ? event.fact : null);
-    assert.equal(before.length, 2);
-    assert.deepEqual(before.map((fact) => fact?.actor), [value.soul.id, value.soul.id]);
-
-    const requestId = "00000000-0000-4000-8000-000000000021";
-    await admitRequest(value.parent.paths, {
-      id: requestId,
-      action: "contract.deliver",
-      repoRoot: repository.path,
-      contractId: (await bound.keiyaku.state()).id,
-      includeDirty: false,
-      admittedAt: "2026-08-09T00:00:05.000Z",
-    });
-    assert.equal(await settleBodyRequests(
-      value.parent.paths,
-      value.soul,
-      () => "2026-08-09T00:00:06.000Z",
-    ), "settled");
-    assert.equal((await readRequest(value.parent.paths, requestId))?.state, "voided");
-    const after = (await bound.keiyaku.history()).events
-      .filter((event) => event.source === "journal" && event.fact.kind === "deliver")
-      .map((event) => event.source === "journal" ? event.fact : null);
-    assert.deepEqual(after, before);
-  } finally {
-    value.leash.release();
-    value.close();
-    rmSync(repository.path, { recursive: true, force: true });
-  }
-});
-
-test("a later body leaves same-actor Contract reviews unattributed", async () => {
-  const value = await fixture(["contract.review"]);
-  const repository = makeGitRepository();
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  try {
-    const bound = await Keiyaku.bind({
-      repo: await Repo.at({ path: repository.path }),
-      markdown: "# Review recovery\n\n## Context\nC\n\n## Objective\nO\n\n## Design\nD\n\n## Region\n```\nsrc/**\n```\n\n## Criteria\n### C\nC\n",
-      workspace: "here",
-      gates: ["reviewed"],
-    });
-    await bound.keiyaku.review({ verdict: "unsatisfied", summary: "first", actor: value.soul.id });
-    await bound.keiyaku.review({ verdict: "unsatisfied", summary: "second", actor: value.soul.id });
-    const before = (await bound.keiyaku.history()).events
-      .filter((event) => event.source === "journal" && event.fact.kind === "attestation")
-      .map((event) => event.source === "journal" ? event.fact : null);
-    assert.equal(before.length, 2);
-    assert.deepEqual(before.map((fact) => fact?.actor), [value.soul.id, value.soul.id]);
-
-    const requestId = "00000000-0000-4000-8000-000000000022";
-    await admitRequest(value.parent.paths, {
-      id: requestId,
-      action: "contract.review",
-      repoRoot: repository.path,
-      contractId: (await bound.keiyaku.state()).id,
-      verdict: "unsatisfied",
-      summary: "orphaned",
-      admittedAt: "2026-08-09T00:00:05.000Z",
-    });
-    assert.equal(await settleBodyRequests(
-      value.parent.paths,
-      value.soul,
-      () => "2026-08-09T00:00:06.000Z",
-    ), "settled");
-    assert.equal((await readRequest(value.parent.paths, requestId))?.state, "voided");
-    const after = (await bound.keiyaku.history()).events
-      .filter((event) => event.source === "journal" && event.fact.kind === "attestation")
-      .map((event) => event.source === "journal" ? event.fact : null);
-    assert.deepEqual(after, before);
-  } finally {
-    value.leash.release();
-    value.close();
-    rmSync(repository.path, { recursive: true, force: true });
   }
 });

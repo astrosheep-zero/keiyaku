@@ -16,7 +16,7 @@ import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js"
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { BodyRequestPump } from "../src/akuma/requests.js";
+import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { publishDispatch, readDispatch } from "../src/dispatch/index.js";
 import {

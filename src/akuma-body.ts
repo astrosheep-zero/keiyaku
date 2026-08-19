@@ -1,6 +1,6 @@
 import { runAkumaBody, type BodyLaunch } from "./akuma/body.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
-import type { UpstreamExecutionPort } from "./akuma/requests.js";
+import type { UpstreamExecutionPort } from "./akuma/request-serve.js";
 import type { WorldRoot } from "./world.js";
 import {
   executeKillAkuma,

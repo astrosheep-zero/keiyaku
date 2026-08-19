@@ -14,6 +14,8 @@ import {
 test("maintainability max-lines exemptions require exact live paths", () => {
   assert.deepEqual(validateExemptions([{
     file: "scripts/check-maintainability.js",
+    reason: "The maintainability runner is one diagnostics owner.",
+    maxEffectiveLines: 501,
   }]), []);
 
   const invalid = validateExemptions([
@@ -22,6 +24,26 @@ test("maintainability max-lines exemptions require exact live paths", () => {
   ]);
   assert.match(invalid[0] ?? "", /exact normalized relative file path/);
   assert.match(invalid[1] ?? "", /targets missing file/);
+});
+
+test("maintainability max-lines exemptions require useful effective-line caps", () => {
+  const exemption = {
+    file: "scripts/check-maintainability.js",
+    reason: "The maintainability runner is one diagnostics owner.",
+  };
+  const invalid = validateExemptions([
+    exemption,
+    {
+      ...exemption,
+      file: "scripts/check-architecture.ts",
+      maxEffectiveLines: Number.POSITIVE_INFINITY,
+    },
+    { ...exemption, file: "scripts/model-change-impact.ts", maxEffectiveLines: 500 },
+  ]);
+
+  assert.match(invalid[0] ?? "", /useful maxEffectiveLines cap above 500/);
+  assert.match(invalid[1] ?? "", /useful maxEffectiveLines cap above 500/);
+  assert.match(invalid[2] ?? "", /useful maxEffectiveLines cap above 500/);
 });
 
 test("maintainability hard line limit promotes only above 500 effective lines", () => {

@@ -13,89 +13,7 @@ import {
 import { transaction, withHeart } from "./storage.js";
 import { soulFact } from "./soul.js";
 import { clipAllowedActions } from "../allowed.js";
-import { isTaskMutationAction } from "../../task/mutation.js";
-
-function sameDeliverRequestInput(
-  fact: Extract<RequestFact, { action: "contract.deliver" }>,
-  input: Extract<RequestInput, { action: "contract.deliver" }>,
-): boolean {
-  return fact.repoRoot === input.repoRoot
-    && fact.contractId === input.contractId
-    && fact.message === input.message
-    && fact.includeDirty === input.includeDirty;
-}
-
-function sameReviewRequestInput(
-  fact: Extract<RequestFact, { action: "contract.review" }>,
-  input: Extract<RequestInput, { action: "contract.review" }>,
-): boolean {
-  return fact.repoRoot === input.repoRoot
-    && fact.contractId === input.contractId
-    && fact.verdict === input.verdict
-    && fact.summary === input.summary;
-}
-
-function sameContractRequestInput(
-  fact: Extract<RequestFact, { action: "contract.deliver" | "contract.review" }>,
-  input: Extract<RequestInput, { action: "contract.deliver" | "contract.review" }>,
-): boolean {
-  if (fact.action === "contract.deliver" && input.action === "contract.deliver") {
-    return sameDeliverRequestInput(fact, input);
-  }
-  return fact.action === "contract.review" && input.action === "contract.review"
-    && sameReviewRequestInput(fact, input);
-}
-
-function taskRequestPayload(input: Extract<RequestInput, { action: `task.${string}` }>): string {
-  return JSON.stringify(input.request);
-}
-
-function sameTaskRequestInput(
-  fact: Extract<RequestFact, { action: `task.${string}` }>,
-  input: Extract<RequestInput, { action: `task.${string}` }>,
-): boolean {
-  return fact.action === input.action
-    && fact.world === input.world
-    && taskRequestPayload(fact) === taskRequestPayload(input);
-}
-
-function sameRequestInput(fact: RequestFact, input: RequestInput): boolean {
-  if (fact.id !== input.id || fact.action !== input.action) return false;
-  if (fact.action === "akuma.call") {
-    const call = input as Extract<RequestInput, { action: "akuma.call" }>;
-    return fact.archetype === call.archetype
-      && fact.body === call.body
-      && fact.cwd === call.cwd
-      && fact.world === call.world
-      && JSON.stringify(fact.recipe) === JSON.stringify(call.recipe);
-  }
-  if (fact.action === "akuma.wait") {
-    const wait = input as Extract<RequestInput, { action: "akuma.wait" }>;
-    return fact.completion === wait.completion
-      && fact.timeoutMs === wait.timeoutMs
-      && JSON.stringify(fact.targets) === JSON.stringify(wait.targets);
-  }
-  if (fact.action === "akuma.tell") {
-    const tell = input as Extract<RequestInput, { action: "akuma.tell" }>;
-    return fact.target === tell.target && fact.body === tell.body;
-  }
-  if (fact.action === "contract.deliver" || fact.action === "contract.review") {
-    return sameContractRequestInput(
-      fact,
-      input as Extract<RequestInput, { action: "contract.deliver" | "contract.review" }>,
-    );
-  }
-  if (isTaskMutationAction(fact.action) && isTaskMutationAction(input.action)) {
-    const taskInput = input as Extract<RequestInput, { action: `task.${string}` }>;
-    if (taskInput.action !== taskInput.request.action) return false;
-    return sameTaskRequestInput(
-      fact as Extract<RequestFact, { action: `task.${string}` }>,
-      taskInput,
-    );
-  }
-  return fact.action === "akuma.kill" && input.action === "akuma.kill"
-    && JSON.stringify(fact.targets) === JSON.stringify(input.targets);
-}
+import { requestPayloadJson } from "./request-rows.js";
 
 export async function admitRequest(
   paths: AkumaPaths,
@@ -125,7 +43,12 @@ export async function admitRequest(
       });
       const fact = requestFact(heart, input.id);
       if (fact === null) throw new Error(`Akuma request ${input.id} was not admitted`);
-      if (fact.requester !== soul.id || !sameRequestInput(fact, normalized)) {
+      if (
+        fact.requester !== soul.id
+        || fact.id !== normalized.id
+        || fact.action !== normalized.action
+        || requestPayloadJson(fact) !== requestPayloadJson(normalized)
+      ) {
         throw new Error(`Akuma request ${input.id} reused different input`);
       }
       return fact;
@@ -173,7 +96,7 @@ export async function serveUpstreamRequest(
         throw new Error(`Akuma request ${id} has a mismatched service reference`);
       }
       if (before.state === "admitted") updateUpstreamRequestServed(heart, id, service);
-      else if (before.state !== "served" || JSON.stringify(before.service) !== JSON.stringify(service)) {
+      else if (before.state !== "served") {
         throw new Error(`Akuma request ${id} cannot be served as ${service.action}`);
       }
       return requestFact(heart, id)!;

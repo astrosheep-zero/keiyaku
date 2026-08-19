@@ -13,7 +13,7 @@ import { decodeSoul } from "../src/akuma/heart/soul.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { BodyRequestPump } from "../src/akuma/requests.js";
+import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../src/library/fleet.js";
 import type { AkumaObservation } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";

@@ -34,7 +34,7 @@ import {
   settleBodyRequests,
   type UpstreamExecutionPort,
   type RequestChildLaunch,
-} from "./requests.js";
+} from "./request-serve.js";
 import {
   spawnDetachedProcess,
 } from "../runtime/proc/run.js";
