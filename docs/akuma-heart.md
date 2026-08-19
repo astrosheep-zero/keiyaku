@@ -140,6 +140,11 @@ dies; their existence does not depend on a current control-flow reader.
   A witness is admitted only after the same Body explicitly ended `put-down`
   and released the leash. Only the latest Body's witness projects `killed`; a
   successor Body supersedes it without deleting history.
+- **hung Body** — provider-custody failure evidence `{ diagnostic, at }` that
+  may coexist with that Body's `broke-off` end. Before recording a successor
+  Body under a free leash, Heart refuses when the latest Body is hung. This
+  gate is permanent: no clearing transition exists, and pending tells,
+  requests, sessions, and history remain unchanged.
 
 The seal is the one row that must not live in `heart.db`: the birth claim is a leash
 transaction, and "check the seal in the same claim" is only atomic if the
@@ -148,8 +153,9 @@ database, not `heart.db`. Both schemas and their typed interpretation are
 owned inside the closed Heart custody core; no store or repository interface
 sits between callers and its index.
 
-Heart schema version is `19`; leash schema version remains `4`. Version 19
-adds the ten independent Task mutation Body Request actions to Heart authority.
+Heart schema version is `20`; leash schema version remains `4`. Version 20
+permits hung evidence and `broke-off` on the same Body, and hard-cuts the
+permanent same-identity successor gate.
 Successful completion remains
 separate from the optional exact provider fork point; session and complete
 answer remain required for an answered Turn. Older hearts

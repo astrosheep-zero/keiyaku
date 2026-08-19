@@ -380,6 +380,10 @@ export class AkumaHandle {
     }
 
     const settledBody = (await readHeart(this.paths)).latestBody;
+    if (settledBody?.sequence === request.body.sequence && settledBody.hung !== undefined) {
+      try { await leash.clearPause(this.paths); } finally { leash.release(); }
+      return { kind: "unavailable", evidence: "hung" };
+    }
     if (settledBody?.sequence !== request.body.sequence || settledBody.end === undefined) {
       try { await leash.clearPause(this.paths); } finally { leash.release(); }
       return { kind: "unavailable", evidence: "untidy" };

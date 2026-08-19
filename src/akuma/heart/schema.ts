@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 19;
+const HEART_SCHEMA_VERSION = 20;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(
@@ -39,7 +39,8 @@ export const HEART_SCHEMA = `
     hung_at TEXT,
     end TEXT CHECK (end IN ('exited', 'broke-off', 'put-down')),
     ended_at TEXT,
-    CHECK ((hung_diagnostic IS NULL AND hung_at IS NULL) OR (hung_diagnostic IS NOT NULL AND hung_at IS NOT NULL AND end IS NULL))
+    CHECK ((hung_diagnostic IS NULL AND hung_at IS NULL)
+      OR (hung_diagnostic IS NOT NULL AND hung_at IS NOT NULL))
   ) STRICT;
   CREATE TABLE IF NOT EXISTS sessions (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,

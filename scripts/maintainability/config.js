@@ -18,9 +18,9 @@ export const FILE_LINE_EXEMPTIONS = Object.freeze([
     maxEffectiveLines: 650,
   },
   {
-    file: "src/akuma/body.ts",
-    reason: "The Body is the single live supervisor for provider setup, turn consumption, durable control, and owned descendant cleanup.",
-    maxEffectiveLines: 750,
+    file: "src/akuma/body-turn.ts",
+    reason: "One concrete live Turn owner keeps provider custody, receipt and tell pumping, bounded control, and hung retirement coherent.",
+    maxEffectiveLines: 600,
   },
   {
     file: "src/akuma/request-serve.ts",

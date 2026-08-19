@@ -51,6 +51,7 @@ function adapter(input: Readonly<{
       },
       completion: eventsFinished.then(() => input.result),
       async abort() {},
+      async forceDispose() {},
     };
   };
   return {
@@ -1179,6 +1180,7 @@ test("pause aborts the current drive and records the body as put down", async ()
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee00" });
     await initializeHeart(allocated.paths);
     let aborted = false;
+    let forced = false;
     let settle!: (result: TurnResult) => void;
     const completion = new Promise<TurnResult>((resolve) => { settle = resolve; });
     const running: ProviderAdapter = {
@@ -1196,6 +1198,10 @@ test("pause aborts the current drive and records the body as put down", async ()
           },
           completion,
           async abort() {
+            throw new Error("graceful disposal failed");
+          },
+          async forceDispose() {
+            forced = true;
             aborted = true;
             settle({ kind: "failed", diagnostic: "paused" });
           },
@@ -1224,12 +1230,54 @@ test("pause aborts the current drive and records the body as put down", async ()
     });
     await body;
     assert.equal(aborted, true);
+    assert.equal(forced, true);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
     assert.equal(await pauseRequested(allocated.paths), true);
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("forced disposal failure records hung and broke-off before the Body returns", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hung-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee06" });
+    await initializeHeart(allocated.paths);
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, {
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() {
+        return {
+          admission: { fence: "hung-fixture-turn" },
+          events: { async *[Symbol.asyncIterator]() { await new Promise<void>(() => {}); } },
+          completion: new Promise<TurnResult>(() => {}),
+          async abort() { throw new Error("graceful disposal failed"); },
+          async forceDispose() { throw new Error("forced disposal failed"); },
+        };
+      },
+    }, { now: () => "2026-08-08T00:00:00.000Z" });
+    while ((await readHeart(allocated.paths)).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z");
+    await body;
+    const heart = await readHeart(allocated.paths);
+    assert.deepEqual(heart.latestBody?.hung, {
+      diagnostic: "forced disposal failed",
+      at: "2026-08-08T00:00:00.000Z",
+    });
+    assert.equal(heart.latestBody?.end, "broke-off");
+    assert.equal(await probeLeash(allocated.paths), "free");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("durable control aborts an owned session while a live tell is stalled", async () => {

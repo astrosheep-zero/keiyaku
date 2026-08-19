@@ -143,6 +143,13 @@ remains in the timeline. What to do about a stranded, hung, or untidy Akuma is t
 flagship's decision; the surface puts the state and available verbs in front of
 her and says nothing more.
 
+Status and fleet project durable latest-Body `hung` even after that Body ended
+`broke-off` and released the physical leash; its life timestamp remains
+`hung.at`. Interrupt and other control observations report that same condition
+as `hung`, never as ordinary untidy. Tell input may remain pending, but wake
+cannot admit a successor through Heart's permanent gate. Fork remains available
+because it creates a distinct Akuma identity.
+
 `list()` is the compact fleet scan, not a smaller `status()`. Born fleet rows expose id,
 Archetype and description snapshots, life and its source Heart timestamp, and
 pending tell count, but no activity, history, or latest outcome. The public

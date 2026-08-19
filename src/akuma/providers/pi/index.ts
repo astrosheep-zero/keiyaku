@@ -95,6 +95,17 @@ async function createPiSession(sdk: PiSdk, input: PiDriveInput, signal: AbortSig
   return await abortable(setup, signal, (created) => created.session.dispose());
 }
 
+function forceDisposePi(
+  dispose: () => void,
+  settle: (result: TurnResult) => void,
+  setAborting: () => void,
+): Promise<void> {
+  setAborting();
+  dispose();
+  settle({ kind: "failed", diagnostic: "Pi session force-disposed" });
+  return Promise.resolve();
+}
+
 async function drivePi(sdk: PiSdk, input: PiDriveInput, signal: AbortSignal): Promise<Session> {
   const created = await createPiSession(sdk, input, signal);
   const native = created.session;
@@ -171,6 +182,7 @@ async function drivePi(sdk: PiSdk, input: PiDriveInput, signal: AbortSignal): Pr
       })();
       return abortRequest;
     },
+    forceDispose: () => forceDisposePi(dispose, settle, () => { aborting = true; }),
   };
 }
 

@@ -467,7 +467,7 @@ test("Body Request facts have one idempotent monotonic authority", async () => {
   }
 });
 
-test("heart schema version 19 and leash schema version 4 hard-refuse old authority", async () => {
+test("heart schema version 20 and leash schema version 4 hard-refuse old authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-cut-"));
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   try {
@@ -477,7 +477,7 @@ test("heart schema version 19 and leash schema version 4 hard-refuse old authori
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec("CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)");
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 19/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 20/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -680,7 +680,19 @@ test("Body hung custody evidence round trips through Heart", async () => {
       diagnostic: "provider custody remained live",
       at: "2026-08-08T00:00:01.000Z",
     });
+    await breakBody(value.allocated.paths, {
+      sequence: body.sequence,
+      end: "broke-off",
+      at: "2026-08-08T00:00:02.000Z",
+    });
+    assert.equal(life({ leash: "held", body: (await readHeart(value.allocated.paths)).latestBody, kill: null }), "hung");
     leash.release();
+    assert.equal(life({ leash: "free", body: (await readHeart(value.allocated.paths)).latestBody, kill: null }), "hung");
+    const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await assert.rejects(successor.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:03.000Z",
+    }), /permanently gated by hung custody/u);
+    successor.release();
     await assert.rejects(leash.recordBodyHung(value.allocated.paths, {
       sequence: body.sequence,
       diagnostic: "late fabricated custody",

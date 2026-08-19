@@ -286,14 +286,14 @@ test("ACP load retains the exact session ID without a fork or live tell capabili
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("ACP cancellation closes its owned process tree after standard session/cancel", async () => {
+test("ACP forced disposal closes its owned process tree after standard session/cancel", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-acp-cancel-"));
   try {
     const fake = fakeAcp(root, "cancel");
     const drive = await createAcpProvider(fake.execution).start({
       body: "wait", launchTells: [], cwd: root, options: {}, session: { kind: "fresh" },
     });
-    await drive.abort();
+    await drive.forceDispose();
     const events = [];
     for await (const event of drive.events) events.push(event);
     assert.deepEqual(events, [{ type: "session", coordinate: { sessionId: "fresh-session" } }]);
@@ -2998,6 +2998,36 @@ test("Claude abort rejects an unacknowledged tell and settles the Query", async 
   await harness.receiveInput();
   await drive.abort();
   await assert.rejects(submission, /aborted/u);
+  assert.equal((await drive.completion).kind, "failed");
+});
+
+test("Claude abort waits for native Query cleanup", async () => {
+  const cleanup = deferred<void>();
+  let closeRequested = false;
+  const provider = createClaudeProvider(async () => ({
+    query({ prompt }) {
+      const input = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+      void input.next().then(async () => await input.next()).catch(() => undefined);
+      const query = (async function* () {
+        yield { type: "system", subtype: "init", session_id: "session-cleanup" } as unknown as SDKMessage;
+        await cleanup.promise;
+      })() as unknown as Query;
+      query.close = () => { closeRequested = true; };
+      return query;
+    },
+  }));
+  const drive = await provider.start({
+    body: "initial", launchTells: [], cwd: "/work", options: {}, session: { kind: "fresh" },
+  });
+  let retired = false;
+  const retirement = drive.abort().then(() => { retired = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closeRequested, true);
+  assert.equal(retired, false);
+
+  cleanup.resolve();
+  await retirement;
+  assert.equal(retired, true);
   assert.equal((await drive.completion).kind, "failed");
 });
 

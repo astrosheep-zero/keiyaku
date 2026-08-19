@@ -144,6 +144,10 @@ function beginAcpPrompt(
       if (!turn.open()) await child.close(true);
       else await turn.finish(result, () => child.close(true));
     },
+    forceDispose: async () => {
+      if (!turn.open()) await child.close(true);
+      else await turn.finish({ kind: "failed", diagnostic: "ACP turn force-disposed" }, () => child.close(true));
+    },
   };
 }
 

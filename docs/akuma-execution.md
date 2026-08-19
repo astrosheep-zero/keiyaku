@@ -2,6 +2,15 @@
 
 This chapter owns body execution and the tell, interrupt, kill, and fork lifecycle verbs.
 
+A Body first revokes delegated Heart-write and spawn authority, then races its
+Session `abort()` against the control response window. Abort rejection or
+timeout races mandatory adapter-owned `forceDispose()` against the same window.
+Forced success retires custody normally. Forced rejection or timeout appends
+the latest Body's `hung { diagnostic, at }`, records one diagnostic activity,
+ends that Body `broke-off`, and returns from the Body process. It never sleeps
+while holding the leash and never records ordinary `put-down` or handoff after
+that result.
+
 ## Body And Turn
 
 The Body is the process lifetime. Its loop may drive multiple provider Turns.
@@ -53,18 +62,18 @@ create their own watchers or register duties. Each phase uses lexical cleanup
 with the shared signal. One observation round reads one Heart snapshot and
 publishes that same snapshot to stop, pause, and pending-Tell consumers.
 
-A provider Session's `abort()` fulfills only after the adapter has disposed
-every OS child and native session it created or may still create, including
-late resources after cancellation. Streams, receipts, Tell promises, and
-iterators are not custody. The Body revokes its delegated Heart-write and
-spawn authorities before cleanup, then uses its private settlement authority
-for `put-down` or a custody diagnostic.
+A provider Session's `abort()` requests graceful native cancellation. The Body
+revokes delegated Heart-write and spawn authority before retirement, bounds
+that request, and escalates rejection or timeout to mandatory adapter-owned
+`forceDispose()`. Forced disposal fulfills only after every adapter-owned OS
+child or native session is disposed, including late resources after
+cancellation. Streams, receipts, Tell promises, and iterators are not custody.
 
-`hung` has one source: a named external provider child or native session that
-the adapter has not disposed within the public control response window. The
-Body keeps the leash and records the durable Body diagnostic plus diagnostic
-activity naming that custody. Local request recovery and request-pump
-cancellation cannot produce `hung`.
+`hung` has one source: both graceful cancellation and forced disposal failed
+to retire a named external provider child or native session within their
+control response windows. The Body records the durable diagnostic and activity,
+ends `broke-off`, and returns so the physical leash is released. Local request
+recovery and request-pump cancellation cannot produce `hung`.
 
 The detached launch carries a soul seed only before birth. Once birth returns,
 including `already-born`, the persisted soul is the only source for provider,

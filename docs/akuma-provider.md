@@ -57,6 +57,7 @@ type Session = {
   receipts?: AsyncIterable<TellReceipt>;
   completion: Promise<TurnResult>;
   abort: () => Promise<void>;
+  forceDispose: () => Promise<void>;
   tell?: (tell: { id: TellId; text: string }) => Promise<TellSubmission>;
 };
 
@@ -79,7 +80,7 @@ the adapter boundary.
 `ReceiptKind` is the provider-authored receipt word; Provider Core does not
 close or reinterpret that vocabulary.
 
-Fresh start, typed events, completion, abort, Body Request transport, option admission,
+Fresh start, typed events, completion, abort, forced disposal, Body Request transport, option admission,
 and `launchTells` are unconditional Provider Core. Resume, fork, and live tell
 are capabilities expressed only by the corresponding optional operation. An
 adapter without live tell still receives pending tells through `launchTells`
@@ -89,11 +90,15 @@ declaration table, probe, independent `SteerControl`, or `ExecutionObserver`.
 
 Every adapter implements the same setup and Session custody contract. Setup
 accepts the Body signal and disposes any native session or OS child that arrives
-after cancellation. Session `abort()` fulfills only after every child and
-native session the adapter created or may still create is disposed; a late
-resource is never delivered. Streams, receipts, Tell promises, and iterators
-are not separate custody duties. Provider-specific cancellation is an
-implementation detail and does not create provider-specific lifecycle law.
+after cancellation. Session `abort()` requests graceful native cancellation; a
+late resource is never delivered. Streams, receipts, Tell promises, and
+iterators are not separate custody duties. Provider-specific cancellation is
+an implementation detail and does not create provider-specific lifecycle law.
+`forceDispose()` is mandatory and fulfills only after proof that the same
+adapter-owned child or native session has been forcibly disposed: an owned OS
+child is forcibly terminated and its exit awaited, and an in-process session
+awaits its native disposal completion. No PID, host, boot, registry, or other
+OS identity crosses the Provider Core boundary.
 
 `Session` owns only one live native execution. A live `tell` returns `accepted`
 with a provider submission fence, or `turn-ended` when the adapter has already

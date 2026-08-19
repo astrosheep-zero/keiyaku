@@ -124,23 +124,26 @@ async function terminateWindowsTree(pid: number): Promise<void> {
 export async function terminateOwnedProcess(child: ChildProcess, force = false): Promise<void> {
   const pid = child.pid;
   if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-  if (process.platform === "win32") {
-    await terminateWindowsTree(pid);
-    return;
-  }
-  if (force) {
-    try { process.kill(-pid, "SIGKILL"); } catch (error) { ignoreMissingProcess(error); }
-    return;
-  }
   let exited = false;
   const exit = new Promise<void>((resolve) => {
     child.once("exit", () => { exited = true; resolve(); });
     child.once("close", () => { exited = true; resolve(); });
   });
+  if (process.platform === "win32") {
+    await terminateWindowsTree(pid);
+    await exit;
+    return;
+  }
+  if (force) {
+    try { process.kill(-pid, "SIGKILL"); } catch (error) { ignoreMissingProcess(error); }
+    await exit;
+    return;
+  }
   try {
     process.kill(-pid, "SIGTERM");
   } catch (error) {
     ignoreMissingProcess(error);
+    await exit;
     return;
   }
   await Promise.race([exit, delay(TERMINATION_GRACE_MS)]);
@@ -150,6 +153,7 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
   } catch (error) {
     ignoreMissingProcess(error);
   }
+  await exit;
 }
 
 export async function spawnDetachedProcess(input: DetachedProcessInput): Promise<OwnedProcess> {

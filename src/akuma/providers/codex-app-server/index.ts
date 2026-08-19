@@ -207,6 +207,10 @@ async function startCodex(execution: ProviderExecution, input: StartInput): Prom
     events,
     completion,
     abort: () => abortTurn(server, state, finish),
+    forceDispose: async () => {
+      if (!state.settled) settle({ kind: "failed", diagnostic: "codex app-server force-disposed" });
+      await server.close(true);
+    },
     tell: (tell) => steerTurn(server, state, tell),
   };
 }

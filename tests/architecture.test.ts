@@ -197,14 +197,14 @@ test("architecture policy gives activity codec directions exact runtime owners",
   ].join("\n");
   const accepted = check({
     "akuma/provider.ts": provider,
-    "akuma/body.ts": 'import { encodeAgentEvent } from "./provider.js"; export const encode = encodeAgentEvent;',
+    "akuma/body-turn.ts": 'import { encodeAgentEvent } from "./provider.js"; export const encode = encodeAgentEvent;',
     "akuma/akuma.ts": 'import { decodeAgentEvent } from "./provider.js"; export const decode = decodeAgentEvent;',
   });
   assert.deepEqual(accepted, []);
 
   const rejected = check({
     "akuma/provider.ts": provider,
-    "akuma/body.ts": 'import { decodeAgentEvent } from "./provider.js"; export const decode = decodeAgentEvent;',
+    "akuma/body-turn.ts": 'import { decodeAgentEvent } from "./provider.js"; export const decode = decodeAgentEvent;',
     "akuma/akuma.ts": 'import { encodeAgentEvent } from "./provider.js"; export const encode = encodeAgentEvent;',
   });
   assert.equal(rules(rejected).filter((rule) => rule === "architecture/dependency-direction").length, 2);

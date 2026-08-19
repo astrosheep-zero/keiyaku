@@ -381,8 +381,10 @@ export type Session = Readonly<{
   events: AsyncIterable<AgentEvent>;
   receipts?: AsyncIterable<TellReceipt>;
   completion: Promise<TurnResult>;
-  /** Fulfills after every adapter-owned OS child or native session is disposed. */
+  /** Requests graceful adapter-owned cancellation. */
   abort(): Promise<void>;
+  /** Fulfills only after forced adapter-owned disposal is proved. */
+  forceDispose(): Promise<void>;
   tell?(tell: Readonly<{ id: string; text: string }>): Promise<TellSubmission>;
 }>;
 

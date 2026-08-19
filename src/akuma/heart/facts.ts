@@ -225,7 +225,8 @@ export function life(input: Readonly<{
   body: BodyFact | null;
   kill: KillFact | null;
 }>): AkumaLife {
-  if (input.leash === "held") return input.body?.hung === undefined ? "running" : "hung";
+  if (input.body?.hung !== undefined) return "hung";
+  if (input.leash === "held") return "running";
   if (input.body === null || input.body.end === undefined) return "untidy";
   if (input.kill?.bodySequence === input.body.sequence) return "killed";
   return input.body.end === "exited" ? "asleep" : "stranded";

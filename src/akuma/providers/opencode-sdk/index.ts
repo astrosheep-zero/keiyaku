@@ -212,6 +212,16 @@ function terminalSettlement(
   return { completion, finish };
 }
 
+async function forceDisposeOpencode(
+  abortController: AbortController,
+  close: () => Promise<void>,
+  finish: (result: TurnResult) => Promise<void>,
+): Promise<void> {
+  abortController.abort();
+  await close();
+  await finish({ kind: "failed", diagnostic: "OpenCode session force-disposed" });
+}
+
 async function drive(execution: ProviderExecution, input: Input, loader?: OpencodeSdkLoader): Promise<Session> {
   admit(input.options);
   const signal = input.signal ?? new AbortController().signal;
@@ -282,6 +292,7 @@ async function drive(execution: ProviderExecution, input: Input, loader?: Openco
         void session.abort({ path: { id: sessionId }, query: { directory: input.cwd }, throwOnError: true }).catch(() => undefined);
         await finish({ kind: "failed", diagnostic: "OpenCode session interrupted" });
       },
+      forceDispose: () => forceDisposeOpencode(abortController, closeOnce, finish),
     };
   } catch (error) {
     signal.removeEventListener("abort", abortSetup);

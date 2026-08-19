@@ -1144,6 +1144,11 @@ test("interrupt reports hung when the Body does not release its held leash", asy
       diagnostic: "provider custody remained live",
       at: "2026-08-08T00:00:01.000Z",
     });
+    await breakBody(allocated.paths, {
+      sequence: body.sequence,
+      end: "broke-off",
+      at: "2026-08-08T00:00:02.000Z",
+    });
     try {
       const handle = (await akumaAt(root)).of({ id: allocated.id });
       assert.deepEqual(await handle.interrupt("never recorded"), {
@@ -1153,6 +1158,13 @@ test("interrupt reports hung when the Body does not release its held leash", asy
       assert.equal((await handle.status()).life, "hung");
       assert.equal(await pauseRequested(allocated.paths), true);
       assert.deepEqual((await readHeart(allocated.paths)).pending, []);
+      holder.release();
+      assert.deepEqual(await handle.interrupt("still never recorded"), {
+        kind: "unavailable",
+        evidence: "hung",
+      });
+      assert.equal((await handle.status()).life, "hung");
+      assert.equal(await pauseRequested(allocated.paths), false);
     } finally {
       holder.release();
     }

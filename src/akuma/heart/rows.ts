@@ -184,6 +184,9 @@ export function insertBodyFact(
   database: DatabaseSync,
   input: Readonly<{ leashTakenAt: string }>,
 ): number {
+  if (latestBodyFact(database)?.hung !== undefined) {
+    throw new Error("Akuma successor is permanently gated by hung custody");
+  }
   const result = database.prepare("INSERT INTO bodies(leash_taken_at) VALUES (?)").run(input.leashTakenAt);
   return Number(result.lastInsertRowid);
 }
@@ -254,7 +257,7 @@ export function markBodyHung(
   input: Readonly<{ sequence: number; diagnostic: string; at: string }>,
 ): void {
   const result = database.prepare(`UPDATE bodies SET hung_diagnostic = ?, hung_at = ?
-    WHERE sequence = ? AND end IS NULL AND hung_diagnostic IS NULL`)
+    WHERE sequence = ? AND hung_diagnostic IS NULL`)
     .run(input.diagnostic, input.at, input.sequence);
   if (result.changes !== 1) throw new Error(`Akuma Body ${input.sequence} cannot record hung custody`);
 }

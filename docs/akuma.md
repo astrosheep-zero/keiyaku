@@ -67,18 +67,20 @@ Heart facts:
 | state    | leash | Heart evidence | meaning |
 | -------- | ----- | -------------- | ------- |
 | running  | held  | no hung diagnostic for the latest Body | a Body owns the execution seat |
-| hung     | held  | latest Body records provider custody that did not retire | the owner cannot yield cleanly |
+| hung     | held or free | latest Body records provider custody that did not retire | same identity is permanently gated |
 | untidy   | free  | no explicit end for the latest Body | physical death released the seat without clean settlement |
 | asleep   | free  | latest Body ended `exited` | last turn completed; tell and fork ready |
 | stranded | free  | latest Body ended `broke-off` or `put-down` | that drive did not complete normally |
 | killed   | free  | latest Body has a kill witness | `kill` witnessed that Body's clean self-termination |
 
-`hung` is constructed only by the live Body from failed provider-custody
-retirement, never by a public timeout. `hung` and `untidy` are conservative
-truth, not permission to reconstruct a process grip. A description can
-diagnose, refuse, wait, or report; it cannot authorize signaling a non-child. A
-later Body may take a free leash and supersede untidy history without claiming
-that it terminated the predecessor.
+`hung` is constructed only by the live Body after both graceful abort and
+adapter-owned forced disposal fail, never by a public timeout. It remains hung
+after the Body returns and frees the leash; Heart permanently refuses every
+same-Akuma successor. `hung` and `untidy` are conservative truth, not
+permission to reconstruct a process grip. A description can diagnose, refuse,
+wait, or report; it cannot authorize signaling a non-child. A later Body may
+take a free leash and supersede untidy history without claiming that it
+terminated the predecessor; it cannot supersede hung history.
 
 Before birth a directory is **unborn**: either being born or abandoned by a
 crashed caller — indistinguishable by reading, and no fact about the akuma
