@@ -768,6 +768,50 @@ test("Grok maps only payloads backed by pinned emitters", () => {
       update: { sessionUpdate: "tool_call", toolCallId: "edit", name: "search_replace", rawInput: { file_path: "src/a.ts" } },
       call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/a.ts" }] },
     },
+    {
+      // Captured Grok Build 1.0.3 transcript: native tool name carried in title only.
+      update: { sessionUpdate: "tool_call", toolCallId: "title-edit", title: "search_replace", rawInput: { file_path: "src/a.ts" } },
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/a.ts" }] },
+    },
+    {
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolname-edit",
+        toolName: "search_replace",
+        rawInput: { file_path: "src/b.ts" },
+      } as GrokUpdate,
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/b.ts" }] },
+    },
+    {
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "name-over-title",
+        name: "search_replace",
+        title: "run_terminal_cmd",
+        rawInput: { file_path: "src/a.ts", command: "npm test" },
+      },
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/a.ts" }] },
+    },
+    {
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "title-over-toolname",
+        title: "search_replace",
+        toolName: "run_terminal_cmd",
+        rawInput: { file_path: "src/a.ts", command: "npm test" },
+      } as GrokUpdate,
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/a.ts" }] },
+    },
+    {
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "named-run",
+        name: "run_terminal_cmd",
+        title: "search_replace",
+        rawInput: { command: "npm test", file_path: "src/a.ts" },
+      },
+      call: { kind: "run", command: "npm test" },
+    },
   ];
   for (const { update, call } of cases) assert.deepEqual(interpretGrokTool(update), call);
   assert.equal(interpretGrokTool({
@@ -830,6 +874,38 @@ test("Grok evidence-backed calls survive sparse completion without duplicate lif
       id: "future-1",
       name: "future_tool",
       call: { kind: "other", display: "future_tool" },
+      result: { status: "ok" },
+    },
+  ]);
+  for (const event of events) assert.deepEqual(decodeAgentEvent(encodeAgentEvent(event)), event);
+});
+
+test("Grok title-only search_replace survives sparse completion as one fileChange lifecycle", () => {
+  const events = mapAcpSeries([
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: "replace-title",
+      title: "search_replace",
+      status: "in_progress",
+      rawInput: { file_path: "src/a.ts" },
+    },
+    { sessionUpdate: "tool_call_update", toolCallId: "replace-title", status: "in_progress" },
+    { sessionUpdate: "tool_call_update", toolCallId: "replace-title", status: "completed" },
+  ], interpretGrokTool);
+  assert.deepEqual(events, [
+    {
+      type: "tool",
+      phase: "started",
+      id: "replace-title",
+      name: "search_replace",
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/a.ts" }] },
+    },
+    {
+      type: "tool",
+      phase: "completed",
+      id: "replace-title",
+      name: "search_replace",
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/a.ts" }] },
       result: { status: "ok" },
     },
   ]);

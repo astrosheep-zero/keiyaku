@@ -36,7 +36,7 @@ function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
 
 function nativeName(update: AcpToolUpdate): string | undefined {
   const wire = update as AcpToolUpdate & { toolName?: unknown };
-  return nonblank(update.name) ?? nonblank(wire.toolName);
+  return nonblank(update.name) ?? nonblank(update.title) ?? nonblank(wire.toolName);
 }
 
 function readCall(name: string, input: Readonly<Record<string, unknown>>): ToolCall | undefined {
