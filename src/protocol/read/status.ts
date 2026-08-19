@@ -19,7 +19,7 @@ import type { ContractTargetLag, ContractWorkspaceObservation } from "../../git/
 import type { GitRepository } from "../../git/process.js";
 import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
-import type { ContractId, ContractState, DeliverData, SnapshotId } from "../../core/facts/types.js";
+import type { ContractId, ContractState, DeliverData, JournalEntry, SnapshotId } from "../../core/facts/types.js";
 
 export type ContractPhase = "waiting" | "bound" | "pending-delivery" | "claimed" | "abandoned";
 export type ContractDisposition = "active" | "terminal";
@@ -40,6 +40,7 @@ export type ContractRow = Readonly<{
   title: string | null;
   phase: ContractPhase;
   phaseAt: string;
+  lastJournalAt: string;
   disposition: ContractDisposition;
   workspace: "worktree" | "here";
   worktreePath: string | null;
@@ -86,6 +87,12 @@ export function phaseAtFor(
   bindAt: string,
 ): string {
   return state.terminal?.at ?? state.delivery?.at ?? state.bound?.at ?? bindAt;
+}
+
+export function lastJournalAtFor(entries: readonly Pick<JournalEntry, "at">[]): string {
+  const last = entries.at(-1);
+  if (last === undefined) throw new Error("present Contract journal is empty");
+  return last.at;
 }
 
 async function managedWorkspaceFacts(
@@ -152,13 +159,14 @@ type ContractRowInput = Readonly<{
   repository: GitRepository;
   state: ContractState;
   bindAt: string;
+  lastJournalAt: string;
   targetObservation: ContractRow["targetObservation"];
   register: PlaceRegister;
   resolveHereWorkspace?: HereWorkspaceObservationResolver;
 }>;
 
 async function rowFor(input: ContractRowInput): Promise<ContractRow> {
-  const { repository, state, bindAt, targetObservation, register, resolveHereWorkspace } = input;
+  const { repository, state, bindAt, lastJournalAt, targetObservation, register, resolveHereWorkspace } = input;
   const workspace = state.coordinates.workspace;
   const gates = gateReports(state);
   const { appointed, workspaceObservation, targetLag } = workspace === "worktree"
@@ -169,6 +177,7 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
     title: titleFor(state),
     phase: phaseFor(state),
     phaseAt: phaseAtFor(state, bindAt),
+    lastJournalAt,
     disposition: state.terminal === null ? "active" : "terminal",
     workspace,
     worktreePath: appointed === undefined ? null : worktreePath(repository, appointed.place),
@@ -207,10 +216,12 @@ export async function readContractBoard(
     if (value.state === null) continue;
     const state = value.state;
     const bindAt = value.entries[0]!.at;
+    const lastJournalAt = lastJournalAtFor(value.entries);
     rows.push(observeDeliveryTargetAt(observation, state).then((target) => rowFor({
       repository: observation.repository,
       state,
       bindAt,
+      lastJournalAt,
       targetObservation: target,
       register,
       ...(resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace }),
@@ -237,6 +248,7 @@ export async function readContractObservation(
           repository: observation.repository,
           state,
           bindAt: record.entries[0]!.at,
+          lastJournalAt: lastJournalAtFor(record.entries),
           targetObservation: await observeDeliveryTargetAt(observation, state),
           register: await readPlaceRegister(observation.repository),
           ...(resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace }),

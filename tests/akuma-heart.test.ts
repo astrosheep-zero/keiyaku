@@ -76,6 +76,7 @@ test("existing Heart opens adjudicate absence without recreating heart.db", asyn
       latestKill: null,
       stop: null,
       pause: null,
+      lastActivityAt: null,
     });
     assert.equal(await readForkPoint(value.allocated.paths, "missing"), null);
     await assert.rejects(
@@ -870,6 +871,7 @@ test("activitySlice returns one retained-bound and row epoch", async () => {
     const firstBody = await body.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
+    assert.equal((await readHeart(value.allocated.paths)).lastActivityAt, null);
     const turn = await beginTurn(value.allocated.paths, {
       bodySequence: firstBody.sequence,
       startedAt: "2026-08-08T00:00:00.000Z",
@@ -902,6 +904,33 @@ test("activitySlice returns one retained-bound and row epoch", async () => {
       restore();
       writer.close();
     }
+    body.release();
+  } finally { value.close(); }
+});
+
+test("Heart reads lastActivityAt from the final retained timeline row", async () => {
+  const value = await fixture();
+  try {
+    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await body.birth(value.allocated.paths, value.soul);
+    const firstBody = await body.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    const turn = await beginTurn(value.allocated.paths, {
+      bodySequence: firstBody.sequence,
+      startedAt: "2026-08-08T00:00:01.000Z",
+    });
+    await appendActivity(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      event: { type: "note", text: "latest" },
+      at: "2026-08-08T00:00:02.000Z",
+    });
+    await endTurn(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      outcome: { kind: "failed", diagnostic: "done" },
+      completedAt: "2026-08-08T00:00:03.000Z",
+    });
+    assert.equal((await readHeart(value.allocated.paths)).lastActivityAt, "2026-08-08T00:00:03.000Z");
     body.release();
   } finally { value.close(); }
 });

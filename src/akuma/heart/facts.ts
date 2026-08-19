@@ -219,6 +219,7 @@ export type HeartSnapshot = Readonly<{
   latestKill: KillFact | null;
   stop: StopFact | null;
   pause: PauseFact | null;
+  lastActivityAt: string | null;
 }>;
 
 export function life(input: Readonly<{

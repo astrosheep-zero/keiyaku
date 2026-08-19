@@ -21,7 +21,7 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { contractJournalPath } from "../src/git/identity.js";
-import { phaseAtFor } from "../src/protocol/read/status.js";
+import { lastJournalAtFor, phaseAtFor } from "../src/protocol/read/status.js";
 import { contractId, contractSegment } from "../src/core/facts/types.js";
 import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
 import { contractNamespace } from "../src/settlement/settle.js";
@@ -87,7 +87,7 @@ async function populatedWorld() {
   const akumaId = await bornAkuma(repository.path, "a0000001");
   assert.equal((await publishDispatch({ repository: await repositoryAt(repository.path), akuId: akumaId, contractId: contract.id })).kind, "dispatched");
   await moveAlias({ world: repository.path, alias: "@watch", akuId: akumaId });
-  return { repository, contract, taskId: added.value.id, akumaId };
+  return { repository, contract, keiyaku: bound.keiyaku, taskId: added.value.id, akumaId };
 }
 
 function gitInvocations(path: string): readonly string[] {
@@ -432,6 +432,8 @@ test("kanshi keeps absent Contract and Task worlds explicit", async () => {
   if (report.akuma.kind === "present") {
     const row = report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
     assert.equal(row?.id, akumaId);
+    assert.equal("lastActivityAt" in (row ?? {}), true);
+    assert.equal("lastActivityAt" in (row ?? {}) ? row.lastActivityAt : undefined, null);
     assert.equal(row === undefined ? false : "contract" in row, false);
   }
 });
@@ -619,6 +621,7 @@ function contractRow(input: Partial<Extract<KanshiReport["contracts"], { kind: "
     title: input.title ?? input.id.slice("kei/".length),
     phase: "waiting" as const,
     phaseAt: "2026-08-11T23:59:30.000Z",
+    lastJournalAt: "2026-08-11T23:59:30.000Z",
     disposition: "active" as const,
     workspace,
     worktreePath: workspace === "worktree" ? path : null,
@@ -741,13 +744,13 @@ function attentionReport(): KanshiReport {
       value: {
         searched: ["/repo/.keiyaku/akuma/run"],
         rows: [
-          { id: "aku/worker/a0000001", archetype: "worker", life: "running", lifeAt: "2026-08-11T23:56:00.000Z", pending: [], aliases: ["@lead"], contract: { id: "kei/active-contract", observed: "active" } },
-          { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", lifeAt: "2026-08-11T00:00:00.000Z", pending: [], aliases: [] },
-          { id: "aku/worker/a0000003", archetype: "worker", life: "killed", lifeAt: "2026-08-11T23:59:30.000Z", pending: [], aliases: [] },
+          { id: "aku/worker/a0000001", archetype: "worker", life: "running", lifeAt: "2026-08-11T23:56:00.000Z", lastActivityAt: "2026-08-11T23:55:00.000Z", pending: [], aliases: ["@lead"], contract: { id: "kei/active-contract", observed: "active" } },
+          { id: "aku/worker/a0000002", archetype: "worker", life: "asleep", lifeAt: "2026-08-11T00:00:00.000Z", lastActivityAt: null, pending: [], aliases: [] },
+          { id: "aku/worker/a0000003", archetype: "worker", life: "killed", lifeAt: "2026-08-11T23:59:30.000Z", lastActivityAt: "2026-08-11T23:59:00.000Z", pending: [], aliases: [] },
           { id: "aku/worker/a0000004", life: "stillborn", seal: { at: "2026-08-10T00:00:00.000Z", evidence: "stillborn" }, aliases: [] },
           { id: "aku/worker/a0000005", life: "unborn", aliases: [] },
-          { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", lifeAt: "2026-08-11T22:00:00.000Z", strandedReason: "resume-unsupported", pending: ["pending"], aliases: [], contract: { id: "kei/missing-contract", observed: "missing" } },
-          { id: "aku/worker/a0000007", archetype: "worker", life: "hung", lifeAt: null, pending: [], aliases: [] },
+          { id: "aku/worker/a0000006", archetype: "worker", life: "stranded", lifeAt: "2026-08-11T22:00:00.000Z", lastActivityAt: "2026-08-11T22:30:00.000Z", strandedReason: "resume-unsupported", pending: ["pending"], aliases: [], contract: { id: "kei/missing-contract", observed: "missing" } },
+          { id: "aku/worker/a0000007", archetype: "worker", life: "hung", lifeAt: null, lastActivityAt: null, pending: [], aliases: [] },
         ],
       },
     },
@@ -784,7 +787,9 @@ test("Kanshi text keeps complete identities in the aperture grammar", async () =
   assert.doesNotMatch(signature, / fleet /u);
   const json = JSON.stringify(report);
   assert.match(json, /"phaseAt":/u);
+  assert.match(json, /"lastJournalAt":/u);
   assert.match(json, /"lifeAt":/u);
+  assert.match(json, /"lastActivityAt":/u);
   assert.doesNotMatch(json, /"(?:age|lifeSince)":|\u001b/u);
 });
 
@@ -798,6 +803,30 @@ test("Contract phase timestamps select the owning journal entry", () => {
   assert.equal(phaseAtFor({ terminal: null, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never }, bindAt), deliveryAt);
   assert.equal(phaseAtFor({ terminal: { at: claimedAt } as never, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never }, bindAt), claimedAt);
   assert.equal(phaseAtFor({ terminal: { at: "2026-08-12T00:04:00.000Z" } as never, delivery: { at: deliveryAt } as never, bound: { at: boundAt } as never }, bindAt), "2026-08-12T00:04:00.000Z");
+});
+
+test("Contract journal recency selects the final frozen journal entry", () => {
+  const journal = [
+    { at: "2026-08-12T00:00:00.000Z" },
+    { at: "2026-08-12T00:01:00.000Z" },
+    { at: "2026-08-12T00:02:00.000Z" },
+  ] as const;
+  assert.equal(lastJournalAtFor(journal), "2026-08-12T00:02:00.000Z");
+});
+
+test("Kanshi Contract journal recency moves after a terms amendment", async () => {
+  const { repository, contract, keiyaku } = await populatedWorld();
+  const before = await observe(repository.path, await Repo.at({ path: repository.path }));
+  assert.equal(before.contracts.kind, "present");
+  if (before.contracts.kind !== "present") return;
+  const initial = before.contracts.value.rows.find((row) => row.id === contract.id);
+  const amended = await keiyaku.amend({ gates: [] });
+  const after = await observe(repository.path, await Repo.at({ path: repository.path }));
+  assert.equal(after.contracts.kind, "present");
+  if (after.contracts.kind !== "present") return;
+  const row = after.contracts.value.rows.find((candidate) => candidate.id === contract.id);
+  assert.equal(row?.lastJournalAt, amended.facts.at(-1)?.at);
+  assert.equal(row?.phaseAt, initial?.phaseAt);
 });
 
 test("Kanshi ages keep every unit boundary, future, and absent evidence distinct", () => {
@@ -866,7 +895,14 @@ test("Kanshi text retains every entity and the aperture hierarchy", () => {
   assert.match(contracts, /task task\/running/u);
   assert.match(contracts, /akuma aku\/worker\/a0000001 \(@lead\)/u);
   assert.doesNotMatch(contracts, /world summary should stay hidden/u);
-  assert.match(contracts, /Cold Contract · bound · 2h · target main · behind 0/u);
+  const cold = contracts.split("kei/cold-contract")[1]!;
+  const nextCold = cold.search(/^[!●○✓?×] /mu);
+  const coldBlock = nextCold === -1 ? cold : cold.slice(0, nextCold);
+  assert.match(coldBlock, /Cold Contract/u);
+  assert.match(coldBlock, /bound · 2h/u);
+  assert.match(coldBlock, /journal 30s/u);
+  assert.match(coldBlock, /target main/u);
+  assert.match(coldBlock, /behind 0/u);
   assert.match(contracts, /Terminal Contract · claimed · 2d/u);
   assert.match(contracts, /Target Unknown · waiting · future/u);
   assert.match(contracts, /target main · behind unknown · drift/u);
@@ -878,9 +914,7 @@ test("Kanshi text retains every entity and the aperture hierarchy", () => {
   assert.match(contracts, /worktree unavailable/u);
   assert.match(contracts, /^ {2}│ ↳ \/repo\/\.git\/keiyaku\/wt\/unavailable-contract$/mu);
   assert.match(contracts, /worktree clean/u);
-  const cold = contracts.split("kei/cold-contract")[1]!;
-  const nextCold = cold.search(/^[!●○✓?×] /mu);
-  assert.doesNotMatch((nextCold === -1 ? cold : cold.slice(0, nextCold)), /↳ /u);
+  assert.doesNotMatch(coldBlock, /↳ /u);
 
   const tasks = sectionBody(text, "TASK");
   assert.match(tasks, /^‖ task\/blocked$/mu);
@@ -901,9 +935,17 @@ test("Kanshi text retains every entity and the aperture hierarchy", () => {
   const fleet = sectionBody(text, "FLEET");
   assert.match(fleet, /^● aku\/worker\/a0000001 \(@lead\)$/mu);
   assert.match(fleet, /running · 4m/u);
-  assert.match(fleet, /stranded · 2h · resume unsupported/u);
+  assert.match(fleet, /activity 5m/u);
+  const stranded = fleet.split("aku/worker/a0000006")[1]!;
+  const nextStranded = stranded.search(/^[!●○✓?×] /mu);
+  const strandedBlock = nextStranded === -1 ? stranded : stranded.slice(0, nextStranded);
+  assert.match(strandedBlock, /stranded/u);
+  assert.match(strandedBlock, /stranded · 2h/u);
+  assert.match(strandedBlock, /activity 1h/u);
+  assert.match(strandedBlock, /resume unsupported/u);
   assert.match(fleet, /-> kei\/missing-contract \(missing\)/u);
   assert.match(fleet, /asleep · 1d · unbound/u);
+  assert.doesNotMatch(fleet, /asleep · 1d · activity/u);
   assert.match(fleet, /killed · 30s/u);
   assert.match(fleet, /hung · —/u);
   assert.deepEqual(report, before);

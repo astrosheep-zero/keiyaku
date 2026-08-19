@@ -81,6 +81,7 @@ export type AkumaListRow = Readonly<{
   description?: string;
   life: AkumaLife;
   lifeAt: string | null;
+  lastActivityAt: string | null;
   pending: readonly string[];
 }>;
 
@@ -240,6 +241,7 @@ async function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot?: HeartS
     ...(snapshot.soul.description === undefined ? {} : { description: snapshot.soul.description }),
     life: currentLife,
     lifeAt: lifeAt(currentLife, snapshot.latestBody, snapshot.latestKill, snapshot.soul.createdAt),
+    lastActivityAt: snapshot.lastActivityAt,
     pending: snapshot.pending.map((tell) => tell.id),
   };
 }

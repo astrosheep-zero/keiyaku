@@ -2,6 +2,12 @@
 
 This chapter owns package-root mutation, refusal, retry, and audit result shapes.
 
+Kanshi Contract rows expose `lastJournalAt`, the timestamp of the final entry
+in the frozen journal observation used to fold that row. Akuma fleet rows
+expose `lastActivityAt`, the timestamp of the highest-sequence retained Heart
+timeline row, or `null` when no timeline activity exists. These are source
+timestamps, not durations or lifecycle substitutes.
+
 ## Mutation Results And Errors
 
 Protocol owns its internal three-arm outcome and uses it only to compose an

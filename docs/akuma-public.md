@@ -151,9 +151,12 @@ cannot admit a successor through Heart's permanent gate. Fork remains available
 because it creates a distinct Akuma identity.
 
 `list()` is the compact fleet scan, not a smaller `status()`. Born fleet rows expose id,
-Archetype and description snapshots, life and its source Heart timestamp, and
-pending tell count, but no activity, history, or latest outcome. The public
-types share `id` and `life` by coincidence, not by inheritance. The id is
+Archetype and description snapshots, life and its source Heart timestamp,
+`lastActivityAt`, and pending tell count, but no activity, history, or latest
+outcome. `lastActivityAt` is the highest-sequence retained Heart timeline row's
+timestamp, or `null` when no timeline activity exists. Its bounded lookup does
+not load retained history and is distinct from life and its timestamp. The
+public types share `id` and `life` by coincidence, not by inheritance. The id is
 projected verbatim and has no endpoint-state interpretation here. Unborn/stillborn rows retain
 their existing evidence. A valid allocated directory that is otherwise readable
 is not omitted for the recognized unborn/stillborn cases: missing Heart or leash

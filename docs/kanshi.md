@@ -51,8 +51,11 @@ for detached HEAD, or when that observation fails. The immutable
 `ContractBoard.state`, not copied into another report field. It is not the
 invocation worktree HEAD.
 
-Contract phase, current gate testimony, and born Akuma life retain their
-owners' source timestamps in the assembled rows. Kanshi does not persist or
+Contract phase, final frozen journal, current gate testimony, born Akuma life,
+and latest semantic activity retain their owners' source timestamps in the
+assembled rows. Contract `lastJournalAt` is the final entry in the frozen
+journal observation. Born Akuma `lastActivityAt` is its Heart owner's bounded
+latest timeline-row observation and may be `null`. Kanshi does not persist or
 precompute an age. Text derives every displayed age against this report's one
 `observedAt`; JSON retains only the source timestamps.
 

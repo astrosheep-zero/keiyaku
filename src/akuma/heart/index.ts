@@ -47,6 +47,7 @@ import {
 } from "./tells.js";
 import {
   activityFactSlice,
+  lastActivityAt as readLastActivityAt,
   pruneActivityFacts,
   type ActivityFactSlice,
 } from "./timeline.js";
@@ -301,10 +302,20 @@ export async function readHeart(paths: AkumaPaths): Promise<HeartSnapshot> {
         latestKill: latestKillFact(heart),
         stop: stopFact(heart),
         pause: pauseFact(heart),
+        lastActivityAt: readLastActivityAt(heart),
     })));
   } catch (error) {
     if (isHeartAbsent(error)) {
-      return { soul: null, latestBody: null, latestSession: null, pending: [], latestKill: null, stop: null, pause: null };
+      return {
+        soul: null,
+        latestBody: null,
+        latestSession: null,
+        pending: [],
+        latestKill: null,
+        stop: null,
+        pause: null,
+        lastActivityAt: null,
+      };
     }
     throw error;
   }

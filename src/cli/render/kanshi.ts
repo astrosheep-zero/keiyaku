@@ -223,9 +223,10 @@ function renderContractRow(
   const compact = !hot && selection !== "contract";
   const title = row.title ?? "title unavailable";
   const phase = `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`;
+  const journal = `journal ${formatAge(row.lastJournalAt, report.observedAt)}`;
   const lines = [identityLine(contractMark(row), row.id)];
-  lines.push(...plumbFacts(compact ? [title, phase, ...targetFacts(row)] : [title], context.columns));
-  if (!compact) lines.push(...plumbFacts([phase, ...targetFacts(row)], context.columns));
+  lines.push(...plumbFacts(compact ? [title, phase, journal, ...targetFacts(row)] : [title], context.columns));
+  if (!compact) lines.push(...plumbFacts([phase, journal, ...targetFacts(row)], context.columns));
   lines.push(...plumbFacts([workspaceState(row)], context.columns));
   if (
     showWorkspacePath(row, hot || selection === "contract")
@@ -318,9 +319,12 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
     lines.push(identityLine(akumaMark(row.life), row.id, akumaLabel(row)));
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
     const life = `${row.life} · ${formatAge(lifeAt, report.observedAt)}`;
+    const activity = "lastActivityAt" in row && row.lastActivityAt !== null
+      ? [`activity ${formatAge(row.lastActivityAt, report.observedAt)}`]
+      : [];
     const key = row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"
-      ? [life, "resume unsupported"]
-      : [life];
+      ? [life, ...activity, "resume unsupported"]
+      : [life, ...activity];
     const relation = row.contract === undefined
       ? ["unbound"]
       : [endpointFact(row.contract.id, row.contract.observed)];
