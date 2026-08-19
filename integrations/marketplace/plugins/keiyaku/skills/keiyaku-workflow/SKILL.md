@@ -96,11 +96,9 @@ that actually govern the assignment.
 
 Contract association, available forwarded actions, and the brief are
 independent inputs. When a Reviewer should record its own verdict, include
-`--allowed contract.review` and explicitly require the `review` command in the
-brief. When a Deliverer should tender its completed candidate, include
-`--allowed contract.deliver` and explicitly require `deliver` after the named
-verification. Do not infer an available action from `--contract` or a seat,
-and do not treat an allowed action as an instruction to use it.
+`--allowed contract.review` and say in the brief to record `--satisfied` on
+pass or `--unsatisfied` on failure. When a Deliverer should tender its completed
+candidate, include `--allowed contract.deliver` and say so in the brief.
 
 A `Deliverer` implements and verifies the terms in `Worktree`. Commission a
 `Reviewer` after delivery. The reviewer inspects the complete current Contract
@@ -231,8 +229,8 @@ keiyaku review <contract> --unsatisfied --summary "<finding>"
 
 Have an independent reviewer inspect the delivered Contract worktree snapshot.
 If it should record the verdict itself, dispatch it with `--allowed
-contract.review` and say so in the brief; otherwise its answer is review input
-for the coordinator to record.
+contract.review` and state both verdicts in the brief. Otherwise its answer is
+review input for the coordinator to record.
 The `review` command records the verdict. `--satisfied` requests placement; if
 the other gates are current, the receipt shows `claimed`.
 
