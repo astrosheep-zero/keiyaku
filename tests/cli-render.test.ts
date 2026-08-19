@@ -65,8 +65,8 @@ test("completion stops render the public unmet prerequisites in order", () => {
 
   const review: InvocationResult = { ...envelope, verb: "review", verdict: "satisfied", placement };
   assert.equal(renderText(review), [
-    "✓ review satisfied — kei/waiting-on-prerequisites",
-    "! contract not complete",
+    "✓ review satisfied — not complete — kei/waiting-on-prerequisites",
+    "  candidate kept",
     "! completion blocked · prerequisites-unsatisfied",
     "  prerequisite kei/active-prerequisite · active",
     "  prerequisite kei/abandoned-prerequisite · abandoned",
@@ -76,11 +76,103 @@ test("completion stops render the public unmet prerequisites in order", () => {
   ].join("\n"));
 });
 
-test("reintegration receipts show the new target and a bounded movement stop", () => {
+test("deliver projects a ran Verification completion", () => {
+  const contract = contractId("kei/completion");
+  const integration = snapshotId("integration-1");
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+  assert.equal(renderText({
+    ...envelope,
+    verb: "deliver",
+    completion: { integration, verification: { mode: "ran", verdict: "satisfied" } },
+  }), [
+    "✓ delivered — kei/completion",
+    "  target -> integration-1 · verified (ran)",
+    "  record",
+    "    journal claim · claimed",
+    "    head head",
+  ].join("\n"));
+});
+
+test("deliver projects no Verification and an unsatisfied non-gating Verification", () => {
+  const contract = contractId("kei/completion-states");
+  const integration = snapshotId("integration-2");
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+  assert.equal(renderText({
+    ...envelope,
+    verb: "deliver",
+    completion: { integration },
+  }), [
+    "✓ delivered — kei/completion-states",
+    "  target -> integration-2",
+    "  record",
+    "    journal claim · claimed",
+    "    head head",
+  ].join("\n"));
+
+  assert.equal(renderText({
+    ...envelope,
+    verb: "deliver",
+    completion: { integration, verification: { mode: "ran", verdict: "unsatisfied" } },
+    verificationSummary: "[1 bash exit 1]",
+  }), [
+    "✓ delivered — kei/completion-states",
+    "  target -> integration-2",
+    "! verification unsatisfied (ran)",
+    "  summary",
+    "",
+    "[1 bash exit 1]",
+    "",
+    "  record",
+    "    journal claim · claimed",
+    "    head head",
+  ].join("\n"));
+});
+
+test("review projects reused Verification and distinguishes completion in its title", () => {
+  const contract = contractId("kei/review-completion");
+  const integration = snapshotId("integration-3");
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+  };
+  assert.equal(renderText({
+    ...envelope,
+    verb: "review",
+    verdict: "satisfied",
+    completion: { integration, verification: { mode: "reused", verdict: "satisfied" } },
+  }), [
+    "✓ review satisfied — complete — kei/review-completion",
+    "  target -> integration-3 · verified (reused)",
+    "  record",
+    "    journal claim · claimed",
+    "    head head",
+  ].join("\n"));
+});
+
+test("movement projects its deviation and reintegration coordinates", () => {
   const contract = contractId("kei/reintegrated");
   const predecessor = snapshotId("target-1");
   const integrated = snapshotId("integration-2");
-  const observed = snapshotId("target-3");
+  const secondPredecessor = snapshotId("target-3");
+  const secondIntegrated = snapshotId("integration-4");
   const envelope = {
     kind: "accepted" as const,
     contract,
@@ -93,21 +185,25 @@ test("reintegration receipts show the new target and a bounded movement stop", (
     entry: "reintegration",
     kind: "reintegrated" as const,
     data: { predecessor, snapshot: integrated },
-  }];
+  }, {
+    contract,
+    entry: "reintegration-2",
+    kind: "reintegrated" as const,
+    data: { predecessor: secondPredecessor, snapshot: secondIntegrated },
+  }, { contract, entry: "claim", kind: "claimed" as const }];
 
   assert.equal(renderText({
     ...envelope,
     verb: "deliver",
-    facts: [...facts, { contract, entry: "claim", kind: "claimed" as const }],
-    verificationVerdict: "satisfied",
+    facts,
+    completion: { integration: secondIntegrated },
   }), [
     "✓ delivered — kei/reintegrated",
-    "  re-integrated target-1 -> integration-2",
-    "  verification re-run · satisfied",
-    "  target -> integration-2",
-    "✓ verification passed",
+    "~ target moved · re-integrated x2",
+    "  target -> integration-4",
     "  record",
-    "    journal reintegration · reintegrated",
+    "    journal reintegration · reintegrated target-1 -> integration-2",
+    "    journal reintegration-2 · reintegrated target-3 -> integration-4",
     "    journal claim · claimed",
     "    head head",
   ].join("\n"));
@@ -115,7 +211,7 @@ test("reintegration receipts show the new target and a bounded movement stop", (
   assert.equal(renderText({
     ...envelope,
     verb: "deliver",
-    facts,
+    facts: facts.slice(0, 2),
     placement: {
       failure: "target-moved",
       contractId: contract,
@@ -126,12 +222,13 @@ test("reintegration receipts show the new target and a bounded movement stop", (
     },
   }), [
     "✓ deliver — not complete — kei/reintegrated",
-    "  re-integrated target-1 -> integration-2",
+    "~ target moved · re-integrated x2",
     "  candidate kept",
     "! completion blocked · target-moved refs/heads/main integration-2 -> null",
     "  attempts=3",
     "  record",
-    "    journal reintegration · reintegrated",
+    "    journal reintegration · reintegrated target-1 -> integration-2",
+    "    journal reintegration-2 · reintegrated target-3 -> integration-4",
     "    head head",
   ].join("\n"));
 });

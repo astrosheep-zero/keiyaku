@@ -2,8 +2,10 @@ import type { SnapshotId } from "../core/facts/types.js";
 import type { DeliverValue } from "../protocol/deliver.js";
 
 class DeliveryHandle {
+  declare readonly completion?: DeliverValue["completion"];
   declare readonly verification?: DeliverValue["verification"];
   declare readonly verificationReuse?: DeliverValue["verificationReuse"];
+  declare readonly verificationSummary?: DeliverValue["verificationSummary"];
   declare readonly placement?: DeliverValue["placement"];
   declare readonly cleanup?: DeliverValue["cleanup"];
   declare readonly leak?: DeliverValue["leak"];
@@ -15,7 +17,7 @@ class DeliveryHandle {
   constructor(
     identity: Pick<DeliverValue, "tenderSnapshot" | "integration" | "method" | "policy">,
     private readonly readDiff: () => Promise<string | null>,
-    outcomes: Partial<Pick<DeliverValue, "verification" | "verificationReuse" | "placement" | "cleanup" | "leak">> = {},
+    outcomes: Partial<Pick<DeliverValue, "completion" | "verification" | "verificationReuse" | "verificationSummary" | "placement" | "cleanup" | "leak">> = {},
   ) {
     this.tenderSnapshot = identity.tenderSnapshot;
     this.integration = identity.integration;

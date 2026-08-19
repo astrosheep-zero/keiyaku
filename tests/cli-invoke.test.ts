@@ -15,7 +15,7 @@ import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
 import { BindDraftError, preserveBindDraft } from "../src/cli/draft.js";
-import { acceptedDeliver } from "../src/cli/accepted.js";
+import { acceptedDeliver, acceptedReview } from "../src/cli/accepted.js";
 import { contractHead, contractId } from "../src/core/facts/types.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
@@ -170,6 +170,39 @@ test("deliver exposes the core-owned unmet prerequisites unchanged in its JSON r
 
   assert.strictEqual(delivered.placement, placement);
   assert.deepEqual(JSON.parse(JSON.stringify(delivered)).placement, placement);
+});
+
+test("accepted deliver and review transport completion without reconstructing it from facts", () => {
+  const contract = contractId("kei/completion-result");
+  const completion = {
+    integration: "final-integration",
+    verification: { mode: "reused" as const, verdict: "unsatisfied" as const },
+  };
+  const envelope = {
+    head: contractHead("head"),
+    effects: [],
+    lags: [],
+    settlement: { actions: [], lags: [] },
+  };
+
+  const delivered = acceptedDeliver({
+    ...envelope,
+    facts: [],
+    value: { completion } as Delivery,
+  }, contract);
+  assert.strictEqual(delivered.completion, completion);
+
+  const reviewed = acceptedReview({
+    ...envelope,
+    facts: [{
+      contract,
+      entry: "review",
+      kind: "attestation",
+      data: { gate: "reviewed", verdict: "satisfied" },
+    }] as never,
+    value: { completion },
+  }, contract);
+  assert.strictEqual(reviewed.completion, completion);
 });
 
 test("one CLI invocation reuses its Repo for selector, settings, and contract lookup", async () => {

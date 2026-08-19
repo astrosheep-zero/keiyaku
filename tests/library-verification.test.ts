@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
+import { acceptedDeliver } from "../src/cli/accepted.js";
 import { withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
 
@@ -36,7 +37,26 @@ test("public deliver keeps its Verification admission in accepted facts", async 
   assert.equal(delivered.value.integration.predecessor, (await contract.state()).delivery?.data.integration.predecessor);
   assert.equal("verification" in delivered.value, false);
   assert.equal("placement" in delivered.value, false);
+  assert.deepEqual(delivered.value.completion, {
+    integration: delivered.value.integration.snapshot,
+    verification: { mode: "ran", verdict: "satisfied" },
+  });
   assert.equal((await contract.state()).attestations.at(-1)?.data.verdict, "satisfied");
+});
+
+test("completion omits Verification when no declaration applies", async () => {
+  const repository = repositoryWithMain();
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+    markdown: document(),
+    workspace: "here",
+    gates: [],
+  });
+  commitCandidate(repository);
+
+  const delivered = await bound.keiyaku.deliver();
+
+  assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "claimed"]);
+  assert.deepEqual(delivered.value.completion, { integration: delivered.value.integration.snapshot });
 });
 
 test("status and audit expose only current Verification testimony", async () => {
@@ -111,6 +131,10 @@ test("amend preserves untouched Verification bytes and currentness", async () =>
 
   const reviewed = await bound.keiyaku.review({ verdict: "satisfied" });
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation", "claimed"]);
+  assert.deepEqual(reviewed.value.completion, {
+    integration: delivered.value.integration.snapshot,
+    verification: { mode: "reused", verdict: "satisfied" },
+  });
 });
 
 test("a declaration timeout admits unsatisfied testimony and leaves placement to gates", async () => {
@@ -126,6 +150,11 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
   assert.equal(openDelivery.facts.find((fact) => fact.kind === "attestation")?.data.verdict, "unsatisfied");
   assert.equal(openDelivery.value.verification, undefined);
   assert.equal(openDelivery.value.placement, undefined);
+  assert.deepEqual(openDelivery.value.completion, {
+    integration: openDelivery.value.integration.snapshot,
+    verification: { mode: "ran", verdict: "unsatisfied" },
+  });
+  assert.match(openDelivery.value.verificationSummary ?? "", /timeout after 25ms/);
   assert.equal((await open.keiyaku.state()).terminal?.kind, "claimed");
 
   const gatedRepository = repositoryWithMain();
@@ -142,6 +171,9 @@ test("a declaration timeout admits unsatisfied testimony and leaves placement to
   assert.deepEqual(gatedDelivery.value.placement, {
     refusal: { kind: "gates-unsatisfied", contractId: (await gated.keiyaku.state()).id },
   });
+  assert.match(gatedDelivery.value.verificationSummary ?? "", /timeout after 25ms/);
+  const accepted = acceptedDeliver(gatedDelivery, gated.keiyaku.id);
+  assert.match(accepted.verificationSummary ?? "", /timeout after 25ms/);
 });
 
 function worktreeSettings(create: readonly string[], destroy: readonly string[] = []): string {

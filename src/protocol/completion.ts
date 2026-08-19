@@ -12,9 +12,19 @@ import { mergeAdmissions, placementStop, timestamp, unpackVerificationOutcome } 
 
 const MAX_REINTEGRATION_CYCLES = 3;
 
+export type CandidateCompletion = Readonly<{
+  integration: SnapshotId;
+  verification?: Readonly<{
+    mode: "ran" | "reused";
+    verdict: "satisfied" | "unsatisfied";
+  }>;
+}>;
+
 export type CompletionEvidence = Readonly<{
+  completion?: CandidateCompletion;
   verification?: VerificationStop;
   verificationReuse?: CurrentVerifiedAttestation;
+  verificationSummary?: string;
   placement?: PlacementStop;
   cleanup?: VerificationCleanupFailure;
   leak?: WorktreeLeak;
@@ -37,6 +47,12 @@ export type CompletionResult = Readonly<{
   evidence: CompletionEvidence;
 }>;
 
+type CompletionVerification = Readonly<{
+  mode: "ran" | "reused";
+  verdict: "satisfied" | "unsatisfied";
+  summary?: string;
+}>;
+
 function reintegrationStop(result: Exclude<ReintegrationResult, { kind: "accepted" }>): PlacementStop {
   if (result.kind === "placement-failed") {
     return { failure: "target-placement-failed", diagnostic: result.diagnostic };
@@ -52,9 +68,20 @@ async function verificationFor(
 ): Promise<Readonly<{
   admission: AcceptedProtocolStep;
   evidence: Omit<CompletionEvidence, "placement">;
+  completionVerification?: CompletionVerification;
 }>> {
   const current = currentVerifiedAttestation(admission.state);
-  if (current !== undefined) return { admission, evidence: { verificationReuse: current } };
+  if (current !== undefined) {
+    return {
+      admission,
+      evidence: { verificationReuse: current },
+      completionVerification: {
+        mode: "reused",
+        verdict: current.verdict,
+        ...(current.summary === undefined ? {} : { summary: current.summary }),
+      },
+    };
+  }
   if (input.verification.kind === "refused") {
     return { admission, evidence: { verification: { refusal: input.verification.refusal } } };
   }
@@ -76,9 +103,21 @@ async function verificationFor(
     admission: unpacked.admission === undefined ? admission : mergeAdmissions(admission, unpacked.admission),
     evidence: {
       ...(unpacked.stop === undefined ? {} : { verification: unpacked.stop }),
+      ...(unpacked.counts?.verdict !== "unsatisfied" || unpacked.counts.summary === undefined
+        ? {}
+        : { verificationSummary: unpacked.counts.summary }),
       ...(unpacked.cleanup === undefined ? {} : { cleanup: unpacked.cleanup }),
       ...(unpacked.leak === undefined ? {} : { leak: unpacked.leak }),
     },
+    ...(unpacked.counts === undefined
+      ? {}
+      : {
+        completionVerification: {
+          mode: "ran" as const,
+          verdict: unpacked.counts.verdict,
+          ...(unpacked.counts.summary === undefined ? {} : { summary: unpacked.counts.summary }),
+        },
+      }),
   };
 }
 
@@ -95,21 +134,53 @@ function mergeEvidence(current: CompletionEvidence, next: CompletionEvidence): C
   return merged;
 }
 
+function replaceVerificationEvidence(current: CompletionEvidence, next: CompletionEvidence): CompletionEvidence {
+  const {
+    verification: _verification,
+    verificationReuse: _verificationReuse,
+    verificationSummary: _verificationSummary,
+    ...withoutVerification
+  } = current;
+  return mergeEvidence(withoutVerification, next);
+}
+
 function requiredPlacementStop(result: Parameters<typeof placementStop>[0]): PlacementStop {
   const stop = placementStop(result);
   if (stop === undefined) throw new Error("non-accepted placement is missing its stop");
   return stop;
 }
 
+function acceptedCompletion(
+  admission: AcceptedProtocolStep,
+  completionVerification: CompletionVerification | undefined,
+): CompletionEvidence {
+  const integration = admission.state.currentIntegration?.snapshot;
+  if (integration === undefined) throw new Error("accepted placement is missing its final integration");
+  const current = completionVerification ?? currentVerifiedAttestation(admission.state);
+  const verification = current === undefined
+    ? undefined
+    : { mode: completionVerification?.mode ?? "reused", verdict: current.verdict } as const;
+  const summary = current?.summary;
+  return {
+    completion: {
+      integration,
+      ...(verification === undefined ? {} : { verification }),
+    },
+    ...(verification?.verdict !== "unsatisfied" || summary === undefined ? {} : { verificationSummary: summary }),
+  };
+}
+
 export async function completeCandidate(input: CompletionInput): Promise<CompletionResult> {
   let admission = input.initial;
   let evidence: CompletionEvidence = {};
+  let completionVerification: CompletionVerification | undefined;
   if (input.verifyInitial) {
     const snapshot = admission.state.currentIntegration?.snapshot;
     if (snapshot === undefined) throw new Error("accepted delivery is missing its current integration");
     const verified = await verificationFor(input, admission, snapshot);
     admission = verified.admission;
     evidence = mergeEvidence(evidence, verified.evidence);
+    completionVerification = verified.completionVerification;
   }
 
   let placement = await admitPlacement(input.channel, input.repository, input.target, {
@@ -118,7 +189,8 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
     at: timestamp(),
   });
   if (placement.kind === "accepted") {
-    return { admission: mergeAdmissions(admission, placement), evidence };
+    admission = mergeAdmissions(admission, placement);
+    return { admission, evidence: mergeEvidence(evidence, acceptedCompletion(admission, completionVerification)) };
   }
   if (placement.kind !== "target-moved" || input.target === undefined) {
     return { admission, evidence: mergeEvidence(evidence, { placement: requiredPlacementStop(placement) }) };
@@ -140,7 +212,8 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
     integratedAt = reintegrated.value.snapshot;
     const verified = await verificationFor(input, admission, reintegrated.value.snapshot);
     admission = verified.admission;
-    evidence = mergeEvidence(evidence, verified.evidence);
+    evidence = replaceVerificationEvidence(evidence, verified.evidence);
+    completionVerification = verified.completionVerification;
 
     placement = await admitPlacement(input.channel, input.repository, input.target, {
       contractId: input.contractId,
@@ -148,7 +221,8 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
       at: timestamp(),
     });
     if (placement.kind === "accepted") {
-      return { admission: mergeAdmissions(admission, placement), evidence };
+      admission = mergeAdmissions(admission, placement);
+      return { admission, evidence: mergeEvidence(evidence, acceptedCompletion(admission, completionVerification)) };
     }
     if (placement.kind !== "target-moved") {
       return { admission, evidence: mergeEvidence(evidence, { placement: requiredPlacementStop(placement) }) };

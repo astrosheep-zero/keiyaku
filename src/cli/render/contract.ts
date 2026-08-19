@@ -151,11 +151,20 @@ function acceptedRecord(
   const record: string[] = [];
   for (const fact of result.facts) {
     const contract = fact.contract === result.contract ? [] : [{ text: fact.contract, opaque: true }];
-    receiptRow(record, " ", "journal", [
-      ...contract,
-      { text: fact.entry, opaque: true },
-      { text: `· ${fact.kind}` },
-    ], columns);
+    receiptRow(record, " ", "journal", fact.kind === "reintegrated"
+      ? [
+        ...contract,
+        { text: fact.entry, opaque: true },
+        { text: "· reintegrated" },
+        { text: fact.data.predecessor, opaque: true },
+        { text: "->" },
+        { text: fact.data.snapshot, opaque: true },
+      ]
+      : [
+        ...contract,
+        { text: fact.entry, opaque: true },
+        { text: `· ${fact.kind}` },
+      ], columns);
   }
   receiptRow(record, " ", "head", [{ text: result.head, opaque: true }], columns);
   if (result.verb === "deliver") {
@@ -221,14 +230,41 @@ function recordBlock(
   return ["  record", ...indentRecord(rows)];
 }
 
-function verificationVerdictLine(
-  verdict: "satisfied" | "unsatisfied",
+function completionLines(
+  result: AcceptedDeliverResult | AcceptedReviewResult,
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
-  receiptRow(lines, verdict === "satisfied" ? "✓" : "!", "verification", [
-    { text: verdict === "satisfied" ? "passed" : "failed" },
+  const completion = result.completion;
+  if (completion === undefined) return lines;
+  const verification = completion.verification;
+  receiptRow(lines, " ", "target", [
+    { text: "->" },
+    { text: completion.integration, opaque: true },
+    ...(verification?.verdict === "satisfied"
+      ? [{ text: `· verified (${verification.mode})` }]
+      : []),
   ], columns);
+  if (verification?.verdict === "unsatisfied") {
+    receiptRow(lines, "!", "verification", [
+      { text: "unsatisfied" },
+      { text: `(${verification.mode})` },
+    ], columns);
+    if (result.verificationSummary !== undefined) {
+      receiptPayload(lines, "  summary", result.verificationSummary);
+    }
+  }
+  return lines;
+}
+
+function movementLines(
+  result: AcceptedDeliverResult | AcceptedReviewResult,
+  columns: number,
+): readonly string[] {
+  const count = result.facts.filter((fact) => fact.kind === "reintegrated").length;
+  if (count === 0) return [];
+  const lines: string[] = [];
+  receiptRow(lines, "~", "target", [{ text: `moved · re-integrated x${count}` }], columns);
   return lines;
 }
 
@@ -250,51 +286,17 @@ function renderAcceptedAmend(result: AcceptedAmendResult, columns: number): stri
   return lines.join("\n");
 }
 
-function reintegrationLines(
-  result: AcceptedDeliverResult | AcceptedReviewResult,
-  complete: boolean,
-  columns: number,
-): readonly string[] {
-  const reintegrated = result.facts.filter((fact) => fact.kind === "reintegrated");
-  if (reintegrated.length === 0) return [];
-  const lines: string[] = [];
-  for (const fact of reintegrated) {
-    receiptRow(lines, " ", "re-integrated", [
-      { text: fact.data.predecessor, opaque: true },
-      { text: "->" },
-      { text: fact.data.snapshot, opaque: true },
-    ], columns);
-  }
-  if (result.verificationVerdict !== undefined) {
-    receiptRow(lines, " ", "verification re-run", [
-      { text: "·" },
-      { text: result.verificationVerdict },
-    ], columns);
-  }
-  if (complete) {
-    receiptRow(lines, " ", "target", [
-      { text: "->" },
-      { text: reintegrated.at(-1)!.data.snapshot, opaque: true },
-    ], columns);
-  }
-  return lines;
-}
-
 function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): string {
-  const complete = result.facts.some((fact) => fact.kind === "claimed");
+  const complete = result.completion !== undefined;
   const title = complete ? "delivered" : "deliver — not complete";
   const lines = titleLines("✓", title, result.contract, columns);
-  lines.push(...reintegrationLines(result, complete, columns));
+  lines.push(...movementLines(result, columns), ...completionLines(result, columns));
   if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   if (result.verification !== undefined) {
     lines.push(...stopLines("verification", result.verification, columns, result.contract));
-  } else if (result.verificationVerdict !== undefined) {
-    lines.push(...verificationVerdictLine(result.verificationVerdict, columns));
   }
   if (!complete && result.placement !== undefined) {
     lines.push(...stopLines("completion", result.placement, columns, result.contract));
-  } else if (!complete && (result.verification !== undefined || result.verificationVerdict === "unsatisfied")) {
-    receiptRow(lines, "·", "completion", [{ text: "not attempted" }], columns);
   }
   if (result.cleanup !== undefined) pushBlock(lines, cleanupLines(result.cleanup, columns));
   if (result.leak !== undefined) pushBlock(lines, leakLines(result.leak, columns));
@@ -303,12 +305,10 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
 }
 
 function renderAcceptedReview(result: AcceptedReviewResult, columns: number): string {
-  const complete = result.facts.some((fact) => fact.kind === "claimed");
-  const lines = titleLines("✓", `review ${result.verdict}`, result.contract, columns);
-  lines.push(...reintegrationLines(result, complete, columns));
-  receiptRow(lines, complete ? "✓" : "!", "contract", [
-    { text: complete ? "complete" : "not complete" },
-  ], columns);
+  const complete = result.completion !== undefined;
+  const lines = titleLines("✓", `review ${result.verdict} — ${complete ? "complete" : "not complete"}`, result.contract, columns);
+  lines.push(...movementLines(result, columns), ...completionLines(result, columns));
+  if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   if (result.placement !== undefined) {
     lines.push(...stopLines("completion", result.placement, columns, result.contract));
   }

@@ -211,24 +211,36 @@ non-null `head`, `facts`, `effects`, `settlement`, and optional nonempty `lag`.
 Verb fields remain flat: bind
 requires `target` and exactly one Region answer (`overlaps` or
 `overlapFailure`); amend requires `diff`, including the empty string, and
-that same Region answer; deliver alone may carry `verification`,
-`verificationReuse`, `placement`, `cleanup`, and `leak`; review alone may
-carry `placement` and `workspace`; arc and abandon carry no verb-specific
-field; audit requires `report` and alone may carry its top-level `cleanup`
-and `leak`. An arm cannot carry another arm's fields. JSON remains that same
-flat value; there is no payload envelope, second schema, or compatibility
-arm.
+that same Region answer; deliver and review may carry the same optional
+`completion`, `verification`, `verificationReuse`, `verificationSummary`,
+`placement`, `cleanup`, and `leak` fields, while review additionally carries
+its `verdict` and optional `workspace`; arc and abandon carry no
+verb-specific field; audit requires `report` and alone may carry its
+top-level `cleanup` and `leak`. An arm cannot carry another arm's fields.
+JSON remains that same flat value; there is no payload envelope, second
+schema, or compatibility arm.
 
 The renderer is a pure exhaustive projection over `InvocationResult`; it
 invents no fields, rereads no authority, and does not change exit semantics.
 JSON serializes that same public value.
 
-When accepted facts contain `reintegrated`, delivery and review text show each
-`re-integrated <predecessor> -> <snapshot>` row. Verification rerun or reuse is
-rendered from its typed result, and successful completion shows the target
-advancing to the latest integration snapshot. A repeated movement stop shows
-its integrated snapshot, observed target, and numeric attempts; the renderer
-does not infer these values from history.
+Accepted deliver and review results may carry the typed final `completion`:
+`{ integration: SnapshotId, verification?: { mode: "ran" | "reused", verdict:
+"satisfied" | "unsatisfied" } }`. It exists only for an accepted placement;
+the nested Verification is absent when no declaration applied. The renderer
+projects this value directly and never reconstructs a target from facts or
+folded state.
+
+When accepted facts contain `reintegrated`, delivery and review text show one
+neutral `~ target moved · re-integrated x<N>` deviation, where N is the count
+of those facts. The final target line is projected only from `completion` and
+includes `· verified (ran|reused)` only for a satisfied nested Verification;
+no-declaration completion has no `verified` word, while an unsatisfied nested
+Verification adds `! verification unsatisfied (ran|reused)` and its existing
+bounded summary when present. Every `reintegrated` journal row retains
+`predecessor -> snapshot`. A repeated movement stop shows its integrated
+snapshot, observed target, and numeric attempts; the renderer does not infer
+these values from history.
 
 An accepted mutation receipt answers the caller's verb-specific question, not
 whether Protocol admitted an entry. Its first line names the world change made
@@ -242,7 +254,7 @@ from a missing effect.
 ✓ terms replaced — <complete kei/...>
 ✓ delivered — <complete kei/...>
 ✓ deliver — not complete — <complete kei/...>
-✓ review <satisfied|unsatisfied> — <complete kei/...>
+✓ review <satisfied|unsatisfied> — <complete|not complete> — <complete kei/...>
 ✓ chapter recorded — <complete kei/...>
 ✓ abandoned — <complete kei/...>
 ✓ audit — <complete kei/...>
@@ -251,7 +263,8 @@ from a missing effect.
     journal <entry> · <kind>
     head <ContractHead>
 
-! verification <typed stop kind and exact scalar facts>
+  target -> <SnapshotId> [· verified (ran|reused)]
+! verification unsatisfied (ran|reused)
 ! completion blocked · <typed reason and exact scalar facts>
 ~ workspace <N files changed, N insertions(+), N deletions(-)>
   staged <complete path>
@@ -284,12 +297,17 @@ that same public collection unchanged.
 Bind reports its typed workspace coordinate and optional target; a missing
 target renders `no target`. Amend places the exact `terms diff` immediately
 after its first line because the diff is its product answer, not mechanical
-record. Deliver is `delivered` exactly when its closed admitted-fact list
-contains `claimed`. Otherwise it is `deliver — not complete`, says `candidate
-kept`, reports the typed Verification verdict when present, and names the typed
-completion stop without exposing the internal `placement` channel name. Review
-reports its admitted attestation verdict and whether the same fact list contains
-`claimed`. Arc reports its typed sequence and title as `chapter <N> · <title>`.
+record. Deliver and review are complete exactly when their typed `completion`
+exists, which is the final placement answer. Otherwise each says `candidate
+kept`, reports any typed Verification stop, and names the typed completion stop
+without exposing the internal `placement` channel name. A claimed result with
+Verification satisfied renders `target -> <integration> · verified (ran|reused)`;
+without an applicable declaration it renders `target -> <integration>`; an
+unsatisfied non-gating Verification renders the target followed by its typed
+unsatisfied row and bounded summary. Movement adds only the neutral deviation
+row. Review's first line includes its admitted review verdict and completion
+state without a second Contract-status row. Arc reports its typed sequence and
+title as `chapter <N> · <title>`.
 Abandon reports its optional note and only the explicit workspace and recovery
 snapshot effects that occurred. Audit reports candidate, Verification, and
 target observations without describing the candidate as accepted or approved.
@@ -345,7 +363,9 @@ a row before it. Ready identity uses `tender=`, `integration=`, and `change=`.
 Recorded delivery evidence is `delivery change=<id>` with its relation.
 Verification `summary` is a subordinate bounded payload, not inline. Each
 answer uses the existing glyph vocabulary. `--json` retains the complete typed
-mutation result. Deliver text makes `verificationReuse` visible when present.
+mutation result. Deliver and review text make the nested `completion`
+Verification mode and verdict visible when present; `verificationReuse` remains
+available as a typed non-final attestation detail.
 For terminal Verification, audit renders the complete already-producer-bounded
 `summary` with the receipt payload grammar: its original bytes and line
 structure remain intact, with no parsing, whitespace collapse, or second

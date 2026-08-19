@@ -223,6 +223,14 @@ type VerificationReuse = Readonly<{
   verdict: "satisfied" | "unsatisfied"
 }>
 
+type CandidateCompletion = Readonly<{
+  integration: SnapshotId
+  verification?: Readonly<{
+    mode: "ran" | "reused"
+    verdict: "satisfied" | "unsatisfied"
+  }>
+}>
+
 type Delivery = Readonly<{
   tenderSnapshot: SnapshotId
   integration: Readonly<{
@@ -232,8 +240,10 @@ type Delivery = Readonly<{
   }>
   method: "squash"
   policy: Readonly<{ requireBranchesToBeUpToDate: boolean }>
+  completion?: CandidateCompletion
   verification?: VerificationStop
   verificationReuse?: VerificationReuse
+  verificationSummary?: string
   placement?: PlacementStop
   cleanup?: VerificationCleanupFailure
   leak?: WorktreeLeak
@@ -241,8 +251,10 @@ type Delivery = Readonly<{
 }>
 
 type Review = Readonly<{
+  completion?: CandidateCompletion
   verification?: VerificationStop
   verificationReuse?: VerificationReuse
+  verificationSummary?: string
   placement?: PlacementStop
   cleanup?: VerificationCleanupFailure
   leak?: WorktreeLeak
@@ -310,9 +322,15 @@ is not document-body law, a journal fact, a receipt, cache state, or a gate
 input, and it does not cross below the library boundary.
 
 Every successful mutation result contains every fact admitted by that
-invocation and the resulting contract-head scalar. Successful Verification attestation and
-placement therefore appear only in `facts`; their named stop channels are
-absent. Package-root results expose no `Receipt`, `prior`, or folded `snapshot`.
+invocation and the resulting contract-head scalar. Accepted deliver and
+satisfied review additionally carry `completion` exactly when placement admits
+`claimed`. Its `integration` is the exact final placed snapshot. Its optional
+Verification member binds the final snapshot to whether Verification ran or a
+current attestation was reused and to that verdict; it is absent when no
+Verification declaration applied. An unsatisfied terminal Verification may
+also carry its existing bounded `verificationSummary`, including when a gate
+stop leaves placement incomplete. Package-root results expose no `Receipt`,
+`prior`, or folded `snapshot`.
 Protocol may retain prior and snapshot values while composing one invocation,
 but they are process-local implementation data with no public or persistent
 reader.
@@ -446,7 +464,8 @@ A leading refusal or retry, such as a missing contract, uses the same
 None of these cases creates a second observation authority or duplicate
 boolean flag. Deliver may expose transient `verificationReuse` naming the
 reused attestation entry and verdict; that field is absent when deliver ran
-Verification or no declarations applied.
+Verification or no declarations applied. `completion` remains the sole
+final-placement answer and is never reconstructed from facts or folded state.
 
 Verification may use one process-local disposable worktree. Failure to remove
 it after a fact was admitted cannot change the accepted arm, facts, or exit

@@ -32,6 +32,10 @@ test("pre-delivery audit candidate matches a later unchanged deliver", async () 
   assert.equal(delivered.value.method, audited.value.candidate.identity.method);
   assert.deepEqual(delivered.value.policy, audited.value.candidate.identity.policy);
   assert.equal(delivered.value.verificationReuse?.verdict, "satisfied");
+  assert.deepEqual(delivered.value.completion, {
+    integration: delivered.value.integration.snapshot,
+    verification: { mode: "reused", verdict: "satisfied" },
+  });
   assert.equal(delivered.facts.some((fact) => fact.kind === "attestation"), false);
 });
 

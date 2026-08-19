@@ -2,6 +2,7 @@ import type {
   AuditReport,
   ContractHistory,
   ContractId,
+  Delivery,
   Fact,
   MutationResult,
   PlacementStop,
@@ -55,8 +56,10 @@ export type AcceptedBindResult = AcceptedEnvelope & Readonly<{
   verb: "bind";
   workspace: "worktree" | "here";
   target: string | null;
+  completion?: never;
   verification?: never;
   verificationReuse?: never;
+  verificationSummary?: never;
   placement?: never;
   cleanup?: never;
   leak?: never;
@@ -72,8 +75,10 @@ export type AcceptedAmendResult = AcceptedEnvelope & Readonly<{
   verb: "amend";
   diff: string;
   target?: never;
+  completion?: never;
   verification?: never;
   verificationReuse?: never;
+  verificationSummary?: never;
   placement?: never;
   cleanup?: never;
   leak?: never;
@@ -87,9 +92,11 @@ export type AcceptedAmendResult = AcceptedEnvelope & Readonly<{
 
 export type AcceptedDeliverResult = AcceptedEnvelope & Readonly<{
   verb: "deliver";
+  completion?: Delivery["completion"];
   verificationVerdict?: "satisfied" | "unsatisfied";
   verification?: VerificationStop;
   verificationReuse?: VerificationReuse;
+  verificationSummary?: string;
   placement?: PlacementStop;
   cleanup?: MutationResult<unknown>["cleanup"];
   leak?: MutationResult<unknown>["leak"];
@@ -107,9 +114,11 @@ export type AcceptedDeliverResult = AcceptedEnvelope & Readonly<{
 export type AcceptedReviewResult = AcceptedEnvelope & Readonly<{
   verb: "review";
   verdict: "satisfied" | "unsatisfied";
+  completion?: Delivery["completion"];
   verificationVerdict?: "satisfied" | "unsatisfied";
   verification?: VerificationStop;
   verificationReuse?: VerificationReuse;
+  verificationSummary?: string;
   placement?: PlacementStop;
   workspace?: Review["workspace"];
   cleanup?: MutationResult<unknown>["cleanup"];
@@ -127,8 +136,10 @@ export type AcceptedArcResult = AcceptedEnvelope & Readonly<{
   verb: "arc";
   chapter: Readonly<{ seq: number; title: string }>;
   target?: never;
+  completion?: never;
   verification?: never;
   verificationReuse?: never;
+  verificationSummary?: never;
   placement?: never;
   cleanup?: never;
   leak?: never;
@@ -146,8 +157,10 @@ export type AcceptedAbandonResult = AcceptedEnvelope & Readonly<{
   verb: "abandon";
   note?: string;
   target?: never;
+  completion?: never;
   verification?: never;
   verificationReuse?: never;
+  verificationSummary?: never;
   placement?: never;
   cleanup?: never;
   leak?: never;
@@ -167,8 +180,10 @@ export type AcceptedAuditResult = AcceptedEnvelope & Readonly<{
   cleanup?: MutationResult<unknown>["cleanup"];
   leak?: MutationResult<unknown>["leak"];
   target?: never;
+  completion?: never;
   verification?: never;
   verificationReuse?: never;
+  verificationSummary?: never;
   placement?: never;
   overlaps?: never;
   overlapFailure?: never;

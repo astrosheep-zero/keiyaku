@@ -130,12 +130,19 @@ function verificationInput(
 export type CurrentVerifiedAttestation = Readonly<{
   entry: EntryUlid;
   verdict: "satisfied" | "unsatisfied";
+  summary?: string;
 }>;
 
 /** Read the latest current verified attestation through the generic currentness judge. */
 export function currentVerifiedAttestation(state: ContractState): CurrentVerifiedAttestation | undefined {
   const current = latestCurrentAttestations(state, new Set([VERIFIED])).get(VERIFIED);
-  return current === undefined ? undefined : { entry: current.entry, verdict: current.data.verdict };
+  return current === undefined
+    ? undefined
+    : {
+      entry: current.entry,
+      verdict: current.data.verdict,
+      ...(current.data.summary === undefined ? {} : { summary: current.data.summary }),
+    };
 }
 
 /** Run Verification against an explicit or admitted integration snapshot. */
