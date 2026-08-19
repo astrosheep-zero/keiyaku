@@ -165,6 +165,7 @@ export async function invokeAkuma(
         ...(input.statedCwd === undefined ? {} : { cwd: input.statedCwd }),
         mode: command.mode,
         ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+        ...(command.readonly === undefined ? {} : { readonly: command.readonly }),
         ...(input.contract === undefined ? {} : { contract: input.contract }),
         ...(command.alias === undefined ? {} : { alias: command.alias }),
         ...(command.allowed === undefined ? {} : { allowed: command.allowed }),

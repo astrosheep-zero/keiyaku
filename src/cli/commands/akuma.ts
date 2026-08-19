@@ -19,6 +19,7 @@ export type ParsedAkumaCommand = Output & (
       alias?: AkumaAlias;
       mode: "wait" | "detach";
       timeoutMs?: number;
+      readonly?: true;
       allowed?: AllowedActions;
     }> & Prompted)
   | Readonly<{ command: "kill"; akuma: readonly string[] }>
@@ -51,16 +52,18 @@ const AKUMA_COMMAND_SPECS = {
       alias: "value",
       wait: "value",
       detach: "boolean",
+      readonly: "boolean",
       allowed: "repeatable",
       json: "boolean",
     },
-    usage: "call <akuma-name> [--contract <kei/...>] [--alias @name] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
+    usage: "call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
       "Give <prompt> as one argument, or use final - to read stdin.",
       "Default: --wait 5m. An explicit --wait replaces that duration; -d and --detach return after birth.",
       "--contract dispatches the born Akuma to that Contract.",
       "--alias assigns the world-local @name selector to the born Akuma.",
+      "--readonly adds the one-way read-only birth restriction.",
       "Repeated --allowed replaces the Archetype list; --allowed none selects an empty list.",
       "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",
     ].join("\n"),
@@ -365,6 +368,7 @@ function parseCall(
     ...(alias === undefined ? {} : { alias }),
     mode,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(flags.readonly === true ? { readonly: true } : {}),
     ...(allowed === undefined ? {} : { allowed }),
     prompt,
     output,

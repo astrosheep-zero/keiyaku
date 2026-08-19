@@ -50,6 +50,7 @@ export type CallInput = Readonly<{
   archetype: string;
   body: string;
   cwd?: string;
+  readonly?: true;
   mode?: "wait" | "detach";
   timeoutMs?: number;
   home?: string;
@@ -140,6 +141,11 @@ function callMode(value: unknown): "wait" | "detach" {
   if (value === undefined || value === "wait") return "wait";
   if (value === "detach") return "detach";
   throw new TypeError("mode must be wait or detach");
+}
+
+function callReadonly(value: unknown): true | undefined {
+  if (value === undefined || value === true) return value;
+  throw new TypeError("readonly must be true");
 }
 
 function callTimeout(value: unknown, mode: "wait" | "detach"): number {
@@ -264,12 +270,13 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const values = requireInput(input, "Keiyaku.call input");
   onlyKeys(
     values,
-    ["path", "archetype", "body", "cwd", "mode", "timeoutMs", "home", "settings", "contract", "alias", "allowed"],
+    ["path", "archetype", "body", "cwd", "readonly", "mode", "timeoutMs", "home", "settings", "contract", "alias", "allowed"],
     "Keiyaku.call input",
   );
   const path = nonblank(values.path, "path") as WorldRoot;
   const archetype = nonblank(values.archetype, "archetype");
   const body = text(values.body, "body");
+  const readonlyRequested = callReadonly(values.readonly);
   const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
   const mode = callMode(values.mode);
   const timeoutMs = callTimeout(values.timeoutMs, mode);
@@ -289,6 +296,7 @@ export async function callKeiyaku(input: CallInput): Promise<CallResult> {
   const call = {
     archetype,
     body,
+    ...(readonlyRequested === undefined ? {} : { readonly: readonlyRequested }),
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
   };

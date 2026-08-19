@@ -369,6 +369,32 @@ test("direct birth freezes Archetype defaults and exact per-call allowed replace
     const empty = await akuma.call({ archetype: "worker", body: "empty", allowed: [] });
     assert.deepEqual((await readSoul(pathsForAkuId(world, empty.id)))?.allowed, []);
     assert.equal((await empty.wait(undefined, { timeoutMs: 2_000 })).life, "asleep");
+
+    writeFileSync(join(configured.home, "akuma", "reviewer.md"), "---\nprovider: local\nreadonly: true\n---\nReview.\n");
+    const callReadonly = await akuma.call({ archetype: "worker", body: "call readonly", readonly: true });
+    const markdownReadonly = await akuma.call({ archetype: "reviewer", body: "Markdown readonly" });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, callReadonly.id)))?.options, { readonly: true, systemPrompt: "Work.\n" });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, callReadonly.id)))?.readonly, { enforcement: "native" });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, markdownReadonly.id)))?.options, { readonly: true, systemPrompt: "Review.\n" });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, markdownReadonly.id)))?.readonly, { enforcement: "native" });
+
+    for (const readonly of [false, "true"] as const) {
+      await assert.rejects(
+        akuma.call({ archetype: "worker", body: "invalid", readonly } as never),
+        /Akuma call readonly must be true/u,
+      );
+      await assert.rejects(
+        Keiyaku.call({
+          path: world,
+          archetype: "worker",
+          body: "invalid",
+          readonly,
+          home: configured.home,
+          settings: configured.value,
+        } as never),
+        /readonly must be true/u,
+      );
+    }
   } finally {
     if (previousRequests === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;

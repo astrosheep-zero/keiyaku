@@ -21,6 +21,7 @@ type DecodedArchetype = Readonly<{
   provider: string;
   description?: string;
   options: ProviderOptions;
+  readonly?: true;
   allowed: AllowedActions;
 }>;
 
@@ -31,7 +32,7 @@ export type ArchetypeCatalogRow = Readonly<{
 }>;
 
 type ArchetypeDefinition = DecodedArchetype & Readonly<{ adapter: ProviderAdapter }>;
-type AdmittedArchetype = Omit<ArchetypeDefinition, "provider"> & Readonly<{
+type AdmittedArchetype = Omit<ArchetypeDefinition, "provider" | "readonly"> & Readonly<{
   provider: ProviderExecution;
   readonly?: ReadonlyRestraint;
 }>;
@@ -133,10 +134,10 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
     options: decodeProviderOptions({
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),
-      ...(readonly === undefined ? {} : { readonly }),
       ...(network === undefined ? {} : { network }),
       ...(systemPrompt.length === 0 ? {} : { systemPrompt }),
     }),
+    ...(readonly === undefined ? {} : { readonly }),
     allowed,
   });
 }
@@ -217,7 +218,11 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
   throw new TypeError(`unknown provider ${name}`);
 }
 
-function admitArchetype(archetype: DecodedArchetype, settings: Settings): AdmittedArchetype {
+function admitArchetype(
+  archetype: DecodedArchetype,
+  settings: Settings,
+  callReadonly: true | undefined,
+): AdmittedArchetype {
   let selected: ReturnType<typeof resolveProviderExecution>;
   try { selected = resolveProviderExecution(providerExecution(settings, archetype.provider)); }
   catch (error) {
@@ -226,12 +231,17 @@ function admitArchetype(archetype: DecodedArchetype, settings: Settings): Admitt
   }
   const execution = selected.execution;
   const adapter = selected.adapter;
-  const admission = adapter.admitOptions(archetype.options);
+  const effectiveReadonly = archetype.readonly === true || callReadonly === true;
+  const admission = adapter.admitOptions({
+    ...archetype.options,
+    ...(effectiveReadonly ? { readonly: true } : {}),
+  });
   if (admission.kind === "refused") {
     throw new AkumaArchetypeError(archetype.name, [archetype.path], `is unsupported: ${admission.diagnostic}`);
   }
+  const { readonly: _readonly, ...definition } = archetype;
   return Object.freeze({
-    ...archetype,
+    ...definition,
     provider: execution,
     adapter,
     options: admission.options,
@@ -240,7 +250,7 @@ function admitArchetype(archetype: DecodedArchetype, settings: Settings): Admitt
 }
 
 export async function loadArchetype(
-  input: Readonly<{ name: string; home?: string; settings: Settings }>,
+  input: Readonly<{ name: string; home?: string; settings: Settings; readonly?: true }>,
 ): Promise<AdmittedArchetype> {
   const name = archetypeName(input.name);
   const directory = archetypeDirectory(input.home);
@@ -259,7 +269,7 @@ export async function loadArchetype(
     throw new AkumaArchetypeError(name, [path], `could not be read: ${error instanceof Error ? error.message : String(error)}`);
   }
   try {
-    return admitArchetype(decodeArchetype(name, path, markdown), input.settings);
+    return admitArchetype(decodeArchetype(name, path, markdown), input.settings, input.readonly);
   } catch (error) {
     if (error instanceof AkumaArchetypeError) throw error;
     throw new AkumaArchetypeError(name, [path], `is invalid: ${error instanceof Error ? error.message : String(error)}`);

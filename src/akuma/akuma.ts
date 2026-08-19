@@ -69,6 +69,12 @@ async function canonicalBirthCwd(input: string): Promise<string> {
   }
 }
 
+function callReadonly(value: unknown): Readonly<{ readonly?: true }> {
+  if (value === undefined) return {};
+  if (value !== true) throw new TypeError("Akuma call readonly must be true");
+  return { readonly: true };
+}
+
 export type AkumaListRow = Readonly<{
   id: AkuId;
   archetype: string;
@@ -115,6 +121,7 @@ export type AkumaCallInput = Readonly<{
   archetype: string;
   body: string;
   cwd?: string;
+  readonly?: true;
   allowed?: readonly AllowedAction[];
 }>;
 type AkumaCallContext = Readonly<{ initiatorCwd?: string; cwdCanonical?: true }>;
@@ -523,10 +530,16 @@ export class Akuma {
   }
 
   async [CALL_WITH_CONTEXT](input: AkumaCallInput, context: AkumaCallContext): Promise<AkumaHandle> {
+    const readonly = callReadonly(input.readonly);
     const name = archetypeName(input.archetype);
     const home = this.configuration.home === undefined ? {} : { home: this.configuration.home };
     const settings = this.configuration.settings ?? await readSettings({ root: this.path, ...home });
-    const archetype = await loadArchetype({ name, ...home, settings });
+    const archetype = await loadArchetype({
+      name,
+      ...home,
+      settings,
+      ...readonly,
+    });
     const allowed = input.allowed === undefined
       ? archetype.allowed
       : decodeAllowedActions(input.allowed, "Akuma call allowed");

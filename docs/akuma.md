@@ -213,6 +213,15 @@ cwd; resume reads that session recipe. Before admission, the body uses the
 soul's options and summon cwd. Thus later edits to Archetype Markdown affect only
 future akuma.
 
+Archetype Markdown and a direct call each accept only literal `readonly: true`.
+For each birth, the selected adapter receives `readonly: true` exactly when the
+Archetype declares it or the call requests it; omission from both is RW. This
+one-way resolution occurs before the adapter's single option admission, and
+only its admitted options and optional restraint enter Soul and a nested
+RequestRecipe. No call can loosen an Archetype restriction, and no live toggle,
+override-source fact, or fork input exists; wake, restart, and fork keep the
+frozen effective result.
+
 Provider kind `claude-agent-sdk` consumes `model`, `effort`, and
 the system prompt. `readonly: true` selects plan mode and records native
 enforcement; absence selects the provider's noninteractive native default.

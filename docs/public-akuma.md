@@ -28,6 +28,7 @@ type CallInput = Readonly<{
   archetype: string
   body: string
   cwd?: string
+  readonly?: true
   mode?: "wait" | "detach"
   timeoutMs?: number
   home?: string
@@ -51,6 +52,11 @@ Keiyaku.fork(input: ForkInput): Promise<ForkResult>
 `path` is an already resolved WorldRoot; Library never climbs or normalizes it.
 `allowed`, when present, replaces the Archetype list for that birth; Akuma owns
 its vocabulary and effective-set judgment.
+`readonly`, when present, must be literal `true` and can only add the birth
+restriction. The effective value is the Archetype declaration OR this call;
+omission is RW unless the Archetype already restricts it. Library validates the
+caller value before birth and neither persists a source/override nor exposes a
+later loosening operation.
 Optional `home` is the Archetype coordinate and is never inferred from Settings
 provenance; omission uses `~/.keiyaku`. Settings remains the provider snapshot.
 `cwd` is stated execution input and wins when present. Otherwise an active

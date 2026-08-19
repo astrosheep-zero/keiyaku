@@ -119,7 +119,7 @@ reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
 settings [--json]
 install <codex|claude|opencode|pi> [--json]
        install --all [--json]
-call <akuma-name> [--contract <kei/...>] [--alias @name] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
+call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
 wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]
 tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)
 history <aku/...|@alias|kei/...> [--before <index> | --since <index>] [--limit <count>] [--last] [--json]
@@ -331,6 +331,11 @@ because each is a successful read result.
 Fork passes the selected Contract Repo, otherwise the invocation Repo when
 available. The facade alone reads and propagates parent Dispatch; CLI never
 reads Dispatch or Alias files.
+
+`call --readonly` adds the one-way read-only restriction to that newly born
+Akuma. Its omission leaves the call RW unless the selected Archetype already
+declares `readonly: true`; the CLI has no `--write` counterpart and no live
+access toggle.
 
 ## Akuma Text Surface
 

@@ -305,8 +305,10 @@ the outer assistant message UUID associated with the successful result; the
 result UUID is not a valid substitute. Together with the session observed by
 the body, it forms the answered turn's durable fork coordinate.
 
-Provider option admission occurs before identity allocation; `admitOptions()`
-alone judges readonly realization. Native restraint has no diagnostic; `none`
+Provider option admission occurs before identity allocation. Akuma resolves the
+one-way Archetype-or-call readonly selection before calling the selected
+adapter's `admitOptions()` exactly once; the adapter alone judges readonly
+realization. Native restraint has no diagnostic; `none`
 names the enforcement gap, and missing enforcement remains admitted. Sessions
 persist execution name and exact options, from which tell, resume, recovery,
 and fork reconstruct adapters. Fork inherits execution and restraint.
