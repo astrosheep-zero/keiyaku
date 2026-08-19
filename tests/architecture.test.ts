@@ -12,6 +12,18 @@ function rules(diagnostics: readonly Diagnostic[]): readonly string[] {
   return diagnostics.map((diagnostic) => diagnostic.rule);
 }
 
+test("architecture policy keeps request and body edges symbol-scoped", () => {
+  const diagnostics = check({
+    "akuma/request-wire.ts": "export const unlisted = undefined;",
+    "akuma/heart/index.ts": "export const unlisted = undefined;",
+    "akuma/requests.ts": 'import { unlisted } from "./request-wire.js"; export { unlisted };',
+    "akuma/request-serve.ts": 'import { unlisted } from "./heart/index.js"; export { unlisted };',
+    "akuma/body.ts": 'import { unlisted } from "./request-serve.js"; export { unlisted };',
+    "akuma-body.ts": 'import { unlisted } from "./akuma/body.js"; export { unlisted };',
+  });
+  assert.deepEqual(rules(diagnostics), Array(4).fill("architecture/dependency-direction"));
+});
+
 test("architecture policy accepts public command adapters", () => {
   const diagnostics = check({
     "index.ts": "export class Repo {}; export const Keiyaku = { bind(): undefined { return undefined; } };",
