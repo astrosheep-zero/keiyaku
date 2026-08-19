@@ -24,6 +24,7 @@ export type CliCoordinateInput = Readonly<{
   processCwd?: string;
   cwd?: string;
   repo?: string;
+  gitPath?: string;
   command: ParsedCommand;
 }>;
 
@@ -32,8 +33,13 @@ async function canonicalInvocationCwd(input: string): Promise<string> {
   catch { throw new CliUsageError(`invocation cwd is not an existing directory: ${input}`); }
 }
 
-async function discoverRepoAt(coordinate: string): Promise<RepoDiscovery> {
-  try { return { kind: "present", repo: await Repo.at({ path: coordinate }) }; }
+async function discoverRepoAt(coordinate: string, gitPath?: string): Promise<RepoDiscovery> {
+  try {
+    return {
+      kind: "present",
+      repo: await Repo.at({ path: coordinate, ...(gitPath === undefined ? {} : { gitPath }) }),
+    };
+  }
   catch (error) {
     if (error instanceof NoGitWorldError) return { kind: "absent", error };
     throw error;
@@ -120,10 +126,10 @@ async function resolveWorld(cwd: string, repo: Repo | undefined) {
 export async function resolveCliCoordinates(input: CliCoordinateInput): Promise<CliCoordinates> {
   const processCwd = resolve(input.processCwd ?? ".");
   const cwd = await canonicalInvocationCwd(resolve(processCwd, input.cwd ?? "."));
-  const invocationRepo = await discoverRepoAt(cwd);
+  const invocationRepo = await discoverRepoAt(cwd, input.gitPath);
   const selectedRepo = input.repo === undefined
     ? invocationRepo
-    : await discoverRepoAt(resolve(cwd, input.repo));
+    : await discoverRepoAt(resolve(cwd, input.repo), input.gitPath);
   const worldRepo = invocationRepo.kind === "present" ? invocationRepo.repo : undefined;
   const repo = repoFor(repoPolicy(input.command).use, selectedRepo);
   const world = await resolveWorld(cwd, worldRepo);

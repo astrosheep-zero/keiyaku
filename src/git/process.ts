@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { consumeProcessStdout } from "../runtime/proc/run.js";
 
 export type GitRepository = Readonly<{
+  /** The executable selected when this repository capability is created. */
+  readonly gitPath: string;
   /** The invocation's effective working directory, including a caller -C worktree. */
   readonly effectiveCwd: string;
   /** The canonical primary worktree root for this repository. */
@@ -59,7 +61,7 @@ async function executeGit(
   const stderr: Buffer[] = [];
   let stderrBytes = 0;
   let inputError: Error | undefined;
-  const child = spawn("git", [...args], {
+  const child = spawn(repository.gitPath, [...args], {
     cwd: repository.effectiveCwd,
     ...(environment === undefined ? {} : { env: { ...process.env, ...environment } }),
     stdio: ["pipe", "pipe", "pipe"],
@@ -103,7 +105,7 @@ export async function consumeGitStdout(
   consume: (chunk: Buffer) => void,
 ): Promise<void> {
   const result = await consumeProcessStdout({
-    argv: ["git", ...args],
+    argv: [repository.gitPath, ...args],
     cwd: repository.effectiveCwd,
   }, consume);
   const { outcome } = result;

@@ -91,6 +91,17 @@ test("a missing invocation cwd is a typed usage refusal", async () => {
   );
 });
 
+test("install does not consume KEIYAKU_GIT_PATH before coordinate resolution", async () => {
+  const result = await invoke(parseArgv(["install", "codex"]), {
+    cwd: "/missing/keiyaku-cli-git-path",
+    environment: { KEIYAKU_GIT_PATH: "   ", PATH: "" },
+  });
+  assert.deepEqual(result, {
+    kind: "install",
+    results: [{ harness: "codex", status: "failed", diagnostic: "codex unavailable: spawn codex ENOENT" }],
+  });
+});
+
 test("an implicit Contract call refuses before creating its candidate World", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);

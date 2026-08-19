@@ -152,8 +152,8 @@ export function placementStop(
 
 export type RepositoryScope = GitRepository;
 
-export async function scopeOperation(input: Readonly<{ coordinate: string }>): Promise<RepositoryScope> {
-  return await repositoryAt(input.coordinate);
+export async function scopeOperation(input: Readonly<{ coordinate: string; gitPath?: string }>): Promise<RepositoryScope> {
+  return await repositoryAt(input.coordinate, input.gitPath);
 }
 
 export async function currentBranchOperation(input: Readonly<{ scope: RepositoryScope }>): Promise<string | null> {

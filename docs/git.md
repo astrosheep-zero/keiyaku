@@ -17,7 +17,10 @@ identity to the common repository. Scope resolution pins both the caller
 worktree and the primary worktree for the one Git world. It also resolves the
 absolute common Git directory once when constructing the internal repository
 capability; later operations read that pinned value and do not rediscover it
-per Contract.
+per Contract. The capability also pins one nonblank Git executable coordinate;
+ordinary, streamed-output, and environment-augmented Git subprocesses all use
+that exact coordinate. Git modules do not read environment configuration or
+reinterpret the coordinate as a repository path.
 
 Targeted observation and admission are bounded by the touched journal and
 selected ancestor depth, never by the complete world; a full-world observation

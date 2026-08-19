@@ -154,6 +154,13 @@ function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv
   return resolved;
 }
 
+function gitPathFromEdge(environment: NodeJS.ProcessEnv): string | undefined {
+  const value = environment.KEIYAKU_GIT_PATH;
+  if (value === undefined) return undefined;
+  if (value.trim().length === 0) throw new CliUsageError("KEIYAKU_GIT_PATH requires a nonblank value");
+  return value;
+}
+
 async function selectContract(repo: Repo, selector: string | undefined, scope: string): Promise<SelectedContract> {
   if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector);
   const id = resolveContextualContract(await Keiyaku.list({ repo }), selector, scope);
@@ -502,10 +509,13 @@ async function invokeParsed(
   invocation: NonInstallExecution,
   runtime: InvokeRuntime,
 ): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
+  const environment = runtime.environment ?? process.env;
+  const gitPath = gitPathFromEdge(environment);
   const coordinates = await resolveCliCoordinates({
     ...(runtime.cwd === undefined ? {} : { processCwd: runtime.cwd }),
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
+    ...(gitPath === undefined ? {} : { gitPath }),
     command: invocation.command,
   });
   const { cwd, cwdSource, repo, world, candidateWorld, establishWorld } = coordinates;

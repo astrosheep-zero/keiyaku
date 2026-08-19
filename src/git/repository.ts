@@ -88,12 +88,13 @@ export async function registeredWorktrees(repository: GitRepository): Promise<re
 export async function registeredWorktreePaths(repository: GitRepository): Promise<readonly string[]> {
   return (await registeredWorktrees(repository)).map((worktree) => worktree.path);
 }
-export async function repositoryAt(cwd: string): Promise<GitRepository> {
+export async function repositoryAt(cwd: string, gitPath = "git"): Promise<GitRepository> {
   if (typeof cwd !== "string" || cwd.length === 0) {
     throw new Error("repository path must be a nonempty string");
   }
   const effectiveCwd = resolve(cwd);
   const provisional = {
+    gitPath,
     effectiveCwd,
     primaryWorktree: effectiveCwd,
     commonDirectory: effectiveCwd,
@@ -109,7 +110,7 @@ export async function repositoryAt(cwd: string): Promise<GitRepository> {
     }
     throw error;
   }
-  return { effectiveCwd, primaryWorktree, commonDirectory };
+  return { gitPath, effectiveCwd, primaryWorktree, commonDirectory };
 }
 
 async function absoluteGitPath(repository: GitRepository, args: readonly string[], label: string): Promise<string> {

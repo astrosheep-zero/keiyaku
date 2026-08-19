@@ -77,7 +77,7 @@ type BatchObjectReader = Readonly<{
 }>;
 
 function batchObjectReader(repository: GitRepository): BatchObjectReader {
-  const child: ChildProcessWithoutNullStreams = spawn("git", ["cat-file", "--batch"], {
+  const child: ChildProcessWithoutNullStreams = spawn(repository.gitPath, ["cat-file", "--batch"], {
     cwd: repository.effectiveCwd,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,

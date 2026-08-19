@@ -13,6 +13,11 @@ export interface TestGitRepository {
   readonly run: (args: readonly string[], input?: string | Uint8Array) => string;
 }
 
+export function gitExecutablePath(): string {
+  const locator = process.platform === "win32" ? "where.exe" : "which";
+  return execFileSync(locator, ["git"], { encoding: "utf8" }).split(/\r?\n/u)[0]!.trim();
+}
+
 export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: () => Promise<T>): Promise<T>;
 export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: () => T): T;
 export function withGitShim<T>(
@@ -21,7 +26,7 @@ export function withGitShim<T>(
   action: () => T | Promise<T>,
 ): T | Promise<T> {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-git-shim-"));
-  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const realGit = gitExecutablePath();
   const shimPath = join(directory, "git");
   writeFileSync(shimPath, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   chmodSync(shimPath, 0o755);

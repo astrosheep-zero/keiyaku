@@ -37,7 +37,7 @@ import { parseArgv } from "../src/cli/parse.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { Tasks } from "../src/task/index.js";
 import { executeTaskMutation } from "../src/task/mutation.js";
-import { appointedWorktreePath, makeGitRepository } from "./support/git.js";
+import { appointedWorktreePath, gitExecutablePath, makeGitRepository } from "./support/git.js";
 
 async function born(
   root: WorldRoot,
@@ -526,6 +526,7 @@ test("Task request recovery voids an unserved claim without replaying Task autho
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 test("CLI forwarded deliver preserves its selected Repo and uses parent Settings and execution", async () => {
+  const gitPath = gitExecutablePath();
   const parentRepository = makeGitRepository();
   const contractRepository = makeGitRepository();
   for (const repository of [parentRepository, contractRepository]) {
@@ -551,7 +552,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
     },
   }));
   await writeFile(join(childHome, "settings.json"), "{");
-  const repo = await Repo.at({ path: contractRepository.path });
+  const repo = await Repo.at({ path: contractRepository.path, gitPath });
   const bound = await Keiyaku.bind({
     repo,
     markdown: [
@@ -590,15 +591,20 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
   let compositionUpstreamFor: typeof import("../src/akuma-body.js").upstreamFor;
   try { ({ upstreamFor: compositionUpstreamFor } = await import("../src/akuma-body.js")); }
   finally { process.argv.splice(0, process.argv.length, ...previousArgv); }
-  const pump = await openPump(parent, compositionUpstreamFor({ paths: parent.paths }, { home: parentHome }));
+  const pump = await openPump(parent, compositionUpstreamFor(
+    { paths: parent.paths },
+    { home: parentHome, gitPath },
+  ));
   const previous = process.env[AKUMA_REQUESTS_ENV];
+  const previousPath = process.env.PATH;
   try {
     process.env[AKUMA_REQUESTS_ENV] = pump.directory;
+    process.env.PATH = "";
     const result = await invoke(parseArgv([
       "--repo", contractRepository.path, "deliver", id, "--actor", "child-supplied-actor",
     ]), {
       cwd: parentRepository.path,
-      environment: { KEIYAKU_HOME: childHome },
+      environment: { KEIYAKU_HOME: childHome, KEIYAKU_GIT_PATH: gitPath, PATH: "" },
     });
     const state = await bound.keiyaku.state();
     assert.equal(result.kind, "accepted");
@@ -611,7 +617,7 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
       "--repo", contractRepository.path, "review", id, "--unsatisfied", "--summary", "needs work", "--actor", "child-supplied-actor",
     ]), {
       cwd: parentRepository.path,
-      environment: { KEIYAKU_HOME: childHome },
+      environment: { KEIYAKU_HOME: childHome, KEIYAKU_GIT_PATH: gitPath, PATH: "" },
     });
     assert.equal(reviewed.kind, "accepted");
     const reviewedState = await bound.keiyaku.state();
@@ -620,6 +626,8 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
   } finally {
     if (previous === undefined) delete process.env[AKUMA_REQUESTS_ENV];
     else process.env[AKUMA_REQUESTS_ENV] = previous;
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
     await pump.close();
     rmSync(parentHome, { recursive: true, force: true });
     rmSync(childHome, { recursive: true, force: true });

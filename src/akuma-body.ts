@@ -19,9 +19,11 @@ import { Repo } from "./library/repo.js";
 import { settings } from "./settings.js";
 import { executeTaskMutation } from "./task/mutation.js";
 
+type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
+
 export function upstreamFor(
   launch: BodyLaunch,
-  settingsCoordinates: Readonly<{ home?: string }>,
+  processConfiguration: BodyProcessConfiguration,
 ): UpstreamExecutionPort {
   const path = worldRootForAkumaPaths(launch.paths) as WorldRoot;
   return {
@@ -49,8 +51,14 @@ export function upstreamFor(
     },
     deliver: async (input) => {
       const [repo, configuration] = await Promise.all([
-        Repo.at({ path: input.repoRoot }),
-        settings({ root: input.repoRoot as WorldRoot, ...settingsCoordinates }),
+        Repo.at({
+          path: input.repoRoot,
+          ...(processConfiguration.gitPath === undefined ? {} : { gitPath: processConfiguration.gitPath }),
+        }),
+        settings({
+          root: input.repoRoot as WorldRoot,
+          ...(processConfiguration.home === undefined ? {} : { home: processConfiguration.home }),
+        }),
       ]);
       return await executeForwardedDeliver({
         repo,
@@ -65,8 +73,14 @@ export function upstreamFor(
     },
     review: async (input) => {
       const [repo, configuration] = await Promise.all([
-        Repo.at({ path: input.repoRoot }),
-        settings({ root: input.repoRoot as WorldRoot, ...settingsCoordinates }),
+        Repo.at({
+          path: input.repoRoot,
+          ...(processConfiguration.gitPath === undefined ? {} : { gitPath: processConfiguration.gitPath }),
+        }),
+        settings({
+          root: input.repoRoot as WorldRoot,
+          ...(processConfiguration.home === undefined ? {} : { home: processConfiguration.home }),
+        }),
       ]);
       return await executeForwardedReview({
         repo,

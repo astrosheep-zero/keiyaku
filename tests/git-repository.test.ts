@@ -11,11 +11,12 @@ import {
 } from "../src/git/repository.js";
 import {
   GitPlumbingError,
+  consumeGitStdout,
   runGit,
   runGitWithEnvironment,
 } from "../src/git/process.js";
 import { worktreePath } from "../src/git/workspace.js";
-import { makeGitRepository, withGitShim } from "./support/git.js";
+import { gitExecutablePath, makeGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithCommit() {
   const repository = makeGitRepository();
@@ -88,12 +89,34 @@ test("async Git plumbing preserves nonzero exit evidence", async () => {
 
 test("a missing Git executable reports one normalized command prefix", async () => {
   const repository = repositoryWithCommit();
-  const git = await repositoryAt(repository.path);
+  const pinned = await repositoryAt(repository.path);
+  const git = { ...pinned, gitPath: "/missing/keiyaku-git" };
 
   await assert.rejects(
     runGitWithEnvironment(git, ["--version"], undefined, { PATH: "" }),
     (error: unknown) => error instanceof GitPlumbingError
       && error.status === null
-      && error.message === "--version: spawn git ENOENT",
+      && error.message === "--version: spawn /missing/keiyaku-git ENOENT",
   );
+});
+
+test("Repo capability pins an absolute Git executable across normal and streamed runners", async () => {
+  const repository = repositoryWithCommit();
+  const realGit = gitExecutablePath();
+  const git = await repositoryAt(repository.path, realGit);
+  const previousPath = process.env.PATH;
+  process.env.PATH = "";
+  try {
+    assert.match((await runGit(git, ["--version"])).toString("utf8"), /^git version /u);
+    const chunks: Buffer[] = [];
+    await consumeGitStdout(git, ["--version"], (chunk) => chunks.push(chunk));
+    assert.match(Buffer.concat(chunks).toString("utf8"), /^git version /u);
+    assert.match(
+      (await runGitWithEnvironment(git, ["--version"], undefined, { PATH: "" })).toString("utf8"),
+      /^git version /u,
+    );
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
 });

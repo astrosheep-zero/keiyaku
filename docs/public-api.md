@@ -91,7 +91,7 @@ type ReconcileInput = Readonly<{
   retryHooks?: boolean
 }>
 
-Repo.at(input?: { path?: string }): Promise<Repo>
+Repo.at(input?: { path?: string; gitPath?: string }): Promise<Repo>
 repo.root: string
 repo.currentBranch(): Promise<string | null>
 repo.reconcile(input?: ReconcileInput): Promise<RepoReconcileReport>
@@ -147,7 +147,10 @@ when that branch moved. Both refusals report the expected target and observed
 branch; `null` denotes detached HEAD. Targetless here remains valid.
 
 `Repo.at` resolves and pins the Git world before returning; omitted `path` uses
-the caller cwd. `currentBranch()` returns the invocation worktree's canonical
+the caller cwd. Optional nonblank `gitPath` selects and pins the executable for
+every Git subprocess issued through that Repo; omission uses the literal
+executable `git`. The string is an executable coordinate, not a repository path,
+and is passed to process creation unchanged. `currentBranch()` returns the invocation worktree's canonical
 symbolic branch or `null`, without choosing a target. `Keiyaku.of` and
 `Keiyaku.bind` require that Repo; instance operations accept no repository
 coordinate, and no raw scope, token, registry, or orchestrator is public.

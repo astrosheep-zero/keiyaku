@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { GIT_REF, repositoryAt } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../src/git/read-observation.js";
-import { makeGitRepository, withGitShim } from "./support/git.js";
+import { gitExecutablePath, makeGitRepository, withGitShim } from "./support/git.js";
 
 const MISSING_OID = "0000000000000000000000000000000000000000";
 
@@ -57,6 +57,25 @@ test("Git read observation returns typed missing objects and closes its batch", 
   assert.notEqual(retained, null);
   await assert.rejects(retained!.readBlobs([]), /Git read observation is closed/u);
   await assert.rejects(retained!.resolveRef("refs/heads/main"), /Git read observation is closed/u);
+});
+
+test("Git read observation uses the pinned executable for its batch", async () => {
+  const repository = makeGitRepository();
+  const gitPath = gitExecutablePath();
+  const git = await repositoryAt(repository.path, gitPath);
+  const previousPath = process.env.PATH;
+  process.env.PATH = "";
+  try {
+    const result = await withGitDecodeChannel(git, (channel) => withGitReadObservation(
+      git,
+      channel,
+      async (observation) => (await observation.readBlobs([MISSING_OID])).get(MISSING_OID),
+    ));
+    assert.deepEqual(result, { kind: "missing" });
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
 });
 
 test("Git read observation preserves callback failure over a simultaneous close failure", async () => {

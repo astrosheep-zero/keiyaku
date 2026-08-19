@@ -16,13 +16,16 @@ import {
 export { NoGitWorldError };
 export type { RepoContractReconcileReport, RepoReconcileReport };
 
-export type RepoAtInput = Readonly<{ path?: string }>;
+export type RepoAtInput = Readonly<{ path?: string; gitPath?: string }>;
 export type ReconcileInput = Readonly<{ hooks?: WorktreeHooks; retryHooks?: boolean }>;
 
 const REPO_SCOPES = new WeakMap<object, RepositoryScope>();
 
-async function resolvePinnedScope(path?: string): Promise<RepositoryScope> {
-  return await scopeOperation({ coordinate: path === undefined ? process.cwd() : path });
+async function resolvePinnedScope(path?: string, gitPath?: string): Promise<RepositoryScope> {
+  return await scopeOperation({
+    coordinate: path === undefined ? process.cwd() : path,
+    ...(gitPath === undefined ? {} : { gitPath }),
+  });
 }
 
 export function reconcileInput(input: ReconcileInput | undefined): Readonly<{
@@ -49,7 +52,10 @@ export class Repo {
 
   static async at(input?: RepoAtInput): Promise<Repo> {
     const values = input === undefined ? undefined : requireInput(input, "Repo.at input");
-    return new Repo(await resolvePinnedScope(optionalNonblank(values?.path, "repository path")));
+    return new Repo(await resolvePinnedScope(
+      optionalNonblank(values?.path, "repository path"),
+      optionalNonblank(values?.gitPath, "Git executable path"),
+    ));
   }
 
   async currentBranch(): Promise<string | null> {

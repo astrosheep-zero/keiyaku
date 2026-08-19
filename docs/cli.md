@@ -42,6 +42,14 @@ operation resolves a path or reads the working directory again.
 On Windows, every CLI-owned child process is created without a visible
 auxiliary console window.
 
+The process edge maps optional `KEIYAKU_GIT_PATH` to the public `Repo.at`
+`gitPath` input for both invocation-World discovery and an explicit Contract
+Repo. An absent value preserves the literal executable `git`; a present blank
+value is usage when coordinate resolution is entered. The edge passes all
+other bytes unchanged, including native Windows paths. Commands completed
+before coordinate resolution, including help and `install`, do not consume the
+variable. No library or Git module reads `KEIYAKU_GIT_PATH`.
+
 The parser owns argv syntax, including arity, duplicates, unknown flags, mutual
 exclusion, and final-stdin selection. It performs no product observation or
 judgment. The invocation adapter then calls the corresponding public operation

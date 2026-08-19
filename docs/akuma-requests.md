@@ -132,6 +132,10 @@ only settlement authority. Forwarding never carries actor, Settings, hooks,
 policy, callbacks, or an unresolved selector, and it never routes beyond the
 direct parent.
 
+When reconstructing a Repo for a forwarded Contract mutation, the parent Body
+process edge maps its inherited `KEIYAKU_GIT_PATH` to `Repo.at`; the request,
+Heart facts, and receipts never carry that machine-local execution coordinate.
+
 `contract.review` is independent of `contract.deliver`. Its claim carries the
 selected Repo's normalized primary-worktree coordinate, a complete ContractId,
 verdict, and optional summary. The direct parent reconstructs that Repo,
