@@ -661,6 +661,131 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
   }
 });
 
+test("request-pump failure aborts the Session and closes request transport", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-request-pump-failure-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c4e" });
+    await initializeHeart(allocated.paths);
+    let aborted = false;
+    let directory!: string;
+    let releaseEvents!: () => void;
+    const eventsReleased = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, {
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start(input) {
+        directory = input.requests!.dir;
+        return {
+          admission: { fence: "launch" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "request-pump-failure-session" } };
+              await eventsReleased;
+            },
+          },
+          completion: new Promise<TurnResult>(() => {}),
+          async abort() { aborted = true; releaseEvents(); },
+        };
+      },
+    }, {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
+
+    while (directory === undefined) await new Promise((resolve) => setTimeout(resolve, 5));
+    rmSync(directory, { recursive: true, force: true });
+    writeFileSync(directory, "request transport is unavailable");
+    await body;
+
+    assert.equal(aborted, true);
+    assert.equal(existsSync(directory), false);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "broke-off");
+    assert.deepEqual((await outcomes(allocated.paths)).at(-1), {
+      kind: "failed",
+      diagnostic: "ENOTDIR: not a directory, scandir '" + directory + "'",
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("request-pump failure closes transport during pending provider setup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-request-pump-setup-failure-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c4e" });
+    await initializeHeart(allocated.paths);
+    let directory!: string;
+    let setupStarted!: () => void;
+    const started = new Promise<void>((resolve) => { setupStarted = resolve; });
+    let setupAborted!: () => void;
+    const setupAbortObserved = new Promise<void>((resolve) => { setupAborted = resolve; });
+    let setupAbortReason: unknown;
+    const body = driveAkumaBody({
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        cwd: root,
+      },
+      initialBody: "work",
+    }, {
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start(input) {
+        directory = input.requests!.dir;
+        setupStarted();
+        await new Promise<never>((_, reject) => {
+          input.signal.addEventListener("abort", () => {
+            setupAbortReason = input.signal.reason;
+            setupAborted();
+            reject(input.signal.reason);
+          }, { once: true });
+        });
+        return {
+          admission: { fence: "launch" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              await new Promise<void>(() => {});
+            },
+          },
+          completion: new Promise<TurnResult>(() => {}),
+          async abort() {},
+        };
+      },
+    }, {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
+
+    await started;
+    rmSync(directory, { recursive: true, force: true });
+    writeFileSync(directory, "request transport is unavailable");
+    await setupAbortObserved;
+    await body;
+
+    assert.equal(setupAbortReason instanceof Error ? setupAbortReason.message : String(setupAbortReason),
+      "ENOTDIR: not a directory, scandir '" + directory + "'");
+    assert.equal(existsSync(directory), false);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "broke-off");
+    assert.deepEqual((await outcomes(allocated.paths)).at(-1), {
+      kind: "failed",
+      diagnostic: "ENOTDIR: not a directory, scandir '" + directory + "'",
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a drive drains Body Requests before recording its terminal turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-body-requests-"));
   const priorHome = process.env.HOME;

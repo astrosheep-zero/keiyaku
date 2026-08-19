@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -47,6 +47,34 @@ async function fixture(allowed?: Soul["allowed"]) {
   await leash.birth(parent.paths, soul);
   return { root, parent, soul, leash, close: () => rmSync(root, { recursive: true, force: true }) };
 }
+
+test("a caller voids when its claim disappears before a receipt", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-claim-loss-"));
+  const id = "00000000-0000-4000-8000-000000000001";
+  try {
+    const request = requestBodyCall({
+      directory,
+      id,
+      world: directory,
+      archetype: "worker",
+      body: "lost request",
+      recipe: {
+        provider: { name: "claude", kind: "claude-agent-sdk" },
+        options: {},
+        allowed: ALLOWED_ACTIONS,
+      },
+    });
+    const path = join(directory, `${id}.request.json`);
+    while (!existsSync(path)) await new Promise((resolve) => setTimeout(resolve, 5));
+    unlinkSync(path);
+    await assert.rejects(request, (error: unknown) => error instanceof AkumaBodyRequestError
+      && error.outcome === "voided"
+      && error.diagnostic === "parent request channel closed before a receipt");
+    assert.equal(existsSync(directory), true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("aborted publication keeps an in-flight launch lexically owned", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-abort-")));
@@ -273,6 +301,9 @@ test("a drive serves Body Requests through transport while Heart remains authori
         allowed: ALLOWED_ACTIONS,
       },
     }));
+    const malformedPath = join(pump.directory, `${malformedId}.request.json`);
+    while (existsSync(malformedPath)) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(existsSync(join(pump.directory, `${malformedId}.receipt.json`)), false);
     await assert.rejects(requestBodyCall({
       directory: pump.directory,
       id: "00000000-0000-4000-8000-000000000002",

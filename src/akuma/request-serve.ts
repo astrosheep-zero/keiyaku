@@ -488,32 +488,35 @@ export class BodyRequestPump {
   }
 
   private async run(): Promise<void> {
-    try {
-      while (!this.closeSignal.signal.aborted) {
-        for (const name of await requestFiles(this.directory)) {
-          if (this.closeSignal.signal.aborted) return;
-          const id = name.slice(0, -".request.json".length);
-          if (this.handled.has(id)) continue;
-          const claim = decodeClaim(await readFile(join(this.directory, name), "utf8"), id);
-          if (claim !== null && !this.admissionClosed) {
-            await serve({
-              directory: this.directory,
-              claim,
-              ...this.input,
-              signal: this.executionSignal.signal,
-              admissionOpen: () => !this.admissionClosed,
-            });
-          }
+    while (!this.closeSignal.signal.aborted) {
+      for (const name of await requestFiles(this.directory)) {
+        if (this.closeSignal.signal.aborted) return;
+        const id = name.slice(0, -".request.json".length);
+        if (this.handled.has(id)) continue;
+        const path = join(this.directory, name);
+        const claim = decodeClaim(await readFile(path, "utf8"), id);
+        if (claim === null) {
+          await rm(path, { force: true });
           this.handled.add(id);
+          continue;
         }
-        try {
-          await abortableDelay(POLL_MS, this.closeSignal.signal);
-        } catch {
-          return;
+        if (!this.admissionClosed) {
+          await serve({
+            directory: this.directory,
+            claim,
+            ...this.input,
+            signal: this.executionSignal.signal,
+            admissionOpen: () => !this.admissionClosed,
+          });
         }
+        this.handled.add(id);
       }
-    } catch {
-      // Request transport loss is recovered from Heart on the next Body.
+      try {
+        await abortableDelay(POLL_MS, this.closeSignal.signal);
+      } catch (error) {
+        if (this.closeSignal.signal.aborted) return;
+        throw error;
+      }
     }
   }
 

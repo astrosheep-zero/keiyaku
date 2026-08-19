@@ -199,6 +199,15 @@ Heart settlement precedes live receipt projection. A missing caller or removed
 transport silently loses that projection and cannot reverse settlement or make
 the Body `broke-off`; only physical Heart loss can leave a request nonterminal
 for the existing recovery sweep.
+
+The directory is the live pump's custody promise: while it exists, one serving
+pump can read claims and project receipts. A pump scan, read, serve, or receipt
+projection failure reaches the Body turn supervisor, which follows its existing
+close path and removes the directory; admitted or reserved Heart facts remain
+for the next Body's recovery sweep. A malformed claim is deleted as transport
+bytes, without a receipt or Heart mutation. A caller whose own claim disappears
+before a receipt treats that as the existing typed `voided` channel-closed
+outcome rather than polling the still-live directory.
 Requests do not enter the idle predicate.
 
 One hop holds at every depth: each provider talks only to its own unsandboxed
