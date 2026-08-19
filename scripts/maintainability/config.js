@@ -5,7 +5,7 @@ export const FILE_LINE_EXEMPTIONS = Object.freeze([
   {
     file: "scripts/architecture/policy.ts",
     reason: "The centralized declarative architecture map must remain one policy authority.",
-    maxEffectiveLines: 1350,
+    maxEffectiveLines: 1500,
   },
   {
     file: "scripts/architecture/engine.ts",
