@@ -51,7 +51,9 @@ function document(script?: string): string {
 async function bindAndDeliver(script?: string, gates: readonly string[] = ["verified"]) {
   const setup = await repositoryWithCandidate();
   mkdirSync(resolve(setup.raw.path, ".keiyaku"), { recursive: true });
-  writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: gates } }));
+  writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: {
+    default: { kind: "bundle", gates },
+  } }));
   const bound = await invoke(parseArgv([
     "bind", "--target", "refs/heads/main", "--actor", "external-test", "-",
   ]), {
@@ -105,7 +107,9 @@ test("dirty --here delivery materializes and lands the verified candidate cleanl
   setup.raw.run(["add", "candidate.txt"]);
   setup.raw.run(["commit", "--quiet", "-m", "failing candidate"]);
   mkdirSync(resolve(setup.raw.path, ".keiyaku"), { recursive: true });
-  writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: ["verified"] } }));
+  writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: {
+    default: { kind: "bundle", gates: ["verified"] },
+  } }));
 
   const contractDocument = document('test "$(cat candidate.txt)" = "passing"');
   const bound = await invoke(parseArgv([

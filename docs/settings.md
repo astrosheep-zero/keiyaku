@@ -38,9 +38,10 @@ I/O failure fail only that scope.
 
 The root is an object from namespace name to namespace value. Every namespace
 is an object from entry name to an opaque JSON value. The resource layer
-validates only those two container levels; a Gate entry may be an array while a
-provider entry may be an object. It treats every unknown root key as a possible
-future namespace and never imports product vocabulary.
+validates only those two container levels; a Gate entry and a provider entry
+may each be objects with unrelated product-owned grammars. It treats every
+unknown root key as a possible future namespace and never imports product
+vocabulary.
 
 Project entries shadow user entries by the complete same-name record. Fields
 never merge. A resolved entry exposes its `project` or `user` source; a project
@@ -65,15 +66,31 @@ and admission timing. A missing or malformed selected entry rejects only the
 operation that selected it. Unknown record fields are judged by that product,
 not by Settings.
 
-The Contract product publicly provides `gatesFrom({ settings, name? })`. It reads
-the `gates` namespace and returns one concrete ordered, duplicate-free public
-Gate snapshot. A gate word matches `^[a-z][a-z0-9-]{0,63}$`; `reviewed` and
-`verified` are conventional words, not privileged type members. Each named
-entry is an array of unique gate words, and an empty array is legal. Omitted
-name selects `default` and returns `[]` when that entry is absent; an explicitly
-selected missing name is usage failure. Bind and amend continue to accept
-concrete Gate arrays. Admission freezes that array into Contract terms; later
-settings edits never alter an existing Contract or its status.
+The Contract product publicly provides `gatesFrom({ settings, names? })`. It
+reads the `gates` namespace and returns one concrete ordered, duplicate-free
+public Gate snapshot. A catalog name and gate word match
+`^[a-z][a-z0-9-]{0,63}$`. Each selected entry is exactly one record of this
+first supported kind:
+
+```json
+{ "kind": "bundle", "gates": ["reviewed", "verified"] }
+```
+
+`bundle.gates` contains leaf producer tokens, not names of other catalog
+entries. This bundle-only grammar admits only the currently dischargeable
+`reviewed` and `verified` leaves; an empty bundle and repeated leaves are
+legal. Selection expands records in caller order and removes duplicate leaves
+stably at their first occurrence. A selected bare array, unknown field,
+unknown kind, invalid leaf, or unknown explicit name is a product Settings
+error. Unselected entries remain opaque and unvalidated so future kinds do not
+break unrelated selections.
+
+Omitted `names` selects `default` and returns `["reviewed"]` when that entry is
+absent. A present empty `default` bundle overrides that built-in default.
+Explicit `names: []` selects nothing. Bind and amend continue to accept
+concrete Gate arrays. Admission freezes only the expanded array into Contract
+terms; catalog names, definitions, and later Settings edits never alter an
+existing Contract or its status.
 
 The Contract product also provides `worktreeHooksFrom({ settings })`. It reads
 the `worktree` namespace and returns one concrete `WorktreeHooks` value. The

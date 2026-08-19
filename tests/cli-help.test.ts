@@ -85,7 +85,7 @@ test("amend leaf help shows one minimal stdin example", () => {
   assert.equal(renderContractHelp("amend"), [
     "Amend one Contract's document operations or structured terms.",
     "",
-    "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] [-]",
+    "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [--json] [-]",
     "",
     "minimal stdin:",
     "  ## Replace: Design",

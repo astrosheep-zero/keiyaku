@@ -153,14 +153,14 @@ test("ls parses only canonical identity directories", () => {
   }
 });
 
-test("bind and amend retain complete after snapshots and gate-set selectors", () => {
+test("bind and amend retain complete after snapshots and gate bundle selectors", () => {
   assert.deepEqual(
-    parseArgv(["bind", "--after", "kei/one", "--after", "kei/two", "--gates", "strict", "-"]),
+    parseArgv(["bind", "--after", "kei/one", "--after", "kei/two", "--gates", "strict,review-only", "-"]),
     {
       command: {
         command: "bind",
         after: ["kei/one", "kei/two"],
-        gates: "strict",
+        gates: ["strict", "review-only"],
         output: "text",
       },
     },
@@ -179,7 +179,14 @@ test("bind and amend retain complete after snapshots and gate-set selectors", ()
   );
   assert.deepEqual(
     parseArgv(["amend", "kei/example", "--gates", "default"]),
-    { command: { command: "amend", contract: "kei/example", gates: "default", output: "text" } },
+    { command: { command: "amend", contract: "kei/example", gates: ["default"], output: "text" } },
+  );
+  for (const value of [",", "strict,", ",strict", "strict,,default"]) {
+    assert.throws(() => parseArgv(["bind", "--gates", value, "-"]), /comma-separated names/u);
+  }
+  assert.deepEqual(
+    parseArgv(["bind", "--gates", " ,--strict", "-"]),
+    { command: { command: "bind", gates: [" ", "--strict"], output: "text" } },
   );
   assert.throws(
     () => parseArgv(["amend", "kei/example"]),

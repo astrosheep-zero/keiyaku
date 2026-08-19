@@ -156,7 +156,7 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   const repository = repositoryWithMain();
   const runtime = {
     cwd: repository.path,
-    environment: {},
+    environment: { KEIYAKU_HOME: `${repository.path}/empty-home` },
   };
   const command = (argv: readonly string[], source = "") => invoke(parseArgv(argv), {
     ...runtime,

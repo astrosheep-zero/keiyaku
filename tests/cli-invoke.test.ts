@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { GIT_REF, readRef, repositoryAt } from "../src/git/repository.js";
@@ -27,7 +27,9 @@ function repositoryWithMain() {
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
   mkdirSync(resolve(repository.path, ".keiyaku"), { recursive: true });
-  writeFileSync(resolve(repository.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: ["reviewed"] } }));
+  writeFileSync(resolve(repository.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: {
+    default: { kind: "bundle", gates: ["reviewed"] },
+  } }));
   repository.run(["add", ".keiyaku/settings.json"]);
   repository.run(["commit", "--quiet", "-m", "initial"]);
   return repository;
@@ -67,10 +69,15 @@ function contractDocument(title: string, extra = ""): string {
   ].join("\n");
 }
 
-async function invokeWithDocument(repositoryPath: string, argv: readonly string[], source: string) {
+async function invokeWithDocument(
+  repositoryPath: string,
+  argv: readonly string[],
+  source: string,
+  environment: NodeJS.ProcessEnv = {},
+) {
   return invoke(parseArgv(argv), {
     cwd: repositoryPath,
-    environment: {},
+    environment,
     readStdin: () => source,
   });
 }
@@ -157,7 +164,9 @@ test("deliver exposes the core-owned unmet prerequisites unchanged in its JSON r
 test("one CLI invocation reuses its Repo for selector, settings, and contract lookup", async () => {
   const repository = repositoryWithMain();
   mkdirSync(resolve(repository.path, ".keiyaku"), { recursive: true });
-  writeFileSync(resolve(repository.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: { default: ["reviewed"] } }));
+  writeFileSync(resolve(repository.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: {
+    default: { kind: "bundle", gates: ["reviewed"] },
+  } }));
   const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Single public repo"));
   const id = acceptedContract(bound);
   const at = Repo.at;
@@ -184,7 +193,7 @@ test("explicit Repo selects Contract storage without replacing the invocation Wo
   const contractRepository = repositoryWithMain();
   writeFileSync(
     resolve(contractRepository.path, ".keiyaku", "settings.json"),
-    JSON.stringify({ gates: { default: ["verified"] } }),
+    JSON.stringify({ gates: { default: { kind: "bundle", gates: ["verified"] } } }),
   );
   contractRepository.run(["add", ".keiyaku/settings.json"]);
   contractRepository.run(["commit", "--quiet", "-m", "distinct contract settings"]);
@@ -660,18 +669,93 @@ test("bind freezes the selected gate snapshot", async () => {
   const repository = repositoryWithMain();
   mkdirSync(resolve(repository.path, ".keiyaku"), { recursive: true });
   writeFileSync(resolve(repository.path, ".keiyaku", "settings.json"), JSON.stringify({
-    gates: { default: ["reviewed"], strict: ["reviewed", "verified"] },
+    gates: {
+      default: { kind: "bundle", gates: ["reviewed"] },
+      strict: { kind: "bundle", gates: ["verified", "reviewed"] },
+      review: { kind: "bundle", gates: ["reviewed"] },
+    },
   }));
 
   const result = await invokeWithDocument(
     repository.path,
-    ["bind", "--actor", "external-test", "-"],
+    ["bind", "--gates", "strict,review", "--actor", "external-test", "-"],
     `${contractDocument("Gate Freeze")}## Verification\n\`\`\`bash\ntrue\n\`\`\`\n`,
   );
 
   assert.deepEqual(
     (await observeContract(await repositoryAt(repository.path), acceptedContract(result))).state?.terms?.gates,
+    ["verified", "reviewed"],
+  );
+});
+
+test("bind maps invalid gate bundle names from the Settings consumer to usage", async () => {
+  const repository = repositoryWithMain();
+  for (const names of ["Strict", "strict,review only", " ", "--strict"]) {
+    await assert.rejects(
+      () => invokeWithDocument(
+        repository.path,
+        ["bind", "--gates", names, "--actor", "external-test", "-"],
+        contractDocument("Invalid Gate Bundle Name"),
+      ),
+      (error: unknown) => error instanceof CliUsageError
+        && /gate bundle name must match/u.test(error.message),
+    );
+  }
+});
+
+test("amend freezes expanded plural gate bundles as concrete replacement terms", async () => {
+  const repository = repositoryWithMain();
+  writeFileSync(resolve(repository.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: {
+    default: { kind: "bundle", gates: ["reviewed"] },
+    strict: { kind: "bundle", gates: ["verified", "reviewed"] },
+    review: { kind: "bundle", gates: ["reviewed"] },
+  } }));
+  const bound = await invokeWithDocument(
+    repository.path,
+    ["bind", "--actor", "external-test", "-"],
+    `${contractDocument("Amend Gate Bundles")}## Verification\n\`\`\`bash\ntrue\n\`\`\`\n`,
+  );
+  const id = acceptedContract(bound);
+  const amended = await invokeWithDocument(
+    repository.path,
+    ["amend", id, "--gates", "strict,review", "--actor", "external-test"],
+    "",
+  );
+  assert.equal(amended.kind, "accepted");
+  assert.deepEqual(
+    (await observeContract(await repositoryAt(repository.path), id)).state?.terms.gates,
+    ["verified", "reviewed"],
+  );
+});
+
+test("bind defaults to reviewed unless a present default bundle overrides it", async () => {
+  const missing = repositoryWithMain();
+  writeFileSync(resolve(missing.path, ".keiyaku", "settings.json"), JSON.stringify({}));
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-empty-home-"));
+  const implicit = await invokeWithDocument(
+    missing.path,
+    ["bind", "--actor", "external-test", "-"],
+    contractDocument("Implicit Reviewed"),
+    { KEIYAKU_HOME: home },
+  );
+  assert.deepEqual(
+    (await observeContract(await repositoryAt(missing.path), acceptedContract(implicit))).state?.terms.gates,
     ["reviewed"],
+  );
+  rmSync(home, { recursive: true, force: true });
+
+  const empty = repositoryWithMain();
+  writeFileSync(resolve(empty.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: {
+    default: { kind: "bundle", gates: [] },
+  } }));
+  const overridden = await invokeWithDocument(
+    empty.path,
+    ["bind", "--actor", "external-test", "-"],
+    contractDocument("Explicit Empty Default"),
+  );
+  assert.deepEqual(
+    (await observeContract(await repositoryAt(empty.path), acceptedContract(overridden))).state?.terms.gates,
+    [],
   );
 });
 

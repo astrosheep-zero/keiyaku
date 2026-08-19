@@ -4,7 +4,7 @@ import type { HookCommand, WorktreeHooks } from "../git/hooks.js";
 export type { HookCommand, WorktreeHooks } from "../git/hooks.js";
 
 export type Gate = string;
-export type GatesFromInput = Readonly<{ settings: Settings; name?: string }>;
+export type GatesFromInput = Readonly<{ settings: Settings; names?: readonly string[] }>;
 export type RequireBranchesToBeUpToDateFromInput = Readonly<{ settings: Settings }>;
 export type WorktreeHooksFromInput = Readonly<{ settings: Settings }>;
 export { SettingsError };
@@ -18,24 +18,60 @@ function namespaceFailure(view: ReturnType<Settings["namespace"]>): never {
   throw new SettingsError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
 }
 
+function bundleGates(name: string, value: unknown): readonly Gate[] {
+  if (!record(value)) throw new SettingsError(`gate bundle '${name}' must be an object`);
+  if (value.kind !== "bundle") {
+    throw new SettingsError(`gate bundle '${name}' has unsupported kind: ${String(value.kind)}`);
+  }
+  for (const field of Object.keys(value)) {
+    if (field !== "kind" && field !== "gates") {
+      throw new SettingsError(`gate bundle '${name}' has unknown field: ${field}`);
+    }
+  }
+  if (!Array.isArray(value.gates)) {
+    throw new SettingsError(`gate bundle '${name}'.gates must be an array`);
+  }
+  return value.gates.map((gate) => {
+    if (!gateWord(gate)) {
+      throw new SettingsError(`gate bundle '${name}' contains an invalid gate word`);
+    }
+    if (gate !== "reviewed" && gate !== "verified") {
+      throw new SettingsError(`gate bundle '${name}' contains a gate without a producer: ${gate}`);
+    }
+    return gate;
+  });
+}
+
 export function gatesFrom(input: GatesFromInput): readonly Gate[] {
   if (!record(input)) throw new TypeError("gatesFrom input must be an object");
-  const name = input.name ?? "default";
-  if (!gateWord(name)) throw new SettingsError("gate set name must match ^[a-z][a-z0-9-]{0,63}$");
+  if (input.names !== undefined && !Array.isArray(input.names)) {
+    throw new TypeError("gatesFrom names must be an array");
+  }
+  const names = input.names ?? ["default"];
+  for (const name of names) {
+    if (!gateWord(name)) throw new SettingsError("gate bundle name must match ^[a-z][a-z0-9-]{0,63}$");
+  }
   const view = input.settings.namespace("gates");
   if (view.kind === "failed") namespaceFailure(view);
-  const selected = view.entries.find((entry) => entry.name === name);
-  if (selected === undefined) {
-    if (input.name === undefined) return Object.freeze([]);
-    throw new SettingsError(`unknown gate set: ${name}`);
+  const expanded: Gate[] = [];
+  const seen = new Set<Gate>();
+  for (const name of names) {
+    const selected = view.entries.find((entry) => entry.name === name);
+    if (selected === undefined) {
+      if (input.names === undefined) {
+        if (!seen.has("reviewed")) expanded.push("reviewed");
+        seen.add("reviewed");
+        continue;
+      }
+      throw new SettingsError(`unknown gate bundle: ${name}`);
+    }
+    for (const gate of bundleGates(name, selected.value)) {
+      if (seen.has(gate)) continue;
+      seen.add(gate);
+      expanded.push(gate);
+    }
   }
-  if (!Array.isArray(selected.value)) throw new SettingsError(`gate set '${name}' must be an array`);
-  const values = selected.value.map((value) => {
-    if (!gateWord(value)) throw new SettingsError(`gate set '${name}' contains an invalid gate word`);
-    return value;
-  });
-  if (new Set(values).size !== values.length) throw new SettingsError(`gate set '${name}' contains duplicate gates`);
-  return Object.freeze(values);
+  return Object.freeze(expanded);
 }
 
 function command(value: unknown, coordinate: string, ErrorType: typeof TypeError | typeof SettingsError): HookCommand {

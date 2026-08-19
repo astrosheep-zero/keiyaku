@@ -47,8 +47,9 @@ TaskHolder. Contract claim settles the current held Task to `done`, while
 abandon releases it. Otherwise bind the Contract without `--task`.
 
 Contract gates come from the Settings `gates` namespace. Omitting `--gates`
-selects `gates.default`, or freezes `[]` when that entry is absent. `--gates
-<name>` selects one named gate set; it does not name a literal gate word.
+selects `gates.default`, or freezes `["reviewed"]` when that entry is absent.
+`--gates <name,...>` selects named bundles in order; the values do not name
+literal gate words.
 
 ## Akuma dispatch
 

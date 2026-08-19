@@ -33,7 +33,10 @@ test("Settings resolves opaque entries by whole-record project shadow", async ()
   const value = fixture();
   try {
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({
-      gates: { default: ["reviewed"], strict: ["reviewed", "security-audited"] },
+      gates: {
+        default: { kind: "bundle", gates: ["reviewed"] },
+        strict: { kind: "bundle", gates: ["reviewed", "verified"] },
+      },
       providers: { codex: { kind: "codex-app-server", executable: "user-codex", env: { A: "user" } } },
     }));
     writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({
@@ -46,8 +49,8 @@ test("Settings resolves opaque entries by whole-record project shadow", async ()
       kind: "read",
       name: "gates",
       entries: [
-        { name: "default", value: ["reviewed"], source: "user", shadows: false },
-        { name: "strict", value: ["reviewed", "security-audited"], source: "user", shadows: false },
+        { name: "default", value: { kind: "bundle", gates: ["reviewed"] }, source: "user", shadows: false },
+        { name: "strict", value: { kind: "bundle", gates: ["reviewed", "verified"] }, source: "user", shadows: false },
       ],
     });
     assert.deepEqual(loaded.namespace("providers"), {
@@ -67,7 +70,7 @@ test("Settings isolates malformed namespaces but never falls through a failed hi
   const value = fixture();
   try {
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({
-      gates: { default: ["reviewed"] },
+      gates: { default: { kind: "bundle", gates: ["reviewed"] } },
       providers: [],
     }));
     let loaded = await settings({ root: value.project, home: value.home });
@@ -81,22 +84,48 @@ test("Settings isolates malformed namespaces but never falls through a failed hi
   } finally { value.close(); }
 });
 
-test("gatesFrom admits custom words, empty sets, and no implicit default", async () => {
+test("gatesFrom expands selected bundles, deduplicates stably, and defaults to reviewed", async () => {
   const value = fixture();
   try {
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ gates: {
-      empty: [],
-      custom: ["reviewed", "security-audited"],
-      duplicate: ["reviewed", "reviewed"],
-      invalid: ["Security"],
+      empty: { kind: "bundle", gates: [] },
+      first: { kind: "bundle", gates: ["reviewed", "verified", "reviewed"] },
+      second: { kind: "bundle", gates: ["verified"] },
+      future: { kind: "external", gate: "security-audited" },
+    } }));
+    let loaded = await settings({ home: value.home });
+    assert.deepEqual(gatesFrom({ settings: loaded }), ["reviewed"]);
+    assert.deepEqual(gatesFrom({ settings: loaded, names: [] }), []);
+    assert.deepEqual(gatesFrom({ settings: loaded, names: ["empty"] }), []);
+    assert.deepEqual(gatesFrom({ settings: loaded, names: ["first", "second", "first"] }), ["reviewed", "verified"]);
+
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ gates: {
+      default: { kind: "bundle", gates: [] },
+    } }));
+    loaded = await settings({ home: value.home });
+    assert.deepEqual(gatesFrom({ settings: loaded }), []);
+  } finally { value.close(); }
+});
+
+test("gatesFrom validates only selected bundle records and hard-rejects the old grammar", async () => {
+  const value = fixture();
+  try {
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ gates: {
+      good: { kind: "bundle", gates: ["reviewed"] },
+      future: { kind: "external", gate: "security-audited" },
+      legacy: ["reviewed"],
+      extra: { kind: "bundle", gates: ["reviewed"], note: true },
+      invalid: { kind: "bundle", gates: ["Security"] },
+      unavailable: { kind: "bundle", gates: ["security-audited"] },
     } }));
     const loaded = await settings({ home: value.home });
-    assert.deepEqual(gatesFrom({ settings: loaded }), []);
-    assert.deepEqual(gatesFrom({ settings: loaded, name: "empty" }), []);
-    assert.deepEqual(gatesFrom({ settings: loaded, name: "custom" }), ["reviewed", "security-audited"]);
-    assert.throws(() => gatesFrom({ settings: loaded, name: "missing" }), /unknown gate set/u);
-    assert.throws(() => gatesFrom({ settings: loaded, name: "duplicate" }), /duplicate gates/u);
-    assert.throws(() => gatesFrom({ settings: loaded, name: "invalid" }), /invalid gate word/u);
+    assert.deepEqual(gatesFrom({ settings: loaded, names: ["good"] }), ["reviewed"]);
+    assert.throws(() => gatesFrom({ settings: loaded, names: ["missing"] }), /unknown gate bundle/u);
+    assert.throws(() => gatesFrom({ settings: loaded, names: ["future"] }), /unsupported kind/u);
+    assert.throws(() => gatesFrom({ settings: loaded, names: ["legacy"] }), /must be an object/u);
+    assert.throws(() => gatesFrom({ settings: loaded, names: ["extra"] }), /unknown field/u);
+    assert.throws(() => gatesFrom({ settings: loaded, names: ["invalid"] }), /invalid gate word/u);
+    assert.throws(() => gatesFrom({ settings: loaded, names: ["unavailable"] }), /without a producer/u);
   } finally { value.close(); }
 });
 
@@ -235,7 +264,9 @@ test("Archetype resolves a second configured ACP execution without registry chan
 test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
   const value = fixture();
   try {
-    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ gates: { default: ["reviewed"] } }));
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ gates: {
+      default: { kind: "bundle", gates: ["reviewed"] },
+    } }));
     const parsed = parseArgv(["-C", value.project, "settings"]);
     if ("help" in parsed) throw new Error("unexpected help");
     const result = await invoke(parsed, { cwd: value.project, environment: { KEIYAKU_HOME: value.home } });

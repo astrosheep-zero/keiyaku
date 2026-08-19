@@ -53,7 +53,7 @@ single structured detail value.
 Settings construction and generic resource behavior are owned by
 [settings.md](settings.md). This package root exports `settings`, `Settings`,
 their observation values, and the Contract-owned consumers
-`gatesFrom({ settings, name? })`, `worktreeHooksFrom({ settings })`, and
+`gatesFrom({ settings, names? })`, `worktreeHooksFrom({ settings })`, and
 `requireBranchesToBeUpToDateFrom({ settings })`. They return immutable values;
 Contract operations retain no Settings observation, and Git receives only the
 opaque hook value. Selected-entry and resource-view failures throw

@@ -16,7 +16,12 @@ import {
 } from "./commands/akuma.js";
 import type { CatalogQuery } from "../index.js";
 import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
-import { AMEND_MINIMAL_STDIN_HELP, CONTRACT_COMMAND_SPECS, type ContractCommand as Command, type ContractCommandSpec as CommandSpec } from "./commands/contract.js";
+import {
+  AMEND_MINIMAL_STDIN_HELP,
+  CONTRACT_COMMAND_SPECS,
+  type ContractCommand as Command,
+  type ContractCommandSpec as CommandSpec,
+} from "./commands/contract.js";
 import { CliUsageError, isBlankInput, usageLine, withJsonAutomationHelp } from "./usage.js";
 export { CliUsageError } from "./usage.js";
 
@@ -68,14 +73,14 @@ export type ParsedBind = Output & Actor & Readonly<{
   target?: string;
   workspace?: "here";
   after?: readonly string[];
-  gates?: string;
+  gates?: readonly string[];
 }>;
 export type ParsedAmend = Output & Actor & Readonly<{
   command: "amend";
   contract?: string;
   after?: readonly string[];
   clearAfter?: true;
-  gates?: string;
+  gates?: readonly string[];
   stdin?: true;
 }>;
 export type ParsedDeliver = Output & Actor & Readonly<{
@@ -187,8 +192,11 @@ function scanOption(command: Command, argv: readonly string[], state: ScanState,
     return index;
   }
   const value = argv[index + 1];
-  if (value === undefined || value === "-" || value.startsWith("--")) refuse(command, `${token} requires a value`);
-  if (isBlankInput(value)) refuse(command, `${token} requires a nonblank value`);
+  if (value === undefined) refuse(command, `${token} requires a value`);
+  if (kind !== "raw-value" && (value === "-" || value.startsWith("--"))) {
+    refuse(command, `${token} requires a value`);
+  }
+  if (kind !== "raw-value" && isBlankInput(value)) refuse(command, `${token} requires a nonblank value`);
   if (kind === "repeat-value") {
     const values = state.flags[name];
     state.flags[name] = [...(Array.isArray(values) ? values : values === undefined ? [] : [values]), value];
@@ -240,7 +248,7 @@ function parseBind(parts: ParsedParts): ParsedBind {
   const task = optionalFlag(parts.flags, "task");
   const target = optionalFlag(parts.flags, "target");
   const after = parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
-  const gates = optionalFlag(parts.flags, "gates");
+  const gates = parseGateBundleNames(parts, "bind");
   return {
     command: "bind",
     ...(task === undefined ? {} : { task }),
@@ -257,7 +265,7 @@ function parseAmend(parts: ParsedParts): ParsedAmend {
   const contract = parts.positionals[0];
   const after = parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
   if (parts.flags["clear-after"] === true && after.length > 0) refuse("amend", "--clear-after and --after are mutually exclusive");
-  const gates = optionalFlag(parts.flags, "gates");
+  const gates = parseGateBundleNames(parts, "amend");
   if (!parts.stdin && parts.flags.after === undefined && parts.flags["clear-after"] !== true && gates === undefined) {
     refuse("amend", "amend requires stdin or --after, --clear-after, or --gates");
   }
@@ -271,6 +279,16 @@ function parseAmend(parts: ParsedParts): ParsedAmend {
     ...(parts.stdin ? { stdin: true as const } : {}),
     output: parts.output,
   };
+}
+
+function parseGateBundleNames(parts: ParsedParts, command: "bind" | "amend"): readonly string[] | undefined {
+  const value = optionalFlag(parts.flags, "gates");
+  if (value === undefined) return undefined;
+  const names = value.split(",");
+  if (names.some((name) => name.length === 0)) {
+    refuse(command, "--gates requires nonempty comma-separated names");
+  }
+  return names;
 }
 
 function parseDeliver(parts: ParsedParts): ParsedDeliver {

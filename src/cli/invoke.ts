@@ -136,8 +136,8 @@ function consumeSettings<T>(run: () => T): T {
   }
 }
 
-function selectedGates(value: Settings, name?: string) {
-  return consumeSettings(() => gatesFrom({ settings: value, ...(name === undefined ? {} : { name }) }));
+function selectedGates(value: Settings, names?: readonly string[]) {
+  return consumeSettings(() => gatesFrom({ settings: value, ...(names === undefined ? {} : { names }) }));
 }
 
 function selectedGitPolicy(value: Settings): boolean {

@@ -15,9 +15,9 @@ read `<command> --help` before using flags.
   then `keiyaku-workflow` for the remaining lifecycle.
 - An Akuma is a callable worker; see `keiyaku-akuma`.
 
-Settings owns named gate sets. Omitting `--gates` selects `gates.default`, or
-freezes an empty gate list when that entry is absent. `--gates <name>` selects
-one configured set; it does not add a literal gate word.
+Settings owns named gate bundles. Omitting `--gates` selects `gates.default`,
+or freezes `["reviewed"]` when that entry is absent. `--gates <name,...>`
+selects configured bundles in order; it does not add literal gate words.
 
 ## Quick Start
 

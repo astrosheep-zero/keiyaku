@@ -151,12 +151,13 @@ terminal fact and otherwise receives a typed refusal.
 
 ## Gates And Attestations
 
-Named gate snapshots in Settings are construction input only. Their resource
-and shadow law lives in [settings.md](settings.md). The Contract-owned
-`gatesFrom` consumer validates a selected record and produces the concrete
-ordered gate array supplied to bind or amend. Once admitted, only
-`terms.gates` matters; lifecycle and status never read Settings or reconcile an
-existing Contract against later configuration edits.
+Named gate catalog entries in Settings are construction input only. Their
+resource and shadow law lives in [settings.md](settings.md). The Contract-owned
+`gatesFrom` consumer validates and expands the selected records into the
+concrete ordered gate array supplied to bind or amend. Entry names, kinds, and
+definitions do not persist. Once admitted, only `terms.gates` matters;
+lifecycle and status never read Settings or reconcile an existing Contract
+against later configuration edits.
 
 Each `gates` term is an opaque, contract-declared placement obligation. Core
 has no built-in gate names, defaults, or verification-derived gates. Its codec

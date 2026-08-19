@@ -93,8 +93,8 @@ settlement neither replays delivery nor fabricates that live result.
 Command syntax:
 
 ```text
-bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name>] [--actor <actor>] [--json] -
-amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name>] [--actor <actor>] [--json] [-]
+bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] [--json] -
+amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [--json] [-]
 deliver [<contract>|@<contract>] [--message <text>] [--actor <actor>] [--json]
 review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>] [--json]
 abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
@@ -182,14 +182,14 @@ value to the public operation; the CLI never runs hooks or reads markers.
 tracked Settings from the integration snapshot. The CLI has no global
 Verification timeout or cancellation flag.
 
-Repository `.keiyaku/settings.json` may supply named gate snapshots and the Git
+Repository `.keiyaku/settings.json` may supply named gate bundles and the Git
 delivery policy for the edge:
 
 ```json
 {
   "gates": {
-    "default": ["reviewed"],
-    "strict": ["reviewed", "verified"]
+    "default": { "kind": "bundle", "gates": ["reviewed"] },
+    "strict": { "kind": "bundle", "gates": ["reviewed", "verified"] }
   },
   "git": {
     "requireBranchesToBeUpToDate": false
@@ -197,13 +197,19 @@ delivery policy for the edge:
 }
 ```
 
-A gate-set name and each gate word match `^[a-z][a-z0-9-]{0,63}$`. Each
-snapshot is an ordered, duplicate-free array; an empty array is valid. The
-adapter resolves the selected name to its array and passes that array to the
-public operation. Bind uses the configured `default` snapshot when its flag is
-omitted and uses `[]` when that entry is absent; amend retains its current
-public value when its flag is omitted. A malformed Settings scope, malformed
-selected entry, or explicitly selected unknown name is a typed usage refusal.
+A catalog name and each bundle leaf match `^[a-z][a-z0-9-]{0,63}$`.
+`--gates a,b,c` selects entries in CLI order; empty or invalid comma segments
+are usage. Argv parsing only separates nonempty segments; the Contract Settings
+consumer is the sole judge of catalog-name grammar. The adapter expands
+selected bundles, removes duplicate leaves at their first occurrence, and
+passes only that concrete array to the public operation. Bundle leaves are the
+current producer tokens `reviewed` and `verified`, not references to other
+entries. Bind selects `default` when its
+flag is omitted and uses `["reviewed"]` when that entry is absent; amend
+retains its current public value when its flag is omitted. A present empty
+default bundle selects no gates. A malformed Settings scope, malformed
+selected entry, or explicitly selected unknown name is a typed usage refusal;
+unselected future-kind records are not validated.
 
 `deliver` and `audit` require a clean workspace unless `--include-dirty`
 authorizes the complete non-ignored final tree; dirty submodule internals still
