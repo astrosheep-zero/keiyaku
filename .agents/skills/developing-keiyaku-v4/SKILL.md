@@ -69,6 +69,14 @@ Add `--contract <kei/...>` when Dispatch evidence should associate the Akuma
 with one Contract. `call` waits up to five minutes by default; use `--detach`
 only when the coordinator intends to observe it separately with `wait`.
 
+Contract association, available forwarded actions, and the brief are
+independent inputs. When a reviewer should record its own verdict, include
+`--allowed contract.review` and explicitly require the `review` command in the
+brief. When a deliverer should tender its completed candidate, include
+`--allowed contract.deliver` and explicitly require `deliver` after the named
+verification. Do not infer an available action from `--contract` or a seat,
+and do not treat an allowed action as an instruction to use it.
+
 ### Authority-grounded briefs
 
 Every implementation brief must cite the exact current law or owning document
@@ -109,12 +117,14 @@ lane's result.
 To finish a Contract that declares the `reviewed` gate:
 
 1. Send an independent reviewer the exact Contract worktree and wait for its
-   completed report.
+   completed report or review receipt. If it should record the verdict itself,
+   dispatch it with `--allowed contract.review` and say so in the brief.
 2. If it reports blocking findings, fix the worktree and review the changed
    patch again. Use `review --unsatisfied --summary <text>` only when retaining
    that negative judgment in Contract history is useful.
-3. When it reports no blocking findings, run `review --satisfied --summary
-   <text>`. If the same patch is already delivered and all other gates pass,
+3. When a reviewer finds no blocking findings and returns no review receipt,
+   run `review --satisfied --summary <text>`. When the brief assigned that
+   mutation to the reviewer, inspect its receipt instead. If the same patch is already delivered and all other gates pass,
    the receipt shows placement and the Contract becomes `claimed`. If no
    candidate is delivered yet, the receipt keeps the review and shows the
    placement stop; delivering those same bytes can then complete placement.
@@ -123,8 +133,9 @@ To finish a Contract that declares the `reviewed` gate:
    patch changed, and `○` is missing testimony. For `?` or `○`, review the
    current patch and record its result.
 
-The reviewer answer remains review input; the coordinator runs the Contract
-`review` command that changes the gate-visible journal.
+A reviewer answer without a review receipt remains review input. The actor
+assigned the `review` mutation in the workflow records the gate-visible
+journal entry.
 
 Akuma may call another Akuma when it has an independent, bounded subtask. It
 must still use `keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 ...`, keep the
