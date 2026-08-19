@@ -44,9 +44,11 @@ export function reconcileInput(input: ReconcileInput | undefined): Readonly<{
 
 export class Repo {
   readonly root: string;
+  readonly cwd: string;
 
   private constructor(scope: RepositoryScope) {
     this.root = scope.primaryWorktree;
+    this.cwd = scope.invocationWorktree;
     REPO_SCOPES.set(this, scope);
   }
 

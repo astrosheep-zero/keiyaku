@@ -54,7 +54,6 @@ async function requestBody(input: Readonly<{
     payload: requestPayload(input.claim),
   });
   const path = receiptPath(input.directory, input.claim.id);
-  const claimPath = requestPath(input.directory, input.claim.id);
   for (;;) {
     try {
       const receipt = decodeReceipt(await readFile(path, "utf8"), input.claim.id, input.claim.action);
@@ -65,8 +64,7 @@ async function requestBody(input: Readonly<{
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    if (!await access(input.directory).then(() => true, () => false)
-      || !await access(claimPath).then(() => true, () => false)) {
+    if (!await access(input.directory).then(() => true, () => false)) {
       throw new AkumaBodyRequestError("voided", "parent request channel closed before a receipt");
     }
     await abortableDelay(POLL_MS, input.signal);

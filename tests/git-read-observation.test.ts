@@ -37,6 +37,7 @@ test("empty Git read observation memoizes refs without starting object transport
 
   assert.deepEqual(invocations(log), [
     "worktree list --porcelain -z",
+    "rev-parse --path-format=absolute --show-toplevel",
     "rev-parse --path-format=absolute --git-common-dir",
     `rev-parse --verify --quiet ${GIT_REF}`,
     "rev-parse --verify --quiet refs/heads/main",

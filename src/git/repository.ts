@@ -96,13 +96,16 @@ export async function repositoryAt(cwd: string, gitPath = "git"): Promise<GitRep
   const provisional = {
     gitPath,
     effectiveCwd,
+    invocationWorktree: effectiveCwd,
     primaryWorktree: effectiveCwd,
     commonDirectory: effectiveCwd,
   } satisfies GitRepository;
+  let invocationWorktree: string;
   let primaryWorktree: string;
   let commonDirectory: string;
   try {
     primaryWorktree = (await registeredWorktreePaths(provisional))[0]!;
+    invocationWorktree = await worktreeRoot(provisional);
     commonDirectory = await absoluteGitPath(provisional, ["--git-common-dir"], "common Git directory");
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 128) {
@@ -110,7 +113,7 @@ export async function repositoryAt(cwd: string, gitPath = "git"): Promise<GitRep
     }
     throw error;
   }
-  return { gitPath, effectiveCwd, primaryWorktree, commonDirectory };
+  return { gitPath, effectiveCwd, invocationWorktree, primaryWorktree, commonDirectory };
 }
 
 async function absoluteGitPath(repository: GitRepository, args: readonly string[], label: string): Promise<string> {

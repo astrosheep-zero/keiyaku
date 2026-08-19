@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
@@ -217,6 +218,31 @@ test("terminal here cleanup does not remove an invalid additional identity appoi
 
   await bound.abandon();
   assert.equal(readFileSync(path, "utf8"), before);
+});
+
+test("duplicate here appointments fail reads generically, reject mutation, and all terminal bytes are removed", async () => {
+  const repository = repositoryWithMain();
+  const bound = await bind(repository);
+  const id = (await bound.state()).id;
+  const parent = mkdtempSync(join(tmpdir(), "keiyaku-here-duplicate-"));
+  const linked = join(parent, "linked");
+  repository.run(["worktree", "add", "--detach", linked, "HEAD"]);
+  const primaryAppointment = appointmentPath(repository.path);
+  const linkedAppointment = appoint(linked, id);
+  writeFileSync(linkedAppointment, readFileSync(primaryAppointment));
+
+  const listed = await Keiyaku.list({ repo: await Repo.at({ path: repository.path }) });
+  const row = listed.rows.find((value) => value.id === id);
+  assert.equal(row?.worktreePath, null);
+  assert.equal(row?.workspaceObservation.kind, "failed");
+  if (row?.workspaceObservation.kind === "failed") {
+    assert.match(row.workspaceObservation.diagnostic, /duplicate here Contract workspace appointments/u);
+  }
+  await assert.rejects(() => bound.deliver(), AuthorityCorruptionError);
+  await bound.abandon();
+  assert.equal(existsSync(primaryAppointment), false);
+  assert.equal(existsSync(linkedAppointment), false);
+  repository.run(["worktree", "remove", "--force", linked]);
 });
 
 test("Delivery.diff freshly reads its pinned candidate diff", async () => {

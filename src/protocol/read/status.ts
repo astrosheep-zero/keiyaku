@@ -29,6 +29,11 @@ export type ContractGateCurrent = GateCurrent;
 export type ContractGateReport = Readonly<{ gate: string; current: ContractGateCurrent }>;
 
 export type { ContractTargetLag, ContractWorkspaceObservation };
+export type HereWorkspaceObservationResolution =
+  | Readonly<{ kind: "appointed"; path: string }>
+  | Readonly<{ kind: "unappointed" }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+export type HereWorkspaceObservationResolver = (contractId: ContractId) => Promise<HereWorkspaceObservationResolution>;
 
 export type ContractRow = Readonly<{
   id: ContractId;
@@ -111,31 +116,54 @@ async function managedWorkspaceFacts(
 
 async function hereWorkspaceFacts(
   repository: GitRepository,
+  contractId: ContractId,
   targetObservation: ContractRow["targetObservation"],
+  resolveHereWorkspace?: HereWorkspaceObservationResolver,
 ): Promise<Readonly<{
   appointed: undefined;
   workspaceObservation: ContractWorkspaceObservation;
   targetLag: ContractTargetLag;
 }>> {
+  const resolved = resolveHereWorkspace === undefined
+    ? { kind: "unappointed" } as const
+    : await resolveHereWorkspace(contractId);
+  if (resolved.kind === "failed") {
+    return {
+      appointed: undefined,
+      workspaceObservation: { kind: "failed", diagnostic: resolved.diagnostic },
+      targetLag: targetObservation === null ? { kind: "none" } : { kind: "unknown" },
+    };
+  }
+  if (resolved.kind === "unappointed") {
+    return {
+      appointed: undefined,
+      workspaceObservation: { kind: "unappointed" },
+      targetLag: targetObservation === null ? { kind: "none" } : { kind: "unknown" },
+    };
+  }
   const [workspaceObservation, targetLag] = await Promise.all([
-    observeWorkspace(repository, { kind: "here" }, repository.effectiveCwd),
-    observeTargetLag(repository, repository.effectiveCwd, targetObservation?.head),
+    observeWorkspace(repository, { kind: "here" }, resolved.path),
+    observeTargetLag(repository, resolved.path, targetObservation?.head),
   ]);
   return { appointed: undefined, workspaceObservation, targetLag };
 }
 
-async function rowFor(
-  repository: GitRepository,
-  state: ContractState,
-  bindAt: string,
-  targetObservation: ContractRow["targetObservation"],
-  register: PlaceRegister,
-): Promise<ContractRow> {
+type ContractRowInput = Readonly<{
+  repository: GitRepository;
+  state: ContractState;
+  bindAt: string;
+  targetObservation: ContractRow["targetObservation"];
+  register: PlaceRegister;
+  resolveHereWorkspace?: HereWorkspaceObservationResolver;
+}>;
+
+async function rowFor(input: ContractRowInput): Promise<ContractRow> {
+  const { repository, state, bindAt, targetObservation, register, resolveHereWorkspace } = input;
   const workspace = state.coordinates.workspace;
   const gates = gateReports(state);
   const { appointed, workspaceObservation, targetLag } = workspace === "worktree"
     ? await managedWorkspaceFacts(repository, state, register, targetObservation)
-    : await hereWorkspaceFacts(repository, targetObservation);
+    : await hereWorkspaceFacts(repository, state.id, targetObservation, resolveHereWorkspace);
   return {
     id: state.id,
     title: titleFor(state),
@@ -162,9 +190,10 @@ async function rowFor(
 export async function readContractBoard(
   observation: GitReadObservation,
   selected?: ContractId,
+  resolveHereWorkspace?: HereWorkspaceObservationResolver,
 ): Promise<ContractBoard> {
   if (selected !== undefined) {
-    const contract = await readContractObservation(observation, selected);
+    const contract = await readContractObservation(observation, selected, resolveHereWorkspace);
     return {
       root: observation.repository.primaryWorktree,
       state: observation.snapshot.commit as SnapshotId | null,
@@ -178,8 +207,14 @@ export async function readContractBoard(
     if (value.state === null) continue;
     const state = value.state;
     const bindAt = value.entries[0]!.at;
-    rows.push(observeDeliveryTargetAt(observation, state).then((target) =>
-      rowFor(observation.repository, state, bindAt, target, register)));
+    rows.push(observeDeliveryTargetAt(observation, state).then((target) => rowFor({
+      repository: observation.repository,
+      state,
+      bindAt,
+      targetObservation: target,
+      register,
+      ...(resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace }),
+    })));
   }
   return { root: observation.repository.primaryWorktree, state: observed.snapshot, rows: await Promise.all(rows) };
 }
@@ -188,6 +223,7 @@ export async function readContractBoard(
 export async function readContractObservation(
   observation: GitReadObservation,
   id: ContractId,
+  resolveHereWorkspace?: HereWorkspaceObservationResolver,
 ): Promise<ContractObservation> {
   const observed = await observeContractsForAdmissionInObservationAt(observation, [id]);
   const record = observed.journals.get(id);
@@ -197,13 +233,14 @@ export async function readContractObservation(
     ? { kind: "missing", id }
     : {
         kind: "present",
-        row: await rowFor(
-          observation.repository,
+        row: await rowFor({
+          repository: observation.repository,
           state,
-          record.entries[0]!.at,
-          await observeDeliveryTargetAt(observation, state),
-          await readPlaceRegister(observation.repository),
-        ),
+          bindAt: record.entries[0]!.at,
+          targetObservation: await observeDeliveryTargetAt(observation, state),
+          register: await readPlaceRegister(observation.repository),
+          ...(resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace }),
+        }),
       };
 }
 
@@ -212,11 +249,12 @@ export async function readContractObservationAt(
   repository: GitRepository,
   channel: GitDecodeChannel,
   id: ContractId,
+  resolveHereWorkspace?: HereWorkspaceObservationResolver,
 ): Promise<ContractObservation> {
   return withContractReadObservationAt(
     repository,
     channel,
     id,
-    async (observation) => await readContractObservation(observation, id),
+    async (observation) => await readContractObservation(observation, id, resolveHereWorkspace),
   );
 }

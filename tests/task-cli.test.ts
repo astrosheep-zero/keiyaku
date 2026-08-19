@@ -261,7 +261,7 @@ test("Task, Settings, and Kanshi share the primary WorldRoot across Git worktree
   assert.equal(existsSync(join(linked, ".keiyaku", "tasks")), false);
   await invoke(parseArgv(["-C", linked, "task", "namespace", "contract/shared"]));
   const namespace = await invoke(parseArgv(["-C", repository.path, "task", "namespace"]));
-  assert.deepEqual(namespace, { kind: "accepted", value: ["contract", "shared"] });
+  assert.deepEqual(namespace, { kind: "accepted", value: [] });
 
   const settings = await invoke(parseArgv(["-C", linked, "settings"]));
   if (settings.kind !== "settings") throw new Error("expected settings result");

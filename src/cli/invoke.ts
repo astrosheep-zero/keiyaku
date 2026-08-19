@@ -518,7 +518,7 @@ async function invokeParsed(
     ...(gitPath === undefined ? {} : { gitPath }),
     command: invocation.command,
   });
-  const { cwd, cwdSource, repo, world, candidateWorld, establishWorld } = coordinates;
+  const { cwd, cwdSource, repo, world, candidateWorld, establishWorld, taskContext } = coordinates;
   const edge: InvocationEdge = {
     environment: runtime.environment ?? process.env,
     readStdin: runtime.readStdin ?? readStdin,
@@ -533,6 +533,7 @@ async function invokeParsed(
     try {
       return await invokeTask(parsed, {
         world,
+        context: taskContext,
         establish: coordinates.establishWorld,
         readStdin: edge.readStdin,
         ...(runtime.actor === undefined ? {} : { actor: runtime.actor }),

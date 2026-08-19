@@ -1,6 +1,4 @@
-import { resolve } from "node:path";
 import { documentDiff } from "../markdown/diff.js";
-import { readNamespaceContext } from "./context.js";
 import { relationProblem, type TaskBoard } from "./board.js";
 import { serializeTaskDocument, type TaskDocument, type TaskPriority } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
@@ -162,12 +160,16 @@ function draft(namespace: readonly string[], remaining: readonly Planned[]): str
   return `${lines.join("\n")}\n`;
 }
 
-export async function composeTasks(world: WorldRoot, markdown: string, signal?: AbortSignal, actor?: string): Promise<TaskCompositionResult> {
+export async function composeTasks(
+  world: WorldRoot,
+  markdown: string,
+  signal?: AbortSignal,
+  actor?: string,
+  defaultNamespace?: readonly string[],
+): Promise<TaskCompositionResult> {
   const sketch = parseSketch(markdown); if ("kind" in sketch) return { kind: "refused", refusal: sketch };
   const at = currentTimestamp();
-  const context = sketch.namespace ?? await readNamespaceContext(world);
-  if (context === "malformed") return { kind: "refused", refusal: { kind: "invalid-namespace-context", path: resolve(world, ".keiyaku", "namespace", "current") } };
-  const namespace = context === "absent" ? [] : context;
+  const namespace = sketch.namespace ?? defaultNamespace ?? [];
   const initial = await readBoard(world); const planned = plan(sketch, initial.board, namespace, at, actor); if ("kind" in planned) return { kind: "refused", refusal: planned };
   const ordered = [...planned].sort((a, b) => Buffer.compare(Buffer.from(a.after.id), Buffer.from(b.after.id)));
   const allocation = sketch.nodes.some((node) => node.kind === "new");

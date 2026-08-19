@@ -107,7 +107,8 @@ export type ContractWorkspaceLocation =
 export type ContractWorkspaceObservation =
   | Readonly<{ kind: "clean" | "dirty"; location: ContractWorkspaceLocation; counts: WorkspaceChangeCounts }>
   | Readonly<{ kind: "unavailable"; location: ContractWorkspaceLocation }>
-  | Readonly<{ kind: "unappointed" }>;
+  | Readonly<{ kind: "unappointed" }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
 
 export type ContractTargetLag =
   | Readonly<{ kind: "counted"; behind: number }>

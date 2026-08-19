@@ -40,6 +40,7 @@ type CompletionInput = Readonly<{
   verification: VerificationDeclarationPreparation;
   initial: AcceptedProtocolStep;
   verifyInitial: boolean;
+  hereWorkspacePath?: string;
 }>;
 
 export type CompletionResult = Readonly<{
@@ -170,6 +171,20 @@ function acceptedCompletion(
   };
 }
 
+async function admitCurrentPlacement(input: CompletionInput) {
+  return await admitPlacement({
+    channel: input.channel,
+    repository: input.repository,
+    target: input.target,
+    placement: {
+      contractId: input.contractId,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+      at: timestamp(),
+    },
+    ...(input.hereWorkspacePath === undefined ? {} : { hereWorkspacePath: input.hereWorkspacePath }),
+  });
+}
+
 export async function completeCandidate(input: CompletionInput): Promise<CompletionResult> {
   let admission = input.initial;
   let evidence: CompletionEvidence = {};
@@ -183,11 +198,7 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
     completionVerification = verified.completionVerification;
   }
 
-  let placement = await admitPlacement(input.channel, input.repository, input.target, {
-    contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-  });
+  let placement = await admitCurrentPlacement(input);
   if (placement.kind === "accepted") {
     admission = mergeAdmissions(admission, placement);
     return { admission, evidence: mergeEvidence(evidence, acceptedCompletion(admission, completionVerification)) };
@@ -204,6 +215,7 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
       contractId: input.contractId,
       target: input.target,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
+      ...(input.hereWorkspacePath === undefined ? {} : { hereWorkspacePath: input.hereWorkspacePath }),
     });
     if (reintegrated.kind !== "accepted") {
       return { admission, evidence: mergeEvidence(evidence, { placement: reintegrationStop(reintegrated) }) };
@@ -215,11 +227,7 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
     evidence = replaceVerificationEvidence(evidence, verified.evidence);
     completionVerification = verified.completionVerification;
 
-    placement = await admitPlacement(input.channel, input.repository, input.target, {
-      contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      at: timestamp(),
-    });
+    placement = await admitCurrentPlacement(input);
     if (placement.kind === "accepted") {
       admission = mergeAdmissions(admission, placement);
       return { admission, evidence: mergeEvidence(evidence, acceptedCompletion(admission, completionVerification)) };

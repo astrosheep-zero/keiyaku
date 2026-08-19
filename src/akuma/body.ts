@@ -258,27 +258,10 @@ export async function spawnAkumaBody(launch: BodyLaunch): Promise<void> {
   owned.release();
 }
 
-export async function runAkumaBody(
-  upstreamFor: (
-    launch: BodyLaunch,
-    configuration: Readonly<{ home?: string; gitPath?: string }>,
-  ) => UpstreamExecutionPort,
-): Promise<void> {
-  const encoded = process.argv[2];
-  if (encoded === undefined) throw new TypeError("Akuma body launch payload is missing");
-  const launch = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as BodyLaunch;
-  const mappedHome = process.env.KEIYAKU_HOME?.trim();
-  const mappedGitPath = process.env.KEIYAKU_GIT_PATH;
-  if (mappedGitPath !== undefined && mappedGitPath.trim().length === 0) {
-    throw new TypeError("KEIYAKU_GIT_PATH requires a nonblank value");
-  }
-  const configuration = {
-    ...(mappedHome === undefined || mappedHome.length === 0 ? {} : { home: mappedHome }),
-    ...(mappedGitPath === undefined ? {} : { gitPath: mappedGitPath }),
-  };
+export async function runAkumaBody(launch: BodyLaunch, upstream: UpstreamExecutionPort): Promise<void> {
   await driveAkumaBody(launch, undefined, {
     now: () => new Date().toISOString(),
     spawnChild: spawnAkumaBody,
-    upstream: upstreamFor(launch, configuration),
+    upstream,
   });
 }

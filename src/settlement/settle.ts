@@ -132,11 +132,10 @@ async function settleNamespace(state: ContractState, effects: readonly Effect[],
     effect.kind === "worktree" && effect.action !== "removed");
   for (const effect of worktrees) {
     try {
-      const world = await World.at(effect.path);
       actions.push({
         kind: "namespace-context",
         path: effect.path,
-        action: await repairNamespaceContext(world, contractNamespace(state.id)),
+        action: await repairNamespaceContext(effect.path, contractNamespace(state.id)),
       });
     } catch (error) {
       lags.push({

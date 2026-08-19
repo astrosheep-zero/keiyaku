@@ -18,6 +18,7 @@ export type TenderCaptureCoordinates = Readonly<{
   contractId: ContractId;
   coordinates: ContractCoordinates;
   place?: string;
+  workspacePath?: string;
 }>;
 
 export type TenderCaptureRefusal = Readonly<{
@@ -57,7 +58,7 @@ async function workspaceExists(repository: GitRepository, workspace: "worktree" 
 }
 
 function workspaceFor(repository: GitRepository, input: TenderCaptureCoordinates): string | undefined {
-  if (input.coordinates.workspace === "here") return repository.effectiveCwd;
+  if (input.workspacePath !== undefined) return input.workspacePath;
   return input.place === undefined ? undefined : worktreePath(repository, input.place);
 }
 

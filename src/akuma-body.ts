@@ -100,4 +100,16 @@ export function upstreamFor(
   };
 }
 
-await runAkumaBody(upstreamFor);
+const encoded = process.argv[2];
+if (encoded === undefined) throw new TypeError("Akuma body launch payload is missing");
+const launch = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as BodyLaunch;
+const mappedHome = process.env.KEIYAKU_HOME?.trim();
+const mappedGitPath = process.env.KEIYAKU_GIT_PATH;
+if (mappedGitPath !== undefined && mappedGitPath.trim().length === 0) {
+  throw new TypeError("KEIYAKU_GIT_PATH requires a nonblank value");
+}
+const configuration = {
+  ...(mappedHome === undefined || mappedHome.length === 0 ? {} : { home: mappedHome }),
+  ...(mappedGitPath === undefined ? {} : { gitPath: mappedGitPath }),
+};
+await runAkumaBody(launch, upstreamFor(launch, configuration));

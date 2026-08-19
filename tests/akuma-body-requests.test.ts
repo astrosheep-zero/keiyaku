@@ -338,7 +338,7 @@ test("contract review and delivery retain separate request permissions", async (
   }
 });
 
-test("all Task mutations preserve selected World and inputs while Heart keeps only service markers", async () => {
+test("same-id task.add and all Task mutations preserve selected World and inputs while Heart keeps only service markers", async () => {
   const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-forward-parent-")));
   const selectedWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-task-forward-selected-")));
   const parent = await born(parentRoot, "parent", "22222222", [
@@ -362,9 +362,9 @@ test("all Task mutations preserve selected World and inputs while Heart keeps on
     },
   });
   const requests = [
-    { action: "task.add" as const, input: { title: "Add", body: "exact\nbody" } },
-    { action: "task.addDocument" as const, input: { markdown: "# Exact\n\nbody\n" } },
-    { action: "task.compose" as const, markdown: "+ Compose\n" },
+    { action: "task.add" as const, input: { title: "Add", body: "exact\nbody", namespace: ["caller"] } },
+    { action: "task.addDocument" as const, input: { markdown: "# Exact\n\nbody\n", namespace: ["caller"] } },
+    { action: "task.compose" as const, markdown: "+ Compose\n", namespace: ["caller"] },
     { action: "task.update" as const, id: "task/target" as const, input: { appendBody: "\nexact" } },
     { action: "task.start" as const, id: "task/target" as const },
     { action: "task.stop" as const, id: "task/target" as const },
@@ -377,7 +377,13 @@ test("all Task mutations preserve selected World and inputs while Heart keeps on
     for (const [index, request] of requests.entries()) {
       const id = `00000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`;
       if (index === 0) {
-        await Promise.all([1, 2].map(async () => await requestBodyTask({ directory: pump.directory, id, world: selectedWorld, request })));
+        const outcomes = await Promise.all([1, 2].map(async () => await requestBodyTask({
+          directory: pump.directory, id, world: selectedWorld, request,
+        })));
+        assert.deepEqual(outcomes, [
+          { kind: "accepted", value: { id: "task/created", body: "exact\nmarkdown", documentDiff: "must not persist" } },
+          { kind: "accepted", value: { id: "task/created", body: "exact\nmarkdown", documentDiff: "must not persist" } },
+        ]);
       } else {
         await requestBodyTask({ directory: pump.directory, id, world: selectedWorld, request });
       }
@@ -453,7 +459,7 @@ test("every native Task return is served unchanged without result classification
   const requests = [
     { action: "task.start" as const, id: "task/missing" as const },
     { action: "task.stop" as const, id: "task/target" as const },
-    { action: "task.compose" as const, markdown: "+ Remaining\n" },
+    { action: "task.compose" as const, markdown: "+ Remaining\n", namespace: ["caller"] },
     { action: "task.done" as const, ids: ["task/one", "task/two"] as const },
   ];
   try {

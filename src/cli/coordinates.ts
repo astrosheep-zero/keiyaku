@@ -17,6 +17,7 @@ export type CliCoordinates = Readonly<{
   repo?: Repo;
   world: WorldRoot | null;
   candidateWorld: WorldRoot | null;
+  taskContext: Readonly<{ directory: string; boundary: string }>;
   establishWorld: () => Promise<WorldRoot>;
 }>;
 
@@ -133,12 +134,14 @@ export async function resolveCliCoordinates(input: CliCoordinateInput): Promise<
   const worldRepo = invocationRepo.kind === "present" ? invocationRepo.repo : undefined;
   const repo = repoFor(repoPolicy(input.command).use, selectedRepo);
   const world = await resolveWorld(cwd, worldRepo);
+  const boundary = worldRepo === undefined ? world.root ?? world.candidate ?? cwd : worldRepo.cwd;
   return {
     cwd,
     cwdSource: input.cwd === undefined ? "process" : "input",
     ...(repo === undefined ? {} : { repo }),
     world: world.root,
     candidateWorld: world.candidate,
+    taskContext: { directory: cwd, boundary },
     establishWorld: world.establish,
   };
 }

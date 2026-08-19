@@ -41,6 +41,10 @@ function firstJournalAt(repository: TestGitRepository, id: ContractId): string {
   return first.at;
 }
 
+function hereWorkspace(scope: Awaited<ReturnType<typeof scopeOperation>>) {
+  return async () => ({ kind: "appointed" as const, path: scope.effectiveCwd });
+}
+
 function repositoryWithMain(): TestGitRepository {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
@@ -128,7 +132,9 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_STATUS_READ_LOG: log },
-    () => withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel })),
+    () => withGitDecodeChannel(scope, (channel) => contractsOperation({
+      scope, channel, hereWorkspace: hereWorkspace(scope),
+    })),
   );
   const git = await repositoryAt(repository.path);
 
@@ -177,6 +183,7 @@ test("Contract reads return plain pinned data from one git snapshot", async () =
     scope,
     channel,
     contractId: first,
+    hereWorkspace: hereWorkspace(scope),
   })), {
     kind: "present",
     row: report.rows.find((contract) => contract.id === first),
@@ -267,7 +274,7 @@ test("public Contract rows select the source entry for every phase", async () =>
   const scope = await scopeOperation({ coordinate: repository.path });
   for (const [id, phase, phaseAt] of expected) {
     const observed = await withGitDecodeChannel(scope, (channel) => contractObservationOperation({
-      scope, channel, contractId: id,
+      scope, channel, contractId: id, hereWorkspace: hereWorkspace(scope),
     }));
     assert.equal(observed.kind, "present");
     if (observed.kind !== "present") continue;
@@ -337,6 +344,7 @@ test("single Contract observation never combines state and target from different
     scope,
     channel,
     contractId: id,
+    hereWorkspace: hereWorkspace(scope),
   })));
 
   assert.deepEqual(result, {

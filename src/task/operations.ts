@@ -1,6 +1,4 @@
-import { resolve } from "node:path";
 import { documentDiff } from "../markdown/diff.js";
-import { installNamespaceContext, readNamespaceContext } from "./context.js";
 import {
   createTaskRelations, projectTaskBoardObservation, relationProblem, projectBlocked, projectRows,
   type BlockedTaskRow, type TaskBoard, type TaskBoardObservation, type TaskRow,
@@ -51,12 +49,6 @@ export function taskView(document: TaskDocument): TaskView {
 }
 function refused(refusal: TaskRefusal): TaskMutationResult { return { kind: "refused", refusal }; }
 function retry(reason: TaskRetry): TaskMutationResult { return { kind: "retry", reason }; }
-async function context(world: WorldRoot, explicit?: readonly string[]): Promise<readonly string[] | TaskRefusal> {
-  if (explicit !== undefined) return explicit;
-  const current = await readNamespaceContext(world);
-  return current === "malformed" ? { kind: "invalid-namespace-context", path: resolve(world, ".keiyaku", "namespace", "current") }
-    : current === "absent" ? [] : current;
-}
 function occupied(board: TaskBoard, namespace: readonly string[]): Set<string> {
   return new Set([...board.tasks.values()].flatMap((task) => {
     const coordinate = parseTaskId(task.id);
@@ -95,14 +87,14 @@ async function create(world: WorldRoot, base: TaskCreationDocument, namespace: r
 }
 
 export async function addTask(world: WorldRoot, input: AddTaskInput): Promise<TaskMutationResult> {
-  const namespace = await context(world, input.namespace); if (!Array.isArray(namespace)) return refused(namespace as TaskRefusal);
+  const namespace = input.namespace ?? [];
   return create(world, {
     title: input.title, body: input.body ?? "", note: input.note ?? "", state: input.state ?? "open", priority: input.priority ?? 2, needs: input.needs ?? [], parent: input.parent ?? null,
     supersedes: input.supersedes ?? [], relates: input.relates ?? [],
   }, namespace, input.signal, input.actor);
 }
 export async function addTaskDocument(world: WorldRoot, input: AddTaskDocumentInput): Promise<TaskMutationResult> {
-  const namespace = await context(world, input.namespace); if (!Array.isArray(namespace)) return refused(namespace as TaskRefusal);
+  const namespace = input.namespace ?? [];
   return create(world, parseTaskCreationDocument(input.markdown), namespace, input.signal, input.actor);
 }
 
@@ -215,15 +207,15 @@ export async function settleTask(world: WorldRoot, id: TaskId): Promise<SettledT
   return result === "busy" ? { kind: "retry", reason: "busy" } : result;
 }
 
-async function readScope(world: WorldRoot, scope: "namespace" | "world" | undefined): Promise<readonly string[] | null | TaskRefusal> {
-  if (scope === "world") return null; return await context(world);
+function readScope(namespace: readonly string[] | undefined, scope: "namespace" | "world" | undefined): readonly string[] | null {
+  return scope === "world" ? null : namespace ?? [];
 }
-export async function listTasks(world: WorldRoot, selection: "active" | "closed" | "all", scope?: "namespace" | "world", limit = DEFAULT_TASK_LIMIT): Promise<TaskOutcome<TaskPage<TaskRow>>> {
-  const selected = await readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
-  return { kind: "accepted", value: projectPage(projectRows((await readBoard(world)).board, selected as readonly string[] | null, selection), limit) };
+export async function listTasks(world: WorldRoot, namespace: readonly string[] | undefined, selection: "active" | "closed" | "all", scope?: "namespace" | "world", limit = DEFAULT_TASK_LIMIT): Promise<TaskOutcome<TaskPage<TaskRow>>> {
+  const selected = readScope(namespace, scope);
+  return { kind: "accepted", value: projectPage(projectRows((await readBoard(world)).board, selected, selection), limit) };
 }
-export async function readyTasks(world: WorldRoot, scope?: "namespace" | "world", parent?: TaskId, limit = DEFAULT_TASK_LIMIT): Promise<TaskOutcome<TaskPage<TaskRow>>> {
-  const selected = await readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
+export async function readyTasks(world: WorldRoot, namespace: readonly string[] | undefined, scope?: "namespace" | "world", parent?: TaskId, limit = DEFAULT_TASK_LIMIT): Promise<TaskOutcome<TaskPage<TaskRow>>> {
+  const selected = readScope(namespace, scope);
   const board = (await readBoard(world)).board;
   if (parent !== undefined && !board.tasks.has(parent)) return { kind: "refused", refusal: { kind: "task-missing", taskId: parent } };
   const relations = createTaskRelations(board);
@@ -237,8 +229,8 @@ export async function readyTasks(world: WorldRoot, scope?: "namespace" | "world"
   const rows = selectedRows.map(({ parent: _parent, needs: _needs, blocks: _blocks, createdAt: _createdAt, updatedAt: _updatedAt, ...row }) => row);
   return { kind: "accepted", value: projectPage(rows, limit) };
 }
-export async function blockedTasks(world: WorldRoot, scope?: "namespace" | "world", parent?: TaskId, limit = DEFAULT_TASK_LIMIT): Promise<TaskOutcome<TaskPage<BlockedTaskRow>>> {
-  const selected = await readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
+export async function blockedTasks(world: WorldRoot, namespace: readonly string[] | undefined, scope?: "namespace" | "world", parent?: TaskId, limit = DEFAULT_TASK_LIMIT): Promise<TaskOutcome<TaskPage<BlockedTaskRow>>> {
+  const selected = readScope(namespace, scope);
   const board = (await readBoard(world)).board;
   if (parent !== undefined && !board.tasks.has(parent)) return { kind: "refused", refusal: { kind: "task-missing", taskId: parent } };
   const relations = createTaskRelations(board);
@@ -258,26 +250,27 @@ export async function blockedTasks(world: WorldRoot, scope?: "namespace" | "worl
     ),
   };
 }
-export async function queryTasks(
-  world: WorldRoot,
-  expression: TaskQueryExpression,
-  scope?: "namespace" | "world",
-  sort: TaskQuerySort = "priority",
-  limit = DEFAULT_TASK_LIMIT,
-): Promise<TaskOutcome<TaskPage<TaskQueryRow>>> {
-  const selected = await readScope(world, scope); if (selected !== null && !Array.isArray(selected)) return { kind: "refused", refusal: selected as TaskRefusal };
-  const board = (await readBoard(world)).board;
+export async function queryTasks(input: Readonly<{
+  world: WorldRoot;
+  namespace?: readonly string[];
+  expression: TaskQueryExpression;
+  scope?: "namespace" | "world";
+  sort?: TaskQuerySort;
+  limit?: number;
+}>): Promise<TaskOutcome<TaskPage<TaskQueryRow>>> {
+  const selected = readScope(input.namespace, input.scope);
+  const board = (await readBoard(input.world)).board;
   const relations = createTaskRelations(board);
-  for (const target of queryUnderTargets(expression)) if (!board.tasks.has(target)) {
+  for (const target of queryUnderTargets(input.expression)) if (!board.tasks.has(target)) {
     return { kind: "refused", refusal: { kind: "task-missing", taskId: target } };
   }
   return {
     kind: "accepted",
     value: projectQuery(board, relations, {
       scope: selected as readonly string[] | null,
-      expression,
-      sort,
-      limit,
+      expression: input.expression,
+      sort: input.sort ?? "priority",
+      limit: input.limit ?? DEFAULT_TASK_LIMIT,
     }),
   };
 }
@@ -288,8 +281,4 @@ export async function observeTaskBoard(world: WorldRoot): Promise<TaskBoardObser
 /** Internal identity catalog from one complete Task board read. */
 export async function observeTaskCatalogRows(world: WorldRoot): Promise<readonly TaskRow[]> {
   return projectRows((await readBoard(world)).board, null, "all");
-}
-export async function setCurrentNamespace(world: WorldRoot, namespace: readonly string[]): Promise<void> { await installNamespaceContext(world, namespace); }
-export async function currentNamespace(world: WorldRoot): Promise<readonly string[] | TaskRefusal> {
-  const selected = await context(world); return selected;
 }

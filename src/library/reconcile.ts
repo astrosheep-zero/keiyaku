@@ -51,6 +51,10 @@ function registerLag(scope: RepositoryScope, error: unknown): ContractFileLag {
   };
 }
 
+function hereConflict(diagnostic: string): never {
+  throw new AuthorityCorruptionError(diagnostic);
+}
+
 function emptySettlement(): SettlementReport {
   return { actions: [], lags: [] };
 }
@@ -149,7 +153,7 @@ export async function completeReconcile(input: ReconcileOptions & Readonly<{
     retainTerminalWorktree: true,
     ...appointed,
   });
-  const projection = await projectContractWorktree(input.scope, retained.state, appointment.register);
+  const projection = await projectContractWorktree(input.scope, retained.state, appointment.register, hereConflict);
   const settlement = await settle({
     repository: input.scope,
     channel: input.channel,
@@ -228,7 +232,7 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
     if (releaseEligible(contract.state, report, places.has(contract.contractId))) {
       released.push(contract.contractId);
     }
-    const projection = await projectContractWorktree(input.scope, contract.state, appointed);
+    const projection = await projectContractWorktree(input.scope, contract.state, appointed, hereConflict);
     contracts.push({
       contractId: contract.contractId,
       report: {

@@ -5,7 +5,8 @@ import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
 
 test("repository Task authority is readable by the current hard-cut codec", async () => {
-  const tasks = Tasks.of(await World.at(resolve(import.meta.dirname, "..")));
+  const root = resolve(import.meta.dirname, "..");
+  const tasks = Tasks.of(await World.at(root));
   const result = await tasks.list({ selection: "all", scope: "world" });
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;

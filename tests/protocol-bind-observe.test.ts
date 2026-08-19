@@ -44,7 +44,12 @@ import { decideArc } from "../src/core/verbs/arc.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { admitIntent } from "../src/protocol/intent.js";
 import { admitPlacement } from "../src/protocol/placement.js";
-import { releaseContractWorktree, reserveContractWorktree } from "../src/contract-worktree.js";
+import {
+  readContractAppointment,
+  releaseContractWorktree,
+  reserveContractWorktree,
+  resolveHereContractWorkspace,
+} from "../src/contract-worktree.js";
 import { runProtocol } from "../src/protocol/run.js";
 import { makeGitRepository, observeContract, withGitShim } from "./support/git.js";
 
@@ -100,8 +105,27 @@ function repositoryWithHead() {
   return repository;
 }
 
-function preparationCoordinates(state: NonNullable<Awaited<ReturnType<typeof observeContract>>["state"]>) {
-  return { contractId: state.id, coordinates: state.coordinates };
+async function preparationCoordinates(
+  repository: Awaited<ReturnType<typeof repositoryAt>>,
+  state: NonNullable<Awaited<ReturnType<typeof observeContract>>["state"]>,
+) {
+  if (state.coordinates.workspace === "worktree") {
+    return { contractId: state.id, coordinates: state.coordinates };
+  }
+  let workspace = await resolveHereContractWorkspace(repository, state.id);
+  if (workspace.kind === "unappointed") {
+    const current = await readContractAppointment(repository);
+    if (current.kind === "appointed") await releaseContractWorktree(repository, current.contract);
+    const reservation = await reserveContractWorktree(repository, state.id);
+    if (reservation.kind !== "reserved" && (reservation.kind !== "appointed" || reservation.contract !== state.id)) {
+      throw new Error(`unable to appoint fixture workspace for ${state.id}: ${reservation.kind}`);
+    }
+    workspace = await resolveHereContractWorkspace(repository, state.id);
+  }
+  if (workspace.kind !== "appointed") {
+    throw new Error(`fixture here workspace is ${workspace.kind} for ${state.id}`);
+  }
+  return { contractId: state.id, coordinates: state.coordinates, workspacePath: workspace.path };
 }
 
 test("observes a targetless current snapshot when bind target is omitted", async () => {
@@ -751,7 +775,7 @@ test("placement claims only the selected contract", async () => {
 
   const sourceState = (await observeContract(git, source.value.contractId)).state;
   if (sourceState === null) throw new Error("source state was not observed");
-  const prepared = await prepareDelivery(git, preparationCoordinates(sourceState), {
+  const prepared = await prepareDelivery(git, await preparationCoordinates(git, sourceState), {
     title: "Frozen journal bytes",
     document: DELIVERY_DOCUMENT,
   });
@@ -764,12 +788,12 @@ test("placement claims only the selected contract", async () => {
   }, decideDeliver));
   assert.equal(delivered.kind, "accepted");
 
-  const claimed = await withGitDecodeChannel(git, (channel) => admitPlacement(
+  const claimed = await withGitDecodeChannel(git, (channel) => admitPlacement({
     channel,
-    git,
-    sourceState.coordinates.target,
-    { contractId: source.value.contractId, at: "2026-08-07T00:00:01Z" },
-  ));
+    repository: git,
+    target: sourceState.coordinates.target,
+    placement: { contractId: source.value.contractId, at: "2026-08-07T00:00:01Z" },
+  }));
 
   assert.equal(claimed.kind, "accepted");
   if (claimed.kind !== "accepted") throw new Error("placement was not accepted");
@@ -982,7 +1006,7 @@ test("delivery binds before after and placement reads amended prerequisites", as
 
   const dependentState = (await observeContract(git, dependent.value.contractId)).state;
   if (dependentState === null) throw new Error("dependent state was not observed");
-  const dependentDelivery = await prepareDelivery(git, preparationCoordinates(dependentState), {
+  const dependentDelivery = await prepareDelivery(git, await preparationCoordinates(git, dependentState), {
     title: "Dependent",
     document: DELIVERY_DOCUMENT,
   });
@@ -1001,12 +1025,12 @@ test("delivery binds before after and placement reads amended prerequisites", as
   if (delivered.kind !== "accepted") throw new Error("dependent delivery was not accepted");
   assert.deepEqual(delivered.facts.map((entry) => entry.kind), ["bound", "deliver"]);
 
-  const waitingPlacement = await withGitDecodeChannel(git, (channel) => admitPlacement(
+  const waitingPlacement = await withGitDecodeChannel(git, (channel) => admitPlacement({
     channel,
-    git,
-    dependentState.coordinates.target,
-    { contractId: dependent.value.contractId, at: "2026-08-07T00:00:01Z" },
-  ));
+    repository: git,
+    target: dependentState.coordinates.target,
+    placement: { contractId: dependent.value.contractId, at: "2026-08-07T00:00:01Z" },
+  }));
   assert.deepEqual(waitingPlacement, {
     kind: "refused",
     refusal: {
@@ -1030,7 +1054,7 @@ test("delivery binds before after and placement reads amended prerequisites", as
 
   const prerequisiteState = (await observeContract(git, replacementPrerequisite.value.contractId)).state;
   if (prerequisiteState === null) throw new Error("replacement prerequisite state was not observed");
-  const prerequisiteDelivery = await prepareDelivery(git, preparationCoordinates(prerequisiteState), {
+  const prerequisiteDelivery = await prepareDelivery(git, await preparationCoordinates(git, prerequisiteState), {
     title: "Prerequisite",
     document: DELIVERY_DOCUMENT,
   });
@@ -1046,20 +1070,20 @@ test("delivery binds before after and placement reads amended prerequisites", as
     },
   }, decideDeliver));
   assert.equal(prerequisiteDelivered.kind, "accepted");
-  const prerequisiteClaimed = await withGitDecodeChannel(git, (channel) => admitPlacement(
+  const prerequisiteClaimed = await withGitDecodeChannel(git, (channel) => admitPlacement({
     channel,
-    git,
-    prerequisiteState.coordinates.target,
-    { contractId: replacementPrerequisite.value.contractId, at: "2026-08-07T00:00:03Z" },
-  ));
+    repository: git,
+    target: prerequisiteState.coordinates.target,
+    placement: { contractId: replacementPrerequisite.value.contractId, at: "2026-08-07T00:00:03Z" },
+  }));
   assert.equal(prerequisiteClaimed.kind, "accepted");
 
-  const claimed = await withGitDecodeChannel(git, (channel) => admitPlacement(
+  const claimed = await withGitDecodeChannel(git, (channel) => admitPlacement({
     channel,
-    git,
-    dependentState.coordinates.target,
-    { contractId: dependent.value.contractId, at: "2026-08-07T00:00:04Z" },
-  ));
+    repository: git,
+    target: dependentState.coordinates.target,
+    placement: { contractId: dependent.value.contractId, at: "2026-08-07T00:00:04Z" },
+  }));
   assert.equal(claimed.kind, "accepted");
   if (claimed.kind !== "accepted") throw new Error("dependent placement was not accepted");
   assert.deepEqual(claimed.facts.map((entry) => entry.kind), ["claimed"]);
@@ -1107,7 +1131,7 @@ test("bind and amend leave eligible prerequisites unmaterialized", async () => {
   const state = (await withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, observeContractWorld)))
     .contracts.get(claimedDependency.value.contractId)?.state;
   if (state === undefined || state === null) throw new Error("claimable dependency state was not observed");
-  const delivery = await prepareDelivery(git, preparationCoordinates(state), {
+  const delivery = await prepareDelivery(git, await preparationCoordinates(git, state), {
     title: "Targeted",
     document: DELIVERY_DOCUMENT,
   });
@@ -1119,12 +1143,12 @@ test("bind and amend leave eligible prerequisites unmaterialized", async () => {
     preparation: { kind: "prepared", document: state.terms.document.key, data: delivery.data },
   }, decideDeliver));
   assert.equal(delivered.kind, "accepted");
-  const claimed = await withGitDecodeChannel(git, (channel) => admitPlacement(
+  const claimed = await withGitDecodeChannel(git, (channel) => admitPlacement({
     channel,
-    git,
-    state.coordinates.target,
-    { contractId: claimedDependency.value.contractId, at: "2026-08-06T00:00:01Z" },
-  ));
+    repository: git,
+    target: state.coordinates.target,
+    placement: { contractId: claimedDependency.value.contractId, at: "2026-08-06T00:00:01Z" },
+  }));
   assert.equal(claimed.kind, "accepted");
 
   const immediatelyBound = await bindOperation({
@@ -1163,7 +1187,7 @@ test("placement redecides after a world advance without binding a dependent", as
   const git = await repositoryAt(repository.path);
   const sourceState = (await observeContract(git, source.value.contractId)).state;
   if (sourceState === null) throw new Error("source state was not observed");
-  const prepared = await prepareDelivery(git, preparationCoordinates(sourceState), {
+  const prepared = await prepareDelivery(git, await preparationCoordinates(git, sourceState), {
     title: "Concurrent placement",
     document: DELIVERY_DOCUMENT,
   });
@@ -1210,12 +1234,12 @@ test("placement redecides after a world advance without binding a dependent", as
   const claimed = await withGitShim(
     shim,
     { KEIYAKU_RACE_MARKER: marker, KEIYAKU_RACE_JOURNAL: dependentJournal },
-    () => withGitDecodeChannel(git, (channel) => admitPlacement(
+    () => withGitDecodeChannel(git, (channel) => admitPlacement({
       channel,
-      git,
-      sourceState.coordinates.target,
-      { contractId: source.value.contractId, at: "2026-08-06T00:00:02Z" },
-    )),
+      repository: git,
+      target: sourceState.coordinates.target,
+      placement: { contractId: source.value.contractId, at: "2026-08-06T00:00:02Z" },
+    })),
   );
   assert.equal(claimed.kind, "accepted");
   if (claimed.kind !== "accepted") throw new Error("placement was not accepted after redecision");
@@ -1233,7 +1257,7 @@ test("delivery preparation ignores an unrelated malformed journal", async () => 
 
   const state = (await observeContract(git, id)).state;
   if (state === null) throw new Error("bound contract state was not observed");
-  assert.equal((await prepareDelivery(git, preparationCoordinates(state), {
+  assert.equal((await prepareDelivery(git, await preparationCoordinates(git, state), {
     title: "Observation",
     document: DELIVERY_DOCUMENT,
   })).kind, "prepared");

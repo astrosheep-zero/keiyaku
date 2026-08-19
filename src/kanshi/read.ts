@@ -1,6 +1,7 @@
 import { Repo } from "../library/repo.js";
 import type { ContractBoard, ContractDisposition } from "../library/contract.js";
 import { scopeForRepo } from "../library/repo.js";
+import { resolveHereContractWorkspace } from "../contract-worktree.js";
 import { observeTaskBoard } from "../task/operations.js";
 import { contractNamespace } from "../settlement/settle.js";
 import { Akuma } from "../akuma/index.js";
@@ -129,7 +130,14 @@ async function readContracts(
   selected?: ContractBoard["rows"][number]["id"],
 ): Promise<Section<ContractBoard>> {
   try {
-    return { kind: "present", value: await readContractBoard(observation, selected) };
+    return {
+      kind: "present",
+      value: await readContractBoard(
+        observation,
+        selected,
+        async (id) => await resolveHereContractWorkspace(observation.repository, id),
+      ),
+    };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
   }

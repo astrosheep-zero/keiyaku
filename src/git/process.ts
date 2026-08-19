@@ -6,6 +6,8 @@ export type GitRepository = Readonly<{
   readonly gitPath: string;
   /** The invocation's effective working directory, including a caller -C worktree. */
   readonly effectiveCwd: string;
+  /** The worktree root containing the invocation's effective working directory. */
+  readonly invocationWorktree: string;
   /** The canonical primary worktree root for this repository. */
   readonly primaryWorktree: string;
   /** The canonical common Git directory pinned when this capability is created. */

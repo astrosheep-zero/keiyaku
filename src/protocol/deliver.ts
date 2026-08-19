@@ -44,7 +44,11 @@ type DeliveryFailure =
   | DeliveryPreparationRefusal
   | import("../verification/declaration.js").VerificationDeclarationRefusal
   | DeliverRefusal;
-type PreparedDelivery = Readonly<{ delivery: DeliveryIdentity; derivation: DocumentDerivation }>;
+type PreparedDelivery = Readonly<{
+  delivery: DeliveryIdentity;
+  derivation: DocumentDerivation;
+  workspacePath?: string;
+}>;
 
 export async function prepareDelivery(
   repository: import("../git/process.js").GitRepository,
@@ -52,6 +56,7 @@ export async function prepareDelivery(
     contractId: ContractId;
     coordinates: ContractState["coordinates"];
     appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
+    workspacePath?: string;
   }>,
   input: Readonly<{
     title: string;
@@ -64,7 +69,7 @@ export async function prepareDelivery(
 ): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: DeliveryPreparationRefusal }> {
   const { contractId, coordinates } = stage;
   if (coordinates.workspace === "here" && coordinates.target !== undefined) {
-    const branch = await currentBranch(repository);
+    const branch = await currentBranch(repository, stage.workspacePath);
     if (branch !== coordinates.target) {
       return {
         kind: "refused",
@@ -81,6 +86,7 @@ export async function prepareDelivery(
     contractId,
     coordinates,
     ...(appointed === undefined ? {} : { place: appointed.place }),
+    ...(stage.workspacePath === undefined ? {} : { workspacePath: stage.workspacePath }),
   });
   if (tender.kind === "refused") return tender;
   if ((tender.data.dirty && input.includeDirty !== true) || tender.data.changes.submodules.length > 0) {
@@ -129,12 +135,20 @@ async function deliverAttempt(
   const state = contractState(decisionObservation.decision, input.contractId);
   const derivation = state === null ? undefined : input.deriveDocument(state);
   let preparation: DeliverInput<DeliveryFailure>["preparation"];
+  let workspacePath: string | undefined;
   if (state === null || derivation === undefined) {
     preparation = { kind: "unavailable" };
   } else if (derivation.verification.kind === "refused") {
     preparation = { kind: "refused", document: derivation.document, refusal: derivation.verification.refusal };
   } else {
-    const prepared = await prepareDelivery(input.scope, { contractId: state.id, coordinates: state.coordinates }, {
+    workspacePath = state.terminal === null && state.coordinates.workspace === "here"
+      ? await input.resolveHereWorkspace?.(state.id)
+      : undefined;
+    const prepared = await prepareDelivery(input.scope, {
+      contractId: state.id,
+      coordinates: state.coordinates,
+      ...(workspacePath === undefined ? {} : { workspacePath }),
+    }, {
       title: derivation.title,
       document: derivation.bytes,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
@@ -144,7 +158,12 @@ async function deliverAttempt(
     });
     preparation = prepared.kind === "refused"
       ? { kind: "refused", document: derivation.document, refusal: prepared.refusal }
-      : { kind: "prepared", document: derivation.document, data: prepared.data };
+      : {
+        kind: "prepared",
+        document: derivation.document,
+        data: prepared.data,
+        ...(workspacePath === undefined ? {} : { workspacePath }),
+      };
   }
   const decision = decideDeliver({
     input: {
@@ -168,7 +187,14 @@ async function deliverAttempt(
   });
   if (admission.kind === "accepted") {
     if (derivation === undefined) throw new Error("accepted delivery is missing its document derivation");
-    return { ...admission, value: { delivery: preparation.data, derivation } };
+    return {
+      ...admission,
+      value: {
+        delivery: preparation.data,
+        derivation,
+        ...(workspacePath === undefined ? {} : { workspacePath }),
+      },
+    };
   }
   return admission;
 }
@@ -187,6 +213,7 @@ async function completeDelivery(
     contractId: input.contractId,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(first.value.workspacePath === undefined ? {} : { hereWorkspacePath: first.value.workspacePath }),
     ...(first.state.coordinates.target === undefined ? {} : { target: first.state.coordinates.target }),
     verification: derivation.verification,
     initial: first,

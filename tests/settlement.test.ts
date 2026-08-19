@@ -457,7 +457,8 @@ test("managed bind installs Task namespace after worktree materialization", asyn
   const bound = await Keiyaku.bind({ repo, markdown: document("Namespace settlement"), workspace: "worktree" });
   const action = bound.settlement.actions[0];
   assert.ok(action);
+  if (action.kind !== "namespace-context") throw new Error("expected namespace context settlement");
   const state = await bound.keiyaku.state();
-  assert.deepEqual(await readNamespaceContext(action.path), [state.id.slice("kei/".length)]);
+  assert.deepEqual(await readNamespaceContext({ directory: action.path, boundary: action.path }), [state.id.slice("kei/".length)]);
   assert.equal(bound.effects.some((effect) => effect.kind === "namespace-context"), false);
 });

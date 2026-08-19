@@ -8,12 +8,14 @@ Contract authority, or interpret a retained contract association.
 
 ## World, Context, And Identity
 
-A Task world is one product World. The CLI supplies the `WorldRoot` from its
-single `World.resolve` result; the Task product receives that root directly.
-`Tasks.of(root)` never searches upward, reads Git state, or inspects the process
-cwd. In a Git repository every worktree uses the primary worktree WorldRoot;
-a worktree marker cannot split Task authority. Outside Git, a nearer nested
-marker deliberately starts another Task world.
+A Task world is one product World. The public `Tasks.of` board handle is
+constructed from that WorldRoot only; it never stores invocation paths, reads
+Git state, or inspects process cwd. In a Git repository every worktree uses the
+primary worktree WorldRoot while the caller edge supplies the invocation
+directory and current worktree root to Task's context resolver. A worktree
+marker cannot split Task authority. Outside Git, context lookup and writes
+remain at WorldRoot, and a nearer nested marker deliberately starts another
+Task world.
 
 A `TaskId` is `task/<local-id>` at the root or
 `task/<namespace...>/<local-id>` in a nested namespace. Every segment uses the
@@ -31,12 +33,16 @@ authority. Its sole byte representation is:
 .keiyaku/namespace/current     # canonical slash-separated human segments
 ```
 
-An absent marker means the root namespace. A malformed marker refuses
-context-consuming Task operations as `invalid-namespace-context`. `add`,
-`addDocument`, and `compose` use it as their allocation default; `list`,
-`ready`, and `blocked` use it as their default scope. Explicit full-TaskId
-operations (`show`, `tree`, `update`, and lifecycle) never consult it.
-`doctor` is always world-scoped. `setNamespace` atomically replaces it.
+A caller-context read inspects from `directory` upward through the current
+worktree `boundary`, nearest first. An absent marker means the root namespace;
+a nearest malformed marker refuses context-consuming CLI/composition operations
+as `invalid-namespace-context` at that marker path and never falls through.
+`add`, `addDocument`, and `compose` receive their already-resolved namespace as
+an explicit input; `list`, `ready`, and `blocked` receive it when selecting a
+namespace scope. Explicit full-TaskId operations (`show`, `tree`, `update`,
+and lifecycle) carry no context. `doctor` is always world-scoped. The caller
+edge writes `task namespace X` at the invocation directory for Git and at
+WorldRoot for non-Git.
 
 The byte law and read/write primitive belong to Task. Installation in a
 managed Contract worktree is driven only by [settlement](settlement.md), which
@@ -163,20 +169,18 @@ be read. `Tasks.of` is constructed only in the `present` arm. Absence is never
 converted to an accepted empty list or a healthy doctor report.
 
 ```ts
-Tasks.of(root: WorldRoot): Tasks
+Tasks.of(world: WorldRoot): Tasks
 tasks.root: string
-tasks.namespace(): Promise<TaskNamespaceResult>
-tasks.setNamespace(input: { namespace: readonly string[] }): Promise<void>
 tasks.task(input: { id: string }): Task
 tasks.add(input: AddTaskInput): Promise<TaskMutationResult>
 tasks.addDocument(input: AddTaskDocumentInput): Promise<TaskMutationResult>
-tasks.list(input?: { selection?: "active" | "closed" | "all"; scope?: "namespace" | "world"; limit?: number }): Promise<TaskList>
-tasks.ready(input?: { scope?: "namespace" | "world"; parent?: string; limit?: number }): Promise<TaskList>
-tasks.blocked(input?: { scope?: "namespace" | "world"; parent?: string; limit?: number }): Promise<BlockedTaskList>
-tasks.query(input?: { where?: TaskQueryExpression; scope?: "namespace" | "world"; sort?: "priority" | "created" | "updated" | "id"; limit?: number }): Promise<TaskQueryResult>
+tasks.list(input?: { selection?: "active" | "closed" | "all"; scope?: "namespace" | "world"; namespace?: readonly string[]; limit?: number }): Promise<TaskList>
+tasks.ready(input?: { scope?: "namespace" | "world"; namespace?: readonly string[]; parent?: string; limit?: number }): Promise<TaskList>
+tasks.blocked(input?: { scope?: "namespace" | "world"; namespace?: readonly string[]; parent?: string; limit?: number }): Promise<BlockedTaskList>
+tasks.query(input?: { where?: TaskQueryExpression; scope?: "namespace" | "world"; namespace?: readonly string[]; sort?: "priority" | "created" | "updated" | "id"; limit?: number }): Promise<TaskQueryResult>
 tasks.doctor(): Promise<TaskDoctorReport>
 tasks.batch(input: { verb: "done" | "drop" | "hold"; ids: readonly string[]; note?: string; signal?: AbortSignal }): Promise<TaskBatchResult>
-tasks.compose(input: { markdown: string; actor?: string; signal?: AbortSignal }): Promise<TaskCompositionResult>
+tasks.compose(input: { markdown: string; namespace?: readonly string[]; actor?: string; signal?: AbortSignal }): Promise<TaskCompositionResult>
 
 task.read(): Promise<TaskDetail | null>
 task.tree(): Promise<TaskDecompositionTree>

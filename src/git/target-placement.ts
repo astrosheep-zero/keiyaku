@@ -287,10 +287,6 @@ async function workspaceMatchesTreeOnPaths(
   return (await gitPaths(repository, path, ["diff", "--name-only", "-z", tree, workspaceTree, "--", ...paths])).length === 0;
 }
 
-async function sourceWorktree(repository: GitRepository): Promise<string> {
-  return resolve((await runGit(repository, ["rev-parse", "--show-toplevel"])).toString("utf8").trim());
-}
-
 async function ordinaryPrecheck(
   repository: GitRepository,
   contractId: ContractId,
@@ -331,6 +327,7 @@ export type TargetPlacementObservationInput = Readonly<{
   coordinates: TargetedContractCoordinates;
   predecessor: SnapshotId;
   candidate: SnapshotId;
+  hereWorkspacePath?: string;
 }>;
 
 export type TargetPlacementObservation =
@@ -350,7 +347,7 @@ export async function observeTargetPlacement(
   const worktrees = (await registeredWorktrees(repository))
     .filter((worktree) => worktree.branch === target.target)
     .sort((left, right) => left.path.localeCompare(right.path));
-  const hereSource = input.coordinates.workspace === "here" ? await sourceWorktree(repository) : null;
+  const hereSource = input.coordinates.workspace === "here" ? input.hereWorkspacePath ?? null : null;
   if (hereSource !== null) {
     const branch = await currentBranch(repository, hereSource);
     if (branch !== target.target) {
@@ -375,9 +372,8 @@ export async function observeTargetPlacement(
     }
     arms.push({ kind, path: worktree.path });
   }
-  if (hereSource !== null && !arms.some((arm) => arm.kind === "here")) {
-    throw new Error("targeted here workspace is not a registered checkout of its target");
-  }
+  if (input.coordinates.workspace === "here" && hereSource === null) throw new Error("targeted here workspace is unappointed");
+  if (hereSource !== null && !arms.some((arm) => arm.kind === "here")) throw new Error("targeted here workspace is not a registered checkout of its target");
   return { kind: "ready", arms };
 }
 
@@ -413,6 +409,7 @@ export async function prepareTargetPlacement(
   repository: GitRepository,
   state: ContractState,
   target: RefOperation,
+  hereWorkspacePath?: string,
 ): Promise<TargetPlacementPreparation> {
   if (state.coordinates.target !== target.target || state.currentIntegration?.snapshot !== target.newOid) {
     throw new Error("placement state does not match its offered target movement");
@@ -422,6 +419,7 @@ export async function prepareTargetPlacement(
     coordinates: { ...state.coordinates, target: target.target },
     predecessor: target.expectedOid,
     candidate: target.newOid,
+    ...(hereWorkspacePath === undefined ? {} : { hereWorkspacePath }),
   });
   return observation.kind === "refused"
     ? observation

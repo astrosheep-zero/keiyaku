@@ -44,6 +44,7 @@ export async function auditContract(input: Readonly<{
   scope: RepositoryScope;
   contractId: ContractId;
   input?: AuditInput;
+  resolveHereWorkspace?: (contractId: ContractId) => Promise<string | undefined>;
 }>): Promise<MutationResult<AuditReport>> {
   const normalized = normalizeAuditInput(input.input);
   return withGitDecodeChannel(input.scope, async (channel) => {
@@ -61,6 +62,7 @@ export async function auditContract(input: Readonly<{
       requireBranchesToBeUpToDate: normalized.requireBranchesToBeUpToDate,
       ...(normalized.signal === undefined ? {} : { signal: normalized.signal }),
       ...(normalized.actor === undefined ? {} : { actor: normalized.actor }),
+      ...(input.resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace: input.resolveHereWorkspace }),
     }));
     return completeMutation({
       scope: input.scope,

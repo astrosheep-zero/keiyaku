@@ -1122,6 +1122,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/read-observation.ts", ["GitReadObservation", "withGitDecodeChannel", "withGitReadObservation"]),
         any("kanshi/**"), any("library/region.ts", ["readRegionDeclarations", "regionIntersections", "regionPathMatches", "validateRegionPath"]),
         any("core/facts/types.ts", ["contractId"]),
+        any("contract-worktree.ts", ["resolveHereContractWorkspace"]),
         types("library/contract.ts"),
         any("library/repo.ts", ["Repo", "scopeForRepo"]),
         any("protocol/read/status.ts", ["readContractBoard"]),
@@ -1192,7 +1193,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "cli/commands/task-invoke.ts",
-      allow: [types("cli/commands/task.ts"), any("task/index.ts"), any("task/mutation.ts"), types("world.ts"), any("akuma/requests.ts", ["injectedBodyRequests", "requestBodyTask"])],
+      allow: [types("cli/commands/task.ts"), any("task/index.ts"), any("task/context.ts", ["resolveTaskNamespaceContext", "writeTaskNamespaceContext"]), any("task/mutation.ts"), types("world.ts"), any("akuma/requests.ts", ["injectedBodyRequests", "requestBodyTask"])],
     },
     {
       source: "cli/draft.ts",
@@ -1351,13 +1352,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { capability: "module-mutable-state", owners: [] },
     { capability: "date-now", owners: ["protocol/attempt.ts", "cli/draft.ts"] },
     { capability: "new-date-current", owners: ["akuma/akuma.ts", "akuma/body.ts", "akuma/publication.ts", "dispatch/index.ts", "kanshi/read.ts", "protocol/bind.ts", "protocol/operations.ts", "task/compose.ts", "task/operations.ts"] },
-    { capability: "process-argv", owners: ["akuma/body.ts", "cli/main.ts", "cli/index.ts", "git/hooks.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
+    { capability: "process-argv", owners: ["akuma-body.ts", "cli/main.ts", "cli/index.ts", "git/hooks.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-cwd", owners: ["akuma/akuma.ts", "git/repository.ts", "cli/main.ts", "kanshi/read.ts", "library/repo.ts", "task/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
-    { capability: "process-environment", owners: ["akuma/body.ts", "akuma/providers/acp/core.ts", "akuma/providers/claude/index.ts", "akuma/providers/codex-app-server/index.ts", "akuma/providers/opencode-sdk/session.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "git/process.ts", "protocol/audit.ts", "protocol/completion.ts", "protocol/deliver.ts", "runtime/proc/**"] },
+    { capability: "process-environment", owners: ["akuma-body.ts", "akuma/body.ts", "akuma/providers/acp/core.ts", "akuma/providers/claude/index.ts", "akuma/providers/codex-app-server/index.ts", "akuma/providers/opencode-sdk/session.ts", "akuma/requests.ts", "cli/invoke.ts", "cli/main.ts", "git/process.ts", "protocol/audit.ts", "protocol/completion.ts", "protocol/deliver.ts", "runtime/proc/**"] },
     { capability: "process-output", owners: ["cli/main.ts", "cli/index.ts", "scripts/check-architecture.ts", "scripts/model-change-impact.ts"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },
-    { capability: "type-error-construction", owners: ["world.ts", "akuma/allowed.ts", "akuma/akuma.ts", "akuma/body.ts", "akuma/body-turn.ts", "akuma/identity.ts", "akuma/archetype.ts", "akuma/provider.ts", "akuma/provider-recipe.ts", "akuma/providers/index.ts", "akuma/providers/acp/index.ts", "akuma/providers/grok-build/index.ts", "akuma/providers/pi/index.ts", "alias/index.ts", "body/**", "cli/actor.ts", "contract-worktree.ts", "workspace-place.ts", "git/hooks.ts", "kanshi/**", "library/configuration.ts", "library/contract.ts", "library/input.ts", "library/repo.ts", "library/akuma-creation.ts", "library/address.ts", "library/fleet.ts", "library/catalog.ts", "identity/coordinates.ts", "identity/selector.ts", "settings.ts", "task/**"] },
+    { capability: "type-error-construction", owners: ["world.ts", "akuma-body.ts", "akuma/allowed.ts", "akuma/akuma.ts", "akuma/body.ts", "akuma/body-turn.ts", "akuma/identity.ts", "akuma/archetype.ts", "akuma/provider.ts", "akuma/provider-recipe.ts", "akuma/providers/index.ts", "akuma/providers/acp/index.ts", "akuma/providers/grok-build/index.ts", "akuma/providers/pi/index.ts", "alias/index.ts", "body/**", "cli/actor.ts", "contract-worktree.ts", "workspace-place.ts", "git/hooks.ts", "kanshi/**", "library/configuration.ts", "library/contract.ts", "library/input.ts", "library/repo.ts", "library/akuma-creation.ts", "library/address.ts", "library/fleet.ts", "library/catalog.ts", "identity/coordinates.ts", "identity/selector.ts", "settings.ts", "task/**"] },
   ],
   forbiddenFileNames: [
     "approval-preparation.ts",

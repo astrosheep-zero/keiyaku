@@ -25,9 +25,9 @@ export function isTaskMutationAction(value: unknown): value is TaskMutationActio
 }
 
 export type TaskMutationRequest =
-  | Readonly<{ action: "task.add"; input: Omit<AddTaskInput, "actor" | "signal"> }>
-  | Readonly<{ action: "task.addDocument"; input: Omit<AddTaskDocumentInput, "actor" | "signal"> }>
-  | Readonly<{ action: "task.compose"; markdown: string }>
+  | Readonly<{ action: "task.add"; input: Omit<AddTaskInput, "actor" | "signal" | "namespace"> & Readonly<{ namespace: readonly string[] }> }>
+  | Readonly<{ action: "task.addDocument"; input: Omit<AddTaskDocumentInput, "actor" | "signal" | "namespace"> & Readonly<{ namespace: readonly string[] }> }>
+  | Readonly<{ action: "task.compose"; markdown: string; namespace: readonly string[] }>
   | Readonly<{ action: "task.update"; id: TaskId; input: Omit<UpdateTaskInput, "signal"> }>
   | Readonly<{ action: "task.start" | "task.stop" | "task.resume"; id: TaskId }>
   | Readonly<{ action: "task.hold"; ids: readonly TaskId[] }>
@@ -49,7 +49,9 @@ export function decodeTaskMutationRequest(action: TaskMutationAction, value: unk
       const raw = mutationObject(input.input, [
         "title", "namespace", "body", "note", "state", "priority", "needs", "parent", "supersedes", "relates",
       ], "task.add input");
-      return { action, input: addInput(raw) };
+      const decoded = addInput(raw);
+      if (decoded.namespace === undefined) throw new TypeError("task.add request namespace is required");
+      return { action, input: { ...decoded, namespace: decoded.namespace } };
     }
     case "task.addDocument": {
       const input = mutationObject(value, ["input"], "task.addDocument request");
@@ -57,13 +59,16 @@ export function decodeTaskMutationRequest(action: TaskMutationAction, value: unk
       const markdown = text(raw.markdown, "markdown");
       if (markdown === undefined) throw new TypeError("markdown is required");
       const selected = namespace(raw.namespace);
-      return { action, input: { markdown, ...(selected === undefined ? {} : { namespace: selected }) } };
+      if (selected === undefined) throw new TypeError("task.addDocument request namespace is required");
+      return { action, input: { markdown, namespace: selected } };
     }
     case "task.compose": {
-      const input = mutationObject(value, ["markdown"], "task.compose request");
+      const input = mutationObject(value, ["markdown", "namespace"], "task.compose request");
       const markdown = text(input.markdown, "markdown");
       if (markdown === undefined) throw new TypeError("markdown is required");
-      return { action, markdown };
+      const selected = namespace(input.namespace);
+      if (selected === undefined) throw new TypeError("task.compose request namespace is required");
+      return { action, markdown, namespace: selected };
     }
     case "task.update": {
       const request = mutationObject(value, ["id", "input"], "task.update request");
@@ -104,7 +109,7 @@ export async function executeTaskMutation(input: Readonly<{
   switch (request.action) {
     case "task.add": return await tasks.add({ ...request.input, actor: input.requester, ...withSignal });
     case "task.addDocument": return await tasks.addDocument({ ...request.input, actor: input.requester, ...withSignal });
-    case "task.compose": return await tasks.compose({ markdown: request.markdown, actor: input.requester, ...withSignal });
+    case "task.compose": return await tasks.compose({ markdown: request.markdown, namespace: request.namespace, actor: input.requester, ...withSignal });
     case "task.update": return await tasks.task({ id: request.id }).update({ ...request.input, ...withSignal });
     case "task.start": return await tasks.task({ id: request.id }).start(withSignal);
     case "task.stop": return await tasks.task({ id: request.id }).stop(withSignal);

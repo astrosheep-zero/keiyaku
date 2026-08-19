@@ -19,7 +19,10 @@ import { World } from "../src/world.js";
 
 async function world(): { root: string; tasks: ReturnType<typeof Tasks.of> } {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-tasks-")); mkdirSync(join(root, ".keiyaku"));
-  return { root, tasks: Tasks.of(await World.at(root)) };
+  return {
+    root,
+    tasks: Tasks.of(await World.at(root)),
+  };
 }
 function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Tasks.of>["add"]>>): TaskId {
   assert.equal(result.kind, "accepted");
@@ -97,16 +100,15 @@ test("done and drop replace note while preserving creation time", async () => {
   assert.throws(() => tasks.batch({ verb: "hold", ids: [two], note: "invalid" }), /valid only for done or drop/u);
 });
 
-test("Tasks creates root and nested authority without Contract coupling", async () => {
+test("Tasks creates root authority without Contract coupling", async () => {
   const { tasks } = await world();
   const rootId = acceptedId(await tasks.add({ title: "Root task" }));
   assert.equal(rootId, "task/root-task");
-  await tasks.setNamespace({ namespace: ["contract", "inside"] });
-  const nestedId = acceptedId(await tasks.add({ title: "Nested task", state: "in_progress" }));
+  const nestedId = acceptedId(await tasks.add({ title: "Nested task", namespace: ["contract", "inside"], state: "in_progress" }));
   assert.equal(nestedId, "task/contract/inside/nested-task");
   assert.equal((await tasks.task({ id: nestedId }).read())?.task.state, "in_progress");
   assert.throws(() => tasks.add({ title: "Coupled", contractId: "kei/forbidden" } as never), /unknown field: contractId/u);
-  assert.deepEqual((await tasks.list()).kind === "accepted" ? (await tasks.list() as { kind: "accepted"; value: { rows: readonly { id: string }[] } }).value.rows.map((row) => row.id) : [], [nestedId]);
+  assert.deepEqual((await tasks.list({ namespace: ["contract", "inside"] })).kind === "accepted" ? (await tasks.list({ namespace: ["contract", "inside"] }) as { kind: "accepted"; value: { rows: readonly { id: string }[] } }).value.rows.map((row) => row.id) : [], [nestedId]);
   const worldList = await tasks.list({ scope: "world", selection: "all" });
   assert.equal(worldList.kind, "accepted");
   if (worldList.kind === "accepted") {
@@ -335,21 +337,14 @@ test("manual predecessor movement is refused and idle lock deletion never change
   assert.equal((await tasks.task({ id }).read())?.task.state, "done");
 });
 
-test("malformed current namespace refuses context consumers but not explicit TaskId reads", async () => {
+test("direct package Tasks uses root namespace without reading local context", async () => {
   const { root, tasks } = await world();
   const id = acceptedId(await tasks.add({ title: "Existing" }));
   mkdirSync(join(root, ".keiyaku", "namespace"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "namespace", "current"), "Bad Namespace\n");
   const listed = await tasks.list();
-  assert.equal(listed.kind, "refused");
-  if (listed.kind === "refused") {
-    assert.equal(listed.refusal.kind, "invalid-namespace-context");
-    if (listed.refusal.kind === "invalid-namespace-context") assert.equal(listed.refusal.path, join(tasks.root, ".keiyaku", "namespace", "current"));
-  }
+  assert.equal(listed.kind, "accepted");
   assert.equal((await tasks.task({ id }).read())?.task.id, id);
-  const namespace = await tasks.namespace();
-  assert.equal(namespace.kind, "refused");
-  if (namespace.kind === "refused") assert.equal(namespace.refusal.kind, "invalid-namespace-context");
 });
 
 function treeIds(node: TaskTreeNode): readonly string[] {
@@ -512,7 +507,7 @@ test("public inputs reject unknown fields before observing authority", async () 
   assert.throws(() => tasks.task({ id }).update({ title: "   " }), /title must be nonblank/u);
   assert.throws(() => tasks.task({ id }).start({ extra: true } as never), /unknown field/u);
   await assert.rejects(tasks.list({ scope: "nearby" } as never), /scope must be namespace or world/u);
-  assert.throws(() => Tasks.of({ root: tasks.root } as never), /WorldRoot/u);
+  assert.throws(() => Tasks.of({ root: tasks.root } as never), /Tasks.of world/u);
 });
 
 test("board ignores non-Markdown regular files including writer temporary files", async () => {

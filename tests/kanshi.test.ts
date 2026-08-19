@@ -110,7 +110,7 @@ function deleteLooseObject(repository: ReturnType<typeof makeGitRepository>, oid
   unlinkSync(join(repository.path, ".git", "objects", oid.slice(0, 2), oid.slice(2)));
 }
 
-test("one-target Kanshi observation has a seven-process Git topology", async () => {
+test("one-target Kanshi observation has an eight-process Git topology with one here locator fold", async () => {
   const { repository } = await populatedWorld();
   const tasks = Tasks.of(await World.at(repository.path));
   const added = await tasks.add({ title: "Second status row" });
@@ -132,7 +132,7 @@ test("one-target Kanshi observation has a seven-process Git topology", async () 
   })).kind, "dispatched");
   const invocations = await observedGitInvocations(repository);
 
-  assert.equal(invocations.filter((command) => command === "worktree list --porcelain -z").length, 1);
+  assert.equal(invocations.filter((command) => command === "worktree list --porcelain -z").length, 2);
   assert.equal(invocations.filter((command) => command === "rev-parse --path-format=absolute --git-common-dir").length, 1);
   assert.equal(invocations.filter((command) => command === "symbolic-ref --quiet HEAD").length, 1);
   assert.equal(invocations.filter((command) => command === `rev-parse --verify --quiet ${GIT_REF}`).length, 1);
@@ -277,6 +277,36 @@ test("Kanshi Git topology adds one ref read per distinct Contract target", async
   assert.equal(invocations.filter((command) => command.includes("status --porcelain=v2")).length, 2);
   assert.equal(invocations.filter((command) => /rev-list --count HEAD\.\.[0-9a-f]{40}$/u.test(command)).length, 2);
   assert.equal(invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)), false);
+});
+
+test("Kanshi reports duplicate here Contract appointments as a failed workspace observation", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repo = await Repo.at({ path: repository.path });
+  const bound = await Keiyaku.bind({ repo, markdown: document("Duplicate here workspace"), workspace: "here" });
+  const state = await bound.keiyaku.state();
+  const linked = join(mkdtempSync(join(tmpdir(), "keiyaku-kanshi-linked-")), "worktree");
+  repository.run(["worktree", "add", "--detach", linked]);
+  const appointment = readFileSync(join(repository.path, ".keiyaku", "KEIYAKU.md"));
+  mkdirSync(join(linked, ".keiyaku"), { recursive: true });
+  writeFileSync(join(linked, ".keiyaku", "KEIYAKU.md"), appointment);
+
+  const report = await observe(repository.path, repo);
+
+  assert.equal(report.contracts.kind, "present");
+  if (report.contracts.kind !== "present") return;
+  const row = report.contracts.value.rows.find((candidate) => candidate.id === state.id);
+  assert.equal(row?.worktreePath, null);
+  assert.equal(row?.workspaceObservation.kind, "failed");
+  if (row?.workspaceObservation.kind === "failed") {
+    assert.match(row.workspaceObservation.diagnostic, /duplicate here Contract workspace appointments/u);
+  }
+  assert.match(
+    renderKanshiText(report, { columns: 120, color: false }),
+    /workspace here · failed · duplicate here Contract workspace appointments/u,
+  );
 });
 
 test("a dead shared Kanshi batch fails every Git-backed owner without restarting", async () => {

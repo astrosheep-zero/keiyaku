@@ -39,13 +39,18 @@ type ReviewOperationInput = MutationOperationInput & Readonly<{
   deriveDocument?: (state: ContractState) => DocumentDerivation;
 }>;
 export type ReviewValue = CompletionEvidence & Readonly<{ workspace?: WorkspaceDirtyDelta }>;
-type PreparedReview = Readonly<{ workspace?: WorkspaceDirtyDelta; tender?: TenderCapture }>;
+type PreparedReview = Readonly<{
+  workspace?: WorkspaceDirtyDelta;
+  tender?: TenderCapture;
+  workspacePath?: string;
+}>;
 
 async function captureReviewableWorktree(
   repository: RepositoryScope,
   stage: Readonly<{
     contractId: import("../core/facts/types.js").ContractId;
     coordinates: ContractState["coordinates"];
+    workspacePath?: string;
   }>,
 ): Promise<{ kind: "prepared"; data: Readonly<{
   changeId: DeliverData["integration"]["changeId"];
@@ -58,6 +63,7 @@ async function captureReviewableWorktree(
   const tender = await captureTender(repository, {
     ...stage,
     ...(appointed === undefined ? {} : { place: appointed.place }),
+    ...(stage.workspacePath === undefined ? {} : { workspacePath: stage.workspacePath }),
   });
   if (tender.kind === "refused") return tender;
   if (tender.data.changes.submodules.length > 0) {
@@ -79,6 +85,7 @@ export async function prepareReview(
   stage: Readonly<{
     contractId: import("../core/facts/types.js").ContractId;
     coordinates: ContractState["coordinates"];
+    workspacePath?: string;
   }>,
 ): Promise<{ kind: "prepared"; data: Readonly<{
   changeId: DeliverData["integration"]["changeId"];
@@ -111,10 +118,15 @@ async function reviewAttempt(
   let preparation: AttestationInput<ReviewRefusal>["preparation"];
   let workspace: WorkspaceDirtyDelta | undefined;
   let tender: TenderCapture | undefined;
+  let workspacePath: string | undefined;
   if (state !== null) {
+    workspacePath = state.terminal === null && state.coordinates.workspace === "here"
+      ? await input.resolveHereWorkspace?.(state.id)
+      : undefined;
     const prepared = await captureReviewableWorktree(input.scope, {
       contractId: state.id,
       coordinates: state.coordinates,
+      ...(workspacePath === undefined ? {} : { workspacePath }),
     });
     preparation = prepared.kind === "refused"
       ? { kind: "refused", refusal: prepared.refusal }
@@ -159,6 +171,7 @@ async function reviewAttempt(
     value: {
       ...(workspace === undefined ? {} : { workspace }),
       ...(tender === undefined ? {} : { tender }),
+      ...(workspacePath === undefined ? {} : { workspacePath }),
     },
   };
   return admission;
@@ -190,6 +203,7 @@ export async function reviewOperation(input: ReviewOperationInput): Promise<Inte
     verification: derivation?.verification ?? { kind: "prepared", data: null },
     initial: review,
     verifyInitial: false,
+    ...(review.value.workspacePath === undefined ? {} : { hereWorkspacePath: review.value.workspacePath }),
   });
   return admitted(completed.admission, reviewValue(review.value, completed.evidence));
 }

@@ -74,6 +74,26 @@ known, a later workspace projection restores canonical bytes. Terminal
 cleanup and foreign-appointment refusal use the parsed Contract identity and
 never treat the description as lifecycle authority.
 
+Here-workspace lookup is one workspace-owner fold: it enumerates registered Git
+worktrees, reads their existing appointment bytes, and returns appointed for
+one matching path, unappointed for none, or failed with a bounded diagnostic
+for duplicate matching paths. Status and observe receive that read-facing fold
+through the Contract status projection, and Kanshi supplies it to that same
+projection. Protocol and tender consumers receive its appointment result rather
+than discovering worktrees themselves. One matching appointment supplies the
+workspace path for projection, audit, tender, review, target handling, and
+terminal cleanup; no
+operation consults invocation cwd after bind. No matching appointment uses the
+existing unavailable or `worktree-missing` behavior. Multiple valid matching
+appointments are authority corruption. Pre-admission delivery, review, and
+audit, and nonterminal projection or reconciliation, throw
+`AuthorityCorruptionError`; they do not mint a refusal or lag. Read-only
+status, observe, and Kanshi retain the row with `worktreePath` null and report
+one generic failed workspace observation whose bounded diagnostic may name the
+matching paths. Terminal cleanup is deliberately different: it removes every
+appointment whose decoded ContractId matches the terminal Contract and leaves
+foreign appointments untouched.
+
 ## Managed Place Appointment
 
 Place is the managed form of this same local appointment. It is not a Git

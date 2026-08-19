@@ -24,6 +24,12 @@ bounded diagnostic. One section's failure does not suppress another section.
 The WorldRoot is shared by every worktree in one Git repository; Kanshi never
 re-resolves it from cwd or a worktree marker.
 
+Kanshi consumes the Contract workspace owner's one here-appointment fold and
+supplies it to the Contract status projection. It does not enumerate Git
+worktrees, read appointment files, or select a here workspace itself. Thus a
+duplicate here appointment remains the same bounded failed workspace
+observation in Kanshi as in ordinary Contract status and observe.
+
 The report is:
 
 ```ts

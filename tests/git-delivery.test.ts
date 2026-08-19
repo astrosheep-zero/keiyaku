@@ -13,6 +13,7 @@ import { readDeliveryDiff } from "../src/git/integration.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { worktreePath } from "../src/git/workspace.js";
+import { reserveContractWorktree, resolveHereContractWorkspace } from "../src/contract-worktree.js";
 import {
   AuthorityCorruptionError,
   Keiyaku,
@@ -51,19 +52,34 @@ function preparationCoordinates(state: NonNullable<Awaited<ReturnType<typeof obs
   return { contractId: state.id, coordinates: state.coordinates };
 }
 
+async function herePreparationCoordinates(
+  repository: Awaited<ReturnType<typeof repositoryAt>>,
+  state: NonNullable<Awaited<ReturnType<typeof observeContract>>["state"]>,
+) {
+  if (state.coordinates.workspace !== "here") return preparationCoordinates(state);
+  const workspace = await resolveHereContractWorkspace(repository, state.id);
+  if (workspace.kind !== "appointed") throw new Error(`here workspace fixture was ${workspace.kind}`);
+  return { contractId: state.id, coordinates: state.coordinates, workspacePath: workspace.path };
+}
+
 async function boundContract(): Promise<Readonly<{ repository: TestGitRepository; id: ContractId }>> {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
-  return { repository, id: (await bound.keiyaku.state()).id };
+  const id = (await bound.keiyaku.state()).id;
+  const appointment = await reserveContractWorktree(await repositoryAt(repository.path), id);
+  if (appointment.kind !== "reserved" && (appointment.kind !== "appointed" || appointment.contract !== id)) {
+    throw new Error(`here workspace fixture was ${appointment.kind}`);
+  }
+  return { repository, id };
 }
 
 async function preparedDelivery(repository: TestGitRepository, id: ContractId) {
   const state = (await observeContract(await repositoryAt(repository.path), id)).state;
   if (state === null) throw new Error("contract was not observed");
-  const prepared = await prepareDelivery(await repositoryAt(repository.path), preparationCoordinates(state), {
+  const prepared = await prepareDelivery(await repositoryAt(repository.path), await herePreparationCoordinates(await repositoryAt(repository.path), state), {
     title: "Delivery patch identity",
     document: contractBody(),
   });
@@ -317,13 +333,13 @@ test("dirty delivery materializes a candidate without changing the caller index"
   const git = await repositoryAt(repository.path);
   const state = (await observeContract(git, id)).state;
   if (state === null) throw new Error("contract was not observed");
-  const review = await prepareReview(git, preparationCoordinates(state));
+  const review = await prepareReview(git, await herePreparationCoordinates(git, state));
   assert.equal(review.kind, "prepared");
   if (review.kind !== "prepared") throw new Error("review preparation was refused");
   assert.equal("documentKey" in review, false);
   const indexBefore = repository.run(["diff", "--cached", "--binary"]);
 
-  const prepared = await prepareDelivery(git, preparationCoordinates(state), {
+  const prepared = await prepareDelivery(git, await herePreparationCoordinates(git, state), {
     title: "Patch identity",
     document: contractBody(),
     includeDirty: true,
@@ -382,9 +398,10 @@ test("materialized delivery identity uses the complete repository pair or the ne
   writeFileSync(join(configured.repository.path, "configured.txt"), "configured\n");
   const configuredState = (await observeContract(await repositoryAt(configured.repository.path), configured.id)).state;
   if (configuredState === null) throw new Error("configured contract was not observed");
+  const configuredGit = await repositoryAt(configured.repository.path);
   const configuredDelivery = await prepareDelivery(
-    await repositoryAt(configured.repository.path),
-    preparationCoordinates(configuredState),
+    configuredGit,
+    await herePreparationCoordinates(configuredGit, configuredState),
     { title: "Configured", document: contractBody(), includeDirty: true },
   );
   assert.equal(configuredDelivery.kind, "prepared");
@@ -404,11 +421,14 @@ test("materialized delivery identity uses the complete repository pair or the ne
   const fallback = await withGitShim("exec \"$KEIYAKU_REAL_GIT\" \"$@\"", {
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_SYSTEM: "/dev/null",
-  }, async () => await prepareDelivery(
-    await repositoryAt(incomplete.repository.path),
-    preparationCoordinates(incompleteState),
+  }, async () => {
+    const incompleteGit = await repositoryAt(incomplete.repository.path);
+    return await prepareDelivery(
+      incompleteGit,
+      await herePreparationCoordinates(incompleteGit, incompleteState),
     { title: "Fallback", document: contractBody(), includeDirty: true },
-  ));
+    );
+  });
   assert.equal(fallback.kind, "prepared");
   if (fallback.kind !== "prepared") return;
   assert.deepEqual(commitSignature(incomplete.repository, fallback.data.tenderSnapshot).slice(0, 4), [
@@ -441,7 +461,7 @@ test("dirty delivery refuses classified paths unless the complete workspace is a
   const indexBefore = repository.run(["diff", "--cached", "--binary"]);
   const statusBefore = repository.run(["status", "--porcelain=v2", "--untracked-files=all"]);
 
-  assert.deepEqual(await prepareDelivery(git, preparationCoordinates(state), {
+  assert.deepEqual(await prepareDelivery(git, await herePreparationCoordinates(git, state), {
     title: "Explicit dirty",
     document: contractBody(),
   }), {
@@ -456,7 +476,7 @@ test("dirty delivery refuses classified paths unless the complete workspace is a
       shortStat: { filesChanged: 2, insertions: 2, deletions: 1 },
     },
   });
-  const prepared = await prepareDelivery(git, preparationCoordinates(state), {
+  const prepared = await prepareDelivery(git, await herePreparationCoordinates(git, state), {
     title: "Explicit dirty",
     document: contractBody(),
     includeDirty: true,
@@ -842,8 +862,8 @@ test("review observes dirty bytes but refuses dirty submodule internals", async 
     },
   };
 
-  assert.deepEqual(await prepareReview(git, preparationCoordinates(state)), expected);
-  assert.deepEqual(await prepareDelivery(git, preparationCoordinates(state), {
+  assert.deepEqual(await prepareReview(git, await herePreparationCoordinates(git, state)), expected);
+  assert.deepEqual(await prepareDelivery(git, await herePreparationCoordinates(git, state), {
     title: "Submodule",
     document: contractBody(),
     includeDirty: true,
@@ -948,10 +968,13 @@ test("clean delivery resolves its workspace head and tree in one Git call", asyn
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_GIT_CALLS: calls },
-    async () => await prepareDelivery(await repositoryAt(repository.path), preparationCoordinates(state), {
-      title: "Delivery patch identity",
-      document: contractBody(),
-    }),
+    async () => {
+      const git = await repositoryAt(repository.path);
+      return await prepareDelivery(git, await herePreparationCoordinates(git, state), {
+        title: "Delivery patch identity",
+        document: contractBody(),
+      });
+    },
   );
 
   assert.equal(prepared.kind, "prepared");

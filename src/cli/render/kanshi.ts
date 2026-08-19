@@ -80,7 +80,11 @@ function targetFacts(row: ContractKanshiRow): readonly string[] {
 
 function workspaceState(row: ContractKanshiRow): string {
   const observation = row.workspaceObservation;
+  if (row.workspace === "here" && observation.kind === "failed") {
+    return `workspace here · failed · ${observation.diagnostic}`;
+  }
   if (row.workspace === "here") return `workspace here · ${observation.kind}`;
+  if (observation.kind === "failed") return `worktree unavailable · ${observation.diagnostic}`;
   if (observation.kind === "unappointed") return "worktree unappointed";
   if (observation.kind === "unavailable") return "worktree unavailable";
   if (observation.kind === "clean") return "worktree clean";
@@ -96,7 +100,7 @@ function workspaceState(row: ContractKanshiRow): string {
 function showWorkspacePath(row: ContractKanshiRow, hot: boolean): boolean {
   if (row.workspace !== "worktree") return false;
   if (row.workspaceObservation.kind === "unappointed") return false;
-  if (row.workspaceObservation.kind !== "clean") return true;
+  if (row.workspaceObservation.kind !== "clean" && row.workspaceObservation.kind !== "failed") return true;
   return hot;
 }
 
@@ -226,6 +230,7 @@ function renderContractRow(
   if (
     showWorkspacePath(row, hot || selection === "contract")
     && row.workspaceObservation.kind !== "unappointed"
+    && row.workspaceObservation.kind !== "failed"
     && row.workspaceObservation.location.kind === "worktree"
   ) {
     lines.push(plumbPath(row.workspaceObservation.location.path));

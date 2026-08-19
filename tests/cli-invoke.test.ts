@@ -424,6 +424,31 @@ test("task creation resolves actor before applying the selected input", async ()
   assert.equal("createdBy" in blankEnv.value, false);
 });
 
+test("a linked-worktree Task invocation uses its local namespace and the primary World board", async () => {
+  const repository = repositoryWithMain();
+  const linked = join(mkdtempSync(join(tmpdir(), "keiyaku-linked-task-")), "worktree");
+  repository.run(["worktree", "add", "--detach", linked]);
+  const nested = join(linked, "nested");
+  mkdirSync(nested);
+
+  await invoke(parseArgv(["-C", repository.path, "task", "namespace", "primary"]), { environment: {} });
+  await invoke(parseArgv(["-C", nested, "task", "namespace", "linked"]), { environment: {} });
+  const linkedNamespace = await invoke(parseArgv(["-C", nested, "task", "namespace"]), { environment: {} });
+  assert.deepEqual(linkedNamespace, { kind: "accepted", value: ["linked"] });
+  const added = await invoke(parseArgv(["-C", nested, "task", "add", "Linked worktree task"]), {
+    environment: {},
+  }) as { kind: string; value?: { id?: string } };
+
+  assert.equal(added.kind, "accepted");
+  assert.match(added.value?.id ?? "", /^task\/linked\//u);
+  assert.equal(readFileSync(join(repository.path, ".keiyaku", "namespace", "current"), "utf8").trim(), "primary");
+  assert.equal(readFileSync(join(nested, ".keiyaku", "namespace", "current"), "utf8").trim(), "linked");
+  const world = await World.at(repository.path);
+  const board = await Tasks.of(world).list({ selection: "all", scope: "world" });
+  assert.equal(board.kind, "accepted");
+  if (board.kind === "accepted") assert.equal(board.value.rows.some((row) => row.id === added.value?.id), true);
+});
+
 test("bind defaults its target to the invocation worktree's current branch", async () => {
   const repository = repositoryWithMain();
   const start = repository.run(["rev-parse", "refs/heads/main"]).trim();

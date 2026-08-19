@@ -13,6 +13,7 @@ import { deliverOperation } from "../src/protocol/deliver.js";
 import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
+import { resolveHereContractWorkspace } from "../src/contract-worktree.js";
 import { makeGitRepository, type TestGitRepository } from "./support/git.js";
 
 function repositoryWithMain(): TestGitRepository {
@@ -181,6 +182,10 @@ test("audit without Verification still returns an accepted ready candidate", asy
         contractId,
       }),
     }),
+    resolveHereWorkspace: async (id) => {
+      const appointment = await resolveHereContractWorkspace(scope, id);
+      return appointment.kind === "appointed" ? appointment.path : undefined;
+    },
   }));
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;

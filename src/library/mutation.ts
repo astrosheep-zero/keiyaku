@@ -35,6 +35,16 @@ type Completion<Value, PublicValue> = Readonly<{
   hooks: WorktreeHooks;
 }>;
 
+export function completionInput<Value, PublicValue>(
+  scope: RepositoryScope,
+  channel: GitDecodeChannel,
+  contractId: ContractId,
+  value: (result: Value) => PublicValue,
+  hooks: WorktreeHooks,
+): Omit<Completion<Value, PublicValue>, "accepted"> {
+  return { scope, channel, contractId, value, hooks };
+}
+
 export async function completeMutation<Value, PublicValue>(
   input: Completion<Value, PublicValue>,
 ): Promise<MutationResult<PublicValue>> {

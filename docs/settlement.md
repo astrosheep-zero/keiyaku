@@ -68,7 +68,8 @@ Settlement has exactly these rules:
 2. A terminal Contract with no current matching holder does nothing. This is
    how superseded holders remain inert under settlement replay.
 3. An active managed Contract worktree reported as present by Git has its Task
-   namespace context installed or repaired. The default namespace is the
+   namespace context installed or repaired through the Task-owned primitive at
+   that worktree root. Settlement does not construct a World at that path. The default namespace is the
    ContractId's human contract segment. A valid local override is kept.
 
 Settlement owns the canonical Contract namespace

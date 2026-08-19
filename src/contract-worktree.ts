@@ -8,6 +8,7 @@ import {
 } from "./coordination/durable-file.js";
 import { contractId, type ArcData, type ContractId, type ContractState } from "./core/facts/types.js";
 import {
+  registeredWorktrees,
   worktreeGitDirectory,
   worktreeRoot,
 } from "./git/repository.js";
@@ -21,27 +22,17 @@ import {
 
 const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
 const APPOINTMENT_DESCRIPTION = "This is a read-only projection. Do not edit manually.";
-
-function appointmentBytes(contract: ContractId): string {
-  return `---\ncontract: ${contract}\ndescription: ${APPOINTMENT_DESCRIPTION}\n---\n`;
-}
-
-function appointedContract(bytes: string): ContractId | undefined {
-  const lines = bytes.split(/\r?\n/u);
-  if (lines[0] !== "---") return undefined;
-  const close = lines.indexOf("---", 1);
-  if (close !== 2 && close !== 3) return undefined;
-  const identity = lines[1];
-  const description = lines[2];
-  if (identity === undefined || !identity.startsWith("contract: ")) return undefined;
-  if (close === 3 && (description === undefined || !description.startsWith("description: "))) return undefined;
-  try {
-    return contractId(identity.slice("contract: ".length));
-  } catch {
-    return undefined;
-  }
-}
-
+export type ContractAppointment = Readonly<{ kind: "absent"; path: string }>
+  | Readonly<{ kind: "appointed"; path: string; contract: ContractId }>
+  | Readonly<{ kind: "invalid"; path: string }>;
+export type HereContractWorkspaceObservation = Readonly<{ kind: "appointed"; path: string }>
+  | Readonly<{ kind: "unappointed" }>
+  | Readonly<{ kind: "failed"; diagnostic: string; cause?: "duplicate" | "observation" }>;
+type HereContractWorkspaceAppointment = Readonly<{ kind: "appointed"; path: string }>
+  | Readonly<{ kind: "unappointed" }>
+  | Readonly<{ kind: "conflicted"; paths: readonly string[] }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+function appointmentBytes(contract: ContractId): string { return `---\ncontract: ${contract}\ndescription: ${APPOINTMENT_DESCRIPTION}\n---\n`; }
 function renderArc(arc: ArcData): string {
   return [
     "## Arc", "", "### Sequence", "", String(arc.seq), "", "### Title", "", arc.title.trimEnd(), "",
@@ -111,21 +102,54 @@ function generatedPath(worktree: string, name: string): string {
   return join(worktree, ".keiyaku", name);
 }
 
-export type ContractAppointment =
-  | Readonly<{ kind: "absent"; path: string }>
-  | Readonly<{ kind: "appointed"; path: string; contract: ContractId }>
-  | Readonly<{ kind: "invalid"; path: string }>;
-
+function appointedContract(bytes: string): ContractId | undefined {
+  const lines = bytes.split(/\r?\n/u), close = lines.indexOf("---", 1);
+  if (lines[0] !== "---" || (close !== 2 && close !== 3) || !lines[1]?.startsWith("contract: ")) return undefined;
+  if (close === 3 && !lines[2]?.startsWith("description: ")) return undefined;
+  try { return contractId(lines[1]!.slice("contract: ".length)); } catch { return undefined; }
+}
 export async function readContractAppointment(repository: GitRepository): Promise<ContractAppointment> {
   const path = generatedPath(await worktreeRoot(repository), "KEIYAKU.md");
-  const stat = await lstat(path).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return undefined;
-    throw error;
-  });
+  const stat = await lstat(path).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error));
   if (stat === undefined) return { kind: "absent", path };
   if (!stat.isFile() || stat.isSymbolicLink()) return { kind: "invalid", path };
   const contract = appointedContract(await readFile(path, "utf8"));
   return contract === undefined ? { kind: "invalid", path } : { kind: "appointed", path, contract };
+}
+async function readHereContractWorkspaceAppointment(repository: GitRepository, contract: ContractId): Promise<HereContractWorkspaceAppointment> {
+  const matches: string[] = [];
+  let worktrees;
+  try {
+    worktrees = await registeredWorktrees(repository);
+  } catch (error) {
+    if (error instanceof GitPlumbingError) return { kind: "failed", diagnostic: error.message };
+    throw error;
+  }
+  for (const worktree of worktrees) {
+    const appointment = await readContractAppointment({ ...repository, effectiveCwd: worktree.path });
+    if (appointment.kind === "appointed" && appointment.contract === contract) matches.push(worktree.path);
+  }
+  if (matches.length === 0) return { kind: "unappointed" };
+  if (matches.length > 1) return { kind: "conflicted", paths: matches.sort() };
+  return { kind: "appointed", path: matches[0]! };
+}
+
+function conflictDiagnostic(paths: readonly string[]): string {
+  const displayed = paths.slice(0, 3);
+  return `duplicate here Contract workspace appointments: ${displayed.join(", ")}${paths.length > displayed.length ? ", ..." : ""}`;
+}
+
+/** Fold existing here appointments over all registered worktrees for one Contract. */
+export async function resolveHereContractWorkspace(
+  repository: GitRepository,
+  contract: ContractId,
+): Promise<HereContractWorkspaceObservation> {
+  const appointment = await readHereContractWorkspaceAppointment(repository, contract);
+  if (appointment.kind === "failed") return { kind: "failed", diagnostic: appointment.diagnostic, cause: "observation" };
+  if (appointment.kind === "conflicted") {
+    return { kind: "failed", diagnostic: conflictDiagnostic(appointment.paths), cause: "duplicate" };
+  }
+  return appointment;
 }
 
 export type ContractReservation =
@@ -216,57 +240,53 @@ async function materialize(repository: GitRepository, worktree: string, guidance
   return { effects, lag: [] };
 }
 
-async function here(repository: GitRepository, state: ContractState, guidance: string): Promise<ContractWorktreeResult> {
-  const worktree = await worktreeRoot(repository);
-  const appointment = await readContractAppointment(repository);
-  if (appointment.kind === "appointed" && appointment.contract === state.id) {
-    return await materialize(repository, worktree, guidance);
+async function here(
+  repository: GitRepository,
+  state: ContractState,
+  guidance: string,
+  onConflict?: (diagnostic: string) => never,
+): Promise<ContractWorktreeResult> {
+  const appointment = await resolveHereContractWorkspace(repository, state.id);
+  if (appointment.kind === "appointed") return await materialize(repository, appointment.path, guidance);
+  if (appointment.kind === "failed") {
+    if (onConflict !== undefined) return onConflict(appointment.diagnostic);
+    throw new Error(appointment.diagnostic);
   }
-  const diagnostic = appointment.kind === "appointed"
-    ? `here worktree is appointed to ${appointment.contract}`
-    : `here Contract appointment is ${appointment.kind}`;
   return {
     effects: [],
-    lag: [{ kind: "contract-file-failed", worktree, path: appointment.path, diagnostic }],
+    lag: [{
+      kind: "contract-file-failed",
+      worktree: repository.primaryWorktree,
+      path: generatedPath(repository.primaryWorktree, "KEIYAKU.md"),
+      diagnostic: "here Contract is unappointed",
+    }],
   };
 }
 
-async function removeHere(repository: GitRepository, contract: ContractId): Promise<ContractWorktreeResult> {
-  const worktree = await worktreeRoot(repository);
-  const appointment = await readContractAppointment(repository);
-  if (appointment.kind === "absent" || (appointment.kind === "appointed" && appointment.contract !== contract)) {
-    return { effects: [], lag: [] };
+async function removeHere(repository: GitRepository, state: ContractState): Promise<ContractWorktreeResult> {
+  const effects: ContractFileEffect[] = [];
+  for (const worktree of await registeredWorktrees(repository)) {
+    const appointment = await readContractAppointment({ ...repository, effectiveCwd: worktree.path });
+    if (appointment.kind !== "appointed" || appointment.contract !== state.id) continue;
+    try { await unlink(appointment.path); effects.push({ kind: "contract-file", path: appointment.path, action: "removed" }); }
+    catch (error) { return { effects, lag: [{ kind: "contract-file-failed", worktree: worktree.path, path: appointment.path, diagnostic: error instanceof Error ? error.message : String(error) }] }; }
   }
-  if (appointment.kind === "invalid") {
-    return { effects: [], lag: [{
-      kind: "contract-file-failed", worktree, path: appointment.path, diagnostic: "here Contract appointment is invalid",
-    }] };
-  }
-  try {
-    await unlink(appointment.path);
-    return { effects: [{ kind: "contract-file", path: appointment.path, action: "removed" }], lag: [] };
-  } catch (error) {
-    return { effects: [], lag: [{
-      kind: "contract-file-failed",
-      worktree,
-      path: appointment.path,
-      diagnostic: error instanceof Error ? error.message : String(error),
-    }] };
-  }
+  return { effects, lag: [] };
 }
 
 export async function projectContractWorktree(
   repository: GitRepository,
   state: ContractState | null,
   register?: PlaceRegister,
+  onConflict?: (diagnostic: string) => never,
 ): Promise<ContractWorktreeResult> {
   if (state === null || state.terminal) {
     return state?.coordinates.workspace === "here"
-      ? await removeHere(repository, state.id)
+      ? await removeHere(repository, state)
       : { effects: [], lag: [] };
   }
   if (state.coordinates.workspace === "here") {
-    return await here(repository, state, renderContractGuidance(state));
+    return await here(repository, state, renderContractGuidance(state), onConflict);
   }
   const appointed = register === undefined ? undefined : appointmentFor(register, state.id);
   if (appointed === undefined) {

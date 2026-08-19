@@ -205,9 +205,11 @@ pump can read claims and project receipts. A pump scan, read, serve, or receipt
 projection failure reaches the Body turn supervisor, which follows its existing
 close path and removes the directory; admitted or reserved Heart facts remain
 for the next Body's recovery sweep. A malformed claim is deleted as transport
-bytes, without a receipt or Heart mutation. A caller whose own claim disappears
-before a receipt treats that as the existing typed `voided` channel-closed
-outcome rather than polling the still-live directory.
+bytes, without a receipt or Heart mutation. A request filename is not a caller
+liveness receipt: a pump may already have consumed a valid duplicate claim
+while Heart settlement and receipt projection remain in flight. A caller polls
+for its receipt until the directory disappears, which is the existing typed
+`voided` channel-closed outcome.
 Requests do not enter the idle predicate.
 
 One hop holds at every depth: each provider talks only to its own unsandboxed

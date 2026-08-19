@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -48,7 +48,7 @@ async function fixture(allowed?: Soul["allowed"]) {
   return { root, parent, soul, leash, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-test("a caller voids when its claim disappears before a receipt", async () => {
+test("a caller voids when its request transport disappears before a receipt", async () => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-request-claim-loss-"));
   const id = "00000000-0000-4000-8000-000000000001";
   try {
@@ -66,11 +66,11 @@ test("a caller voids when its claim disappears before a receipt", async () => {
     });
     const path = join(directory, `${id}.request.json`);
     while (!existsSync(path)) await new Promise((resolve) => setTimeout(resolve, 5));
-    unlinkSync(path);
+    rmSync(directory, { recursive: true, force: true });
     await assert.rejects(request, (error: unknown) => error instanceof AkumaBodyRequestError
       && error.outcome === "voided"
       && error.diagnostic === "parent request channel closed before a receipt");
-    assert.equal(existsSync(directory), true);
+    assert.equal(existsSync(directory), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
