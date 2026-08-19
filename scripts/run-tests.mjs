@@ -38,13 +38,15 @@ if (testFiles.length === 0) {
 const reporterOptions = options.some((option) => option === "--test-reporter" || option.startsWith("--test-reporter="))
   ? []
   : ["--test-reporter=dot"];
+const environment = { ...process.env };
+delete environment.AKUMA_REQUESTS;
 const result = spawnSync(process.execPath, [
   "--import", "tsx",
   "--test",
   ...reporterOptions,
   ...options,
   ...testFiles,
-], { stdio: "inherit" });
+], { stdio: "inherit", env: environment });
 
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);

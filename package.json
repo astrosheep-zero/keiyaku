@@ -36,9 +36,9 @@
     "review:model-impact": "node --import tsx scripts/model-change-impact.ts",
     "test": "npm run build && npm run test:architecture && npm run test:maintainability && npm run test:reachability && node --import tsx scripts/run-tests.mjs",
     "test:architecture": "node --import tsx scripts/check-architecture.ts",
-    "test:e2e": "npm run build && node --import tsx --test tests/packaged-cli.e2e.ts",
+    "test:e2e": "npm run build && node scripts/run-tests.mjs tests/packaged-cli.e2e.ts",
     "test:maintainability": "node scripts/check-maintainability.js",
-    "test:focused": "node --import tsx --test --test-reporter=dot",
+    "test:focused": "node scripts/run-tests.mjs",
     "test:reachability": "knip --include files,dependencies,unlisted,unresolved,duplicates",
     "test:typecheck": "tsc -p tsconfig.json --noEmit"
   },

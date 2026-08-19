@@ -3089,7 +3089,7 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
       kind: "codex-app-server",
       executable: fake.executable,
       config: { service_tier: "priority" },
-      env: { SETTINGS_LITERAL: "from-settings" },
+      env: { SETTINGS_LITERAL: "from-settings", KEIYAKU_ACTOR_ID: "" },
     });
     const options = {
       model: "gpt-test",
