@@ -299,7 +299,7 @@ function waitText(
   const blocks = [
     ...result.result.observations.map((observation) => {
       const answer = statusAnswer(observation);
-      if (answer !== undefined) return `${answeredHeading(observation.status.id, alias)}\n${answer}`;
+      if (answer !== undefined) return `${answeredHeading(observation.status.id, alias)}\n${answer}\n${OPENING_STROKE}`;
       return snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) });
     }),
     ...result.result.unobserved.map((member) => unobservedText(member.id, member.diagnostic)),
