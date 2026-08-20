@@ -356,6 +356,10 @@ function executionCwdLine(result: Extract<AkumaInvocationResult, { action: "call
   return result.execution.source === "contract-worktree" ? [`cwd ${result.execution.cwd}`] : [];
 }
 
+function posixShellArgument(value: string): string {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
 function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, context: TextRenderContext): string {
   const alias = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : undefined;
   const contractId = result.result.dispatch.kind === "dispatched" ? result.result.dispatch.dispatch.contractId : undefined;
@@ -369,7 +373,7 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
       : { kind: "associated", contractId }), ...cwd, ...restraint, ...facts];
     if (!callFailed(result.result)) {
       const selector = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : result.result.akuma;
-      lines.push(`$ keiyaku -C ${result.world} wait ${selector} --timeout 5m`);
+      lines.push(`$ keiyaku -C ${posixShellArgument(result.world)} wait ${selector} --timeout 5m`);
     }
     return lines.join("\n");
   }
