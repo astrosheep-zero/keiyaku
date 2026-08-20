@@ -487,7 +487,12 @@ test("Akuma running life is the unfinished terminal line and tell omits it", () 
   const observation = akumaObservation({
     id: "aku/worker/1234abcd",
     life: "running",
-    timeline: { kind: "idle", entries: [], omitted: 0, ...emptyReported },
+    timeline: {
+      kind: "idle",
+      entries: [{ kind: "row", row: { kind: "said", sequence: 1, turnSequence: 1, at: "2026-08-10T16:42:00.000Z", text: "working" } }],
+      omitted: 0,
+      ...emptyReported,
+    },
   }, {
     createdTasks: {
       kind: "present",
@@ -503,6 +508,7 @@ test("Akuma running life is the unfinished terminal line and tell omits it", () 
   const waitText = renderAkumaText(waitCommand(observation.status.id), waitInvocation(observation));
   const waitLines = waitText.split("\n");
   assert.equal(waitLines.at(-1), "● STILL RUNNING");
+  assert.equal(waitLines[waitLines.indexOf("tasks 1") - 1], "");
   assert.ok(waitLines.indexOf("tasks 1") < waitLines.indexOf("changes 0"));
   assert.ok(waitLines.indexOf("changes 0") < waitLines.length - 1);
   assert.equal(waitLines.at(-2), "");
@@ -961,6 +967,8 @@ test("plural wait renders came-back answers and completion count", () => {
       kind: "idle",
       entries: [],
       omitted: 0,
+      reportedChanges: [{ sequence: 1, at: "2026-08-10T16:42:00.000Z", op: "add", path: "src/result.ts", diffstat: { added: 4, removed: 0 } }],
+      reportedChangesOmitted: 0,
       outcome: {
         kind: "outcome",
         sequence: 1,
@@ -968,6 +976,17 @@ test("plural wait renders came-back answers and completion count", () => {
         at: "2026-08-10T16:42:00.000Z",
         outcome: { kind: "answered", answer: "returned\nverbatim", historyId: "history", session: { sessionId: "session" } },
       },
+    },
+  }, {
+    createdTasks: {
+      kind: "present",
+      rows: [{
+        id: "task/result",
+        title: "Return result context",
+        state: "done",
+        priority: 0,
+        disposition: "done",
+      }],
     },
   });
   const running = akumaObservation({
@@ -987,6 +1006,7 @@ test("plural wait renders came-back answers and completion count", () => {
   };
   const text = renderAkumaText(parseArgv(["wait", "aku/worker/*", "aku/reviewer/*", "--any"]).command, result);
   assert.match(text, /^✓ came back aku\/worker\/1234abcd\n─+\nreturned\nverbatim$/mu);
+  assert.match(text, /returned\nverbatim\n\ntasks 1\n  ✓ task\/result · Return result context · done · P0\nchanges 1/u);
   assert.match(text, /aku\/reviewer\/5678abcd[\s\S]*● STILL RUNNING/u);
   assert.match(text, /\n\n1 of 2 done$/u);
 });

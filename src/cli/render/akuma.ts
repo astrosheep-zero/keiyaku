@@ -251,6 +251,28 @@ function renderTaskContextLines(
   return [`tasks ${created.rows.length}`, ...created.rows.flatMap((row) => renderTaskRow(row, columns))];
 }
 
+function answerContextLines(
+  observation: AkumaObservation,
+  columns: number,
+): readonly string[] {
+  return [
+    ...renderTaskContextLines(observation.createdTasks, columns),
+    ...renderReportedChangeLines(observation.status.timeline),
+  ];
+}
+
+function answeredBlock(
+  observation: AkumaObservation,
+  answer: string,
+  alias: string | undefined,
+  columns: number,
+): string {
+  const context = answerContextLines(observation, columns).join("\n");
+  if (context.length === 0) return `${answeredHeading(observation.status.id, alias, columns)}\n${answer}`;
+  const separator = answer.endsWith("\n") ? "\n" : "\n\n";
+  return `${answeredHeading(observation.status.id, alias, columns)}\n${answer}${separator}${context}`;
+}
+
 function snapshotText(
   view: Readonly<{
     status: AkumaObservation["status"];
@@ -272,13 +294,16 @@ function snapshotText(
     ...contractFacts(view.contract),
     ...(options.facts ?? []),
   ];
+  const taskContext = renderTaskContextLines(view.createdTasks, context.columns);
+  const changes = renderReportedChangeLines(snapshot);
   const footer = options.showLife === false ? [] : ["", lifeLabel(view.status.life)];
   return [
     ...snapshotHeading(view.status.id, options.alias, view.contract, context.columns),
     ...facts,
     ...activity,
-    ...renderTaskContextLines(view.createdTasks, context.columns),
-    ...renderReportedChangeLines(snapshot),
+    ...(activity.length > 0 && taskContext.length > 0 ? [""] : []),
+    ...taskContext,
+    ...changes,
     ...footer,
   ].join("\n");
 }
@@ -303,7 +328,7 @@ function waitText(
   const blocks = [
     ...result.result.observations.map((observation) => {
       const answer = statusAnswer(observation);
-      if (answer !== undefined) return `${answeredHeading(observation.status.id, alias, context.columns)}\n${answer}`;
+      if (answer !== undefined) return answeredBlock(observation, answer, alias, context.columns);
       return snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) });
     }),
     ...result.result.unobserved.map((member) => unobservedText(member.id, member.diagnostic)),

@@ -123,7 +123,8 @@ unbounded browsing surface. An idle answered default call or ordinary single
 wait writes the exact answer, including empty bytes, with no framing or added
 newline. Every other state remains an identity-bearing snapshot, and plural
 wait renders each answered member as `✓ came back <AkuId>`, the
-snapshot-width ruler, and its exact answer; the collection then ends with
+snapshot-width ruler, and its exact answer, followed by its `tasks` and
+`changes` blocks; the collection then ends with
 `<done> of <total> done`. Successful detach ends with
 `$ keiyaku -C <world> wait <@alias|AkuId> --timeout 5m`, using the successful
 Alias or complete AkuId and canonical World; failure adds no command or life.
@@ -200,7 +201,9 @@ beginning with `U+2514` and `U+2500`; an unassociated Akuma omits that line.
 Identity rows never contain current life.
 Activity follows the identity and optional relation directly, keeping typed
 gaps in persisted order. Created Task context, when supplied, follows the
-timeline; the reported-change block follows Tasks. Status, wait, unfinished
+timeline after one blank line; the reported-change block follows Tasks. A
+plural answered wait member places the same two context blocks after one blank
+line following its exact answer. Status, wait, unfinished
 observed call, and kill then place life last: one blank line, then a top-level
 life line. Ordinary and interrupt tell output and history omit life. Running
 life is exactly `● STILL RUNNING`; an asleep Akuma renders as `✓ came back`,
