@@ -50,10 +50,8 @@ function snapshotHeading(id: string, alias?: string, contract?: DispatchAssociat
   ];
 }
 
-function answeredHeading(id: string, alias: string | undefined, columns: number): string {
-  const prefix = `✓ came back ${identity(id, alias)}`;
-  const ruler = "─".repeat(Math.max(1, columns - displayColumns(prefix) - 1));
-  return `${prefix} ${ruler}`;
+function answeredHeading(id: string, alias: string | undefined): string {
+  return [`✓ came back ${identity(id, alias)}`, OPENING_STROKE].join("\n");
 }
 
 function contractFacts(contract: DispatchAssociation): readonly string[] {
@@ -301,7 +299,7 @@ function waitText(
   const blocks = [
     ...result.result.observations.map((observation) => {
       const answer = statusAnswer(observation);
-      if (answer !== undefined) return `${answeredHeading(observation.status.id, alias, context.columns)}\n${answer}`;
+      if (answer !== undefined) return `${answeredHeading(observation.status.id, alias)}\n${answer}`;
       return snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) });
     }),
     ...result.result.unobserved.map((member) => unobservedText(member.id, member.diagnostic)),

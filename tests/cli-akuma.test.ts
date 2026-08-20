@@ -986,7 +986,7 @@ test("plural wait renders came-back answers and completion count", () => {
     result: { completion: "any" as const, observations: [answered, running], unobserved: [] },
   };
   const text = renderAkumaText(parseArgv(["wait", "aku/worker/*", "aku/reviewer/*", "--any"]).command, result);
-  assert.match(text, /^✓ came back aku\/worker\/1234abcd ─+\nreturned\nverbatim$/mu);
+  assert.match(text, /^✓ came back aku\/worker\/1234abcd\n─────\nreturned\nverbatim$/mu);
   assert.match(text, /aku\/reviewer\/5678abcd[\s\S]*● STILL RUNNING/u);
   assert.match(text, /\n\n1 of 2 done$/u);
 });
