@@ -133,6 +133,24 @@ function akumaHot(row: AkumaKanshiRow): boolean {
   return row.contract?.observed === "missing" || row.contract?.observed === "unavailable";
 }
 
+function activitySnapshotLine(row: AkumaKanshiRow): string | undefined {
+  const snapshot = row.snapshot;
+  if (snapshot === undefined) return undefined;
+  const entries = snapshot.entries.flatMap((entry) => entry.kind === "row" ? [entry.row] : []);
+  const latest = entries.at(-1);
+  if (latest === undefined) {
+    if (snapshot.kind === "idle" && snapshot.outcome !== undefined) {
+      return snapshot.outcome.outcome.kind === "answered" ? snapshot.outcome.outcome.answer : snapshot.outcome.outcome.diagnostic;
+    }
+    return "empty";
+  }
+  if (latest.kind === "said" || latest.kind === "thought" || latest.kind === "note" || latest.kind === "call" || latest.kind === "tell") {
+    return latest.text;
+  }
+  if (latest.kind === "tool") return latest.name;
+  return "activity";
+}
+
 function plumbFacts(facts: readonly string[], columns: number): readonly string[] {
   const clean = facts.map(safeText).filter((fact) => fact.length > 0);
   if (clean.length === 0) return [];
@@ -378,7 +396,14 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
   const section = report.akuma;
   if (section.kind === "absent") return sectionAbsent("FLEET", context.columns);
   if (section.kind === "failed") return failure("FLEET", section, context);
-  const rows = selectRows(section.value.rows, akumaHot);
+  const live = section.value.rows
+    .filter((row) => row.life === "running")
+    .sort((left, right) => {
+      const l = "lastActivityAt" in left && left.lastActivityAt !== null ? Date.parse(left.lastActivityAt) : -Infinity;
+      const r = "lastActivityAt" in right && right.lastActivityAt !== null ? Date.parse(right.lastActivityAt) : -Infinity;
+      return r - l;
+    });
+  const rows = live.slice(0, MAX_VISIBLE_ROWS);
   const rowLines: readonly string[][] = rows.map((row) => {
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
     const life = `${row.life} · ${formatAge(lifeAt, report.observedAt)}`;
@@ -391,13 +416,15 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
     const relation = row.contract === undefined
       ? ["unbound"]
       : [endpointFact(row.contract.id, row.contract.observed)];
-    if (!akumaHot(row)) return [identityLine(akumaMark(row.life), row.id, `${akumaLabel(row)} · ${[...key, ...relation].join(" · ")}`.trim())];
+    const snapshot = activitySnapshotLine(row);
+    if (!akumaHot(row)) return [identityLine(akumaMark(row.life), row.id, `${akumaLabel(row)} · ${[...key, ...relation, ...(snapshot === undefined ? [] : [snapshot])].join(" · ")}`.trim())];
     const lines = [identityLine(akumaMark(row.life), row.id, akumaLabel(row))];
     lines.push(fieldLine("LIFE", key.join(" · ")));
+    if (snapshot !== undefined) lines.push(fieldLine("SNAPSHOT", snapshot));
     lines.push(fieldLine("LINKED", relation.join(" · ")));
     return lines;
   });
-  return sectionBlock("FLEET", "akuma", "aku", rowLines, section.value.rows.length);
+  return sectionBlock("FLEET", "akuma", "aku", rowLines, live.length);
 }
 
 export function renderKanshiText(

@@ -56,7 +56,9 @@ assembled rows. Contract `lastJournalAt` is the final entry in the frozen
 journal observation. Born Akuma `lastActivityAt` is its Heart owner's bounded
 latest timeline-row observation and may be `null`. Kanshi does not persist or
 precompute an age. Text derives every displayed age against this report's one
-`observedAt`; JSON retains only the source timestamps.
+`observedAt`; JSON retains only the source timestamps. Fleet text defines `live`
+as exactly `running` rows, orders them only by descending `lastActivityAt`, and
+includes one activity snapshot line for the first three rows.
 
 When a Repo is present, Kanshi creates one call-scoped Git read observation and
 passes it to the complete Contract, TaskHolder, and

@@ -336,6 +336,8 @@ Keiyaku.ls(input: CatalogInput): Promise<Catalog>
 Contract queries carry one resolved Repo; Archetype queries carry optional
 `home`. An Akuma query may select one Archetype or all instances. `Catalog`
 is the corresponding closed result arm and contains only the selected rows.
+Akuma catalog text includes runtime age from `lifeAt` and last-activity age from
+`lastActivityAt` for born rows.
 There is no aggregate, absent section, failed-section wrapper, exact identity
 selector, Alias selector, or cross-product fallback.
 

@@ -286,22 +286,41 @@ async function joinAkuma(
     const aliasById = new Map<string, typeof aliases.value>();
     for (const binding of aliases.value) aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
     const dispatchById = new Map(dispatches.map((dispatch) => [dispatch.akuId, dispatch]));
+    const rows = source.rows.map((row) => {
+      const dispatch = dispatchById.get(row.id);
+      return {
+        ...row,
+        aliases: (aliasById.get(row.id) ?? []).map((binding) => binding.alias),
+        ...(dispatch === undefined ? {} : {
+          contract: {
+            id: dispatch.contractId,
+            observed: observeContract(dispatch.contractId),
+          },
+        }),
+      };
+    });
+    const running = rows
+      .filter((row) => row.life === "running")
+      .sort((left, right) => {
+        const l = "lastActivityAt" in left && left.lastActivityAt !== null ? Date.parse(left.lastActivityAt) : -Infinity;
+        const r = "lastActivityAt" in right && right.lastActivityAt !== null ? Date.parse(right.lastActivityAt) : -Infinity;
+        return r - l;
+      })
+      .slice(0, 3);
+    const snapshots = new Map(await Promise.all(running.map(async (row) => {
+      try {
+        return [row.id, (await Akuma.of(path).of({ id: row.id }).status()).timeline] as const;
+      } catch {
+        return [row.id, undefined] as const;
+      }
+    })));
     return {
       kind: "present",
       value: {
         ...source,
-        rows: source.rows.map((row) => {
-          const dispatch = dispatchById.get(row.id);
-          return {
-            ...row,
-            aliases: (aliasById.get(row.id) ?? []).map((binding) => binding.alias),
-            ...(dispatch === undefined ? {} : {
-              contract: {
-                id: dispatch.contractId,
-                observed: observeContract(dispatch.contractId),
-              },
-            }),
-          };
+        rows: rows.map((row) => {
+          const snapshot = snapshots.get(row.id);
+          return snapshot === undefined ? row : { ...row, snapshot };
         }),
       },
     };
