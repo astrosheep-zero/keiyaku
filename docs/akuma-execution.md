@@ -91,6 +91,8 @@ reap cannot signal again. Releasing a handle gives up that authority. No pid,
 process group, start token, or reconstructed identity is stored in the Body
 row.
 
+On Windows, Body launch and retained provider children present no visible console; console policy is runtime-private and confers no signal authority.
+
 For each turn the body tracks the actual resumable session: it begins with the
 session passed to `resume()`, when any, and advances when the provider emits a
 session-admission event. An answered result is persisted only with that exact

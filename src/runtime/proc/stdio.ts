@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
+import { spawnOptionsFor } from "./launch.js";
 import { terminateOwnedProcess } from "./run.js";
 
 export type StdioProcessExit = Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>;
@@ -17,13 +18,10 @@ const DEFAULT_DRAIN_TIMEOUT_MS = 1_000;
 export function spawnStdioProcess(input: Readonly<{
   argv: readonly [string, ...string[]]; cwd: string; env?: NodeJS.ProcessEnv;
 }>): StdioProcess {
-  const child = spawn(input.argv[0], input.argv.slice(1), {
+  const child = spawn(input.argv[0], input.argv.slice(1), spawnOptionsFor("retained", {
     cwd: input.cwd,
     env: input.env ?? process.env,
-    detached: true,
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-  });
+  }, ["pipe", "pipe", "pipe"]));
   let stderr = "";
   let inputEnded = false;
   let forced: Promise<void> | undefined;

@@ -22,7 +22,7 @@ import {
   type RequestChildLaunch,
 } from "./request-serve.js";
 import {
-  spawnDetachedProcess,
+  handoffProcess,
 } from "../runtime/proc/run.js";
 
 const LEASH_RETRY_MS = 25;
@@ -249,13 +249,12 @@ export async function spawnAkumaBody(launch: BodyLaunch): Promise<void> {
   const encoded = Buffer.from(JSON.stringify(launch), "utf8").toString("base64url");
   const actorId = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
   if (actorId === undefined) throw new Error("Akuma wake has no born soul");
-  const owned = await spawnDetachedProcess({
+  await handoffProcess({
     argv: [process.execPath, ...process.execArgv, fileURLToPath(new URL("../akuma-body.js", import.meta.url)), encoded],
     cwd: await launchCwd(launch),
     env: { ...process.env, KEIYAKU_ACTOR_ID: actorId },
     log: launch.paths.log,
   });
-  owned.release();
 }
 
 export async function runAkumaBody(launch: BodyLaunch, upstream: UpstreamExecutionPort): Promise<void> {

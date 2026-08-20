@@ -1,8 +1,14 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { open } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import crossSpawn from "cross-spawn";
+import {
+  spawnLoggedProcess,
+  spawnOptionsFor,
+  type DetachedProcessInput,
+} from "./launch.js";
+
+export { handoffProcess, type DetachedProcessInput } from "./launch.js";
 
 const TERMINATION_GRACE_MS = 250;
 const STREAM_TAIL_BYTES = 16 * 1024;
@@ -20,6 +26,7 @@ type ProcessSpawnOptions = Readonly<{
   detached: boolean;
   stdio: ["ignore", "pipe", "pipe"];
   windowsHide: boolean;
+  shell: false;
 }>;
 
 type ProcessSpawner = (command: string, args: readonly string[], options: ProcessSpawnOptions) => ChildProcess;
@@ -63,13 +70,6 @@ type ProcessStreamError = Readonly<{
 export type ProcessConsumption = Readonly<{
   readonly outcome: ProcessOutcome | ProcessStreamError;
   readonly pid: number | null;
-}>;
-
-export type DetachedProcessInput = Readonly<{
-  argv: readonly string[];
-  cwd: string;
-  env?: NodeJS.ProcessEnv;
-  log: string;
 }>;
 
 export type OwnedProcess = Readonly<{
@@ -157,44 +157,28 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
 }
 
 export async function spawnDetachedProcess(input: DetachedProcessInput): Promise<OwnedProcess> {
-  const log = await open(input.log, "a");
-  try {
-    const child = spawn(input.argv[0]!, input.argv.slice(1), {
-      cwd: input.cwd,
-      env: input.env,
-      detached: true,
-      stdio: ["ignore", log.fd, log.fd],
-      windowsHide: true,
-    });
-    await new Promise<void>((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
-    });
-    if (child.pid === undefined) throw new Error("detached process spawned without a pid");
-    const pid = child.pid;
-    let state: "active" | "terminating" | "inert" = "active";
-    let termination: Promise<void> | undefined;
-    const invalidate = (): void => { state = "inert"; };
-    child.once("exit", invalidate);
-    child.once("close", invalidate);
-    return {
-      pid,
-      terminate(force = false) {
-        if (state === "inert") return Promise.resolve();
-        if (termination !== undefined) return termination;
-        state = "terminating";
-        termination = terminateOwnedProcess(child, force).finally(invalidate);
-        return termination;
-      },
-      release: () => {
-        if (state === "inert") return;
-        state = "inert";
-        child.unref();
-      },
-    };
-  } finally {
-    await log.close();
-  }
+  const child = await spawnLoggedProcess(input, "retained");
+  const pid = child.pid!;
+  let state: "active" | "terminating" | "inert" = "active";
+  let termination: Promise<void> | undefined;
+  const invalidate = (): void => { state = "inert"; };
+  child.once("exit", invalidate);
+  child.once("close", invalidate);
+  return {
+    pid,
+    terminate(force = false) {
+      if (state === "inert") return Promise.resolve();
+      if (termination !== undefined) return termination;
+      state = "terminating";
+      termination = terminateOwnedProcess(child, force).finally(invalidate);
+      return termination;
+    },
+    release: () => {
+      if (state === "inert") return;
+      state = "inert";
+      child.unref();
+    },
+  };
 }
 
 function terminalOutcome(
@@ -219,13 +203,11 @@ async function executeProcess(
   spawnProcess: ProcessSpawner = spawn,
 ): Promise<ProcessConsumption> {
   if (input.signal?.aborted === true) return { outcome: { kind: "cancelled" }, pid: null };
-  const child = spawnProcess(input.argv[0]!, input.argv.slice(1), {
-    cwd: input.cwd,
-    env: input.env,
-    detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
+  const child = spawnProcess(
+    input.argv[0]!,
+    input.argv.slice(1),
+    spawnOptionsFor("retained", input, ["ignore", "pipe", "pipe"]),
+  );
   const stdout = tailCapture(STREAM_TAIL_BYTES);
   const stderr = tailCapture(STREAM_TAIL_BYTES);
 
