@@ -99,7 +99,7 @@ test("post-admission observation failure preserves the admitted Contract without
         "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
       ].join("\n"),
       { KEIYAKU_REGION_MARKER: marker, KEIYAKU_REGION_BATCH_PID: batchPid },
-      async () => Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
+      async (gitPath) => Keiyaku.bind({ repo: await Repo.at({ path: repository.path, gitPath }),
         markdown: document("Observed failure", ["docs/**"]),
         workspace: "worktree",
       }),

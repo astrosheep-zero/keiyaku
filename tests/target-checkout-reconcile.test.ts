@@ -351,7 +351,7 @@ test("reconcile completes an ordinary follow interrupted after atomic publicatio
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     {},
-    () => candidate.contract.reconcile(),
+    async (gitPath) => Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: candidate.contract.id }).reconcile(),
   );
 
   assert.deepEqual(reconciled.lag, []);

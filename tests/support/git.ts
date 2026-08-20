@@ -18,39 +18,25 @@ export function gitExecutablePath(): string {
   return execFileSync(locator, ["git"], { encoding: "utf8" }).split(/\r?\n/u)[0]!.trim();
 }
 
-export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: () => Promise<T>): Promise<T>;
-export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: () => T): T;
+export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: (gitPath: string) => Promise<T>): Promise<T>;
+export function withGitShim<T>(body: string, variables: Readonly<Record<string, string>>, action: (gitPath: string) => T): T;
 export function withGitShim<T>(
   body: string,
   variables: Readonly<Record<string, string>>,
-  action: () => T | Promise<T>,
+  action: (gitPath: string) => T | Promise<T>,
 ): T | Promise<T> {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-v4-git-shim-"));
   const realGit = gitExecutablePath();
   const shimPath = join(directory, "git");
-  writeFileSync(shimPath, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+  const assignments = Object.entries({ KEIYAKU_REAL_GIT: realGit, ...variables })
+    .map(([key, value]) => `${key}=${shellQuote(value)}`)
+    .join("\n");
+  writeFileSync(shimPath, `#!/bin/sh\n${assignments}\nexport ${Object.keys({ KEIYAKU_REAL_GIT: realGit, ...variables }).join(" ")}\n${body}\n`, { mode: 0o755 });
   chmodSync(shimPath, 0o755);
-  const updates = {
-    PATH: `${directory}:${process.env.PATH ?? ""}`,
-    KEIYAKU_REAL_GIT: realGit,
-    ...variables,
-  };
-  const previous = new Map(Object.keys(updates).map((key) => [key, process.env[key]]));
-  for (const [key, value] of Object.entries(updates)) process.env[key] = value;
-  const restore = (): void => {
-    for (const key of Object.keys(updates)) {
-      const value = previous.get(key);
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  };
   try {
-    const result = action();
-    if (result instanceof Promise) return result.finally(restore);
-    restore();
-    return result;
+    return action(shimPath);
   } catch (error) {
-    restore();
     throw error;
   }
 }

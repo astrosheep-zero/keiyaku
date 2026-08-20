@@ -52,8 +52,8 @@ test("contract path derivation reuses the common directory pinned by repositoryA
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     { KEIYAKU_CALLS: calls },
-    async () => {
-      const pinned = await repositoryAt(repository.path);
+    async (gitPath) => {
+      const pinned = await repositoryAt(repository.path, gitPath);
       commonGitDirectory(pinned);
       worktreePath(pinned, "atlantis");
       worktreePath(pinned, "hogwarts");
@@ -104,19 +104,12 @@ test("Repo capability pins an absolute Git executable across normal and streamed
   const repository = repositoryWithCommit();
   const realGit = gitExecutablePath();
   const git = await repositoryAt(repository.path, realGit);
-  const previousPath = process.env.PATH;
-  process.env.PATH = "";
-  try {
-    assert.match((await runGit(git, ["--version"])).toString("utf8"), /^git version /u);
-    const chunks: Buffer[] = [];
-    await consumeGitStdout(git, ["--version"], (chunk) => chunks.push(chunk));
-    assert.match(Buffer.concat(chunks).toString("utf8"), /^git version /u);
-    assert.match(
-      (await runGitWithEnvironment(git, ["--version"], undefined, { PATH: "" })).toString("utf8"),
-      /^git version /u,
-    );
-  } finally {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-  }
+  assert.match((await runGit(git, ["--version"])).toString("utf8"), /^git version /u);
+  const chunks: Buffer[] = [];
+  await consumeGitStdout(git, ["--version"], (chunk) => chunks.push(chunk));
+  assert.match(Buffer.concat(chunks).toString("utf8"), /^git version /u);
+  assert.match(
+    (await runGitWithEnvironment(git, ["--version"], undefined, { PATH: "" })).toString("utf8"),
+    /^git version /u,
+  );
 });

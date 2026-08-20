@@ -415,8 +415,8 @@ test("permissive integration reports unsupported Git while strict policy needs n
     "fi",
     'exec "$KEIYAKU_REAL_GIT" "$@"',
   ].join("\n");
-  const permissive = await withGitShim(shim, {}, async () => await prepareDelivery(
-    await repositoryAt(repository.path),
+  const permissive = await withGitShim(shim, {}, async (gitPath) => await prepareDelivery(
+    await repositoryAt(repository.path, gitPath),
     preparationCoordinates(state),
     { title: "Permissive", document: contractBody(), requireBranchesToBeUpToDate: false },
   ));
@@ -424,8 +424,8 @@ test("permissive integration reports unsupported Git while strict policy needs n
     kind: "refused",
     refusal: { kind: "integration-unsupported", contractId: state.id, requiredGit: "2.38" },
   });
-  const strict = await withGitShim(shim, {}, async () => await prepareDelivery(
-    await repositoryAt(repository.path),
+  const strict = await withGitShim(shim, {}, async (gitPath) => await prepareDelivery(
+    await repositoryAt(repository.path, gitPath),
     preparationCoordinates(state),
     { title: "Strict", document: contractBody(), requireBranchesToBeUpToDate: true },
   ));
@@ -531,8 +531,8 @@ test("materialized delivery identity uses the complete repository pair or the ne
   const fallback = await withGitShim("exec \"$KEIYAKU_REAL_GIT\" \"$@\"", {
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_SYSTEM: "/dev/null",
-  }, async () => {
-    const incompleteGit = await repositoryAt(incomplete.repository.path);
+  }, async (gitPath) => {
+    const incompleteGit = await repositoryAt(incomplete.repository.path, gitPath);
     return await prepareDelivery(
       incompleteGit,
       await herePreparationCoordinates(incompleteGit, incompleteState),
@@ -749,7 +749,7 @@ test("audit target adjudicator reports initial movement without observing follow
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    () => adjudicateAuditTarget(git, {
+    async (gitPath) => adjudicateAuditTarget({ ...git, gitPath }, {
       contractId: state.id,
       coordinates: { ...state.coordinates, target: targetName },
       predecessor: expected,
@@ -790,7 +790,7 @@ test("audit target adjudicator reobserves movement after followability", async (
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     { KEIYAKU_TEST_REPO: repository.path },
-    () => adjudicateAuditTarget(git, {
+    async (gitPath) => adjudicateAuditTarget({ ...git, gitPath }, {
       contractId: state.id,
       coordinates: { ...state.coordinates, target: targetName },
       predecessor: expected,
@@ -934,7 +934,7 @@ test("a failed displaced-directory observation leaves the target untouched", asy
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     {},
-    () => contract.deliver(),
+    async (gitPath) => (await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: contract.id })).deliver(),
   );
 
   assert.equal(delivered.value.placement?.failure, "target-placement-failed");
@@ -1031,7 +1031,7 @@ test("managed bind preserves its admitted Contract when worktree reconciliation 
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    async () => Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" }),
+    async (gitPath) => Keiyaku.bind({ repo: await Repo.at({ path: repository.path, gitPath }), markdown: contractBody(), workspace: "worktree" }),
   );
   assert.deepEqual(result.facts.map((fact) => fact.kind), ["bind"]);
   assert.notEqual(result.head, null);
@@ -1078,8 +1078,8 @@ test("clean delivery resolves its workspace head and tree in one Git call", asyn
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_GIT_CALLS: calls },
-    async () => {
-      const git = await repositoryAt(repository.path);
+    async (gitPath) => {
+      const git = await repositoryAt(repository.path, gitPath);
       return await prepareDelivery(git, await herePreparationCoordinates(git, state), {
         title: "Delivery patch identity",
         document: contractBody(),
@@ -1120,7 +1120,7 @@ test("delivery diff checks both snapshots in one batch process", async () => {
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_GIT_CALLS: calls },
-    async () => await readDeliveryDiff(git, delivery.integration.predecessor, delivery.integration.snapshot),
+    async (gitPath) => await readDeliveryDiff({ ...git, gitPath }, delivery.integration.predecessor, delivery.integration.snapshot),
   );
 
   assert.equal(result, "");
@@ -1167,7 +1167,7 @@ test("delivery diff rechecks one batch for a pruning race", async () => {
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_GIT_CALLS: calls, KEIYAKU_PRUNED_MARKER: pruned },
-    async () => await readDeliveryDiff(git, delivery.integration.predecessor, delivery.integration.snapshot),
+    async (gitPath) => await readDeliveryDiff({ ...git, gitPath }, delivery.integration.predecessor, delivery.integration.snapshot),
   );
 
   assert.equal(result, null);
@@ -1187,9 +1187,9 @@ test("delivery diff leaves probe diagnostics as Git errors", async () => {
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     {},
-    async () => {
+    async (gitPath) => {
       await assert.rejects(
-        async () => readDeliveryDiff(await repositoryAt(repository.path), delivery.integration.predecessor, delivery.integration.snapshot),
+        async () => readDeliveryDiff(await repositoryAt(repository.path, gitPath), delivery.integration.predecessor, delivery.integration.snapshot),
         (error: unknown) => error instanceof Error && error.message.startsWith("cat-file"),
       );
     },
