@@ -13,7 +13,7 @@ is accepted; the identity underneath never changes.
 ## Start One
 
 ```bash
-keiyaku -C <cwd> call <akuma-name> [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
+keiyaku -C <cwd> call <akuma-name> [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] (<prompt> | -)
 ```
 
 Give the worker's initial prompt as one argument (quote it when it contains
@@ -44,7 +44,7 @@ outgrows its Archetype mid-life.
 keiyaku status                            # deep fleet observation
 keiyaku status <aku/...|@alias>           # one worker's snapshot
 keiyaku ls aku/                           # shallow catalog; also aku/<archetype>/ and "aku/*/*"
-keiyaku wait <selector>... [--any | --all] [--timeout <duration>] [--json]
+keiyaku wait <selector>... [--any | --all] [--timeout <duration>]
 ```
 
 `wait` accepts complete ids, aliases, and Akuma globs, resolved once into a

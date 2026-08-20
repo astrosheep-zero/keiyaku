@@ -27,7 +27,7 @@ history expansion.
 
 ## Help
 
-Each command family owns one grammar table. Root help composes those rows;
+Each command family owns its help rows. Root help composes those rows;
 validation, usage refusal, namespace help, and leaf help read the same syntax,
 usage, and purpose values. Only Task remains a namespace.
 

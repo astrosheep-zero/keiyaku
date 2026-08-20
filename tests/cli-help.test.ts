@@ -6,7 +6,7 @@ import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp } from "..
 import { renderAkumaHelp, type AkumaAction } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
 import { renderTaskHelp, type TaskAction } from "../src/cli/commands/task.js";
-import { JSON_AUTOMATION_HELP, usageLine, withJsonAutomationHelp } from "../src/cli/usage.js";
+import { usageLine } from "../src/cli/usage.js";
 
 test("help resolves the longest legal command-word prefix before syntax scanning", () => {
   assert.deepEqual(parseArgv(["--help"]), { help: { kind: "root" } });
@@ -39,26 +39,22 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.equal(renderContractHelp("show"), [
     "Read one Contract guidance projection.",
     "",
-    "usage: keiyaku show [<contract>|@<contract>] [--json]",
-    "",
-    JSON_AUTOMATION_HELP,
+    "usage: keiyaku show [<contract>|@<contract>]",
   ].join("\n"));
   assert.equal(renderContractHelp("ls"), [
     "List one identity directory.",
     "",
-    "usage: keiyaku ls task[/] [--json]",
-    "       keiyaku ls kei[/] [--json]",
-    "       keiyaku ls aku[/] [--json]",
-    "       keiyaku ls aku/<akuma>[/] [--json]",
-    "       keiyaku ls \"aku/*/*\" [--json]",
-    "",
-    JSON_AUTOMATION_HELP,
+    "usage: keiyaku ls task[/]",
+    "       keiyaku ls kei[/]",
+    "       keiyaku ls aku[/]",
+    "       keiyaku ls aku/<akuma>[/]",
+    "       keiyaku ls \"aku/*/*\"",
   ].join("\n"));
   assert.match(renderTaskHelp(), /task update <TaskId>/u);
-  assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId> \[--json\]/u);
+  assert.match(renderTaskHelp("tree"), /usage: keiyaku task tree <TaskId>/u);
   assert.doesNotMatch(renderTaskHelp(), /--full/u);
   assert.doesNotMatch(renderTaskHelp(), /--contract|--no-contract/u);
-  assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--actor <actor>\] \[--json\] -/u);
+  assert.match(renderTaskHelp("compose"), /usage: keiyaku task compose \[--actor <actor>\] -/u);
   assert.match(renderTaskHelp("add"), /--actor <actor>/u);
   assert.doesNotMatch(renderTaskHelp("update"), /--actor/u);
   assert.doesNotMatch(renderTaskHelp("start"), /--actor/u);
@@ -71,58 +67,38 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.equal(renderAkumaHelp("tell"), [
     "Send one prompt to an existing Akuma and wake it.",
     "",
-    "usage: keiyaku tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)",
+    "usage: keiyaku tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
     "",
     "Give <prompt> as one argument, or use final - to read stdin.",
     "--interrupt ends the current Body before recording the prompt and waking its successor.",
-    "",
-    JSON_AUTOMATION_HELP,
   ].join("\n"));
   assert.match(renderAkumaHelp("history"), /\[--limit <count>\] \[--last\]/u);
 });
 
-test("amend leaf help shows one minimal stdin example", () => {
+test("amend leaf help enumerates the operation grammar", () => {
   assert.equal(renderContractHelp("amend"), [
     "Amend one Contract's document operations or structured terms.",
     "",
-    "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [--json] [-]",
+    "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]",
     "",
-    "minimal stdin:",
-    "  ## Replace: Design",
-    "  <complete replacement>",
+    "stdin operations (H2 sections only, no H1):",
+    "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
+    "  ## Append: Context|Objective|Design|Criteria|<extension>",
+    "  ## Add: Criteria|<new-extension-title>",
+    "  ## Update: Criterion <existing-title>|<existing-extension-title>",
+    "  ## Remove: Criterion <existing-title>|<existing-extension-title>",
     "",
-    JSON_AUTOMATION_HELP,
+    "full operation grammar: docs/document.md, Amend Operations",
   ].join("\n"));
 });
 
-test("only amend leaf help carries the stdin example", () => {
-  assert.doesNotMatch(renderRootHelp(), /minimal stdin/u);
+test("only amend leaf help carries the operation grammar", () => {
+  assert.doesNotMatch(renderRootHelp(), /stdin operations/u);
   for (const command of Object.keys(CONTRACT_COMMAND_SPECS) as ContractCommand[]) {
     if (command === "amend") continue;
     const spec = CONTRACT_COMMAND_SPECS[command];
-    assert.equal(renderContractHelp(command), withJsonAutomationHelp(`${spec.purpose}\n\n${usageLine(spec.usage)}`));
-    assert.doesNotMatch(renderContractHelp(command), /minimal stdin/u);
-  }
-});
-
-test("every JSON help surface reserves the flag for automation scripts", () => {
-  const taskActions: readonly TaskAction[] = [
-    "add", "show", "ls", "ready", "blocked", "query", "tree", "doctor", "update",
-    "start", "stop", "hold", "resume", "done", "drop", "namespace", "compose",
-  ];
-  const akumaActions: readonly AkumaAction[] = ["call", "wait", "tell", "history", "fork", "kill"];
-  const surfaces = [
-    renderRootHelp(),
-    renderInstallHelp(),
-    ...Object.keys(CONTRACT_COMMAND_SPECS).map((command) => renderContractHelp(command as ContractCommand)),
-    renderTaskHelp(),
-    ...taskActions.map((action) => renderTaskHelp(action)),
-    ...akumaActions.map((action) => renderAkumaHelp(action)),
-  ];
-  for (const help of surfaces) {
-    assert.match(help, /--json/u);
-    assert.equal(help.split(JSON_AUTOMATION_HELP).length - 1, 1);
-    assert.equal(help.endsWith(JSON_AUTOMATION_HELP), true);
+    assert.equal(renderContractHelp(command), `${spec.purpose}\n\n${usageLine(spec.usage)}`);
+    assert.doesNotMatch(renderContractHelp(command), /stdin operations/u);
   }
 });
 

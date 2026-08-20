@@ -1,4 +1,4 @@
-import { CliUsageError, isBlankInput, usageLine, withJsonAutomationHelp } from "../usage.js";
+import { CliUsageError, isBlankInput, usageLine } from "../usage.js";
 import {
   parseTaskQueryExpression,
   validateTaskLimit,
@@ -38,18 +38,18 @@ const TASK_COMMAND_SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
   [--note <text>] [--actor <actor>]
   [--needs <TaskId>]... [--parent <TaskId>]
   [--supersedes <TaskId>]... [--relates <TaskId>]...
-  [--body <text>] [--json]
-task add [--namespace <ns>] [--actor <actor>] [--json] -`,
+  [--body <text>]
+task add [--namespace <ns>] [--actor <actor>] -`,
     purpose: "Create one Task from flags or a canonical stdin document.",
   },
-  show: { arity: [1, 1], flags: COMMON, usage: "task show <TaskId> [--json]", purpose: "Read one Task and its relationships." },
-  ls: { arity: [0, 0], flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" }, usage: "task ls [--closed | --all] [--world] [--limit <n>] [--json]", purpose: "List Tasks in the selected scope." },
-  ready: { arity: [0, 0], flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" }, usage: "task ready [--world] [--parent <TaskId>] [--limit <n>] [--json]", purpose: "List open Tasks whose every need is terminal." },
-  blocked: { arity: [0, 0], flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" }, usage: "task blocked [--world] [--parent <TaskId>] [--limit <n>] [--json]", purpose: "List Tasks blocked by dependencies." },
+  show: { arity: [1, 1], flags: COMMON, usage: "task show <TaskId>", purpose: "Read one Task and its relationships." },
+  ls: { arity: [0, 0], flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" }, usage: "task ls [--closed | --all] [--world] [--limit <n>]", purpose: "List Tasks in the selected scope." },
+  ready: { arity: [0, 0], flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" }, usage: "task ready [--world] [--parent <TaskId>] [--limit <n>]", purpose: "List open Tasks whose every need is terminal." },
+  blocked: { arity: [0, 0], flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" }, usage: "task blocked [--world] [--parent <TaskId>] [--limit <n>]", purpose: "List Tasks blocked by dependencies." },
   query: { arity: [0, 0], flags: { ...COMMON, where: "value", world: "boolean", sort: "value", limit: "value" }, usage: `task query [--where <expression>] [--world]
-  [--sort priority|created|updated|id] [--limit <n>] [--json]`, purpose: "Query Task facts with a typed boolean expression." },
-  tree: { arity: [1, 1], flags: COMMON, usage: "task tree <TaskId> [--json]", purpose: "Read one Task parent decomposition tree." },
-  doctor: { arity: [0, 0], flags: COMMON, usage: "task doctor [--json]", purpose: "Inspect Task authority without repairing it." },
+  [--sort priority|created|updated|id] [--limit <n>]`, purpose: "Query Task facts with a typed boolean expression." },
+  tree: { arity: [1, 1], flags: COMMON, usage: "task tree <TaskId>", purpose: "Read one Task parent decomposition tree." },
+  doctor: { arity: [0, 0], flags: COMMON, usage: "task doctor", purpose: "Inspect Task authority without repairing it." },
   update: {
     arity: [1, 1], flags: { ...COMMON, title: "value", body: "value", append: "value", note: "value", priority: "value", needs: "repeat", "drop-needs": "repeat", parent: "value", "no-parent": "boolean", supersedes: "repeat", "drop-supersedes": "repeat", relates: "repeat", "drop-relates": "repeat" },
     usage: `task update <TaskId> [--title <text>] [--body <text>|- | --append <text>|-]
@@ -57,17 +57,17 @@ task add [--namespace <ns>] [--actor <actor>] [--json] -`,
   [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
   [--parent <TaskId> | --no-parent]
   [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
-  [--relates <TaskId>]... [--drop-relates <TaskId>]... [--json]`,
+  [--relates <TaskId>]... [--drop-relates <TaskId>]...`,
     purpose: "Apply one or more patches to a Task.",
   },
-  start: { arity: [1, 1], flags: COMMON, usage: "task start <TaskId> [--json]", purpose: "Move one open Task into progress." },
-  stop: { arity: [1, 1], flags: COMMON, usage: "task stop <TaskId> [--json]", purpose: "Return one in-progress Task to open." },
-  hold: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON, usage: "task hold <TaskId>... [--json]", purpose: "Put one or more Tasks on hold." },
-  resume: { arity: [1, 1], flags: COMMON, usage: "task resume <TaskId> [--json]", purpose: "Return one held Task to open." },
-  done: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" }, usage: "task done <TaskId>... [--note <text>] [--json]", purpose: "Mark one or more Tasks done." },
-  drop: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" }, usage: "task drop <TaskId>... [--note <text>] [--json]", purpose: "Drop one or more Tasks." },
-  namespace: { arity: [0, 1], flags: COMMON, usage: "task namespace [<namespace>] [--json]", purpose: "Read or replace the current Task namespace." },
-  compose: { arity: [0, 0], stdin: "compose", flags: { ...COMMON, actor: "value" }, usage: "task compose [--actor <actor>] [--json] -", purpose: "Admit Task documents independently; partial admission has no cross-file atomicity or rollback." },
+  start: { arity: [1, 1], flags: COMMON, usage: "task start <TaskId>", purpose: "Move one open Task into progress." },
+  stop: { arity: [1, 1], flags: COMMON, usage: "task stop <TaskId>", purpose: "Return one in-progress Task to open." },
+  hold: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON, usage: "task hold <TaskId>...", purpose: "Put one or more Tasks on hold." },
+  resume: { arity: [1, 1], flags: COMMON, usage: "task resume <TaskId>", purpose: "Return one held Task to open." },
+  done: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" }, usage: "task done <TaskId>... [--note <text>]", purpose: "Mark one or more Tasks done." },
+  drop: { arity: [1, Number.POSITIVE_INFINITY], flags: { ...COMMON, note: "value" }, usage: "task drop <TaskId>... [--note <text>]", purpose: "Drop one or more Tasks." },
+  namespace: { arity: [0, 1], flags: COMMON, usage: "task namespace [<namespace>]", purpose: "Read or replace the current Task namespace." },
+  compose: { arity: [0, 0], stdin: "compose", flags: { ...COMMON, actor: "value" }, usage: "task compose [--actor <actor>] -", purpose: "Admit Task documents independently; partial admission has no cross-file atomicity or rollback." },
 };
 
 export function isTaskAction(value: string | undefined): value is TaskAction {
@@ -77,14 +77,14 @@ export function isTaskAction(value: string | undefined): value is TaskAction {
 export function renderTaskHelp(action?: TaskAction): string {
   if (action !== undefined) {
     const spec = TASK_COMMAND_SPECS[action];
-    return withJsonAutomationHelp(`${spec.purpose}\n\n${usageLine(spec.usage)}`);
+    return `${spec.purpose}\n\n${usageLine(spec.usage)}`;
   }
-  return withJsonAutomationHelp([
+  return [
     "usage: keiyaku task <command> ...",
     "",
     "commands:",
     ...Object.values(TASK_COMMAND_SPECS).flatMap((spec) => spec.usage.split("\n").map((line) => `  ${line}`).concat(`    ${spec.purpose}`)),
-  ].join("\n"));
+  ].join("\n");
 }
 
 export function renderTaskUsage(action: TaskAction): string {

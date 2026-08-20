@@ -1,4 +1,4 @@
-import { CliUsageError, isBlankInput, usageLine, withJsonAutomationHelp } from "../usage.js";
+import { CliUsageError, isBlankInput, usageLine } from "../usage.js";
 import { archetypeName, parseAkuId } from "../../akuma/identity.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
@@ -56,7 +56,7 @@ const AKUMA_COMMAND_SPECS = {
       allowed: "repeatable",
       json: "boolean",
     },
-    usage: "call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)",
+    usage: "call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
       "Give <prompt> as one argument, or use final - to read stdin.",
@@ -72,14 +72,14 @@ const AKUMA_COMMAND_SPECS = {
     arity: "one-or-more",
     stdin: false,
     flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
-    usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]",
+    usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>]",
     purpose: "Wait for one Akuma or an explicitly selected Akuma set.",
   },
   tell: {
     arity: 1,
     stdin: true,
     flags: { interrupt: "boolean", json: "boolean" },
-    usage: "tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)",
+    usage: "tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
     purpose: "Send one prompt to an existing Akuma and wake it.",
     details: [
       "Give <prompt> as one argument, or use final - to read stdin.",
@@ -90,21 +90,21 @@ const AKUMA_COMMAND_SPECS = {
     arity: 1,
     stdin: false,
     flags: { before: "value", since: "value", limit: "value", last: "boolean", json: "boolean" },
-    usage: "history <aku/...|@alias|kei/...> [--before <index> | --since <index>] [--limit <count>] [--last] [--json]",
+    usage: "history <aku/...|@alias|kei/...> [--before <index> | --since <index>] [--limit <count>] [--last]",
     purpose: "Read Akuma execution history or one complete Contract journal and Dispatch timeline.",
   },
   fork: {
     arity: 1,
     stdin: false,
     flags: { at: "value", json: "boolean" },
-    usage: "fork <aku/...> --at <historyId> [--json]",
+    usage: "fork <aku/...> --at <historyId>",
     purpose: "Fork one Akuma at a retained answered history point.",
   },
   kill: {
     arity: "one-or-more",
     stdin: false,
     flags: { json: "boolean" },
-    usage: "kill <akuma-selector>... [--json]",
+    usage: "kill <akuma-selector>...",
     purpose: "Put down the current Body of an Akuma selector snapshot.",
   },
 } as const satisfies Readonly<Record<string, AkumaCommandSpec>>;
@@ -123,9 +123,7 @@ export function renderAkumaRootRows(): readonly string[] {
 
 export function renderAkumaHelp(action: AkumaAction): string {
   const spec: AkumaCommandSpec = AKUMA_COMMAND_SPECS[action];
-  return withJsonAutomationHelp(
-    `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`,
-  );
+  return `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
 }
 
 export function renderAkumaUsage(action: AkumaAction): string {

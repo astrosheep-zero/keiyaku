@@ -100,34 +100,8 @@ The live command receives the ordinary Contract result, including a
 materialized conflict value; later request
 settlement neither replays delivery nor fabricates that live result.
 
-Command syntax:
-
-```text
-bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] [--json] -
-amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [--json] [-]
-deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>] [--json]
-review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>] [--json]
-abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
-arc [<contract>|@<contract>] [--actor <actor>] [--json] -
-status [<contract>|@name|<aku/...>] [--json]
-show [<contract>|@<contract>] [--json]
-ls task[/] [--json]
-ls kei[/] [--json]
-ls aku[/] [--json]
-ls aku/<akuma>[/] [--json]
-ls "aku/*/*" [--json]
-audit [<contract>|@<contract>] [--include-dirty] [--diff] [--actor <actor>] [--json]
-reconcile [<contract>|@<contract>] [--retry-hooks] [--json]
-settings [--json]
-install <codex|claude|opencode|pi> [--json]
-       install --all [--json]
-call <akuma-name> [--contract <kei/...>] [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
-wait <akuma-selector>... [--any | --all] [--timeout <duration>] [--json]
-tell <aku/...|@alias> [--interrupt] [--json] (<prompt> | -)
-history <aku/...|@alias|kei/...> [--before <index> | --since <index>] [--limit <count>] [--last] [--json]
-fork <aku/...|@alias> --at <historyId> [--json]
-kill <akuma-selector>... [--json]
-```
+Command syntax is owned by each command family's help rows; `--help` renders
+the authoritative usage for every command.
 
 ## Inputs And Flags
 
@@ -177,14 +151,9 @@ with `--after`. Final `-` selects one nonblank H2 operation document. Its
 absence requires at least one of `--after`, `--clear-after`, or `--gates` and
 does not acquire stdin; otherwise parsing is usage before observation. `bind`
 and `arc` still require their final `-` document input. Amend leaf help
-includes this one minimal legal stdin operation. The complete
-amendment-operation grammar remains in [document.md](document.md).
-
-```text
-minimal stdin:
-  ## Replace: Design
-  <complete replacement>
-```
+enumerates the five operation headings verbatim from
+[document.md](document.md) and points there for body semantics; the complete
+amendment-operation grammar remains owned by document.md.
 
 Every Contract mutation and `reconcile` passes one CLI-observed `WorktreeHooks`
 value to the public operation; the CLI never runs hooks or reads markers.
