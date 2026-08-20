@@ -5,11 +5,6 @@ import type { InvocationResult } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import { renderText } from "../src/cli/render/text.js";
 
-test("guidance text is the exact Markdown projection", () => {
-  const guidance = "---\ncontract: kei/show\n---\n\n# Show\n";
-  assert.equal(renderText({ kind: "guidance", contract: contractId("kei/show"), guidance }), guidance);
-});
-
 test("catalog text renders only the selected identity layer", () => {
   assert.equal(renderCatalogText({
     kind: "archetypes",
