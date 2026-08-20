@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { replaceFileDurably } from "./coordination/durable-file.js";
 import { acquireSqliteTransactionLock } from "./coordination/sqlite-transaction-lock.js";
@@ -381,6 +381,31 @@ export async function releaseManagedWorktrees(
     const kept = current.appointments.filter((appointment) => !drop.has(appointment.contract));
     return kept.length === current.appointments.length ? current : indexedRegister(kept);
   });
+}
+
+async function regularFile(path: string): Promise<boolean> {
+  const value = await lstat(path).catch((error: NodeJS.ErrnoException) =>
+    error.code === "ENOENT" ? undefined : Promise.reject(error),
+  );
+  if (value === undefined) return false;
+  if (!value.isFile() || value.isSymbolicLink()) throw new Error(`Place custody is not a regular file: ${path}`);
+  return true;
+}
+
+/** Remove only an already-empty Place authority. */
+export async function nukeEmptyPlaceAuthority(repository: GitRepository): Promise<void> {
+  const location = placePaths(repository);
+  const [authorityPresent, lockPresent] = [await regularFile(location.authority), await regularFile(location.lock)];
+  if (!authorityPresent && !lockPresent) return;
+
+  const held = await acquireSqliteTransactionLock({ path: location.lock, mode: "immediate" });
+  try {
+    const current = await readPlaceRegister(repository);
+    if (current.appointments.length !== 0) throw new Error("Place authority still has managed worktree appointments");
+    if (await regularFile(location.authority)) await unlink(location.authority);
+  } finally {
+    held.close();
+  }
 }
 
 export async function readManagedWorktreeAppointment(

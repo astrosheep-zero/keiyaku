@@ -82,6 +82,7 @@ function repoPolicy(command: ParsedCommand): RepoPolicy {
         acceptsExplicit: command.contract !== undefined,
       };
     case "settings":
+    case "nuke":
     case "task":
     case "install":
       return { use: "none", acceptsExplicit: false };

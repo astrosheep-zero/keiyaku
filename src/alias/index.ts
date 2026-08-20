@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
 import { replaceFileDurably } from "../coordination/durable-file.js";
@@ -82,6 +82,37 @@ async function read(path: string): Promise<readonly AliasBinding[]> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
+  }
+}
+
+async function regularFile(path: string): Promise<boolean> {
+  try {
+    const value = await lstat(path);
+    if (!value.isFile() || value.isSymbolicLink()) throw new Error(`Alias custody is not a regular file: ${path}`);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+export async function nukeAliases(world: WorldRoot): Promise<void> {
+  const location = paths(world);
+  const initialAuthority = await regularFile(location.authority);
+  const initialLock = await regularFile(location.lock);
+  if (!initialAuthority && !initialLock) return;
+
+  const held = await acquireSqliteTransactionLock({ path: location.lock, mode: "immediate" });
+  try {
+    // Alias writers use this same custody lock. Observe after acquiring it so
+    // an authority committed by a prior holder is part of this reset sweep.
+    const authorityPresent = await regularFile(location.authority);
+    if (authorityPresent) {
+      await read(location.authority);
+      await unlink(location.authority);
+    }
+  } finally {
+    held.close();
   }
 }
 

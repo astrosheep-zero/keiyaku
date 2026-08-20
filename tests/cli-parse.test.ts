@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp } from "../src/cli/parse.js";
 
 test("bind mints its contract identity and keeps JSON output separate from input", () => {
   assert.deepEqual(
@@ -19,6 +19,21 @@ test("bind mints its contract identity and keeps JSON output separate from input
       },
     },
   );
+});
+
+test("nuke admits only a literal WorldRoot confirmation", () => {
+  assert.deepEqual(parseArgv(["nuke"]), {
+    command: { command: "nuke", output: "text" },
+  });
+  assert.deepEqual(parseArgv(["nuke", "--confirm", "/world/root", "--json"]), {
+    command: { command: "nuke", confirm: "/world/root", output: "json" },
+  });
+  assert.throws(() => parseArgv(["nuke", "kei/example"]), /nuke accepts no contract/u);
+  assert.throws(() => parseArgv(["nuke", "-"]), /nuke reads no stdin/u);
+  assert.throws(() => parseArgv(["nuke", "--confirm", " "]), /requires a nonblank value/u);
+  assert.throws(() => parseArgv(["nuke", "--confirm", "/one", "--confirm", "/two"]), /duplicate option/u);
+  assert.match(renderRootHelp(), /nuke \[--confirm <WorldRoot>\] \[--json\]/u);
+  assert.match(renderContractHelp("nuke"), /Remove Keiyaku-owned data/u);
 });
 
 test("bind accepts boolean --here and preserves -C outside the contract command", () => {

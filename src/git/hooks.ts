@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { replaceFileDurably } from "../coordination/durable-file.js";
@@ -211,6 +211,34 @@ type HookRunnerInput = Readonly<{
 
 function hookExecutionLockPath(administrationDirectory: string): string {
   return join(administrationDirectory, "keiyaku", "hook-execution.sqlite");
+}
+
+async function regularFile(path: string): Promise<boolean> {
+  try {
+    const value = await lstat(path);
+    if (!value.isFile() || value.isSymbolicLink()) throw new Error(`worktree hook custody is not a regular file: ${path}`);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+/** Remove validated Keiyaku hook state after its worktree has been reset. */
+export async function nukeWorktreeHookResidue(administrationDirectory: string): Promise<void> {
+  const marker = hookMarkerPath(administrationDirectory);
+  const lock = hookExecutionLockPath(administrationDirectory);
+  const markerPresent = await regularFile(marker);
+  const lockPresent = await regularFile(lock);
+  if (!markerPresent && !lockPresent) return;
+  const held = await acquireSqliteTransactionLock({ path: lock, mode: "immediate" });
+  try {
+    const currentMarker = await regularFile(marker);
+    if (currentMarker) await readMarker(administrationDirectory);
+    if (currentMarker) await unlink(marker);
+  } finally {
+    held.close();
+  }
 }
 
 function decodeRunnerInput(encoded: string): HookRunnerInput {

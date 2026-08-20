@@ -38,7 +38,8 @@ import { invokeAkuma, invokeAkumaStatus, type AkumaInvocationResult } from "./co
 import { isParsedAkumaCommand, type InvokedAkumaCommand } from "./commands/akuma.js";
 import { bindFromCommand } from "./commands/bind.js";
 import { installHarnesses, type InstallInvocationResult } from "./commands/install.js";
-import { invokeTask, type TaskInvocationResult } from "./commands/task-invoke.js";
+import { invokeNuke } from "./commands/nuke.js";
+import { invokeTaskFromEdge, type TaskInvocationResult } from "./commands/task-invoke.js";
 import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
 import { isBlankInput } from "./usage.js";
 import type { InvocationResult, RegionResult } from "./result.js";
@@ -52,9 +53,9 @@ import {
 import { resolveNamedAddress } from "../library/address.js";
 import { injectedBodyRequests } from "../akuma/requests.js";
 import { EMPTY_WORKTREE_HOOKS } from "../library/configuration.js";
-import type { WorldRoot } from "../world.js";
 import { assertExplicitRepoUse, resolveCliCoordinates } from "./coordinates.js";
 import { BindDraftError, preserveBindDraft } from "./draft.js";
+import type { WorldRoot } from "../world.js";
 
 export type { AcceptedFact, InvocationResult, Lag } from "./result.js";
 
@@ -70,7 +71,7 @@ type ExistingCommand = Exclude<
   ParsedCommand,
   | InvokedAkumaCommand
   | { command: "history" }
-  | { command: "bind" | "status" | "show" | "ls" | "reconcile" | "settings" | "region" | "task" | "install" }
+  | { command: "bind" | "nuke" | "status" | "show" | "ls" | "reconcile" | "settings" | "region" | "task" | "install" }
 >;
 type NonInstallExecution = Readonly<{ cwd?: string; repo?: string; command: Exclude<ParsedCommand, { command: "install" }> }>;
 type InvocationEdge = Readonly<{
@@ -550,17 +551,11 @@ async function invokeParsed(
   if (parsed.command === "settings") {
     return { kind: "settings", value: await settingsAt(world ?? undefined, home) };
   }
+  if (parsed.command === "nuke") {
+    return await invokeNuke(parsed, world);
+  }
   if (parsed.command === "task") {
-    try {
-      return await invokeTask(parsed, {
-        world,
-        context: taskContext,
-        establish: coordinates.establishWorld,
-        readStdin: edge.readStdin,
-        ...(runtime.actor === undefined ? {} : { actor: runtime.actor }),
-      });
-    }
-    catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
+    return await invokeTaskFromEdge({ parsed, world, context: taskContext, establish: coordinates.establishWorld, readStdin: edge.readStdin, actor: runtime.actor });
   }
   if (parsed.command === "history" && "contract" in parsed) return await invokeContractHistory(repo, parsed.contract);
   if (isParsedAkumaCommand(parsed)) {

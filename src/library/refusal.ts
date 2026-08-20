@@ -8,7 +8,18 @@ export type ContractAppointmentRefusal = Readonly<{
   contract?: ContractId;
 }>;
 
-export type KeiyakuRefusal = IntentRefusal | ContractAppointmentRefusal;
+export type NukeConfirmationRefusal = Readonly<{
+  kind: "nuke-confirmation-mismatch";
+  world: string;
+  confirmation: string;
+}>;
+export type NukeConfirmationRequiredRefusal = Readonly<{
+  kind: "nuke-confirmation-required";
+  world: string;
+}>;
+
+export type KeiyakuRefusal = IntentRefusal | ContractAppointmentRefusal
+  | NukeConfirmationRefusal | NukeConfirmationRequiredRefusal;
 export type KeiyakuRetryReason = IntentRetry;
 
 export class KeiyakuRefused extends Error {

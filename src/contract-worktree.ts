@@ -192,6 +192,48 @@ export async function releaseContractWorktree(repository: GitRepository, contrac
   try { await unlink(appointment.path); } catch { /* reservation cleanup is best effort */ }
 }
 
+async function removeOwnedHereSupport(worktree: string): Promise<number> {
+  const path = generatedPath(worktree, ".gitignore");
+  try {
+    const value = await lstat(path);
+    if (!value.isFile() || value.isSymbolicLink()) return 0;
+    if (await readFile(path, "utf8") !== IGNORE_BYTES) return 0;
+    await unlink(path);
+    return 1;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw error;
+  }
+}
+
+/** Remove matching here appointments and their exact generated support from registered worktrees. */
+export async function nukeHereAppointments(repository: GitRepository): Promise<void> {
+  for (const registered of await registeredWorktrees(repository)) {
+    const scoped = { ...repository, effectiveCwd: registered.path };
+    await withContractWorktreeAppointment(scoped, async () => {
+      const appointment = await readContractAppointment(scoped);
+      if (appointment.kind === "appointed") {
+        await unlink(appointment.path);
+        await removeOwnedHereSupport(registered.path);
+      }
+    });
+  }
+}
+
+/** Validate the existing Contract-worktree coordination lock before releasing it. */
+export async function nukeContractWorktreeLock(repository: GitRepository): Promise<void> {
+  const path = join(repository.commonDirectory, "keiyaku", "contract-worktree.sqlite");
+  try {
+    const value = await lstat(path);
+    if (!value.isFile() || value.isSymbolicLink()) throw new Error(`Contract worktree lock custody is not a regular file: ${path}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const held = await acquireSqliteTransactionLock({ path, mode: "immediate" });
+  held.close();
+}
+
 
 async function repair(repository: GitRepository, worktree: string, relativePath: string, bytes: string): Promise<ContractFileEffect> {
   const path = join(worktree, relativePath);

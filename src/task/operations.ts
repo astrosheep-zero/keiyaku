@@ -6,12 +6,16 @@ import {
 import { parseTaskCreationDocument, serializeTaskDocument, type TaskCreationDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import {
-  authorityPath, readBoard, replaceAuthority, withTaskLocks,
+  authorityPath, nukeTaskAuthority, readBoard, replaceAuthority, withTaskLocks,
 } from "./store.js";
 import type { WorldRoot } from "../world.js";
 import { DEFAULT_TASK_LIMIT, projectPage, projectQuery, queryUnderTargets, type TaskPage, type TaskQueryExpression, type TaskQueryRow, type TaskQuerySort, underExpression } from "./query.js";
 
 export type TaskView = Readonly<TaskDocument & { namespace: readonly string[] }>;
+export async function nukeTask(world: WorldRoot): Promise<void> {
+  if (await nukeTaskAuthority(world) === "busy") throw new Error("Task reset lock contention");
+}
+
 export type TaskRefusal =
   | Readonly<{ kind: "task-missing"; taskId: TaskId }>
   | Readonly<{ kind: "invalid-lifecycle-transition"; taskId: TaskId; state: TaskState; verb: TaskLifecycleVerb }>

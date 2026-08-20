@@ -1,5 +1,43 @@
 # Public Mutation Results
 
+## Keiyaku-Owned Data Reset
+
+The package-root `nuke` result is one confirmed execution result for one
+`WorldRoot`; it is never a repository-cleanup result. It reports only success
+or the diagnostic that stopped deletion. Repository source and business refs,
+ordinary worktree bodies, authored Settings and namespace configuration, global
+Archetypes, and unknown `.keiyaku` bytes are outside its scope.
+
+```ts
+type NukeResult =
+  | Readonly<{
+      kind: "success"
+      world: WorldRoot
+    }>
+  | Readonly<{
+      kind: "failed"
+      world: WorldRoot
+      diagnostic: string
+    }>
+
+type NukeConfirmationRequiredRefusal = Readonly<{
+  kind: "nuke-confirmation-required"
+  world: string
+}>
+
+type NukeConfirmationRefusal = Readonly<{
+  kind: "nuke-confirmation-mismatch"
+  world: string
+  confirmation: string
+}>
+
+```
+
+The same literal confirmation is the recovery operation. A bare invocation
+throws `KeiyakuRefused` with `NukeConfirmationRequiredRefusal`; a mismatching
+confirmation throws it with `NukeConfirmationRefusal`. Neither performs an
+owner effect.
+
 This chapter owns package-root mutation, refusal, retry, and audit result shapes.
 
 Kanshi Contract rows expose `lastJournalAt`, the timestamp of the final entry

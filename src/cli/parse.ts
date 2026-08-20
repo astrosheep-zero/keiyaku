@@ -119,6 +119,7 @@ export type ParsedAudit = Output & Readonly<{
   actor?: string;
 }>;
 type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
+export type ParsedNuke = Output & Readonly<{ command: "nuke"; confirm?: string }>;
 export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
 export type ParsedRegion = Output & Readonly<{ command: "region"; contract?: string; overlap: boolean; path?: string }>;
 
@@ -134,6 +135,7 @@ export type ParsedCommand =
   | ParsedLs
   | ParsedAudit
   | ParsedReconcile
+  | ParsedNuke
   | ParsedSettings
   | ParsedRegion
   | ParsedInstallCommand
@@ -479,6 +481,10 @@ function parseCommand(parts: ParsedParts): ParsedCommand {
         retryHooks: parts.flags["retry-hooks"] === true,
         output: parts.output,
       };
+    }
+    case "nuke": {
+      const confirm = optionalFlag(parts.flags, "confirm");
+      return { command: "nuke", ...(confirm === undefined ? {} : { confirm }), output: parts.output };
     }
     case "settings": return { command: "settings", output: parts.output };
     case "region": return parseRegion(parts);

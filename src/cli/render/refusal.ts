@@ -67,6 +67,18 @@ export function renderRefusalFacts(
   addressed?: string,
 ): readonly string[] {
   const identity = refusalIdentity(refusal, addressed);
+  if (refusal.kind === "nuke-confirmation-mismatch") {
+    return [
+      ...renderOpaqueBlock(`nuke confirmation mismatch world=${refusal.world} confirmation=${refusal.confirmation}`, indent, columns),
+      ...renderOpaqueBlock(`keiyaku nuke --confirm ${refusal.world}`, indent, columns),
+    ];
+  }
+  if (refusal.kind === "nuke-confirmation-required") {
+    return [
+      ...renderOpaqueBlock(`nuke confirmation required world=${refusal.world}`, indent, columns),
+      ...renderOpaqueBlock(`keiyaku nuke --confirm ${refusal.world}`, indent, columns),
+    ];
+  }
   if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
   if (refusal.kind === "integration-failed") {
     const lines = [

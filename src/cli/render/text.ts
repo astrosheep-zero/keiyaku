@@ -5,6 +5,7 @@ import { renderKanshiText } from "./kanshi.js";
 import { renderConflictMaterialized, renderRefusal } from "./refusal.js";
 import type { TextRenderContext } from "./terminal.js";
 import { renderCatalogText } from "./catalog.js";
+import { renderNukeText } from "./nuke.js";
 import { renderRegionText } from "./region.js";
 
 export function renderText(result: InvocationResult, context?: TextRenderContext): string {
@@ -13,6 +14,7 @@ export function renderText(result: InvocationResult, context?: TextRenderContext
   if (result.kind === "catalog") return renderCatalogText(result.catalog);
   if (result.kind === "contract-history") return renderContractHistory(result.history);
   if (result.kind === "region") return renderRegionText(result.region);
+  if (result.kind === "nuke") return renderNukeText(result.result);
   if (result.kind === "accepted") return renderAccepted(result, context);
   if (result.kind === "refused") return renderRefusal(result, context);
   if (result.kind === "retry") return renderRetry(result, context);

@@ -16,6 +16,7 @@ import {
   waitAkuma,
 } from "./fleet.js";
 import { listCatalog } from "./catalog.js";
+import { nukeKeiyaku } from "./nuke.js";
 
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 export {
@@ -116,6 +117,11 @@ export type { AkuId } from "../akuma/identity.js";
 export type { AllowedAction, AllowedActions } from "../akuma/allowed.js";
 export type { Catalog, CatalogInput, CatalogQuery } from "./catalog.js";
 export type {
+  NukeInput,
+  NukeResult,
+} from "./nuke.js";
+export type { NukeConfirmationRefusal, NukeConfirmationRequiredRefusal } from "./refusal.js";
+export type {
   AkumaAddressInput,
   AkumaSetAddressInput,
   AkumaWorldScopeRefusal,
@@ -151,6 +157,7 @@ export const Keiyaku = Object.freeze({
   interrupt: interruptAkuma,
   kill: killAkuma,
   ls: listCatalog,
+  nuke: nukeKeiyaku,
   list: listKeiyaku,
   observe: observeKeiyaku,
   of: keiyakuOf,

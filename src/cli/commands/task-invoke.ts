@@ -21,6 +21,7 @@ import type { WorldRoot } from "../../world.js";
 import { injectedBodyRequests, requestBodyTask } from "../../akuma/requests.js";
 import { decodeTaskMutationRequest, type TaskMutationRequest } from "../../task/mutation.js";
 import { resolveTaskNamespaceContext, writeTaskNamespaceContext } from "../../task/context.js";
+import { CliUsageError } from "../usage.js";
 
 export type TaskInvocationResult = TaskMutationResult | TaskUpdateResult | TaskBatchResult | TaskCompositionResult
   | TaskDetail | TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskDoctorReport | TaskNamespaceResult
@@ -34,6 +35,28 @@ export type TaskWorldObservation =
 
 type TaskProduct = ReturnType<typeof Tasks.of>;
 type TaskInput = Readonly<{ world: WorldRoot | null; context: Readonly<{ directory: string; boundary: string }>; establish(): Promise<WorldRoot>; readStdin(): Promise<string>; actor?: string }>;
+
+export async function invokeTaskFromEdge(input: Readonly<{
+  parsed: ParsedTaskCommand;
+  world: WorldRoot | null;
+  context: Readonly<{ directory: string; boundary: string }>;
+  establish: () => Promise<WorldRoot>;
+  readStdin: () => Promise<string>;
+  actor: string | undefined;
+}>): Promise<TaskInvocationResult> {
+  try {
+    return await invokeTask(input.parsed, {
+      world: input.world,
+      context: input.context,
+      establish: input.establish,
+      readStdin: input.readStdin,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw new CliUsageError(error.message);
+    throw error;
+  }
+}
 
 function value(command: ParsedTaskCommand, name: string): string | undefined {
   const item = command.flags[name]; return typeof item === "string" ? item : undefined;

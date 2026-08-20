@@ -372,3 +372,23 @@ cross-product relationship is the TaskHolder authority defined by
 [settlement.md](settlement.md). Task contributes only its complete identity
 and the Task-owned state transition primitive used after settlement has judged
 that holder.
+
+## Keiyaku-Owned Data Reset
+
+Task owns the custody of canonical Task Markdown authority and its allocation
+and per-Task coordination locks. Confirmed Task reset removes only regular
+canonical Markdown authority. It preserves
+`.keiyaku/namespace/current`, its local ignore support, project Settings,
+unknown `.keiyaku` bytes, and all non-Task authority; it does not remove now-
+empty directories.
+
+Before removal, Task validates its selected Markdown authority and dedicated
+lock custody, then takes its allocation and addressed Task locks. Corruption,
+foreign or nonregular lock custody, contention, or changed authority leaves
+the affected custody for a retry rather than removing it. Repeating the literal
+World confirmation retries remaining authority and never reconstructs it.
+After releasing the locks, reset leaves their paths as harmless coordination
+residue because it cannot prove the same path was not reacquired.
+
+The Task owner exposes its deletion entry point; World composition does not
+inspect Task custody.

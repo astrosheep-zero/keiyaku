@@ -21,6 +21,7 @@ import { renderSettingsText, settingsJsonValue } from "./render/settings.js";
 import { renderCatalogText } from "./render/catalog.js";
 import { BindDraftError } from "./draft.js";
 import { renderBindDraftReceipt } from "./render/refusal.js";
+import { nukeExitCode } from "./render/nuke.js";
 
 function writeTask(command: ParsedTaskCommand, result: TaskInvocationResult): number {
   const context = {
@@ -112,6 +113,11 @@ function writeResult(command: ParsedCommand, result: unknown): number {
   const contractResult = result as InvocationResult;
   if (contractResult.kind === "guidance") return writeGuidance(command, contractResult);
   if (contractResult.kind === "catalog") return writeCatalog(command, contractResult);
+  if (contractResult.kind === "nuke") {
+    const output = command.output === "json" ? JSON.stringify(contractResult.result) : renderText(contractResult);
+    process.stdout.write(`${output}\n`);
+    return nukeExitCode(contractResult.result);
+  }
   if (contractResult.kind === "region") {
     const output = command.output === "json" ? JSON.stringify(contractResult.region) : renderText(contractResult);
     process.stdout.write(`${output}\n`);

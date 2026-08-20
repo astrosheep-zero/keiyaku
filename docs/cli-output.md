@@ -27,6 +27,19 @@ history expansion.
 
 ## Help
 
+Root help includes:
+
+```text
+  nuke [--confirm <WorldRoot>] [--json]
+    Remove Keiyaku-owned data from one confirmed World.
+```
+
+The bare form uses the existing refusal envelope and exit status to print the
+exact literal confirmation invocation. It does not suggest repository cleanup
+or generic World teardown. JSON is the same typed refusal or execution value.
+A confirmation mismatch uses the same envelope and prints one mismatch line
+followed by the exact retry command using the resolved WorldRoot.
+
 Each command family owns one grammar table. Root help composes those rows;
 validation, usage refusal, namespace help, and leaf help read the same syntax,
 usage, and purpose values. Only Task remains a namespace.

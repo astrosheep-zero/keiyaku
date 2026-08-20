@@ -11,6 +11,11 @@ import { formatTaskId, parseTaskId, taskAuthorityPath, type TaskId } from "./ide
 import type { TaskBoard } from "./board.js";
 
 export type BoardSnapshot = Readonly<{ board: TaskBoard; bytes: ReadonlyMap<TaskId, Uint8Array> }>;
+type TaskNukeCustody = Readonly<{
+  authorityIds: readonly TaskId[];
+  lockIds: readonly TaskId[];
+  lockPaths: readonly string[];
+}>;
 
 function syncTaskDirectory(path: string): void {
   if (process.platform === "win32") return;
@@ -23,6 +28,8 @@ function syncTaskDirectory(path: string): void {
 }
 
 function tasksDirectory(world: WorldRoot): string { return resolve(world, ".keiyaku", "tasks"); }
+function taskLocksDirectory(world: WorldRoot): string { return resolve(world, ".keiyaku", "locks", "task"); }
+function allocationLockPath(world: WorldRoot): string { return resolve(world, ".keiyaku", "locks", "task-allocation.sqlite"); }
 
 async function authorityFiles(directory: string): Promise<readonly string[]> {
   const files: string[] = [];
@@ -107,11 +114,97 @@ function lockPath(world: WorldRoot, id: TaskId): string {
   return resolve(world, ".keiyaku", "locks", "task", ...coordinate.namespace, `${coordinate.localId}.sqlite`);
 }
 
+async function regularFile(path: string, label: string): Promise<boolean> {
+  try {
+    const entry = await lstat(path);
+    if (!entry.isFile() || entry.isSymbolicLink()) throw new Error(`${label} is not a regular file: ${path}`);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function taskLockFiles(world: WorldRoot, directory = taskLocksDirectory(world)): Promise<readonly Readonly<{ id: TaskId; path: string }>[]> {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const files: Readonly<{ id: TaskId; path: string }>[] = [];
+  for (const entry of entries) {
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await taskLockFiles(world, path));
+      continue;
+    }
+    if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".sqlite")) {
+      throw new Error(`Task lock has foreign or corrupt custody: ${path}`);
+    }
+    const local = relative(taskLocksDirectory(world), path);
+    const id = formatTaskId(parseTaskId(`task/${local.slice(0, -7).split(sep).join("/")}`));
+    if (lockPath(world, id) !== path) throw new Error(`Task lock has invalid coordinate: ${path}`);
+    files.push({ id, path });
+  }
+  return files.sort((left, right) => Buffer.compare(Buffer.from(left.path), Buffer.from(right.path)));
+}
+
+async function taskNukeCustody(world: WorldRoot): Promise<TaskNukeCustody> {
+  const snapshot = await readBoard(world);
+  const locks = await taskLockFiles(world);
+  const allocation = allocationLockPath(world);
+  const lockPaths = [
+    ...(await regularFile(allocation, "Task allocation lock") ? [allocation] : []),
+    ...locks.map((lock) => lock.path),
+  ];
+  return {
+    authorityIds: [...snapshot.board.tasks.keys()].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right))),
+    lockIds: locks.map((lock) => lock.id),
+    lockPaths,
+  };
+}
+
+function sameIds(left: readonly TaskId[], right: readonly TaskId[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+async function removeRegularFile(path: string, label: string): Promise<void> {
+  if (!(await regularFile(path, label))) return;
+  await unlink(path);
+}
+
+export async function nukeTaskAuthority(world: WorldRoot): Promise<void | "busy"> {
+  const initial = await taskNukeCustody(world);
+  if (initial.authorityIds.length === 0 && initial.lockPaths.length === 0) return;
+
+  const ids = [...new Set([...initial.authorityIds, ...initial.lockIds])];
+  const result = await withTaskLocks({ world, allocation: true, ids }, async () => {
+    const fresh = await taskNukeCustody(world);
+    if (!sameIds(initial.authorityIds, fresh.authorityIds)) {
+      throw new Error("Task authority changed while acquiring reset locks");
+    }
+    const expectedLocks = new Set([
+      ...initial.lockPaths,
+      allocationLockPath(world),
+      ...initial.authorityIds.map((id) => lockPath(world, id)),
+    ]);
+    if (fresh.lockPaths.some((path) => !expectedLocks.has(path))) {
+      throw new Error("Task lock custody changed while acquiring reset locks");
+    }
+    for (const id of fresh.authorityIds) {
+      await removeRegularFile(authorityPath(world, id), "Task authority");
+    }
+  });
+  if (result === "busy") return "busy";
+}
+
 export async function withTaskLocks<T>(input: Readonly<{
   world: WorldRoot; allocation: boolean; ids: readonly TaskId[]; signal?: AbortSignal;
 }>, action: () => Promise<T>): Promise<T | "busy"> {
   const paths = [
-    ...(input.allocation ? [resolve(input.world, ".keiyaku", "locks", "task-allocation.sqlite")] : []),
+    ...(input.allocation ? [allocationLockPath(input.world)] : []),
     ...[...new Set(input.ids)].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))).map((id) => lockPath(input.world, id)),
   ];
   const held: HeldSqliteTransactionLock[] = [];

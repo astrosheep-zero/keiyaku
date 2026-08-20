@@ -57,6 +57,14 @@ without a second command-specific behavior layer.
 
 ## Command Surface
 
+`keiyaku nuke [--json]` refuses with the required confirmed form for the
+invocation World. `keiyaku nuke --confirm <WorldRoot> [--json]` executes the
+Keiyaku-owned data reset only
+when the literal confirmation equals the resolved WorldRoot byte-for-byte.
+Nuke is not repository cleanup or generic World teardown. It never accepts a
+Contract positional argument, stdin, a token, snapshot hash, prompt, or
+per-owner confirmation. `--repo` has no consumer for this command.
+
 The command vocabulary is:
 
 | Command | Public adaptation |

@@ -16,6 +16,7 @@ import type { KanshiReport } from "../kanshi/index.js";
 import type { RegionRead, Section } from "../kanshi/index.js";
 import type { Catalog } from "../index.js";
 import type { RegionObservation } from "../library/region.js";
+import type { NukeResult } from "../index.js";
 
 export type BindDraftReceipt = Readonly<
   | { path: string; warning?: string }
@@ -243,6 +244,7 @@ export type RegionResult = Readonly<{ kind: "region"; region: Section<RegionRead
 export type CatalogResult = Readonly<{ kind: "catalog"; catalog: Catalog }>;
 
 export type ContractHistoryResult = Readonly<{ kind: "contract-history"; history: ContractHistory }>;
+export type NukeInvocationResult = Readonly<{ kind: "nuke"; result: NukeResult }>;
 
 export type InvocationResult =
   | AcceptedResult
@@ -254,4 +256,5 @@ export type InvocationResult =
   | RegionResult
   | CatalogResult
   | ContractHistoryResult
+  | NukeInvocationResult
   | IntegrationConflictMaterialized;

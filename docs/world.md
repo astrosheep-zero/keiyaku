@@ -81,3 +81,42 @@ from that Repo and operate on the resolved AkuIds in the `-C` World; they do
 not scan another World or replace `-C` with `--repo`.
 Two different repository coordinates name two Worlds and are never composed
 into one aggregate observation.
+
+## Keiyaku-Owned Data Reset
+
+`nuke` is a Keiyaku-owned data reset for exactly one resolved `WorldRoot`. It
+is not repository cleanup and is not a generic World teardown. World owns the
+reset scope, literal confirmation, preservation rule, and one execution result;
+each product owner owns its deletion custody.
+
+A bare operation is the `nuke-confirmation-required` refusal. A confirmation
+must equal the resolved `WorldRoot` byte for byte; mismatch is the
+`nuke-confirmation-mismatch` refusal before every owner effect. Confirmed
+execution stops live writers before deleting their owned state and returns one
+success or failed diagnostic. The same literal confirmation retries remaining
+owned data. No preview, token, snapshot hash, prompt, World-wide lock, reset
+ledger, backup, trash, undo, or lifecycle simulation exists.
+
+Only Keiyaku-produced management data owned by the selected World is in scope.
+Repository source and business refs, ordinary worktree bodies, project and
+user Settings, namespace configuration, global Archetypes, and unknown
+`.keiyaku` bytes remain. A managed worktree is removable only because its
+worktree and appointment are Keiyaku-owned custody; this does not authorize
+repository cleanup or deletion of arbitrary worktrees. A marker or directory
+is removed only after owner cleanup leaves it empty.
+
+The reset law maps to one owner per concern:
+
+| Concern | Owner |
+| --- | --- |
+| Resolved World coordinate, literal confirmation, execution result, and preservation rule | This chapter |
+| Runtime-body admission, stoppage, and World-local Alias authority | [akuma.md](akuma.md), [akuma-heart.md](akuma-heart.md), and [alias.md](alias.md) |
+| Keiyaku refs, managed-worktree custody, appointments, locks, and reconciliation residue | [git.md](git.md), [workspace.md](workspace.md), [git-reconciliation.md](git-reconciliation.md), and [settlement.md](settlement.md) |
+| Task authority and Task locks | [task.md](task.md) |
+| Authored Settings, namespace configuration, and global Archetypes that remain | [settings.md](settings.md) |
+| Package-root inputs and result declarations | [public-api.md](public-api.md) and [public-results.md](public-results.md) |
+| Command grammar and output projection | [cli.md](cli.md) and [cli-output.md](cli-output.md) |
+
+The package composition stops active writers, then attempts the owner-local
+deletion entry points independently. It has no fixed cross-owner order,
+storage path, ref, glob, inventory, count, or residue-specific knowledge.
