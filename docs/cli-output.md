@@ -89,29 +89,20 @@ Kanshi alone derives compact age text from each row's source timestamp and the
 report's one `observedAt`. It floors nonnegative elapsed time to `Ns` below one
 minute, `Nm` below one hour, `Nh` below one day, and `Nd` thereafter; a later
 source is `future` and lawful absence is `—`. Contract phase is
-`<phase> · <age>` followed by `journal <age>` before target facts, each gate
-token is `<mark> <gate> <age>`, and born Akuma life is `<life> · <age>` followed
-by `activity <age>` when `lastActivityAt` is non-null. JSON retains the source
-timestamps and never contains the derived age.
+`<phase> · <age>` before target facts, and born Akuma life is `<life> · <age>`.
+Selected Contract gates retain `<mark> <gate> <age>` detail; world-board gate
+slots are age-less. JSON retains the source timestamps and never contains the
+derived age.
 
-Kanshi is the one aggregate surface with a brand signature. Its first line is
-one responsive Split Horizon geometry:
-
-```text
-kanshi ─── <keiyaku-count> keiyaku · <akuma-count> akuma · <task-count> task ─── <world>
-```
-
-The left word identifies the observer, the middle is the aggregate fact, and the
-right side is the observed world coordinate. The two horizontal segments use
-`U+2500` and flex to the available display width, with at least three characters
-on each side; they never hide or shorten the facts. When the complete coordinate
-makes the minimum signature wider than the viewport, the signature remains one
-scan line and exceeds the viewport rather than folding or truncating. A present
-empty board keeps all three zero counts. An absent world has no signature
-because there is no observed world to frame. After the signature, Kanshi uses
-the KEIYAKU, TASK, and FLEET apertures and plumb-line hierarchy owned by
-[kanshi.md](kanshi.md). FLEET is never an akuma count unit. Other commands
-start with their operation identity and do not receive a banner.
+Bare Kanshi text begins with its first section and uses KEIYAKU, FLEET, TASK in
+that order. Each section has a `[ <SECTION> ]  <N> live` header, at most ten
+hot-first live rows, and an exact complete or partial footer owned by
+[kanshi.md](kanshi.md). It has no aggregate signature, cwd, state coordinate,
+or status presentation flag. `--json` retains the complete typed report; the
+`keiyaku ls kei/`, `keiyaku ls aku/`, and `keiyaku ls task/` catalogs are the
+complete text inspection paths. FLEET remains only a section name, never a
+count unit. Other commands start with their operation identity and do not
+receive a banner.
 
 Every invocation renders exactly one final plain result object on stdout:
 

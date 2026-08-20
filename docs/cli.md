@@ -113,6 +113,10 @@ settlement neither replays delivery nor fabricates that live result.
 Command syntax is owned by each command family's help rows; `--help` renders
 the authoritative usage for every command.
 
+Bare `status` has no `--all`, limit, or alternate text mode. Its bounded text
+board and complete inspection paths are owned by [cli-output.md](cli-output.md)
+and [kanshi.md](kanshi.md); `--json` is the complete typed Kanshi projection.
+
 ## Inputs And Flags
 
 A final bare `-` reads stdin. For `bind`, it reads one contract document; for

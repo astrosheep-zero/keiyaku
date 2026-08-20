@@ -5,13 +5,12 @@ shape, section availability, read-time association joins, and Contract
 selection. It is a reader, never authority: it writes, caches, repairs, and
 reconciles nothing.
 
-Its text identity is the Split Horizon signature owned by
-[cli-output.md](cli-output.md). The renderer derives its three aggregate facts
-only from the assembled `contracts`, `akuma`, and `tasks` sections and derives
-the world label only from `root`, `branch`, and the present Contract-board state
-coordinate. It performs no additional read. An absent or failed section is
+Its text projection is owned by [cli-output.md](cli-output.md). The renderer
+derives each section's visible live count only from the assembled `contracts`,
+`akuma`, and `tasks` sections. It performs no additional read. An absent or
+failed section is
 named as such and is never counted as zero; a present empty section is zero.
-The signature does not add persisted counters or another report field.
+The text projection adds no persisted counters or another report field.
 
 ## Report
 
@@ -159,7 +158,7 @@ and renders each present endpoint as `keiyaku <id> (<observed>)`.
 
 Exact Contract text is not a world board. It renders the one selected Contract
 row and its subordinate holder, Fleet attachment, namespace, workspace, and
-gate facts without the Split Horizon, section apertures, top-level Task or
+gate facts without world-board sections, top-level Task or
 Fleet rows, or aggregate counts. The JSON projection keeps the assembled
 selected report; text does not repeat those joined relations as world sections.
 Kanshi owns that assembled observation: a complete Contract ID reads that one
@@ -222,60 +221,80 @@ touched paths, Git conflicts, ownership, gates, or serialization advice.
 ## Text board
 
 Human and Flagship share one text projection. The renderer consumes the typed
-report only; it does not reread product authorities or infer associations. The
-signature owned by [cli-output.md](cli-output.md) always says keiyaku, akuma,
-and task as count units. FLEET is only the section name.
-
-The normative layout is three apertures after the signature:
+report only; it does not reread product authorities or infer associations. Bare
+world text has three sections in this exact order: KEIYAKU, FLEET, TASK. Each
+left-aligned header is `[ <SECTION> ]  <N> live`, where N is that section's
+non-terminal live count. There is no signature, invocation coordinate, state
+coordinate, aggregate score, or alternate status mode.
 
 ```text
-kanshi ─── 1 keiyaku · 1 akuma · 1 task ─── /repo main <state>
+[ KEIYAKU ]  1 live
 
-──[ KEIYAKU ]────────────────────────────────────────────────────
 ! kei/example
-  │ Title · waiting · target main · behind 7 · drift
-  │ worktree dirty · staged 1 · unstaged 3 · untracked 2
-  │ ↳ /absolute/managed/path
-  │ gates: ✓ build · ! tests
-  │ task task/example
-  │ akuma aku/worker/abcd1234 (@lead)
-──[ 1 keiyaku · 1 attention ]───────────────────────────────────
+  TITLE   Title
+  STATE   pending-delivery · 3m
+  GIT     target main · 7 commits behind main · target moved · worktree dirty · staged 1 · unstaged 3 · untracked 2
+  DIR     /absolute/managed/path
+  GATES   [✓] build   [✗] tests
+  LINKED  task/example
+          aku/worker/abcd1234 (@lead)
 
-──[ TASK ]───────────────────────────────────────────────────────
-● task/example
-  │ Title · in_progress · P0
-  │ -> kei/example
-──[ 1 task · 1 attention ]──────────────────────────────────────
+  (all 1 live keiyaku shown)
 
-──[ FLEET ]──────────────────────────────────────────────────────
+
+[ FLEET ]  1 live
+
 ● aku/worker/abcd1234 (@lead)
-  │ running
-  │ -> kei/example
-──[ 1 akuma · 1 attention ]─────────────────────────────────────
+  LIFE    running · 4m
+  LINKED  -> kei/example
+
+  (all 1 live akuma shown)
+
+
+[ TASK ]  1 live
+
+● task/example
+  TITLE   Title
+  STATE   in_progress · P0
+  LINKED  -> kei/example
+
+  (all 1 live task shown)
 ```
 
-Every observed entity repeats its row grammar between the section boundaries.
-No entity may be replaced by an omission line, aggregate, dormant bucket,
-placeholder, or shortened coordinate. Complete coordinates remain present in
-output bytes even when the terminal wraps them. Hot or anomalous entities use
-additional plumb-line rows for decision facts; cold entities retain at least
-one plumb-line row with title, state, and key fact. Section summaries report
-totals and attention counts only after every entity has appeared.
+The text aperture shows at most ten live rows from each section. It selects
+hot live rows first, then cold-live rows in their existing source order: a
+Contract is hot when it is pending-delivery, has failed or
+stale gate testimony, is behind its target, has a dirty or unavailable
+worktree, has an unavailable or held TaskHolder, has an attached Akuma, or has
+no readable title; a Task is hot when blocked or in progress; an Akuma is hot
+when running, lost, stillborn, or its Dispatch endpoint is
+missing or unavailable. No row is duplicated. Terminal Contract and Task rows
+are omitted and excluded from their live count; Fleet retains its existing life
+semantics, including killed rows. Complete coordinates remain present in output
+bytes even when the terminal wraps them.
 
-A Contract is hot when it is pending-delivery, has failed or stale gate
-testimony, is behind its target, has a dirty or unavailable worktree, has an
-unavailable holder, has an attached Task or Akuma, or its current opaque
-document cannot yield a title. Waiting, drift, unknown target, and no-target
-stay on the compact row and are not themselves attention. A Task is hot when
-blocked or in progress. An Akuma is hot when running, lost, stillborn, or its
-Dispatch endpoint is missing or unavailable. Attention counts those hot rows.
+After its visible rows, a complete section writes exactly
+`  (all <N> live <unit> shown)`. A partial section writes exactly
+`  + <N> more live <unit> not shown` followed by
+`    keiyaku ls <selector>/`; the resulting commands are `keiyaku ls kei/`,
+`keiyaku ls aku/`, and `keiyaku ls task/`. The
+omitted count is the live count beyond the ten-row aperture and never includes
+terminal Contract or Task rows. There is one blank line after each header and
+before its footer, then two blank lines before the next header. `keiyaku ls`
+is the complete text inspection path; typed Kanshi and JSON remain complete.
 
 Contract rows retain complete `kei/...` identity, read-time title, phase, target,
-numeric behind when known, `behind unknown` beside a known target name when
-lag is unknown, explicit no-target when none, independent drift, gate
-testimony, and exact attached Task/Akuma coordinates. Selected Contract text
-renders `namespaceTasks` only under KEIYAKU, after holder and Fleet attachment
-rows, as one summary then every matching row:
+numeric behind when known, `commits behind <target> unknown` beside a known
+target name when lag is unknown, explicit no-target when none, independent
+target movement, gate testimony, and exact attached Task/Akuma coordinates.
+Visible hot Contract rows retain every such fact; cold rows retain their
+complete identity, title, phase, and target facts. World-board gates are
+age-less slots: `[✓]` satisfied, `[✗]` unsatisfied, `[ ]` never reported, and
+`[~]` stale. Selected Contract text retains detailed gate ages and summaries.
+World attachments render as a `LINKED` list with the first identity on the
+label line and later identities on aligned following lines. Selected Contract
+text renders `namespaceTasks` after holder and Fleet attachment rows, as one
+summary then every matching row:
 
 ```text
   │ namespace tasks <N>
@@ -285,8 +304,7 @@ rows, as one summary then every matching row:
 Zero matches render `namespace tasks 0`. Absent and failed observations render
 `namespace tasks absent` or `namespace tasks failed <diagnostic>`. Bare world
 Kanshi omits those nested rows because TASK already renders every Task.
-Namespace tasks do not affect Contract heat or attention. Task and Akuma rows
-retain complete identities, state or key facts, and exact `-> kei/...`
+Task and Akuma rows retain complete identities, state or key facts, and exact `-> kei/...`
 associations where present. A missing endpoint is `-> kei/... (missing)`; an
 unavailable board is `-> kei/... (unavailable)`. An unbound Task or Akuma
 renders `unbound` instead of a relation. Title is `null` when the current opaque
@@ -301,20 +319,23 @@ vocabulary: `●` live, `○` waiting or idle, `✓` claimed or satisfied, `×`
 abandoned, killed, or dropped, `!` unsatisfied or stillborn, and `?`
 unknown, stale, or lost. There is no invented `=` mark.
 
-Worktree facts use this exact Contract plumb-line order after the title/state
-line:
+Hot world-board Contract rows use this aligned field order:
 
 ```text
-  │ worktree dirty · staged 1 · unstaged 3 · untracked 2
-  │ ↳ /absolute/managed/path
-  │ gates: ✓ build · ! tests
+  TITLE   <title>
+  STATE   <phase> · <age>
+  GIT     <target facts> · <worktree state>
+  DIR     /absolute/managed/path
+  GATES   [✓] build   [✗] tests
+  LINKED  task/<complete-id>
+          aku/<complete-id> (@alias)
 ```
 
-The worktree state line is always visible. The complete path line expands for
-an active/hot Contract or any dirty or unavailable observation; a cold clean
-Contract may omit the path while retaining `worktree clean`. An unappointed
-managed Contract renders `worktree unappointed` and never names a worktree
-path. A here Contract renders `workspace here · clean|dirty|unavailable` and
-never fabricates a managed path. A path is always one complete coordinate; renderer truncation
-or an ellipsis is forbidden. The path line is subordinate fact syntax, not a
-cross-product relation, and does not use the entity attachment relation.
+`GIT` carries the worktree state. `DIR` appears for a hot managed Contract
+when its observation supplies a managed worktree location, including an
+unavailable location; unappointed and failed observations never invent one,
+and here rows never name a managed path.
+Cold live rows keep the complete identity, title, phase, and target facts in
+one compact row, without repeating clean worktree state or a path. IDs and
+paths are never shortened; they may overflow the terminal. `LINKED` is an
+entity attachment list, not a worktree relation.
