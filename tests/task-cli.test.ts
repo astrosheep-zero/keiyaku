@@ -699,10 +699,13 @@ test("built CLI Task text stays one scan grammar at 80 and 36 columns", async ()
   ])) as { kind: string; value: { id: string } };
   assert.equal(added.kind, "accepted");
   const longId = added.value.id;
-  await invoke(parseArgv(["-C", root, "task", "add", "Need only blocker outside the tree"]));
+  const blocker = await invoke(parseArgv(["-C", root, "task", "add", "Need only blocker outside the tree"])) as { kind: string; value: { id: string } };
+  assert.equal(blocker.kind, "accepted");
+  const blockerId = blocker.value.id;
   await invoke(parseArgv(["-C", root, "task", "add", "Child under the alpha parent root"]));
   await invoke(parseArgv(["-C", root, "task", "update", "task/child-under-the-alpha-parent-root", "--parent", longId]));
-  await invoke(parseArgv(["-C", root, "task", "update", longId, "--needs", "task/need-only-blocker-outside-the-tree"]));
+  const needsUpdate = await invoke(parseArgv(["-C", root, "task", "update", longId, "--needs", blockerId])) as { kind: string };
+  assert.equal(needsUpdate.kind, "accepted");
 
   const wide = await runCli(["-C", root, "task", "show", longId]);
   assert.notEqual(wide.code, 3, wide.stderr);
@@ -712,8 +715,8 @@ test("built CLI Task text stays one scan grammar at 80 and 36 columns", async ()
   const narrow = await runCli(["-C", root, "task", "blocked", "--world"], 36);
   assert.notEqual(narrow.code, 3, narrow.stderr);
   assert.doesNotMatch(narrow.stdout, /\{"kind"|TaskId - P/u);
-  assertCopyable(narrow.stdout, [longId, "task/need-only-blocker-outside-the-tree"]);
-  assert.equal(narrow.stdout.includes(`! ${longId} · P2 blocked —`), true);
+  assertCopyable(narrow.stdout, [longId, blockerId]);
+  assert.equal(narrow.stdout.includes(`! ${longId} · P2 blocked · updated`), true);
   assertFitsOrOverflowsLawfully(narrow.stdout, 36);
 
   const empty = world();
