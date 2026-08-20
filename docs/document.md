@@ -45,7 +45,7 @@ A contract document has exactly one H1 title and these required H2 sections:
 | `Context` | Nonblank prose. |
 | `Objective` | Nonblank prose. |
 | `Design` | Nonblank prose. |
-| `Region` | One closed fence with no info string and one or more nonblank path patterns. |
+| `Region` | One closed fence with no info string or the exact `txt` info string, and one or more nonblank path patterns. |
 | `Criteria` | One or more H3 criteria. Each title is unique after normalized comparison and each body is nonblank. |
 | `Verification` | Optional ordered executor declarations owned by the library edge. |
 

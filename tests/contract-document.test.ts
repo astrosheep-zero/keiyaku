@@ -3,7 +3,7 @@ import test from "node:test";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 
-function document(extra = ""): string {
+function document(extra = "", regionInfo = ""): string {
   return [
     "# Day One",
     "",
@@ -17,7 +17,7 @@ function document(extra = ""): string {
     "Keep one input adapter.",
     "",
     "## Region",
-    "~~~",
+    `~~~${regionInfo}`,
     "src/cli/**",
     "tests/**",
     "~~~",
@@ -64,6 +64,10 @@ test("contract Markdown decodes core fields and retains unknown H2 bytes", () =>
   assert.deepEqual(body.criteria.map((criterion) => criterion.title), ["Parses the document", "Retains extensions"]);
   assert.deepEqual(body.extensions, [{ title: "Rollout Notes", content: "first\n\n- second\n" }]);
   assert.deepEqual(body.verification, []);
+});
+
+test("contract Markdown accepts the exact txt Region fence info string", () => {
+  assert.deepEqual(decodeContractDocument(document("", "txt")).region, ["src/cli/**", "tests/**"]);
 });
 
 test("Region directory shorthand canonicalizes without rewriting document bytes", () => {

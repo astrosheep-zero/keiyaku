@@ -7,14 +7,14 @@ import { renderContractBody } from "../src/body/render.js";
 import { parseToAST } from "../src/markdown/parse.js";
 import type { SectionNode } from "../src/markdown/types.js";
 
-function region(patterns: readonly string[]): readonly string[] {
-  const document = parseToAST(["## Region", "~~~", ...patterns, "~~~"].join("\n"));
+function region(patterns: readonly string[], info = ""): readonly string[] {
+  const document = parseToAST(["## Region", `~~~${info}`, ...patterns, "~~~"].join("\n"));
   const section = document.children[0];
   assert.ok(section?.type === "section");
   return decodeRegion(document, section as SectionNode);
 }
 
-function contract(pattern: string): string {
+function contract(pattern: string, regionInfo = ""): string {
   return [
     "# Region",
     "",
@@ -28,7 +28,7 @@ function contract(pattern: string): string {
     "design",
     "",
     "## Region",
-    "~~~",
+    `~~~${regionInfo}`,
     pattern,
     "~~~",
     "",
@@ -64,13 +64,29 @@ test("Region accepts only its closed positive path grammar", () => {
   }
 });
 
-test("Region accepts only one closed unlabelled fence", () => {
-  const refused = [
+test("Region accepts only one closed fence with no info string or exact txt", () => {
+  assert.deepEqual(region(["src/**"]), ["src/**"]);
+  assert.deepEqual(region(["src/**"], "txt"), ["src/**"]);
+  const invalidLabels = [
     "## Region\n~~~text\nsrc/**\n~~~",
+    "## Region\n~~~TXT\nsrc/**\n~~~",
+    "## Region\n~~~txt extra\nsrc/**\n~~~",
+  ];
+  for (const source of invalidLabels) {
+    const document = parseToAST(source);
+    const section = document.children[0];
+    assert.ok(section?.type === "section");
+    assert.throws(
+      () => decodeRegion(document, section as SectionNode),
+      (error: unknown) => error instanceof RegionDocumentError && error.message.includes("no info string or the exact 'txt' info string"),
+    );
+  }
+
+  const invalidStructure = [
     "## Region\n~~~\nsrc/**",
     "## Region\n~~~\nsrc/**\n~~~\nextra",
   ];
-  for (const source of refused) {
+  for (const source of invalidStructure) {
     const document = parseToAST(source);
     const section = document.children[0];
     assert.ok(section?.type === "section");
@@ -91,6 +107,8 @@ test("contract rendering chooses a fence that preserves legal delimiter path byt
 
 test("contract decoding and amendment share Region validation", () => {
   const current = decodeContractDocument(contract("src/**"));
+  assert.deepEqual(decodeContractDocument(contract("src/**", "txt")).region, ["src/**"]);
+  assert.deepEqual(decodeContractDocument(applyAmendDocument("## Replace: Region\n~~~txt\ntests/**\n~~~", current)).region, ["tests/**"]);
   assert.throws(
     () => decodeContractDocument(contract("src/**file")),
     (error: unknown) => error instanceof TypeError && error.message.includes("Region pattern 'src/**file' may use ** only as a complete segment"),

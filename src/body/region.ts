@@ -185,8 +185,8 @@ function patternsOverlap(left: readonly RegionSegment[], right: readonly RegionS
 
 export function decodeRegion(document: DocumentNode, section: SectionNode): readonly string[] {
   const blocks = directChildren(section, "code_block");
-  if (blocks.length !== 1 || !blocks[0]!.closed || blocks[0]!.info.length > 0) {
-    refusal("Region must contain one closed fence without an info string");
+  if (blocks.length !== 1 || !blocks[0]!.closed || (blocks[0]!.info !== "" && blocks[0]!.info !== "txt")) {
+    refusal("Region must contain one closed fence with no info string or the exact 'txt' info string");
   }
   const other = section.children.filter((node) => node !== blocks[0] && nonblank(document, node));
   if (other.length > 0) refusal("Region may contain only its fenced declaration");
