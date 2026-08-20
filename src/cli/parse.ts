@@ -19,7 +19,6 @@ import {
 import type { CatalogQuery } from "../library/catalog.js";
 import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
 import {
-  AMEND_OPERATIONS_HELP,
   CONTRACT_COMMAND_SPECS,
   type ContractCommand as Command,
   type ContractCommandSpec as CommandSpec,
@@ -50,9 +49,9 @@ export function renderRootHelp(): string {
 }
 
 export function renderContractHelp(command: Command): string {
-  const spec = CONTRACT_COMMAND_SPECS[command];
+  const spec: CommandSpec = CONTRACT_COMMAND_SPECS[command];
   const help = `${spec.purpose}\n\n${usageLine(spec.usage)}`;
-  return command === "amend" ? `${help}\n\n${AMEND_OPERATIONS_HELP}` : help;
+  return spec.help === undefined ? help : `${help}\n\n${spec.help}`;
 }
 
 function contractUsage(command: Command): string {

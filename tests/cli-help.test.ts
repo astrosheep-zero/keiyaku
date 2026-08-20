@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
-import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "../src/cli/commands/contract.js";
+import { CONTRACT_COMMAND_SPECS, type ContractCommand, type ContractCommandSpec } from "../src/cli/commands/contract.js";
 import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp } from "../src/cli/parse.js";
 import { renderAkumaHelp, type AkumaAction } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
@@ -90,13 +90,28 @@ test("amend leaf help enumerates the operation grammar", () => {
   ].join("\n"));
 });
 
-test("only amend leaf help carries the operation grammar", () => {
+test("deliver leaf help explains candidate capture and conflict continuation", () => {
+  assert.equal(renderContractHelp("deliver"), [
+    "Deliver one Contract candidate from the appointed worktree.",
+    "",
+    "usage: keiyaku deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>]",
+    "",
+    "  --include-dirty         Capture the complete non-ignored worktree tree as the",
+    "                          candidate; stages nothing, commits nothing. Refused",
+    "                          while unmerged paths exist.",
+    "  --materialize-conflict  After a conflict result, project the judged targetHead",
+    "                          into the worktree as an uncommitted merge. Not a",
+    "                          delivery: resolve, stage, deliver again.",
+  ].join("\n"));
+  assert.doesNotMatch(renderRootHelp(), /Capture the complete non-ignored worktree tree/u);
+});
+
+test("supplemental Contract help is owned by command specs", () => {
   assert.doesNotMatch(renderRootHelp(), /stdin operations/u);
   for (const command of Object.keys(CONTRACT_COMMAND_SPECS) as ContractCommand[]) {
-    if (command === "amend") continue;
-    const spec = CONTRACT_COMMAND_SPECS[command];
-    assert.equal(renderContractHelp(command), `${spec.purpose}\n\n${usageLine(spec.usage)}`);
-    assert.doesNotMatch(renderContractHelp(command), /stdin operations/u);
+    const spec: ContractCommandSpec = CONTRACT_COMMAND_SPECS[command];
+    const expected = `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.help === undefined ? "" : `\n\n${spec.help}`}`;
+    assert.equal(renderContractHelp(command), expected);
   }
 });
 

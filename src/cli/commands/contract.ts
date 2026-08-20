@@ -6,21 +6,33 @@ export type ContractCommandSpec = Readonly<{
   flags: Readonly<Record<string, ContractFlagKind>>;
   usage: string;
   purpose: string;
+  help?: string;
 }>;
-
-export const AMEND_OPERATIONS_HELP = [
-  "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
-  "  ## Append: Context|Objective|Design|Criteria|<extension>",
-  "  ## Add: Criteria|<new-extension-title>",
-  "  ## Update: <existing-extension-title>",
-  "  ## Remove: Criterion <existing-title>",
-  "  ## Remove: <existing-extension-title>",
-].join("\n");
 
 export const CONTRACT_COMMAND_SPECS = {
   bind: { positional: "none", stdin: "required", flags: { actor: "value", task: "value", target: "value", here: "boolean", after: "repeat-value", gates: "raw-value", json: "boolean" }, usage: "bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] -", purpose: "Create one Contract from stdin Markdown." },
-  amend: { positional: "optional", stdin: "optional", flags: { actor: "value", after: "repeat-value", "clear-after": "boolean", gates: "raw-value", json: "boolean" }, usage: "amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]", purpose: "Amend one Contract's document operations or structured terms." },
-  deliver: { positional: "optional", stdin: "none", flags: { actor: "value", message: "value", "include-dirty": "boolean", "materialize-conflict": "boolean", json: "boolean" }, usage: "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>]", purpose: "Deliver one Contract candidate." },
+  amend: {
+    positional: "optional", stdin: "optional", flags: { actor: "value", after: "repeat-value", "clear-after": "boolean", gates: "raw-value", json: "boolean" }, usage: "amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]", purpose: "Amend one Contract's document operations or structured terms.",
+    help: [
+      "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
+      "  ## Append: Context|Objective|Design|Criteria|<extension>",
+      "  ## Add: Criteria|<new-extension-title>",
+      "  ## Update: <existing-extension-title>",
+      "  ## Remove: Criterion <existing-title>",
+      "  ## Remove: <existing-extension-title>",
+    ].join("\n"),
+  },
+  deliver: {
+    positional: "optional", stdin: "none", flags: { actor: "value", message: "value", "include-dirty": "boolean", "materialize-conflict": "boolean", json: "boolean" }, usage: "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>]", purpose: "Deliver one Contract candidate from the appointed worktree.",
+    help: [
+      "  --include-dirty         Capture the complete non-ignored worktree tree as the",
+      "                          candidate; stages nothing, commits nothing. Refused",
+      "                          while unmerged paths exist.",
+      "  --materialize-conflict  After a conflict result, project the judged targetHead",
+      "                          into the worktree as an uncommitted merge. Not a",
+      "                          delivery: resolve, stage, deliver again.",
+    ].join("\n"),
+  },
   review: { positional: "optional", stdin: "optional", flags: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" }, usage: "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>]", purpose: "Record one review verdict." },
   arc: { positional: "optional", stdin: "required", flags: { actor: "value", json: "boolean" }, usage: "arc [<contract>|@<contract>] [--actor <actor>] -", purpose: "Record stdin arc Markdown for one Contract." },
   abandon: { positional: "optional", stdin: "none", flags: { actor: "value", note: "value", json: "boolean" }, usage: "abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>]", purpose: "Abandon one Contract with an optional note." },
