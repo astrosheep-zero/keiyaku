@@ -244,13 +244,17 @@ RequestRecipe. No call can loosen an Archetype restriction, and no live toggle,
 override-source fact, or fork input exists; wake, restart, and fork keep the
 frozen effective result.
 
-Provider kind `claude-agent-sdk` consumes `model`, `effort`, and
-the admitted system prompt. `readonly: true` selects plan mode and records native
-enforcement; absence selects the provider's noninteractive native default.
+Provider kind `claude-agent-sdk` consumes `model`, `effort`, and the admitted
+system prompt. `append` uses the native `claude_code` preset while `replace`
+supplies a complete custom prompt; historical mode absence remains append.
+`readonly: true` selects plan mode and records native enforcement; absence
+selects the provider's noninteractive native default.
 
 Provider kind `codex-app-server` runs the selected executable, defaulting to
-`codex`, as `app-server --listen stdio://`. It consumes `model`, `effort`,
-and the admitted system prompt. `readonly: true` selects the native read-only sandbox
+`codex`, as `app-server --listen stdio://`. It consumes `model`, `effort`, and
+the admitted system prompt: `append` maps to `developerInstructions` and
+`replace` to `baseInstructions` on fresh and resumed threads; historical mode
+absence remains append. `readonly: true` selects the native read-only sandbox
 and records native enforcement; absence selects the provider's native default.
 `network` selects the sandbox's native network flag and defaults to disabled. Its
 resumable coordinate is the native thread id; its answered history id is the
@@ -262,7 +266,8 @@ the Body turn or leave an answered Akuma untidy.
 
 Provider kind `opencode-sdk` runs the selected executable, defaulting to
 `opencode`, through the official public V1 Session API. It consumes `model` and
-an append-only system prompt. Archetype `effort` is passed as OpenCode's native model
+an append-only system prompt. `replace` is refused because V1 exposes no
+replacement input; historical mode absence remains append. Archetype `effort` is passed as OpenCode's native model
 variant; it is not a per-call override. V1 has no per-session permission input,
 so `readonly: true` is admitted with `none` enforcement and a concrete
 diagnostic. Fresh and resumed drives use the frozen session id, and native fork
@@ -271,18 +276,21 @@ admission, completion, event, and tell semantics belong exclusively to
 [akuma-provider.md](akuma-provider.md).
 
 Provider kind `pi` uses the in-process `@earendil-works/pi-coding-agent`
-SDK. Model is an exact `<provider>/<id>` lookup through `ModelRuntime`; effort
-is one native thinking level; the admitted system prompt is supplied through the
-native resource loader. For `readonly: true`, its admitted tool set excludes `bash`,
+ SDK. Model is an exact `<provider>/<id>` lookup through `ModelRuntime`; effort
+is one native thinking level; `append` uses the loader's appended prompt blocks
+and `replace` uses its system-prompt override. Historical mode absence remains
+the existing replace behavior. For `readonly: true`, its admitted tool set excludes `bash`,
 `edit`, and `write`, and records native enforcement. Resume and fork use the
 exact persisted session file. Native steer
 proves queueing only, so Pi does not expose live tell.
 
 Provider kind `grok-build` uses the shared ACP lifecycle under its own `x.ai`
 wire identity. Its fixed launch consumes `model`, `effort`, and an admitted
-append or replace system prompt; custom executions may replace only executable
-and environment. It exposes native live tell through `x.ai/interject`, has no
-fork, and makes no readonly enforcement claim.
+append or replace system prompt; append sends fresh-session `rules`, replace
+sends the `systemPromptOverride` metadata on fresh and resumed sessions, and
+historical mode absence with a body remains refused. Custom executions may
+replace only executable and environment. It exposes native live tell through
+`x.ai/interject`, has no fork, and makes no readonly enforcement claim.
 
 `readonly: true` promises only that the Akuma cannot mutate its task surface.
 Native enforcement means the session's reachable capabilities physically lack
