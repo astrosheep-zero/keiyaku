@@ -177,7 +177,7 @@ needed by `workspace: "here"`.
 `Keiyaku.list` enumerates the Contract world; `Keiyaku.observe` performs one
 targeted journal observation without enumerating it. Both project the same row
 shape. The return contract and behavior of `reconcile` are defined by
-[git.md](git.md).
+[git-reconciliation.md](git-reconciliation.md).
 
 `Keiyaku` is a stateless branded handle born only through `Keiyaku.of` or a
 successful bind. There is no `Repo` convenience path or alternate constructor.
@@ -379,8 +379,11 @@ explicit empty arrays remain valid replacements, and `documentDiff` is `""`.
 `abandon`, and `audit` apply the lifecycle rules in
 [lifecycle.md](lifecycle.md). `reconcile` requests the Git operation
 defined in [git-reconciliation.md](git-reconciliation.md). `ReconcileReport`
-is that chapter's exact `ReconcileResult`, including its flat cleanup lag; this
-chapter does not define a second result shape.
+is that chapter's exact `ReconcileResult`, including its flat cleanup lag.
+`Repo.reconcile` returns that chapter's `RepoReconcileReport` union: a
+completed world, including an empty Contract list, or
+`world-observation-failed` before any ContractId exists. This chapter does
+not define a second result shape.
 
 Every accepted mutation makes one mandatory reconciliation attempt with the
 supplied `hooks`, if any. Omitting them means empty commands only when Git must

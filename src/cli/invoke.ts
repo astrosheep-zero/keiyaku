@@ -588,7 +588,7 @@ async function invokeParsed(
   switch (parsed.command) {
     case "reconcile": {
       if (parsed.contract === undefined) {
-        return { kind: "observation", command: "reconcile", ...await repo.reconcile({ hooks, retryHooks: parsed.retryHooks }) };
+        return { kind: "observation", command: "reconcile", report: await repo.reconcile({ hooks, retryHooks: parsed.retryHooks }) };
       }
       const { contract } = await selectContract(repo, parsed.contract, scope);
       return { kind: "observation", command: "reconcile", ...await contract.reconcile({ hooks, retryHooks: parsed.retryHooks }) };

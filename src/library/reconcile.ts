@@ -31,9 +31,14 @@ export type ReconcileCompletion = Readonly<{
 
 export type RepoContractReconcileReport = ReconcileCompletion;
 
-export type RepoReconcileReport = Readonly<{
-  contracts: readonly Readonly<{ contractId: ContractId; report: RepoContractReconcileReport }>[];
-}>;
+type RepoReconcileContracts = readonly Readonly<{
+  contractId: ContractId;
+  report: RepoContractReconcileReport;
+}>[];
+
+export type RepoReconcileReport =
+  | Readonly<{ kind: "completed"; contracts: RepoReconcileContracts }>
+  | Readonly<{ kind: "world-observation-failed"; diagnostic: string }>;
 
 type ReconcileOptions = Readonly<{
   scope: RepositoryScope;
@@ -174,27 +179,38 @@ export async function completeReconcile(input: ReconcileOptions & Readonly<{
 }
 
 function attachReleaseLag(
-  contracts: RepoReconcileReport["contracts"],
+  contracts: RepoReconcileContracts,
   released: readonly ContractId[],
   lag: ContractFileLag,
-): RepoReconcileReport {
+): Extract<RepoReconcileReport, { kind: "completed" }> {
   const affected = new Set(released);
   return {
+    kind: "completed",
     contracts: contracts.map((contract) => affected.has(contract.contractId)
       ? { ...contract, report: { ...contract.report, lag: [...contract.report.lag, lag] } }
       : contract),
   };
 }
 
+function worldObservationDiagnostic(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).trim();
+}
+
 export async function completeRepoReconcile(input: ReconcileOptions): Promise<RepoReconcileReport> {
-  const states = await worldContractStates(input);
+  let states: readonly ContractState[];
+  try {
+    states = await worldContractStates(input);
+  } catch (error) {
+    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
+    return { kind: "world-observation-failed", diagnostic: worldObservationDiagnostic(error) };
+  }
   let appointed: PlaceRegister;
   try {
     appointed = await appointPlaces(input.scope, states);
   } catch (error) {
     if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
     const lag = registerLag(input.scope, error);
-    const contracts: RepoReconcileReport["contracts"][number][] = [];
+    const contracts: RepoReconcileContracts[number][] = [];
     for (const state of states) {
       contracts.push({
         contractId: state.id,
@@ -203,11 +219,12 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
           : await completeReconcile({ ...input, contractId: state.id }),
       });
     }
-    return { contracts };
+    return { kind: "completed", contracts };
   }
   const places = new Map(appointed.appointments.map((appointment) => [appointment.contract, appointment.place]));
   const retained = await reconcileAllOperation({
     ...input,
+    states,
     retainTerminalWorktree: true,
     places,
   });
@@ -220,13 +237,13 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
     })),
   });
   const cleanup = retained.contracts.some((contract) => isManagedTerminal(contract.state))
-    ? await reconcileAllOperation({ ...input, places })
+    ? await reconcileAllOperation({ ...input, states, places })
     : null;
   const later = cleanup === null
     ? null
     : new Map(cleanup.contracts.map((contract) => [contract.contractId, contract.report]));
   const released: ContractId[] = [];
-  const contracts: RepoReconcileReport["contracts"][number][] = [];
+  const contracts: RepoReconcileContracts[number][] = [];
   for (const [index, contract] of retained.contracts.entries()) {
     const report = later?.get(contract.contractId);
     if (releaseEligible(contract.state, report, places.has(contract.contractId))) {
@@ -243,5 +260,5 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
     });
   }
   const lag = await releaseAppointments(input.scope, released);
-  return lag === undefined ? { contracts } : attachReleaseLag(contracts, released, lag);
+  return lag === undefined ? { kind: "completed", contracts } : attachReleaseLag(contracts, released, lag);
 }

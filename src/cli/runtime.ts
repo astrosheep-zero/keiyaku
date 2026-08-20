@@ -98,6 +98,10 @@ async function writeResult(command: ParsedCommand, result: unknown): Promise<num
       color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
     });
   process.stdout.write(`${output}\n`);
+  if (contractResult.kind === "observation") {
+    const { worldObservationFailureText } = await import("./render/board.js");
+    return worldObservationFailureText(contractResult) === undefined ? 0 : 1;
+  }
   return contractResult.kind === "refused" ? 1 : contractResult.kind === "retry" ? 2 : 0;
 }
 

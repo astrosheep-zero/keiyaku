@@ -27,6 +27,32 @@ test("observation text keeps the command and view data together", () => {
   assert.equal(renderText(result), 'observation status\n{\n  "contracts": []\n}');
 });
 
+test("world reconcile text keeps a completed report under report", () => {
+  const result: InvocationResult = {
+    kind: "observation",
+    command: "reconcile",
+    report: { kind: "completed", contracts: [] },
+  };
+  assert.equal(renderText(result), [
+    "observation reconcile",
+    "{",
+    '  "report": {',
+    '    "kind": "completed",',
+    '    "contracts": []',
+    "  }",
+    "}",
+  ].join("\n"));
+});
+
+test("world observation failure text is exact", () => {
+  const result: InvocationResult = {
+    kind: "observation",
+    command: "reconcile",
+    report: { kind: "world-observation-failed", diagnostic: "git failed" },
+  };
+  assert.equal(renderText(result), "reconcile: world observation failed · git failed");
+});
+
 test("completion stops render the public unmet prerequisites in order", () => {
   const contract = contractId("kei/waiting-on-prerequisites");
   const unmet = [

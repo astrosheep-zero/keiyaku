@@ -450,7 +450,9 @@ test("post-admission reconcile failure remains accepted with a physical lag", as
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    () => invokeWithDocument(repository.path, ["bind", "-"], contractDocument("CLI reconcile failure")),
+    (gitPath) => invokeWithDocument(repository.path, ["bind", "-"], contractDocument("CLI reconcile failure"), {
+      KEIYAKU_GIT_PATH: gitPath,
+    }),
   );
 
   assert.equal(result.kind, "accepted");
@@ -1133,8 +1135,8 @@ test("a terminal worktree removal failure remains accepted cleanup lag", async (
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    () => invoke(parseArgv(["-C", path, "abandon", id, "--actor", "external-test"]), {
-      environment: {},
+    (gitPath) => invoke(parseArgv(["-C", path, "abandon", id, "--actor", "external-test"]), {
+      environment: { KEIYAKU_GIT_PATH: gitPath },
     }),
   );
 
@@ -1150,6 +1152,7 @@ test("reconcile world command adapts the public repository report", async () => 
   const repository = repositoryWithMain();
   const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Reconcile world"));
   assert.equal(bound.kind, "accepted");
+  if (bound.kind !== "accepted") return;
 
   const result = await invoke(parseArgv(["reconcile"]), {
     cwd: repository.path,
@@ -1157,7 +1160,95 @@ test("reconcile world command adapts the public repository report", async () => 
   });
   assert.equal(result.kind, "observation");
   if (result.kind !== "observation") return;
-  assert.ok(Array.isArray(result.contracts));
+  assert.equal(result.command, "reconcile");
+  assert.equal("contracts" in result, false);
+  const report = result.report as { kind?: string; contracts?: readonly unknown[] };
+  assert.equal(report.kind, "completed");
+  assert.ok(Array.isArray(report.contracts));
+  assert.equal(report.contracts.length, 1);
+  const json = JSON.parse(JSON.stringify(result)) as { kind: string; command: string; report: { kind: string } };
+  assert.equal(json.kind, "observation");
+  assert.equal(json.command, "reconcile");
+  assert.equal(json.report.kind, "completed");
+  assert.match(renderText(result), /^observation reconcile\n/u);
+  assert.doesNotMatch(renderText(result), /world observation failed/u);
+});
+
+test("reconcile world command reports an empty completed world", async () => {
+  const repository = repositoryWithMain();
+  const result = await invoke(parseArgv(["reconcile"]), {
+    cwd: repository.path,
+    environment: {},
+  });
+  assert.deepEqual(result, {
+    kind: "observation",
+    command: "reconcile",
+    report: { kind: "completed", contracts: [] },
+  });
+  assert.equal(renderText(result).includes("world observation failed"), false);
+});
+
+test("reconcile world command carries a typed discovery failure", async () => {
+  const repository = repositoryWithMain();
+  const bound = await invokeWithDocument(repository.path, ["bind", "-"], contractDocument("Reconcile discovery"));
+  assert.equal(bound.kind, "accepted");
+  if (bound.kind !== "accepted") return;
+  const captured = await withGitShim(
+    [
+      `if [ "$*" = "rev-parse --verify --quiet ${GIT_REF}" ]; then`,
+      '  printf "forced world observation failure\\n" >&2',
+      "  exit 128",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    async (gitPath) => {
+      const result = await invoke(parseArgv(["reconcile"]), {
+        cwd: repository.path,
+        environment: { KEIYAKU_GIT_PATH: gitPath },
+      });
+      const env = { ...process.env, KEIYAKU_GIT_PATH: gitPath, NO_COLOR: "1" };
+      delete env.FORCE_COLOR;
+      const run = (args: readonly string[]) => spawnSync(
+        process.execPath,
+        ["--import", import.meta.resolve("tsx"), resolve(import.meta.dirname, "../src/cli/index.ts"), ...args],
+        { encoding: "utf8", env },
+      );
+      return {
+        result,
+        text: run(["-C", repository.path, "reconcile"]),
+        json: run(["-C", repository.path, "reconcile", "--json"]),
+      };
+    },
+  );
+  assert.equal(captured.result.kind, "observation");
+  if (captured.result.kind !== "observation") return;
+  const report = captured.result.report as { kind?: string; diagnostic?: string; contracts?: unknown };
+  assert.equal(report.kind, "world-observation-failed");
+  assert.equal("contracts" in report, false);
+  assert.match(String(report.diagnostic), /forced world observation failure/u);
+  assert.equal(renderText(captured.result), `reconcile: world observation failed · ${report.diagnostic}`);
+  const json = JSON.parse(JSON.stringify(captured.result)) as {
+    kind: string;
+    command: string;
+    report: { kind: string; diagnostic: string };
+  };
+  assert.equal(json.kind, "observation");
+  assert.equal(json.command, "reconcile");
+  assert.equal(json.report.kind, "world-observation-failed");
+  assert.equal(json.report.diagnostic, report.diagnostic);
+  assert.equal(captured.text.status, 1);
+  assert.equal(captured.json.status, 1);
+  assert.equal(captured.text.stdout.trim(), renderText(captured.result));
+  const jsonOutput = JSON.parse(captured.json.stdout) as {
+    kind: string;
+    command: string;
+    report: { kind: string; diagnostic: string };
+  };
+  assert.equal(jsonOutput.kind, "observation");
+  assert.equal(jsonOutput.command, "reconcile");
+  assert.equal(jsonOutput.report.kind, "world-observation-failed");
+  assert.equal(jsonOutput.report.diagnostic, report.diagnostic);
 });
 
 test("--here delivers in place without owning a managed worktree", async () => {

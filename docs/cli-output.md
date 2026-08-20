@@ -114,6 +114,13 @@ Every invocation renders exactly one final plain result object on stdout:
 | `observation` | view data, including observed effects when present | 0 |
 | `integration-conflict-materialized` | exact public `IntegrationConflictMaterialized` value: judged `targetHead`, ordered `conflictPaths`, and appointed `workspace` | 0 |
 
+World `reconcile` remains this observation kind. JSON places the public
+`RepoReconcileReport` under `report` and never copies that report's
+discriminant onto the envelope. Completed text keeps the existing observation
+rendering, including `contracts: []`. `world-observation-failed` writes exactly
+`reconcile: world observation failed · <diagnostic>` and exits `1`; it does
+not render an empty successful board or a synthetic Contract row.
+
 Text and `--json` render this same object. Both write to stdout; JSON serializes
 it without another output schema. A corrupted authority or other exception
 writes its verbatim diagnostic to stderr and exits `3`.

@@ -46,13 +46,16 @@ export async function worldContractStates(
 }
 
 export async function reconcileAllOperation(
-  input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }> & ReconcileOptions,
+  input: Readonly<{
+    scope: RepositoryScope;
+    channel: GitDecodeChannel;
+    states: readonly ContractState[];
+  }> & ReconcileOptions,
 ): Promise<RepoReconcileReport> {
-  const observation = await withGitReadObservation(input.scope, input.channel, async (read) => await observeContractWorld(read));
   const contracts = (await reconcileBatch(
     input.scope,
     input.channel,
-    observation.contracts.keys(),
+    input.states.map((state) => state.id),
     {
       hooks: input.hooks,
       retryHooks: input.retryHooks,

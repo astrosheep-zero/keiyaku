@@ -432,6 +432,8 @@ test("a clean terminal stays unappointed across per-Contract and repo reconcile"
   assert.deepEqual(once.lag, []);
   assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
   const world = await (await Repo.at({ path: repository.path })).reconcile();
+  assert.equal(world.kind, "completed");
+  if (world.kind !== "completed") throw new Error("expected completed repo reconcile");
   assert.equal(world.contracts.every((contract) => contract.report.lag.length === 0), true);
   assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
   const observed = await withGitDecodeChannel(git, (channel) =>
@@ -512,6 +514,8 @@ test("repo reconcile isolates a Place-register outage from here repair", async (
     rmSync(lock, { recursive: true, force: true });
   }
   const observed = await withGitDecodeChannel(git, (channel) => worldContractStates({ scope: git, channel }));
+  assert.equal(world.kind, "completed");
+  if (world.kind !== "completed") throw new Error("expected completed repo reconcile");
   assert.deepEqual(world.contracts.map((contract) => contract.contractId), observed.map((state) => state.id));
   assert.deepEqual(new Set(world.contracts.map((contract) => contract.contractId)), new Set([
     here.keiyaku.id,

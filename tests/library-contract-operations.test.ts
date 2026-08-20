@@ -11,6 +11,8 @@ import { changeId, contractId, entryUlid, snapshotId } from "../src/core/facts/t
 import { contractJournalPath } from "../src/git/identity.js";
 import { GIT_REF, readBlob, readGit, readRef, repositoryAt, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
+import { withGitDecodeChannel } from "../src/git/read-observation.js";
+import { completeRepoReconcile } from "../src/library/reconcile.js";
 import { appointedWorktreePath, makeGitRepository, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
 
@@ -421,14 +423,20 @@ test("Delivery.diff freshly reads its pinned candidate diff", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository);
   commitCandidate(repository);
-  const delivered = await contract.deliver();
+  await contract.deliver();
 
   const log = resolve(repository.path, "delivery-diff.log");
   writeFileSync(log, "");
   const shim = "if [ \"$1\" = \"diff\" ]; then printf 'diff\\n' >> \"$KEIYAKU_DELIVERY_DIFF_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"";
   const variables = { KEIYAKU_DELIVERY_DIFF_LOG: log };
-  const first = await withGitShim(shim, variables, () => delivered.value.diff());
-  const second = await withGitShim(shim, variables, () => delivered.value.diff());
+  const id = (await contract.state()).id;
+  const readDiff = async (gitPath: string) => {
+    const recovered = await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id }).delivery();
+    if (recovered === null) throw new Error("missing delivery");
+    return recovered.diff();
+  };
+  const first = await withGitShim(shim, variables, readDiff);
+  const second = await withGitShim(shim, variables, readDiff);
 
   assert.match(first, /diff --git a\/candidate\.txt b\/candidate\.txt/);
   assert.equal(second, first);
@@ -445,14 +453,14 @@ test("one public handle reuses its resolved repository scope", async () => {
 
   const operations = await withGitShim(
     [
-      "if [ \"$1\" = \"worktree\" ] && [ \"$2\" = \"list\" ]; then",
+      "if [ \"$*\" = \"rev-parse --path-format=absolute --git-common-dir\" ]; then",
       "  printf 'discovery\\n' >> \"$KEIYAKU_SCOPE_DISCOVERY_LOG\"",
       "fi",
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     { KEIYAKU_SCOPE_DISCOVERY_LOG: log },
-    async () => {
-      const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id });
+    async (gitPath) => {
+      const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id });
       return [contract.state(), contract.deliver(), contract.reconcile()] as const;
     },
   );
@@ -460,6 +468,116 @@ test("one public handle reuses its resolved repository scope", async () => {
 
   assert.equal(state.id, id);
   assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["discovery"]);
+});
+
+test("repo reconcile reports an empty completed world", async () => {
+  const repository = repositoryWithMain();
+  const report = await (await Repo.at({ path: repository.path })).reconcile();
+  assert.deepEqual(report, { kind: "completed", contracts: [] });
+});
+
+test("repo reconcile returns a typed discovery failure without a synthetic ContractId", async () => {
+  const repository = repositoryWithMain();
+  const bound = await bind(repository);
+  const id = (await bound.state()).id;
+  const report = await withGitShim(
+    [
+      `if [ "$*" = "rev-parse --verify --quiet ${GIT_REF}" ]; then`,
+      '  printf "forced world observation failure\\n" >&2',
+      "  exit 128",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    async (gitPath) => (await Repo.at({ path: repository.path, gitPath })).reconcile(),
+  );
+  assert.equal(report.kind, "world-observation-failed");
+  if (report.kind !== "world-observation-failed") return;
+  assert.equal("contracts" in report, false);
+  assert.equal(report.diagnostic.includes(id), false);
+  assert.match(report.diagnostic, /forced world observation failure/u);
+});
+
+test("repo reconcile still throws TypeError during world discovery", async () => {
+  const repository = repositoryWithMain();
+  await bind(repository);
+  const git = await repositoryAt(repository.path);
+  await assert.rejects(
+    () => withGitDecodeChannel(git, (channel) => completeRepoReconcile({
+      scope: git,
+      channel: {
+        ...channel,
+        readObjects: async () => {
+          throw new TypeError("forced type error");
+        },
+      },
+      hooks: { create: [], destroy: [] },
+      retryHooks: false,
+    })),
+    (error: unknown) => error instanceof TypeError && error.message === "forced type error",
+  );
+});
+
+test("repo reconcile still throws authority corruption during world discovery", async () => {
+  const repository = repositoryWithMain();
+  const bound = await bind(repository);
+  const id = (await bound.state()).id;
+  const git = await repositoryAt(repository.path);
+  const before = await readGit(git);
+  const journal = before.paths.get(contractJournalPath(id));
+  if (journal?.type !== "blob") throw new Error("missing journal");
+  const tree = await updateGitTree(git, before.tree, new Map([[
+    contractJournalPath(id),
+    { oid: await writeBlob(git, Buffer.from("not-a-journal\n")) },
+  ]]));
+  const commit = await writeCommit({ repository: git, tree, parent: before.commit, message: "corrupt journal" });
+  repository.run(["update-ref", GIT_REF, commit, before.commit]);
+  await assert.rejects(
+    () => Repo.at({ path: repository.path }).then((repo) => repo.reconcile()),
+    (error: unknown) => error instanceof AuthorityCorruptionError,
+  );
+});
+
+test("repo reconcile keeps per-Contract reports after discovery", async () => {
+  const repository = repositoryWithMain();
+  const bound = await bind(repository);
+  const id = (await bound.state()).id;
+  const report = await (await Repo.at({ path: repository.path })).reconcile();
+  assert.equal(report.kind, "completed");
+  if (report.kind !== "completed") return;
+  assert.equal(report.contracts.length, 1);
+  assert.equal(report.contracts[0]?.contractId, id);
+  assert.equal(Array.isArray(report.contracts[0]?.report.effects), true);
+  assert.equal(Array.isArray(report.contracts[0]?.report.lag), true);
+  assert.deepEqual(report.contracts[0]?.report.settlement, { actions: [], lags: [] });
+});
+
+test("repo reconcile does not observe the Contract world again after discovery", async () => {
+  const repository = repositoryWithMain();
+  await bind(repository);
+  await plantDispatch(repository, "aku/01ARZ3NDEKTSV4RRFFQ69G5FA", "kei/reconcile", "2026-08-20T00:00:00Z");
+  const dispatchTree = repository.run(["rev-parse", `${GIT_REF}:dispatch`]).trim();
+  const git = await repositoryAt(repository.path);
+  let dispatchTreeReads = 0;
+
+  const report = await withGitDecodeChannel(git, async (channel) => completeRepoReconcile({
+    scope: git,
+    channel: {
+      ...channel,
+      readObjects: async (oids) => {
+        if (oids.includes(dispatchTree)) {
+          dispatchTreeReads += 1;
+          if (dispatchTreeReads > 1) throw new Error("second Contract world observation");
+        }
+        return await channel.readObjects(oids);
+      },
+    },
+    hooks: { create: [], destroy: [] },
+    retryHooks: false,
+  }));
+
+  assert.equal(dispatchTreeReads, 1);
+  assert.equal(report.kind, "completed");
 });
 
 test("public review, abandon, and Arc preserve their ruled testimony", async () => {
@@ -1096,7 +1214,7 @@ test("contract history composes one frozen journal and Dispatch observation", as
   const history = await withGitShim(
     "printf '%s\\n' \"$*\" >> \"$KEIYAKU_HISTORY_OBSERVATION_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_HISTORY_OBSERVATION_LOG: log },
-    async () => Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id: firstId }).history(),
+    async (gitPath) => Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: firstId }).history(),
   );
   const snapshot = await readRef(await repositoryAt(repository.path), GIT_REF);
   assert.equal(history.id, firstId);

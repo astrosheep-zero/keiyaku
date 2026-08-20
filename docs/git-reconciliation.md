@@ -242,7 +242,10 @@ type Effect =
 ```
 
 `keiyaku.reconcile()` returns the contract's `ReconcileResult` as its public
-`ReconcileReport`. World reconciliation returns:
+`ReconcileReport`. World reconciliation first performs one frozen Git
+observation to discover the complete Contract world. That observation is
+atomic: it either yields the complete world, including zero Contracts, or
+fails before any ContractId exists. The public report is exactly:
 
 ```ts
 type RepoReconcileItem = Readonly<{
@@ -250,16 +253,31 @@ type RepoReconcileItem = Readonly<{
   report: ReconcileReport
 }>
 
-type RepoReconcileReport = Readonly<{
-  contracts: readonly RepoReconcileItem[]
-}>
+type RepoReconcileReport =
+  | Readonly<{
+      kind: "completed";
+      contracts: readonly RepoReconcileItem[];
+    }>
+  | Readonly<{
+      kind: "world-observation-failed";
+      diagnostic: string;
+    }>;
 ```
 
-It contains one typed report for every observed contract. A failure lag does
-not discard successful effects or reports and never becomes an aggregate
-exception. Contract and world reconciliation use the same lag vocabulary.
-Git owns no Task namespace bytes or ContractId-to-namespace policy; that
-post-physical projection belongs to [settlement](settlement.md).
+`completed` with `contracts: []` means the frozen world was read successfully
+and contains no Contracts. `world-observation-failed` is only an operational
+IO/Git observation failure before discovery yields ContractIds. It never
+contains a synthetic ContractId or a partial discovery list. Authority
+corruption and type errors remain exceptions. Per-Contract `ReconcileReport`
+shapes, including typed observation failures and successful effects after
+discovery, do not change. No new aggregate failure arm is used once discovery
+has completed.
+
+A completed report contains one typed report for every observed contract. A
+failure lag does not discard successful effects or reports and never becomes
+an aggregate exception. Contract and world reconciliation use the same lag
+vocabulary. Git owns no Task namespace bytes or ContractId-to-namespace
+policy; that post-physical projection belongs to [settlement](settlement.md).
 
 Effects and lag are transparent data. `changed` is derivable from effect
 actions, resource coordinates are already in each effect, and lifecycle state

@@ -19,7 +19,7 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { bindOperation } from "../src/protocol/bind.js";
-import { reconcileAllOperation } from "../src/protocol/reconcile.js";
+import { reconcileAllOperation, worldContractStates } from "../src/protocol/reconcile.js";
 import {
   contractObservationOperation,
   contractsOperation,
@@ -373,9 +373,10 @@ test("batch reconcile isolates a failed contract and retains successful reports"
   mkdirSync(await appointedWorktreePath(git, blocked), { recursive: true });
 
   const scope = await scopeOperation({ coordinate: repository.path });
-  const report = await withGitDecodeChannel(scope, (channel) => reconcileAllOperation({
+  const report = await withGitDecodeChannel(scope, async (channel) => reconcileAllOperation({
     scope,
     channel,
+    states: await worldContractStates({ scope, channel }),
     hooks: { create: [], destroy: [] },
     retryHooks: false,
     places,
