@@ -192,8 +192,8 @@ changes 15
 ● STILL RUNNING
 ```
 
-The identity and optional alias occupy the first line. The next line is the
-five-column `U+2500` ruler, exactly as wide as `HH:MM`; it marks the boundary
+The identity and optional alias occupy the first line. The next line is a
+`U+2500` ruler spanning the requested display width; it marks the boundary
 between identity and the rest of the snapshot. When a Contract is associated,
 its complete `kei/...` coordinate follows on the separate hanging relation line
 beginning with `U+2514` and `U+2500`; an unassociated Akuma omits that line.

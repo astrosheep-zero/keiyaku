@@ -41,17 +41,21 @@ function associatedIdentity(id: string, alias?: string, contract?: DispatchAssoc
   return `${identity(id, alias)}${contractId === undefined ? "" : ` [${contractId}]`}`;
 }
 
-function snapshotHeading(id: string, alias?: string, contract?: DispatchAssociation): readonly string[] {
+function ruler(columns: number): string {
+  return "─".repeat(Math.max(OPENING_STROKE.length, columns));
+}
+
+function snapshotHeading(id: string, alias: string | undefined, contract: DispatchAssociation | undefined, columns: number): readonly string[] {
   const contractId = contract === undefined ? undefined : associatedContractId(contract);
   return [
     identity(id, alias),
-    OPENING_STROKE,
+    ruler(columns),
     ...(contractId === undefined ? [] : [`└─ ${contractId}`]),
   ];
 }
 
-function answeredHeading(id: string, alias: string | undefined): string {
-  return [`✓ came back ${identity(id, alias)}`, OPENING_STROKE].join("\n");
+function answeredHeading(id: string, alias: string | undefined, columns: number): string {
+  return [`✓ came back ${identity(id, alias)}`, ruler(columns)].join("\n");
 }
 
 function contractFacts(contract: DispatchAssociation): readonly string[] {
@@ -270,7 +274,7 @@ function snapshotText(
   ];
   const footer = options.showLife === false ? [] : ["", lifeLabel(view.status.life)];
   return [
-    ...snapshotHeading(view.status.id, options.alias, view.contract),
+    ...snapshotHeading(view.status.id, options.alias, view.contract, context.columns),
     ...facts,
     ...activity,
     ...renderTaskContextLines(view.createdTasks, context.columns),
@@ -299,7 +303,7 @@ function waitText(
   const blocks = [
     ...result.result.observations.map((observation) => {
       const answer = statusAnswer(observation);
-      if (answer !== undefined) return `${answeredHeading(observation.status.id, alias)}\n${answer}`;
+      if (answer !== undefined) return `${answeredHeading(observation.status.id, alias, context.columns)}\n${answer}`;
       return snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) });
     }),
     ...result.result.unobserved.map((member) => unobservedText(member.id, member.diagnostic)),
@@ -315,7 +319,7 @@ function historyText(
 ): string {
   if (command.last) return result.mode === "last" ? result.answer : "no answer retained";
   if (result.mode !== "page") throw new Error("history result lacks page");
-  return [...snapshotHeading(result.akuma, result.alias, result.historyResult.contract), ...groupedRows(result.history.rows, context, true)].join("\n");
+  return [...snapshotHeading(result.akuma, result.alias, result.historyResult.contract, context.columns), ...groupedRows(result.history.rows, context, true)].join("\n");
 }
 
 function tellText(result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>, context: TextRenderContext): string {
@@ -377,7 +381,7 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   if (result.result.observation.kind === "detached") {
     const lines = [...snapshotHeading(result.result.akuma, alias, contractId === undefined
       ? { kind: "none" }
-      : { kind: "associated", contractId }), ...cwd, ...restraint, ...facts];
+      : { kind: "associated", contractId }, context.columns), ...cwd, ...restraint, ...facts];
     if (!callFailed(result.result)) {
       const selector = result.result.alias.kind === "aliased" ? result.result.alias.alias.alias : result.result.akuma;
       lines.push(`$ keiyaku -C ${posixShellArgument(result.world)} wait ${selector} --timeout 5m`);
@@ -387,7 +391,7 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   if (result.result.observation.kind === "failed") {
     return [...snapshotHeading(result.result.akuma, alias, contractId === undefined
       ? { kind: "none" }
-      : { kind: "associated", contractId }), ...cwd, ...restraint, ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
+      : { kind: "associated", contractId }, context.columns), ...cwd, ...restraint, ...facts, `! error ${safeText(result.result.observation.failure.diagnostic)}`].join("\n");
   }
   return snapshotText({
     status: result.result.observation.status,
