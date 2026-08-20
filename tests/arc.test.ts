@@ -17,7 +17,8 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { makeGitRepository, observeContract } from "./support/git.js";
+import { observeContract } from "./support/git.js";
+import { repositoryWithMain } from "./support/library-verbs.js";
 
 const id = contractId("kei/arc-test");
 const initial = snapshotId("a".repeat(40));
@@ -92,15 +93,6 @@ function contractDocument(title: string): string {
     "Arc remains narrative only.",
     "",
   ].join("\n");
-}
-
-function repositoryWithMain() {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  return repository;
 }
 
 test("Arc Markdown accepts only a title, Objective, and Brief", () => {

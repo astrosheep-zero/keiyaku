@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { appointManagedWorktrees } from "../src/workspace-place.js";
-import { appointedWorktreePath, makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, type TestGitRepository, withGitShim } from "./support/git.js";
+import { repositoryWithMain } from "./support/library-verbs.js";
 import {
   readBlob,
   readGit,
@@ -43,15 +44,6 @@ function firstJournalAt(repository: TestGitRepository, id: ContractId): string {
 
 function hereWorkspace(scope: Awaited<ReturnType<typeof scopeOperation>>) {
   return async () => ({ kind: "appointed" as const, path: scope.effectiveCwd });
-}
-
-function repositoryWithMain(): TestGitRepository {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  return repository;
 }
 
 function terms(title: string) {

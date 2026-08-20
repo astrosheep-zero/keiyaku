@@ -15,16 +15,8 @@ import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { resolveHereContractWorkspace } from "../src/contract-worktree.js";
-import { appointedWorktreePath, makeGitRepository, type TestGitRepository } from "./support/git.js";
-
-function repositoryWithMain(): TestGitRepository {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  return repository;
-}
+import { appointedWorktreePath, type TestGitRepository } from "./support/git.js";
+import { repositoryWithMain } from "./support/library-verbs.js";
 
 function refused(expected: KeiyakuRefusal): (error: unknown) => boolean {
   return (error) => {

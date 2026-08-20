@@ -12,19 +12,13 @@ import { observeContractsForAdmissionAt } from "../src/git/observe.js";
 
 import { repositoryAt } from "../src/git/repository.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { appointedWorktreePath, makeGitRepository, observeContract, type TestGitRepository, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, observeContract, type TestGitRepository, withGitShim } from "./support/git.js";
+import { repositoryWithMain } from "./support/library-verbs.js";
 
-function repositoryWithMain(): TestGitRepository {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
-  writeFileSync(resolve(repository.path, "delivered.txt"), "base\n");
-  writeFileSync(resolve(repository.path, "local.txt"), "base\n");
-  repository.run(["add", "delivered.txt", "local.txt"]);
-  repository.run(["commit", "--quiet", "-m", "initial"]);
-  return repository;
-}
+const TARGET_FILES = {
+  "delivered.txt": "base\n",
+  "local.txt": "base\n",
+};
 
 function document(title = "Target checkout placement"): string {
   return [
@@ -68,7 +62,7 @@ async function managedCandidate(repository: TestGitRepository, gates: readonly s
 }
 
 test("ordinary placement follows a checked-out target and preserves unrelated worktree bytes", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const { contract } = await managedCandidate(repository);
   writeFileSync(resolve(repository.path, "local.txt"), "unstaged local\n");
   writeFileSync(resolve(repository.path, "untracked.txt"), "untracked local\n");
@@ -87,7 +81,7 @@ test("ordinary placement follows a checked-out target and preserves unrelated wo
 });
 
 test("claimed target observation is current at integration and drifts after rewind", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const { contract } = await managedCandidate(repository);
   await contract.deliver();
   const delivery = (await contract.state()).delivery?.data;
@@ -106,7 +100,7 @@ test("claimed target observation is current at integration and drifts after rewi
 });
 
 test("ordinary placement carries unrelated staged index bytes through the follow", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const { contract, path } = await managedCandidate(repository);
   const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
   const candidate = repository.run(["-C", path, "rev-parse", "HEAD"]);
@@ -127,7 +121,7 @@ test("ordinary placement carries unrelated staged index bytes through the follow
 });
 
 test("ordinary placement follows the target checkout in another worktree", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   repository.run(["branch", "observer"]);
   repository.run(["checkout", "--quiet", "observer"]);
   const checkout = `${repository.path}-main-checkout`;
@@ -145,7 +139,7 @@ test("ordinary placement follows the target checkout in another worktree", async
 });
 
 test("conflicting target bytes refuse placement before claimed or target movement", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const { contract } = await managedCandidate(repository);
   const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
   writeFileSync(resolve(repository.path, "delivered.txt"), "local conflict\n");
@@ -169,7 +163,7 @@ test("conflicting target bytes refuse placement before claimed or target movemen
 });
 
 test("an untracked collision refuses placement before target movement", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const candidate = await managedCandidate(repository);
   writeFileSync(resolve(candidate.path, "collision.txt"), "candidate\n");
   repository.run(["-C", candidate.path, "add", "collision.txt"]);
@@ -190,7 +184,7 @@ test("an untracked collision refuses placement before target movement", async ()
 });
 
 test("an ignored untracked collision remains a typed refusal", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   writeFileSync(resolve(repository.path, ".gitignore"), "generated.dat\n");
   repository.run(["add", ".gitignore"]);
   repository.run(["commit", "--quiet", "-m", "ignore generated output"]);
@@ -214,7 +208,7 @@ test("an ignored untracked collision remains a typed refusal", async () => {
 });
 
 test("a staged candidate-changed path refuses placement with its exact path", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const { contract } = await managedCandidate(repository);
   const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
   writeFileSync(resolve(repository.path, "delivered.txt"), "staged conflict\n");
@@ -237,7 +231,7 @@ test("a staged candidate-changed path refuses placement with its exact path", as
 });
 
 test("dirty here placement commits staged unstaged and untracked bytes without rewriting the worktree", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document("Here placement"),
@@ -260,7 +254,7 @@ test("dirty here placement commits staged unstaged and untracked bytes without r
 });
 
 test("here delivery refuses before tender after its workspace leaves the target branch", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   repository.run(["branch", "other"]);
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
@@ -281,7 +275,7 @@ test("here delivery refuses before tender after its workspace leaves the target 
 });
 
 test("targeted here bind refuses a foreign branch before Contract birth", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   repository.run(["branch", "foreign"]);
 
   await assert.rejects(
@@ -338,7 +332,7 @@ async function admitClaimWithoutFollow(repository: TestGitRepository, contract: 
 }
 
 test("reconcile completes an ordinary follow interrupted after atomic publication", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const candidate = await managedCandidate(repository, ["reviewed"]);
   await admitClaimWithoutFollow(repository, candidate.contract);
   assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "base\n");
@@ -361,7 +355,7 @@ test("reconcile completes an ordinary follow interrupted after atomic publicatio
 });
 
 test("reconcile recognizes a completed ordinary follow despite unrelated staged and unstaged bytes", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const candidate = await managedCandidate(repository, ["reviewed"]);
   await admitClaimWithoutFollow(repository, candidate.contract);
   const delivery = (await observeContract(await repositoryAt(repository.path), candidate.contract.id)).state?.delivery?.data;
@@ -383,7 +377,7 @@ test("reconcile recognizes a completed ordinary follow despite unrelated staged 
 });
 
 test("reconcile aligns a candidate worktree to its index without disturbing unrelated staged content", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const candidate = await managedCandidate(repository, ["reviewed"]);
   writeFileSync(resolve(repository.path, "local.txt"), "staged local\n");
   repository.run(["add", "local.txt"]);
@@ -406,7 +400,7 @@ test("reconcile aligns a candidate worktree to its index without disturbing unre
 });
 
 test("reconcile completes a dirty here index alignment interrupted after atomic publication", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document("Interrupted here placement"),
@@ -429,7 +423,7 @@ test("reconcile completes a dirty here index alignment interrupted after atomic 
 });
 
 test("reconcile independently recovers here and ordinary checkouts of one target", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const checkout = `${repository.path}-forced-main-checkout`;
   repository.run(["worktree", "add", "--force", "--quiet", checkout, "main"]);
   const bound = await Keiyaku.bind({
@@ -454,7 +448,7 @@ test("reconcile independently recovers here and ordinary checkouts of one target
 });
 
 test("reconcile identifies a dirty here source by checkout shape instead of invocation path", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const checkout = `${repository.path}-reconcile-caller`;
   repository.run(["worktree", "add", "--force", "--quiet", checkout, "main"]);
   const bound = await Keiyaku.bind({
@@ -482,7 +476,7 @@ test("reconcile identifies a dirty here source by checkout shape instead of invo
 });
 
 test("reconcile does not guess after the user changes an interrupted target checkout", async () => {
-  const repository = repositoryWithMain();
+  const repository = repositoryWithMain({ files: TARGET_FILES });
   const candidate = await managedCandidate(repository, ["reviewed"]);
   await admitClaimWithoutFollow(repository, candidate.contract);
   writeFileSync(resolve(repository.path, "delivered.txt"), "changed after publication\n");

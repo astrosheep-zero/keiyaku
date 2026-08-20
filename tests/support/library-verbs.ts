@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   Keiyaku,
   KeiyakuRefused,
@@ -8,12 +9,27 @@ import {
 } from "../../src/index.js";
 import { makeGitRepository, type TestGitRepository } from "./git.js";
 
-export function repositoryWithMain(): TestGitRepository {
+export interface RepositoryWithMainOptions {
+  readonly files?: Readonly<Record<string, string>>;
+}
+
+export function repositoryWithMain(options: RepositoryWithMainOptions = {}): TestGitRepository {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
   repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const files = options.files ?? {};
+  for (const [relativePath, contents] of Object.entries(files)) {
+    const path = join(repository.path, relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, contents);
+  }
+  if (Object.keys(files).length === 0) {
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  } else {
+    repository.run(["add", "--", ...Object.keys(files)]);
+    repository.run(["commit", "--quiet", "-m", "initial"]);
+  }
   return repository;
 }
 

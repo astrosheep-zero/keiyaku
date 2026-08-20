@@ -13,6 +13,12 @@ import { reconcile } from "../src/git/reconcile.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { appointedWorktreePath, makeGitRepository, observeContract, withGitShim } from "./support/git.js";
+import { repositoryWithMain as makeRepositoryWithMain } from "./support/library-verbs.js";
+const repositoryWithMain = () => makeRepositoryWithMain({ files: {
+  ".keiyaku/settings.json": JSON.stringify({ gates: {
+    default: { kind: "bundle", gates: ["reviewed"] },
+  } }),
+} });
 import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
@@ -21,21 +27,6 @@ import { acceptedDeliver, acceptedReview } from "../src/cli/accepted.js";
 import { contractHead, contractId } from "../src/core/facts/types.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
-
-
-function repositoryWithMain() {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
-  mkdirSync(resolve(repository.path, ".keiyaku"), { recursive: true });
-  writeFileSync(resolve(repository.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: {
-    default: { kind: "bundle", gates: ["reviewed"] },
-  } }));
-  repository.run(["add", ".keiyaku/settings.json"]);
-  repository.run(["commit", "--quiet", "-m", "initial"]);
-  return repository;
-}
 
 function deliveryRefFor(contract: ContractId): string {
   return `refs/heads/keiyaku-delivery/kei-${contract.slice("kei/".length)}`;

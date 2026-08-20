@@ -16,7 +16,7 @@ import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { abandonOperation } from "../src/protocol/abandon.js";
 import { scopeOperation } from "../src/protocol/operations.js";
-import { makeGitRepository } from "./support/git.js";
+import { repositoryWithMain } from "./support/library-verbs.js";
 
 const EMPTY_HOOKS: WorktreeHooks = { create: [], destroy: [] };
 
@@ -43,14 +43,6 @@ function contractBody(title: string): string {
     "Each effect is visible exactly as specified.",
     "",
   ].join("\n");
-}
-
-function repositoryWithMain() {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  return repository;
 }
 
 function appendCommand(path: string, value: string, delayMs = 0): HookCommand {
