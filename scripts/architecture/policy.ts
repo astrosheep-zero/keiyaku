@@ -1268,7 +1268,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "cli/commands/task-invoke.ts",
-      allow: [types("cli/commands/task.ts"), any("cli/usage.ts", ["CliUsageError"]), any("task/index.ts"), any("task/context.ts", ["resolveTaskNamespaceContext", "writeTaskNamespaceContext"]), any("task/mutation.ts"), types("world.ts"), any("akuma/requests.ts", ["injectedBodyRequests", "requestBodyTask"])],
+      allow: [types("cli/commands/task.ts"), any("cli/usage.ts", ["CliUsageError"]), any("task/index.ts"), any("task/operations.ts", ["observeTaskDetails"]), any("task/context.ts", ["resolveTaskNamespaceContext", "writeTaskNamespaceContext"]), any("task/mutation.ts"), types("world.ts"), any("akuma/requests.ts", ["injectedBodyRequests", "requestBodyTask"])],
     },
     {
       source: "cli/draft.ts",

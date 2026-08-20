@@ -1,6 +1,5 @@
 import {
   Tasks,
-  observeTaskDetails,
   type BlockedTaskList,
   type TaskBatchResult,
   type TaskCompositionResult,
@@ -17,6 +16,7 @@ import {
   type TaskState,
   type TaskUpdateResult,
 } from "../../task/index.js";
+import { observeTaskDetails } from "../../task/operations.js";
 import type { ParsedTaskCommand } from "./task.js";
 import type { WorldRoot } from "../../world.js";
 import { injectedBodyRequests, requestBodyTask } from "../../akuma/requests.js";

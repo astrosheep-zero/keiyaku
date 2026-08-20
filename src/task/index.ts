@@ -8,7 +8,7 @@ import { composeTasks, type TaskCompositionResult } from "./compose.js";
 import { TaskAuthorityCorruptionError, type TaskPriority, type TaskState } from "./document.js";
 import type { TaskId } from "./identity.js";
 import {
-  addTask, addTaskDocument, batchTasks, blockedTasks, lifecycleTask, listTasks, queryTasks, readTaskDetails, readyTasks,
+  addTask, addTaskDocument, batchTasks, blockedTasks, lifecycleTask, listTasks, queryTasks, readyTasks,
   taskView, updateTask, type AddTaskDocumentInput, type AddTaskInput, type TaskBatchResult,
   type TaskMutationResult, type TaskOutcome, type TaskRefusal, type TaskRetry, type TaskUpdateResult, type TaskView, type UpdateTaskInput,
 } from "./operations.js";
@@ -37,12 +37,6 @@ export type {
   TaskQueryRow, TaskQuerySort, TaskRelationPredicateField,
 };
 export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS };
-
-export async function observeTaskDetails(world: WorldRoot, ids: readonly TaskId[]): Promise<TaskOutcome<readonly TaskDetail[]>> {
-  const observed = await readTaskDetails(world, ids);
-  if (observed.kind !== "accepted") return observed;
-  return { kind: "accepted", value: observed.value.map((facts) => ({ ...facts, task: taskView(facts.task) })) };
-}
 
 class TaskHandle {
   constructor(readonly id: TaskId, private readonly world: WorldRoot) {}

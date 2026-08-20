@@ -276,7 +276,7 @@ test("task package export exposes only the Tasks-first native surface", () => {
   const output = execFileSync(process.execPath, ["--input-type=module", "-e", 'const m = await import("@astrosheep/keiyaku/task"); console.log(Object.keys(m).sort().join(","));'], { cwd: directory, encoding: "utf8" });
   assert.equal(
     output.trim(),
-    "TASK_RELATION_PREDICATE_FIELDS,TaskAuthorityCorruptionError,Tasks,observeTaskDetails",
+    "TASK_RELATION_PREDICATE_FIELDS,TaskAuthorityCorruptionError,Tasks",
   );
 });
 

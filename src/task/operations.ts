@@ -228,6 +228,11 @@ export async function readTaskDetails(world: WorldRoot, ids: readonly TaskId[]):
     ? { kind: "accepted", value: details as readonly TaskDetailFacts[] }
     : { kind: "refused", refusal: { kind: "task-missing", taskId: ids[missing]! } };
 }
+export async function observeTaskDetails(world: WorldRoot, ids: readonly TaskId[]): Promise<TaskOutcome<readonly (Omit<TaskDetailFacts, "task"> & Readonly<{ task: TaskView }>)[]>> {
+  const observed = await readTaskDetails(world, ids);
+  if (observed.kind !== "accepted") return observed;
+  return { kind: "accepted", value: observed.value.map((facts) => ({ ...facts, task: taskView(facts.task) })) };
+}
 export async function readyTasks(world: WorldRoot, namespace: readonly string[] | undefined, scope?: "namespace" | "world", parent?: TaskId, limit = DEFAULT_TASK_LIMIT): Promise<TaskOutcome<TaskPage<TaskRow>>> {
   const selected = readScope(namespace, scope);
   const board = (await readBoard(world)).board;
