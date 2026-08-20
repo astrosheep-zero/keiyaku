@@ -108,7 +108,7 @@ test("architecture policy reserves asynchronous process spawn for runtime/proc",
   const accepted = check({
     "runtime/proc/run.ts": 'import { spawn } from "node:child_process"; export function run(): void { void spawn; }',
   });
-  assert.deepEqual(accepted, []);
+  assert.deepEqual(rules(accepted), []);
 
   const rejected = check({
     "cli/actor.ts": 'import { spawn } from "node:child_process"; export function run(): void { void spawn; }',
@@ -190,6 +190,34 @@ test("architecture policy gives provider recipe grammar one inward dependency di
   assert.deepEqual(rules(rejected), ["architecture/dependency-direction"]);
 });
 
+test("architecture policy distinguishes provider SDK value edges from type-only config edges", () => {
+  const accepted = check({
+    "akuma/provider-recipe.ts": "export type SystemPromptMode = 'append' | 'replace';",
+    "akuma/providers/acp/config.ts": 'import type { SystemPromptMode } from "../../provider-recipe.js"; export type Config = { mode?: SystemPromptMode };',
+  });
+  assert.deepEqual(accepted, []);
+
+  const rejected = check({
+    "akuma/provider-recipe.ts": "export const SystemPromptMode = 'append';",
+    "akuma/providers/acp/config.ts": 'import { SystemPromptMode } from "../../provider-recipe.js"; export const mode = SystemPromptMode;',
+  });
+  assert.ok(rules(rejected).includes("architecture/dependency-direction"));
+});
+
+test("architecture policy checks the real CLI parse graph for provider SDK reachability", () => {
+  const accepted = check({
+    "cli/parse.ts": "export const parse = (): void => {};",
+    "akuma/providers/acp/core.ts": 'import type * as Sdk from "@agentclientprotocol/sdk"; export type Core = Sdk.ClientContext;',
+  });
+  assert.deepEqual(accepted, []);
+
+  const rejected = check({
+    "cli/parse.ts": 'import { helper } from "./new-help-module.js"; export const parse = helper;',
+    "cli/new-help-module.ts": 'import "@agentclientprotocol/sdk"; export const helper = (): void => {};',
+  });
+  assert.ok(rules(rejected).includes("architecture/provider-sdk-reachable-from-cli"));
+});
+
 test("architecture policy gives activity codec directions exact runtime owners", () => {
   const provider = [
     "export function encodeAgentEvent(): void {}",
@@ -210,12 +238,12 @@ test("architecture policy gives activity codec directions exact runtime owners",
   assert.equal(rules(rejected).filter((rule) => rule === "architecture/dependency-direction").length, 2);
 });
 
-test("architecture policy rejects dependency cycles including type-only cycles", () => {
+test("architecture policy excludes type-only edges from module-loading cycles", () => {
   const diagnostics = check({
     "core/facts/a.ts": 'import type { B } from "./b.js"; export type A = B;',
     "core/facts/b.ts": 'import type { A } from "./a.js"; export type B = A;',
   });
-  assert.ok(rules(diagnostics).includes("architecture/dependency-cycle"));
+  assert.equal(rules(diagnostics).includes("architecture/dependency-cycle"), false);
 });
 
 test("architecture policy keeps pure facts independent of Git", () => {

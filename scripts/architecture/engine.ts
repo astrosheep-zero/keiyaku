@@ -49,6 +49,8 @@ export type ArchitecturePolicy = Readonly<{
   forbiddenFileNames: readonly string[];
   forbiddenDeclarations: readonly RegExp[];
   verbDirectory: string;
+  providerSdkRoots: readonly Readonly<{ module: string; root: string }>[];
+  runtimeGraphRoots: readonly string[];
 }>;
 
 type Capability =
@@ -382,6 +384,14 @@ function referenceDiagnostics(
     detail: `cannot resolve ${reference.specifier}`,
   }];
   const diagnostics: Diagnostic[] = [];
+  const providerSdk = policy.providerSdkRoots.find((candidate) => candidate.module === reference.specifier);
+  if (providerSdk && reference.symbols.runtime.length > 0 && !matches(`${providerSdk.root}/**`, unit.path)) diagnostics.push({
+    rule: "architecture/provider-sdk-boundary",
+    file: unit.path,
+    line: reference.line,
+    column: reference.column,
+    detail: `${reference.specifier} may be loaded only inside ${providerSdk.root}/`,
+  });
   if (reference.target && zone && !zone.allow.some((allowance) => allowanceMatches(reference, allowance))) diagnostics.push({
     rule: "architecture/dependency-direction",
     file: unit.path,
@@ -427,7 +437,7 @@ function dependencyDiagnostics(units: readonly ParsedSource[], policy: Architect
 }
 
 function stronglyConnected(units: readonly ParsedSource[]): readonly (readonly string[])[] {
-  const graph = new Map(units.map((unit) => [unit.path, new Set(unit.references.flatMap((reference) => reference.target ? [reference.target] : []))]));
+  const graph = new Map(units.map((unit) => [unit.path, new Set(unit.references.flatMap((reference) => reference.target && reference.symbols.runtime.length > 0 ? [reference.target] : []))]));
   let index = 0;
   const indices = new Map<string, number>();
   const low = new Map<string, number>();
@@ -458,6 +468,33 @@ function stronglyConnected(units: readonly ParsedSource[]): readonly (readonly s
   };
   for (const unit of units) if (!indices.has(unit.path)) connect(unit.path);
   return components.filter((component) => component.length > 1 || (graph.get(component[0]!)?.has(component[0]!) ?? false));
+}
+
+function runtimeGraphDiagnostics(units: readonly ParsedSource[], policy: ArchitecturePolicy): Diagnostic[] {
+  const byPath = new Map(units.map((unit) => [unit.path, unit]));
+  const visited = new Set<string>();
+  const queue = [...policy.runtimeGraphRoots];
+  const diagnostics: Diagnostic[] = [];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    const unit = byPath.get(current);
+    if (!unit) continue;
+    for (const reference of unit.references) {
+      if (reference.symbols.runtime.length === 0) continue;
+      const providerSdk = policy.providerSdkRoots.find((candidate) => candidate.module === reference.specifier);
+      if (providerSdk) diagnostics.push({
+        rule: "architecture/provider-sdk-reachable-from-cli",
+        file: unit.path,
+        line: reference.line,
+        column: reference.column,
+        detail: `${reference.specifier} is reachable from ${policy.runtimeGraphRoots.join(", ")}`,
+      });
+      if (reference.target) queue.push(reference.target);
+    }
+  }
+  return diagnostics;
 }
 
 function verbOwnerDiagnostic(unit: ParsedSource, policy: ArchitecturePolicy): Diagnostic | null {
@@ -533,6 +570,7 @@ export function checkArchitecture(inputs: readonly SourceInput[], policy: Archit
   const diagnostics = [
     ...dependencyDiagnostics(units, policy),
     ...structureDiagnostics(units, policy),
+    ...runtimeGraphDiagnostics(units, policy),
   ];
   for (const component of stronglyConnected(units)) diagnostics.push({
     rule: "architecture/dependency-cycle",

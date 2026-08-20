@@ -34,7 +34,7 @@ async function adapterFor(execution: ProviderExecution): Promise<ProviderAdapter
     const { claudeProvider, createClaudeProvider } = await import("./claude/index.js");
     return execution.executable === undefined && execution.env === undefined
       ? claudeProvider
-      : createClaudeProvider(async () => await import("@anthropic-ai/claude-agent-sdk"), execution);
+      : createClaudeProvider(execution);
   }
   if (execution.kind === "codex-app-server") return (await import("./codex-app-server/index.js")).createCodexAppServerProvider(execution);
   if (execution.kind === "grok-build") return (await import("./grok-build/index.js")).createGrokBuildProvider(execution);

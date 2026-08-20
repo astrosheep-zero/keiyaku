@@ -329,14 +329,18 @@ async function driveClaude(
 }
 
 export function createClaudeProvider(
-  load: () => Promise<ClaudeSdk>,
+  loadOrExecution: (() => Promise<ClaudeSdk>) | ClaudeExecution = async () =>
+    await import("@anthropic-ai/claude-agent-sdk") as ClaudeSdk,
   execution: ClaudeExecution = {},
 ): ProviderAdapter {
+  const load = typeof loadOrExecution === "function" ? loadOrExecution : async () =>
+    await import("@anthropic-ai/claude-agent-sdk") as ClaudeSdk;
+  const selectedExecution = typeof loadOrExecution === "function" ? execution : loadOrExecution;
   return {
     admitOptions: admitClaudeOptions,
-    fork: (input) => forkClaude(load, execution, input),
-    start: (input) => driveClaude(load, execution, input),
-    resume: (input) => driveClaude(load, execution, input),
+    fork: (input) => forkClaude(load, selectedExecution, input),
+    start: (input) => driveClaude(load, selectedExecution, input),
+    resume: (input) => driveClaude(load, selectedExecution, input),
   };
 }
 
