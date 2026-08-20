@@ -38,9 +38,34 @@ that completed before the failure and identifies whether observation or effect
 application failed. It makes no claim that an unreported effect did or did not
 happen. Authority corruption and internal invariant failure remain exceptions.
 
-For an active worktree contract, reconciliation creates the deterministic
-linked worktree only when it is missing, and repairs only its Keiyaku-owned
-refs and pins. It never resets, switches, or detaches an existing worktree.
+For an active worktree contract, reconciliation repairs its custody ref, then
+projects an existing managed worktree, runs create-hook recovery, and repairs
+its candidate pin. It creates the deterministic linked worktree only when it
+is missing, directly detached at its tender or start snapshot. With no
+delivery, an existing worktree is unchanged. With a delivery, an existing
+worktree whose detached `HEAD` already equals `tenderSnapshot` is unchanged:
+reconciliation does not rewrite its index or files.
+
+Otherwise, a dirty tender follows only when the existing worktree has a
+detached `HEAD` equal to the tender's first parent. A one-parent tender admits
+no merge, rebase, cherry-pick, revert, or unmerged-index state. A two-parent
+tender admits only its captured resolved merge: `MERGE_HEAD` names the tender's
+second parent, the index has no unmerged entries, and no other operation is in
+progress. No other parent shape follows. The admitted transition is Git's
+native mixed reset to `tenderSnapshot`, which moves only detached `HEAD` and
+the real index, does not write worktree files, and clears the resolved merge
+state through that native transition.
+
+Every other existing delivery shape leaves `HEAD`, index, operation metadata,
+and files unchanged and reports retryable `worktree-follow-retained`. Its
+reason is `head-attached` for an attached `HEAD`, `head-moved` for a detached
+`HEAD` other than the tender or its first parent, `operation-in-progress` for
+an inadmissible operation or unmerged index, and `unsupported-parent-shape`
+for a tender other than one or two parents. Observation or Git execution
+failure remains `reconcile-failed`; it is not a retained follow shape. A
+follow reports `worktree` action `followed` with its before and after snapshot.
+No target ref moves, attached branch follows, extra commits, refs, markers, or
+persisted follow state exist.
 For a here contract, reconciliation never creates, removes, switches,
 detaches, or resets the caller-supplied worktree or its branch.
 

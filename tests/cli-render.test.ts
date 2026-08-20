@@ -101,6 +101,32 @@ test("world observation failure text is exact", () => {
   assert.equal(renderText(result), "reconcile: world observation failed · git failed");
 });
 
+test("reconcile text renders followed worktrees and retained follow shape", () => {
+  const contract = contractId("kei/followed");
+  const tender = snapshotId("tender");
+  const head = snapshotId("head");
+  const envelope = {
+    kind: "accepted" as const,
+    contract,
+    head: contractHead("record"),
+    facts: [],
+    effects: [{ kind: "worktree" as const, path: "/tmp/wt", action: "followed" as const, before: head, after: tender }],
+    lag: [{ kind: "worktree-follow-retained" as const, path: "/tmp/wt", tender, head, reason: "head-moved" as const }],
+    settlement: { actions: [], lags: [] },
+  };
+  assert.equal(renderText({ ...envelope, verb: "deliver" }), [
+    "✓ deliver — not complete — kei/followed",
+    "  candidate kept",
+    "  record",
+    "    head record",
+    "  ✓ worktree followed /tmp/wt",
+    "  ! lag",
+    "    worktree-follow-retained reason=head-moved tender=tender head=head path=/tmp/wt",
+  ].join("\n"));
+  assert.deepEqual(envelope.effects[0], { kind: "worktree", path: "/tmp/wt", action: "followed", before: head, after: tender });
+  assert.deepEqual(envelope.lag[0], { kind: "worktree-follow-retained", path: "/tmp/wt", tender, head, reason: "head-moved" });
+});
+
 test("completion stops render the public unmet prerequisites in order", () => {
   const contract = contractId("kei/waiting-on-prerequisites");
   const unmet = [

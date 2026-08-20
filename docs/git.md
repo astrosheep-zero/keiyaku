@@ -175,6 +175,16 @@ with one trailing newline, then one blank line and the final
 `Keiyaku-Contract: <contract-id>` trailer. A supplied message replaces only the
 subject. Tender and integration materialized by one preparation share the
 captured workspace `HEAD` committer timestamp and one author/committer pair.
+
+After an accepted dirty managed delivery, reconciliation may project that same
+recorded tender snapshot into its existing managed worktree. It moves only an
+eligible detached `HEAD` and its real index through Git's mixed-reset semantics;
+it never checks out or writes worktree files. The tender snapshot remains the
+only durable candidate identity. Bytes written after capture remain ordinary
+tracked or untracked changes above the tender, while the captured bytes become
+the clean delivered baseline. An already-followed worktree is not reset again,
+so subsequent index and worktree changes remain untouched. The exact eligible
+and retained shapes are owned by [git-reconciliation.md](git-reconciliation.md).
 Reusing that timestamp keeps an unchanged prospective audit identity stable for
 a later delivery. Actor testimony wins and
 uses `keiyaku@localhost`; otherwise a complete repository-effective

@@ -84,6 +84,8 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
   const lines: string[] = [];
   if (lag.kind === "worktree-retained") {
     receiptRow(lines, "!", "lag", [{ text: `worktree-retained ${lag.path}`, opaque: true }], columns);
+  } else if (lag.kind === "worktree-follow-retained") {
+    receiptRow(lines, "!", "lag", [{ text: `${lag.kind} reason=${lag.reason} tender=${lag.tender} head=${lag.head} path=${lag.path}`, opaque: true }], columns);
   } else if (lag.kind === "unsealed-bytes") {
     receiptRow(lines, "!", "lag", [{ text: `unsealed-bytes ${lag.path}${lag.head === undefined ? "" : ` head=${lag.head}`}${lag.paths.length === 0 ? "" : ` paths=${lag.paths.join(",")}`}`, opaque: true }], columns);
   } else if (lag.kind === "target-checkout-retained") {

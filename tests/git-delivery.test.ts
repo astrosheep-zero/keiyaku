@@ -11,7 +11,7 @@ import { adjudicateAuditTarget, observeTargetPlacement } from "../src/git/target
 import { readRef, repositoryAt } from "../src/git/repository.js";
 import { materializeJudgedConflict, readDeliveryDiff, workspaceMergeStatePresent } from "../src/git/integration.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
-import { reconcile } from "../src/git/reconcile.js";
+import { followManagedWorktree, reconcile } from "../src/git/reconcile.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { reserveContractWorktree, resolveHereContractWorkspace } from "../src/contract-worktree.js";
 import {
@@ -976,6 +976,107 @@ test("reconcile recreates a registered managed worktree whose directory disappea
 
   assert.equal(existsSync(path), true);
   assert.equal(repaired.effects.some((effect) => effect.kind === "worktree" && effect.action === "created"), true);
+});
+
+test("managed follow advances only the detached HEAD and real index", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  writeFileSync(join(repository.path, "tracked.txt"), "base\n");
+  repository.run(["add", "tracked.txt"]);
+  repository.run(["commit", "--quiet", "-m", "initial"]);
+  const start = repository.run(["rev-parse", "HEAD"]).trim();
+  repository.run(["checkout", "--detach", "--quiet", start]);
+  writeFileSync(join(repository.path, "tracked.txt"), "captured\n");
+  writeFileSync(join(repository.path, "captured.txt"), "captured\n");
+  repository.run(["add", "tracked.txt", "captured.txt"]);
+  const tender = repository.run(["commit-tree", repository.run(["write-tree"]).trim(), "-p", start], "captured tender\n").trim();
+  repository.run(["reset", "--mixed", start]);
+  writeFileSync(join(repository.path, "tracked.txt"), "later\n");
+  writeFileSync(join(repository.path, "later.txt"), "later\n");
+  repository.run(["add", "tracked.txt"]);
+  const cachedBefore = repository.run(["diff", "--cached", "--binary"]);
+  const git = await repositoryAt(repository.path);
+
+  const followed = await followManagedWorktree(git, repository.path, mintSnapshotId(tender));
+
+  assert.deepEqual(followed, { kind: "followed", before: mintSnapshotId(start), after: mintSnapshotId(tender) });
+  assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), tender);
+  assert.equal(readFileSync(join(repository.path, "tracked.txt"), "utf8"), "later\n");
+  assert.equal(readFileSync(join(repository.path, "later.txt"), "utf8"), "later\n");
+  assert.equal(repository.run(["diff", "--cached", "--binary"]), "");
+  assert.notEqual(cachedBefore, "");
+  assert.match(repository.run(["status", "--porcelain=v2", "--untracked-files=all"]), /tracked\.txt/);
+
+  repository.run(["add", "tracked.txt"]);
+  const stagedAfter = repository.run(["diff", "--cached", "--binary"]);
+  assert.deepEqual(await followManagedWorktree(git, repository.path, mintSnapshotId(tender)), { kind: "unchanged" });
+  assert.equal(repository.run(["diff", "--cached", "--binary"]), stagedAfter);
+  assert.equal(readFileSync(join(repository.path, "tracked.txt"), "utf8"), "later\n");
+});
+
+test("dirty managed delivery follows its accepted tender as the clean baseline", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  writeFileSync(join(repository.path, "tracked.txt"), "base\n");
+  repository.run(["add", "tracked.txt"]);
+  repository.run(["commit", "--quiet", "-m", "initial"]);
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree", gates: ["reviewed"] });
+  await bound.keiyaku.reconcile();
+  const path = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  const before = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
+  writeFileSync(join(path, "tracked.txt"), "delivered\n");
+  writeFileSync(join(path, "delivered.txt"), "delivered\n");
+
+  const delivered = await bound.keiyaku.deliver({ includeDirty: true });
+  const tender = (await bound.keiyaku.state()).delivery?.data.tenderSnapshot;
+
+  assert.notEqual(tender, undefined);
+  if (tender === undefined) return;
+  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), tender);
+  assert.equal(repository.run(["-C", path, "status", "--porcelain=v2", "--untracked-files=all"]), "");
+  assert.equal(readFileSync(join(path, "tracked.txt"), "utf8"), "delivered\n");
+  assert.equal(readFileSync(join(path, "delivered.txt"), "utf8"), "delivered\n");
+  assert.equal(delivered.effects.some((effect) => effect.kind === "worktree" && effect.action === "followed" && effect.before === before && effect.after === tender), true);
+});
+
+test("managed follow retains attached, moved, operating, and unsupported shapes", async () => {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Test User"]);
+  repository.run(["config", "user.email", "test@example.com"]);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const start = repository.run(["rev-parse", "HEAD"]).trim();
+  const tender = repository.run(["commit-tree", `${start}^{tree}`, "-p", start], "tender\n").trim();
+  const git = await repositoryAt(repository.path);
+
+  assert.deepEqual(await followManagedWorktree(git, repository.path, mintSnapshotId(tender)), {
+    kind: "retained", head: mintSnapshotId(start), reason: "head-attached",
+  });
+  repository.run(["checkout", "--detach", "--quiet", tender]);
+  const later = repository.run(["commit-tree", `${tender}^{tree}`, "-p", tender], "later\n").trim();
+  repository.run(["checkout", "--detach", "--quiet", later]);
+  assert.deepEqual(await followManagedWorktree(git, repository.path, mintSnapshotId(tender)), {
+    kind: "retained", head: mintSnapshotId(later), reason: "head-moved",
+  });
+  repository.run(["checkout", "--detach", "--quiet", start]);
+  const cherryPickHead = repository.run(["rev-parse", "--git-path", "CHERRY_PICK_HEAD"]).trim();
+  writeFileSync(cherryPickHead, `${tender}\n`);
+  assert.deepEqual(await followManagedWorktree(git, repository.path, mintSnapshotId(tender)), {
+    kind: "retained", head: mintSnapshotId(start), reason: "operation-in-progress",
+  });
+  repository.run(["update-ref", "-d", "CHERRY_PICK_HEAD"]);
+  const second = repository.run(["commit-tree", `${start}^{tree}`, "-p", start], "second\n").trim();
+  const third = repository.run(["commit-tree", `${start}^{tree}`, "-p", start], "third\n").trim();
+  const unsupported = repository.run(["commit-tree", `${start}^{tree}`, "-p", start, "-p", second, "-p", third], "unsupported\n").trim();
+  repository.run(["checkout", "--detach", "--quiet", later]);
+  assert.deepEqual(await followManagedWorktree(git, repository.path, mintSnapshotId(unsupported)), {
+    kind: "retained", head: mintSnapshotId(later), reason: "head-moved",
+  });
+  repository.run(["checkout", "--detach", "--quiet", start]);
+  assert.deepEqual(await followManagedWorktree(git, repository.path, mintSnapshotId(unsupported)), {
+    kind: "retained", head: mintSnapshotId(start), reason: "unsupported-parent-shape",
+  });
 });
 
 test("managed bind preserves its admitted Contract when worktree reconciliation fails", async () => {

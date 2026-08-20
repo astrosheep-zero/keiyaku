@@ -990,7 +990,7 @@ test("audit --diff renders the prospective candidate without a prior Delivery re
   }
 });
 
-test("managed delivery reads without realigning its deterministic worktree", async () => {
+test("managed delivery follows an eligible deterministic worktree", async () => {
   const repository = repositoryWithMain();
   const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
   const bound = await invokeWithDocument(
@@ -1037,8 +1037,8 @@ test("managed delivery reads without realigning its deterministic worktree", asy
     retryHooks: false,
     ...(appointment.kind === "appointed" ? { place: appointment.place } : {}),
   }));
-  assert.equal(reconciled.result.effects.some((effect) => effect.kind === "worktree" && effect.action === "unchanged"), true);
-  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), target);
+  assert.equal(reconciled.result.effects.some((effect) => effect.kind === "worktree" && effect.action === "followed" && effect.before === target && effect.after === candidate), true);
+  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), candidate);
 
   const satisfiedReview = await fromManaged(["review", id, "--satisfied", "--summary", "accepted", "--actor", "external-test"]);
   assert.equal(satisfiedReview.kind, "accepted");
