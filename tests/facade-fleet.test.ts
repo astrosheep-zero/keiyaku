@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -795,22 +796,15 @@ test("CLI wait and kill expose Contract selector world refusal as typed usage", 
   );
 
   const capture = async (args: readonly string[]) => {
-    let stdout = "";
-    let stderr = "";
-    const writeStdout = process.stdout.write;
-    const writeStderr = process.stderr.write;
-    process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
-    process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
-    const cwd = process.cwd();
-    try {
-      process.chdir(worldB);
-      const code = await main(args);
-      return { code, stdout, stderr };
-    } finally {
-      process.chdir(cwd);
-      process.stdout.write = writeStdout;
-      process.stderr.write = writeStderr;
-    }
+    const child = spawnSync(process.execPath, [
+      "--import", import.meta.resolve("tsx"), "--input-type=module", "-e",
+      `import { main } from ${JSON.stringify(new URL("../src/cli/main.ts", import.meta.url).href)}; process.exitCode = await main(JSON.parse(process.env.KEIYAKU_TEST_ARGS));`,
+    ], {
+      cwd: worldB,
+      env: { ...process.env, KEIYAKU_TEST_ARGS: JSON.stringify(args) },
+      encoding: "utf8",
+    });
+    return { code: child.status ?? 1, stdout: child.stdout, stderr: child.stderr };
   };
   const text = await capture(["-C", worldB, "--repo", worldB, "wait", "kei/foreign", "--timeout", "0ms"]);
   assert.equal(text.code, 1);
@@ -822,6 +816,16 @@ test("CLI wait and kill expose Contract selector world refusal as typed usage", 
   assert.equal(json.stdout, "");
   assert.deepEqual(JSON.parse(json.stderr), { kind: "akuma-not-in-world", ids: [born.id], world: worldB });
   assert.doesNotMatch(json.stderr, /is not born/u);
+  const killText = await capture(["-C", worldB, "--repo", worldB, "kill", "kei/foreign"]);
+  assert.equal(killText.code, 1);
+  assert.equal(killText.stdout, "");
+  assert.equal(killText.stderr, `akuma-not-in-world ${worldB} ${born.id}\n`);
+  assert.doesNotMatch(killText.stderr, /is not born/u);
+  const killJson = await capture(["-C", worldB, "--repo", worldB, "kill", "kei/foreign", "--json"]);
+  assert.equal(killJson.code, 1);
+  assert.equal(killJson.stdout, "");
+  assert.deepEqual(JSON.parse(killJson.stderr), { kind: "akuma-not-in-world", ids: [born.id], world: worldB });
+  assert.doesNotMatch(killJson.stderr, /is not born/u);
 });
 
 test("exact set selection does not read unrelated Alias authority", async () => {
