@@ -305,11 +305,10 @@ type CandidateCompletion = Readonly<{
 }>
 
 type ContinuationReport = Readonly<{
-  attempted: number
   claimed: readonly ContractId[]
   stopped: readonly Readonly<{
     contractId: ContractId
-    stop: PlacementStop | { kind: "already-terminal" | "delivery-missing" }
+    stop: PlacementStop | { kind: "already-terminal" }
   }>[]
 }>
 
@@ -436,10 +435,9 @@ but they are process-local implementation data with no public or persistent
 reader.
 
 An accepted deliver or review carries `continuation` only when its successful
-placement attempted at least one retained dependent. `attempted` is the exact
-number attempted in that invocation. `claimed` and `stopped` retain canonical
-selection order and complete ContractIds. A stopped row carries the unchanged
-`PlacementStop`, or `already-terminal`/`delivery-missing` when concurrent state
+placement selects at least one retained dependent. `claimed` and `stopped`
+retain canonical selection order and complete ContractIds. A stopped row carries
+the unchanged `PlacementStop`, or `already-terminal` when concurrent state
 movement prevents starting the retained candidate. The report is an
 invocation-scoped consequence projection, not a queue, retry receipt, or
 journal fact. JSON and text consume this same value without another read.

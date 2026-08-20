@@ -32,6 +32,22 @@ function appointmentPath(repositoryPath: string): string {
   return resolve(realpathSync(repositoryPath), ".keiyaku", "KEIYAKU.md");
 }
 
+async function bindRetained(
+  repo: Repo,
+  title: string,
+  after: readonly ReturnType<typeof contractId>[] = [],
+  reviewed = false,
+  verification?: string,
+) {
+  return await Keiyaku.bind({
+    repo,
+    markdown: document(verification).replace("# Library verbs", `# ${title}`),
+    workspace: "worktree",
+    gates: reviewed ? ["reviewed"] : [],
+    ...(after.length === 0 ? {} : { after }),
+  });
+}
+
 async function plantDispatch(
   repository: ReturnType<typeof repositoryWithMain>,
   akuId: string,
@@ -687,26 +703,13 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
 test("claim continues one retained dependent without another delivery", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const prerequisite = await Keiyaku.bind({
-    repo,
-    markdown: document().replace("# Library verbs", "# Prerequisite"),
-    workspace: "worktree",
-    gates: [],
-  });
-  const dependent = await Keiyaku.bind({
-    repo,
-    markdown: document().replace("# Library verbs", "# Dependent"),
-    workspace: "worktree",
-    gates: [],
-    after: [prerequisite.keiyaku.id],
-  });
-
+  const prerequisite = await bindRetained(repo, "Prerequisite");
+  const dependent = await bindRetained(repo, "Dependent", [prerequisite.keiyaku.id]);
   const retained = await dependent.keiyaku.deliver();
   assert.equal(retained.value.placement?.refusal.kind, "prerequisites-unsatisfied");
   const delivered = await prerequisite.keiyaku.deliver();
 
   assert.deepEqual(delivered.value.continuation, {
-    attempted: 1,
     claimed: [dependent.keiyaku.id],
     stopped: [],
   });
@@ -721,32 +724,13 @@ test("claim continues one retained dependent without another delivery", async ()
 test("a stopped continuation does not block an eligible sibling", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const prerequisite = await Keiyaku.bind({
-    repo,
-    markdown: document().replace("# Library verbs", "# Prerequisite"),
-    workspace: "worktree",
-    gates: [],
-  });
-  const blocked = await Keiyaku.bind({
-    repo,
-    markdown: document().replace("# Library verbs", "# Blocked dependent"),
-    workspace: "worktree",
-    gates: ["reviewed"],
-    after: [prerequisite.keiyaku.id],
-  });
-  const eligible = await Keiyaku.bind({
-    repo,
-    markdown: document().replace("# Library verbs", "# Eligible dependent"),
-    workspace: "worktree",
-    gates: [],
-    after: [prerequisite.keiyaku.id],
-  });
+  const prerequisite = await bindRetained(repo, "Prerequisite");
+  const blocked = await bindRetained(repo, "Blocked dependent", [prerequisite.keiyaku.id], true);
+  const eligible = await bindRetained(repo, "Eligible dependent", [prerequisite.keiyaku.id]);
   await blocked.keiyaku.deliver();
   await eligible.keiyaku.deliver();
-
   const delivered = await prerequisite.keiyaku.deliver();
 
-  assert.equal(delivered.value.continuation?.attempted, 2);
   assert.deepEqual(delivered.value.continuation?.claimed, [eligible.keiyaku.id]);
   assert.deepEqual(delivered.value.continuation?.stopped, [{
     contractId: blocked.keiyaku.id,
@@ -760,33 +744,14 @@ test("a stopped continuation does not block an eligible sibling", async () => {
 test("claim continuation walks a retained dependency chain once", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const root = await Keiyaku.bind({
-    repo,
-    markdown: document().replace("# Library verbs", "# Root"),
-    workspace: "worktree",
-    gates: [],
-  });
-  const middle = await Keiyaku.bind({
-    repo,
-    markdown: document().replace("# Library verbs", "# Middle"),
-    workspace: "worktree",
-    gates: [],
-    after: [root.keiyaku.id],
-  });
-  const leaf = await Keiyaku.bind({
-    repo,
-    markdown: document().replace("# Library verbs", "# Leaf"),
-    workspace: "worktree",
-    gates: [],
-    after: [middle.keiyaku.id],
-  });
+  const root = await bindRetained(repo, "Root");
+  const middle = await bindRetained(repo, "Middle", [root.keiyaku.id]);
+  const leaf = await bindRetained(repo, "Leaf", [middle.keiyaku.id]);
   await leaf.keiyaku.deliver();
   await middle.keiyaku.deliver();
-
   const delivered = await root.keiyaku.deliver();
 
   assert.deepEqual(delivered.value.continuation, {
-    attempted: 2,
     claimed: [middle.keiyaku.id, leaf.keiyaku.id],
     stopped: [],
   });
@@ -801,19 +766,8 @@ test("claim continuation walks a retained dependency chain once", async () => {
 test("a dependent claimed during continuation reports already-terminal", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const prerequisite = await Keiyaku.bind({
-    repo,
-    markdown: document().replace("# Library verbs", "# Prerequisite"),
-    workspace: "worktree",
-    gates: [],
-  });
-  const dependent = await Keiyaku.bind({
-    repo,
-    markdown: document("true").replace("# Library verbs", "# Dependent"),
-    workspace: "worktree",
-    gates: ["reviewed"],
-    after: [prerequisite.keiyaku.id],
-  });
+  const prerequisite = await bindRetained(repo, "Prerequisite");
+  const dependent = await bindRetained(repo, "Dependent", [prerequisite.keiyaku.id], true, "true");
   await dependent.keiyaku.deliver();
 
   const reviewScript = [
@@ -830,11 +784,9 @@ test("a dependent claimed during continuation reports already-terminal", async (
     "",
   ].join("\n");
   await dependent.keiyaku.amend({ markdown: verification });
-
   const delivered = await prerequisite.keiyaku.deliver();
 
   assert.deepEqual(delivered.value.continuation, {
-    attempted: 1,
     claimed: [],
     stopped: [{
       contractId: dependent.keiyaku.id,

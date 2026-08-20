@@ -11,11 +11,10 @@ import type {
 import type { AcceptedIntent } from "./mutation.js";
 
 export type ContinuationReport = Readonly<{
-  attempted: number;
   claimed: readonly ContractId[];
   stopped: readonly Readonly<{
     contractId: ContractId;
-    stop: PlacementStop | Readonly<{ kind: "already-terminal" | "delivery-missing" }>;
+    stop: PlacementStop | Readonly<{ kind: "already-terminal" }>;
   }>[];
 }>;
 
@@ -24,26 +23,22 @@ type RetainedDependent = Readonly<{
   journal: readonly JournalEntry[];
 }>;
 
-function directDependents(
+function reverseDependents(
   world: Awaited<ReturnType<typeof observeActiveContractWorld>>,
-  claimed: ContractId,
-  attempted: ReadonlySet<ContractId>,
-  newlyClaimed: ReadonlySet<ContractId>,
-): readonly RetainedDependent[] {
-  const dependents: RetainedDependent[] = [];
-  for (const [contractId, record] of world.contracts) {
+): ReadonlyMap<ContractId, readonly RetainedDependent[]> {
+  const index = new Map<ContractId, RetainedDependent[]>();
+  for (const record of world.contracts.values()) {
     const state = record.state;
-    if (
-      state === null
-      || attempted.has(contractId)
-      || !state.terms.after.includes(claimed)
-      || state.delivery === null
-      || !state.terms.after.every((dependency) =>
-        newlyClaimed.has(dependency) || world.eligibility.get(dependency)?.terminal?.kind === "claimed")
-    ) continue;
-    dependents.push({ state, journal: record.entries });
+    if (state === null || state.delivery === null) continue;
+    const dependent = { state, journal: record.entries };
+    for (const prerequisite of state.terms.after) {
+      const dependents = index.get(prerequisite) ?? [];
+      dependents.push(dependent);
+      index.set(prerequisite, dependents);
+    }
   }
-  return dependents.sort((left, right) => left.state.id.localeCompare(right.state.id));
+  for (const dependents of index.values()) dependents.sort((left, right) => left.state.id.localeCompare(right.state.id));
+  return index;
 }
 
 function appendAccepted<Value>(
@@ -74,6 +69,7 @@ export async function continueDeliveredDependents<Value extends object>(input: R
     input.channel,
     async (observation) => await observeActiveContractWorld(observation),
   );
+  const dependents = reverseDependents(world);
   const pending = [input.contractId];
   const attempted = new Set<ContractId>();
   const newlyClaimed = new Set<ContractId>(pending);
@@ -83,8 +79,13 @@ export async function continueDeliveredDependents<Value extends object>(input: R
 
   while (pending.length > 0) {
     const parent = pending.shift()!;
-    for (const candidate of directDependents(world, parent, attempted, newlyClaimed)) {
+    for (const candidate of dependents.get(parent) ?? []) {
       const contractId = candidate.state.id;
+      if (
+        attempted.has(contractId)
+        || !candidate.state.terms.after.every((dependency) =>
+          newlyClaimed.has(dependency) || world.eligibility.get(dependency)?.terminal?.kind === "claimed")
+      ) continue;
       attempted.add(contractId);
       const child = await continueDeliveryOperation({
         scope: input.scope,
@@ -107,8 +108,6 @@ export async function continueDeliveredDependents<Value extends object>(input: R
       if (stop === undefined) throw new Error("incomplete continuation is missing its placement stop");
       if ("refusal" in stop && stop.refusal.kind === "terminal") {
         stopped.push({ contractId, stop: { kind: "already-terminal" } });
-      } else if ("refusal" in stop && stop.refusal.kind === "delivery-missing") {
-        stopped.push({ contractId, stop: { kind: "delivery-missing" } });
       } else {
         stopped.push({ contractId, stop });
       }
@@ -119,7 +118,7 @@ export async function continueDeliveredDependents<Value extends object>(input: R
     ...accepted,
     value: {
       ...accepted.value,
-      ...(attempted.size === 0 ? {} : { continuation: { attempted: attempted.size, claimed, stopped } }),
+      ...(attempted.size === 0 ? {} : { continuation: { claimed, stopped } }),
     },
   };
 }

@@ -23,6 +23,7 @@ import {
 import { observeRegion, type RegionObservation, type RegionOverlap } from "./region.js";
 import { type Gate, type WorktreeHooks, worktreeHooksOption } from "./configuration.js";
 import {
+  type ActorId as FactActorId,
   contractId,
   type ChangeId,
   type ContractId,
@@ -68,7 +69,7 @@ import type { FactKind } from "../core/facts/types.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { mintSnapshotId } from "../git/identity.js";
 import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
-import { withGitDecodeChannel, withGitReadObservation } from "../git/read-observation.js";
+import { withGitDecodeChannel, withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import { type SettlementReport } from "../settlement/settle.js";
 import {
   claimTaskHolderWithFence,
@@ -91,6 +92,7 @@ import {
   completionInput,
   completeHolderMutation,
   completeMutation,
+  type AcceptedIntent,
   type MutationResult,
 } from "./mutation.js";
 import { completeReconcile } from "./reconcile.js";
@@ -246,6 +248,22 @@ function derivedDocument(state: ContractState) {
   return documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
 }
 
+async function continueAfterCompletion<Value extends Readonly<{ completion?: unknown }>>(input: Readonly<{
+  scope: RepositoryScope;
+  channel: GitDecodeChannel;
+  contractId: ContractId;
+  accepted: AcceptedIntent<Value>;
+  actor?: FactActorId;
+  signal?: AbortSignal;
+}>): Promise<AcceptedIntent<Value & Readonly<{ continuation?: ContinuationReport }>>> {
+  if (input.accepted.value.completion === undefined) return input.accepted;
+  return await continueDeliveredDependents({
+    ...input,
+    deriveDocument: derivedDocument,
+    resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
+  });
+}
+
 async function executeLocalDelivery(
   input: DeliveryExecutionInput,
 ): Promise<MutationResult<DeliveryValue> | IntegrationConflictMaterialized> {
@@ -265,18 +283,14 @@ async function executeLocalDelivery(
     });
     if (outcome.kind === "integration-conflict-materialized") return outcome;
     const accepted = requireAccepted(outcome);
-    const continued = accepted.value.completion === undefined
-      ? accepted
-      : await continueDeliveredDependents({
-        scope: input.scope,
-        channel,
-        contractId: input.contractId,
-        accepted,
-        deriveDocument: derivedDocument,
-        resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
-        ...(input.actor === undefined ? {} : { actor: input.actor }),
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-      });
+    const continued = await continueAfterCompletion({
+      scope: input.scope,
+      channel,
+      contractId: input.contractId,
+      accepted,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
     return completeMutation({
       ...completionInput(input.scope, channel, input.contractId, (delivery: DeliveryValue) => delivery, input.hooks),
       accepted: continued,
@@ -296,17 +310,13 @@ async function executeLocalReview(input: ReviewExecutionInput): Promise<Mutation
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
     }));
-    const continued = accepted.value.completion === undefined
-      ? accepted
-      : await continueDeliveredDependents({
-        scope: input.scope,
-        channel,
-        contractId: input.contractId,
-        accepted,
-        deriveDocument: derivedDocument,
-        resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
-        ...(input.actor === undefined ? {} : { actor: input.actor }),
-      });
+    const continued = await continueAfterCompletion({
+      scope: input.scope,
+      channel,
+      contractId: input.contractId,
+      accepted,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+    });
     return completeMutation({
       ...completionInput(input.scope, channel, input.contractId, (review: Review) => review, input.hooks),
       accepted: continued,

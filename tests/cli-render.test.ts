@@ -183,7 +183,6 @@ test("deliver renders claimed and stopped continuations from the accepted result
     settlement: { actions: [], lags: [] },
     completion: { integration: snapshotId("integration") },
     continuation: {
-      attempted: 2,
       claimed: [claimed],
       stopped: [{
         contractId: stopped,

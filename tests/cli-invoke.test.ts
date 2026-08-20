@@ -277,7 +277,6 @@ test("accepted deliver and review transport completion consequences without reco
     verification: { mode: "reused" as const, verdict: "unsatisfied" as const },
   };
   const continuation = {
-    attempted: 1,
     claimed: [contractId("kei/dependent")],
     stopped: [],
   };

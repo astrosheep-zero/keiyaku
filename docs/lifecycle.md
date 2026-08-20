@@ -259,11 +259,11 @@ Placement eligibility is a Contract-local projection of that Contract's current
 observe only their addressed Contract and the finite prerequisite closure
 needed to validate identities and acyclicity. Placement observes the addressed
 Contract and its current direct prerequisites. After placement admits `claimed`,
-the library facade reads active Contracts and selects direct dependents that
-retain a delivery and whose prerequisites are all claimed. This read-time
-association is
-not a Pact decision and does not broadcast `bound` facts. Attestation does not
-change prerequisite eligibility.
+the library facade observes active Contracts once, builds an invocation-local
+reverse dependency index, and selects direct dependents that retain a delivery
+and whose prerequisites are all claimed. This read-time association is not a
+Pact decision and does not broadcast `bound` facts. Attestation does not change
+prerequisite eligibility.
 
 Every `after` coordinate must resolve to an existing contract in the decision
 snapshot. An unresolved coordinate is a typed `unknown-prerequisite` refusal;
