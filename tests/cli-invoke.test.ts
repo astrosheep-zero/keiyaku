@@ -1265,8 +1265,8 @@ test("deliver conflict JSON and text expose recovery without mutating the worksp
   });
   const text = renderText(result);
   assert.match(text, /reason=conflict/u);
-  assert.match(text, /recovery materialize deliver --materialize-conflict/u);
-  assert.match(text, /recovery continue deliver/u);
+  assert.match(text, /recovery materialize conflicts · deliver --materialize-conflict/u);
+  assert.match(text, /recovery continue after resolve and commit · deliver/u);
   assert.deepEqual(JSON.parse(JSON.stringify(result)).refusal.recovery, {
     materialize: "deliver --materialize-conflict",
     continue: "deliver",

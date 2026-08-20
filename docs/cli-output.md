@@ -419,7 +419,10 @@ option projection. The renderer does not run Git or infer another path
 classification.
 
 A deliver `integration-failed` conflict refusal exposes `reason`, `targetHead`,
-ordered `conflictPaths`, and both recovery values in text and JSON.
+ordered `conflictPaths`, and both recovery values in text and JSON. Plain text
+labels them `recovery materialize conflicts · deliver --materialize-conflict`
+and `recovery continue after resolve and commit · deliver`; both labels read
+the typed recovery values without reconstructing invocation arguments.
 `merge-state-present` exposes the appointed workspace kind and path.
 `integration-conflict-materialized` is not a refusal: JSON is the exact public
 value, text names that kind, `targetHead`, `conflictPaths`, and workspace, and
