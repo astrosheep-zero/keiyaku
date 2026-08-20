@@ -1,12 +1,6 @@
 # Public Mutation Results
 
-## Keiyaku-Owned Data Reset
-
-The package-root `nuke` result is one confirmed execution result for one
-`WorldRoot`; it is never a repository-cleanup result. It reports only success
-or the diagnostic that stopped deletion. Repository source and business refs,
-ordinary worktree bodies, authored Settings and namespace configuration, global
-Archetypes, and unknown `.keiyaku` bytes are outside its scope.
+## Nuke Result Shape
 
 ```ts
 type NukeResult =
@@ -33,12 +27,8 @@ type NukeConfirmationRefusal = Readonly<{
 
 ```
 
-The same literal confirmation is the recovery operation. A bare invocation
-throws `KeiyakuRefused` with `NukeConfirmationRequiredRefusal`; a mismatching
-confirmation throws it with `NukeConfirmationRefusal`. Neither performs an
-owner effect.
-
-This chapter owns package-root mutation, refusal, retry, and audit result shapes.
+This chapter owns the package-root nuke result and refusal shapes. Reset
+semantics and preservation law live in [world.md](world.md).
 
 Kanshi Contract rows expose `lastJournalAt`, the timestamp of the final entry
 in the frozen journal observation used to fold that row. Akuma fleet rows

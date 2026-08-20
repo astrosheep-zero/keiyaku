@@ -1,5 +1,5 @@
 import { access } from "node:fs/promises";
-import { nukeContractWorktreeLock, nukeHereAppointments } from "../contract-worktree.js";
+import { nukeHereAppointments } from "../contract-worktree.js";
 import type { ContractId } from "../core/facts/types.js";
 import {
   nukeEmptyPlaceAuthority,
@@ -71,18 +71,16 @@ export async function nukeGit(world: WorldRoot): Promise<void> {
     if (error instanceof NoGitWorldError) return;
     throw error;
   }
-  await nukeContractWorktreeLock(repository, async () => {
-    const custody = await managedCustody(repository);
-    for (const entry of custody.entries) {
-      await removeManagedWorktree(repository, entry);
-      await releaseManagedWorktrees(repository, [entry.contract]);
-    }
-    await nukeHereAppointments(repository);
-    await nukeEmptyPlaceAuthority(repository);
-    await removeOwnedRefs(repository, custody.refs);
-    if (custody.state) {
-      const oid = (await runGit(repository, ["rev-parse", "--verify", "refs/heads/keiyaku-state"])).toString("utf8").trim();
-      await runGit(repository, ["update-ref", "--no-deref", "-d", "refs/heads/keiyaku-state", oid]);
-    }
-  });
+  const custody = await managedCustody(repository);
+  for (const entry of custody.entries) {
+    await removeManagedWorktree(repository, entry);
+    await releaseManagedWorktrees(repository, [entry.contract]);
+  }
+  await nukeHereAppointments(repository);
+  await nukeEmptyPlaceAuthority(repository);
+  await removeOwnedRefs(repository, custody.refs);
+  if (custody.state) {
+    const oid = (await runGit(repository, ["rev-parse", "--verify", "refs/heads/keiyaku-state"])).toString("utf8").trim();
+    await runGit(repository, ["update-ref", "--no-deref", "-d", "refs/heads/keiyaku-state", oid]);
+  }
 }

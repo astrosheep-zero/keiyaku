@@ -321,24 +321,3 @@ Hearts live in the primary world:
   No defense is built.
 - Home keeps Archetype configuration only, never state. Nothing reads it back
   after call.
-
-## Keiyaku-Owned Data Reset
-
-Akuma owns World-local runtime bodies, Alias authority, and Akuma locks. It
-never includes user-global Settings or Archetypes. Confirmed reset closes
-admission, stops and verifies running bodies under existing leash authority,
-then removes only this Keiyaku-owned data. A stop or verification failure
-leaves the affected authority for the same confirmed reset to retry; successful
-deletion never reconstructs removed authority.
-
-Unrecognized directories under the runtime root are outside Akuma custody and
-remain untouched; only directories with a valid Keiyaku Akuma identity and a
-regular existing Heart custody marker are considered for stoppage and deletion.
-An orphan Leash is inert residue and cannot block a repeat reset. While the
-Leash is held, only direct Akuma-owned Heart files are removed; the held
-`leash.db` and its sidecars remain as inert coordination residue, as do unknown
-bytes and request transport. The directory remains when those bytes prevent
-it becoming empty.
-
-The Akuma owner exposes its deletion entry point. Package composition does not
-inspect Heart, Alias, or lock custody.

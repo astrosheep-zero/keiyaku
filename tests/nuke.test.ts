@@ -1,25 +1,21 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, World } from "../src/index.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
-import { HeldAkumaLeash, finishBodyIfIdle, initializeHeart, readHeart } from "../src/akuma/heart/index.js";
+import { initializeHeart, readHeart } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import { stopAkuma } from "../src/akuma/nuke.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias } from "../src/alias/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderRefusal } from "../src/cli/render/refusal.js";
 import { nukeExitCode } from "../src/cli/render/nuke.js";
-import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { contractLocator } from "../src/git/identity.js";
-import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
+import { repositoryAt } from "../src/git/repository.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { reserveContractWorktree } from "../src/contract-worktree.js";
-import { settlementFencePath } from "../src/settlement/fence.js";
 import { appointManagedWorktrees, readPlaceRegister } from "../src/workspace-place.js";
 import { contractId } from "../src/core/facts/types.js";
 import { Tasks } from "../src/task/index.js";
@@ -29,11 +25,6 @@ const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
 async function testWorld() {
   return await World.at(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-")));
-}
-
-async function leaveIdleLock(path: string): Promise<void> {
-  const held = await acquireSqliteTransactionLock({ path, mode: "immediate" });
-  held.close();
 }
 
 async function gitNukeFixture() {
@@ -47,12 +38,6 @@ async function gitNukeFixture() {
   const managedPath = worktreePath(repository, place.place);
   raw.run(["worktree", "add", "--detach", managedPath, "HEAD"]);
   await reserveContractWorktree(repository, contractId("kei/nuke-here"));
-  const common = commonGitDirectory(repository);
-  const locator = contractLocator(managed);
-  const reconcileLock = join(common, "keiyaku", "locks", "reconcile", locator.slice(0, 2), `${locator.slice(2)}.sqlite`);
-  const settlementLock = settlementFencePath(repository, "task/nuke-settlement" as never);
-  await leaveIdleLock(reconcileLock);
-  await leaveIdleLock(settlementLock);
   raw.run(["branch", "business-branch"]);
   raw.run(["update-ref", "refs/heads/keiyaku-delivery/nuke-managed", "HEAD"]);
   raw.run(["update-ref", "refs/heads/keiyaku-candidate/nuke-managed", "HEAD"]);
@@ -62,15 +47,8 @@ async function gitNukeFixture() {
   return {
     raw,
     world,
-    repository,
     managedPath,
     foreign,
-    locks: [
-      join(common, "keiyaku", "contract-worktree.sqlite"),
-      join(common, "keiyaku", "locks", "places.sqlite"),
-      reconcileLock,
-      settlementLock,
-    ],
   };
 }
 
@@ -113,7 +91,7 @@ test("bare and mismatched nuke confirmations refuse before deletion", async () =
 test("confirmed nuke stops live writers and removes owned state while preserving boundaries", async () => {
   const fixture = await gitNukeFixture();
   try {
-    const { raw, world, repository, managedPath, foreign, locks } = fixture;
+    const { raw, world, managedPath, foreign } = fixture;
     const tasks = Tasks.of(world);
     assert.equal((await tasks.add({ title: "Remove me" })).kind, "accepted");
     const namespace = join(world, ".keiyaku", "namespace", "current");
@@ -142,8 +120,6 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.equal(existsSync(join(world, ".keiyaku", "akuma", "alias.json")), false);
     assert.equal(existsSync(join(world, ".keiyaku", "locks", "akuma-alias.sqlite")), true);
     assert.equal(existsSync(join(world, ".keiyaku", "tasks", "remove-me.md")), false);
-    assert.equal(existsSync(join(world, ".keiyaku", "locks", "task-allocation.sqlite")), true);
-    for (const lock of locks) assert.equal(existsSync(lock), true, lock);
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
     assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
@@ -154,40 +130,10 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.equal(readFileSync(join(orphanRun, "leash.db"), "utf8"), "orphan leash\n");
     assert.equal(readFileSync(foreignByte, "utf8"), "retain\n");
     assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
-    for (const lock of locks) assert.equal(existsSync(lock), true);
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
   }
-});
-
-test("Akuma nuke retains custody from stop through deletion", async () => {
-  const world = await testWorld();
-  try {
-    const running = await runningAkuma(world);
-    const deleteAkuma = await stopAkuma(world);
-    await running.body;
-    assert.equal(await HeldAkumaLeash.try(running.allocated.paths), null);
-    await deleteAkuma();
-    assert.equal(existsSync(running.allocated.paths.heart), false);
-    assert.equal(existsSync(running.allocated.paths.leash), true);
-  } finally { rmSync(world, { recursive: true, force: true }); }
-});
-
-test("Akuma nuke preserves unknown bytes inside recognized custody", async () => {
-  const world = await testWorld();
-  try {
-    const running = await runningAkuma(world);
-    const unknown = join(running.allocated.paths.directory, "foreign.bin");
-    writeFileSync(unknown, "foreign runtime\n");
-    const deleteAkuma = await stopAkuma(world);
-    await running.body;
-    await deleteAkuma();
-    assert.equal(readFileSync(unknown, "utf8"), "foreign runtime\n");
-    assert.equal(existsSync(running.allocated.paths.heart), false);
-    assert.equal(existsSync(running.allocated.paths.leash), true);
-    assert.equal(existsSync(running.allocated.paths.directory), true);
-  } finally { rmSync(world, { recursive: true, force: true }); }
 });
 
 test("owner failure becomes one diagnostic and leaves failed custody for retry", async () => {
@@ -216,71 +162,6 @@ test("owner deletion attempts remain independent after the stop prerequisite", a
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
     assert.equal(existsSync(broken), true);
-  } finally {
-    rmSync(fixture.raw.path, { recursive: true, force: true });
-    rmSync(fixture.foreign, { recursive: true, force: true });
-  }
-});
-
-test("Git nuke lock timeout preserves custody and retries after release", async () => {
-  const fixture = await gitNukeFixture();
-  const held = await acquireSqliteTransactionLock({ path: fixture.locks[0]!, mode: "immediate" });
-  try {
-    const failed = await Keiyaku.nuke({ world: fixture.world, confirm: fixture.world });
-    assert.equal(failed.kind, "failed");
-    assert.match(failed.diagnostic, /SQLite lock timed out after 3000ms/u);
-    assert.equal(existsSync(fixture.managedPath), true);
-  } finally {
-    held.close();
-  }
-  try {
-    assert.deepEqual(await Keiyaku.nuke({ world: fixture.world, confirm: fixture.world }), { kind: "success", world: fixture.world });
-  } finally {
-    rmSync(fixture.raw.path, { recursive: true, force: true });
-    rmSync(fixture.foreign, { recursive: true, force: true });
-  }
-});
-
-test("Git nuke respects the linked worktree appointment writer lock", async () => {
-  const fixture = await gitNukeFixture();
-  const linkedContract = contractId("kei/nuke-linked");
-  const linkedRepository = { ...fixture.repository, effectiveCwd: fixture.foreign };
-  await reserveContractWorktree(linkedRepository, linkedContract);
-  const linkedAdmin = await worktreeGitDirectory(fixture.repository, fixture.foreign);
-  const linkedLock = join(linkedAdmin, "keiyaku", "contract-worktree.sqlite");
-  const held = await acquireSqliteTransactionLock({ path: linkedLock, mode: "immediate" });
-  const appointment = join(fixture.foreign, ".keiyaku", "KEIYAKU.md");
-  try {
-    const failed = await Keiyaku.nuke({ world: fixture.world, confirm: fixture.world });
-    assert.equal(failed.kind, "failed");
-    assert.match(failed.diagnostic, /SQLite lock timed out after 3000ms/u);
-    assert.equal(existsSync(appointment), true);
-  } finally {
-    held.close();
-  }
-  try {
-    assert.deepEqual(await Keiyaku.nuke({ world: fixture.world, confirm: fixture.world }), { kind: "success", world: fixture.world });
-    assert.equal(existsSync(appointment), false);
-  } finally {
-    rmSync(fixture.raw.path, { recursive: true, force: true });
-    rmSync(fixture.foreign, { recursive: true, force: true });
-  }
-});
-
-test("foreign reconcile and settlement lock bytes remain inert during Git nuke", async () => {
-  const fixture = await gitNukeFixture();
-  const common = commonGitDirectory(fixture.repository);
-  const reconcileForeign = join(common, "keiyaku", "locks", "reconcile", "foreign.bin");
-  const settlementForeign = join(common, "keiyaku", "locks", "settlement", "foreign-dir");
-  const settlementLink = join(common, "keiyaku", "locks", "settlement", "foreign-link");
-  try {
-    writeFileSync(reconcileForeign, "foreign\n");
-    mkdirSync(settlementForeign, { recursive: true });
-    symlinkSync(fixture.world, settlementLink);
-    assert.deepEqual(await Keiyaku.nuke({ world: fixture.world, confirm: fixture.world }), { kind: "success", world: fixture.world });
-    assert.equal(readFileSync(reconcileForeign, "utf8"), "foreign\n");
-    assert.equal(existsSync(settlementForeign), true);
-    assert.equal(existsSync(settlementLink), true);
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });

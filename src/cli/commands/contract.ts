@@ -29,7 +29,7 @@ export const CONTRACT_COMMAND_SPECS = {
   ls: { positional: "optional", stdin: "none", flags: { json: "boolean" }, usage: "ls task[/]\n       keiyaku ls kei[/]\n       keiyaku ls aku[/]\n       keiyaku ls aku/<akuma>[/]\n       keiyaku ls \"aku/*/*\"", purpose: "List one identity directory." },
   audit: { positional: "optional", stdin: "none", flags: { "include-dirty": "boolean", diff: "boolean", actor: "value", json: "boolean" }, usage: "audit [<contract>|@<contract>] [--include-dirty] [--diff] [--actor <actor>]", purpose: "Ask what candidate preparation, Verification, and target placement would do." },
   reconcile: { positional: "optional", stdin: "none", flags: { "retry-hooks": "boolean", json: "boolean" }, usage: "reconcile [<contract>|@<contract>] [--retry-hooks]", purpose: "Reconcile one Contract or the invocation world." },
-  nuke: { positional: "none", stdin: "none", flags: { confirm: "value", json: "boolean" }, usage: "nuke [--confirm <WorldRoot>]", purpose: "Remove Keiyaku-owned data from one confirmed World." },
+  nuke: { positional: "none", stdin: "none", flags: { confirm: "value", json: "boolean" }, usage: "nuke [--confirm <WorldRoot>] [--json]", purpose: "Remove Keiyaku-owned data from one confirmed World." },
   settings: { positional: "none", stdin: "none", flags: { json: "boolean" }, usage: "settings", purpose: "Read user and project Settings resources." },
   region: { positional: "optional", stdin: "none", flags: { overlap: "boolean", path: "value", json: "boolean" }, usage: "region [<contract>] [--overlap]\n       region --path <repo-relative-path>", purpose: "Read active declared Contract Regions." },
 } as const satisfies Readonly<Record<string, ContractCommandSpec>>;

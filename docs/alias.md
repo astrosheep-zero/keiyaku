@@ -77,17 +77,3 @@ transaction lock. Akuma, Dispatch, Contract, Task, Git, Settings, and CLI do
 not own or persist Alias state. The Library may sequence a move after Akuma
 birth; a later Alias failure does not erase the born Akuma or any published
 Dispatch.
-
-## Keiyaku-Owned Data Reset
-
-World-local Alias authority is Keiyaku-produced data owned by the Akuma reset
-owner. It is removed only after Akuma admission is closed and running bodies
-are verified stopped. User-global configuration and Archetypes remain outside
-the reset.
-
-Alias custody is reached through the Akuma owner's deletion boundary; World
-composition has no Alias custody knowledge.
-
-Its SQLite coordination file contains no Alias fact. Reset releases it after
-removing Alias authority and leaves the path as harmless coordination residue:
-after release, it cannot prove that the same path was not reacquired.

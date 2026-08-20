@@ -162,14 +162,3 @@ hooks are Git-owned managed-worktree create and destroy commands. Future
 non-worktree behavior requires a concrete settlement rule here; settlement
 does not expose Contract, Task, or Akuma lifecycle events as configurable
 hooks.
-
-## Keiyaku-Owned Data Reset
-
-TaskHolder and settlement residue produced for Keiyaku Contracts are owned by
-the Contract/Git reset owner and are removed there without driving Contract
-lifecycle. Settlement never becomes a second custody authority; existing lock
-failures leave the affected data for a retry. Its coordination SQLite fence
-files remain after release because their paths cannot be proven unreacquired.
-
-Settlement is reached through the Git/Contract owner's deletion boundary, not
-through World composition.

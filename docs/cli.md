@@ -61,10 +61,9 @@ command-specific behavior layer.
 
 `keiyaku nuke [--json]` refuses with the required confirmed form for the
 invocation World. `keiyaku nuke --confirm <WorldRoot> [--json]` executes the
-Keiyaku-owned data reset only
-when the literal confirmation equals the resolved WorldRoot byte-for-byte.
-Nuke is not repository cleanup or generic World teardown. It never accepts a
-Contract positional argument, stdin, a token, snapshot hash, prompt, or
+Keiyaku-owned reset described in [world.md](world.md) when the literal
+confirmation equals the resolved WorldRoot byte-for-byte. It accepts no
+Contract positional argument, stdin, token, snapshot hash, prompt, or
 per-owner confirmation. `--repo` has no consumer for this command.
 
 The command vocabulary is:

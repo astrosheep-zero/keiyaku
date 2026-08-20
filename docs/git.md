@@ -360,19 +360,3 @@ public `Delivery.diff()` contract and its git-unavailable result are defined in
 
 No cleanup operation rewrites a target ref. A targetless claimed contract and a
 targeted contract whose target later moves share the same byte-custody rule.
-
-## Keiyaku-Owned Data Reset
-
-The Git/Contract owner owns only Keiyaku-produced refs, common-directory locks
-and residue, and Keiyaku-managed worktree custody. It removes managed
-worktrees even when dirty because their custody is Keiyaku-owned, then removes
-appointments and produced refs under existing custody and lock adjudication.
-It never deletes repository source, business refs, ordinary worktree bodies,
-or arbitrary repository resources; no lifecycle terminal fact is appended.
-
-Coordination SQLite lock files contain no Git or Contract authority. After a
-reset validates and releases one, it leaves the path as inert Keiyaku-owned
-residue because it cannot prove a newly released path was not reacquired.
-
-The Git/Contract owner exposes its deletion entry point. World composition
-cannot name its storage custody.

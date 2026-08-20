@@ -35,8 +35,8 @@ Root help includes:
 ```
 
 The bare form uses the existing refusal envelope and exit status to print the
-exact literal confirmation invocation. It does not suggest repository cleanup
-or generic World teardown. JSON is the same typed refusal or execution value.
+exact literal confirmation invocation. JSON is the same typed refusal or
+execution value.
 A confirmation mismatch uses the same envelope and prints one mismatch line
 followed by the exact retry command using the resolved WorldRoot.
 

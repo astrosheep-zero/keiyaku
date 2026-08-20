@@ -110,11 +110,8 @@ type NukeInput = Readonly<{
 
 ```
 
-The result union is owned by [public-results.md](public-results.md). Without
-`confirm`, `Keiyaku.nuke` throws the typed required-confirmation refusal before
-any owner effect. With `confirm`, it executes only when the value is byte-for-
-byte equal to `world`; a mismatch is likewise a typed refusal. Nuke resets only
-Keiyaku-owned data; it is not repository cleanup or generic World teardown.
+The result union is owned by [public-results.md](public-results.md). The
+confirmation and reset semantics are owned by [world.md](world.md).
 
 `markdown` is the complete contract document and is decoded at the library
 edge. `workspace` defaults to `"worktree"`. `task`, `target`, `workspace`, `actor`,

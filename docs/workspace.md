@@ -236,17 +236,3 @@ repair entry point because library orchestration runs Git reconciliation first
 and workspace projection second. Worktree hooks likewise do not consume
 `KEIYAKU.md` declaratively; a hook command may read it as an ordinary file when
 the invoking harness chooses to do so.
-
-## Keiyaku-Owned Data Reset
-
-The reset may remove only Keiyaku-owned managed worktree custody and its
-appointment/guidance bytes. A here worktree body remains intact; only the
-Keiyaku-owned appointment projection is eligible. Managed worktrees may be
-removed under the existing custody rule even when dirty. Ordinary worktrees and
-repository files are outside scope.
-
-Place coordination lock paths contain no appointment fact. Reset leaves them
-after releasing custody because it cannot prove the path was not reacquired.
-
-Workspace is reached through the Git/Contract owner's deletion boundary. World
-composition does not enumerate worktrees or appointments.

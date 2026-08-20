@@ -208,42 +208,13 @@ async function removeOwnedHereSupport(worktree: string): Promise<number> {
 
 /** Remove matching here appointments and their exact generated support from registered worktrees. */
 export async function nukeHereAppointments(repository: GitRepository): Promise<void> {
-  const commonLock = join(repository.commonDirectory, "keiyaku", "contract-worktree.sqlite");
   for (const registered of await registeredWorktrees(repository)) {
     const scoped = { ...repository, effectiveCwd: registered.path };
-    const admin = await worktreeGitDirectory(repository, registered.path);
-    const lockPath = join(admin, "keiyaku", "contract-worktree.sqlite");
-    const held = lockPath === commonLock ? null : await acquireSqliteTransactionLock({
-      path: lockPath,
-      mode: "immediate",
-      timeoutMs: 3_000,
-    });
-    try {
-      const appointment = await readContractAppointment(scoped);
-      if (appointment.kind === "appointed") {
-        await unlink(appointment.path);
-        await removeOwnedHereSupport(registered.path);
-      }
-    } finally {
-      held?.close();
+    const appointment = await readContractAppointment(scoped);
+    if (appointment.kind === "appointed") {
+      await unlink(appointment.path);
+      await removeOwnedHereSupport(registered.path);
     }
-  }
-}
-
-/** Validate the existing Contract-worktree coordination lock before releasing it. */
-export async function nukeContractWorktreeLock<T>(repository: GitRepository, action: () => Promise<T>): Promise<T> {
-  const path = join(repository.commonDirectory, "keiyaku", "contract-worktree.sqlite");
-  try {
-    const value = await lstat(path);
-    if (!value.isFile() || value.isSymbolicLink()) throw new Error(`Contract worktree lock custody is not a regular file: ${path}`);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  const held = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 3_000 });
-  try {
-    return await action();
-  } finally {
-    held.close();
   }
 }
 

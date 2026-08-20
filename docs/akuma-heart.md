@@ -262,14 +262,3 @@ No cross-database atomicity is claimed anywhere. A held leash alone proves only
 that a Body remains live. `hung` requires that Body's durable diagnostic that
 owned provider custody did not retire within the response window. Elapsed time
 at a public boundary never constructs that fact or grants process authority.
-
-## Keiyaku-Owned Data Reset
-
-Heart owns World-local runtime data and its existing locks. Confirmed reset
-stops writers before removing run data; the held Leash database and its
-sidecars remain after release as inert coordination residue. It does not touch
-global Archetypes, authored Settings, or unknown `.keiyaku` bytes. A stopping
-or verification failure leaves the affected custody for a retry.
-
-Heart custody is reached only through the Akuma owner's deletion boundary. It
-is never inspected by World composition.

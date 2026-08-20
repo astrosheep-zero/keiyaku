@@ -153,10 +153,3 @@ write command and no redaction under the local-trusted-user threat model.
 The Settings module never names `gates`, `worktree`, `providers`, a provider
 kind, or any other product concept. Product modules never read settings file
 paths. Those two checks are the boundary sentinels.
-
-## Keiyaku-Owned Data Reset
-
-Settings are authored configuration, not Keiyaku-produced reset data. Project
-and user `settings.json`, namespace configuration, and global Archetypes remain
-untouched by a World reset. The Settings owner contributes no destructive
-inventory or reset entry point; unknown `.keiyaku` entries remain outside scope.

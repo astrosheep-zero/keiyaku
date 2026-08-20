@@ -268,15 +268,3 @@ actually observed in that operation and the flat `lag` array above; lag is not
 nested in an effect or a second cleanup report. A report with lag is safe to
 retry because every later reconcile starts from durable facts and fresh
 topology rather than an in-memory receipt.
-
-## Keiyaku-Owned Data Reset
-
-Reconciliation residue is reset only when it is Keiyaku-produced and owned by
-the Git/Contract reset owner. Existing lock, custody, and corruption rules
-remain authoritative; contention or foreign custody leaves the affected data
-for a retry. Its coordination SQLite lock files remain after release because
-the owner cannot prove the path was not reacquired. Repository bytes and
-business refs remain untouched.
-
-Reconciliation is reached through the Git/Contract owner's deletion boundary
-and never through World composition.
