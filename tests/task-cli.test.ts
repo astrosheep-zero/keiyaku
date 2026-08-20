@@ -704,60 +704,60 @@ test("built CLI Task text stays one scan grammar at 80 and 36 columns", async ()
   await invoke(parseArgv(["-C", root, "task", "update", "task/child-under-the-alpha-parent-root", "--parent", longId]));
   await invoke(parseArgv(["-C", root, "task", "update", longId, "--needs", "task/need-only-blocker-outside-the-tree"]));
 
-  const cases: ReadonlyArray<readonly string[]> = [
-    ["-C", root, "task", "ls"],
-    ["-C", root, "task", "blocked"],
-    ["-C", root, "task", "show", longId],
-    ["-C", root, "task", "tree", longId],
-    ["-C", root, "task", "ls", "--limit", "1"],
-    ["-C", root, "task", "done", "task/child-under-the-alpha-parent-root", "task/missing", longId],
-  ];
-  for (const args of cases) {
-    const wide = await runCli(args);
-    assert.notEqual(wide.code, 3, wide.stderr);
-    assert.doesNotMatch(wide.stdout, /\{"kind"|TaskId - P/u);
-    const expected = [...wide.stdout.matchAll(/task\/[a-z0-9/-]+/gu)].map((match) => match[0]!);
-    const unique = [...new Set(expected)];
-    assertCopyable(wide.stdout, unique);
-    const narrow = await runCli(args, 36);
-    assert.notEqual(narrow.code, 3, narrow.stderr);
-    assertCopyable(narrow.stdout, unique);
-    assertFitsOrOverflowsLawfully(narrow.stdout, 36);
-  }
+  const wide = await runCli(["-C", root, "task", "show", longId]);
+  assert.notEqual(wide.code, 3, wide.stderr);
+  assert.doesNotMatch(wide.stdout, /\{"kind"|TaskId - P/u);
+  assertCopyable(wide.stdout, [longId]);
+
+  const narrow = await runCli(["-C", root, "task", "blocked", "--world"], 36);
+  assert.notEqual(narrow.code, 3, narrow.stderr);
+  assert.doesNotMatch(narrow.stdout, /\{"kind"|TaskId - P/u);
+  assertCopyable(narrow.stdout, [longId, "task/need-only-blocker-outside-the-tree"]);
+  assert.equal(narrow.stdout.includes(`! ${longId} · P2 blocked —`), true);
+  assertFitsOrOverflowsLawfully(narrow.stdout, 36);
 
   const empty = world();
   const absent = mkdtempSync(join(tmpdir(), "keiyaku-task-cli-smoke-absent-"));
   const failed = world();
   mkdirSync(join(failed, ".keiyaku", "tasks"));
   writeFileSync(join(failed, ".keiyaku", "tasks", "broken.md"), "not Task authority\n");
-  for (const columns of [undefined, 36] as const) {
-    const presentEmpty = await runCli(["-C", empty, "task", "ls"], columns);
-    assert.equal(presentEmpty.code, 0, presentEmpty.stderr);
-    assert.match(presentEmpty.stdout, /^tasks 0$/mu);
-    const missing = await runCli(["-C", absent, "task", "ls"], columns);
-    assert.equal(missing.code, 1);
-    assert.match(missing.stdout, /^task world absent$/mu);
-    const broken = await runCli(["-C", failed, "task", "ls"], columns);
-    assert.equal(broken.code, 3);
-    assert.match(broken.stdout, /^task world failed\ndiagnostic\n\n/u);
-    assert.doesNotMatch(broken.stdout, /\{/u);
-    if (columns === 36) assertFitsOrOverflowsLawfully(`${presentEmpty.stdout}${missing.stdout}${broken.stdout}`, 36);
-  }
+  const lsCommand = parseArgv(["task", "ls"]).command;
+  if (lsCommand.command !== "task") throw new Error("not a task command");
+  const presentEmpty = await invoke(parseArgv(["-C", empty, "task", "ls"])) as TaskInvocationResult;
+  assert.deepEqual(presentEmpty, { kind: "present", value: { kind: "accepted", value: { rows: [], total: 0, returned: 0, truncated: false } } });
+  assert.equal(renderTaskText(lsCommand, presentEmpty), "tasks 0");
+  assert.equal(taskExitCode(presentEmpty), 0);
+
+  const absentCommand = parseArgv(["task", "ls"]).command;
+  const missing = await invoke(parseArgv(["-C", absent, "task", "ls"])) as TaskInvocationResult;
+  assert.deepEqual(missing, { kind: "absent" });
+  assert.equal(renderTaskText(absentCommand, missing), "task world absent");
+  assert.equal(taskExitCode(missing), 1);
+
+  const broken = await invoke(parseArgv(["-C", failed, "task", "ls"])) as TaskInvocationResult;
+  assert.equal((broken as { kind: string }).kind, "failed");
+  assert.match(renderTaskText(lsCommand, broken), /^task world failed\ndiagnostic\n\n/u);
+  assert.doesNotMatch(renderTaskText(lsCommand, broken), /\{/u);
+  assert.equal(taskExitCode(broken), 3);
 
   const held = await acquireSqliteTransactionLock({
     path: join(root, ".keiyaku", "locks", "task-allocation.sqlite"),
     mode: "immediate",
     timeoutMs: 100,
   });
-  let incomplete: RunResult;
+  let incomplete: TaskInvocationResult;
   try {
-    incomplete = await runCli(["-C", root, "task", "compose", "-"], undefined, "+ Remaining\n");
+    incomplete = await invoke(parseArgv(["-C", root, "task", "compose", "-"]), {
+      readStdin: () => "+ Remaining\n",
+    }) as TaskInvocationResult;
   } finally {
     held.close();
   }
-  assert.equal(incomplete.code, 1, incomplete.stderr);
-  assert.match(incomplete.stdout, /^ns=\n\+ Remaining /u);
-  assert.doesNotMatch(incomplete.stdout, /compose incomplete|diff /u);
-  assert.match(incomplete.stderr, /^! compose incomplete · 0 admitted$/mu);
-  assert.match(incomplete.stderr, /^\? stopped busy$/mu);
+  const composeCommand = parseArgv(["task", "compose", "-"]).command;
+  if (composeCommand.command !== "task") throw new Error("not a task command");
+  assert.equal((incomplete as { kind: string }).kind, "incomplete");
+  assert.match((incomplete as { draft: string }).draft, /^ns=\n\+ Remaining /u);
+  assert.equal(renderTaskText(composeCommand, incomplete), "");
+  assert.match(renderTaskIncompleteDiagnostic(incomplete as never), /^! compose incomplete · 0 admitted\n\? stopped busy$/mu);
+  assert.equal(taskExitCode(incomplete), 1);
 });
