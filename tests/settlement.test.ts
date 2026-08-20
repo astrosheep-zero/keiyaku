@@ -197,12 +197,13 @@ test("abandon decodes TaskHolders through the shared batch without legacy reader
   const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Batch-only release");
   const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Batch-only release"), workspace: "here" });
+  const id = (await bound.keiyaku.state()).id;
   const log = join(world.path, "abandon-holder-reads.log");
 
   await withGitShim(
     'printf "%s\\n" "$*" >> "$KEIYAKU_READ_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
     { KEIYAKU_READ_LOG: log },
-    () => bound.keiyaku.abandon(),
+    async (gitPath) => Keiyaku.of({ repo: await Repo.at({ path: world.path, gitPath }), id }).abandon(),
   );
 
   const commands = readFileSync(log, "utf8").trim().split("\n");

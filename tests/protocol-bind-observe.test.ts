@@ -193,9 +193,9 @@ test("refuses malformed structured bind observations", async () => {
       "fi\n" +
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     {},
-    async () => {
+    async (gitPath) => {
       await assert.rejects(
-        observeBindCoordinates(await repositoryAt(repository.path), "refs/heads/main"),
+        observeBindCoordinates(await repositoryAt(repository.path, gitPath), "refs/heads/main"),
         /malformed structured Git output while observing bind coordinates/,
       );
     },
@@ -258,8 +258,8 @@ test("batches full Contract observation through one call-scoped object process",
   const observed = await withGitShim(
     "if [ \"$1\" = \"cat-file\" ]; then printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"; fi\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_READ_LOG: log },
-    async () => {
-      const git = await repositoryAt(repository.path);
+    async (gitPath) => {
+      const git = await repositoryAt(repository.path, gitPath);
       return withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, observeContractWorld));
     },
   );
@@ -302,22 +302,25 @@ test("known publication failure is returned without a post-result ref read", asy
   ].join("\n"), {
     KEIYAKU_PUBLICATION_FAILED: failed,
     KEIYAKU_POST_FAILURE_READ: postRead,
-  }, () => withGitDecodeChannel(git, async (channel) => {
-    const observation = await observeContractsForAdmissionAt(git, channel, [id]);
-    const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] };
-    const decision = decideArc({
-      input: {
-        contractId: id,
-        at: "2026-08-06T00:00:00Z",
-        data: { title: "Failed publication", objective: "Keep failure factual", brief: "Do not reread refs." },
-      },
-      attempt,
-      observation: observation.decision,
+  }, async (gitPath) => {
+    const scoped = await repositoryAt(repository.path, gitPath);
+    return withGitDecodeChannel(scoped, async (channel) => {
+      const observation = await observeContractsForAdmissionAt(scoped, channel, [id]);
+      const attempt = { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] };
+      const decision = decideArc({
+        input: {
+          contractId: id,
+          at: "2026-08-06T00:00:00Z",
+          data: { title: "Failed publication", objective: "Keep failure factual", brief: "Do not reread refs." },
+        },
+        attempt,
+        observation: observation.decision,
+      });
+      assert.equal(decision.kind, "offer");
+      if (decision.kind !== "offer") throw new Error("arc decision was not an offer");
+      return admit(scoped, decision.offer, observation.admission);
     });
-    assert.equal(decision.kind, "offer");
-    if (decision.kind !== "offer") throw new Error("arc decision was not an offer");
-    return admit(git, decision.offer, observation.admission);
-  }));
+  });
 
   assert.equal(result.kind, "publication-failed");
   if (result.kind !== "publication-failed") throw new Error("publication failure was not preserved");
@@ -459,8 +462,8 @@ async function amendObjectIo(
   const amended = await withGitShim(
     "printf '%s\\n' \"$*\" >> \"$KEIYAKU_READ_LOG\"\nexec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     { KEIYAKU_READ_LOG: log },
-    () => amendOperation({
-      scope: repository,
+    async (gitPath) => amendOperation({
+      scope: await repositoryAt(repository.effectiveCwd, gitPath),
       contractId: id,
       source: state.terms,
       terms: state.terms,
@@ -483,8 +486,8 @@ async function amendBatchRequests(
     "  exit $?",
     "fi",
     'exec "$KEIYAKU_REAL_GIT" "$@"',
-  ].join("\n"), { KEIYAKU_BATCH_OID_LOG: log }, () => amendOperation({
-    scope: repository,
+  ].join("\n"), { KEIYAKU_BATCH_OID_LOG: log }, async (gitPath) => amendOperation({
+    scope: await repositoryAt(repository.effectiveCwd, gitPath),
     contractId: id,
     source: state.terms,
     terms: state.terms,
@@ -538,8 +541,8 @@ test("bind reobserves and atomically asserts target coordinates after Git moveme
     KEIYAKU_BIND_MARKER: marker,
     KEIYAKU_MOVED_TARGET: moved,
     KEIYAKU_OLD_TARGET: predecessor,
-  }, () => bindOperation({
-    scope: git,
+  }, async (gitPath) => bindOperation({
+    scope: await repositoryAt(repository.path, gitPath),
     title: "Moving target",
     terms: terms([]),
     target: "refs/heads/release",
@@ -649,8 +652,8 @@ test("bind never restores a targeted here checkout that moved to a same-OID bran
     '  "$KEIYAKU_REAL_GIT" symbolic-ref HEAD refs/heads/feature || exit $?',
     "fi",
     'exec "$KEIYAKU_REAL_GIT" "$@"',
-  ].join("\n"), {}, () => bindOperation({
-    scope: git,
+  ].join("\n"), {}, async (gitPath) => bindOperation({
+    scope: await repositoryAt(repository.path, gitPath),
     title: "Same OID checkout movement",
     terms: terms([]),
     target: "refs/heads/main",
@@ -678,8 +681,8 @@ test("targetless bind reobserves a different HEAD OID after atomic verification 
     '  "$KEIYAKU_REAL_GIT" symbolic-ref HEAD refs/heads/feature || exit $?',
     "fi",
     'exec "$KEIYAKU_REAL_GIT" "$@"',
-  ].join("\n"), { KEIYAKU_BIND_MARKER: marker }, () => bindOperation({
-    scope: git,
+  ].join("\n"), { KEIYAKU_BIND_MARKER: marker }, async (gitPath) => bindOperation({
+    scope: await repositoryAt(repository.path, gitPath),
     title: "Different OID checkout movement",
     terms: terms([]),
     workspace: "worktree",
@@ -1234,12 +1237,15 @@ test("placement redecides after a world advance without binding a dependent", as
   const claimed = await withGitShim(
     shim,
     { KEIYAKU_RACE_MARKER: marker, KEIYAKU_RACE_JOURNAL: dependentJournal },
-    () => withGitDecodeChannel(git, (channel) => admitPlacement({
-      channel,
-      repository: git,
-      target: sourceState.coordinates.target,
-      placement: { contractId: source.value.contractId, at: "2026-08-06T00:00:02Z" },
-    })),
+    async (gitPath) => {
+      const scoped = await repositoryAt(repository.path, gitPath);
+      return withGitDecodeChannel(scoped, (channel) => admitPlacement({
+        channel,
+        repository: scoped,
+        target: sourceState.coordinates.target,
+        placement: { contractId: source.value.contractId, at: "2026-08-06T00:00:02Z" },
+      }));
+    },
   );
   assert.equal(claimed.kind, "accepted");
   if (claimed.kind !== "accepted") throw new Error("placement was not accepted after redecision");
