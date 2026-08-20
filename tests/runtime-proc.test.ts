@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -20,17 +20,45 @@ function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): 
   };
 }
 
-async function waitForExit(pid: number): Promise<void> {
-  const deadline = performance.now() + 2_000;
-  while (true) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return;
+function waitForOutputLine(expected: string, message: string): Readonly<{
+  wait: Promise<void>;
+  observe(chunk: Uint8Array): void;
+  dispose(): void;
+}> {
+  let buffered = "";
+  let settled = false;
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const timeout = setTimeout(() => {
+    if (!settled) {
+      settled = true;
+      reject(new Error(message));
     }
-    if (performance.now() >= deadline) throw new Error(`descendant ${pid} survived process-tree termination`);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
+  }, 2_000);
+  const settle = (): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    resolve();
+  };
+  const wait = new Promise<void>((resolveWait, rejectWait) => {
+    resolve = resolveWait;
+    reject = rejectWait;
+  });
+  return {
+    wait,
+    observe(chunk) {
+      buffered += Buffer.from(chunk).toString("utf8");
+      for (;;) {
+        const newline = buffered.indexOf("\n");
+        if (newline < 0) return;
+        const line = buffered.slice(0, newline).trim();
+        buffered = buffered.slice(newline + 1);
+        if (line === expected) settle();
+      }
+    },
+    dispose() { clearTimeout(timeout); },
+  };
 }
 
 test("runProcess returns terminal diagnostics from both streams", async () => {
@@ -126,98 +154,111 @@ test("runProcess reports spawn errors", async () => {
   assert.match(outcome.diagnostic, /ENOENT/);
 });
 
-test("runProcess timeout kills a detached descendant tree", async () => {
-  const descendant = "setInterval(() => {}, 1_000);";
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-"));
-  const descendantFile = join(root, "descendant-pid");
-  const parent = [
-    'const { writeFileSync } = require("node:fs");',
-    'const { spawn } = require("node:child_process");',
-    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore" });`,
-    `writeFileSync(${JSON.stringify(descendantFile)}, String(child.pid));`,
+test("runProcess timeout closes the directly-owned helper boundary", async () => {
+  const descendant = [
+    'process.on("SIGTERM", () => process.stdout.write("descendant/exited\\n", () => process.exit(0)));',
+    'process.stdout.write("descendant/ready\\n");',
+    "setTimeout(() => process.exit(99), 2_000);",
     "setInterval(() => {}, 1_000);",
   ].join(" ");
-  let descendantPid: number | undefined;
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-"));
+  const parent = [
+    'const { spawn } = require("node:child_process");',
+    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
+  const ready = waitForOutputLine("descendant/ready", "timeout helper did not signal readiness");
+  let pending: ReturnType<typeof consumeProcessStdout> | undefined;
+  const output: string[] = [];
   try {
-    const outcome = await runProcess({ ...input([process.execPath, "-e", parent]), cwd: root, timeoutMs: 1_000 });
+    pending = consumeProcessStdout({
+      ...input([process.execPath, "-e", parent]),
+      cwd: root,
+      timeoutMs: 1_000,
+    }, (chunk) => {
+      output.push(chunk.toString("utf8"));
+      ready.observe(chunk);
+    });
+    await ready.wait;
+    const outcome = (await pending).outcome;
     assert.equal(outcome.kind, "timeout");
-    if (outcome.kind !== "timeout") return;
-    descendantPid = Number.parseInt(readFileSync(descendantFile, "utf8"), 10);
-    assert.ok(Number.isSafeInteger(descendantPid) && descendantPid > 0);
-    await waitForExit(descendantPid);
+    assert.match(output.join(""), /descendant\/exited/);
   } finally {
-    if (descendantPid !== undefined) {
-      try {
-        process.kill(descendantPid, "SIGKILL");
-      } catch {
-        // The asserted path has already reaped the descendant.
-      }
-    }
+    ready.dispose();
+    if (pending !== undefined) await pending;
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("runProcess cancellation kills a detached descendant tree", async () => {
+test("runProcess cancellation closes the directly-owned helper boundary", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-cancel-"));
-  const descendantFile = join(root, "descendant-pid");
-  const descendant = 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000);';
+  const descendant = [
+    'process.on("SIGTERM", () => process.stdout.write("descendant/exited\\n", () => process.exit(0)));',
+    'process.stdout.write("descendant/ready\\n");',
+    "setTimeout(() => process.exit(99), 2_000);",
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
   const parent = [
-    'const { writeFileSync } = require("node:fs");',
     'const { spawn } = require("node:child_process");',
-    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore" });`,
-    `writeFileSync(${JSON.stringify(descendantFile)}, String(child.pid));`,
+    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
     "setInterval(() => {}, 1_000);",
   ].join(" ");
   const controller = new AbortController();
-  let descendantPid: number | undefined;
+  const ready = waitForOutputLine("descendant/ready", "cancel helper did not signal readiness");
+  let pending: ReturnType<typeof consumeProcessStdout> | undefined;
+  const output: string[] = [];
   try {
-    const pending = runProcess({ argv: [process.execPath, "-e", parent], cwd: root, signal: controller.signal });
-    const deadline = performance.now() + 2_000;
-    while (!existsSync(descendantFile)) {
-      if (performance.now() >= deadline) throw new Error("cancelled process did not start its descendant");
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    descendantPid = Number.parseInt(readFileSync(descendantFile, "utf8"), 10);
+    pending = consumeProcessStdout({ argv: [process.execPath, "-e", parent], cwd: root, signal: controller.signal }, (chunk) => {
+      output.push(chunk.toString("utf8"));
+      ready.observe(chunk);
+    });
+    await ready.wait;
     controller.abort();
-    assert.deepEqual(await pending, { kind: "cancelled" });
-    await waitForExit(descendantPid);
+    assert.deepEqual((await pending).outcome, { kind: "cancelled" });
+    assert.match(output.join(""), /descendant\/exited/);
   } finally {
-    if (descendantPid !== undefined) {
-      try { process.kill(descendantPid, "SIGKILL"); } catch { /* already reaped */ }
-    }
+    ready.dispose();
+    controller.abort();
+    if (pending !== undefined) await pending;
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("LineRpcProcess close terminates its complete helper tree", async () => {
+test("LineRpcProcess close closes the directly-owned helper boundary", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-tree-"));
-  const descendantFile = join(root, "descendant-pid");
-  const descendant = 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000);';
-  const parent = [
-    'const { writeFileSync } = require("node:fs");',
-    'const { spawn } = require("node:child_process");',
-    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore" });`,
-    `writeFileSync(${JSON.stringify(descendantFile)}, String(child.pid));`,
+  const descendant = [
+    'process.on("SIGTERM", () => process.stdout.write(JSON.stringify({ method: "probe/descendant-exited" }) + "\\n", () => process.exit(0)));',
+    'process.stdout.write(JSON.stringify({ method: "probe/ready" }) + "\\n");',
+    "setTimeout(() => process.exit(99), 2_000);",
     "setInterval(() => {}, 1_000);",
   ].join(" ");
-  let descendantPid: number | undefined;
+  const parent = [
+    'const { spawn } = require("node:child_process");',
+    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
+  let rpc: LineRpcProcess | undefined;
+  let closed = false;
+  let ready!: () => void;
+  let readyTimer!: ReturnType<typeof setTimeout>;
+  const notifications: string[] = [];
+  const isReady = new Promise<void>((resolve, reject) => {
+    readyTimer = setTimeout(() => reject(new Error("line RPC helper did not signal readiness")), 2_000);
+    ready = () => { clearTimeout(readyTimer); resolve(); };
+  });
   try {
-    const rpc = new LineRpcProcess({ argv: [process.execPath, "-e", parent], cwd: root });
-    const deadline = performance.now() + 2_000;
-    while (descendantPid === undefined) {
-      try { descendantPid = Number.parseInt(readFileSync(descendantFile, "utf8"), 10); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        if (performance.now() >= deadline) throw new Error("line RPC descendant was not spawned");
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-    }
-    await rpc.close();
-    await waitForExit(descendantPid);
+    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", parent], cwd: root });
+    rpc.onNotification((notification) => {
+      notifications.push(notification.method);
+      if (notification.method === "probe/ready") ready();
+    });
+    await isReady;
+    await rpc.close(false);
+    closed = true;
+    assert.ok(notifications.includes("probe/descendant-exited"));
   } finally {
-    if (descendantPid !== undefined) {
-      try { process.kill(descendantPid, "SIGKILL"); } catch { /* already reaped */ }
-    }
+    clearTimeout(readyTimer);
+    if (!closed) await rpc?.close(false);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -230,22 +271,31 @@ test("LineRpcProcess endInputAndDrain admits delayed notifications before produc
     'process.stdin.on("end", () => setTimeout(() => { send("item/completed"); process.exit(0); }, 350));',
     'send("turn/completed");',
   ].join(" ");
+  let rpc: LineRpcProcess | undefined;
+  let closed = false;
+  let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root });
+    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root });
     const notifications: string[] = [];
-    let drained: Promise<void> | undefined;
+    let resolveDrain!: (value: Promise<void>) => void;
+    const drainStarted = new Promise<Promise<void>>((resolve, reject) => {
+      notificationTimer = setTimeout(() => reject(new Error("line RPC terminal notification was not admitted")), 2_000);
+      resolveDrain = (drained) => {
+        clearTimeout(notificationTimer);
+        resolve(drained);
+      };
+    });
     rpc.onNotification((notification) => {
       notifications.push(notification.method);
-      if (notification.method === "turn/completed") drained = rpc.endInputAndDrain();
+      if (notification.method === "turn/completed") resolveDrain(rpc!.endInputAndDrain());
     });
-    const deadline = performance.now() + 2_000;
-    while (drained === undefined) {
-      if (performance.now() >= deadline) throw new Error("line RPC terminal notification was not admitted");
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
+    const drained = await drainStarted;
     await drained;
     assert.deepEqual(notifications, ["turn/completed", "item/completed"]);
+    closed = true;
   } finally {
+    clearTimeout(notificationTimer);
+    if (!closed) await rpc?.close(true);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -257,12 +307,18 @@ test("LineRpcProcess endInputAndDrain force-closes an uncooperative producer", a
     "process.stdin.on('end',()=>{});",
     "setInterval(()=>{},1000);",
   ].join(" ");
+  let rpc: LineRpcProcess | undefined;
+  let closed = false;
   try {
-    const rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root });
+    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root });
     const started = performance.now();
     await rpc.endInputAndDrain(50);
     assert.ok(performance.now() - started < 1_000);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    closed = true;
+  } finally {
+    if (!closed) await rpc?.close(true);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("StdioProcess endInputAndDrain retains output until producer EOF", async () => {
@@ -272,47 +328,53 @@ test("StdioProcess endInputAndDrain retains output until producer EOF", async ()
     'process.stdin.resume();',
     'process.stdin.on("end", () => setTimeout(() => { process.stdout.write(" tail"); process.exit(0); }, 50));',
   ].join(" ");
+  let stdio: ReturnType<typeof spawnStdioProcess> | undefined;
+  let closed = false;
   try {
-    const stdio = spawnStdioProcess({ argv: [process.execPath, "-e", child], cwd: root });
+    stdio = spawnStdioProcess({ argv: [process.execPath, "-e", child], cwd: root });
     const output = (async () => {
       const chunks: Buffer[] = [];
-      for await (const chunk of stdio.output) chunks.push(Buffer.from(chunk));
+      for await (const chunk of stdio!.output) chunks.push(Buffer.from(chunk));
       return Buffer.concat(chunks).toString("utf8");
     })();
     await stdio.endInputAndDrain();
     assert.equal(await output, "terminal tail");
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    closed = true;
+  } finally {
+    if (!closed) await stdio?.close(true);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
-test("StdioProcess forced close terminates its complete helper tree", async () => {
+test("StdioProcess close terminates its complete helper tree", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-stdio-tree-"));
-  const descendantFile = join(root, "descendant-pid");
-  const descendant = 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000);';
-  const parent = [
-    'const { writeFileSync } = require("node:fs");',
-    'const { spawn } = require("node:child_process");',
-    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore" });`,
-    `writeFileSync(${JSON.stringify(descendantFile)}, String(child.pid));`,
+  const descendant = [
+    'process.on("SIGTERM", () => process.stdout.write("descendant/exited\\n", () => process.exit(0)));',
+    'process.stdout.write("descendant/ready\\n");',
     "setInterval(() => {}, 1_000);",
   ].join(" ");
-  let descendantPid: number | undefined;
+  const parent = [
+    'const { spawn } = require("node:child_process");',
+    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
+  let stdio: ReturnType<typeof spawnStdioProcess> | undefined;
+  let closed = false;
+  const ready = waitForOutputLine("descendant/ready", "stdio helper did not signal readiness");
+  const terminated = waitForOutputLine("descendant/exited", "stdio descendant did not confirm termination");
   try {
-    const stdio = spawnStdioProcess({ argv: [process.execPath, "-e", parent], cwd: root });
-    const deadline = performance.now() + 2_000;
-    while (descendantPid === undefined) {
-      try { descendantPid = Number.parseInt(readFileSync(descendantFile, "utf8"), 10); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        if (performance.now() >= deadline) throw new Error("stdio descendant was not spawned");
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-    }
-    await stdio.close(true);
-    await waitForExit(descendantPid);
+    stdio = spawnStdioProcess({ argv: [process.execPath, "-e", parent], cwd: root });
+    stdio.output.on("data", (chunk) => {
+      ready.observe(chunk);
+      terminated.observe(chunk);
+    });
+    await ready.wait;
+    await Promise.all([stdio.close(false), terminated.wait]);
+    closed = true;
   } finally {
-    if (descendantPid !== undefined) {
-      try { process.kill(descendantPid, "SIGKILL"); } catch { /* already reaped */ }
-    }
+    ready.dispose();
+    terminated.dispose();
+    if (!closed) await stdio?.close(true);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -320,54 +382,35 @@ test("StdioProcess forced close terminates its complete helper tree", async () =
 
 test("a direct spawner terminates through its live owned-process handle", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-"));
+  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
+  let terminated = false;
   try {
-    const owned = await spawnDetachedProcess({
+    owned = await spawnDetachedProcess({
       argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
       cwd: root,
       log: join(root, "stdio.log"),
     });
     assert.ok(owned.pid > 0);
     await owned.terminate();
-    await waitForExit(owned.pid);
+    terminated = true;
   } finally {
+    if (!terminated) await owned?.terminate(true);
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("an owned process capability is inert after reap and repeated terminate", async () => {
+test("an owned process capability is inert after termination and repeated terminate", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-reap-"));
+  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
+  let terminated = false;
   try {
-    const owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", ""],
+    owned = await spawnDetachedProcess({
+      argv: [process.execPath, "-e", "setInterval(() => {}, 1_000)"],
       cwd: root,
       log: join(root, "stdio.log"),
     });
-    await waitForExit(owned.pid);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    let signals = 0;
-    const originalKill = process.kill;
-    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-      if (pid === -owned.pid && signal !== 0) signals += 1;
-      return originalKill(pid, signal as NodeJS.Signals);
-    }) as typeof process.kill;
-    process.kill = kill;
-    try {
-      await owned.terminate();
-      await owned.terminate();
-    } finally { process.kill = originalKill; }
-    assert.equal(signals, 0);
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("an owned process capability is inert after release and repeated terminate", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-release-"));
-  const owned = await spawnDetachedProcess({
-    argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
-    cwd: root,
-    log: join(root, "stdio.log"),
-  });
-  try {
-    owned.release();
+    await owned.terminate();
+    terminated = true;
     let signals = 0;
     const originalKill = process.kill;
     const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
@@ -381,8 +424,41 @@ test("an owned process capability is inert after release and repeated terminate"
     } finally { process.kill = originalKill; }
     assert.equal(signals, 0);
   } finally {
-    try { process.kill(owned.pid, "SIGKILL"); } catch { /* already reaped */ }
-    await waitForExit(owned.pid);
+    if (!terminated) await owned?.terminate(true);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an owned process capability is inert after release and repeated terminate", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-release-"));
+  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
+  let released = false;
+  try {
+    owned = await spawnDetachedProcess({
+      argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+      cwd: root,
+      log: join(root, "stdio.log"),
+    });
+    owned.release();
+    released = true;
+    let signals = 0;
+    const originalKill = process.kill;
+    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === -owned.pid && signal !== 0) signals += 1;
+      return originalKill(pid, signal as NodeJS.Signals);
+    }) as typeof process.kill;
+    process.kill = kill;
+    try {
+      await owned.terminate();
+      await owned.terminate();
+    } finally { process.kill = originalKill; }
+    assert.equal(signals, 0);
+  } finally {
+    if (owned !== undefined && released) {
+      try { process.kill(owned.pid, "SIGKILL"); } catch { /* already reaped */ }
+    } else {
+      await owned?.terminate(true);
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });
