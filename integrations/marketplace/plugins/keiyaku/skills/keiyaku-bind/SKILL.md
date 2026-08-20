@@ -66,9 +66,11 @@ reader would otherwise re-derive wrongly. Never narrative. If Objective and
 Design read the same without a sentence here, delete it.>
 
 ## Objective
-<One observable end-state, judged done/not-done without reading Design.
-If "and" joins independently acceptable outcomes, bind two Contracts. A
-single outcome may still require several arcs during fulfillment.>
+<One end-state you could watch happen, named at the level of intent and goal
+— above implementation detail, above spec recital. If "and" joins two
+outcomes that would each stand alone, bind two Contracts. Even an outcome
+that cannot split into two may still need arcs to organize its
+fulfillment.>
 
 ## Design
 <The closed decisions. A statement belongs here exactly when a test-green

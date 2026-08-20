@@ -1,15 +1,15 @@
 ---
 id: task/replace-source-topology-architecture-allowlists
 title: Replace source-topology architecture allowlists with owner rules
-state: open
+state: drop
 priority: 0
 needs: []
 parent: task/审计项目架构边界-重复与-owner-错位
 supersedes: []
 relates: []
-note: ""
+note: "Rejected: line count, allowlist count, and co-change frequency do not establish duplicate adjudication. Sampled policy changes each admitted an explicit capability edge, and no ungated divergent judge was constructed; the single conformance guard is designed drift friction."
 createdAt: 2026-08-18T03:55:57.451Z
-updatedAt: 2026-08-18T03:56:44.021Z
+updatedAt: 2026-08-18T04:27:04.787Z
 ---
 保留真正的 architecture invariants：跨 owner 依赖方向、敏感 capability owner、禁止的模型/声明/源码模式，以及 public composition boundary。删除对 owner 内部每个 source file、import symbol 和当前 topology 的逐项镜像。
 

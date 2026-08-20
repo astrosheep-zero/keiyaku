@@ -85,7 +85,8 @@ Read first:
 - <owner documents governing this delivery>
 - <source files named or selected from the Contract Region for this work>
 Objective:
-<bounded assignment>
+<the assignment's high-level intent and goal — not implementation detail,
+not a restatement of the Contract terms>
 ```
 
 Every `Read first` path is relative to `Worktree` unless it is absolute. The
@@ -196,11 +197,16 @@ candidate.
 Deliver when the worktree content is the candidate you intend to land:
 
 ```bash
-keiyaku deliver <contract>
+keiyaku deliver <contract> --include-dirty
 ```
 
-`deliver` freshly tenders the clean `HEAD`, records the candidate, and requests
-placement. When a current audit attestation names the identical integration
+This example includes all non-ignored staged, unstaged, and untracked bytes in
+the candidate. Use `--include-dirty` only when the complete current workspace
+is the intended delivery; otherwise commit the intended bytes and run
+`keiyaku deliver <contract>`.
+
+`deliver` freshly tenders the candidate, records it, and requests placement.
+When a current audit attestation names the identical integration
 snapshot and Verification segment, deliver reuses it; otherwise it runs the
 declarations. Worktree, target, policy, document, Verification, or
 snapshot-producing option changes prevent reuse. If the workspace is dirty, the refusal

@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProcessInput, ProcessOutcome } from "../../runtime/proc/run.js";
-import { CliUsageError, usageLine, withJsonAutomationHelp } from "../usage.js";
+import { CliUsageError, usageLine } from "../usage.js";
 
 export const HARNESS_NAMES = ["codex", "claude", "opencode", "pi"] as const;
 export type HarnessName = typeof HARNESS_NAMES[number];
@@ -25,7 +25,7 @@ export type InstallInvocationResult = Readonly<{
 
 export type InstallRunner = (input: ProcessInput) => Promise<ProcessOutcome>;
 
-export const INSTALL_USAGE = "install <codex|claude|opencode|pi> [--json]\n       install --all [--json]";
+export const INSTALL_USAGE = "install <codex|claude|opencode|pi>\n       install --all";
 
 function isHarness(value: string | undefined): value is HarnessName {
   return value !== undefined && (HARNESS_NAMES as readonly string[]).includes(value);
@@ -60,9 +60,7 @@ export function parseInstallCommand(argv: readonly string[]): ParsedInstallComma
 }
 
 export function renderInstallHelp(): string {
-  return withJsonAutomationHelp(
-    `Install the Keiyaku skills into one or more agent harnesses.\n\n${usageLine(INSTALL_USAGE)}`,
-  );
+  return `Install the Keiyaku skills into one or more agent harnesses.\n\n${usageLine(INSTALL_USAGE)}`;
 }
 
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;

@@ -1,7 +1,7 @@
 ---
 id: task/enforce-production-export-reachability
 title: Enforce production export reachability
-state: open
+state: drop
 priority: 1
 needs:
   - task/centralize-task-timestamp-advancement-and-remove
@@ -15,9 +15,9 @@ needs:
 parent: task/审计项目架构边界-重复与-owner-错位
 supersedes: []
 relates: []
-note: ""
+note: "Rejected: known no-reader exports can be removed from verified reader evidence. A new global export gate has no demonstrated failing case and would add policy/allowlist maintenance rather than remove an existing adjudicator."
 createdAt: 2026-08-18T03:55:57.451Z
-updatedAt: 2026-08-18T03:56:24.400Z
+updatedAt: 2026-08-18T04:27:04.789Z
 ---
 按 owner逐批清理无生产读者或仅由测试维持的 internal exports/wrappers，使测试通过 public behavior或真正 private seam进入。随后扩展 knip reachability gate以检查 production exports/types，同时排除 package entry points中 owner law明确的 public surface。
 

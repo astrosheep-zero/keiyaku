@@ -19,12 +19,12 @@ import {
 import type { CatalogQuery } from "../library/catalog.js";
 import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
 import {
-  AMEND_MINIMAL_STDIN_HELP,
+  AMEND_OPERATIONS_HELP,
   CONTRACT_COMMAND_SPECS,
   type ContractCommand as Command,
   type ContractCommandSpec as CommandSpec,
 } from "./commands/contract.js";
-import { CliUsageError, isBlankInput, usageLine, withJsonAutomationHelp } from "./usage.js";
+import { CliUsageError, isBlankInput, usageLine } from "./usage.js";
 export { CliUsageError } from "./usage.js";
 
 export type { Command };
@@ -32,7 +32,7 @@ export type { Command };
 const ROOT_USAGE = "usage: keiyaku [-C <path>] [--repo <path>] <command> [<contract>|@<contract>] [--flag ...] [-]";
 
 export function renderRootHelp(): string {
-  return withJsonAutomationHelp([
+  return [
     ROOT_USAGE,
     "",
     "global options:",
@@ -46,13 +46,13 @@ export function renderRootHelp(): string {
     "  task ...",
     "    Task coordination; see `keiyaku task --help`.",
     ...renderAkumaRootRows(),
-  ].join("\n"));
+  ].join("\n");
 }
 
 export function renderContractHelp(command: Command): string {
   const spec = CONTRACT_COMMAND_SPECS[command];
   const help = `${spec.purpose}\n\n${usageLine(spec.usage)}`;
-  return withJsonAutomationHelp(command === "amend" ? `${help}\n\n${AMEND_MINIMAL_STDIN_HELP}` : help);
+  return command === "amend" ? `${help}\n\n${AMEND_OPERATIONS_HELP}` : help;
 }
 
 function contractUsage(command: Command): string {

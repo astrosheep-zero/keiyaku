@@ -13,7 +13,7 @@ is accepted; the identity underneath never changes.
 ## Start One
 
 ```bash
-keiyaku -C <cwd> call <akuma-name> [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] [--json] (<prompt> | -)
+keiyaku -C <cwd> call <akuma-name> [--alias @name] [--readonly] [--allowed <product.action>]... [--wait <duration> | -d | --detach] (<prompt> | -)
 ```
 
 Give the worker's initial prompt as one argument (quote it when it contains
@@ -44,14 +44,22 @@ outgrows its Archetype mid-life.
 keiyaku status                            # deep fleet observation
 keiyaku status <aku/...|@alias>           # one worker's snapshot
 keiyaku ls aku/                           # shallow catalog; also aku/<archetype>/ and "aku/*/*"
-keiyaku wait <selector>... [--any | --all] [--timeout <duration>] [--json]
+keiyaku wait <selector>... [--any | --all] [--timeout <duration>]
 ```
 
-`wait` accepts complete ids, aliases, and Akuma globs, resolved once into a
-stable deduplicated set. One member needs no mode; two or more require exactly
-one of `--any` or `--all`. A timeout returns the current real snapshot — never
-a fabricated timeout state — and `--any` leaves the unfinished members
-running.
+`wait` accepts complete ids, aliases, and Akuma globs. Wait on one Akuma without
+a mode. When observing multiple Akuma, prefer one plural wait over separate
+waits and choose exactly one mode:
+
+```bash
+keiyaku -C <cwd> wait @worker-a --timeout 5m
+keiyaku -C <cwd> wait @worker-a @worker-b --all --timeout 5m
+keiyaku -C <cwd> wait @worker-a @worker-b --any --timeout 5m
+```
+
+`--all` waits until every selected Akuma stops running. `--any` returns when the
+first one stops and leaves the others alone. When the timeout expires, `wait`
+returns their current status without stopping them.
 
 ## Steer
 

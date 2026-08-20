@@ -1,16 +1,18 @@
 ---
 id: task/require-delivery-document-derivation-at-the-prot
 title: Require delivery document derivation at the protocol boundary
-state: in_progress
+state: drop
 priority: 1
 needs: []
 parent: task/审计项目架构边界-重复与-owner-错位
 supersedes: []
 relates: []
-note: ""
+note: Implementation proved the proposed cleanup was representational churn rather than a production-code reduction; Contract abandoned with no source change.
 createdAt: 2026-08-18T03:55:57.451Z
-updatedAt: 2026-08-18T03:57:35.582Z
+updatedAt: 2026-08-18T08:59:25.195Z
 ---
-将当前全部生产 delivery/audit调用都提供的 document derivation从 internal optional input改为 required capability，删除 active delivery中的 unavailable sentinel与不可达 throw分支。Contract missing仍由 core decision返回既有 typed refusal。
+All production delivery and audit callers provide document derivation at the Library edge. Require it for audit and remove optional-capability checks that production cannot construct.
 
-不把 document decoding移进 Protocol，不改变 public DeliverInput或 audit结果；只收紧内部 composition contract并删除无生产状态。
+Deliver already requires the capability. Retain its existing narrow runtime correlation guard when removing that guard would require a larger staging type or new abstraction; this cleanup must reduce production code rather than mechanize an impossible state.
+
+Do not move document decoding into Protocol, change public DeliverInput or AuditInput, or alter missing-Contract, document-moved, verification, or Git behavior.

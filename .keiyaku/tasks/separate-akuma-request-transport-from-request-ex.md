@@ -1,16 +1,16 @@
 ---
 id: task/separate-akuma-request-transport-from-request-ex
 title: Separate Akuma request transport from request execution
-state: open
+state: drop
 priority: 1
 needs:
   - task/replace-source-topology-architecture-allowlists
 parent: task/审计项目架构边界-重复与-owner-错位
 supersedes: []
 relates: []
-note: ""
+note: "Rejected: history found no product change forced to repeat the same judgment because these files are colocated. Cross-surface changes followed shared persistence or frozen-observation invariants; moving coherent owner code into more files would add topology without reducing adjudication points."
 createdAt: 2026-08-18T03:55:57.451Z
-updatedAt: 2026-08-18T03:56:24.400Z
+updatedAt: 2026-08-18T04:27:04.965Z
 ---
 在 Akuma Request owner 内分离 wire claim/receipt codec 与 atomic file transport、caller request admission、Body-side request serving/pump/recovery。call/wait/tell/kill 继续使用同一 request state machine 和 Heart facts，不复制 decode、reservation 或 settlement judge。
 

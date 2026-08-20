@@ -86,8 +86,8 @@ export function renderRefusalFacts(
     ];
     if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflictPaths", refusal.conflictPaths, indent, columns));
     if ("recovery" in refusal && refusal.recovery !== undefined) {
-      wrap(lines, `recovery materialize ${refusal.recovery.materialize}`, indent, columns);
-      wrap(lines, `recovery continue ${refusal.recovery.continue}`, indent, columns);
+      wrap(lines, `recovery materialize conflicts · ${refusal.recovery.materialize}`, indent, columns);
+      wrap(lines, `recovery continue after resolve and commit · ${refusal.recovery.continue}`, indent, columns);
     }
     return lines;
   }
