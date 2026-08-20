@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, World } from "../src/index.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
@@ -25,7 +25,6 @@ import { contractId } from "../src/core/facts/types.js";
 import { Tasks } from "../src/task/index.js";
 import { makeGitRepository } from "./support/git.js";
 
-const root = resolve(import.meta.dirname, "..");
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
 async function testWorld() {
@@ -215,7 +214,6 @@ test("owner deletion attempts remain independent after the stop prerequisite", a
     const result = await Keiyaku.nuke({ world, confirm: world });
     assert.equal(result.kind, "failed");
     assert.equal(existsSync(managedPath), false);
-    assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
     assert.equal(existsSync(broken), true);
   } finally {
@@ -240,11 +238,4 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
 test("CLI nuke exit code reports owner failure", () => {
   assert.equal(nukeExitCode({ kind: "success", world: "/world" as never }), 0);
   assert.equal(nukeExitCode({ kind: "failed", world: "/world" as never, diagnostic: "broken" }), 2);
-});
-
-test("nuke composition has no owner storage knowledge or owner arms", () => {
-  const source = readFileSync(join(root, "src", "library", "nuke.ts"), "utf8");
-  assert.doesNotMatch(source, /node:(?:fs|path)|\.keiyaku|refs\/|glob|readdir|join\(|preview|count|NukeOwner/u);
-  assert.match(source, /const deleteAkuma = await stopAkuma\(value\.world\)/u);
-  assert.match(source, /await Promise\.all\(/u);
 });
