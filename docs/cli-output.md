@@ -123,8 +123,8 @@ unbounded browsing surface. An idle answered default call or ordinary single
 wait writes the exact answer, including empty bytes, with no framing or added
 newline. Every other state remains an identity-bearing snapshot, and plural
 wait renders each answered member as `✓ came back <AkuId>`, the
-snapshot-width ruler, its exact answer, and a closing snapshot-width ruler;
-the collection then ends with `<done> of <total> done`. Successful detach ends with
+snapshot-width ruler, and its exact answer; the collection then ends with
+`<done> of <total> done`. Successful detach ends with
 `$ keiyaku -C <world> wait <@alias|AkuId> --timeout 5m`, using the successful
 Alias or complete AkuId and canonical World; failure adds no command or life.
 `said` and `thought` occupy at most two terminal lines with visible clipping.
@@ -165,8 +165,8 @@ between relation and activity, or changed snapshot selection. One `fileChange`
 with one `unspecified` change renders as `edit` with its path.
 
 ```text
-─────
 aku/expert-akuma/5659b10d (@expert)
+─────
 └─ kei/make-non-git-runtime-observation-honestly-async
       ⋮ 171 omitted
 14:36 │ say    “I’m editing the architecture allowlist to mirror the completed-”
@@ -192,12 +192,12 @@ changes 15
 ● STILL RUNNING
 ```
 
-The first output line is the five-column `U+2500` opening stroke, exactly as
-wide as `HH:MM`. It marks the boundary of the complete snapshot and carries no
-state icon, label, or header. AkuId and optional alias occupy the next line.
-When a Contract is associated, its complete `kei/...` coordinate follows on the
-separate hanging relation line beginning with `U+2514` and `U+2500`; an
-unassociated Akuma omits that line. Identity rows never contain current life.
+The identity and optional alias occupy the first line. The next line is the
+five-column `U+2500` ruler, exactly as wide as `HH:MM`; it marks the boundary
+between identity and the rest of the snapshot. When a Contract is associated,
+its complete `kei/...` coordinate follows on the separate hanging relation line
+beginning with `U+2514` and `U+2500`; an unassociated Akuma omits that line.
+Identity rows never contain current life.
 Activity follows the identity and optional relation directly, keeping typed
 gaps in persisted order. Created Task context, when supplied, follows the
 timeline; the reported-change block follows Tasks. Status, wait, unfinished

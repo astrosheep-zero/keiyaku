@@ -44,8 +44,8 @@ function associatedIdentity(id: string, alias?: string, contract?: DispatchAssoc
 function snapshotHeading(id: string, alias?: string, contract?: DispatchAssociation): readonly string[] {
   const contractId = contract === undefined ? undefined : associatedContractId(contract);
   return [
-    OPENING_STROKE,
     identity(id, alias),
+    OPENING_STROKE,
     ...(contractId === undefined ? [] : [`└─ ${contractId}`]),
   ];
 }
@@ -299,7 +299,7 @@ function waitText(
   const blocks = [
     ...result.result.observations.map((observation) => {
       const answer = statusAnswer(observation);
-      if (answer !== undefined) return `${answeredHeading(observation.status.id, alias)}\n${answer}\n${OPENING_STROKE}`;
+      if (answer !== undefined) return `${answeredHeading(observation.status.id, alias)}\n${answer}`;
       return snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) });
     }),
     ...result.result.unobserved.map((member) => unobservedText(member.id, member.diagnostic)),
