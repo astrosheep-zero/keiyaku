@@ -1,6 +1,7 @@
 import {
   isTaskAction,
   parseTaskCommand,
+  renderTaskHelp,
   renderTaskUsage,
   type ParsedTaskCommand,
   type TaskAction,
@@ -9,12 +10,13 @@ import {
   isAkumaAction,
   parseAkumaCatalogPath,
   parseAkumaCommand,
+  renderAkumaHelp,
   renderAkumaRootRows,
   renderAkumaUsage,
   type AkumaAction,
   type ParsedAkumaCommand,
 } from "./commands/akuma.js";
-import type { CatalogQuery } from "../index.js";
+import type { CatalogQuery } from "../library/catalog.js";
 import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
 import {
   AMEND_MINIMAL_STDIN_HELP,
@@ -62,6 +64,16 @@ export function renderCommandUsage(command: ParsedCommand): string {
   if (command.command === "task") return renderTaskUsage(command.action);
   if (isAkumaAction(command.command)) return renderAkumaUsage(command.command);
   return contractUsage(command.command);
+}
+
+export function renderHelp(coordinate: CliHelpCoordinate): string {
+  switch (coordinate.kind) {
+    case "root": return renderRootHelp();
+    case "contract": return renderContractHelp(coordinate.command);
+    case "task": return renderTaskHelp(coordinate.action);
+    case "install": return renderInstallHelp();
+    case "akuma": return renderAkumaHelp(coordinate.action);
+  }
 }
 
 type Output = Readonly<{ output: "text" | "json" }>;
@@ -151,6 +163,60 @@ export type CliHelpCoordinate =
 
 export type ParsedExecution = Readonly<{ cwd?: string; repo?: string; command: ParsedCommand }>;
 export type ParsedInvocation = ParsedExecution | Readonly<{ help: CliHelpCoordinate }>;
+
+type RepoUse = "none" | "optional" | "required";
+export type CommandRepoPolicy = Readonly<{ use: RepoUse; acceptsExplicit: boolean }>;
+
+export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
+  switch (command.command) {
+    case "bind":
+    case "amend":
+    case "deliver":
+    case "review":
+    case "arc":
+    case "abandon":
+    case "audit":
+    case "reconcile":
+    case "show":
+    case "region":
+      return { use: "required", acceptsExplicit: true };
+    case "ls":
+      return { use: command.query.kind === "contracts" ? "required" : "none", acceptsExplicit: false };
+    case "status":
+    case "tell":
+      return { use: "optional", acceptsExplicit: false };
+    case "history":
+      return "contract" in command
+        ? { use: "required", acceptsExplicit: true }
+        : { use: "optional", acceptsExplicit: false };
+    case "fork":
+      return { use: "optional", acceptsExplicit: true };
+    case "wait":
+    case "kill": {
+      const contractSelector = command.akuma.some((selector) => selector.startsWith("kei/"));
+      return { use: contractSelector ? "required" : "optional", acceptsExplicit: contractSelector };
+    }
+    case "call":
+      return {
+        use: command.contract === undefined ? "none" : "required",
+        acceptsExplicit: command.contract !== undefined,
+      };
+    case "settings":
+    case "nuke":
+    case "task":
+    case "install":
+      return { use: "none", acceptsExplicit: false };
+  }
+}
+
+function refuseUnusedRepo(command: ParsedCommand): never {
+  if (command.command === "call") throw new CliUsageError("--repo has no consumer without --contract");
+  throw new CliUsageError(`--repo has no consumer for ${command.command}`);
+}
+
+export function assertExplicitRepoUse(command: ParsedCommand, repo: string | undefined): void {
+  if (repo !== undefined && !commandRepoPolicy(command).acceptsExplicit) refuseUnusedRepo(command);
+}
 
 function optionalFlag(flags: Readonly<Record<string, string | true | readonly string[]>>, name: string): string | undefined {
   const value = flags[name];
@@ -509,9 +575,10 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const akuma = isAkumaAction(invocation.commandArgv[0])
     ? parseAkumaCommand(invocation.commandArgv)
     : undefined;
-  return {
+  const parsed: ParsedExecution = {
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
     command: task ?? akuma ?? install ?? parseCommand(scanArgv(invocation.commandArgv)),
   };
+  return parsed;
 }

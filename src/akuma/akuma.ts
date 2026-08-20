@@ -256,7 +256,7 @@ async function bornStatus(
   const current = await bornListRow(paths, expected, snapshot);
   const resumeUnsupported = current.life === "stranded"
     && snapshot.latestSession?.provider === snapshot.soul.provider.name
-    && resolveProviderExecution(snapshot.soul.provider).adapter.resume === undefined;
+    && (await resolveProviderExecution(snapshot.soul.provider)).adapter.resume === undefined;
   const slice = await activitySlice(paths);
   return {
     id: current.id,
@@ -413,7 +413,7 @@ export class AkumaHandle {
     const source = await readSoul(this.paths);
     if (source === null) throw new AkumaNotBornError(this.id);
     if (source.id !== this.id) throw new Error("Akuma soul does not match its coordinate");
-    const adapter = resolveProviderExecution(source.provider).adapter;
+    const adapter = (await resolveProviderExecution(source.provider)).adapter;
     if (adapter.fork === undefined) return { kind: "provider-cannot-fork", provider: source.provider.name };
     const point = await readForkPoint(this.paths, input.at);
     if (point === null) return { kind: "unknown-history", at: input.at };

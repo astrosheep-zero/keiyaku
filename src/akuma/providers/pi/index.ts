@@ -1,11 +1,10 @@
-import {
+import type {
   createAgentSession,
-  createBashToolDefinition,
   DefaultResourceLoader,
   getAgentDir,
   ModelRuntime,
   SessionManager,
-  type CreateAgentSessionOptions,
+  CreateAgentSessionOptions,
 } from "@earendil-works/pi-coding-agent";
 import { abortable } from "../../abort.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
@@ -68,6 +67,14 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
     : "sessionFile" in input.session.coordinate
       ? sdk.SessionManager.open(input.session.coordinate.sessionFile)
       : (() => { throw new Error("Pi resume requires sessionFile"); })();
+  const customTools = input.requests === undefined || input.options.readonly === true
+    ? undefined
+    : [(await import("@earendil-works/pi-coding-agent")).createBashToolDefinition(input.cwd, {
+        spawnHook: (context) => ({
+          ...context,
+          env: { ...context.env, [AKUMA_REQUESTS_ENV]: input.requests.dir },
+        }),
+      }) as NonNullable<CreateAgentSessionOptions["customTools"]>[number]];
   return {
     cwd: input.cwd,
     sessionManager,
@@ -75,14 +82,7 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
     ...(resourceLoader === undefined ? {} : { resourceLoader }),
     ...(input.options.effort === undefined ? {} : { thinkingLevel: input.options.effort as PiThinkingLevel }),
     ...(input.options.readonly === undefined ? {} : { tools: ["read", "grep", "find", "ls"] }),
-    ...(input.requests === undefined || input.options.readonly === true
-      ? {}
-      : { customTools: [createBashToolDefinition(input.cwd, {
-          spawnHook: (context) => ({
-            ...context,
-            env: { ...context.env, [AKUMA_REQUESTS_ENV]: input.requests.dir },
-          }),
-        }) as NonNullable<CreateAgentSessionOptions["customTools"]>[number]] }),
+    ...(customTools === undefined ? {} : { customTools }),
   };
 }
 
@@ -199,11 +199,20 @@ async function forkPi(sdk: PiSdk, input: Parameters<NonNullable<ProviderAdapter[
   return { session: { sessionFile: child } };
 }
 
-const defaultSdk: PiSdk = { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager };
+async function loadPiSdk(): Promise<PiSdk> {
+  const sdk = await import("@earendil-works/pi-coding-agent");
+  return {
+    createAgentSession: sdk.createAgentSession,
+    DefaultResourceLoader: sdk.DefaultResourceLoader,
+    getAgentDir: sdk.getAgentDir,
+    ModelRuntime: sdk.ModelRuntime,
+    SessionManager: sdk.SessionManager,
+  };
+}
 
 export function createPiProvider(
   execution: ProviderExecution = { name: "pi", kind: "pi" },
-  load: () => Promise<PiSdk> = async () => defaultSdk,
+  load: () => Promise<PiSdk> = loadPiSdk,
 ): ProviderAdapter {
   if (execution.executable !== undefined || execution.config !== undefined) {
     throw new TypeError("Pi provider does not support executable or config");

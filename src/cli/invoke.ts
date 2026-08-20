@@ -1,60 +1,23 @@
-import {
-  AkumaWorldScopeError,
-  gatesFrom,
-  Keiyaku,
-  KeiyakuRefused,
-  KeiyakuRetry,
-  Repo,
-  requireBranchesToBeUpToDateFrom,
-  settings,
-  SettingsError,
-  worktreeHooksFrom,
-  type ActorId,
-  type ContractId,
-  type Keiyaku as KeiyakuContract,
-  type Settings,
-  type WorktreeHooks,
-} from "../index.js";
-import {
-  kanshi,
-  observeKanshi,
-  selectKanshi,
-  selectRegion,
-  type KanshiRegionSelection,
-} from "../kanshi/index.js";
 import { resolveActor } from "./actor.js";
-import {
-  acceptedAbandon,
-  acceptedAmend,
-  acceptedArc,
-  acceptedAudit,
-  acceptedBind,
-  acceptedDeliver,
-  acceptedReview,
-  resultFromMutationCall,
-} from "./accepted.js";
-import { amendFromCommand } from "./commands/amend.js";
-import { invokeAkuma, invokeAkumaStatus, type AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import { isParsedAkumaCommand, type InvokedAkumaCommand } from "./commands/akuma.js";
-import { bindFromCommand } from "./commands/bind.js";
-import { installHarnesses, type InstallInvocationResult } from "./commands/install.js";
-import { invokeNuke } from "./commands/nuke.js";
-import { invokeTaskFromEdge, type TaskInvocationResult } from "./commands/task-invoke.js";
-import { CliUsageError, renderCommandUsage, type ParsedCommand, type ParsedExecution } from "./parse.js";
+import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
+import type { InstallInvocationResult } from "./commands/install.js";
+import type { TaskInvocationResult } from "./commands/task-invoke.js";
+import {
+  assertExplicitRepoUse,
+  CliUsageError,
+  renderCommandUsage,
+  type ParsedCommand,
+  type ParsedExecution,
+} from "./parse.js";
 import { isBlankInput } from "./usage.js";
 import type { InvocationResult, RegionResult } from "./result.js";
-import {
-  canonicalContractSelector,
-  contractFromInput,
-  resolveContextualContract,
-  resolveKanshiContract,
-  type SelectedContract,
-} from "./selectors.js";
-import { resolveNamedAddress } from "../library/address.js";
-import { injectedBodyRequests } from "../akuma/requests.js";
-import { EMPTY_WORKTREE_HOOKS } from "../library/configuration.js";
-import { assertExplicitRepoUse, resolveCliCoordinates } from "./coordinates.js";
-import { BindDraftError, preserveBindDraft } from "./draft.js";
+import type { SelectedContract } from "./selectors.js";
+import type { ActorId, ContractId, Keiyaku as KeiyakuContract } from "../index.js";
+import type { KanshiRegionSelection } from "../kanshi/index.js";
+import type { WorktreeHooks } from "../library/configuration.js";
+import type { Repo } from "../library/repo.js";
+import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 
 export type { AcceptedFact, InvocationResult, Lag } from "./result.js";
@@ -125,25 +88,28 @@ async function withAcquiredStdin(
 export type SettingsInvocationResult = Readonly<{ kind: "settings"; value: Settings }>;
 export type GuidanceInvocationResult = Readonly<{ kind: "guidance"; contract: ContractId; guidance: string }>;
 
-function settingsAt(root: WorldRoot | undefined, home?: string): Promise<Settings> {
+async function settingsAt(root: WorldRoot | undefined, home?: string): Promise<Settings> {
+  const { settings } = await import("../settings.js");
   return settings({ ...(root === undefined ? {} : { root }), ...(home === undefined ? {} : { home }) });
 }
 
-function consumeSettings<T>(run: () => T): T {
+function consumeSettings<T>(run: () => T, ErrorType: new (message: string) => Error): T {
   try {
     return run();
   } catch (error) {
-    if (error instanceof SettingsError) throw new CliUsageError(error.message);
+    if (error instanceof ErrorType) throw new CliUsageError(error.message);
     throw error;
   }
 }
 
-function selectedGates(value: Settings, names?: readonly string[]) {
-  return consumeSettings(() => gatesFrom({ settings: value, ...(names === undefined ? {} : { names }) }));
+async function selectedGates(value: Settings, names?: readonly string[]) {
+  const { gatesFrom, SettingsError } = await import("../library/configuration.js");
+  return consumeSettings(() => gatesFrom({ settings: value, ...(names === undefined ? {} : { names }) }), SettingsError);
 }
 
-function selectedGitPolicy(value: Settings): boolean {
-  return consumeSettings(() => requireBranchesToBeUpToDateFrom({ settings: value }));
+async function selectedGitPolicy(value: Settings): Promise<boolean> {
+  const { requireBranchesToBeUpToDateFrom, SettingsError } = await import("../library/configuration.js");
+  return consumeSettings(() => requireBranchesToBeUpToDateFrom({ settings: value }), SettingsError);
 }
 
 function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
@@ -164,7 +130,9 @@ function gitPathFromEdge(environment: NodeJS.ProcessEnv): string | undefined {
 }
 
 async function selectContract(repo: Repo, selector: string | undefined, scope: string): Promise<SelectedContract> {
+  const { contractFromInput, resolveContextualContract } = await import("./selectors.js");
   if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector);
+  const { Keiyaku } = await import("../library/keiyaku.js");
   const id = resolveContextualContract(await Keiyaku.list({ repo }), selector, scope);
   return contractFromInput(repo, id);
 }
@@ -179,6 +147,7 @@ type BindInvocation = Readonly<{
 }>;
 
 async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdown: string) {
+  const { preserveBindDraft } = await import("./draft.js");
   try {
     return preserveBindDraft(await establishWorld(), markdown);
   } catch (error) {
@@ -188,8 +157,10 @@ async function bindDraftReceipt(establishWorld: () => Promise<WorldRoot>, markdo
 
 async function invokeBind({ parsed, repo, edge, configuration, hooks, establishWorld }: BindInvocation): Promise<InvocationResult> {
   const markdown = await edge.readStdin();
-  const gates = selectedGates(configuration, parsed.gates);
+  const gates = await selectedGates(configuration, parsed.gates);
   const actor = actorFromEdge(parsed.actor, edge.environment);
+  const { bindFromCommand } = await import("./commands/bind.js");
+  const { acceptedBind, resultFromMutationCall } = await import("./accepted.js");
   try {
     const result = await resultFromMutationCall(
       "bind",
@@ -211,6 +182,7 @@ async function invokeBind({ parsed, repo, edge, configuration, hooks, establishW
     return { ...result, draft: await bindDraftReceipt(establishWorld, markdown) };
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
+    const { BindDraftError } = await import("./draft.js");
     throw new BindDraftError(error, await bindDraftReceipt(establishWorld, markdown));
   }
 }
@@ -235,6 +207,7 @@ async function invokeDeliver(
   seat: ExistingSeat,
   requireBranchesToBeUpToDate: boolean,
 ): Promise<InvocationResult> {
+  const { acceptedDeliver } = await import("./accepted.js");
   try {
     const delivered = await seat.contract.deliver({
       ...(seat.actor === undefined ? {} : { actor: seat.actor }),
@@ -247,21 +220,12 @@ async function invokeDeliver(
     if (!("facts" in delivered)) return delivered;
     return acceptedDeliver(delivered, seat.id);
   } catch (error) {
+    const { KeiyakuRefused, KeiyakuRetry } = await import("../library/keiyaku.js");
     if (error instanceof KeiyakuRefused) {
-      return {
-        kind: "refused",
-        verb: "deliver",
-        contract: seat.id,
-        refusal: deliverRefusal(error.refusal),
-      };
+      return { kind: "refused", verb: "deliver", contract: seat.id, refusal: deliverRefusal(error.refusal) };
     }
     if (error instanceof KeiyakuRetry) {
-      return {
-        kind: "retry",
-        verb: "deliver",
-        contract: seat.id,
-        detail: error.reason,
-      };
+      return { kind: "retry", verb: "deliver", contract: seat.id, detail: error.reason };
     }
     throw error;
   }
@@ -273,6 +237,7 @@ async function invokeReview(
   readStdin: () => Promise<string>,
 ): Promise<InvocationResult> {
   const summary = parsed.summaryFromStdin === true ? await readStdin() : parsed.summary;
+  const { acceptedReview, resultFromMutationCall } = await import("./accepted.js");
   return resultFromMutationCall("review", () => seat.contract.review({
     verdict: parsed.verdict,
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
@@ -286,6 +251,7 @@ async function invokeAudit(
   seat: ExistingSeat,
   requireBranchesToBeUpToDate: boolean,
 ): Promise<InvocationResult> {
+  const { acceptedAudit, resultFromMutationCall } = await import("./accepted.js");
   return resultFromMutationCall(
     "audit",
     () => seat.contract.audit({
@@ -327,7 +293,9 @@ async function invokeExisting(input: ExistingInvocation): Promise<InvocationResu
       const markdown = parsed.stdin === true ? await edge.readStdin() : undefined;
       const gates = parsed.gates === undefined
         ? undefined
-        : selectedGates(configuration, parsed.gates);
+        : await selectedGates(configuration, parsed.gates);
+      const { amendFromCommand } = await import("./commands/amend.js");
+      const { acceptedAmend, resultFromMutationCall } = await import("./accepted.js");
       return resultFromMutationCall(
         "amend",
         () => amendFromCommand({
@@ -344,25 +312,28 @@ async function invokeExisting(input: ExistingInvocation): Promise<InvocationResu
       );
     }
     case "deliver":
-      return invokeDeliver(parsed, seat, selectedGitPolicy(configuration));
+      return invokeDeliver(parsed, seat, await selectedGitPolicy(configuration));
     case "review":
       return invokeReview(parsed, seat, edge.readStdin);
     case "arc": {
       const markdown = await edge.readStdin();
+      const { acceptedArc, resultFromMutationCall } = await import("./accepted.js");
       return resultFromMutationCall("arc", () => contract.arc({
           markdown,
           ...(actor === undefined ? {} : { actor }),
           hooks,
         }), (result) => acceptedArc(result, id), { coordinate: id });
     }
-    case "abandon":
+    case "abandon": {
+      const { acceptedAbandon, resultFromMutationCall } = await import("./accepted.js");
       return resultFromMutationCall("abandon", () => contract.abandon({
         ...(actor === undefined ? {} : { actor }),
         ...(parsed.note === undefined ? {} : { note: parsed.note }),
         hooks,
       }), (result) => acceptedAbandon(result, id), { coordinate: id });
+    }
     case "audit":
-      return invokeAudit(parsed, seat, selectedGitPolicy(configuration));
+      return invokeAudit(parsed, seat, await selectedGitPolicy(configuration));
     default:
       return parsed satisfies never;
   }
@@ -383,17 +354,20 @@ async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdge
     if (parsed.command === "call" && parsed.contract !== undefined && repo === undefined) {
       throw new Error("call with Contract requires a resolved Repo");
     }
+    const { invokeAkuma } = await import("./commands/akuma-invoke.js");
+    const contract = parsed.command === "call" && parsed.contract !== undefined
+      ? (await import("./selectors.js")).contractFromInput(repo as Repo, parsed.contract).contract
+      : undefined;
     return await invokeAkuma(parsed, {
       path,
       ...(statedCwd === undefined ? {} : { statedCwd }),
       ...(home === undefined ? {} : { home }),
       ...(configuration === undefined ? {} : { settings: configuration }),
-      ...(parsed.command === "call" && parsed.contract !== undefined
-        ? { contract: contractFromInput(repo as Repo, parsed.contract).contract }
-        : repo === undefined ? {} : { repo }),
+      ...(contract === undefined ? repo === undefined ? {} : { repo } : { contract }),
       readStdin: edge.readStdin,
     });
   } catch (error) {
+    const { AkumaWorldScopeError } = await import("../library/address.js");
     if (error instanceof AkumaWorldScopeError) throw error;
     if (error instanceof TypeError) throw new CliUsageError(error.message);
     throw error;
@@ -418,6 +392,7 @@ async function invokeCatalog(
   home?: string,
 ) {
   try {
+    const { Keiyaku } = await import("../library/keiyaku.js");
     if (parsed.query.kind === "contracts") {
       if (repo === undefined) throw new Error("Contract catalog requires a resolved Repo");
       return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, repo }) };
@@ -446,8 +421,9 @@ async function invokeStatus(
 ) {
   if (parsed.akuma === true) {
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-    return invokeAkumaStatus(world, parsed.contract, undefined, repo);
+    return (await import("./commands/akuma-invoke.js")).invokeAkumaStatus(world, parsed.contract, undefined, repo);
   }
+  const { kanshi, observeKanshi, selectKanshi } = await import("../kanshi/index.js");
   if (parsed.contract === undefined) {
     const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
     return { kind: "status" as const, report, selection: "world" as const };
@@ -455,6 +431,7 @@ async function invokeStatus(
   if (parsed.contract.startsWith("@")) {
     try {
       const observation = await observeKanshi({ world, ...(repo === undefined ? {} : { repo }) });
+      const { resolveNamedAddress } = await import("../library/address.js");
       const address = resolveNamedAddress({
         selector: parsed.contract,
         report: observation.report,
@@ -462,7 +439,7 @@ async function invokeStatus(
       });
       if (address.kind === "akuma") {
         if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-        return invokeAkumaStatus(world, address.id, parsed.contract, repo);
+        return (await import("./commands/akuma-invoke.js")).invokeAkumaStatus(world, address.id, parsed.contract, repo);
       }
       return { kind: "status" as const, report: selectKanshi({ report: observation.report, contract: address.id }), selection: "contract" as const };
     } catch (error) {
@@ -472,6 +449,7 @@ async function invokeStatus(
   }
   if (parsed.contract.startsWith("kei/")) {
     if (repo === undefined) throw new CliUsageError("cannot select a contract while the Contract world is absent");
+    const { canonicalContractSelector } = await import("./selectors.js");
     const contract = canonicalContractSelector(parsed.contract);
     return {
       kind: "status" as const,
@@ -480,6 +458,7 @@ async function invokeStatus(
     };
   }
   const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
+  const { resolveKanshiContract } = await import("./selectors.js");
   const contract = resolveKanshiContract(report, parsed.contract);
   return { kind: "status" as const, report: selectKanshi({ report, contract }), selection: "contract" as const };
 }
@@ -489,6 +468,7 @@ async function invokeRegion(
   world: WorldRoot | null,
   repo: Repo,
 ): Promise<RegionResult> {
+  const { kanshi, selectRegion } = await import("../kanshi/index.js");
   const read = async (region: KanshiRegionSelection) => {
     try { return await kanshi({ world, repo, region }); }
     catch (error) { if (error instanceof TypeError) throw new CliUsageError(error.message); throw error; }
@@ -501,6 +481,7 @@ async function invokeRegion(
     return { kind: "region", region: report.region ?? { kind: "absent" } };
   }
   const report = await read({ kind: "declarations" });
+  const { resolveKanshiContract } = await import("./selectors.js");
   const contract = resolveKanshiContract(report, parsed.contract) as ContractId;
   if (report.contracts.kind !== "present" || report.contracts.value.rows.every((row) => row.id !== contract || row.disposition !== "active")) {
     throw new CliUsageError(`unknown contract selector: ${parsed.contract}`);
@@ -514,11 +495,13 @@ async function invokeRegion(
 
 async function invokeContractHistory(repo: Repo | undefined, contract: string): Promise<InvocationResult> {
   if (repo === undefined) throw new Error("history kei/... requires a resolved Repo");
+  const { contractFromInput } = await import("./selectors.js");
   const selected = contractFromInput(repo, contract);
   try {
     return { kind: "contract-history" as const, history: await selected.contract.history() };
   } catch (error) {
     if (error instanceof TypeError) throw new CliUsageError(error.message);
+    const { KeiyakuRefused } = await import("../library/keiyaku.js");
     if (error instanceof KeiyakuRefused) {
       return { kind: "refused" as const, verb: "history", contract: selected.id, refusal: error.refusal };
     }
@@ -533,6 +516,7 @@ async function invokeParsed(
 ): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
   const environment = runtime.environment ?? process.env;
   const gitPath = gitPathFromEdge(environment);
+  const { resolveCliCoordinates } = await import("./coordinates.js");
   const coordinates = await resolveCliCoordinates({
     ...(runtime.cwd === undefined ? {} : { processCwd: runtime.cwd }),
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
@@ -552,10 +536,21 @@ async function invokeParsed(
     return { kind: "settings", value: await settingsAt(world ?? undefined, home) };
   }
   if (parsed.command === "nuke") {
-    return await invokeNuke(parsed, world);
+    return await (await import("./commands/nuke.js")).invokeNuke(parsed, world);
   }
   if (parsed.command === "task") {
-    return await invokeTaskFromEdge({ parsed, world, context: taskContext, establish: coordinates.establishWorld, readStdin: edge.readStdin, actor: runtime.actor });
+    const actor = runtime.actor ?? actorFromEdge(
+      typeof parsed.flags.actor === "string" ? parsed.flags.actor : undefined,
+      edge.environment,
+    );
+    return await (await import("./commands/task-invoke.js")).invokeTaskFromEdge({
+      parsed,
+      world,
+      context: taskContext,
+      establish: coordinates.establishWorld,
+      readStdin: edge.readStdin,
+      actor,
+    });
   }
   if (parsed.command === "history" && "contract" in parsed) return await invokeContractHistory(repo, parsed.contract);
   if (isParsedAkumaCommand(parsed)) {
@@ -575,14 +570,16 @@ async function invokeParsed(
   if (repo === undefined) throw new Error(`${parsed.command} requires a resolved Repo`);
   if (parsed.command === "region") return invokeRegion(parsed, world, repo);
   const scope = cwd;
-  if ((parsed.command === "deliver" || parsed.command === "review") && injectedBodyRequests() !== null) {
+  if ((parsed.command === "deliver" || parsed.command === "review") && (await import("../akuma/requests.js")).injectedBodyRequests() !== null) {
+    const { EMPTY_WORKTREE_HOOKS } = await import("../library/configuration.js");
     const seat = await existingSeat({ parsed, repo, edge, scope, hooks: EMPTY_WORKTREE_HOOKS });
     return parsed.command === "deliver"
       ? await invokeDeliver(parsed, seat, false)
       : await invokeReview(parsed, seat, edge.readStdin);
   }
   const configuration = await settingsAt(world ?? undefined, home);
-  const hooks = consumeSettings(() => worktreeHooksFrom({ settings: configuration }));
+  const { worktreeHooksFrom, SettingsError } = await import("../library/configuration.js");
+  const hooks = consumeSettings(() => worktreeHooksFrom({ settings: configuration }), SettingsError);
 
   if (parsed.command === "show") {
     const selected = await selectContract(repo, parsed.contract, scope);
@@ -615,7 +612,7 @@ export async function invoke(invocation: ParsedExecution, runtime: InvokeRuntime
     assertExplicitRepoUse(command, invocation.repo);
     if (command.command === "install") {
       runtime.onOperationStart?.();
-      return installHarnesses(command.harnesses, runtime.environment ?? process.env);
+      return (await import("./commands/install.js")).installHarnesses(command.harnesses, runtime.environment ?? process.env);
     }
     const acquiredRuntime = await withAcquiredStdin(command, withResolvedTaskActor(command, runtime));
     runtime.onOperationStart?.();

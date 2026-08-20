@@ -3,7 +3,10 @@
 This chapter owns the provider-neutral protocol and native adapter obligations.
 The shared recipe codec owns the provider-neutral execution envelope. The
 provider map applies the selected kind's config grammar before any adapter is
-constructed; Heart and callers do not repeat or bypass that judgment.
+constructed; Heart and callers do not repeat or bypass that judgment. Recipe
+inspection remains adapter- and SDK-free; selected adapter construction is
+asynchronous, and that adapter loads its native SDK only when it starts or
+resumes a native session.
 
 ## Turn Correlation
 

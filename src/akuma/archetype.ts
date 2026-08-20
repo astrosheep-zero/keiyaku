@@ -218,13 +218,13 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
   throw new TypeError(`unknown provider ${name}`);
 }
 
-function admitArchetype(
+async function admitArchetype(
   archetype: DecodedArchetype,
   settings: Settings,
   callReadonly: true | undefined,
-): AdmittedArchetype {
-  let selected: ReturnType<typeof resolveProviderExecution>;
-  try { selected = resolveProviderExecution(providerExecution(settings, archetype.provider)); }
+): Promise<AdmittedArchetype> {
+  let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
+  try { selected = await resolveProviderExecution(providerExecution(settings, archetype.provider)); }
   catch (error) {
     if (error instanceof TypeError) throw new AkumaArchetypeError(archetype.name, [archetype.path], `uses ${error.message}`);
     throw error;
@@ -269,7 +269,7 @@ export async function loadArchetype(
     throw new AkumaArchetypeError(name, [path], `could not be read: ${error instanceof Error ? error.message : String(error)}`);
   }
   try {
-    return admitArchetype(decodeArchetype(name, path, markdown), input.settings, input.readonly);
+    return await admitArchetype(decodeArchetype(name, path, markdown), input.settings, input.readonly);
   } catch (error) {
     if (error instanceof AkumaArchetypeError) throw error;
     throw new AkumaArchetypeError(name, [path], `is invalid: ${error instanceof Error ? error.message : String(error)}`);

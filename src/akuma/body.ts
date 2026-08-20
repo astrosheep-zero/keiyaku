@@ -221,7 +221,7 @@ export async function driveAkumaBody(
   try {
     const soul = await bornSoul(launch, leash, runtime.now());
     if (soul === null) return;
-    const selected = adapter ?? resolveProviderExecution(soul.provider).adapter;
+    const selected = adapter ?? (await resolveProviderExecution(soul.provider)).adapter;
     if (!await prepareBodyStart(launch.paths, leash)) return;
     const body = await leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
     const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);

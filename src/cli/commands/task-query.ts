@@ -1,14 +1,14 @@
+import type { TaskPriority, TaskState } from "../../task/document.js";
+import type { TaskId } from "../../task/identity.js";
 import {
+  MAX_TASK_LIMIT,
   TASK_RELATION_PREDICATE_FIELDS,
-  type TaskId,
-  type TaskPriority,
+  normalizeTaskQuery,
   type TaskQueryExpression,
   type TaskQueryPredicate,
-  type TaskState,
-} from "../../task/index.js";
-import { MAX_TASK_LIMIT, normalizeTaskQuery } from "../../task/query.js";
+} from "../../task/query.js";
 
-export type { TaskQueryExpression } from "../../task/index.js";
+export type { TaskQueryExpression } from "../../task/query.js";
 
 type Token = Readonly<{ kind: "word" | "string" | "operator" | "left" | "right" | "end"; value: string; offset: number }>;
 

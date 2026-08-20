@@ -1,7 +1,7 @@
 import net from "node:net";
 import { abortable } from "../../abort.js";
 import { spawnDetachedProcess } from "../../../runtime/proc/run.js";
-import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
+import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { ResumeCoordinate } from "../../heart/index.js";
 import type { ProviderExecution } from "../../provider-recipe.js";
 
@@ -72,6 +72,7 @@ export async function loadOpencode(
     env: { ...process.env, ...execution.env },
     log: `${cwd}/.opencode.log`,
   });
+  const { createOpencodeClient } = await import("@opencode-ai/sdk");
   const client = createOpencodeClient({ baseUrl: `http://127.0.0.1:${port}`, directory: cwd });
   try {
     await waitReady(client, cwd, signal);

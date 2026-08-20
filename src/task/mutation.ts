@@ -1,7 +1,6 @@
 import type { WorldRoot } from "../world.js";
 import type { TaskCompositionResult } from "./compose.js";
 import { addInput, closed, namespace, record, taskId, taskIds, text, updateInput } from "./input.js";
-import { Tasks } from "./index.js";
 import type {
   AddTaskDocumentInput,
   AddTaskInput,
@@ -103,6 +102,7 @@ export async function executeTaskMutation(input: Readonly<{
   requester: string;
   signal?: AbortSignal;
 }>): Promise<TaskMutationExecutionResult> {
+  const { Tasks } = await import("./index.js");
   const tasks = Tasks.of(input.world);
   const { request, signal } = input;
   const withSignal = signal === undefined ? {} : { signal };

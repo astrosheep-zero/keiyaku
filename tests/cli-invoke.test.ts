@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { GIT_REF, readRef, repositoryAt } from "../src/git/repository.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { HeartAbsentError } from "../src/akuma/heart/index.js";
@@ -100,6 +102,111 @@ test("install does not consume KEIYAKU_GIT_PATH before coordinate resolution", a
     kind: "install",
     results: [{ harness: "codex", status: "failed", diagnostic: "codex unavailable: spawn codex ENOENT" }],
   });
+});
+
+function sourceModulesLoadedByCli(
+  argv: readonly string[],
+  cwd: string,
+  environment: NodeJS.ProcessEnv = {},
+): readonly string[] {
+  const dir = mkdtempSync(join(tmpdir(), "keiyaku-cli-trace-"));
+  const tracer = join(dir, "trace.mjs");
+  const output = join(dir, "loaded.json");
+  writeFileSync(tracer, [
+    'import { registerHooks } from "node:module";',
+    'import { writeFileSync } from "node:fs";',
+    "const loaded = [];",
+    "registerHooks({",
+    "  load(url, context, nextLoad) {",
+    "    loaded.push(url);",
+    "    return nextLoad(url, context);",
+    "  },",
+    "});",
+    `const { main } = await import(${JSON.stringify(pathToFileURL(resolve(import.meta.dirname, "../src/cli/main.ts")).href)});`,
+    `const code = await main(${JSON.stringify(argv)});`,
+    `writeFileSync(${JSON.stringify(output)}, JSON.stringify(loaded));`,
+    "process.exitCode = code;",
+    "",
+  ].join("\n"));
+  const env = { ...process.env, ...environment };
+  delete env.FORCE_COLOR;
+  const result = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), tracer], {
+    cwd,
+    encoding: "utf8",
+    env,
+  });
+  if (!existsSync(output)) {
+    throw new Error(`CLI family trace missing: status=${String(result.status)}\n${result.stdout}\n${result.stderr}`);
+  }
+  const loaded = JSON.parse(readFileSync(output, "utf8")) as string[];
+  const srcPrefix = `${pathToFileURL(resolve(import.meta.dirname, "../src")).href}/`;
+  return loaded.flatMap((url) => {
+    const bare = url.split("?")[0]!;
+    if (!bare.startsWith(srcPrefix)) return [];
+    return [decodeURIComponent(bare.slice(srcPrefix.length))];
+  });
+}
+
+function assertLoaded(loaded: readonly string[], expected: readonly string[], forbidden: readonly string[]): void {
+  const seen = loaded.join(", ");
+  for (const path of expected) {
+    assert.ok(loaded.includes(path), `expected to load ${path}, got ${seen}`);
+  }
+  for (const path of forbidden) {
+    assert.ok(!loaded.includes(path), `did not expect to load ${path}; loaded ${seen}`);
+  }
+}
+
+test("help and selected commands load only their CLI families", () => {
+  const repository = repositoryWithMain();
+  const cwd = resolve(import.meta.dirname, "..");
+  const atRepo = (command: readonly string[]): readonly string[] => ["-C", repository.path, ...command];
+  const product = [
+    "settings.ts",
+    "task/index.ts",
+    "kanshi/index.ts",
+    "akuma/index.ts",
+    "cli/commands/akuma-invoke.ts",
+    "cli/commands/task-invoke.ts",
+    "runtime/proc/run.ts",
+  ] as const;
+  const otherFamilies = [
+    "task/index.ts",
+    "kanshi/index.ts",
+    "akuma/index.ts",
+    "cli/commands/akuma-invoke.ts",
+    "cli/commands/task-invoke.ts",
+  ] as const;
+  assertLoaded(sourceModulesLoadedByCli(["--help"], cwd), ["cli/parse.ts"], [
+    "cli/runtime.ts",
+    "cli/invoke.ts",
+    ...product,
+  ]);
+  assertLoaded(sourceModulesLoadedByCli(atRepo(["settings"]), cwd), ["cli/runtime.ts", "cli/invoke.ts", "settings.ts"], otherFamilies);
+  assertLoaded(sourceModulesLoadedByCli(["install", "codex"], cwd, { PATH: "" }), [
+    "cli/runtime.ts",
+    "cli/invoke.ts",
+    "runtime/proc/run.ts",
+  ], ["settings.ts", ...otherFamilies]);
+  assertLoaded(sourceModulesLoadedByCli(atRepo(["task", "ls"]), cwd), [
+    "cli/commands/task-invoke.ts",
+    "task/index.ts",
+  ], [
+    "kanshi/index.ts",
+    "akuma/index.ts",
+    "cli/commands/akuma-invoke.ts",
+  ]);
+  assertLoaded(sourceModulesLoadedByCli(atRepo(["status", "--json"]), cwd), ["kanshi/index.ts"], [
+    "cli/commands/akuma-invoke.ts",
+    "cli/commands/task-invoke.ts",
+  ]);
+  assertLoaded(sourceModulesLoadedByCli(atRepo(["status", "aku/missing", "--json"]), cwd), [
+    "cli/commands/akuma-invoke.ts",
+    "akuma/index.ts",
+  ], [
+    "kanshi/index.ts",
+    "cli/commands/task-invoke.ts",
+  ]);
 });
 
 test("an implicit Contract call refuses before creating its candidate World", async () => {

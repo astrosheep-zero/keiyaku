@@ -52,8 +52,10 @@ variable. No library or Git module reads `KEIYAKU_GIT_PATH`.
 
 The parser owns argv syntax, including arity, duplicates, unknown flags, mutual
 exclusion, and final-stdin selection. It performs no product observation or
-judgment. The invocation adapter then calls the corresponding public operation
-without a second command-specific behavior layer.
+judgment. Help completes at this dependency-light edge. After a non-help parse,
+the invocation adapter loads only the selected command family's execution and
+rendering graph, then calls the corresponding public operation without a second
+command-specific behavior layer.
 
 ## Command Surface
 

@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -46,9 +47,14 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   const cache = mkdtempSync(join(tmpdir(), "keiyaku-npm-cache-"));
   const repository = mkdtempSync(join(tmpdir(), "keiyaku-e2e-repo-"));
 
-  npmCommand(["pack", "--ignore-scripts", "--pack-destination", packed], root);
+  npmCommand(["pack", "--ignore-scripts", "--pack-destination", packed, "--cache", cache], root);
   const archives = readdirSync(packed).filter((name) => name.endsWith(".tgz"));
   assert.equal(archives.length, 1, `expected one package archive, got ${archives.join(", ")}`);
+  const packageArchive = join(packed, archives[0]!);
+  const claudePackage = join(root, "node_modules", "@anthropic-ai", "claude-agent-sdk");
+  npmCommand(["pack", "--ignore-scripts", "--pack-destination", packed, "--cache", cache], claudePackage);
+  const claudeArchives = readdirSync(packed).filter((name) => name.startsWith("anthropic-ai-claude-agent-sdk-") && name.endsWith(".tgz"));
+  assert.equal(claudeArchives.length, 1, `expected one Claude package archive, got ${claudeArchives.join(", ")}`);
 
   const packageManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
     dependencies?: Readonly<Record<string, string>>;
@@ -56,7 +62,9 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   };
   const dependencies = Object.fromEntries(Object.keys(packageManifest.dependencies ?? {}).map((name) => [
     name,
-    `file:${join(root, "node_modules", name)}`,
+    name === "@anthropic-ai/claude-agent-sdk"
+      ? `file:${join(packed, claudeArchives[0]!)}`
+      : `file:${join(root, "node_modules", name)}`,
   ]));
   writeFileSync(join(installed, "package.json"), `${JSON.stringify({
     name: "keiyaku-e2e-consumer",
@@ -69,10 +77,12 @@ test("published package installs one keiyaku CLI and runs against a real reposit
     "--no-audit",
     "--no-fund",
     "--offline",
+    "--legacy-peer-deps",
+    "--no-bin-links",
     "--package-lock=false",
     "--cache",
     cache,
-    join(packed, archives[0]!),
+    packageArchive,
   ], installed);
 
   const installedPackage = JSON.parse(readFileSync(
@@ -88,6 +98,8 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   if (process.platform !== "win32") {
     assert.notEqual(statSync(target).mode & 0o111, 0, "installed CLI must be executable");
   }
+  const claudeSdk = join(installed, "node_modules", "@anthropic-ai", "claude-agent-sdk");
+  renameSync(claudeSdk, `${claudeSdk}.hidden`);
   assert.match(installedCommand(["--help"], installed), /^usage: keiyaku /m);
 
   command("git", ["init", "--quiet", "--initial-branch=main", repository], repository);
@@ -100,4 +112,49 @@ test("published package installs one keiyaku CLI and runs against a real reposit
     contracts?: { kind?: string };
   };
   assert.equal(status.contracts?.kind, "present");
+
+  const providerRegistry = join(
+    installed,
+    "node_modules",
+    "@astrosheep",
+    "keiyaku",
+    "build",
+    "src",
+    "akuma",
+    "providers",
+    "index.js",
+  );
+  const inspect = (source: readonly string[]): string => command("node", [
+    "--input-type=module",
+    "--eval",
+    source.join("\n"),
+    providerRegistry,
+  ], installed);
+  assert.deepEqual(JSON.parse(inspect([
+    "const { decodeProviderExecution } = await import(process.argv.at(-1));",
+    'process.stdout.write(JSON.stringify(decodeProviderExecution({ name: "claude", kind: "claude-agent-sdk" })));',
+  ])), { name: "claude", kind: "claude-agent-sdk" });
+  assert.deepEqual(JSON.parse(inspect([
+    "const { resolveProviderExecution } = await import(process.argv.at(-1));",
+    'const selected = await resolveProviderExecution({ name: "pi", kind: "pi" });',
+    "process.stdout.write(JSON.stringify({",
+    "  name: selected.execution.name,",
+    "  kind: selected.execution.kind,",
+    "  hasStart: typeof selected.adapter.start === 'function',",
+    "}));",
+  ])), { name: "pi", kind: "pi", hasStart: true });
+  assert.deepEqual(JSON.parse(inspect([
+    "const { resolveProviderExecution } = await import(process.argv.at(-1));",
+    'const selected = await resolveProviderExecution({ name: "claude", kind: "claude-agent-sdk" });',
+    "process.stdout.write(JSON.stringify({",
+    "  name: selected.execution.name,",
+    "  kind: selected.execution.kind,",
+    "  hasStart: typeof selected.adapter.start === 'function',",
+    "}));",
+  ])), { name: "claude", kind: "claude-agent-sdk", hasStart: true });
+  assert.throws(() => inspect([
+    "const { resolveProviderExecution } = await import(process.argv.at(-1));",
+    'const selected = await resolveProviderExecution({ name: "claude", kind: "claude-agent-sdk" });',
+    'await selected.adapter.start({ body: "start", launchTells: [], cwd: process.cwd(), options: {}, session: { kind: "fresh" } });',
+  ]), /Cannot find package/u);
 });

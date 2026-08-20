@@ -8,7 +8,7 @@ import {
   decodeReadonlyRestraint,
   type ReadonlyRestraint,
 } from "./provider-recipe.js";
-import { resolveProviderExecution } from "./providers/index.js";
+import { decodeProviderExecution } from "./providers/index.js";
 import {
   decodeTaskMutationRequest,
   isTaskMutationAction,
@@ -21,7 +21,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 export type RequestRecipe = Readonly<{
   description?: string;
   allowed: readonly string[];
-  provider: ReturnType<typeof resolveProviderExecution>["execution"];
+  provider: ReturnType<typeof decodeProviderExecution>;
   options: ReturnType<typeof decodeProviderOptions>;
   readonly?: ReadonlyRestraint;
 }>;
@@ -181,7 +181,7 @@ export function decodeRecipe(value: unknown): RequestRecipe | null {
     return Object.freeze({
       ...(recipe.description === undefined ? {} : { description: recipe.description }),
       allowed: decodeAllowedActions(recipe.allowed),
-      provider: resolveProviderExecution(recipe.provider).execution,
+      provider: decodeProviderExecution(recipe.provider),
       options,
       ...(readonly === undefined ? {} : { readonly }),
     });
