@@ -4,6 +4,7 @@ import type {
   ContractId,
   Delivery,
   Fact,
+  IntegrationConflictMaterialized,
   MutationResult,
   PlacementStop,
   ReconcileReport,
@@ -252,4 +253,5 @@ export type InvocationResult =
   | StatusResult
   | RegionResult
   | CatalogResult
-  | ContractHistoryResult;
+  | ContractHistoryResult
+  | IntegrationConflictMaterialized;

@@ -256,9 +256,10 @@ keiyaku.deliver(input?: {
   message?: string
   requireBranchesToBeUpToDate?: boolean
   includeDirty?: boolean
+  materializeConflict?: boolean
   signal?: AbortSignal
   hooks?: WorktreeHooks
-}): Promise<MutationResult<Delivery>>
+}): Promise<MutationResult<Delivery> | IntegrationConflictMaterialized>
 keiyaku.review(input: {
   verdict: AttestationVerdict
   actor?: ActorId
@@ -288,22 +289,31 @@ delivery.diff(): Promise<string | null>
 authorizes the complete non-ignored staged, unstaged, and untracked final tree;
 it does not select only staged paths and never includes dirty submodule
 internals. Omission and `false` are identical. Git performs the capture without
-changing the caller's real `HEAD`, index, branch, or files. Audit receives the
+changing the caller's real `HEAD`, index, branch, or files. `materializeConflict`
+is a separate boolean whose omission is false. It is consulted only after the
+one integration judge returns `reason: "conflict"`; a non-conflicting placement
+is equivalent to omission. On conflict, omission returns the typed
+`integration-failed` refusal with recovery values. `true` materializes that
+already-judged conflict in the appointed workspace and returns
+`IntegrationConflictMaterialized` rather than a mutation result. Materialization
+does not honor `includeDirty`. Audit receives the
 same clean-worktree default and the same `includeDirty` authorization. It does
-not accept a custom commit message. `showDiff: true` asks the accepted audit
+not accept a custom commit message or `materializeConflict`. `showDiff: true` asks the accepted audit
 result to carry the prospective predecessor-to-candidate `diff` and `scope.paths`;
 omission leaves those bytes off the report. An explicitly requested empty
 string remains visible.
 
 When an Akuma request channel is present, `deliver` forwards the pinned
 Repo's normalized primary-worktree coordinate, its complete ContractId,
-optional message, and `includeDirty` to the direct parent. The parent
+optional message, `includeDirty`, and `materializeConflict` to the direct parent. The parent
 reconstructs that Repo instead of substituting its own World, supplies the
 requester actor, and reads Settings scoped to the selected Repo for Git policy
 and hooks; caller-provided actor, policy, and hooks do not cross the boundary.
 The parent invokes the same local executor as ordinary delivery, and the live
-exchange returns the ordinary mutation result. Heart persists only the Repo
-coordinate, ContractId, and accepted delivery fact id; a later pump projects
+exchange returns the ordinary mutation, refusal, retry, or materialized result.
+Heart persists only the Repo
+coordinate, ContractId, and accepted delivery fact id; materialization stores
+no accepted delivery reference. A later pump projects
 that typed reference for the same request id without reconstructing live
 trailing channels. No second delivery result or automatic multi-hop route
 exists.

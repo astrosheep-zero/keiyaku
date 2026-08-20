@@ -57,6 +57,7 @@ export type {
   ContractRow,
   DeliverInput,
   Fact,
+  IntegrationConflictMaterialized,
   FactKind,
   KeiyakuOfInput,
   KeiyakuRefusal,

@@ -3,6 +3,7 @@ import {
   gatesFrom,
   Keiyaku,
   KeiyakuRefused,
+  KeiyakuRetry,
   Repo,
   requireBranchesToBeUpToDateFrom,
   settings,
@@ -233,16 +234,36 @@ async function invokeDeliver(
   seat: ExistingSeat,
   requireBranchesToBeUpToDate: boolean,
 ): Promise<InvocationResult> {
-  return resultFromMutationCall("deliver", () => seat.contract.deliver({
-    ...(seat.actor === undefined ? {} : { actor: seat.actor }),
-    ...(parsed.message === undefined ? {} : { message: parsed.message }),
-    requireBranchesToBeUpToDate,
-    includeDirty: parsed.includeDirty,
-    hooks: seat.hooks,
-  }), (result) => acceptedDeliver(result, seat.id), {
-    coordinate: seat.id,
-    projectRefusal: deliverRefusal,
-  });
+  try {
+    const delivered = await seat.contract.deliver({
+      ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+      ...(parsed.message === undefined ? {} : { message: parsed.message }),
+      requireBranchesToBeUpToDate,
+      includeDirty: parsed.includeDirty,
+      materializeConflict: parsed.materializeConflict,
+      hooks: seat.hooks,
+    });
+    if (!("facts" in delivered)) return delivered;
+    return acceptedDeliver(delivered, seat.id);
+  } catch (error) {
+    if (error instanceof KeiyakuRefused) {
+      return {
+        kind: "refused",
+        verb: "deliver",
+        contract: seat.id,
+        refusal: deliverRefusal(error.refusal),
+      };
+    }
+    if (error instanceof KeiyakuRetry) {
+      return {
+        kind: "retry",
+        verb: "deliver",
+        contract: seat.id,
+        detail: error.reason,
+      };
+    }
+    throw error;
+  }
 }
 
 async function invokeReview(

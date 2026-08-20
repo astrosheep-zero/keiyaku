@@ -60,7 +60,7 @@ export type UpstreamExecutionPort = Readonly<{
     result: unknown; service: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[];
   }>>;
   deliver(input: ContractCall & Readonly<{
-    message?: string; includeDirty: boolean;
+    message?: string; includeDirty: boolean; materializeConflict: boolean;
   }>): Promise<Readonly<{ result: unknown; deliveryFactId?: string }>>;
   review(input: ContractCall & Readonly<{
     verdict: "satisfied" | "unsatisfied"; summary?: string;
@@ -319,6 +319,7 @@ async function executeDeliver(
     contractId: request.contractId,
     ...(request.message === undefined ? {} : { message: request.message }),
     includeDirty: request.includeDirty,
+    materializeConflict: request.materializeConflict,
     requester: request.requester,
     signal: input.signal,
   });
@@ -408,16 +409,7 @@ async function serveUpstream(
   try {
     const served = await execute(input, request);
     outcome = { kind: "returned", result: served.result };
-    if (served.service === undefined) {
-      fact = await voidRequest(
-        input.paths,
-        request.id,
-        "body completed without a durable Contract fact reference",
-      );
-      await projectReceipt(input.directory, fact);
-      return;
-    }
-    service = served.service;
+    if (served.service !== undefined) service = served.service;
   } catch (error) {
     outcome = { kind: "failed", failure: failure(error) };
     fact = await voidRequest(

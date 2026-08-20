@@ -24,6 +24,7 @@ import {
   requestBodyCall,
 } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
+import { decodeClaim } from "../src/akuma/request-wire.js";
 import { World } from "../src/world.js";
 
 async function akumaAt(root: string) { return Akuma.of(await World.at(root)); }
@@ -416,4 +417,26 @@ test("a new body settles old requests by observation without replay", async () =
     value.leash.release();
     value.close();
   }
+});
+
+test("contract.deliver claims require the exact normalized payload keys", () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  const payload = {
+    repoRoot: "/repo",
+    contractId: "kei/example",
+    includeDirty: false,
+    materializeConflict: true,
+  };
+  assert.deepEqual(decodeClaim(JSON.stringify({ id, action: "contract.deliver", payload }), id), {
+    id,
+    action: "contract.deliver",
+    ...payload,
+  });
+  assert.equal(decodeClaim(JSON.stringify({
+    id,
+    action: "contract.deliver",
+    payload: { ...payload, extra: true },
+  }), id), null);
+  const { materializeConflict: _materializeConflict, ...without } = payload;
+  assert.equal(decodeClaim(JSON.stringify({ id, action: "contract.deliver", payload: without }), id), null);
 });

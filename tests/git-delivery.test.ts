@@ -9,7 +9,7 @@ import { actorId } from "../src/core/facts/types.js";
 import { mintSnapshotId } from "../src/git/identity.js";
 import { adjudicateAuditTarget, observeTargetPlacement } from "../src/git/target-placement.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
-import { readDeliveryDiff } from "../src/git/integration.js";
+import { materializeJudgedConflict, readDeliveryDiff, workspaceMergeStatePresent } from "../src/git/integration.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { reconcile } from "../src/git/reconcile.js";
 import { worktreePath } from "../src/git/workspace.js";
@@ -236,6 +236,22 @@ test("targeted integration conflict returns structured paths", async () => {
       conflictPaths: ["shared.txt"],
     },
   });
+});
+
+test("Git merge-state detection and judged conflict projection stay with the one judge", async () => {
+  const { repository, worktree } = await targetedContract();
+  writeFileSync(join(repository.path, "shared.txt"), "target\n");
+  repository.run(["add", "shared.txt"]);
+  repository.run(["commit", "--quiet", "-m", "target change"]);
+  const targetHead = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
+  writeFileSync(join(worktree, "shared.txt"), "tender\n");
+  repository.run(["-C", worktree, "add", "shared.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
+  const git = await repositoryAt(repository.path);
+  assert.equal(await workspaceMergeStatePresent(git, worktree), false);
+  await materializeJudgedConflict(git, worktree, targetHead);
+  assert.equal(await workspaceMergeStatePresent(git, worktree), true);
+  assert.equal(repository.run(["-C", worktree, "rev-parse", "MERGE_HEAD"]).trim(), targetHead);
 });
 
 test("rebasing a managed tender onto the current target resolves its integration base", async () => {

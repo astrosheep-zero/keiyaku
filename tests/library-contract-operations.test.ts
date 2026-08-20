@@ -78,8 +78,148 @@ async function conflictedTargetReview() {
   writeFileSync(join(worktree, "z.txt"), "tender\n");
   repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
-  return { repository, bound, targetHead };
+  return { repository, bound, targetHead, worktree };
 }
+
+const DELIVER_CONFLICT_RECOVERY = {
+  materialize: "deliver --materialize-conflict",
+  continue: "deliver",
+} as const;
+
+function mergeHead(repository: ReturnType<typeof repositoryWithMain>, worktree: string): string | null {
+  try {
+    return repository.run(["-C", worktree, "rev-parse", "-q", "--verify", "MERGE_HEAD"]).trim();
+  } catch {
+    return null;
+  }
+}
+
+async function disjointTargetedDelivery(materializeConflict?: boolean) {
+  const repository = repositoryWithMain();
+  writeFileSync(join(repository.path, "shared.txt"), "base\n");
+  repository.run(["add", "shared.txt"]);
+  repository.run(["commit", "--quiet", "-m", "base"]);
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: document(),
+    workspace: "worktree",
+    target: "refs/heads/main",
+  });
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), bound.keiyaku.id);
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+  const delivered = materializeConflict === undefined
+    ? await bound.keiyaku.deliver()
+    : await bound.keiyaku.deliver({ materializeConflict });
+  return { repository, bound, delivered };
+}
+
+test("plain deliver conflict is an executable handoff and does not mutate", async () => {
+  const { repository, bound, targetHead, worktree } = await conflictedTargetReview();
+  const git = await repositoryAt(repository.path);
+  const journal = await readRef(git, GIT_REF);
+  await assert.rejects(
+    () => bound.keiyaku.deliver(),
+    refused({
+      kind: "integration-failed",
+      contractId: bound.keiyaku.id,
+      reason: "conflict",
+      targetHead,
+      conflictPaths: ["a.txt", "z.txt"],
+      recovery: DELIVER_CONFLICT_RECOVERY,
+    }),
+  );
+  const state = await bound.keiyaku.state();
+  assert.equal(state.delivery, null);
+  assert.equal(state.terminal, null);
+  assert.equal(await readRef(git, GIT_REF), journal);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetHead);
+  assert.equal(mergeHead(repository, worktree), null);
+});
+
+test("explicit materialization projects the judged conflict in the appointed workspace", async () => {
+  const { repository, bound, targetHead, worktree } = await conflictedTargetReview();
+  const git = await repositoryAt(repository.path);
+  const journal = await readRef(git, GIT_REF);
+  const materialized = await bound.keiyaku.deliver({ materializeConflict: true });
+  assert.deepEqual(materialized, {
+    kind: "integration-conflict-materialized",
+    targetHead,
+    conflictPaths: ["a.txt", "z.txt"],
+    workspace: { kind: "worktree", path: worktree },
+  });
+  const state = await bound.keiyaku.state();
+  assert.equal(state.delivery, null);
+  assert.equal(state.terminal, null);
+  assert.equal(await readRef(git, GIT_REF), journal);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetHead);
+  assert.equal(mergeHead(repository, worktree), targetHead);
+});
+
+test("materializeConflict is inert when the judge reports no conflict", async () => {
+  const plain = await disjointTargetedDelivery();
+  const flagged = await disjointTargetedDelivery(true);
+  assert.equal("facts" in plain.delivered, true);
+  assert.equal("facts" in flagged.delivered, true);
+  if (!("facts" in plain.delivered) || !("facts" in flagged.delivered)) return;
+  assert.deepEqual(plain.delivered.facts.map((fact) => fact.kind), flagged.delivered.facts.map((fact) => fact.kind));
+  assert.equal(plain.delivered.value.integration.changeId, flagged.delivered.value.integration.changeId);
+  assert.deepEqual(plain.delivered.value.placement, flagged.delivered.value.placement);
+  assert.equal((await plain.bound.keiyaku.state()).terminal?.kind, (await flagged.bound.keiyaku.state()).terminal?.kind);
+});
+
+test("materialization refuses a dirty workspace even with includeDirty", async () => {
+  const { repository, bound, worktree } = await conflictedTargetReview();
+  writeFileSync(join(worktree, "extra.txt"), "dirty\n");
+  await assert.rejects(
+    () => bound.keiyaku.deliver({ includeDirty: true, materializeConflict: true }),
+    (error: unknown) => {
+      assert.ok(error instanceof KeiyakuRefused);
+      assert.equal(error.refusal.kind, "dirty-workspace");
+      return true;
+    },
+  );
+  assert.equal(mergeHead(repository, worktree), null);
+  assert.equal((await bound.keiyaku.state()).delivery, null);
+});
+
+test("existing merge state refuses materialization without a second judge", async () => {
+  const { repository, bound, targetHead, worktree } = await conflictedTargetReview();
+  const first = await bound.keiyaku.deliver({ materializeConflict: true });
+  assert.equal(first.kind, "integration-conflict-materialized");
+  await assert.rejects(
+    () => bound.keiyaku.deliver({ includeDirty: true, materializeConflict: true }),
+    refused({
+      kind: "merge-state-present",
+      contractId: bound.keiyaku.id,
+      workspace: { kind: "worktree", path: worktree },
+    }),
+  );
+  assert.equal(mergeHead(repository, worktree), targetHead);
+  assert.equal((await bound.keiyaku.state()).delivery, null);
+});
+
+test("native resolution continues through plain deliver against the then-current target", async () => {
+  const { repository, bound, worktree } = await conflictedTargetReview();
+  const materialized = await bound.keiyaku.deliver({ materializeConflict: true });
+  assert.equal(materialized.kind, "integration-conflict-materialized");
+  writeFileSync(join(worktree, "a.txt"), "resolved\n");
+  writeFileSync(join(worktree, "z.txt"), "resolved\n");
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "resolve merge"]);
+  const mergeCommit = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+  writeFileSync(join(repository.path, "unrelated.txt"), "target only\n");
+  repository.run(["add", "unrelated.txt"]);
+  repository.run(["commit", "--quiet", "-m", "move target"]);
+  const thenHead = repository.run(["rev-parse", "refs/heads/main"]).trim();
+  const delivered = await bound.keiyaku.deliver();
+  assert.equal("facts" in delivered, true);
+  if (!("facts" in delivered)) return;
+  assert.equal(delivered.value.tenderSnapshot, mergeCommit);
+  assert.equal(delivered.value.integration.predecessor, thenHead);
+  assert.equal(mergeHead(repository, worktree), null);
+});
 
 test("here bind preserves and refuses an appointment whose journal is missing", async () => {
   const repository = repositoryWithMain();

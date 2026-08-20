@@ -153,6 +153,7 @@ export type RequestInput = Readonly<{
   contractId: string;
   message?: string;
   includeDirty: boolean;
+  materializeConflict: boolean;
 }> | Readonly<{
   id: string;
   action: "contract.review";

@@ -83,16 +83,37 @@ testimony for that exact delivery and Verification segment is reused, whether
 satisfied or unsatisfied; otherwise Verification runs. Placement consumes only
 generic current gate evidence. Git owns preparation details.
 
+`deliver` accepts one boolean `materializeConflict`; omission is false. The
+flag is consulted only after the one Git integration judge returns
+`reason: "conflict"`. A non-conflicting placement ignores it, and the ordinary
+accepted delivery is equivalent to omission. Plain conflict is observation-only:
+it returns typed `integration-failed` with the judged `targetHead`, ordered
+`conflictPaths`, and
+
+```ts
+recovery: { materialize: "deliver --materialize-conflict", continue: "deliver" }
+```
+
+and changes no workspace bytes, journal, pins, refs, or lifecycle phase. With
+the flag, the same preparation and judge run first; on conflict, a clean
+appointed workspace with no Git merge state receives `git merge --no-commit`
+of that judged `targetHead` and returns `integration-conflict-materialized`.
+That result is not an accepted mutation: it admits no deliver fact, mints no
+candidate, and leaves the Contract `pending-delivery`. Continuation after a
+native resolve-and-commit is plain `deliver`.
+
 An authenticated Akuma `contract.deliver` is the same Contract operation at a
 different process boundary: the claim preserves the caller-selected Repo as
 its normalized primary-worktree coordinate, and the direct parent reconstructs
 that Repo, supplies the requester as actor, reads Settings scoped to it for
 policy and hooks, and calls the same local executor. The request claim also
-carries only the complete ContractId, optional message, and `includeDirty`; it
-creates no second delivery authority. Its Heart reference is the Repo
-coordinate, ContractId, and accepted delivery fact id. The live exchange
-retains the normal accepted, refusal, retry, and trailing projections; later
-pumps retain only that accepted reference and never infer or replay a delivery.
+carries only the complete ContractId, optional message, `includeDirty`, and
+`materializeConflict`; it creates no second delivery authority. Its Heart
+reference is the Repo coordinate, ContractId, and accepted delivery fact id.
+Materialization stores no accepted delivery reference. The live exchange
+retains the normal accepted, refusal, retry, materialized, and trailing
+projections; later pumps retain only that accepted reference and never infer
+or replay a delivery.
 
 `review` is a contract operation and may record testimony before any `deliver`.
 Git captures its subject as the document key projected by the decision

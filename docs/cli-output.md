@@ -107,6 +107,7 @@ Every invocation renders exactly one final plain result object on stdout:
 | `refused` | typed refusal and observed grounds | 1 |
 | `retry` | exhausted, collision, or publication-failed detail; caller-addressed verbs use the caller's contract coordinate, while bind has no contract segment | 2 |
 | `observation` | view data, including observed effects when present | 0 |
+| `integration-conflict-materialized` | exact public `IntegrationConflictMaterialized` value: judged `targetHead`, ordered `conflictPaths`, and appointed `workspace` | 0 |
 
 Text and `--json` render this same object. Both write to stdout; JSON serializes
 it without another output schema. A corrupted authority or other exception
@@ -415,6 +416,13 @@ authorization option. The option is unavailable exactly when dirty submodule
 internals are present. JSON carries the same refusal facts plus the CLI-owned
 option projection. The renderer does not run Git or infer another path
 classification.
+
+A deliver `integration-failed` conflict refusal exposes `reason`, `targetHead`,
+ordered `conflictPaths`, and both recovery values in text and JSON.
+`merge-state-present` exposes the appointed workspace kind and path.
+`integration-conflict-materialized` is not a refusal: JSON is the exact public
+value, text names that kind, `targetHead`, `conflictPaths`, and workspace, and
+the process exits `0`.
 
 An accepted review that observed ordinary dirty workspace bytes hangs one
 `~ workspace` shortstat line and one evidence row per nonempty classification

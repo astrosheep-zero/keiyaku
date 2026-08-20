@@ -60,6 +60,7 @@ export type DeliverRequestClaim = Readonly<{
   contractId: string;
   message?: string;
   includeDirty: boolean;
+  materializeConflict: boolean;
 }>;
 export type ReviewRequestClaim = Readonly<{
   id: string;
@@ -270,6 +271,7 @@ function decodeDeliver(id: string, payload: Readonly<Record<string, unknown>>): 
   const valid = exactKeys(payload, [
     "contractId",
     "includeDirty",
+    "materializeConflict",
     "repoRoot",
     ...(payload.message === undefined ? [] : ["message"]),
   ]);
@@ -278,6 +280,7 @@ function decodeDeliver(id: string, payload: Readonly<Record<string, unknown>>): 
     && selected !== null
     && absolute(payload.repoRoot)
     && typeof payload.includeDirty === "boolean"
+    && typeof payload.materializeConflict === "boolean"
     && (payload.message === undefined
       || (typeof payload.message === "string"
         && payload.message.trim().length > 0))
@@ -287,6 +290,7 @@ function decodeDeliver(id: string, payload: Readonly<Record<string, unknown>>): 
         repoRoot: payload.repoRoot,
         contractId: selected,
         includeDirty: payload.includeDirty,
+        materializeConflict: payload.materializeConflict,
         ...(payload.message === undefined
           ? {}
           : { message: payload.message as string }),

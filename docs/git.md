@@ -199,9 +199,18 @@ rebase therefore changes the integration base through ordinary Git history;
 immutable Contract `start` remains birth topology and is not a mutable delivery
 base. Git uses `merge-tree --write-tree -z --name-only`, then creates one
 deterministic commit whose parent is the observed target head and whose message
-is the tender message. It never checks out or edits an agent worktree. No common
-ancestor produces `integration-failed` with reason `unrelated-histories`;
-structured conflict paths produce reason `conflict`.
+is the tender message. The judge never checks out or edits an agent worktree.
+No common ancestor produces `integration-failed` with reason
+`unrelated-histories`; structured conflict paths produce reason `conflict`.
+That conflict names the exact judged `targetHead` and the ordered unique
+conflict paths.
+
+When deliver asks to materialize a judged conflict, Git first detects existing
+merge state with `git rev-parse -q --verify MERGE_HEAD` in the appointed
+workspace. It then projects the already-made judge as
+`git merge --no-commit <targetHead>` in that same workspace. This is not a
+second conflict adjudicator and does not choose ours/theirs, write a merge
+commit, or move a ref. Git owns only that detection and projection.
 
 Squash integration requires Git 2.38 or a compatible structured
 `merge-tree --write-tree` capability. Git probes that capability without

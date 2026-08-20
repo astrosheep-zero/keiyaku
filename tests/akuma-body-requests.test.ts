@@ -141,8 +141,13 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
       calls += 1;
       assert.equal(input.requester, parent.id);
       assert.deepEqual(
-        { contractId: input.contractId, message: input.message, includeDirty: input.includeDirty },
-        { contractId, message: "ship it", includeDirty: true },
+        {
+          contractId: input.contractId,
+          message: input.message,
+          includeDirty: input.includeDirty,
+          materializeConflict: input.materializeConflict,
+        },
+        { contractId, message: "ship it", includeDirty: true, materializeConflict: false },
       );
       return {
         result: { kind: "accepted", result: { marker: "delivery-result" } },
@@ -159,6 +164,7 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
       contractId,
       message: "ship it",
       includeDirty: true,
+      materializeConflict: false,
     })));
     assert.deepEqual(outcomes, [
       { kind: "returned", result: { kind: "accepted", result: { marker: "delivery-result" } } },
@@ -168,7 +174,13 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
     const claim = JSON.parse(await readFile(join(pump.directory, `${id}.request.json`), "utf8")) as {
       payload: unknown;
     };
-    assert.deepEqual(claim.payload, { repoRoot: root, contractId, message: "ship it", includeDirty: true });
+    assert.deepEqual(claim.payload, {
+      repoRoot: root,
+      contractId,
+      message: "ship it",
+      includeDirty: true,
+      materializeConflict: false,
+    });
     const fact = await readRequest(parent.paths, id);
     assert.deepEqual(fact?.state === "served" && "service" in fact ? fact.service : null, {
       action: "contract.deliver",
@@ -193,6 +205,7 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
         contractId,
         message: "ship it",
         includeDirty: true,
+        materializeConflict: false,
       }), {
         kind: "accepted-reference",
         repoRoot: root,
@@ -311,6 +324,7 @@ test("contract review and delivery retain separate request permissions", async (
       repoRoot: root,
       contractId: "kei/missing",
       includeDirty: false,
+      materializeConflict: false,
     }), (error: unknown) => error instanceof AkumaBodyRequestError
       && error.diagnostic === "not-allowed: contract.deliver");
   } finally { await reviewPump.close(); }
@@ -645,21 +659,89 @@ test("CLI forwarded deliver preserves its selected Repo and uses parent Settings
 test("deliver returns without a durable reference and settles Heart voided", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-voided-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const id = randomUUID();
+  const refusal = { kind: "refused" as const, refusal: { kind: "contract-missing" } };
   const pump = await openPump(parent, {
     wait: async () => { throw new Error("unexpected wait"); },
     tell: async () => { throw new Error("unexpected tell"); },
     kill: async () => { throw new Error("unexpected kill"); },
-    deliver: async () => ({ result: { kind: "refused", refusal: { kind: "contract-missing" } } }),
+    deliver: async () => ({ result: refusal }),
   });
   try {
-    const id = randomUUID();
-    await assert.rejects(requestBodyDeliver({
+    assert.deepEqual(await requestBodyDeliver({
       directory: pump.directory,
       id,
       repoRoot: root,
       contractId: "kei/not-accepted",
       includeDirty: false,
+      materializeConflict: false,
+    }), { kind: "returned", result: refusal });
+    assert.equal((await readRequest(parent.paths, id))?.state, "voided");
+  } finally {
+    await pump.close();
+  }
+
+  const replay = await openPump(parent, {
+    wait: async () => { throw new Error("unexpected wait"); },
+    tell: async () => { throw new Error("unexpected tell"); },
+    kill: async () => { throw new Error("unexpected kill"); },
+    deliver: async () => { throw new Error("voided deliver must not replay"); },
+  });
+  try {
+    await assert.rejects(requestBodyDeliver({
+      directory: replay.directory,
+      id,
+      repoRoot: root,
+      contractId: "kei/not-accepted",
+      includeDirty: false,
+      materializeConflict: false,
     }), (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided");
+  } finally {
+    await replay.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("forwarded materialization is a live result and stores no Heart delivery reference", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-materialized-")));
+  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const materialized = {
+    kind: "integration-conflict-materialized" as const,
+    targetHead: "target-head",
+    conflictPaths: ["shared.txt"],
+    workspace: { kind: "worktree" as const, path: "/tmp/wt" },
+  };
+  let calls = 0;
+  const pump = await openPump(parent, {
+    wait: async () => { throw new Error("unexpected wait"); },
+    tell: async () => { throw new Error("unexpected tell"); },
+    kill: async () => { throw new Error("unexpected kill"); },
+    deliver: async (input) => {
+      calls += 1;
+      assert.equal(input.materializeConflict, true);
+      return { result: materialized };
+    },
+  });
+  try {
+    const id = randomUUID();
+    assert.deepEqual(await requestBodyDeliver({
+      directory: pump.directory,
+      id,
+      repoRoot: root,
+      contractId: "kei/conflicted",
+      includeDirty: false,
+      materializeConflict: true,
+    }), { kind: "returned", result: materialized });
+    assert.equal(calls, 1);
+    const claim = JSON.parse(await readFile(join(pump.directory, `${id}.request.json`), "utf8")) as {
+      payload: unknown;
+    };
+    assert.deepEqual(claim.payload, {
+      repoRoot: root,
+      contractId: "kei/conflicted",
+      includeDirty: false,
+      materializeConflict: true,
+    });
     assert.equal((await readRequest(parent.paths, id))?.state, "voided");
   } finally {
     await pump.close();
@@ -693,6 +775,7 @@ test("completion fences admission but drains a returned delivery reference", asy
       repoRoot: root,
       contractId: "kei/drained",
       includeDirty: false,
+      materializeConflict: false,
     });
     await executorStarted;
     pump.stopAdmission();
@@ -735,6 +818,7 @@ test("a terminal duplicate is reprojected when its replay fences admission", asy
       repoRoot: root,
       contractId: "kei/terminal-replay",
       includeDirty: false,
+      materializeConflict: false,
     });
   } finally {
     await first.close();
@@ -770,6 +854,7 @@ test("a terminal duplicate is reprojected when its replay fences admission", asy
       repoRoot: root,
       contractId: "kei/terminal-replay",
       includeDirty: false,
+      materializeConflict: false,
     }), {
       kind: "accepted-reference",
       repoRoot: root,
@@ -879,6 +964,7 @@ test("a vanished live receipt does not fail durable request settlement", async (
       repoRoot: root,
       contractId: "kei/missing-receipt",
       includeDirty: false,
+      materializeConflict: false,
     });
     await executorStarted;
     rmSync(pump.directory, { recursive: true, force: true });
@@ -998,6 +1084,7 @@ test("Heart leaves wait unkeyed and refuses disabled mutations before their exec
       repoRoot: root,
       contractId: "kei/blocked",
       includeDirty: false,
+      materializeConflict: false,
     }), (error: unknown) => error instanceof AkumaBodyRequestError
       && error.diagnostic === "not-allowed: contract.deliver");
     assert.deepEqual(calls, ["wait"]);

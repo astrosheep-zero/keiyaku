@@ -34,7 +34,7 @@ test("each grammar owner renders its own namespace and leaf help", () => {
   assert.match(renderRootHelp(), /--repo <path>     Select the Git repository coordinate\./u);
   assert.match(renderRootHelp(), /task \.\.\.\n    Task coordination; see `keiyaku task --help`\./u);
   assert.match(renderContractHelp("bind"), /usage: keiyaku bind \[--task <task\/\.\.\.>\]/u);
-  assert.match(renderContractHelp("deliver"), /--message <text>\] \[--include-dirty\]/u);
+  assert.match(renderContractHelp("deliver"), /--message <text>\] \[--include-dirty\] \[--materialize-conflict\]/u);
   assert.match(renderContractHelp("review"), /usage: keiyaku review .*--satisfied \| --unsatisfied/u);
   assert.equal(renderContractHelp("show"), [
     "Read one Contract guidance projection.",

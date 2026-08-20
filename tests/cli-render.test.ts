@@ -232,3 +232,56 @@ test("movement projects its deviation and reintegration coordinates", () => {
     "    head head",
   ].join("\n"));
 });
+
+test("deliver conflict text exposes target head, paths, and recovery", () => {
+  const contract = contractId("kei/conflicted");
+  const targetHead = snapshotId("target-head");
+  assert.equal(renderText({
+    kind: "refused",
+    verb: "deliver",
+    contract,
+    refusal: {
+      kind: "integration-failed",
+      contractId: contract,
+      reason: "conflict",
+      targetHead,
+      conflictPaths: ["a.txt", "z.txt"],
+      recovery: { materialize: "deliver --materialize-conflict", continue: "deliver" },
+    },
+  }), [
+    "! deliver refused — kei/conflicted",
+    "   integration-failed reason=conflict targetHead=target-head",
+    "   conflictPaths",
+    "   │ a.txt",
+    "   │ z.txt",
+    "   recovery materialize deliver --materialize-conflict",
+    "   recovery continue deliver",
+  ].join("\n"));
+});
+
+test("merge-state-present and materialized conflict render their public fields", () => {
+  const contract = contractId("kei/conflicted");
+  const targetHead = snapshotId("target-head");
+  const workspace = { kind: "worktree" as const, path: "/tmp/wt" };
+  assert.equal(renderText({
+    kind: "refused",
+    verb: "deliver",
+    contract,
+    refusal: { kind: "merge-state-present", contractId: contract, workspace },
+  }), [
+    "! deliver refused — kei/conflicted",
+    "   merge-state-present workspace=worktree path=/tmp/wt",
+  ].join("\n"));
+  assert.equal(renderText({
+    kind: "integration-conflict-materialized",
+    targetHead,
+    conflictPaths: ["a.txt", "z.txt"],
+    workspace,
+  }), [
+    "integration-conflict-materialized targetHead=target-head",
+    "   conflictPaths",
+    "   │ a.txt",
+    "   │ z.txt",
+    "   workspace worktree /tmp/wt",
+  ].join("\n"));
+});

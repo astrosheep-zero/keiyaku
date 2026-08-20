@@ -125,13 +125,41 @@ type PlacementRefusal = Readonly<{
 type IntegrationRefusal = Readonly<{
   kind: "integration-failed"
   contractId: ContractId
-  reason: "not-based-on-target" | "unrelated-histories" | "conflict"
+  reason: "not-based-on-target" | "unrelated-histories"
   targetHead: SnapshotId
-  conflictPaths?: readonly string[]
+}> | Readonly<{
+  kind: "integration-failed"
+  contractId: ContractId
+  reason: "conflict"
+  targetHead: SnapshotId
+  conflictPaths: readonly string[]
+  recovery: Readonly<{
+    materialize: "deliver --materialize-conflict"
+    continue: "deliver"
+  }>
 }> | Readonly<{
   kind: "integration-unsupported"
   contractId: ContractId
   requiredGit: "2.38"
+}>
+
+type MergeStatePresentRefusal = Readonly<{
+  kind: "merge-state-present"
+  contractId: ContractId
+  workspace: Readonly<{
+    kind: "here" | "worktree"
+    path: string
+  }>
+}>
+
+type IntegrationConflictMaterialized = Readonly<{
+  kind: "integration-conflict-materialized"
+  targetHead: SnapshotId
+  conflictPaths: readonly string[]
+  workspace: Readonly<{
+    kind: "here" | "worktree"
+    path: string
+  }>
 }>
 
 type CheckoutNotFollowableRefusal = Readonly<{
@@ -154,6 +182,7 @@ type DeliveryPreparationRefusal =
   | Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
   | DirtyWorkspaceRefusal
   | IntegrationRefusal
+  | MergeStatePresentRefusal
   | CheckoutNotFollowableRefusal
   | DeliveryWorkspaceRefusal
 
@@ -301,8 +330,11 @@ the subject actually reviewed. `KeiyakuRefusal` therefore includes
 `terms-moved` for amend, `DocumentMovedRefusal` for deliver and audit, and
 `DeliveryWorkspaceRefusal` for a here deliver whose caller workspace left its
 target. It also includes `DirtyWorkspaceRefusal` when delivery lacks explicit
-dirty authorization or when dirty submodule internals cannot be sealed or
-observed. Ordinary dirty review is accepted and returns a `workspace`
+dirty authorization, when dirty submodule internals cannot be sealed or
+observed, or when conflict materialization finds a dirty appointed workspace,
+including when `includeDirty` is also supplied. Existing Git merge state
+during materialization is `MergeStatePresentRefusal`. Ordinary dirty review is
+accepted and returns a `workspace`
 disclosure instead of a refusal. One path may appear in both staged and
 unstaged arrays when the index and worktree each differ. `shortStat` describes
 the complete final tree relative to `HEAD`; binary entries count as changed
@@ -320,6 +352,12 @@ library computes it exactly once with the JavaScript `diff` package from the
 exact whole-document before and after bytes. It is presentation data only: it
 is not document-body law, a journal fact, a receipt, cache state, or a gate
 input, and it does not cross below the library boundary.
+
+`deliver` may return `IntegrationConflictMaterialized` instead of a
+`MutationResult`. That value is the public conflict-handoff result: it has no
+journal facts, candidate identity, placement admission, or verification, and
+it is not a refusal. `KeiyakuRefusal` still owns the observation-only conflict
+failure, which includes `recovery` only on `reason: "conflict"`.
 
 Every successful mutation result contains every fact admitted by that
 invocation and the resulting contract-head scalar. Accepted deliver and

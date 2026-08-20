@@ -147,6 +147,8 @@ test("a stale document derivation is refused inside its E-decision", async () =>
       contractId: state.id,
       deriveDocument: () => derivation,
       requireBranchesToBeUpToDate: false,
+      includeDirty: false,
+      materializeConflict: false,
     }), { kind: "refused", refusal });
     assert.deepEqual(await auditOperation({
       scope,

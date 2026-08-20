@@ -32,12 +32,34 @@ import {
   type ContractObservation,
 } from "./read/status.js";
 
+export type MergeStatePresentRefusal = Readonly<{
+  kind: "merge-state-present";
+  contractId: ContractId;
+  workspace: Readonly<{
+    kind: "here" | "worktree";
+    path: string;
+  }>;
+}>;
+
+export type DeliverConflictRefusal = Readonly<{
+  kind: "integration-failed";
+  contractId: ContractId;
+  reason: "conflict";
+  targetHead: SnapshotId;
+  conflictPaths: readonly string[];
+  recovery: Readonly<{
+    materialize: "deliver --materialize-conflict";
+    continue: "deliver";
+  }>;
+}>;
+
 export type DeliveryPreparationRefusal = Readonly<{
   kind: "target-missing" | "worktree-missing";
   contractId: ContractId;
 }>
   | DirtyWorkspaceRefusal
   | IntegrationPreparationRefusal
+  | MergeStatePresentRefusal
   | TargetPlacementRefusal;
 
 export type IntentRefusal =
@@ -47,6 +69,7 @@ export type IntentRefusal =
   | BindRefusal
   | DeliverRefusal
   | DeliveryPreparationRefusal
+  | DeliverConflictRefusal
   | PlacementRefusal
   | AttestationRefusal
   | TargetInputRefusal

@@ -88,6 +88,7 @@ export type ParsedDeliver = Output & Actor & Readonly<{
   contract?: string;
   message?: string;
   includeDirty: boolean;
+  materializeConflict: boolean;
 }>;
 export type ParsedReview = Output & Actor & Readonly<{
   command: "review";
@@ -300,6 +301,7 @@ function parseDeliver(parts: ParsedParts): ParsedDeliver {
     ...(parts.actor === undefined ? {} : { actor: parts.actor }),
     ...(message === undefined ? {} : { message }),
     includeDirty: parts.flags["include-dirty"] === true,
+    materializeConflict: parts.flags["materialize-conflict"] === true,
     output: parts.output,
   };
 }

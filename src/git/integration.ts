@@ -263,6 +263,50 @@ async function mergedTree(
   });
 }
 
+/** True when the appointed workspace already has Git MERGE_HEAD. */
+export async function workspaceMergeStatePresent(
+  repository: GitRepository,
+  workspace: string,
+): Promise<boolean> {
+  const result = await runAllowingNonzero(repository, [
+    "-C",
+    workspace,
+    "rev-parse",
+    "-q",
+    "--verify",
+    "MERGE_HEAD",
+  ]);
+  if (result.status === 0) return true;
+  if (result.status === 1) return false;
+  throw new GitPlumbingError({
+    stderr: result.stderr,
+    status: result.status,
+    message: "git rev-parse --verify MERGE_HEAD failed",
+  });
+}
+
+/** Project the already-judged conflict as `git merge --no-commit <targetHead>`. */
+export async function materializeJudgedConflict(
+  repository: GitRepository,
+  workspace: string,
+  targetHead: SnapshotId,
+): Promise<void> {
+  const result = await runAllowingNonzero(repository, [
+    "-C",
+    workspace,
+    "merge",
+    "--no-commit",
+    gitObjectIdForSnapshot(targetHead),
+  ]);
+  if (result.status === 0 || result.status === 1) return;
+  throw new GitPlumbingError({
+    stdout: result.stdout,
+    stderr: result.stderr,
+    status: result.status,
+    message: "git merge --no-commit failed",
+  });
+}
+
 export async function planIntegration(
   repository: GitRepository,
   input: IntegrationCoordinates,

@@ -1,6 +1,8 @@
 import {
   materializeIntegrationSnapshot,
+  materializeJudgedConflict,
   planIntegration,
+  workspaceMergeStatePresent,
   worktreeChangeId,
 } from "../git/integration.js";
 import {
@@ -9,10 +11,11 @@ import {
   materializeTenderSnapshot,
   prepareDeliveryCommitMetadata,
 } from "../git/tender.js";
+import { worktreePath } from "../git/workspace.js";
 import { currentBranch, observeContractsForAdmissionAt } from "../git/observe.js";
 import type { AttemptContext } from "../core/decide.js";
 import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ContractId, ContractState, DeliverData } from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState, DeliverData, SnapshotId } from "../core/facts/types.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import type { CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
@@ -21,9 +24,11 @@ import { completeCandidate, type CompletionEvidence } from "./completion.js";
 import { appointmentFor, readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import type {
   AttemptDecision,
+  DeliverConflictRefusal,
   DeliveryPreparationRefusal,
   DocumentDerivation,
   IntentOutcome,
+  IntentRefusal,
   MutationOperationInput,
 } from "./operations.js";
 import { timestamp } from "./operations.js";
@@ -32,13 +37,33 @@ type DeliveryIdentity = DeliverData;
 export type VerificationReuse = CurrentVerifiedAttestation;
 export type DeliverValue = DeliveryIdentity & CompletionEvidence;
 
+export type AppointedWorkspace = Readonly<{
+  kind: "here" | "worktree";
+  path: string;
+}>;
+
+export type IntegrationConflictMaterialized = Readonly<{
+  kind: "integration-conflict-materialized";
+  targetHead: SnapshotId;
+  conflictPaths: readonly string[];
+  workspace: AppointedWorkspace;
+}>;
+
+const DELIVER_CONFLICT_RECOVERY = Object.freeze({
+  materialize: "deliver --materialize-conflict",
+  continue: "deliver",
+} as const);
+
 type DeliverOperationInput = MutationOperationInput & Readonly<{
   deriveDocument: (state: ContractState) => DocumentDerivation;
   message?: string;
   requireBranchesToBeUpToDate: boolean;
   includeDirty: boolean;
+  materializeConflict: boolean;
   signal?: AbortSignal;
 }>;
+
+type IntegrationConflictRefusal = Extract<IntentRefusal, { kind: "integration-failed"; reason: "conflict" }>;
 
 type DeliveryFailure =
   | DeliveryPreparationRefusal
@@ -225,7 +250,92 @@ async function completeDelivery(
   });
 }
 
-export async function deliverOperation(input: DeliverOperationInput): Promise<IntentOutcome<DeliverValue>> {
+function isIntegrationConflict(refusal: IntentRefusal): refusal is IntegrationConflictRefusal {
+  return refusal.kind === "integration-failed" && refusal.reason === "conflict";
+}
+
+function conflictDeliverRefusal(refusal: IntegrationConflictRefusal): DeliverConflictRefusal {
+  if (refusal.conflictPaths === undefined) throw new Error("conflicted integration is missing conflict paths");
+  return {
+    kind: "integration-failed",
+    contractId: refusal.contractId,
+    reason: "conflict",
+    targetHead: refusal.targetHead,
+    conflictPaths: refusal.conflictPaths,
+    recovery: DELIVER_CONFLICT_RECOVERY,
+  };
+}
+
+async function appointedDeliverWorkspace(
+  input: DeliverOperationInput,
+): Promise<
+  | Readonly<{ workspace: AppointedWorkspace; coordinates: ContractState["coordinates"] }>
+  | { kind: "refused"; refusal: DeliveryPreparationRefusal }
+> {
+  const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const state = contractState(observation.decision, input.contractId);
+  if (state === null) return { kind: "refused", refusal: { kind: "worktree-missing", contractId: input.contractId } };
+  if (state.coordinates.workspace === "here") {
+    const path = await input.resolveHereWorkspace?.(state.id);
+    if (path === undefined) {
+      return { kind: "refused", refusal: { kind: "worktree-missing", contractId: input.contractId } };
+    }
+    return { workspace: { kind: "here", path }, coordinates: state.coordinates };
+  }
+  const appointment = appointmentFor(await readPlaceRegister(input.scope), input.contractId);
+  if (appointment === undefined) {
+    return { kind: "refused", refusal: { kind: "worktree-missing", contractId: input.contractId } };
+  }
+  return {
+    workspace: { kind: "worktree", path: worktreePath(input.scope, appointment.place) },
+    coordinates: state.coordinates,
+  };
+}
+
+async function materializeDeliverConflict(
+  input: DeliverOperationInput,
+  refusal: IntegrationConflictRefusal,
+): Promise<IntentOutcome<DeliverValue> | IntegrationConflictMaterialized> {
+  if (refusal.conflictPaths === undefined) throw new Error("conflicted integration is missing conflict paths");
+  const appointed = await appointedDeliverWorkspace(input);
+  if ("kind" in appointed) return appointed;
+  const { workspace, coordinates } = appointed;
+  if (await workspaceMergeStatePresent(input.scope, workspace.path)) {
+    return {
+      kind: "refused",
+      refusal: { kind: "merge-state-present", contractId: input.contractId, workspace },
+    };
+  }
+  const tender = await captureTender(input.scope, {
+    contractId: input.contractId,
+    coordinates,
+    workspacePath: workspace.path,
+  });
+  if (tender.kind === "refused") return tender;
+  if (tender.data.dirty || tender.data.changes.submodules.length > 0) {
+    return { kind: "refused", refusal: await dirtyTenderRefusal(input.scope, input.contractId, tender.data) };
+  }
+  await materializeJudgedConflict(input.scope, workspace.path, refusal.targetHead);
+  return {
+    kind: "integration-conflict-materialized",
+    targetHead: refusal.targetHead,
+    conflictPaths: refusal.conflictPaths,
+    workspace,
+  };
+}
+
+async function finishDeliverRefusal(
+  input: DeliverOperationInput,
+  refusal: IntentRefusal,
+): Promise<IntentOutcome<DeliverValue> | IntegrationConflictMaterialized> {
+  if (!isIntegrationConflict(refusal)) return { kind: "refused", refusal };
+  if (input.materializeConflict !== true) return { kind: "refused", refusal: conflictDeliverRefusal(refusal) };
+  return await materializeDeliverConflict(input, refusal);
+}
+
+export async function deliverOperation(
+  input: DeliverOperationInput,
+): Promise<IntentOutcome<DeliverValue> | IntegrationConflictMaterialized> {
   const attempts = mintAttempts({ entryCount: 2 });
   let first: Extract<AttemptDecision<PreparedDelivery>, { kind: "accepted" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
@@ -234,7 +344,7 @@ export async function deliverOperation(input: DeliverOperationInput): Promise<In
       first = result;
       break;
     }
-    if (result.kind === "refused") return result;
+    if (result.kind === "refused") return await finishDeliverRefusal(input, result.refusal);
     if (result.kind === "publication-failed") return { kind: "retry", reason: result };
     if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
   }

@@ -118,13 +118,16 @@ facts remain in each target Heart. Verb results and operation failures travel on
 in the live receipt and never become permission refusals or a generic result store.
 
 `contract.deliver` carries the selected Repo's normalized primary-worktree
-coordinate, a complete ContractId, optional message, and `includeDirty`. The
+coordinate, a complete ContractId, optional message, `includeDirty`, and
+`materializeConflict`. The
 parent Body reconstructs that Repo rather than replacing it with the parent
 World, supplies the authenticated requester as actor, reads Settings scoped to
 the selected Repo for Git policy and hooks, and enters the same forced-local
 Library deliver executor used by ordinary delivery. A live accepted receipt
-carries the complete ordinary mutation result; Heart stores only the Repo
-coordinate, ContractId, and owner-minted delivery fact id. A later pump
+carries the complete ordinary mutation result; a live conflict or materialized
+result is the same typed value as local execution. Heart stores only the Repo
+coordinate, ContractId, and owner-minted delivery fact id, and never stores a
+materialization result. A later pump
 projects that durable accepted reference for the same request id without
 replaying delivery. A normal return without that owner-minted reference, or an
 executor throw or cancellation, settles Heart `voided`; the durable fact is the

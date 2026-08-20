@@ -66,6 +66,7 @@ export function upstreamFor(
         requester: input.requester,
         ...(input.message === undefined ? {} : { message: input.message }),
         includeDirty: input.includeDirty,
+        materializeConflict: input.materializeConflict,
         requireBranchesToBeUpToDate: requireBranchesToBeUpToDateFrom({ settings: configuration }),
         hooks: worktreeHooksFrom({ settings: configuration }),
         signal: input.signal,

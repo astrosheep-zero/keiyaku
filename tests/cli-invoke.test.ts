@@ -1220,3 +1220,79 @@ test("valid acquired stdin bytes pass through unchanged", async () => {
   const id = acceptedContract(bound);
   assert.equal((await observeContract(await repositoryAt(repository.path), id)).state?.terms?.document.bytes, source);
 });
+
+async function conflictedDeliverCommand() {
+  const repository = repositoryWithMain();
+  writeFileSync(join(repository.path, "shared.txt"), "base\n");
+  repository.run(["add", "shared.txt"]);
+  repository.run(["commit", "--quiet", "-m", "base"]);
+  const bound = await invokeWithDocument(
+    repository.path,
+    ["bind", "--target", "refs/heads/main", "--actor", "external-test", "-"],
+    contractDocument("Conflicted delivery"),
+  );
+  const id = acceptedContract(bound);
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), id);
+  writeFileSync(join(repository.path, "shared.txt"), "target\n");
+  repository.run(["add", "shared.txt"]);
+  repository.run(["commit", "--quiet", "-m", "target change"]);
+  const targetHead = repository.run(["rev-parse", "HEAD"]).trim();
+  writeFileSync(join(worktree, "shared.txt"), "tender\n");
+  repository.run(["-C", worktree, "add", "shared.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
+  const command = (argv: readonly string[]) => invoke(
+    parseArgv(["-C", worktree, ...argv]),
+    { environment: {}, readStdin: () => "" },
+  );
+  return { repository, id, worktree, targetHead, command };
+}
+
+test("deliver conflict JSON and text expose recovery without mutating the workspace", async () => {
+  const { repository, id, worktree, targetHead, command } = await conflictedDeliverCommand();
+  const result = await command(["deliver", "--actor", "external-test"]);
+  assert.deepEqual(result, {
+    kind: "refused",
+    verb: "deliver",
+    contract: id,
+    refusal: {
+      kind: "integration-failed",
+      contractId: id,
+      reason: "conflict",
+      targetHead,
+      conflictPaths: ["shared.txt"],
+      recovery: { materialize: "deliver --materialize-conflict", continue: "deliver" },
+    },
+  });
+  const text = renderText(result);
+  assert.match(text, /reason=conflict/u);
+  assert.match(text, /recovery materialize deliver --materialize-conflict/u);
+  assert.match(text, /recovery continue deliver/u);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)).refusal.recovery, {
+    materialize: "deliver --materialize-conflict",
+    continue: "deliver",
+  });
+  assert.throws(() => repository.run(["-C", worktree, "rev-parse", "-q", "--verify", "MERGE_HEAD"]));
+});
+
+test("deliver --materialize-conflict returns the exact public materialization object", async () => {
+  const { repository, id, worktree, targetHead, command } = await conflictedDeliverCommand();
+  const result = await command(["deliver", "--materialize-conflict", "--actor", "external-test"]);
+  assert.deepEqual(result, {
+    kind: "integration-conflict-materialized",
+    targetHead,
+    conflictPaths: ["shared.txt"],
+    workspace: { kind: "worktree", path: worktree },
+  });
+  assert.equal(repository.run(["-C", worktree, "rev-parse", "MERGE_HEAD"]).trim(), targetHead);
+  const text = renderText(result);
+  assert.match(text, /integration-conflict-materialized targetHead=/u);
+  assert.match(text, /workspace worktree /u);
+  const json = JSON.parse(JSON.stringify(result));
+  assert.equal(json.kind, "integration-conflict-materialized");
+  assert.equal(json.targetHead, targetHead);
+  assert.deepEqual(json.conflictPaths, ["shared.txt"]);
+  assert.deepEqual(json.workspace, { kind: "worktree", path: worktree });
+  const state = (await observeContract(await repositoryAt(repository.path), id)).state;
+  assert.equal(state?.delivery, null);
+  assert.equal(state?.terminal, null);
+});

@@ -595,9 +595,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("git/integration.ts", [
           "materializeIntegrationSnapshot",
+          "materializeJudgedConflict",
           "planIntegration",
+          "workspaceMergeStatePresent",
           "worktreeChangeId",
         ]),
+        any("git/workspace.ts", ["worktreePath"]),
         any("git/tender.ts", [
           "captureTender",
           "dirtyTenderRefusal",
@@ -614,6 +617,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "ContractId",
           "ContractState",
           "DeliverData",
+          "SnapshotId",
         ]),
         any("core/verbs/deliver.ts", [
           "DeliverInput",
@@ -638,9 +642,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ]),
         types("protocol/operations.ts", [
           "AttemptDecision",
+          "DeliverConflictRefusal",
           "DeliveryPreparationRefusal",
           "DocumentDerivation",
           "IntentOutcome",
+          "IntentRefusal",
           "MutationOperationInput",
           "PlacementStop",
           "VerificationStop",
@@ -858,7 +864,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/amend.ts", ["amendOperation"]),
         any("protocol/arc.ts", ["arcOperation"]),
         types("protocol/audit.ts", ["AuditReport"]),
-        any("protocol/deliver.ts", ["deliverOperation", "DeliverValue", "VerificationReuse"]),
+        any("protocol/deliver.ts", [
+          "deliverOperation",
+          "DeliverValue",
+          "IntegrationConflictMaterialized",
+          "VerificationReuse",
+        ]),
         types("protocol/reconcile.ts", ["ReconcileReport"]),
         any("protocol/review.ts", ["reviewOperation", "ReviewValue"]),
         any("dispatch/index.ts", ["Dispatch", "readDispatchesAt"]),

@@ -90,12 +90,14 @@ typed usage refusal when this test has no unique match.
 Inside an Akuma request channel, `deliver` still resolves its Contract
 selector to one complete ContractId before publishing the claim and preserves
 the selected Contract Repo as its normalized primary-worktree coordinate. The
-claim also contains only that id, optional message, and `includeDirty`; the
+claim also contains only that id, optional message, `includeDirty`, and
+`materializeConflict`; the
 direct parent reconstructs the selected Repo, reads Settings and hooks scoped
 to it at execution time, and uses the same local Contract executor. It never
 substitutes the parent World for an explicit `--repo`. The CLI does not create
 a second delivery path or carry its own actor or Git policy across the channel.
-The live command receives the ordinary Contract result; later request
+The live command receives the ordinary Contract result, including a
+materialized conflict value; later request
 settlement neither replays delivery nor fabricates that live result.
 
 Command syntax:
@@ -103,7 +105,7 @@ Command syntax:
 ```text
 bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] [--json] -
 amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [--json] [-]
-deliver [<contract>|@<contract>] [--message <text>] [--actor <actor>] [--json]
+deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--actor <actor>] [--json]
 review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>] [--json]
 abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--json]
 arc [<contract>|@<contract>] [--actor <actor>] [--json] -
@@ -221,7 +223,11 @@ unselected future-kind records are not validated.
 
 `deliver` and `audit` require a clean workspace unless `--include-dirty`
 authorizes the complete non-ignored final tree; dirty submodule internals still
-refuse. Their up-to-date policy comes only from Settings. `review` requires one
+refuse. `--materialize-conflict` is deliver-only and is consulted only after
+the one integration judge returns `reason: "conflict"`. On conflict, omission
+returns the typed failure with recovery values; the flag projects that judged
+conflict into the appointed workspace. It does not override the clean-workspace
+materialization precondition. Their up-to-date policy comes only from Settings. `review` requires one
 verdict and one summary source, has no dirty authorization, and discloses
 ordinary dirty bytes when accepted. `--diff` maps to audit `showDiff`; the value
 lives only at `report.candidate.diff`, including `""`. `--show-diff-body` is

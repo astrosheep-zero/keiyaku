@@ -1,5 +1,5 @@
 import type { BindDraftReceipt, RefusedResult } from "../result.js";
-import type { KeiyakuRefusal } from "../../index.js";
+import type { IntegrationConflictMaterialized, KeiyakuRefusal } from "../../index.js";
 import { displayColumns, gitShortStat, renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 type DirtyWithOption = Extract<KeiyakuRefusal, { kind: "dirty-workspace" }> & {
@@ -73,7 +73,21 @@ export function renderRefusalFacts(
       ...renderOpaqueBlock(refusalHead(refusal.kind, identity, [`reason=${refusal.reason}`, `targetHead=${refusal.targetHead}`]), indent, columns),
     ];
     if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflictPaths", refusal.conflictPaths, indent, columns));
+    if ("recovery" in refusal && refusal.recovery !== undefined) {
+      wrap(lines, `recovery materialize ${refusal.recovery.materialize}`, indent, columns);
+      wrap(lines, `recovery continue ${refusal.recovery.continue}`, indent, columns);
+    }
     return lines;
+  }
+  if (refusal.kind === "merge-state-present") {
+    return renderOpaqueBlock(
+      refusalHead(refusal.kind, identity, [
+        `workspace=${refusal.workspace.kind}`,
+        `path=${refusal.workspace.path}`,
+      ]),
+      indent,
+      columns,
+    );
   }
   if (refusal.kind === "integration-unsupported") {
     return renderOpaqueBlock(refusalHead(refusal.kind, identity, [`requiredGit=${refusal.requiredGit}`]), indent, columns);
@@ -117,6 +131,23 @@ export function renderRefusal(result: RefusedResult, context?: TextRenderContext
   }
   const output = lines.join("\n");
   return result.draft === undefined ? output : `${output}\n${renderBindDraftReceipt(result.draft)}`;
+}
+
+export function renderConflictMaterialized(
+  result: IntegrationConflictMaterialized,
+  context?: TextRenderContext,
+): string {
+  const columns = context?.columns ?? 80;
+  const indent = "   ";
+  return [
+    ...renderOpaqueBlock(
+      `integration-conflict-materialized targetHead=${result.targetHead}`,
+      "",
+      columns,
+    ),
+    ...collectionLines("conflictPaths", result.conflictPaths, indent, columns),
+    ...renderOpaqueBlock(`workspace ${result.workspace.kind} ${result.workspace.path}`, indent, columns),
+  ].join("\n");
 }
 
 export function renderBindDraftReceipt(receipt: BindDraftReceipt): string {

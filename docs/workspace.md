@@ -81,9 +81,15 @@ for duplicate matching paths. Status and observe receive that read-facing fold
 through the Contract status projection, and Kanshi supplies it to that same
 projection. Protocol and tender consumers receive its appointment result rather
 than discovering worktrees themselves. One matching appointment supplies the
-workspace path for projection, audit, tender, review, target handling, and
+workspace path for projection, audit, tender, review, target handling,
+conflict materialization, and
 terminal cleanup; no
-operation consults invocation cwd after bind. No matching appointment uses the
+operation consults invocation cwd after bind. Conflict materialization may run
+only when that appointed workspace is clean and has no existing Git merge
+state. A dirty workspace reuses `dirty-workspace` even when `includeDirty` is
+true. Existing merge state refuses `merge-state-present` with the appointed
+`{ kind, path }`. Neither refusal mutates bytes, refs, facts, pins, or
+lifecycle. Keiyaku adds no merge-abort command. No matching appointment uses the
 existing unavailable or `worktree-missing` behavior. Multiple valid matching
 appointments are authority corruption. Pre-admission delivery, review, and
 audit, and nonterminal projection or reconciliation, throw
