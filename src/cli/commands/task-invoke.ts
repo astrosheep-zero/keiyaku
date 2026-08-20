@@ -1,5 +1,6 @@
 import {
   Tasks,
+  observeTaskDetails,
   type BlockedTaskList,
   type TaskBatchResult,
   type TaskCompositionResult,
@@ -23,8 +24,9 @@ import { decodeTaskMutationRequest, type TaskMutationRequest } from "../../task/
 import { resolveTaskNamespaceContext, writeTaskNamespaceContext } from "../../task/context.js";
 import { CliUsageError } from "../usage.js";
 
+export type TaskShowResult = TaskDetail | readonly TaskDetail[] | Extract<TaskMutationResult, { kind: "refused" }>;
 export type TaskInvocationResult = TaskMutationResult | TaskUpdateResult | TaskBatchResult | TaskCompositionResult
-  | TaskDetail | TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskDoctorReport | TaskNamespaceResult
+  | TaskShowResult | TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskDoctorReport | TaskNamespaceResult
   | TaskWorldObservation;
 
 type TaskWorldRead = TaskList | BlockedTaskList | TaskQueryResult | TaskDoctorReport;
@@ -197,8 +199,10 @@ async function invokeRead(tasks: TaskProduct, command: ParsedTaskCommand, curren
   const id = command.positionals[0]!;
   switch (command.action) {
     case "show": {
-      const detail = await tasks.task({ id }).read();
-      return detail ?? { kind: "refused", refusal: { kind: "task-missing", taskId: id as TaskId } };
+      const ids = command.positionals.map((taskId) => tasks.task({ id: taskId }).id);
+      const observed = await observeTaskDetails(tasks.root, ids);
+      if (observed.kind !== "accepted") return observed;
+      return command.output === "json" || observed.value.length > 1 ? observed.value : observed.value[0]!;
     }
     case "ls": return tasks.list({ selection: command.flags.all === true ? "all" : command.flags.closed === true ? "closed" : "active", ...readScope(command, current), ...(limit(command) === undefined ? {} : { limit: limit(command)! }) });
     case "ready": return tasks.ready({ ...readScope(command, current), ...(value(command, "parent") === undefined ? {} : { parent: value(command, "parent")! }), ...(limit(command) === undefined ? {} : { limit: limit(command)! }) });

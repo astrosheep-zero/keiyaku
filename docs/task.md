@@ -20,9 +20,13 @@ Task world.
 A `TaskId` is `task/<local-id>` at the root or
 `task/<namespace...>/<local-id>` in a nested namespace. Every segment uses the
 registered human-segment grammar. Creation derives the immutable local ID from
-the title with the shared identity normalizer and a 48-byte fitted stem. A
-closed task still occupies its coordinate. Collision allocation uses the first
-free numeric suffix beginning at `-2`, fitted inside the same byte limit.
+the title with the shared identity normalizer. For newly allocated Tasks only,
+the local stem accumulates normalized hyphen-separated words without splitting
+a word and stops before the next word would exceed 32 Unicode code points; the
+first word is retained even when it is longer than that budget. A closed task
+still occupies its coordinate. Collision allocation uses the first free numeric
+suffix beginning at `-2` after the fitted base stem. Existing TaskIds and
+references are never rewritten.
 Callers never provide an arbitrary ID, and title updates never move authority.
 
 The world-local current namespace is context, not Task or contract
@@ -213,6 +217,14 @@ integer from 1 through 1000. The fixed priority-then-TaskId order is stable for
 one observed board snapshot; Task owns no continuation cursor or observer
 session.
 
+Each compact `TaskRow` contains `id`, `title`, `state`, `priority`,
+`disposition`, persisted `updatedAt`, `bodyPresent`, and optional direct-child
+counts `{ live, total }`. `bodyPresent` is true exactly when the persisted body
+is nonempty. Child counts come from the one relation projection: `total` counts
+all direct children and `live` excludes `done` and `drop`; the field is absent
+when there are no children. `TaskQueryRow` carries these fields in addition to
+its existing parent, needs, blocks, createdAt, and updatedAt facts.
+
 `add` accepts structured title, namespace, body, note, priority, relations,
 optional initial state, optional actor, and signal. `addDocument` accepts
 creation-document Markdown plus an optional namespace, actor, and signal. The
@@ -254,10 +266,13 @@ next item and never interrupts an atomic replacement.
 
 ## Views
 
-`show <TaskId>` is world-scoped and returns exact fields, body, direct needs
+`show <TaskId>...` is world-scoped and returns exact fields, body, direct needs
 with released status, unresolved blockers, derived blocks/children/
 supersededBy/related, parent, and outgoing supersedes
-bytes when present.
+bytes when present. Multiple complete TaskIds are observed and rendered in input
+order (one blank line between text entries; a JSON array). If any ID is invalid
+or missing, the invocation returns one usage or typed missing refusal and no
+partial result.
 `tree <TaskId>` follows parent decomposition from one observed board.
 Starting at the addressed root, it recursively selects Tasks whose `parent`
 equals the current TaskId, in canonical TaskId byte order. A node seen again
@@ -275,7 +290,9 @@ sort by priority then TaskId bytes and contain TaskId, priority, disposition,
 and title. Every list result is bounded by its optional `limit` and carries an
 honest `total` for the complete matching set; no result requires title/body
 prose inference. Blocked rows add unresolved blocker references only. File
-mtime is never read.
+mtime is never read. Text pages that are truncated state the exact remaining
+count and print one complete repeat command with `--limit` equal to `total`;
+JSON remains the typed page shape without a footer.
 
 `query` is the general read surface over one Task board snapshot. Its public
 input is a typed expression tree, never a shell string. Task owns the exported

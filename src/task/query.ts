@@ -1,7 +1,7 @@
 import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
 import { formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import type { BlockedTaskRow, TaskBoard, TaskRef, TaskRelationProjection, TaskRow } from "./board.js";
-import { taskBlocked, taskDisposition, taskRef } from "./board.js";
+import { projectTaskRow, taskBlocked, taskDisposition, taskRef } from "./board.js";
 
 export const DEFAULT_TASK_LIMIT = 100;
 export const MAX_TASK_LIMIT = 1_000;
@@ -263,7 +263,7 @@ function matches(
 }
 function row(board: TaskBoard, relations: TaskRelationProjection, task: TaskDocument): TaskQueryRow {
   return {
-    id: task.id, title: task.title, state: task.state, priority: task.priority, disposition: taskDisposition(board, task),
+    ...projectTaskRow(board, relations, task),
     parent: task.parent,
     needs: task.needs.map((need) => taskRef(board, need)),
     blocks: relations.blocks(task.id),

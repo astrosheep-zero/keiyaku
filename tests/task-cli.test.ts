@@ -162,6 +162,26 @@ test("Task commands reject the removed Contract association flags", () => {
   assert.throws(() => parseArgv(["task", "add", "Old association", "--contract", "kei/example"]), /option --contract is not valid for task add/u);
   assert.throws(() => parseArgv(["task", "update", "task/example", "--no-contract"]), /option --no-contract is not valid for task update/u);
 });
+test("plural show is all-or-nothing and preserves input order", async () => {
+  const root = world();
+  for (const title of ["First detail", "Second detail", "Third detail"]) {
+    const added = await invoke(parseArgv(["-C", root, "task", "add", title])) as TaskInvocationResult;
+    assert.equal((added as { kind: string }).kind, "accepted");
+  }
+  const ids = ["task/first-detail", "task/second-detail", "task/third-detail"] as const;
+  const textCommand = parseArgv(["task", "show", ...ids]).command;
+  const textResult = await invoke(parseArgv(["-C", root, "task", "show", ...ids])) as TaskInvocationResult;
+  assert.deepEqual((textResult as readonly { task: { id: string } }[]).map((detail) => detail.task.id), ids);
+  if (textCommand.command !== "task") throw new Error("not a task command");
+  assert.equal(renderTaskText(textCommand, textResult).split("\n\n").length, 3);
+
+  const jsonResult = await invoke(parseArgv(["-C", root, "task", "show", ...ids, "--json"])) as TaskInvocationResult;
+  assert.deepEqual((jsonResult as readonly { task: { id: string } }[]).map((detail) => detail.task.id), ids);
+
+  const missing = await invoke(parseArgv(["-C", root, "task", "show", ids[0], "task/missing", ids[2]])) as TaskInvocationResult;
+  assert.deepEqual(missing, { kind: "refused", refusal: { kind: "task-missing", taskId: "task/missing" } });
+  assert.doesNotMatch(renderTaskText(textCommand, missing), /first-detail|third-detail/u);
+});
 test("task invocation works outside Git and consumes stdin only when selected", async () => {
   const root = world(); let reads = 0;
   const add = await invoke(parseArgv(["-C", root, "task", "add", "Native CLI", "--state", "on_hold", "--note", "initial"]), { readStdin: () => { reads += 1; return "unused"; } }) as TaskInvocationResult;
@@ -370,7 +390,7 @@ test("task compose and views flow through native results", async () => {
   const command = parseArgv(["task", "ls"]).command;
   if (command.command !== "task") throw new Error("not a task command");
   assert.match(renderTaskText(command, listed), /^tasks 2$/mu);
-  assert.match(renderTaskText(command, listed), /^○ task\/parent · P2 ready — Parent$/mu);
+  assert.match(renderTaskText(command, listed), /^○ task\/parent · P2 ready · updated .* · no body · children 1\/1 live — Parent$/mu);
   assert.equal(taskExitCode(listed), 0);
 });
 
@@ -383,7 +403,7 @@ test("task query keeps text and JSON membership on one typed page", async () => 
   const command = parseArgv(argv).command;
   if (command.command !== "task") throw new Error("not a task command");
   assert.match(renderTaskText(command, result), /^query 1$/mu);
-  assert.match(renderTaskText(command, result), /^○ task\/critical-auth · P0 ready — Critical auth$/mu);
+  assert.match(renderTaskText(command, result), /^○ task\/critical-auth · P0 ready · updated .* · no body — Critical auth$/mu);
   const hostileArgv = ["-C", root, "task", "query", "--where", "title ~ \"auth\nforged heading\""] as const;
   const hostile = await invoke(parseArgv(hostileArgv)) as TaskInvocationResult;
   const hostileCommand = parseArgv(hostileArgv).command;
@@ -504,10 +524,10 @@ test("built CLI task tree follows parent decomposition at 36 columns", async () 
     assert.equal(added.kind, "accepted");
   }
   const ids = {
-    root: "task/alpha-parent-decomposition-root-for-tree-smoke",
-    need: "task/need-only-blocker-outside-the-tree",
-    child: "task/child-under-the-alpha-parent-root",
-    nested: "task/nested-grandchild-under-the-child",
+    root: "task/alpha-parent-decomposition-root",
+    need: "task/need-only-blocker-outside-the",
+    child: "task/child-under-the-alpha-parent",
+    nested: "task/nested-grandchild-under-the",
   };
   assert.equal((await invoke(parseArgv(["-C", root, "task", "update", ids.child, "--parent", ids.root])) as { kind: string }).kind, "accepted");
   assert.equal((await invoke(parseArgv(["-C", root, "task", "update", ids.nested, "--parent", ids.child])) as { kind: string }).kind, "accepted");
@@ -568,7 +588,7 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   const listed = await invoke(parseArgv(["-C", root, "task", "ls", "--limit", "1"])) as TaskInvocationResult;
   const listedText = renderTaskText(lsCommand, listed);
   assert.match(listedText, /^tasks 1 of 3 · limit 1$/mu);
-  assert.match(listedText, /^! task\/blocked · P2 blocked — Blocked$/mu);
+  assert.match(listedText, /^! task\/blocked · P2 blocked · updated .* — Blocked$/mu);
   assert.doesNotMatch(listedText, /needs |created |parent /u);
 
   const blockedCommand = parseArgv(["task", "blocked"]).command;
@@ -576,7 +596,7 @@ test("Task list, blocked, show, mutation, and batch text use one scan grammar", 
   const blocked = await invoke(parseArgv(["-C", root, "task", "blocked"])) as TaskInvocationResult;
   const blockedText = renderTaskText(blockedCommand, blocked);
   assert.match(blockedText, /^blocked 1$/mu);
-  assert.match(blockedText, /^! task\/blocked · P2 blocked — Blocked$/mu);
+  assert.match(blockedText, /^! task\/blocked · P2 blocked · updated .* — Blocked$/mu);
   assert.match(blockedText, /^  needs task\/need · open$/mu);
 
   await invoke(parseArgv(["-C", root, "task", "add", "Open need"]));

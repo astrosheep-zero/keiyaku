@@ -20,7 +20,7 @@ import type {
   TaskUpdateResult,
   TaskView,
 } from "../../task/index.js";
-import type { TaskInvocationResult, TaskWorldObservation } from "../commands/task-invoke.js";
+import type { TaskInvocationResult, TaskShowResult, TaskWorldObservation } from "../commands/task-invoke.js";
 import type { ParsedTaskCommand } from "../commands/task.js";
 import { outcomeLines, receiptPayload } from "./receipt.js";
 import { displayColumns, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
@@ -28,7 +28,7 @@ import { displayColumns, renderTextBlock, safeText, type TextRenderContext } fro
 type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskNamespaceResult;
 type TaskFailure = Extract<TaskMutationResult, { kind: "refused" | "retry" }> | Extract<TaskCompositionResult, { kind: "refused" }>;
 type TaskWord = TaskRow["disposition"] | TaskView["state"] | TaskRef["state"];
-type TaskEntity = Readonly<{ id: string; priority: number | null; word: TaskWord; title: string | null }>;
+type TaskEntity = Readonly<{ id: string; priority: number | null; word?: TaskWord; facts?: string; title: string | null }>;
 type RefusalProjection = Readonly<{ line: string; diagnostic?: string }>;
 type ComposeStop = Extract<TaskCompositionResult, { kind: "incomplete" }>["stopped"];
 
@@ -54,21 +54,17 @@ function priorityText(priority: number | null): string {
   return priority === null ? "P?" : `P${priority}`;
 }
 
-function scanUnit(id: string, priority: number | null, word: string): string {
-  return `${markFor(word)} ${id} · ${priorityText(priority)} ${word}`;
+function scanUnit(id: string, priority: number | null, word: TaskWord | undefined): string {
+  return word === undefined ? `${markFor("ready")} ${id} · ${priorityText(priority)}` : `${markFor(word)} ${id} · ${priorityText(priority)} ${word}`;
 }
 
 function entityLines(entity: TaskEntity, columns: number, indent = ""): readonly string[] {
-  const scan = `${indent}${scanUnit(entity.id, entity.priority, entity.word)}`;
+  const scan = `${indent}${scanUnit(entity.id, entity.priority, entity.word)}${entity.facts === undefined ? "" : ` · ${entity.facts}`}`;
   if (entity.title === null || entity.title.length === 0) return [scan];
   const title = safeText(entity.title);
   const inline = `${scan} — ${title}`;
   if (displayColumns(inline) <= columns) return [inline];
   return [`${scan} —`, ...renderTextBlock(title, `${indent}  `, columns)];
-}
-
-function listEntity(item: TaskRow): TaskEntity {
-  return { id: item.id, priority: item.priority, word: item.disposition, title: item.title };
 }
 
 function stateEntity(task: TaskView | TaskRef & { priority?: number | null }): TaskEntity {
@@ -112,22 +108,69 @@ function pageHeading(view: string, page: TaskPage<TaskRow | TaskQueryRow>): stri
   return `${view} ${page.returned}`;
 }
 
-function renderListRow(item: TaskRow | BlockedTaskRow | TaskQueryRow, columns: number): readonly string[] {
-  const lines = [...entityLines(listEntity(item), columns)];
+function updatedAge(updatedAt: string): string {
+  const elapsed = Math.max(0, performance.timeOrigin + performance.now() - Date.parse(updatedAt));
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function compactFacts(item: TaskRow): string {
+  return [
+    `updated ${updatedAge(item.updatedAt)}`,
+    ...(item.bodyPresent ? [] : ["no body"]),
+    ...(item.children === undefined ? [] : [`children ${item.children.live}/${item.children.total} live`]),
+  ].join(" · ");
+}
+
+function listEntity(item: TaskRow, omitDisposition: boolean): TaskEntity {
+  return {
+    id: item.id,
+    priority: item.priority,
+    ...(omitDisposition ? {} : { word: item.disposition }),
+    facts: compactFacts(item),
+    title: item.title,
+  };
+}
+
+function renderListRow(item: TaskRow | BlockedTaskRow | TaskQueryRow, columns: number, omitDisposition: boolean): readonly string[] {
+  const lines = [...entityLines(listEntity(item, omitDisposition), columns)];
   if ("blockers" in item) {
     for (const blocker of item.blockers) lines.push(`  needs ${blocker.id} · ${blocker.state}`);
   }
   return lines;
 }
 
+function shellQuote(value: string): string { return `'${value.replaceAll("'", "'\\''")}'`; }
+
+function recoveryCommand(command: ParsedTaskCommand, total: number): string {
+  const parts = ["keiyaku", "task", command.action];
+  if (command.action === "ls") {
+    if (command.flags.closed === true) parts.push("--closed");
+    if (command.flags.all === true) parts.push("--all");
+  }
+  if (command.flags.world === true) parts.push("--world");
+  if ((command.action === "ready" || command.action === "blocked") && typeof command.flags.parent === "string") {
+    parts.push("--parent", command.flags.parent);
+  }
+  if (command.action === "query" && typeof command.flags.where === "string") parts.push("--where", shellQuote(command.flags.where));
+  if (command.action === "query" && typeof command.flags.sort === "string") parts.push("--sort", command.flags.sort);
+  parts.push("--limit", String(total));
+  return parts.join(" ");
+}
+
 function renderRows(command: ParsedTaskCommand, result: TaskList | BlockedTaskList | TaskQueryResult, columns: number): string {
   if (result.kind !== "accepted") return renderFailure(command.action, result, columns);
   const view = command.action === "ls" ? "tasks" : command.action;
-  return [pageHeading(view, result.value), ...result.value.rows.flatMap((item) => renderListRow(item, columns))].join("\n");
+  const footer = result.value.truncated
+    ? ["", `  + ${result.value.total - result.value.returned} more not shown`, `    ${recoveryCommand(command, result.value.total)}`]
+    : [];
+  return [pageHeading(view, result.value), ...result.value.rows.flatMap((item) => renderListRow(item, columns, command.action === "ready")), ...footer].join("\n");
 }
 
-function renderShow(result: TaskDetail | TaskMutationResult, columns: number): string {
-  if ("kind" in result) return result.kind === "accepted" ? entityLines(stateEntity(result.value), columns).join("\n") : renderFailure("show", result, columns);
+function renderShowDetail(result: TaskDetail, columns: number): string {
   const task = result.task;
   const lines = [
     ...entityLines(stateEntity(task), columns),
@@ -145,6 +188,12 @@ function renderShow(result: TaskDetail | TaskMutationResult, columns: number): s
   if (task.note.length > 0) receiptPayload(lines, "note", task.note);
   if (task.body.length > 0) receiptPayload(lines, "body", task.body);
   return lines.join("\n");
+}
+
+function renderShow(result: TaskShowResult, columns: number): string {
+  if (Array.isArray(result)) return result.map((detail) => renderShowDetail(detail, columns)).join("\n\n");
+  if ("kind" in result) return renderFailure("show", result, columns);
+  return renderShowDetail(result as TaskDetail, columns);
 }
 
 function treeLines(node: TaskTreeNode, columns: number, depth = 0): readonly string[] {
@@ -241,7 +290,7 @@ function renderTaskValue(
   result: Exclude<TaskInvocationResult, TaskWorldObservation>,
   columns: number,
 ): string {
-  if (command.action === "show") return renderShow(result as TaskDetail | TaskMutationResult, columns);
+  if (command.action === "show") return renderShow(result as TaskShowResult, columns);
   if (command.action === "ls" || command.action === "ready" || command.action === "blocked" || command.action === "query") {
     return renderRows(command, result as TaskList | BlockedTaskList | TaskQueryResult, columns);
   }

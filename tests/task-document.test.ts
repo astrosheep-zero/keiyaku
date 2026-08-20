@@ -3,9 +3,10 @@ import test from "node:test";
 import { parseTaskCreationDocument, parseTaskDocument, serializeTaskDocument, TaskAuthorityCorruptionError } from "../src/task/document.js";
 import { deriveLocalStem, formatTaskId, parseTaskId } from "../src/task/identity.js";
 
-test("task identity normalizes titles, caps local IDs, and supports nested namespaces", () => {
+test("task identity normalizes titles, fits new stems by whole words, and supports nested namespaces", () => {
   assert.equal(deriveLocalStem("  Ship Native Task!  "), "ship-native-task");
-  assert.ok(Buffer.byteLength(deriveLocalStem("very ".repeat(30))) <= 48);
+  assert.equal(deriveLocalStem("one two three four five six seven eight nine ten"), "one-two-three-four-five-six");
+  assert.equal(deriveLocalStem("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"), "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz");
   const id = formatTaskId({ namespace: ["contract", "internal"], localId: "ship-native-task" });
   assert.equal(id, "task/contract/internal/ship-native-task");
   assert.deepEqual(parseTaskId(id), { namespace: ["contract", "internal"], localId: "ship-native-task" });

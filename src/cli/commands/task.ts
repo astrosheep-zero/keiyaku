@@ -42,7 +42,7 @@ const TASK_COMMAND_SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
 task add [--namespace <ns>] [--actor <actor>] -`,
     purpose: "Create one Task from flags or a canonical stdin document.",
   },
-  show: { arity: [1, 1], flags: COMMON, usage: "task show <TaskId>", purpose: "Read one Task and its relationships." },
+  show: { arity: [1, Number.POSITIVE_INFINITY], flags: COMMON, usage: "task show <TaskId>...", purpose: "Read one or more Tasks and their relationships." },
   ls: { arity: [0, 0], flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" }, usage: "task ls [--closed | --all] [--world] [--limit <n>]", purpose: "List Tasks in the selected scope." },
   ready: { arity: [0, 0], flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" }, usage: "task ready [--world] [--parent <TaskId>] [--limit <n>]", purpose: "List open Tasks whose every need is terminal." },
   blocked: { arity: [0, 0], flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" }, usage: "task blocked [--world] [--parent <TaskId>] [--limit <n>]", purpose: "List Tasks blocked by dependencies." },
@@ -77,7 +77,15 @@ export function isTaskAction(value: string | undefined): value is TaskAction {
 export function renderTaskHelp(action?: TaskAction): string {
   if (action !== undefined) {
     const spec = TASK_COMMAND_SPECS[action];
-    return `${spec.purpose}\n\n${usageLine(spec.usage)}`;
+    const queryGuide = action === "query" ? [
+      "",
+      "fields: state priority title id parent under needs blocks ready blocked created updated",
+      "operators: = != < > <= >= ~ and or not ( )",
+      "examples:",
+      "  keiyaku task query --where 'priority <= 1 and ready' --world",
+      "  keiyaku task query --where 'updated < 2026-08-06T00:00:00.000Z' --world",
+    ].join("\n") : "";
+    return `${spec.purpose}\n\n${usageLine(spec.usage)}${queryGuide}`;
   }
   return [
     "usage: keiyaku task <command> ...",

@@ -1,7 +1,7 @@
 import { documentDiff } from "../markdown/diff.js";
 import {
-  createTaskRelations, projectTaskBoardObservation, relationProblem, projectBlocked, projectRows,
-  type BlockedTaskRow, type TaskBoard, type TaskBoardObservation, type TaskRow,
+  createTaskRelations, projectDetailFacts, projectTaskBoardObservation, relationProblem, projectBlocked, projectRows,
+  type BlockedTaskRow, type TaskBoard, type TaskBoardObservation, type TaskDetailFacts, type TaskRow,
 } from "./board.js";
 import { parseTaskCreationDocument, serializeTaskDocument, type TaskCreationDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
@@ -216,7 +216,17 @@ function readScope(namespace: readonly string[] | undefined, scope: "namespace" 
 }
 export async function listTasks(world: WorldRoot, namespace: readonly string[] | undefined, selection: "active" | "closed" | "all", scope?: "namespace" | "world", limit = DEFAULT_TASK_LIMIT): Promise<TaskOutcome<TaskPage<TaskRow>>> {
   const selected = readScope(namespace, scope);
-  return { kind: "accepted", value: projectPage(projectRows((await readBoard(world)).board, selected, selection), limit) };
+  const board = (await readBoard(world)).board;
+  return { kind: "accepted", value: projectPage(projectRows(board, createTaskRelations(board), selected, selection), limit) };
+}
+export async function readTaskDetails(world: WorldRoot, ids: readonly TaskId[]): Promise<TaskOutcome<readonly TaskDetailFacts[]>> {
+  const board = (await readBoard(world)).board;
+  const relations = createTaskRelations(board);
+  const details = ids.map((id) => projectDetailFacts(board, id, relations));
+  const missing = details.findIndex((detail) => detail === null);
+  return missing < 0
+    ? { kind: "accepted", value: details as readonly TaskDetailFacts[] }
+    : { kind: "refused", refusal: { kind: "task-missing", taskId: ids[missing]! } };
 }
 export async function readyTasks(world: WorldRoot, namespace: readonly string[] | undefined, scope?: "namespace" | "world", parent?: TaskId, limit = DEFAULT_TASK_LIMIT): Promise<TaskOutcome<TaskPage<TaskRow>>> {
   const selected = readScope(namespace, scope);
@@ -230,7 +240,7 @@ export async function readyTasks(world: WorldRoot, namespace: readonly string[] 
     expression,
     limit: Math.max(1, board.tasks.size),
   }).rows;
-  const rows = selectedRows.map(({ parent: _parent, needs: _needs, blocks: _blocks, createdAt: _createdAt, updatedAt: _updatedAt, ...row }) => row);
+  const rows = selectedRows.map(({ parent: _parent, needs: _needs, blocks: _blocks, createdAt: _createdAt, ...row }) => row);
   return { kind: "accepted", value: projectPage(rows, limit) };
 }
 export async function blockedTasks(world: WorldRoot, namespace: readonly string[] | undefined, scope?: "namespace" | "world", parent?: TaskId, limit = DEFAULT_TASK_LIMIT): Promise<TaskOutcome<TaskPage<BlockedTaskRow>>> {
@@ -284,5 +294,6 @@ export async function observeTaskBoard(world: WorldRoot): Promise<TaskBoardObser
 }
 /** Internal identity catalog from one complete Task board read. */
 export async function observeTaskCatalogRows(world: WorldRoot): Promise<readonly TaskRow[]> {
-  return projectRows((await readBoard(world)).board, null, "all");
+  const board = (await readBoard(world)).board;
+  return projectRows(board, createTaskRelations(board), null, "all");
 }

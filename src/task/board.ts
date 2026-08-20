@@ -3,7 +3,16 @@ import { parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 
 export type TaskRef = Readonly<{ id: TaskId; title: string | null; state: TaskState | "missing" }>;
 export type TaskDisposition = "ready" | "blocked" | "in_progress" | "on_hold" | "done" | "drop";
-export type TaskRow = Readonly<{ id: TaskId; title: string; state: TaskState; priority: TaskPriority; disposition: TaskDisposition }>;
+export type TaskRow = Readonly<{
+  id: TaskId;
+  title: string;
+  state: TaskState;
+  priority: TaskPriority;
+  disposition: TaskDisposition;
+  updatedAt: string;
+  bodyPresent: boolean;
+  children?: Readonly<{ live: number; total: number }>;
+}>;
 export type BlockedTaskRow = TaskRow & Readonly<{ blockers: readonly TaskRef[] }>;
 export type TaskDetailFacts = Readonly<{
   task: TaskDocument; needs: readonly (TaskRef & Readonly<{ released: boolean }>)[]; blockers: readonly TaskRef[];
@@ -105,28 +114,45 @@ export function projectDetailFacts(
   };
 }
 function inScope(task: TaskDocument, scope: readonly string[] | null): boolean { return scope === null || sameNamespace(parseTaskId(task.id).namespace, scope); }
-export function projectRows(board: TaskBoard, scope: readonly string[] | null, selection: "active" | "closed" | "all"): readonly TaskRow[] {
+export function projectTaskRow(board: TaskBoard, relations: TaskRelationProjection, task: TaskDocument): TaskRow {
+  const children = relations.children(task.id);
+  const total = children.length;
+  const live = children.filter((child) => child.state !== "done" && child.state !== "drop").length;
+  return {
+    id: task.id,
+    title: task.title,
+    state: task.state,
+    priority: task.priority,
+    disposition: taskDisposition(board, task),
+    updatedAt: task.updatedAt,
+    bodyPresent: task.body.length > 0,
+    ...(total === 0 ? {} : { children: { live, total } }),
+  };
+}
+export function projectRows(
+  board: TaskBoard,
+  relations: TaskRelationProjection,
+  scope: readonly string[] | null,
+  selection: "active" | "closed" | "all",
+): readonly TaskRow[] {
   return [...board.tasks.values()].filter((task) => inScope(task, scope)).filter((task) => selection === "all"
-    || (selection === "closed") === terminal(task.state)).map((task) => ({
-      id: task.id, title: task.title, state: task.state, priority: task.priority,
-      disposition: taskDisposition(board, task),
-    })).sort((a, b) => a.priority - b.priority || Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
+    || (selection === "closed") === terminal(task.state)).map((task) => projectTaskRow(board, relations, task))
+    .sort((a, b) => a.priority - b.priority || Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
 }
 export function projectBlocked(
   board: TaskBoard,
   scope: readonly string[] | null,
   relations: TaskRelationProjection,
 ): readonly BlockedTaskRow[] {
-  return projectRows(board, scope, "active").flatMap((row) => {
+  return projectRows(board, relations, scope, "active").flatMap((row) => {
     if (!taskBlocked(board, board.tasks.get(row.id)!)) return [];
     return [{ ...row, blockers: projectDetailFacts(board, row.id, relations)!.blockers }];
   });
 }
 
-export function projectStatusRows(board: TaskBoard, scope: readonly string[] | null) {
-  const relations = createTaskRelations(board);
+export function projectStatusRows(board: TaskBoard, relations: TaskRelationProjection, scope: readonly string[] | null) {
   const blockers = new Map(projectBlocked(board, scope, relations).map((row) => [row.id, row.blockers]));
-  return projectRows(board, scope, "all").map((row) => {
+  return projectRows(board, relations, scope, "all").map((row) => {
     const unresolved = blockers.get(row.id);
     return unresolved === undefined ? row : { ...row, blockers: unresolved };
   });
@@ -139,10 +165,11 @@ export type TaskBoardObservation = Readonly<{
 }>;
 
 export function projectTaskBoardObservation(board: TaskBoard): TaskBoardObservation {
-  const rows = projectRows(board, null, "all");
+  const relations = createTaskRelations(board);
+  const rows = projectRows(board, relations, null, "all");
   return {
-    statusRows: projectStatusRows(board, null),
-    selectNamespace: (namespace) => projectRows(board, namespace, "all"),
+    statusRows: projectStatusRows(board, relations, null),
+    selectNamespace: (namespace) => projectRows(board, relations, namespace, "all"),
     selectCreatedBy: (createdBy) => rows.filter((row) => board.tasks.get(row.id)?.createdBy === createdBy),
   };
 }

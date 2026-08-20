@@ -4,6 +4,24 @@ This chapter owns Task subcommands, grammar, and rendering.
 
 ## Task Commands
 
+List, ready, blocked, and query share one compact row grammar. Every row keeps
+the complete TaskId and title, shows priority and a render-time nonnegative
+updated age (`m` below an hour, `h` below a day, `d` otherwise), and adds `no
+body` only when `bodyPresent` is false. Parent rows add `children <live>/<total>
+live`. Ready owns its disposition in the heading, so ready rows omit the
+repeated disposition word; mixed views retain it. These text facts are exactly
+the typed `TaskRow` facts; age is presentation only.
+
+Pages retain `rows`, `total`, `returned`, and `truncated`. A truncated text page
+adds the exact remaining count and one complete command repeating the action,
+scope, predicate, and sort with `--limit` set to `total`. Query recovery keeps
+its `--where`, `--sort`, and `--world` flags. JSON has no second footer shape.
+
+`task query --help` lists the shipped fields `state priority title id parent
+under needs blocks ready blocked created updated`, operators `= != < > <= >= ~
+and or not ( )`, and executable examples including
+`keiyaku task query --where 'updated < 2026-08-06T00:00:00.000Z' --world`.
+
 `keiyaku task` resolves the global `-C` coordinate once and constructs one
 `Tasks.of` value when a world is present or created. Its parser owns argv shape, stdin selection, mutual exclusion, and
 output selection only. Task Markdown, graph, lifecycle, diff, and compose
