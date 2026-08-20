@@ -352,23 +352,25 @@ answered single wait, and `history --last` write exact answer bytes. Detached
 call prints the copyable canonical-world wait command. Text never exposes
 provider receipt/fence stages or Heart storage vocabulary.
 
-Provider-reported changes and created Task context follow the snapshot,
-including after its life footer:
+Created Task context and provider-reported changes follow the timeline and
+precede life:
 
 ```text
-  changes <total>
-  <write|edit|delete> <path> [— +<added> -<removed>]
+tasks <N>
+  <mark> <complete TaskId> · <title> · <disposition> · P<n>
+changes <total>
+  +N -N    <complete path>
   ⋮ <N> earlier changes
-  tasks <N>
-  <mark> <complete TaskId> · P<n> <disposition> — <title>
 ```
 
 `<total>` is shown plus omitted; emit the omitted line only when nonzero.
-Missing diffstat shortens that item. Empty summaries print `changes 0`.
-Zero Task matches render `tasks 0`; failure renders `! tasks failed
-<diagnostic>`. Complete TaskIds and titles are never truncated. Neither block
-consumes the timeline budget. Exact-answer call/wait and `history --last`
-remain raw and have no snapshot block; JSON retains the complete observation.
+Visible operations group by exact path in first-visible order. Complete
+grouped diffstats sum to `+N -N`; any missing diffstat in the group renders
+`+? -?`. Empty summaries print `changes 0`. Zero Task matches render
+`tasks 0`; failure renders `! tasks failed <diagnostic>`. Complete TaskIds,
+titles, and paths are never truncated. Neither block consumes the timeline
+budget. Exact-answer call/wait and `history --last` remain raw and have no
+snapshot block; JSON retains the complete observation.
 
 Tell appears once as pending (`⧗ tell`) or terminally evidenced (`told`), and
 pending tells survive the snapshot budget. Post-primary observation failures
@@ -382,9 +384,10 @@ a fresh fallback or deletes its coordinate.
 History retains public row order without current-life observation. Native
 provider history ids never become CLI selectors; `history --last` bypasses the
 page and writes exact answer bytes. Wherever an `AkumaObservation` is rendered,
-created Task context follows the snapshot without consuming its timeline
-budget; exact-answer call/wait, Akuma history, and compact FLEET remain raw as
-defined in [cli-output.md](cli-output.md).
+created Task context and reported changes follow the timeline without consuming
+its budget, and life remains last when the command shows it; exact-answer
+call/wait, Akuma history, and compact FLEET remain raw as defined in
+[cli-output.md](cli-output.md).
 
 ## Product Boundary
 

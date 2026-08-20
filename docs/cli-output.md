@@ -122,7 +122,8 @@ Alias or complete AkuId and canonical World; failure adds no command or life.
 `said` and `thought` occupy at most two terminal lines with visible clipping.
 Text never changes the public JSON value.
 
-Akuma life words are rendered verbatim from the public union. `hung` means the
+Akuma life words are rendered from the public union. Running text is exactly
+`● STILL RUNNING`; other words keep their public spellings. `hung` means the
 latest Body durably recorded provider custody that did not retire; a public
 timeout with only a held leash remains `running`. `untidy` means the leash is
 free but the latest Body has no explicit end. Both use the conservative `?`
@@ -148,22 +149,22 @@ text begins at one stable column. Say, think, tell, and answered-outcome bodies
 are wrapped in `U+201C`/`U+201D`; tool, note, call, and error bodies are not.
 A wrapped body line places a vertical bar in the glyph column and aligns its
 body with the first line's body. Event glyphs
-remain: ordinary voice, note, and told rows use `·`, completed success uses
+remain: ordinary voice, note, and told rows use `│`, completed success uses
 `✓`, completed failure uses `!`, active tool uses `⧖`, pending tell uses `⧗`,
-and unsettled tool uses `?`. There is no aggregate omission token on the first
-row, standalone minute divider, second rule between relation and activity, or
-changed snapshot selection. One `fileChange` with one `unspecified` change
-renders as `edit` with its path.
+unsettled tool uses `?`, and continuation uses `│`. There is no aggregate
+omission token on the first row, standalone minute divider, second rule
+between relation and activity, or changed snapshot selection. One `fileChange`
+with one `unspecified` change renders as `edit` with its path.
 
 ```text
 ─────
 aku/expert-akuma/5659b10d (@expert)
 └─ kei/make-non-git-runtime-observation-honestly-async
       ⋮ 171 omitted
-14:36 · say    “I’m editing the architecture allowlist to mirror the completed-”
+14:36 │ say    “I’m editing the architecture allowlist to mirror the completed-”
       │        “migration: synchronous filesystem authority remains only in the two documented…”
       ⋮ 17 omitted
-14:46 · think  “The migrated Heart and Body slices now pass except one real-”
+14:46 │ think  “The migrated Heart and Body slices now pass except one real-”
       │        “async race exposed by the new boundary…”
 14:47 ✓ run    $ npm run test:focused — ok
       ! run    $ npm test — failed
@@ -171,7 +172,16 @@ aku/expert-akuma/5659b10d (@expert)
 14:49 ✓ run    $ npm test — ok
       ⧗ tell   “Please also inspect the termination path.”
 14:50 ⧖ run    $ npm run test:focused
-  ● running
+tasks 2
+  ● task/repair-maintainability-limit · Repair maintainability parameter limit · in_progress · P0
+  ‖ task/restore-nuke-fixture · Restore Nuke fixture API · blocked · P1
+changes 15
+  +3 -2    /tmp/keiyaku-integration.uAA0a9/repo/tests/nuke.test.ts
+  +15 -10  /Users/astrosheep/Developer/keiyaku-v4/.git/keiyaku/wt/valhalla/src/cli/invoke.ts
+  +10 -10  /tmp/keiyaku-integration.uAA0a9/repo/src/cli/invoke.ts
+  ⋮ 10 earlier changes
+
+● STILL RUNNING
 ```
 
 The first output line is the five-column `U+2500` opening stroke, exactly as
@@ -180,24 +190,46 @@ state icon, label, or header. AkuId and optional alias occupy the next line.
 When a Contract is associated, its complete `kei/...` coordinate follows on the
 separate hanging relation line beginning with `U+2514` and `U+2500`; an
 unassociated Akuma omits that line. Identity rows never contain current life.
-Activity follows the identity and optional relation directly. Status, wait,
-unfinished observed call, and kill place life on one two-space-indented
-trailing line immediately after activity. Ordinary and interrupt tell output
-and history omit life. The life vocabulary remains `● running`, `○ asleep`,
-`× killed`, `? stranded`, `? hung`, and `? untidy`. A returned
-`AkumaObservation` then appends created Task context after the snapshot body:
+Activity follows the identity and optional relation directly, keeping typed
+gaps in persisted order. Created Task context, when supplied, follows the
+timeline; the reported-change block follows Tasks. Status, wait, unfinished
+observed call, and kill then place life last: one blank line, then a top-level
+life line. Ordinary and interrupt tell output and history omit life. Running
+life is exactly `● STILL RUNNING`; other life words remain `○ asleep`,
+`× killed`, `? stranded`, `? hung`, and `? untidy`.
+
+A present created Task observation renders:
 
 ```text
-  tasks <N>
-  <mark> <complete TaskId> · P<n> <disposition> — <title>
+tasks <N>
+  <mark> <complete TaskId> · <title> · <disposition> · P<n>
 ```
 
-Zero matches render `tasks 0`; failure renders `! tasks failed <diagnostic>`.
-The block preserves Task wrapping and complete identities, never truncates
-TaskIds or titles, and consumes no timeline budget. Raw answered wait/call,
-history, and compact FLEET remain unchanged. Renderers perform no Task, Heart,
-or Dispatch lookup. JSON values, timeline semantics, and history model remain
-unchanged.
+Each Task is one logical row indented two spaces: existing disposition mark,
+complete TaskId, title, disposition, and priority. Titles may wrap with a
+four-space continuation. Complete TaskIds never truncate. The renderer invents
+no Contract relation, `unbound` word, or blocker line. Zero matches render
+`tasks 0`; failure renders `! tasks failed <diagnostic>`. Absent Task context
+adds no block.
+
+Reported changes keep the typed operation count `shown + omitted` and group
+visible operations by exact path in first-visible order:
+
+```text
+changes <N>
+  +N -N    <complete path>
+  ⋮ N earlier changes
+```
+
+Statistics form a fixed left column. Complete grouped diffstats sum to `+N -N`;
+any missing diffstat in the group renders `+? -?`. Paths are never truncated
+and may exceed the terminal width. The omitted line stays indented two spaces
+and keeps the typed `reportedChangesOmitted` value. JSON and the public
+snapshot retain every repeated operation; aggregation is text-only. Empty
+summaries print `changes 0`. Neither block consumes the timeline budget. Raw
+answered wait/call, history, and compact FLEET remain unchanged. Renderers
+perform no Task, Heart, or Dispatch lookup. JSON values, timeline semantics,
+and history model remain unchanged.
 
 Post-admission physical or settlement failures remain inside the accepted
 object as typed lags. Text and JSON expose them without changing the Contract

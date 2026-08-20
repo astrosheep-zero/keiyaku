@@ -266,6 +266,44 @@ test("blank Akuma stdin is usage before World or package invocation", async () =
   );
 });
 
+function statusCommand(id: string) {
+  return parseArgv(["status", id]).command;
+}
+
+function renderStatus(observation: AkumaObservation, context?: TextRenderContext): string {
+  return renderAkumaText(statusCommand(observation.status.id), { kind: "akuma", action: "status", status: observation }, context);
+}
+
+function waitCommand(id: string) {
+  return parseArgv(["wait", id]).command;
+}
+
+function waitInvocation(observation: AkumaObservation) {
+  return {
+    kind: "akuma" as const,
+    action: "wait" as const,
+    result: { completion: "all" as const, observations: [observation], unobserved: [] },
+  };
+}
+
+function tellInvocation(observation: AkumaObservation) {
+  return {
+    kind: "akuma" as const,
+    action: "tell" as const,
+    mode: "ordinary" as const,
+    body: "steer",
+    result: {
+      akuma: observation.status.id,
+      tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
+      observation: { kind: "observed" as const, ...observation },
+    },
+  };
+}
+
+function glyph(line: string): string {
+  return line[6] ?? "";
+}
+
 test("Akuma snapshots preserve typed omission", () => {
   const result = {
     kind: "akuma" as const,
@@ -286,6 +324,221 @@ test("Akuma snapshots preserve typed omission", () => {
   assert.equal(projected.status.id, "aku/worker/1234abcd");
   assert.equal(projected.status.timeline.omitted, 12);
   assert.deepEqual(projected.status.timeline.entries, [{ kind: "gap", count: 12 }]);
+});
+
+test("Akuma snapshot text keeps timeline order and uses ordinary vertical marks", () => {
+  const at = "2026-08-10T16:36:00.000Z";
+  const later = "2026-08-10T16:47:00.000Z";
+  const said = "I'm editing the architecture allowlist to mirror the completed migration: synchronous filesystem authority remains only in the two documented owners.";
+  const thought = "The migrated Heart and Body slices now pass except one real async race exposed by the new boundary.";
+  const observation = akumaObservation({
+    id: "aku/expert-akuma/5659b10d",
+    life: "running",
+    timeline: {
+      kind: "open",
+      turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at },
+      entries: [
+        { kind: "gap", count: 171 },
+        { kind: "row", row: { kind: "said", sequence: 2, turnSequence: 1, at, text: said } },
+        { kind: "gap", count: 17 },
+        { kind: "row", row: { kind: "thought", sequence: 3, turnSequence: 1, at: "2026-08-10T16:46:00.000Z", text: thought } },
+        { kind: "row", row: { kind: "tool", sequence: 4, turnSequence: 1, at: later, name: "Bash", call: { kind: "run", command: "npm run test:focused" }, state: { status: "ok" } } },
+        { kind: "row", row: { kind: "tool", sequence: 5, turnSequence: 1, at: later, name: "Bash", call: { kind: "run", command: "npm test" }, state: { status: "error" } } },
+        { kind: "gap", count: 11 },
+        { kind: "row", row: { kind: "tool", sequence: 6, turnSequence: 1, at: "2026-08-10T16:49:00.000Z", name: "Bash", call: { kind: "run", command: "npm test" }, state: { status: "ok" } } },
+        { kind: "row", row: { kind: "tell", sequence: 7, at: "2026-08-10T16:49:00.000Z", tellId: "tell-1", text: "Please also inspect the termination path.", state: "pending", deliveries: [] } },
+        { kind: "row", row: { kind: "tool", sequence: 8, turnSequence: 1, at: "2026-08-10T16:50:00.000Z", name: "Bash", call: { kind: "run", command: "npm run test:focused" }, state: "active" } },
+        { kind: "row", row: { kind: "tool", sequence: 9, turnSequence: 1, at: "2026-08-10T16:50:00.000Z", name: "Bash", call: { kind: "run", command: "npm run lint" }, state: "unsettled" } },
+      ],
+      omitted: 199,
+      ...emptyReported,
+    },
+  });
+  const text = renderStatus(observation);
+  const lines = text.split("\n");
+  const gaps = lines.filter((line) => /⋮ \d+ omitted/u.test(line));
+  assert.deepEqual(gaps, ["      ⋮ 171 omitted", "      ⋮ 17 omitted", "      ⋮ 11 omitted"]);
+  const activity = lines.slice(lines.indexOf("      ⋮ 171 omitted"), lines.indexOf("tasks 0"));
+  const verbs = activity.filter((line) => / (say|think|run|tell) /u.test(line) && line[5] === " ").map((line) => `${glyph(line)} ${line.slice(8, 14).trimEnd()}`);
+  assert.deepEqual(verbs, [
+    "│ say",
+    "│ think",
+    "✓ run",
+    "! run",
+    "✓ run",
+    "⧗ tell",
+    "⧖ run",
+    "? run",
+  ]);
+  const sayAt = activity.findIndex((line) => line.includes("say"));
+  assert.equal(glyph(activity[sayAt]!), "│");
+  assert.equal(glyph(activity[sayAt + 1]!), "│");
+  assert.match(activity[sayAt + 1]!, /^ {6}│ {8}/u);
+  assert.doesNotMatch(text, /^.{5} · /mu);
+  assert.equal(lines.at(-1), "● STILL RUNNING");
+  assert.equal(lines.at(-2), "");
+});
+
+test("Akuma snapshot tasks stay compact and do not invent relations", () => {
+  const observation = akumaObservation({
+    id: "aku/worker/1234abcd",
+    life: "running",
+    timeline: { kind: "idle", entries: [], omitted: 0, ...emptyReported },
+  }, {
+    createdTasks: {
+      kind: "present",
+      rows: [
+        {
+          id: "task/repair-maintainability-limit",
+          title: "Repair maintainability parameter limit",
+          state: "in_progress",
+          priority: 0,
+          disposition: "in_progress",
+        },
+        {
+          id: "task/restore-nuke-fixture",
+          title: "Restore Nuke fixture API",
+          state: "open",
+          priority: 1,
+          disposition: "blocked",
+        },
+      ],
+    },
+  });
+  const text = renderStatus(observation, { columns: 120, color: false });
+  const lines = text.split("\n");
+  const tasksAt = lines.indexOf("tasks 2");
+  assert.equal(lines[tasksAt], "tasks 2");
+  assert.equal(lines[tasksAt + 1], "  ● task/repair-maintainability-limit · Repair maintainability parameter limit · in_progress · P0");
+  assert.equal(lines[tasksAt + 2], "  ‖ task/restore-nuke-fixture · Restore Nuke fixture API · blocked · P1");
+  assert.doesNotMatch(text, /unbound|blocked by|kei\//u);
+  const empty = renderStatus(akumaObservation({
+    id: "aku/worker/1234abcd",
+    life: "asleep",
+    timeline: { kind: "idle", entries: [], omitted: 0, ...emptyReported },
+  }));
+  assert.match(empty, /^tasks 0$/mu);
+  const failed = renderStatus(akumaObservation({
+    id: "aku/worker/1234abcd",
+    life: "asleep",
+    timeline: { kind: "idle", entries: [], omitted: 0, ...emptyReported },
+  }, { createdTasks: { kind: "failed", diagnostic: "front matter" } }));
+  assert.match(failed, /^! tasks failed front matter$/mu);
+  const wrapped = renderStatus(observation, { columns: 36, color: false });
+  assert.match(wrapped, /^ {2}● task\/repair-maintainability-limit/mu);
+  assert.match(wrapped, /^ {4}\S/mu);
+});
+
+test("Akuma snapshot changes aggregate paths and leave JSON repeated", () => {
+  const nuke = "/tmp/keiyaku-integration.uAA0a9/repo/tests/nuke.test.ts";
+  const valhalla = "/Users/astrosheep/Developer/keiyaku-v4/.git/keiyaku/wt/valhalla/src/cli/invoke.ts";
+  const invoke = "/tmp/keiyaku-integration.uAA0a9/repo/src/cli/invoke.ts";
+  const reportedChanges = [
+    { sequence: 1, at: "2026-08-10T16:42:00.000Z", op: "update" as const, path: nuke, diffstat: { added: 1, removed: 1 } },
+    { sequence: 2, at: "2026-08-10T16:42:01.000Z", op: "add" as const, path: nuke, diffstat: { added: 2, removed: 1 } },
+    { sequence: 3, at: "2026-08-10T16:42:02.000Z", op: "update" as const, path: valhalla, diffstat: { added: 15, removed: 10 } },
+    { sequence: 4, at: "2026-08-10T16:42:03.000Z", op: "update" as const, path: invoke, diffstat: { added: 10, removed: 10 } },
+    { sequence: 5, at: "2026-08-10T16:42:04.000Z", op: "update" as const, path: nuke, diffstat: { added: 0, removed: 0 } },
+  ];
+  const observation = akumaObservation({
+    id: "aku/worker/1234abcd",
+    life: "running",
+    timeline: {
+      kind: "idle",
+      entries: [],
+      omitted: 0,
+      reportedChanges,
+      reportedChangesOmitted: 10,
+    },
+  });
+  const result = { kind: "akuma" as const, action: "status" as const, status: observation };
+  const text = renderAkumaText(statusCommand(observation.status.id), result, { columns: 20, color: false });
+  const lines = text.split("\n");
+  const changesAt = lines.indexOf("changes 15");
+  assert.equal(lines[changesAt], "changes 15");
+  assert.equal(lines[changesAt + 1], `  +3 -2    ${nuke}`);
+  assert.equal(lines[changesAt + 2], `  +15 -10  ${valhalla}`);
+  assert.equal(lines[changesAt + 3], `  +10 -10  ${invoke}`);
+  assert.equal(lines[changesAt + 4], "  ⋮ 10 earlier changes");
+  assert.equal(text.split(nuke).length - 1, 1);
+  const json = akumaJsonValue(result) as AkumaObservation;
+  assert.deepEqual(json.status.timeline.reportedChanges, reportedChanges);
+  assert.equal(json.status.timeline.reportedChangesOmitted, 10);
+  const incomplete = renderStatus(akumaObservation({
+    id: "aku/worker/1234abcd",
+    life: "asleep",
+    timeline: {
+      kind: "idle",
+      entries: [],
+      omitted: 0,
+      reportedChanges: [
+        { sequence: 1, at: "2026-08-10T16:42:00.000Z", op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 1 } },
+        { sequence: 2, at: "2026-08-10T16:42:01.000Z", op: "update", path: "src/a.ts" },
+        { sequence: 3, at: "2026-08-10T16:42:02.000Z", op: "add", path: "src/b.ts", diffstat: { added: 4, removed: 0 } },
+      ],
+      reportedChangesOmitted: 0,
+    },
+  }));
+  assert.match(incomplete, /^ {2}\+\? -\? {2}src\/a\.ts$/mu);
+  assert.match(incomplete, /^ {2}\+4 -0 {2}src\/b\.ts$/mu);
+});
+
+test("Akuma running life is the unfinished terminal line and tell omits it", () => {
+  const observation = akumaObservation({
+    id: "aku/worker/1234abcd",
+    life: "running",
+    timeline: { kind: "idle", entries: [], omitted: 0, ...emptyReported },
+  }, {
+    createdTasks: {
+      kind: "present",
+      rows: [{
+        id: "task/repair-maintainability-limit",
+        title: "Repair maintainability parameter limit",
+        state: "in_progress",
+        priority: 0,
+        disposition: "in_progress",
+      }],
+    },
+  });
+  const waitText = renderAkumaText(waitCommand(observation.status.id), waitInvocation(observation));
+  const waitLines = waitText.split("\n");
+  assert.equal(waitLines.at(-1), "● STILL RUNNING");
+  assert.ok(waitLines.indexOf("tasks 1") < waitLines.indexOf("changes 0"));
+  assert.ok(waitLines.indexOf("changes 0") < waitLines.length - 1);
+  assert.equal(waitLines.at(-2), "");
+  const told = renderAkumaText(parseArgv(["tell", observation.status.id, "steer"]).command, tellInvocation(observation));
+  assert.doesNotMatch(told, /STILL RUNNING/u);
+  assert.match(told, /^tasks 1$/mu);
+  assert.match(told, /^changes 0$/mu);
+  assert.notEqual(told.split("\n").at(-1), "");
+  const asleep = renderStatus(akumaObservation({
+    id: "aku/worker/1234abcd",
+    life: "asleep",
+    timeline: { kind: "idle", entries: [], omitted: 0, ...emptyReported },
+  }));
+  assert.equal(asleep.split("\n").at(-1), "○ asleep");
+  const hung = renderStatus(akumaObservation({
+    id: "aku/worker/1234abcd",
+    life: "hung",
+    timeline: { kind: "idle", entries: [], omitted: 0, ...emptyReported },
+  }));
+  assert.equal(hung.split("\n").at(-1), "? hung");
+  const callText = renderAkumaText(parseArgv(["call", "claude", "prompt"]).command, {
+    kind: "akuma",
+    action: "call",
+    world: "/world" as import("../src/world.js").WorldRoot,
+    result: {
+      kind: "called",
+      akuma: observation.status.id,
+      execution: { cwd: "/world", source: "input" },
+      dispatch: { kind: "none" },
+      alias: { kind: "none" },
+      observation: { kind: "observed", status: observation.status },
+    },
+  });
+  assert.doesNotMatch(callText, /^tasks /mu);
+  assert.match(callText, /^changes 0$/mu);
+  assert.equal(callText.split("\n").at(-1), "● STILL RUNNING");
 });
 
 test("Akuma output preserves a complete associated Contract identity", () => {
@@ -695,7 +948,9 @@ test("raw-answer selection preserves exact bytes and unfinished snapshots", () =
   assert.equal(renderAkumaText(parseArgv(["wait", id]).command, empty), "");
   const unfinished = wait(observation("kept", "running").status);
   assert.equal(akumaRawAnswer(unfinished), undefined);
-  assert.match(renderAkumaText(parseArgv(["wait", id]).command, unfinished), /aku\/worker\/1234abcd/u);
+  const unfinishedText = renderAkumaText(parseArgv(["wait", id]).command, unfinished);
+  assert.match(unfinishedText, /aku\/worker\/1234abcd/u);
+  assert.equal(unfinishedText.split("\n").at(-1), "● STILL RUNNING");
 });
 
 test("Soul validation diagnostics name the Akuma without the internal term", () => {

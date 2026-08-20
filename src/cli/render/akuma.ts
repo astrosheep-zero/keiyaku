@@ -18,7 +18,6 @@ import { toolRepr } from "./akuma-tool.js";
 import {
   displayColumns,
   renderBoundedTextBlock,
-  renderTextBlock,
   safeText,
   truncateMiddleDisplayText,
   type TextRenderContext,
@@ -60,7 +59,7 @@ function unobservedText(id: string, diagnostic: string): string {
 }
 
 function lifeLabel(life: AkumaObservation["status"]["life"]): string {
-  if (life === "running") return "● running";
+  if (life === "running") return "● STILL RUNNING";
   if (life === "asleep") return "○ asleep";
   if (life === "killed") return "× killed";
   return `? ${life}`;
@@ -82,7 +81,7 @@ function label(row: ActivityRow | SnapshotRow): string {
   return toolRepr(row).label;
 }
 
-function mark(row: ActivityRow | SnapshotRow): "·" | "✓" | "!" | "⧖" | "⧗" | "?" {
+function mark(row: ActivityRow | SnapshotRow): "│" | "✓" | "!" | "⧖" | "⧗" | "?" {
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "✓" : "!";
   if (row.kind === "tell" && row.state === "pending") return "⧗";
   if (row.kind === "tool") {
@@ -90,7 +89,7 @@ function mark(row: ActivityRow | SnapshotRow): "·" | "✓" | "!" | "⧖" | "⧗
     if (row.state === "unsettled") return "?";
     return row.state.status === "ok" ? "✓" : "!";
   }
-  return "·";
+  return "│";
 }
 
 function rowText(row: ActivityRow | SnapshotRow): Readonly<{ text: string; lines: number; middle?: true; suffix?: string }> {
@@ -188,30 +187,51 @@ function taskDispositionMark(disposition: CreatedTaskRow["disposition"]): string
   return disposition === "blocked" ? "‖" : "○";
 }
 
-function taskScanLine(row: CreatedTaskRow, indent = ""): string {
-  return `${indent}${taskDispositionMark(row.disposition)} ${row.id} · P${row.priority} ${row.disposition}`;
+function changeStat(group: readonly ReportedFileChange[]): string {
+  let added = 0;
+  let removed = 0;
+  for (const change of group) {
+    if (change.diffstat === undefined) return "+? -?";
+    added += change.diffstat.added;
+    removed += change.diffstat.removed;
+  }
+  return `+${added} -${removed}`;
 }
 
-function changeOp(op: ReportedFileChange["op"]): "write" | "edit" | "delete" {
-  return op === "add" ? "write" : op === "delete" ? "delete" : "edit";
+function groupedChangeRows(changes: readonly ReportedFileChange[]): readonly Readonly<{ path: string; stat: string }>[] {
+  const groups: ReportedFileChange[][] = [];
+  const seen = new Map<string, number>();
+  for (const change of changes) {
+    const index = seen.get(change.path);
+    if (index === undefined) {
+      seen.set(change.path, groups.length);
+      groups.push([change]);
+    } else groups[index]!.push(change);
+  }
+  return groups.map((group) => ({ path: group[0]!.path, stat: changeStat(group) }));
 }
 
-function renderReportedChangeLines(snapshot: ActivitySnapshot, columns: number): readonly string[] {
-  const lines = [`  changes ${snapshot.reportedChanges.length + snapshot.reportedChangesOmitted}`];
-  for (const change of snapshot.reportedChanges) {
-    const scan = `  ${changeOp(change.op)}`;
-    const path = safeText(change.path);
-    const stat = change.diffstat === undefined
-      ? ""
-      : ` — +${change.diffstat.added} -${change.diffstat.removed}`;
-    const inline = `${scan} ${path}${stat}`;
-    if (displayColumns(inline) <= columns) lines.push(inline);
-    else lines.push(`${scan}`, ...renderTextBlock(`${path}${stat}`, "    ", columns));
-  }
-  if (snapshot.reportedChangesOmitted > 0) {
-    lines.push(`  ⋮ ${snapshot.reportedChangesOmitted} earlier changes`);
-  }
-  return lines;
+function renderReportedChangeLines(snapshot: ActivitySnapshot): readonly string[] {
+  const rows = groupedChangeRows(snapshot.reportedChanges);
+  const width = rows.reduce((max, row) => Math.max(max, row.stat.length), 0);
+  return [
+    `changes ${snapshot.reportedChanges.length + snapshot.reportedChangesOmitted}`,
+    ...rows.map((row) => `  ${row.stat.padEnd(width)}  ${safeText(row.path)}`),
+    ...(snapshot.reportedChangesOmitted > 0 ? [`  ⋮ ${snapshot.reportedChangesOmitted} earlier changes`] : []),
+  ];
+}
+
+function renderTaskRow(row: CreatedTaskRow, columns: number): readonly string[] {
+  const prefix = `  ${taskDispositionMark(row.disposition)} ${row.id} · `;
+  const body = `${safeText(row.title)} · ${row.disposition} · P${row.priority}`;
+  const inline = `${prefix}${body}`;
+  if (displayColumns(inline) <= columns) return [inline];
+  return renderBoundedTextBlock(body, {
+    first: prefix,
+    continuation: "    ",
+    columns,
+    lines: Number.MAX_SAFE_INTEGER,
+  });
 }
 
 function renderTaskContextLines(
@@ -220,15 +240,7 @@ function renderTaskContextLines(
 ): readonly string[] {
   if (created === undefined) return [];
   if (created.kind === "failed") return [`! tasks failed ${safeText(created.diagnostic)}`];
-  const lines = [`  tasks ${created.rows.length}`];
-  for (const row of created.rows) {
-    const scan = `  ${taskScanLine(row)}`;
-    const title = safeText(row.title);
-    const inline = `${scan} — ${title}`;
-    if (displayColumns(inline) <= columns) lines.push(inline);
-    else lines.push(`${scan} —`, ...renderTextBlock(title, "    ", columns));
-  }
-  return lines;
+  return [`tasks ${created.rows.length}`, ...created.rows.flatMap((row) => renderTaskRow(row, columns))];
 }
 
 function snapshotText(
@@ -252,14 +264,14 @@ function snapshotText(
     ...contractFacts(view.contract),
     ...(options.facts ?? []),
   ];
-  const footer = options.showLife === false ? [] : [`  ${lifeLabel(view.status.life)}`];
+  const footer = options.showLife === false ? [] : ["", lifeLabel(view.status.life)];
   return [
     ...snapshotHeading(view.status.id, options.alias, view.contract),
     ...facts,
     ...activity,
-    ...footer,
-    ...renderReportedChangeLines(snapshot, context.columns),
     ...renderTaskContextLines(view.createdTasks, context.columns),
+    ...renderReportedChangeLines(snapshot),
+    ...footer,
   ].join("\n");
 }
 
