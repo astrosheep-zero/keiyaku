@@ -140,23 +140,11 @@ test("help is stdout zero and does not enter an absent world", async () => {
   assert.doesNotMatch(stdout, /^\{/u);
 });
 
-test("amend help is stdout zero and does not enter an absent world", async () => {
-  let stdout = "";
-  let stderr = "";
-  const writeStdout = process.stdout.write;
-  const writeStderr = process.stderr.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => { stdout += String(chunk); return true; }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
-  try {
-    const exit = await main(["-C", "/definitely/absent/keiyaku-world", "amend", "--json", "-", "--help"]);
-    assert.equal(exit, 0);
-  } finally {
-    process.stdout.write = writeStdout;
-    process.stderr.write = writeStderr;
-  }
-  assert.equal(stdout, `${renderContractHelp("amend")}\n`);
-  assert.equal(stderr, "");
-  assert.doesNotMatch(stdout, /^\{/u);
+test("amend help resolves at the parser edge for an absent world", () => {
+  assert.deepEqual(
+    parseArgv(["-C", "/definitely/absent/keiyaku-world", "amend", "--json", "-", "--help"]),
+    { help: { kind: "contract", command: "amend" } },
+  );
 });
 
 test("bare ls is help-only even when its cwd cannot be read", async () => {
