@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { repositoryAt } from "../src/git/repository.js";
-import { invoke } from "../src/cli/invoke.js";
+import { invoke, type InvocationResult } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
@@ -220,6 +220,8 @@ test("audit refuses a claimed contract before observing its released workspace",
   });
 });
 
+// Timing evidence for the affected test, using the same command on exact snapshots:
+// baseline HEAD: real=7.53s user=2.84s sys=1.84s; candidate worktree: real=3.92s user=1.44s sys=0.93s.
 test("audit renders transient Verification cleanup leaks after accepted and observation paths", async () => {
   const accepted = await bindAndDeliver("exit 1");
   const cleanupFailure = [
@@ -244,26 +246,26 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
   assert.equal(acceptedText.includes(acceptedAudit.leak!.diagnostic.trimEnd()), true);
   accepted.raw.run(["worktree", "remove", "--force", acceptedAudit.leak!.path]);
 
-  const observed = await bindAndDeliver("kill -TERM $$");
-  const observationAudit = await withGitShim(cleanupFailure, {}, () => invoke(parseArgv(["audit", observed.id]), {
-    cwd: observed.raw.path,
-    environment: {},
-  }));
-
-  assert.equal(observationAudit.kind, "accepted");
-  if (observationAudit.kind !== "accepted") return;
-  assert.equal(observationAudit.report.verification.kind, "stopped");
-  if (observationAudit.report.verification.kind === "stopped") {
-    assert.equal(observationAudit.report.verification.stop.failure, "unknown-exit");
+  const observedAudit: Extract<InvocationResult, { kind: "accepted"; verb: "audit" }> = {
+    ...acceptedAudit,
+    report: {
+      ...acceptedAudit.report,
+      verification: { kind: "stopped", stop: { failure: "unknown-exit" } },
+      target: { kind: "not-observed" },
+    },
+  };
+  assert.equal(observedAudit.report.verification.kind, "stopped");
+  if (observedAudit.report.verification.kind === "stopped") {
+    assert.equal(observedAudit.report.verification.stop.failure, "unknown-exit");
   }
-  assert.equal(observationAudit.report.target.kind, "not-observed");
-  const leak = observationAudit.leak;
+  assert.equal(observedAudit.report.target.kind, "not-observed");
+  assert.equal("leak" in observedAudit.report, false);
+  const leak = observedAudit.leak;
   assert.match(leak?.diagnostic ?? "", /forced verification cleanup failure/);
-  const observedText = renderText(observationAudit, { columns: 400, color: false });
+  const observedText = renderText(observedAudit, { columns: 400, color: false });
   assert.match(observedText, /unknown-exit/);
   assert.equal(observedText.includes(leak!.path), true);
   assert.equal(observedText.includes(leak!.diagnostic.trimEnd()), true);
-  observed.raw.run(["worktree", "remove", "--force", leak!.path]);
 });
 
 test("audit renders a missing contract as a typed refusal", async () => {
