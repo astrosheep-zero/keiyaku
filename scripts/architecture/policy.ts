@@ -652,6 +652,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "ContractId",
           "ContractState",
           "DeliverData",
+          "JournalEntry",
           "SnapshotId",
         ]),
         any("core/verbs/deliver.ts", [
@@ -920,6 +921,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/input.ts"),
         any("library/region.ts"),
         any("library/configuration.ts"),
+        any("library/continuation.ts", ["ContinuationReport", "continueDeliveredDependents"]),
         any("library/repo.ts"),
         any("settlement/holder.ts"),
         any("settlement/settle.ts"),
@@ -949,7 +951,27 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "library/delivery.ts",
-      allow: [types("core/facts/types.ts"), types("protocol/deliver.ts", ["DeliverValue"])],
+      allow: [
+        types("core/facts/types.ts"),
+        types("protocol/deliver.ts", ["DeliverValue"]),
+        types("library/continuation.ts", ["ContinuationReport"]),
+      ],
+    },
+    {
+      source: "library/continuation.ts",
+      allow: [
+        types("core/facts/types.ts", ["ActorId", "ContractId", "ContractState", "JournalEntry"]),
+        any("git/observe.ts", ["observeActiveContractWorld"]),
+        any("git/read-observation.ts", ["GitDecodeChannel", "withGitReadObservation"]),
+        any("protocol/deliver.ts", ["continueDeliveryOperation"]),
+        any("protocol/operations.ts", [
+          "DocumentDerivation",
+          "HereWorkspaceResolver",
+          "PlacementStop",
+          "RepositoryScope",
+        ]),
+        types("library/mutation.ts", ["AcceptedIntent"]),
+      ],
     },
     {
       source: "library/mutation.ts",

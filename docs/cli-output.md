@@ -256,7 +256,7 @@ requires `target` and exactly one Region answer (`overlaps` or
 `overlapFailure`); amend requires `diff`, including the empty string, and
 that same Region answer; deliver and review may carry the same optional
 `completion`, `verification`, `verificationReuse`, `verificationSummary`,
-`placement`, `cleanup`, and `leak` fields, while review additionally carries
+`placement`, `continuation`, `cleanup`, and `leak` fields, while review additionally carries
 its `verdict` and optional `workspace`; arc and abandon carry no
 verb-specific field; audit requires `report` and alone may carry its
 top-level `cleanup` and `leak`. An arm cannot carry another arm's fields.
@@ -285,6 +285,13 @@ bounded summary when present. Every `reintegrated` journal row retains
 snapshot, observed target, and numeric attempts; the renderer does not infer
 these values from history.
 
+When `continuation` is present, deliver and review text project one concise row
+for every reported dependent without rereading Contract state. Claimed members
+render `✓ continuation complete <ContractId>`. Stopped members render
+`! continuation blocked <ContractId> · <typed stop summary>`. The complete
+structured stop remains in the same JSON value. Absence renders no continuation
+heading or zero row.
+
 An accepted mutation receipt answers the caller's verb-specific question, not
 whether Protocol admitted an entry. Its first line names the world change made
 by that verb and the Contract identity. Decision-relevant consequences follow;
@@ -307,6 +314,8 @@ from a missing effect.
     head <ContractHead>
 
   target -> <SnapshotId> [· verified (ran|reused)]
+✓ continuation complete <complete kei/...>
+! continuation blocked <complete kei/...> · <typed stop summary>
 ! verification unsatisfied (ran|reused)
 ! completion blocked · <typed reason and exact scalar facts>
 ~ workspace <N files changed, N insertions(+), N deletions(-)>
@@ -349,7 +358,9 @@ without an applicable declaration it renders `target -> <integration>`; an
 unsatisfied non-gating Verification renders the target followed by its typed
 unsatisfied row and bounded summary. Movement adds only the neutral deviation
 row. Review's first line includes its admitted review verdict and completion
-state without a second Contract-status row. Arc reports its typed sequence and
+state without a second Contract-status row. Continuation rows use `complete`
+and `blocked` as consequence states; the journal's `claimed` word remains in the
+record only. Arc reports its typed sequence and
 title as `chapter <N> · <title>`.
 Abandon reports its optional note and only the explicit workspace and recovery
 snapshot effects that occurred. Audit reports candidate, Verification, and

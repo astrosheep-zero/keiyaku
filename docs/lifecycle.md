@@ -52,8 +52,10 @@ other non-claimed state. Claimed prerequisites are omitted, and this refusal
 always has a nonempty `unmet` collection. No later layer rereads Contract
 authority or adjudicates those categories.
 Admitting testimony does not itself invoke placement; `deliver` and a satisfied
-`review` explicitly request it as a later protocol step. The request attempts
-placement under the target fence. If the target moved after the accepted
+`review` explicitly request it as a later protocol step. A successful placement
+also continues already-delivered direct dependents whose current prerequisites
+are now claimed. Both paths use the same placement adjudicator under the target
+fence. If the target moved after the accepted
 candidate was prepared, the protocol reuses the persisted tender and frozen
 policy, admits `reintegrated`, runs or reuses the exact Verification, and
 retries placement. It performs at most three complete integrate-verify-place
@@ -256,9 +258,12 @@ Placement eligibility is a Contract-local projection of that Contract's current
 `after` and the terminal state of the ContractIds it names. Bind and amend
 observe only their addressed Contract and the finite prerequisite closure
 needed to validate identities and acyclicity. Placement observes the addressed
-Contract and its current direct prerequisites. Claim concerns only the claimed
-Contract; it neither discovers dependents nor broadcasts `bound` facts.
-Attestation does not change prerequisite eligibility.
+Contract and its current direct prerequisites. After placement admits `claimed`,
+the library facade reads active Contracts and selects direct dependents that
+retain a delivery and whose prerequisites are all claimed. This read-time
+association is
+not a Pact decision and does not broadcast `bound` facts. Attestation does not
+change prerequisite eligibility.
 
 Every `after` coordinate must resolve to an existing contract in the decision
 snapshot. An unresolved coordinate is a typed `unknown-prerequisite` refusal;
@@ -272,9 +277,16 @@ Placement observes its identity plus its current direct `after` contracts.
 Deliver does not observe prerequisites. No lifecycle decision performs a
 full-world Contract observation.
 
-Prerequisite eligibility becoming true does not itself publish a fact. Claimed
-terminality cannot revert, so the truth remains available for a later placement
-attempt. `bound` is the durable delivery-phase milestone and does not record
+Prerequisite eligibility becoming true does not itself publish a fact. When it
+becomes true because placement admitted `claimed`, that invocation attempts
+each selected retained dependent in canonical ContractId order. It reuses the
+dependent's persisted tender, frozen policy, Verification, reintegration, and
+placement paths; it never captures workspace bytes or appends another delivery.
+A child stop does not reverse the leading claim or prevent an independent
+sibling attempt. Each newly claimed child exposes its own direct dependents in
+the same finite invocation. Acyclic prerequisites and invocation-local
+ContractId deduplication make this traversal finite and idempotent. `bound` is
+the durable delivery-phase milestone and does not record
 consumption of an `after` snapshot. It is materialized only by the first
 operation whose fact requires boundness, currently `deliver`, in the same Offer
 and immediately before that dependent fact. Bind and amend never eagerly append
@@ -282,9 +294,11 @@ it. Future bound gates may be judged at that transition without changing
 placement prerequisites. `bound` is never offered or repaired independently,
 and no dependent fact may precede it.
 
-The kernel neither sorts, queues, nor automatically reorders contracts.
-Placement eligibility observes the declared prerequisite identities and their
-terminal facts.
+The kernel neither sorts nor queues Contracts. Library claim continuation is a
+synchronous consequence of one accepted placement, not durable intent: it adds
+no queue, retry ledger, event, background worker, or lifecycle fact. Protocol
+completes one retained candidate at a time, and the existing placement decision
+remains the sole judge of every selected Contract.
 
 ## Pact Decisions
 
@@ -385,8 +399,10 @@ decision.
 
 The leading admission selects the outer result. `refused` and `retry` mean no
 journal fact landed; once the leading act completes the result remains
-`accepted`. Verification, placement, cleanup, reconciliation, and settlement
-are independent trailing duties whose facts or typed stops remain on their own
-channels. They never reverse acceptance, change exit status, append abandonment,
-or hide the admitted Contract. Exact public shapes are owned by
+`accepted`. Verification, placement, claim continuation, cleanup,
+reconciliation, and settlement are independent trailing duties whose facts or
+typed stops remain on their own channels. Continuation facts and physical
+effects join the invoking result while its `head` remains the addressed
+Contract's head. These duties never reverse acceptance, change exit status,
+append abandonment, or hide the admitted Contract. Exact public shapes are owned by
 [public-results.md](public-results.md).

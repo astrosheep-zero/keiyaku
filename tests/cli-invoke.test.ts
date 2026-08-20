@@ -270,11 +270,16 @@ test("deliver exposes the core-owned unmet prerequisites unchanged in its JSON r
   assert.deepEqual(JSON.parse(JSON.stringify(delivered)).placement, placement);
 });
 
-test("accepted deliver and review transport completion without reconstructing it from facts", () => {
+test("accepted deliver and review transport completion consequences without reconstructing facts", () => {
   const contract = contractId("kei/completion-result");
   const completion = {
     integration: "final-integration",
     verification: { mode: "reused" as const, verdict: "unsatisfied" as const },
+  };
+  const continuation = {
+    attempted: 1,
+    claimed: [contractId("kei/dependent")],
+    stopped: [],
   };
   const envelope = {
     head: contractHead("head"),
@@ -286,9 +291,10 @@ test("accepted deliver and review transport completion without reconstructing it
   const delivered = acceptedDeliver({
     ...envelope,
     facts: [],
-    value: { completion } as Delivery,
+    value: { completion, continuation } as Delivery,
   }, contract);
   assert.strictEqual(delivered.completion, completion);
+  assert.strictEqual(delivered.continuation, continuation);
 
   const reviewed = acceptedReview({
     ...envelope,
@@ -298,9 +304,10 @@ test("accepted deliver and review transport completion without reconstructing it
       kind: "attestation",
       data: { gate: "reviewed", verdict: "satisfied" },
     }] as never,
-    value: { completion },
+    value: { completion, continuation },
   }, contract);
   assert.strictEqual(reviewed.completion, completion);
+  assert.strictEqual(reviewed.continuation, continuation);
 });
 
 test("one CLI invocation reuses its Repo for selector, settings, and contract lookup", async () => {

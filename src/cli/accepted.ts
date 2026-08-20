@@ -109,6 +109,7 @@ export function acceptedDeliver(
     ...(value.verificationReuse === undefined ? {} : { verificationReuse: value.verificationReuse }),
     ...(value.verificationSummary === undefined ? {} : { verificationSummary: value.verificationSummary }),
     ...(value.placement === undefined ? {} : { placement: value.placement }),
+    ...(value.continuation === undefined ? {} : { continuation: value.continuation }),
     ...(value.cleanup === undefined ? {} : { cleanup: value.cleanup }),
     ...(value.leak === undefined ? {} : { leak: value.leak }),
   };
@@ -133,6 +134,7 @@ export function acceptedReview(
     ...(value.verificationReuse === undefined ? {} : { verificationReuse: value.verificationReuse }),
     ...(value.verificationSummary === undefined ? {} : { verificationSummary: value.verificationSummary }),
     ...(value.placement === undefined ? {} : { placement: value.placement }),
+    ...(value.continuation === undefined ? {} : { continuation: value.continuation }),
     ...(value.workspace === undefined ? {} : { workspace: value.workspace }),
     ...(value.cleanup === undefined ? {} : { cleanup: value.cleanup }),
     ...(value.leak === undefined ? {} : { leak: value.leak }),

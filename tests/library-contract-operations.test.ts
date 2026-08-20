@@ -544,6 +544,166 @@ test("delivery terminal refusal outranks a missing managed worktree", async () =
   );
 });
 
+test("claim continues one retained dependent without another delivery", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  const prerequisite = await Keiyaku.bind({
+    repo,
+    markdown: document().replace("# Library verbs", "# Prerequisite"),
+    workspace: "worktree",
+    gates: [],
+  });
+  const dependent = await Keiyaku.bind({
+    repo,
+    markdown: document().replace("# Library verbs", "# Dependent"),
+    workspace: "worktree",
+    gates: [],
+    after: [prerequisite.keiyaku.id],
+  });
+
+  const retained = await dependent.keiyaku.deliver();
+  assert.equal(retained.value.placement?.refusal.kind, "prerequisites-unsatisfied");
+  const delivered = await prerequisite.keiyaku.deliver();
+
+  assert.deepEqual(delivered.value.continuation, {
+    attempted: 1,
+    claimed: [dependent.keiyaku.id],
+    stopped: [],
+  });
+  assert.equal(delivered.head, (await prerequisite.keiyaku.state()).head);
+  assert.equal((await dependent.keiyaku.state()).terminal?.kind, "claimed");
+  const dependentFacts = (await dependent.keiyaku.history()).events
+    .flatMap((event) => event.source === "journal" ? [event.fact.kind] : []);
+  assert.equal(dependentFacts.filter((kind) => kind === "deliver").length, 1);
+  assert.equal(dependentFacts.filter((kind) => kind === "claimed").length, 1);
+});
+
+test("a stopped continuation does not block an eligible sibling", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  const prerequisite = await Keiyaku.bind({
+    repo,
+    markdown: document().replace("# Library verbs", "# Prerequisite"),
+    workspace: "worktree",
+    gates: [],
+  });
+  const blocked = await Keiyaku.bind({
+    repo,
+    markdown: document().replace("# Library verbs", "# Blocked dependent"),
+    workspace: "worktree",
+    gates: ["reviewed"],
+    after: [prerequisite.keiyaku.id],
+  });
+  const eligible = await Keiyaku.bind({
+    repo,
+    markdown: document().replace("# Library verbs", "# Eligible dependent"),
+    workspace: "worktree",
+    gates: [],
+    after: [prerequisite.keiyaku.id],
+  });
+  await blocked.keiyaku.deliver();
+  await eligible.keiyaku.deliver();
+
+  const delivered = await prerequisite.keiyaku.deliver();
+
+  assert.equal(delivered.value.continuation?.attempted, 2);
+  assert.deepEqual(delivered.value.continuation?.claimed, [eligible.keiyaku.id]);
+  assert.deepEqual(delivered.value.continuation?.stopped, [{
+    contractId: blocked.keiyaku.id,
+    stop: { refusal: { kind: "gates-unsatisfied", contractId: blocked.keiyaku.id } },
+  }]);
+  assert.equal((await prerequisite.keiyaku.state()).terminal?.kind, "claimed");
+  assert.equal((await eligible.keiyaku.state()).terminal?.kind, "claimed");
+  assert.equal((await blocked.keiyaku.state()).terminal, null);
+});
+
+test("claim continuation walks a retained dependency chain once", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  const root = await Keiyaku.bind({
+    repo,
+    markdown: document().replace("# Library verbs", "# Root"),
+    workspace: "worktree",
+    gates: [],
+  });
+  const middle = await Keiyaku.bind({
+    repo,
+    markdown: document().replace("# Library verbs", "# Middle"),
+    workspace: "worktree",
+    gates: [],
+    after: [root.keiyaku.id],
+  });
+  const leaf = await Keiyaku.bind({
+    repo,
+    markdown: document().replace("# Library verbs", "# Leaf"),
+    workspace: "worktree",
+    gates: [],
+    after: [middle.keiyaku.id],
+  });
+  await leaf.keiyaku.deliver();
+  await middle.keiyaku.deliver();
+
+  const delivered = await root.keiyaku.deliver();
+
+  assert.deepEqual(delivered.value.continuation, {
+    attempted: 2,
+    claimed: [middle.keiyaku.id, leaf.keiyaku.id],
+    stopped: [],
+  });
+  for (const contract of [middle.keiyaku, leaf.keiyaku]) {
+    const facts = (await contract.history()).events
+      .flatMap((event) => event.source === "journal" ? [event.fact.kind] : []);
+    assert.equal(facts.filter((kind) => kind === "deliver").length, 1);
+    assert.equal(facts.filter((kind) => kind === "claimed").length, 1);
+  }
+});
+
+test("a dependent claimed during continuation reports already-terminal", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  const prerequisite = await Keiyaku.bind({
+    repo,
+    markdown: document().replace("# Library verbs", "# Prerequisite"),
+    workspace: "worktree",
+    gates: [],
+  });
+  const dependent = await Keiyaku.bind({
+    repo,
+    markdown: document("true").replace("# Library verbs", "# Dependent"),
+    workspace: "worktree",
+    gates: ["reviewed"],
+    after: [prerequisite.keiyaku.id],
+  });
+  await dependent.keiyaku.deliver();
+
+  const reviewScript = [
+    `const { Keiyaku, Repo } = await import(${JSON.stringify(new URL("../src/index.ts", import.meta.url).href)});`,
+    `const repo = await Repo.at({ path: ${JSON.stringify(repository.path)} });`,
+    `await Keiyaku.of({ repo, id: ${JSON.stringify(dependent.keiyaku.id)} }).review({ verdict: "satisfied" });`,
+  ].join(" ");
+  const encoded = Buffer.from(`(async () => { ${reviewScript} })()`).toString("base64");
+  const verification = [
+    "## Replace: Verification",
+    "~~~bash",
+    `node --import '${new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href}' --input-type=module -e 'await eval(Buffer.from("${encoded}", "base64").toString())'`,
+    "~~~",
+    "",
+  ].join("\n");
+  await dependent.keiyaku.amend({ markdown: verification });
+
+  const delivered = await prerequisite.keiyaku.deliver();
+
+  assert.deepEqual(delivered.value.continuation, {
+    attempted: 1,
+    claimed: [],
+    stopped: [{
+      contractId: dependent.keiyaku.id,
+      stop: { kind: "already-terminal" },
+    }],
+  });
+  assert.equal((await dependent.keiyaku.state()).terminal?.kind, "claimed");
+});
+
 test("review records before delivery and the same patch can be placed", async () => {
   const repository = repositoryWithMain();
   const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });

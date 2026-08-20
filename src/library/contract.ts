@@ -58,7 +58,6 @@ import { arcOperation } from "../protocol/arc.js";
 import type { AuditReport } from "../protocol/audit.js";
 import {
   deliverOperation,
-  type DeliverValue,
   type IntegrationConflictMaterialized,
   type VerificationReuse,
 } from "../protocol/deliver.js";
@@ -85,7 +84,8 @@ import {
   type UpstreamRequestOutcome,
 } from "../akuma/requests.js";
 import { auditContract, type AuditInput } from "./audit.js";
-import { Delivery, deliveryHandle } from "./delivery.js";
+import { Delivery, deliveryHandle, type DeliveryValue } from "./delivery.js";
+import { continueDeliveredDependents, type ContinuationReport } from "./continuation.js";
 import {
   completionInput,
   completeHolderMutation,
@@ -140,8 +140,9 @@ export type ContractHistory = Readonly<{
 }>;
 export type ActorId = string;
 export type AttestationVerdict = "satisfied" | "unsatisfied";
-export type Review = ReviewValue;
+export type Review = ReviewValue & Readonly<{ continuation?: ContinuationReport }>;
 export type { PlacementStop, VerificationReuse, VerificationStop, IntegrationConflictMaterialized };
+export type { ContinuationReport };
 
 export type TopologyEffect = ProtocolReconcileReport["effects"][number] | ContractFileEffect;
 export type Lag = ProtocolReconcileReport["lag"][number] | ContractFileLag;
@@ -209,12 +210,12 @@ type ReviewExecutionInput = Readonly<{
 }>;
 
 type ForwardedDeliveryReceipt =
-  | Readonly<{ kind: "accepted"; result: MutationResult<DeliverValue> }>
+  | Readonly<{ kind: "accepted"; result: MutationResult<DeliveryValue> }>
   | Readonly<{ kind: "refused"; refusal: KeiyakuRefusal }>
   | Readonly<{ kind: "retry"; reason: KeiyakuRetryReason }>
   | IntegrationConflictMaterialized;
 type ForwardedReviewReceipt =
-  | Readonly<{ kind: "accepted"; result: MutationResult<ReviewValue> }>
+  | Readonly<{ kind: "accepted"; result: MutationResult<Review> }>
   | Readonly<{ kind: "refused"; refusal: KeiyakuRefusal }>
   | Readonly<{ kind: "retry"; reason: KeiyakuRetryReason }>;
 export type { AuditInput };
@@ -245,7 +246,7 @@ function derivedDocument(state: ContractState) {
 
 async function executeLocalDelivery(
   input: DeliveryExecutionInput,
-): Promise<MutationResult<DeliverValue> | IntegrationConflictMaterialized> {
+): Promise<MutationResult<DeliveryValue> | IntegrationConflictMaterialized> {
   return withGitDecodeChannel(input.scope, async (channel) => {
     const outcome = await deliverOperation({
       scope: input.scope,
@@ -261,14 +262,27 @@ async function executeLocalDelivery(
       resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
     });
     if (outcome.kind === "integration-conflict-materialized") return outcome;
+    const accepted = requireAccepted(outcome);
+    const continued = accepted.value.completion === undefined
+      ? accepted
+      : await continueDeliveredDependents({
+        scope: input.scope,
+        channel,
+        contractId: input.contractId,
+        accepted,
+        deriveDocument: derivedDocument,
+        resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
+        ...(input.actor === undefined ? {} : { actor: input.actor }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
     return completeMutation({
-      ...completionInput(input.scope, channel, input.contractId, (delivery: DeliverValue) => delivery, input.hooks),
-      accepted: requireAccepted(outcome),
+      ...completionInput(input.scope, channel, input.contractId, (delivery: DeliveryValue) => delivery, input.hooks),
+      accepted: continued,
     });
   });
 }
 
-async function executeLocalReview(input: ReviewExecutionInput): Promise<MutationResult<ReviewValue>> {
+async function executeLocalReview(input: ReviewExecutionInput): Promise<MutationResult<Review>> {
   return withGitDecodeChannel(input.scope, async (channel) => {
     const accepted = requireAccepted(await reviewOperation({
       scope: input.scope,
@@ -280,9 +294,20 @@ async function executeLocalReview(input: ReviewExecutionInput): Promise<Mutation
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
     }));
+    const continued = accepted.value.completion === undefined
+      ? accepted
+      : await continueDeliveredDependents({
+        scope: input.scope,
+        channel,
+        contractId: input.contractId,
+        accepted,
+        deriveDocument: derivedDocument,
+        resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
+        ...(input.actor === undefined ? {} : { actor: input.actor }),
+      });
     return completeMutation({
-      ...completionInput(input.scope, channel, input.contractId, (review: ReviewValue) => review, input.hooks),
-      accepted,
+      ...completionInput(input.scope, channel, input.contractId, (review: Review) => review, input.hooks),
+      accepted: continued,
     });
   });
 }
@@ -298,13 +323,13 @@ function forwardedReceipt<Receipt>(outcome: UpstreamRequestOutcome, action: stri
 
 function requireForwardedDelivery(
   receipt: ForwardedDeliveryReceipt,
-): MutationResult<DeliverValue> | IntegrationConflictMaterialized {
+): MutationResult<DeliveryValue> | IntegrationConflictMaterialized {
   if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
   if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
   return receipt.kind === "accepted" ? receipt.result : receipt;
 }
 
-function requireForwardedReview(receipt: ForwardedReviewReceipt): MutationResult<ReviewValue> {
+function requireForwardedReview(receipt: ForwardedReviewReceipt): MutationResult<Review> {
   if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
   if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
   return receipt.result;
@@ -623,7 +648,7 @@ export class KeiyakuHandle {
     }));
   }
 
-  private deliveryHandle(delivery: DeliverValue): Delivery {
+  private deliveryHandle(delivery: DeliveryValue): Delivery {
     return deliveryHandle(
       delivery,
       () => deliveryDiffOperation({

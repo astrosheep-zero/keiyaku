@@ -29,6 +29,7 @@ import {
   receiptRow,
   reuseLines,
   stopLines,
+  stopSummary,
   titleLines,
 } from "./receipt.js";
 import { gitShortStat, renderOpaqueBlock, type TextRenderContext } from "./terminal.js";
@@ -268,6 +269,31 @@ function movementLines(
   return lines;
 }
 
+function continuationLines(
+  result: AcceptedDeliverResult | AcceptedReviewResult,
+  columns: number,
+): readonly string[] {
+  const report = result.continuation;
+  if (report === undefined) return [];
+  const lines: string[] = [];
+  for (const contractId of report.claimed) {
+    receiptRow(lines, "✓", "continuation", [
+      { text: "complete" },
+      { text: contractId, opaque: true },
+    ], columns);
+  }
+  for (const { contractId, stop } of report.stopped) {
+    const detail = "kind" in stop ? [{ text: stop.kind }] : stopSummary(stop, contractId);
+    receiptRow(lines, "!", "continuation", [
+      { text: "blocked" },
+      { text: contractId, opaque: true },
+      { text: "·" },
+      ...detail,
+    ], columns);
+  }
+  return lines;
+}
+
 function renderAcceptedBind(result: AcceptedBindResult, columns: number): string {
   const lines = titleLines("✓", "bound", result.contract, columns);
   receiptRow(lines, " ", "workspace", [
@@ -290,7 +316,7 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
   const complete = result.completion !== undefined;
   const title = complete ? "delivered" : "deliver — not complete";
   const lines = titleLines("✓", title, result.contract, columns);
-  lines.push(...movementLines(result, columns), ...completionLines(result, columns));
+  lines.push(...movementLines(result, columns), ...completionLines(result, columns), ...continuationLines(result, columns));
   if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   if (result.verification !== undefined) {
     lines.push(...stopLines("verification", result.verification, columns, result.contract));
@@ -307,7 +333,7 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
 function renderAcceptedReview(result: AcceptedReviewResult, columns: number): string {
   const complete = result.completion !== undefined;
   const lines = titleLines("✓", `review ${result.verdict} — ${complete ? "complete" : "not complete"}`, result.contract, columns);
-  lines.push(...movementLines(result, columns), ...completionLines(result, columns));
+  lines.push(...movementLines(result, columns), ...completionLines(result, columns), ...continuationLines(result, columns));
   if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   if (result.placement !== undefined) {
     lines.push(...stopLines("completion", result.placement, columns, result.contract));

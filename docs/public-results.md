@@ -49,9 +49,12 @@ interpret protocol outcomes or repeat either follow-up stage.
 
 `MutationResult` is invocation-scoped observation, never Contract state or a
 durable receipt. `facts` and `head` come only from accepted protocol admission.
-`effects` and `lags` first contain any physical result produced inside targeted
-placement's Git fence, then the one mandatory Git reconciliation; `settlement`
-comes only from the one settlement invocation. There is no nested `receipt`,
+When claim continuation admits facts for dependent Contracts, `facts` contains
+those consequence facts while `head` remains the addressed Contract's head.
+`effects` and `lags` first contain physical results produced inside targeted
+placement fences, then one mandatory Git reconciliation for every Contract
+whose facts were admitted; `settlement` combines those reconciliation-owned
+settlements. There is no nested `receipt`,
 duplicate fact field, or result stored on a `Keiyaku` handle.
 
 ```ts
@@ -301,6 +304,15 @@ type CandidateCompletion = Readonly<{
   }>
 }>
 
+type ContinuationReport = Readonly<{
+  attempted: number
+  claimed: readonly ContractId[]
+  stopped: readonly Readonly<{
+    contractId: ContractId
+    stop: PlacementStop | { kind: "already-terminal" | "delivery-missing" }
+  }>[]
+}>
+
 type Delivery = Readonly<{
   tenderSnapshot: SnapshotId
   integration: Readonly<{
@@ -317,6 +329,7 @@ type Delivery = Readonly<{
   placement?: PlacementStop
   cleanup?: VerificationCleanupFailure
   leak?: WorktreeLeak
+  continuation?: ContinuationReport
   diff(): Promise<string | null>
 }>
 
@@ -328,6 +341,7 @@ type Review = Readonly<{
   placement?: PlacementStop
   cleanup?: VerificationCleanupFailure
   leak?: WorktreeLeak
+  continuation?: ContinuationReport
 }>
 ```
 
@@ -408,7 +422,7 @@ it is not a refusal. `KeiyakuRefusal` still owns the observation-only conflict
 failure, which includes `recovery` only on `reason: "conflict"`.
 
 Every successful mutation result contains every fact admitted by that
-invocation and the resulting contract-head scalar. Accepted deliver and
+invocation and the addressed Contract's resulting head scalar. Accepted deliver and
 satisfied review additionally carry `completion` exactly when placement admits
 `claimed`. Its `integration` is the exact final placed snapshot. Its optional
 Verification member binds the final snapshot to whether Verification ran or a
@@ -420,6 +434,15 @@ stop leaves placement incomplete. Package-root results expose no `Receipt`,
 Protocol may retain prior and snapshot values while composing one invocation,
 but they are process-local implementation data with no public or persistent
 reader.
+
+An accepted deliver or review carries `continuation` only when its successful
+placement attempted at least one retained dependent. `attempted` is the exact
+number attempted in that invocation. `claimed` and `stopped` retain canonical
+selection order and complete ContractIds. A stopped row carries the unchanged
+`PlacementStop`, or `already-terminal`/`delivery-missing` when concurrent state
+movement prevents starting the retained candidate. The report is an
+invocation-scoped consequence projection, not a queue, retry receipt, or
+journal fact. JSON and text consume this same value without another read.
 
 An unsuccessful trailing obligation does not change the successful leading act.
 The `verification` or `placement` channel contains the typed reason why that

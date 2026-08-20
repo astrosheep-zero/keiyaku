@@ -2,6 +2,7 @@ import type {
   AuditReport,
   ContractHistory,
   ContractId,
+  ContinuationReport,
   Delivery,
   Fact,
   IntegrationConflictMaterialized,
@@ -63,6 +64,7 @@ export type AcceptedBindResult = AcceptedEnvelope & Readonly<{
   verificationReuse?: never;
   verificationSummary?: never;
   placement?: never;
+  continuation?: never;
   cleanup?: never;
   leak?: never;
   report?: never;
@@ -82,6 +84,7 @@ export type AcceptedAmendResult = AcceptedEnvelope & Readonly<{
   verificationReuse?: never;
   verificationSummary?: never;
   placement?: never;
+  continuation?: never;
   cleanup?: never;
   leak?: never;
   report?: never;
@@ -100,6 +103,7 @@ export type AcceptedDeliverResult = AcceptedEnvelope & Readonly<{
   verificationReuse?: VerificationReuse;
   verificationSummary?: string;
   placement?: PlacementStop;
+  continuation?: ContinuationReport;
   cleanup?: MutationResult<unknown>["cleanup"];
   leak?: MutationResult<unknown>["leak"];
   target?: never;
@@ -122,6 +126,7 @@ export type AcceptedReviewResult = AcceptedEnvelope & Readonly<{
   verificationReuse?: VerificationReuse;
   verificationSummary?: string;
   placement?: PlacementStop;
+  continuation?: ContinuationReport;
   workspace?: Review["workspace"];
   cleanup?: MutationResult<unknown>["cleanup"];
   leak?: MutationResult<unknown>["leak"];
@@ -143,6 +148,7 @@ export type AcceptedArcResult = AcceptedEnvelope & Readonly<{
   verificationReuse?: never;
   verificationSummary?: never;
   placement?: never;
+  continuation?: never;
   cleanup?: never;
   leak?: never;
   overlaps?: never;
@@ -164,6 +170,7 @@ export type AcceptedAbandonResult = AcceptedEnvelope & Readonly<{
   verificationReuse?: never;
   verificationSummary?: never;
   placement?: never;
+  continuation?: never;
   cleanup?: never;
   leak?: never;
   overlaps?: never;
@@ -187,6 +194,7 @@ export type AcceptedAuditResult = AcceptedEnvelope & Readonly<{
   verificationReuse?: never;
   verificationSummary?: never;
   placement?: never;
+  continuation?: never;
   overlaps?: never;
   overlapFailure?: never;
   workspace?: never;

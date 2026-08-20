@@ -117,6 +117,26 @@ export function stopLines(
   columns: number,
   addressed: string,
 ): readonly string[] {
+  const detail = stopSummary(stop, addressed);
+  const lines: string[] = [];
+  const state = label === "verification" ? "failed" : "blocked";
+  receiptRow(lines, "!", label, [{ text: state }, { text: "·" }, ...detail], columns);
+  lines.push(...prerequisiteRows(stop, columns));
+  if ("failure" in stop && stop.failure === "environment-failure" && "command" in stop) {
+    appendHookPayload(lines, stop.detail);
+  }
+  if ("retry" in stop && stop.retry?.kind === "publication-failed") {
+    receiptPayload(lines, "diagnostic", stop.retry.diagnostic);
+  } else if ("failure" in stop && "diagnostic" in stop) {
+    receiptPayload(lines, "diagnostic", stop.diagnostic);
+  }
+  return lines;
+}
+
+export function stopSummary(
+  stop: VerificationStop | PlacementStop,
+  addressed: string,
+): readonly ReceiptSegment[] {
   const detail: ReceiptSegment[] = [];
   if ("refusal" in stop && stop.refusal !== undefined) {
     detail.push({ text: stop.refusal.kind });
@@ -133,19 +153,7 @@ export function stopLines(
       detail.push(...targetMovedDetail(stop));
     }
   }
-  const lines: string[] = [];
-  const state = label === "verification" ? "failed" : "blocked";
-  receiptRow(lines, "!", label, [{ text: state }, { text: "·" }, ...detail], columns);
-  lines.push(...prerequisiteRows(stop, columns));
-  if ("failure" in stop && stop.failure === "environment-failure" && "command" in stop) {
-    appendHookPayload(lines, stop.detail);
-  }
-  if ("retry" in stop && stop.retry?.kind === "publication-failed") {
-    receiptPayload(lines, "diagnostic", stop.retry.diagnostic);
-  } else if ("failure" in stop && "diagnostic" in stop) {
-    receiptPayload(lines, "diagnostic", stop.diagnostic);
-  }
-  return lines;
+  return detail;
 }
 
 export function cleanupLines(

@@ -15,12 +15,12 @@ import { worktreePath } from "../git/workspace.js";
 import { currentBranch, observeContractsForAdmissionAt } from "../git/observe.js";
 import type { AttemptContext } from "../core/decide.js";
 import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ContractId, ContractState, DeliverData, SnapshotId } from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState, DeliverData, JournalEntry, SnapshotId } from "../core/facts/types.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import type { CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import { admitted } from "./outcome.js";
-import { completeCandidate, type CompletionEvidence } from "./completion.js";
+import { completeCandidate, type CompletionEvidence, type CompletionResult } from "./completion.js";
 import { appointmentFor, readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import type {
   AttemptDecision,
@@ -254,6 +254,34 @@ async function completeDelivery(
   return admitted(completed.admission, {
     ...first.value.delivery,
     ...completed.evidence,
+  });
+}
+
+export async function continueDeliveryOperation(input: Readonly<{
+  scope: MutationOperationInput["scope"];
+  channel: MutationOperationInput["channel"];
+  state: ContractState;
+  journal: readonly JournalEntry[];
+  deriveDocument: (state: ContractState) => DocumentDerivation;
+  resolveHereWorkspace?: MutationOperationInput["resolveHereWorkspace"];
+  actor?: ActorId;
+  signal?: AbortSignal;
+}>): Promise<CompletionResult> {
+  const contractId = input.state.id;
+  const hereWorkspacePath = input.state.coordinates.workspace === "here"
+    ? await input.resolveHereWorkspace?.(contractId)
+    : undefined;
+  return await completeCandidate({
+    channel: input.channel,
+    repository: input.scope,
+    contractId,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.state.coordinates.target === undefined ? {} : { target: input.state.coordinates.target }),
+    verification: input.deriveDocument(input.state).verification,
+    initial: { kind: "accepted", state: input.state, journal: input.journal, facts: [] },
+    verifyInitial: true,
+    ...(hereWorkspacePath === undefined ? {} : { hereWorkspacePath }),
   });
 }
 

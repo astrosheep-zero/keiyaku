@@ -95,6 +95,37 @@ test("deliver projects a ran Verification completion", () => {
   ].join("\n"));
 });
 
+test("deliver renders claimed and stopped continuations from the accepted result", () => {
+  const contract = contractId("kei/prerequisite");
+  const claimed = contractId("kei/claimed-dependent");
+  const stopped = contractId("kei/stopped-dependent");
+  assert.equal(renderText({
+    kind: "accepted",
+    verb: "deliver",
+    contract,
+    head: contractHead("head"),
+    facts: [],
+    effects: [],
+    settlement: { actions: [], lags: [] },
+    completion: { integration: snapshotId("integration") },
+    continuation: {
+      attempted: 2,
+      claimed: [claimed],
+      stopped: [{
+        contractId: stopped,
+        stop: { refusal: { kind: "gates-unsatisfied", contractId: stopped } },
+      }],
+    },
+  }), [
+    "✓ delivered — kei/prerequisite",
+    "  target -> integration",
+    "✓ continuation complete kei/claimed-dependent",
+    "! continuation blocked kei/stopped-dependent · gates-unsatisfied",
+    "  record",
+    "    head head",
+  ].join("\n"));
+});
+
 test("deliver projects no Verification and an unsatisfied non-gating Verification", () => {
   const contract = contractId("kei/completion-states");
   const integration = snapshotId("integration-2");

@@ -56,6 +56,7 @@ export type {
   ContractObservationInput,
   ContractPhase,
   ContractRow,
+  ContinuationReport,
   DeliverInput,
   Fact,
   IntegrationConflictMaterialized,

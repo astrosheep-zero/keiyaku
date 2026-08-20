@@ -49,7 +49,11 @@ export async function completeMutation<Value, PublicValue>(
   input: Completion<Value, PublicValue>,
 ): Promise<MutationResult<PublicValue>> {
   const { scope, channel, contractId, accepted, value, hooks } = input;
-  const report = await completeReconcile({ scope, channel, contractId, hooks, retryHooks: false });
+  const contracts = [...new Set([contractId, ...accepted.facts.map((fact) => fact.contract)])];
+  const reports: ReconcileCompletion[] = [];
+  for (const affected of contracts) {
+    reports.push(await completeReconcile({ scope, channel, contractId: affected, hooks, retryHooks: false }));
+  }
   const obligations: AcceptedObligations = {
     ...(accepted.cleanup === undefined ? {} : { cleanup: accepted.cleanup }),
     ...(accepted.leak === undefined ? {} : { leak: accepted.leak }),
@@ -58,9 +62,12 @@ export async function completeMutation<Value, PublicValue>(
     facts: accepted.facts,
     head: accepted.head,
     value: value(accepted.value),
-    effects: [...(accepted.physical?.effects ?? []), ...report.effects],
-    lags: [...(accepted.physical?.lag ?? []), ...report.lag],
-    settlement: report.settlement,
+    effects: [...(accepted.physical?.effects ?? []), ...reports.flatMap((report) => report.effects)],
+    lags: [...(accepted.physical?.lag ?? []), ...reports.flatMap((report) => report.lag)],
+    settlement: {
+      actions: reports.flatMap((report) => report.settlement.actions),
+      lags: reports.flatMap((report) => report.settlement.lags),
+    },
     ...obligations,
   };
 }
