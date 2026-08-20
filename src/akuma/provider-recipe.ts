@@ -1,9 +1,12 @@
+export type SystemPromptMode = "append" | "replace";
+
 export type ProviderOptions = Readonly<{
   model?: string;
   effort?: string;
   readonly?: true;
   network?: "disabled" | "enabled";
   systemPrompt?: string;
+  systemPromptMode?: SystemPromptMode;
 }>;
 
 export type ReadonlyRestraint = Readonly<
@@ -58,12 +61,22 @@ export function decodeProviderOptions(value: unknown): ProviderOptions {
     throw new TypeError("provider option network must be disabled, enabled");
   }
   const systemPrompt = optionText(options, "systemPrompt", "allow");
+  const systemPromptMode = options.systemPromptMode;
+  if (systemPromptMode !== undefined) {
+    if (systemPromptMode !== "append" && systemPromptMode !== "replace") {
+      throw new TypeError("provider option systemPromptMode must be append, replace");
+    }
+    if (systemPrompt === undefined) {
+      throw new TypeError("provider option systemPromptMode requires systemPrompt");
+    }
+  }
   return Object.freeze({
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
     ...(options.readonly === undefined ? {} : { readonly: true as const }),
     ...(network === undefined ? {} : { network }),
     ...(systemPrompt === undefined ? {} : { systemPrompt }),
+    ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
   });
 }
 

@@ -5,6 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "../src/library/keiyaku.js";
 import { loadArchetype } from "../src/akuma/archetype.js";
+import { decodeProviderOptions } from "../src/akuma/provider-recipe.js";
+import { decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
 import { invoke, type SettingsInvocationResult } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderSettingsText, settingsJsonValue } from "../src/cli/render/settings.js";
@@ -218,10 +220,8 @@ test("Archetype resolves grok-build as its own builtin protocol execution", asyn
     });
     assert.deepEqual(loaded.options, { model: "grok-4", effort: "high" });
     writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: grok-build\n---\nBuild.\n");
-    await assert.rejects(
-      loadNamed(value, "grok"),
-      /Grok Build does not support the systemPrompt option/u,
-    );
+    const prompted = await loadNamed(value, "grok");
+    assert.deepEqual(prompted.options, { systemPrompt: "Build.\n", systemPromptMode: "append" });
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: {
       private: { kind: "grok-build", executable: "private-grok", env: { XAI_API_KEY: "test" } },
     } }));
@@ -244,7 +244,13 @@ test("Archetype resolves a second configured ACP execution without registry chan
       local: {
         kind: "acp",
         executable: "other-agent",
-        config: { argvBefore: ["serve"], argvAfter: ["stdio"], modelArg: "--model-id", systemPromptArg: "--prompt" },
+        config: {
+          argvBefore: ["serve"],
+          argvAfter: ["stdio"],
+          modelArg: "--model-id",
+          systemPromptArg: "--prompt",
+          systemPromptMode: "append",
+        },
         env: { AGENT_PROFILE: "local" },
       },
     } }));
@@ -254,10 +260,95 @@ test("Archetype resolves a second configured ACP execution without registry chan
       name: "local",
       kind: "acp",
       executable: "other-agent",
-      config: { argvBefore: ["serve"], argvAfter: ["stdio"], modelArg: "--model-id", systemPromptArg: "--prompt" },
+      config: {
+        argvBefore: ["serve"],
+        argvAfter: ["stdio"],
+        modelArg: "--model-id",
+        systemPromptArg: "--prompt",
+        systemPromptMode: "append",
+      },
       env: { AGENT_PROFILE: "local" },
     });
-    assert.deepEqual(loaded.options, { model: "test-model", systemPrompt: "Build.\n" });
+    assert.deepEqual(loaded.options, { model: "test-model", systemPrompt: "Build.\n", systemPromptMode: "append" });
+  } finally { value.close(); }
+});
+
+test("Archetype systemPromptMode defaults to append and rejects invalid definitions", async () => {
+  const value = fixture();
+  try {
+    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+    assert.deepEqual((await loadNamed(value, "worker")).options, {
+      systemPrompt: "Work.\n",
+      systemPromptMode: "append",
+    });
+    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: claude\nsystemPromptMode: append\n---\nWork.\n");
+    assert.deepEqual((await loadNamed(value, "worker")).options, {
+      systemPrompt: "Work.\n",
+      systemPromptMode: "append",
+    });
+    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: claude\nsystemPromptMode: replace\n---\nWork.\n");
+    assert.deepEqual((await loadNamed(value, "worker")).options, {
+      systemPrompt: "Work.\n",
+      systemPromptMode: "replace",
+    });
+    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: claude\n---\n");
+    assert.deepEqual((await loadNamed(value, "worker")).options, {});
+    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: claude\nsystemPromptMode: replace\n---\n");
+    await assert.rejects(loadNamed(value, "worker"), /systemPromptMode requires a nonempty Markdown body/u);
+    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: claude\nsystemPromptMode: merge\n---\nWork.\n");
+    await assert.rejects(loadNamed(value, "worker"), /systemPromptMode must be one of append, replace/u);
+  } finally { value.close(); }
+});
+
+test("provider option decoding preserves historical prompts and rejects invalid modes", () => {
+  assert.deepEqual(decodeProviderOptions({ systemPrompt: "Work.\n" }), { systemPrompt: "Work.\n" });
+  assert.deepEqual(decodeProviderOptions({ systemPrompt: "Work.\n", systemPromptMode: "replace" }), {
+    systemPrompt: "Work.\n",
+    systemPromptMode: "replace",
+  });
+  assert.throws(() => decodeProviderOptions({ systemPromptMode: "append" }), /requires systemPrompt/u);
+  assert.throws(
+    () => decodeProviderOptions({ systemPrompt: "Work.\n", systemPromptMode: "merge" }),
+    /systemPromptMode must be append, replace/u,
+  );
+});
+
+test("generic ACP prompt argument mode matches only the configured mapping", async () => {
+  const value = fixture();
+  const historical = {
+    kind: "acp",
+    executable: "other-agent",
+    config: { argvBefore: ["serve"], argvAfter: ["stdio"], systemPromptArg: "--prompt" },
+  };
+  try {
+    assert.deepEqual(decodeAcpConfig(historical.config), {
+      argvBefore: ["serve"],
+      argvAfter: ["stdio"],
+      systemPromptArg: "--prompt",
+    });
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: historical } }));
+    writeFileSync(join(value.home, "akuma", "local.md"), "---\nprovider: local\n---\nBuild.\n");
+    await assert.rejects(loadNamed(value, "local"), /does not match the configured argument mode/u);
+    writeFileSync(join(value.home, "akuma", "local.md"), "---\nprovider: local\nsystemPromptMode: replace\n---\nBuild.\n");
+    assert.deepEqual((await loadNamed(value, "local")).options, {
+      systemPrompt: "Build.\n",
+      systemPromptMode: "replace",
+    });
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: {
+      ...historical,
+      config: { ...historical.config, systemPromptMode: "append" },
+    } } }));
+    writeFileSync(join(value.home, "akuma", "local.md"), "---\nprovider: local\n---\nBuild.\n");
+    assert.deepEqual((await loadNamed(value, "local")).options, {
+      systemPrompt: "Build.\n",
+      systemPromptMode: "append",
+    });
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: {
+      kind: "acp",
+      executable: "other-agent",
+      config: { argvBefore: ["serve"], argvAfter: ["stdio"], systemPromptMode: "append" },
+    } } }));
+    await assert.rejects(loadNamed(value, "local"), /systemPromptMode requires systemPromptArg/u);
   } finally { value.close(); }
 });
 

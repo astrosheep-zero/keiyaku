@@ -230,6 +230,9 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
     ]);
     assert.deepEqual((records[2]!.argv as readonly string[]).slice(-7), ["--model", "grok-4", "--effort", "high", "--system-prompt", "Be precise.", "stdio"]);
     assert.equal(records[2]!.requests, join(root, "requests"));
+    assert.equal("_meta" in (records[1]!.params as object), false);
+    assert.equal("rules" in (records[1]!.params as object), false);
+    assert.equal("systemPromptOverride" in (records[1]!.params as object), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -283,6 +286,7 @@ test("ACP load retains the exact session ID without a fork or live tell capabili
     assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
     const load = acpLog(fake.log).find((record) => record.kind === "load")!;
     assert.equal((load.params as { sessionId: string }).sessionId, "retained-session");
+    assert.equal("_meta" in (load.params as object), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -327,6 +331,8 @@ function controlledAcpProcess(options: Readonly<{
   resolveInterject(): void;
   resolveCleanup(): void;
   rejectCleanup(error: Error): void;
+  readonly sessionNew: unknown;
+  readonly sessionLoad: unknown;
 }> {
   const inbound = new PassThrough();
   const outbound = new PassThrough();
@@ -346,6 +352,8 @@ function controlledAcpProcess(options: Readonly<{
   const interjections: ControlledInterject[] = [];
   let cancelled = 0;
   let emitAssistant!: (text: string) => Promise<void>;
+  let sessionNew: unknown;
+  let sessionLoad: unknown;
   const cleanup = new Promise<void>((resolve, reject) => {
     resolveCleanup = resolve;
     rejectCleanup = reject;
@@ -356,7 +364,14 @@ function controlledAcpProcess(options: Readonly<{
       if (options.stallInitialize === true) await new Promise(() => undefined);
       return { protocolVersion: params.protocolVersion, agentCapabilities: { loadSession: true } };
     })
-    .onRequest(acp.methods.agent.session.new, () => ({ sessionId: "controlled-session" }))
+    .onRequest(acp.methods.agent.session.new, ({ params }) => {
+      sessionNew = params;
+      return { sessionId: "controlled-session" };
+    })
+    .onRequest(acp.methods.agent.session.load, ({ params }) => {
+      sessionLoad = params;
+      return {};
+    })
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       emitAssistant = async (text) => await client.notify(acp.methods.client.session.update, {
         sessionId: params.sessionId,
@@ -411,6 +426,8 @@ function controlledAcpProcess(options: Readonly<{
     resolveInterject: finishInterject,
     resolveCleanup,
     rejectCleanup,
+    get sessionNew() { return sessionNew; },
+    get sessionLoad() { return sessionLoad; },
   };
 }
 
@@ -526,6 +543,70 @@ test("Grok Build abort uses standard ACP cancellation and closes owned process c
   assert.equal(controlled.cancelled(), 1);
   assert.equal(controlled.forcedCleanup(), 1);
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "ACP turn cancelled" });
+});
+
+async function completeGrokDrive(
+  options: { systemPrompt?: string; systemPromptMode?: "append" | "replace" },
+  session: { kind: "fresh" } | { kind: "resume"; coordinate: { sessionId: string } },
+) {
+  const controlled = controlledAcpProcess();
+  const provider = createGrokBuildProvider(controlledGrokExecution, {
+    spawnProcess: () => controlled.process,
+  });
+  const input = { body: "build", launchTells: [], cwd: "/tmp", options, session };
+  const drive = session.kind === "fresh" ? await provider.start(input) : await provider.resume!(input);
+  await controlled.cleanupStarted;
+  controlled.resolveCleanup();
+  await drive.completion;
+  return controlled;
+}
+
+test("Grok Build maps admitted prompt modes onto session metadata and refuses historical bodies", async () => {
+  const provider = createGrokBuildProvider(controlledGrokExecution, {
+    spawnProcess: () => controlledAcpProcess().process,
+  });
+  assert.equal(provider.admitOptions({ systemPrompt: "Be precise." }).kind, "refused");
+  assert.equal(provider.admitOptions({ systemPrompt: "Be precise.", systemPromptMode: "append" }).kind, "admitted");
+  assert.equal(provider.admitOptions({ systemPrompt: "Be precise.", systemPromptMode: "replace" }).kind, "admitted");
+
+  const freshAppend = await completeGrokDrive({ systemPrompt: "Be precise.", systemPromptMode: "append" }, { kind: "fresh" });
+  assert.deepEqual(freshAppend.sessionNew, {
+    cwd: "/tmp",
+    mcpServers: [],
+    _meta: { rules: "Be precise." },
+  });
+
+  const resumedAppend = await completeGrokDrive(
+    { systemPrompt: "Be precise.", systemPromptMode: "append" },
+    { kind: "resume", coordinate: { sessionId: "retained-session" } },
+  );
+  assert.deepEqual(resumedAppend.sessionLoad, {
+    cwd: "/tmp",
+    mcpServers: [],
+    sessionId: "retained-session",
+  });
+  assert.equal("_meta" in (resumedAppend.sessionLoad as object), false);
+
+  const freshReplace = await completeGrokDrive(
+    { systemPrompt: "Be precise.", systemPromptMode: "replace" },
+    { kind: "fresh" },
+  );
+  assert.deepEqual(freshReplace.sessionNew, {
+    cwd: "/tmp",
+    mcpServers: [],
+    _meta: { systemPromptOverride: "Be precise." },
+  });
+
+  const resumedReplace = await completeGrokDrive(
+    { systemPrompt: "Be precise.", systemPromptMode: "replace" },
+    { kind: "resume", coordinate: { sessionId: "retained-session" } },
+  );
+  assert.deepEqual(resumedReplace.sessionLoad, {
+    cwd: "/tmp",
+    mcpServers: [],
+    sessionId: "retained-session",
+    _meta: { systemPromptOverride: "Be precise." },
+  });
 });
 
 test("ACP completion waits for owned process cleanup", async () => {
@@ -925,6 +1006,7 @@ function fakePiSdk(input: {
 } {
   const seen = { aborted: 0, disposed: 0 } as {
     options?: Record<string, unknown>;
+    loader?: Record<string, unknown>;
     opened?: string;
     branched?: string;
     aborted: number;
@@ -960,7 +1042,10 @@ function fakePiSdk(input: {
     },
     dispose() { seen.disposed += 1; },
   };
-  class ResourceLoader { async reload() {} }
+  class ResourceLoader {
+    constructor(options?: Record<string, unknown>) { seen.loader = options; }
+    async reload() {}
+  }
   return {
     seen,
     sdk: {
@@ -1126,6 +1211,11 @@ test("OpenCode V1 admits native prompt options and maps archetype effort to a mo
     query: { directory: "/tmp" },
     body: { messageID: prompt.body.messageID, model: { providerID: "provider", modelID: "model" }, variant: "high", system: "must enforce", parts: [{ type: "text", text: "continue" }] },
     throwOnError: true,
+  });
+  assert.deepEqual(provider.admitOptions({ systemPrompt: "must enforce", systemPromptMode: "append" }).kind, "admitted");
+  assert.deepEqual(provider.admitOptions({ systemPrompt: "must enforce", systemPromptMode: "replace" }), {
+    kind: "refused",
+    diagnostic: "OpenCode V1 does not support replacing the native system prompt",
   });
 });
 
@@ -1518,10 +1608,48 @@ test("Pi option admission maps native terms and refuses unsupported policy", asy
   assert.equal(fake.seen.options?.thinkingLevel, "high");
   assert.ok(fake.seen.options?.model);
   assert.ok(fake.seen.options?.resourceLoader);
+  assert.equal(typeof fake.seen.loader?.systemPromptOverride, "function");
+  assert.equal(fake.seen.loader?.appendSystemPromptOverride, undefined);
+  assert.equal((fake.seen.loader?.systemPromptOverride as () => string)(), "System");
   assert.throws(
     () => createPiProvider({ name: "pi", kind: "pi", env: { A: "x" } }),
     /env injection not supported/u,
   );
+});
+
+test("Pi appends or replaces the native resource-loader prompt from the admitted mode", async () => {
+  const append = fakePiSdk({ events: [
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } },
+  ] });
+  const appendDrive = await createPiProvider({ name: "pi", kind: "pi" }, async () => append.sdk).start({
+    body: "work",
+    launchTells: [],
+    cwd: "/work",
+    options: { systemPrompt: "System", systemPromptMode: "append" },
+    session: { kind: "fresh" },
+  });
+  for await (const _event of appendDrive.events) { /* drain */ }
+  await appendDrive.completion;
+  assert.equal(append.seen.loader?.systemPromptOverride, undefined);
+  assert.deepEqual(
+    (append.seen.loader?.appendSystemPromptOverride as (base: string[]) => string[])(["base"]),
+    ["base", "System"],
+  );
+
+  const replace = fakePiSdk({ events: [
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } },
+  ] });
+  const replaceDrive = await createPiProvider({ name: "pi", kind: "pi" }, async () => replace.sdk).start({
+    body: "work",
+    launchTells: [],
+    cwd: "/work",
+    options: { systemPrompt: "System", systemPromptMode: "replace" },
+    session: { kind: "fresh" },
+  });
+  for await (const _event of replaceDrive.events) { /* drain */ }
+  await replaceDrive.completion;
+  assert.equal(replace.seen.loader?.appendSystemPromptOverride, undefined);
+  assert.equal((replace.seen.loader?.systemPromptOverride as () => string)(), "System");
 });
 
 test("Pi readonly admits native enforcement and removes every task-surface mutation tool", async () => {
@@ -2843,6 +2971,56 @@ test("Claude adapter consumes the admitted Archetype options", async () => {
   });
 });
 
+test("Claude replace supplies a custom system prompt while append keeps the preset", async () => {
+  let seen: unknown;
+  const provider = createClaudeProvider(async () => ({
+    query(input) {
+      seen = input.options;
+      return fakeQuery([
+        {
+          type: "assistant",
+          uuid: "assistant-history-replace",
+          session_id: "session-replace",
+          parent_tool_use_id: null,
+          message: { content: [] },
+        } as unknown as SDKMessage,
+        {
+          type: "result",
+          subtype: "success",
+          session_id: "session-replace",
+          uuid: "result-history-replace",
+          result: "done",
+        } as unknown as SDKMessage,
+      ], input.prompt as AsyncIterable<unknown>);
+    },
+  }));
+  const drive = await provider.start({
+    body: "inspect",
+    launchTells: [],
+    cwd: "/work",
+    options: { systemPrompt: "Review only.", systemPromptMode: "replace" },
+    session: { kind: "fresh" },
+  });
+  for await (const _event of drive.events) { /* drain */ }
+  await drive.completion;
+  assert.equal((seen as { systemPrompt: unknown }).systemPrompt, "Review only.");
+
+  const append = await provider.start({
+    body: "inspect",
+    launchTells: [],
+    cwd: "/work",
+    options: { systemPrompt: "Review only.", systemPromptMode: "append" },
+    session: { kind: "fresh" },
+  });
+  for await (const _event of append.events) { /* drain */ }
+  await append.completion;
+  assert.deepEqual((seen as { systemPrompt: unknown }).systemPrompt, {
+    type: "preset",
+    preset: "claude_code",
+    append: "Review only.",
+  });
+});
+
 test("Claude execution overlays literal env and selects its executable", async () => {
   let seen: unknown;
   const provider = createClaudeProvider(async () => ({
@@ -3268,6 +3446,43 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
       },
     });
     assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings", actor: "" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codex app-server maps append and replace onto the same fresh and resumed thread fields", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-prompt-mode-"));
+  try {
+    const replaceFake = fakeCodex(root);
+    const replace = createCodexAppServerProvider(replaceFake.executable);
+    const replaceDrive = await replace.start({
+      body: "build",
+      launchTells: [],
+      cwd: root,
+      options: { systemPrompt: "Work precisely.", systemPromptMode: "replace" },
+      session: { kind: "fresh" },
+    });
+    for await (const _event of replaceDrive.events) { /* drain */ }
+    await replaceDrive.completion;
+    assert.deepEqual(replaceFake.requests().find((request) => request.method === "thread/start")?.params, {
+      cwd: root,
+      baseInstructions: "Work precisely.",
+    });
+
+    const resumeFake = fakeCodex(root);
+    const resumeDrive = await createCodexAppServerProvider(resumeFake.executable).resume!({
+      body: "continue",
+      launchTells: [],
+      cwd: root,
+      options: { systemPrompt: "Work precisely.", systemPromptMode: "append" },
+      session: { kind: "resume", coordinate: { sessionId: "thread-source" } },
+    });
+    for await (const _event of resumeDrive.events) { /* drain */ }
+    await resumeDrive.completion;
+    assert.deepEqual(resumeFake.requests().find((request) => request.method === "thread/resume")?.params, {
+      threadId: "thread-source",
+      cwd: root,
+      developerInstructions: "Work precisely.",
+    });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

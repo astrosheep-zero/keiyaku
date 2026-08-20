@@ -59,7 +59,9 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
   const resourceLoader = input.options.systemPrompt === undefined ? undefined : new sdk.DefaultResourceLoader({
     cwd: input.cwd,
     agentDir: sdk.getAgentDir(),
-    systemPromptOverride: () => input.options.systemPrompt,
+    ...(input.options.systemPromptMode === "append"
+      ? { appendSystemPromptOverride: (base: string[]) => [...base, input.options.systemPrompt!] }
+      : { systemPromptOverride: () => input.options.systemPrompt }),
   });
   await resourceLoader?.reload();
   const sessionManager = input.session.kind === "fresh"

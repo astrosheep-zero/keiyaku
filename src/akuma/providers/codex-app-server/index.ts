@@ -94,7 +94,10 @@ async function admitTurn(
     ...(config === undefined ? {} : { config }),
     ...(input.options.model === undefined ? {} : { model: input.options.model }),
     ...(input.options.systemPrompt === undefined || input.options.systemPrompt.length === 0
-      ? {} : { developerInstructions: input.options.systemPrompt }),
+      ? {}
+      : input.options.systemPromptMode === "replace"
+        ? { baseInstructions: input.options.systemPrompt }
+        : { developerInstructions: input.options.systemPrompt }),
   };
   if (input.session.kind === "fresh") {
     state.threadId = threadId(await server.request("thread/start", threadParams));

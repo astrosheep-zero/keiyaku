@@ -1,9 +1,12 @@
+import type { SystemPromptMode } from "../../provider-recipe.js";
+
 export type AcpExecutionConfig = Readonly<{
   argvBefore: readonly string[];
   argvAfter: readonly string[];
   modelArg?: string;
   effortArg?: string;
   systemPromptArg?: string;
+  systemPromptMode?: SystemPromptMode;
 }>;
 
 function argumentName(
@@ -24,7 +27,7 @@ export function decodeAcpConfig(value: unknown): AcpExecutionConfig {
   }
   const config = value as Readonly<Record<string, unknown>>;
   const unknown = Object.keys(config)
-    .find((key) => !["argvBefore", "argvAfter", "effortArg", "modelArg", "systemPromptArg"].includes(key));
+    .find((key) => !["argvBefore", "argvAfter", "effortArg", "modelArg", "systemPromptArg", "systemPromptMode"].includes(key));
   if (unknown !== undefined) throw new TypeError(`ACP provider config has unknown field ${unknown}`);
   if (!Array.isArray(config.argvBefore)
     || config.argvBefore.some((arg) => typeof arg !== "string" || arg.trim().length === 0)) {
@@ -37,11 +40,19 @@ export function decodeAcpConfig(value: unknown): AcpExecutionConfig {
   const modelArg = argumentName(config, "modelArg");
   const effortArg = argumentName(config, "effortArg");
   const systemPromptArg = argumentName(config, "systemPromptArg");
+  const systemPromptMode = config.systemPromptMode;
+  if (systemPromptMode !== undefined && systemPromptMode !== "append" && systemPromptMode !== "replace") {
+    throw new TypeError("ACP provider config systemPromptMode must be append, replace");
+  }
+  if (systemPromptMode !== undefined && systemPromptArg === undefined) {
+    throw new TypeError("ACP provider config systemPromptMode requires systemPromptArg");
+  }
   return Object.freeze({
     argvBefore: Object.freeze([...config.argvBefore] as string[]),
     argvAfter: Object.freeze([...config.argvAfter] as string[]),
     ...(modelArg === undefined ? {} : { modelArg }),
     ...(effortArg === undefined ? {} : { effortArg }),
     ...(systemPromptArg === undefined ? {} : { systemPromptArg }),
+    ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
   });
 }

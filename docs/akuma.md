@@ -160,16 +160,31 @@ configuration. It is call-time input at exactly one path:
 ```
 
 The file begins with one strict YAML mapping. `provider` is required;
-`model`, `effort`, `readonly`, `network`, `description`, and `allowed` are
-optional. The complete `allowed` grammar and birth reduction are owned by
-[akuma-allowed.md](akuma-allowed.md).
+`model`, `effort`, `readonly`, `network`, `description`, `allowed`, and
+`systemPromptMode` are optional. The complete `allowed` grammar and birth
+reduction are owned by [akuma-allowed.md](akuma-allowed.md).
 When present, `readonly` accepts only literal `true`; `false`, non-boolean
 values, and the removed `access` spelling are malformed. `network` is
 `disabled | enabled`; `model`, `effort`, and `description` are nonblank strings.
-Additional top-level keys are ignored and never enter Archetype options or the
-soul snapshot. A nonempty Markdown body after frontmatter overrides the system
-prompt; an empty body leaves that option absent so the native harness keeps its
-default.
+`systemPromptMode` is `append | replace`. Additional top-level keys are ignored
+and never enter Archetype options or the soul snapshot.
+
+A nonempty Markdown body after frontmatter becomes `systemPrompt`. An omitted
+`systemPromptMode` on that nonempty body freezes `append`. An explicit `append`
+or `replace` freezes that value. `systemPromptMode` with an empty body is
+malformed. Every other value is malformed. An empty body leaves `systemPrompt`
+and `systemPromptMode` absent so the native harness keeps its default. New
+Archetype admission always snapshots the effective mode beside a nonempty
+`systemPrompt`. The definition catalog remains a name, optional model, and
+optional description read and does not surface the prompt or mode.
+
+Provider options may include optional `systemPromptMode: append | replace`.
+Generic option decoding rejects an unknown mode and rejects a mode without
+`systemPrompt`. Historical Soul, Session, and RequestRecipe options that
+contain `systemPrompt` without a mode remain readable; adapters interpret that
+absence with their pre-change behavior. No migration rewrites persisted facts.
+Native admission and prompt mappings are owned by
+[akuma-provider.md](akuma-provider.md).
 
 `Akuma.of(root, { home?, settings? })` consumes one resolved WorldRoot. All
 worktrees of one Git repository share one fleet, Alias authority, and Heart
@@ -230,12 +245,12 @@ override-source fact, or fork input exists; wake, restart, and fork keep the
 frozen effective result.
 
 Provider kind `claude-agent-sdk` consumes `model`, `effort`, and
-the system prompt. `readonly: true` selects plan mode and records native
+the admitted system prompt. `readonly: true` selects plan mode and records native
 enforcement; absence selects the provider's noninteractive native default.
 
 Provider kind `codex-app-server` runs the selected executable, defaulting to
 `codex`, as `app-server --listen stdio://`. It consumes `model`, `effort`,
-and the system prompt. `readonly: true` selects the native read-only sandbox
+and the admitted system prompt. `readonly: true` selects the native read-only sandbox
 and records native enforcement; absence selects the provider's native default.
 `network` selects the sandbox's native network flag and defaults to disabled. Its
 resumable coordinate is the native thread id; its answered history id is the
@@ -247,7 +262,7 @@ the Body turn or leave an answered Akuma untidy.
 
 Provider kind `opencode-sdk` runs the selected executable, defaulting to
 `opencode`, through the official public V1 Session API. It consumes `model` and
-the system prompt. Archetype `effort` is passed as OpenCode's native model
+an append-only system prompt. Archetype `effort` is passed as OpenCode's native model
 variant; it is not a per-call override. V1 has no per-session permission input,
 so `readonly: true` is admitted with `none` enforcement and a concrete
 diagnostic. Fresh and resumed drives use the frozen session id, and native fork
@@ -257,16 +272,17 @@ admission, completion, event, and tell semantics belong exclusively to
 
 Provider kind `pi` uses the in-process `@earendil-works/pi-coding-agent`
 SDK. Model is an exact `<provider>/<id>` lookup through `ModelRuntime`; effort
-is one native thinking level; the system prompt is supplied through the native
-resource loader. For `readonly: true`, its admitted tool set excludes `bash`,
+is one native thinking level; the admitted system prompt is supplied through the
+native resource loader. For `readonly: true`, its admitted tool set excludes `bash`,
 `edit`, and `write`, and records native enforcement. Resume and fork use the
 exact persisted session file. Native steer
 proves queueing only, so Pi does not expose live tell.
 
 Provider kind `grok-build` uses the shared ACP lifecycle under its own `x.ai`
-wire identity. Its fixed launch consumes `model` and `effort`; custom executions
-may replace only executable and environment. It exposes native live tell through
-`x.ai/interject`, has no fork, and makes no readonly enforcement claim.
+wire identity. Its fixed launch consumes `model`, `effort`, and an admitted
+append or replace system prompt; custom executions may replace only executable
+and environment. It exposes native live tell through `x.ai/interject`, has no
+fork, and makes no readonly enforcement claim.
 
 `readonly: true` promises only that the Akuma cannot mutate its task surface.
 Native enforcement means the session's reachable capabilities physically lack

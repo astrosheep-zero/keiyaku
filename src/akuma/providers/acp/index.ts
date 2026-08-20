@@ -15,8 +15,16 @@ function optionAdmission(options: ProviderOptions, config: AcpExecutionConfig): 
   if (options.effort !== undefined && config.effortArg === undefined) {
     return { kind: "refused", diagnostic: "ACP provider has no effort argument mapping" };
   }
-  if (options.systemPrompt !== undefined && options.systemPrompt.length > 0 && config.systemPromptArg === undefined) {
-    return { kind: "refused", diagnostic: "ACP provider has no systemPrompt argument mapping" };
+  if (options.systemPrompt !== undefined && options.systemPrompt.length > 0) {
+    if (config.systemPromptArg === undefined) {
+      return { kind: "refused", diagnostic: "ACP provider has no systemPrompt argument mapping" };
+    }
+    if (
+      options.systemPromptMode !== undefined
+      && options.systemPromptMode !== (config.systemPromptMode ?? "replace")
+    ) {
+      return { kind: "refused", diagnostic: "ACP provider systemPromptMode does not match the configured argument mode" };
+    }
   }
   return {
     kind: "admitted",

@@ -97,7 +97,11 @@ function optionAdmission(options: ProviderOptions): ProviderOptionAdmission {
   if (options.network !== undefined) {
     return { kind: "refused", diagnostic: "Grok Build does not support the network option" };
   }
-  if (options.systemPrompt !== undefined && options.systemPrompt.length > 0) {
+  if (
+    options.systemPrompt !== undefined
+    && options.systemPrompt.length > 0
+    && options.systemPromptMode === undefined
+  ) {
     return { kind: "refused", diagnostic: "Grok Build does not support the systemPrompt option" };
   }
   return {
@@ -110,6 +114,16 @@ function optionAdmission(options: ProviderOptions): ProviderOptionAdmission {
       },
     }),
   };
+}
+
+function grokSessionMeta(options: ProviderOptions): Pick<AcpDependencies, "freshSessionMeta" | "loadSessionMeta"> {
+  if (options.systemPrompt === undefined || options.systemPrompt.length === 0) return {};
+  if (options.systemPromptMode === "append") return { freshSessionMeta: { rules: options.systemPrompt } };
+  if (options.systemPromptMode === "replace") {
+    const meta = { systemPromptOverride: options.systemPrompt };
+    return { freshSessionMeta: meta, loadSessionMeta: meta };
+  }
+  return {};
 }
 
 function argv(execution: ProviderExecution, options: ProviderOptions): readonly [string, ...string[]] {
@@ -154,6 +168,7 @@ export function createGrokBuildProvider(
     return withInterject(await startAcpSession(launch, input, {
       ...dependencies,
       interpretTool: interpretGrokTool,
+      ...grokSessionMeta(input.options),
     }));
   };
   return {

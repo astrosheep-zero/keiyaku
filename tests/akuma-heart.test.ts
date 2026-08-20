@@ -732,6 +732,12 @@ test("soul codec hard-fails invalid known members", () => {
     { name: "none restraint blank diagnostic", change: (soul) => ({ ...soul, readonly: { enforcement: "none", diagnostic: " " } }) },
     { name: "none restraint non-string diagnostic", change: (soul) => ({ ...soul, readonly: { enforcement: "none", diagnostic: 7 } }) },
     { name: "unknown restraint enforcement", change: (soul) => ({ ...soul, readonly: { enforcement: "warn" } }) },
+    { name: "unknown systemPromptMode", change: (soul) => ({ ...soul, options: { ...soul.options, systemPromptMode: "merge" } }) },
+    { name: "systemPromptMode without systemPrompt", change: (soul) => {
+      const options = { ...soul.options, systemPromptMode: "append" };
+      delete (options as { systemPrompt?: string }).systemPrompt;
+      return { ...soul, options };
+    } },
     { name: "unknown provider kind", change: (soul) => ({ ...soul, provider: { ...soul.provider, kind: "grok" } }) },
     { name: "blank provider name", change: (soul) => ({ ...soul, provider: { ...soul.provider, name: " " } }) },
     { name: "provider env non-string value", change: (soul) => ({ ...soul, provider: { ...soul.provider, env: { HOME: 9 } } }) },
@@ -814,6 +820,15 @@ test("soul codec decodes canonically, deep-freezes, and round-trips", () => {
 
   assert.throws(() => encodeSoulRow({ ...codecSoul(), options: { readonly: true }, readonly: undefined }), undefined, "encode validates the consistency rule");
   assert.equal(encodeSoulRow(codecSoul())[0] === encodeSoulRow(codecSoul())[0], true, "canonical encoding is deterministic");
+
+  const historical = codecSoul();
+  assert.equal(historical.options.systemPromptMode, undefined);
+  assert.deepEqual(decodeSoul(JSON.parse(encodeSoul(historical))).options, historical.options);
+  const withMode: Soul = {
+    ...historical,
+    options: { ...historical.options, systemPromptMode: "replace" },
+  };
+  assert.deepEqual(decodeSoul(JSON.parse(encodeSoul(withMode))), withMode);
 });
 
 function afterSnapshotQuery(after: () => void): () => void {

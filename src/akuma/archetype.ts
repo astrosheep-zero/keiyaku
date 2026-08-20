@@ -125,7 +125,11 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
   const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
   const description = archetypeField(values, "description");
   const allowed = effectiveAllowedActions(values.allowed);
+  const systemPromptMode = archetypeEnum(values, "systemPromptMode", ["append", "replace"] as const);
   const systemPrompt = lines.slice(closing + 1).join("\n");
+  if (systemPromptMode !== undefined && systemPrompt.length === 0) {
+    throw new TypeError("Akuma systemPromptMode requires a nonempty Markdown body");
+  }
   return Object.freeze({
     name,
     path,
@@ -135,7 +139,10 @@ function decodeArchetype(name: string, path: string, markdown: string): DecodedA
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),
       ...(network === undefined ? {} : { network }),
-      ...(systemPrompt.length === 0 ? {} : { systemPrompt }),
+      ...(systemPrompt.length === 0 ? {} : {
+        systemPrompt,
+        systemPromptMode: systemPromptMode ?? "append",
+      }),
     }),
     ...(readonly === undefined ? {} : { readonly }),
     allowed,

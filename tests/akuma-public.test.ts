@@ -1207,6 +1207,7 @@ test("Archetype Markdown is strict call-time input with a durable option shape",
         effort: "high",
         readonly: true,
         systemPrompt: "Review the change from first principles.\n",
+        systemPromptMode: "append",
       },
       readonly: { enforcement: "native" },
     });

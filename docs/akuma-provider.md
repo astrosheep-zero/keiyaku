@@ -322,6 +322,43 @@ persist execution name and exact options, from which tell, resume, recovery,
 and fork reconstruct adapters. Fork inherits execution and restraint.
 Generic provider execution, option, and restraint decoders validate known
 members and ignore additional members.
+
+When `systemPrompt` is present, `systemPromptMode` selects whether that body
+appends to or replaces the provider's native system prompt. New Archetype
+admission always carries the effective mode. Historical Soul, Session, and
+RequestRecipe options may still contain `systemPrompt` without a mode; each
+adapter below interprets that absence with its pre-change behavior so resume
+and fork do not change. No adapter rewrites persisted options.
+
+- Claude: append uses the `claude_code` preset with `append`; replace supplies
+  the body as the complete custom `systemPrompt`. Historical mode absence
+  remains append.
+- Codex app-server: append sends `developerInstructions`; replace sends
+  `baseInstructions`. Fresh `thread/start` and resumed `thread/resume`
+  parameters use the same mapping. Fork inherits its source thread and does
+  not resend prompt fields. Historical mode absence remains append.
+- OpenCode V1: append uses the existing per-user `system` input, which native
+  OpenCode appends after its agent/provider prompt. Replace is a typed
+  refusal because V1 exposes no replacement input. Historical mode absence
+  remains the existing append behavior.
+- Pi: append uses `appendSystemPromptOverride` to append the body after the
+  loader's existing appended prompt blocks; replace uses
+  `systemPromptOverride`. Historical mode absence remains the existing
+  replace behavior.
+- Grok Build: append is admitted and sends `_meta.rules` only on fresh
+  `session/new`; resume/load sends no `rules` because Grok folds rules only at
+  creation and retains the session prompt. Replace sends
+  `_meta.systemPromptOverride` on fresh `session/new` and resumed
+  `session/load`. Historical mode absence with a body remains refused because
+  Grok previously admitted no such Akuma. Those `_meta` keys are Grok dialect
+  fields owned only by this kind.
+- Generic ACP: execution config may declare `systemPromptMode: append | replace`
+  paired with `systemPromptArg`. A configured `systemPromptArg` without the
+  new field retains its historical replace declaration. A prompt is admitted
+  only when its effective option mode matches the configured argument mode; a
+  missing mapping or mismatch is a typed refusal. Config mode without an
+  argument is malformed. Historical options without a mode continue through
+  the historical argument mapping.
 `executable` constrains process start; literal `env` overlays only ambient
 launch environment and is neither durable nor interpolated. Claude execution
 with `env` refuses fork because native `forkSession` cannot accept it.
@@ -352,7 +389,10 @@ fork, and it never gains behavior from the execution name.
 The shared ACP core owns stdio custody, initialize, session new/load/prompt,
 event mapping, cancellation, and cleanup. Standard `acp` adds no wire methods.
 The core exposes no client-side filesystem, terminal, permission, or elicitation
-capability, and contains no product extension vocabulary.
+capability, and contains no product extension vocabulary. It may accept opaque
+fresh-session and load-session metadata from its caller and copy that object to
+the standard request `_meta`. Empty metadata is omitted. The core never names,
+parses, or owns `rules`, `systemPromptOverride`, or any other Grok literal.
 
 One ACP prompt response is the terminal authority. The exact session id is the
 resume coordinate. Message identity separates assistant messages; unidentified
@@ -361,9 +401,11 @@ messages remain activity. Completion follows process cleanup, and cleanup
 failure is a failed Turn.
 
 `grok-build` is a distinct ACP dialect kind. It owns the trusted noninteractive
-launch and every `x.ai` literal; generic ACP and the shared core do not. A live
-Grok session maps provider-neutral tell to exactly one `x.ai/interject` using
-the session id, unchanged text, and TellId as `interjectionId`.
+launch, every `x.ai` literal, and the `rules` / `systemPromptOverride` session
+metadata constructed from an admitted prompt mode; generic ACP and the shared
+core do not. A live Grok session maps provider-neutral tell to exactly one
+`x.ai/interject` using the session id, unchanged text, and TellId as
+`interjectionId`.
 
 Every Grok dialect payload branch requires either its serializer in pinned
 reference source or a captured real provider transcript. Fixtures alone are

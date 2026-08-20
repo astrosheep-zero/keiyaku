@@ -22,9 +22,13 @@ export type { AcpToolInterpreter, AcpToolUpdate };
 export type AcpStartInput = Parameters<ProviderAdapter["start"]>[0]
   | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 
+export type AcpSessionMeta = Readonly<Record<string, unknown>>;
+
 export type AcpDependencies = Readonly<{
   spawnProcess?: typeof spawnStdioProcess;
   interpretTool?: AcpToolInterpreter;
+  freshSessionMeta?: AcpSessionMeta;
+  loadSessionMeta?: AcpSessionMeta;
 }>;
 
 export type AcpLiveSession = Readonly<{
@@ -61,7 +65,15 @@ function promptResult(response: acp.PromptResponse): TurnResult {
   return { kind: "failed", diagnostic: `ACP prompt ended ${response.stopReason}` };
 }
 
-async function establishSession(agent: acp.ClientContext, input: AcpStartInput): Promise<string> {
+function requestMeta(meta?: AcpSessionMeta): Readonly<{ _meta: AcpSessionMeta }> | Readonly<Record<string, never>> {
+  return meta === undefined || Object.keys(meta).length === 0 ? {} : { _meta: meta };
+}
+
+async function establishSession(
+  agent: acp.ClientContext,
+  input: AcpStartInput,
+  dependencies: AcpDependencies,
+): Promise<string> {
   const initialized = await agent.request(acp.methods.agent.initialize, {
     protocolVersion: acp.PROTOCOL_VERSION,
     clientInfo: { name: "keiyaku", version: "4" },
@@ -70,11 +82,20 @@ async function establishSession(agent: acp.ClientContext, input: AcpStartInput):
     throw new Error("ACP agent does not advertise session/load");
   }
   if (input.session.kind === "fresh") {
-    return (await agent.request(acp.methods.agent.session.new, { cwd: input.cwd, mcpServers: [] })).sessionId;
+    return (await agent.request(acp.methods.agent.session.new, {
+      cwd: input.cwd,
+      mcpServers: [],
+      ...requestMeta(dependencies.freshSessionMeta),
+    })).sessionId;
   }
   const sessionId = input.session.coordinate.sessionId;
   if (sessionId === undefined) throw new Error("ACP resume coordinate has no session id");
-  await agent.request(acp.methods.agent.session.load, { cwd: input.cwd, mcpServers: [], sessionId });
+  await agent.request(acp.methods.agent.session.load, {
+    cwd: input.cwd,
+    mcpServers: [],
+    sessionId,
+    ...requestMeta(dependencies.loadSessionMeta),
+  });
   return sessionId;
 }
 
@@ -177,7 +198,7 @@ export async function startAcpSession(
   ));
   turn = createAcpTurn(connection, dependencies.interpretTool);
   try {
-    sessionId = await abortable(establishSession(connection.agent, input), signal);
+    sessionId = await abortable(establishSession(connection.agent, input, dependencies), signal);
     turn.events.emit({ type: "session", coordinate: { sessionId } });
     const session = beginAcpPrompt(connection.agent, child, turn, sessionId, input);
     return { session, agent: connection.agent, sessionId, open: turn.open };

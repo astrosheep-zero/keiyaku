@@ -373,9 +373,13 @@ test("direct birth freezes Archetype defaults and exact per-call allowed replace
     writeFileSync(join(configured.home, "akuma", "reviewer.md"), "---\nprovider: local\nreadonly: true\n---\nReview.\n");
     const callReadonly = await akuma.call({ archetype: "worker", body: "call readonly", readonly: true });
     const markdownReadonly = await akuma.call({ archetype: "reviewer", body: "Markdown readonly" });
-    assert.deepEqual((await readSoul(pathsForAkuId(world, callReadonly.id)))?.options, { readonly: true, systemPrompt: "Work.\n" });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, callReadonly.id)))?.options, {
+      readonly: true, systemPrompt: "Work.\n", systemPromptMode: "append",
+    });
     assert.deepEqual((await readSoul(pathsForAkuId(world, callReadonly.id)))?.readonly, { enforcement: "native" });
-    assert.deepEqual((await readSoul(pathsForAkuId(world, markdownReadonly.id)))?.options, { readonly: true, systemPrompt: "Review.\n" });
+    assert.deepEqual((await readSoul(pathsForAkuId(world, markdownReadonly.id)))?.options, {
+      readonly: true, systemPrompt: "Review.\n", systemPromptMode: "append",
+    });
     assert.deepEqual((await readSoul(pathsForAkuId(world, markdownReadonly.id)))?.readonly, { enforcement: "native" });
 
     for (const readonly of [false, "true"] as const) {

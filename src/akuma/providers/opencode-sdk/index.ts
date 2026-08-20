@@ -35,6 +35,9 @@ function opencodeSessionId(coordinateValue: ResumeCoordinate): string {
 }
 function admit(options: ProviderOptions): void {
   if (options.network !== undefined) throw new Error("OpenCode does not support explicit network");
+  if (options.systemPromptMode === "replace") {
+    throw new Error("OpenCode V1 does not support replacing the native system prompt");
+  }
   if (options.model !== undefined) parseModel(options.model);
 }
 function eventValue(value: unknown): unknown {

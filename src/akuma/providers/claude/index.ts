@@ -107,7 +107,9 @@ function claudeQueryOptions(
     ...(input.options.model === undefined ? {} : { model: input.options.model }),
     ...(input.options.effort === undefined ? {} : { effort: input.options.effort as NonNullable<Options["effort"]> }),
     ...(input.options.systemPrompt === undefined || input.options.systemPrompt.length === 0 ? {} : {
-      systemPrompt: { type: "preset", preset: "claude_code", append: input.options.systemPrompt },
+      systemPrompt: input.options.systemPromptMode === "replace"
+        ? input.options.systemPrompt
+        : { type: "preset", preset: "claude_code", append: input.options.systemPrompt },
     }),
     ...(input.session.kind === "fresh" ? {} : { resume: claudeSessionId(input.session.coordinate) }),
   };
