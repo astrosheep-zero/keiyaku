@@ -122,7 +122,8 @@ Akuma text shares that snapshot across the named commands; history remains the
 unbounded browsing surface. An idle answered default call or ordinary single
 wait writes the exact answer, including empty bytes, with no framing or added
 newline. Every other state remains an identity-bearing snapshot, and plural
-wait never concatenates raw answers. Successful detach ends with
+wait renders each answered member as `✓ came back <AkuId> ─...` followed by its
+exact answer, then ends with `<done> of <total> done`. Successful detach ends with
 `$ keiyaku -C <world> wait <@alias|AkuId> --timeout 5m`, using the successful
 Alias or complete AkuId and canonical World; failure adds no command or life.
 `said` and `thought` occupy at most two terminal lines with visible clipping.
@@ -201,7 +202,7 @@ gaps in persisted order. Created Task context, when supplied, follows the
 timeline; the reported-change block follows Tasks. Status, wait, unfinished
 observed call, and kill then place life last: one blank line, then a top-level
 life line. Ordinary and interrupt tell output and history omit life. Running
-life is exactly `● STILL RUNNING`; other life words remain `○ asleep`,
+life is exactly `● STILL RUNNING`; an asleep Akuma renders as `✓ came back`,
 `× killed`, `? stranded`, `? hung`, and `? untidy`.
 
 A present created Task observation renders:

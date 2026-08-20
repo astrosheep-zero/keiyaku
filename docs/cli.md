@@ -337,7 +337,9 @@ Readonly `none` renders its diagnostic; native or absent restraint renders
 nothing. Snapshots name the complete AkuId, optional frozen Alias, and Dispatch
 relation. Dispatch read failures render their diagnostic. Status, non-answer waits, multi-waits, unfinished call, and
 kill include public life; tell and history do not. Answered default call,
-answered single wait, and `history --last` write exact answer bytes. Detached
+answered single wait, and `history --last` write exact answer bytes. Plural wait
+renders each answered member with its identity header and exact answer, then a
+`<done> of <total> done` line. Detached
 call prints the copyable canonical-world wait command. Text never exposes
 provider receipt/fence stages or Heart storage vocabulary.
 

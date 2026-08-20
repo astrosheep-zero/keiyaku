@@ -516,7 +516,7 @@ test("Akuma running life is the unfinished terminal line and tell omits it", () 
     life: "asleep",
     timeline: { kind: "idle", entries: [], omitted: 0, ...emptyReported },
   }));
-  assert.equal(asleep.split("\n").at(-1), "○ asleep");
+  assert.equal(asleep.split("\n").at(-1), "✓ came back");
   const hung = renderStatus(akumaObservation({
     id: "aku/worker/1234abcd",
     life: "hung",
@@ -951,6 +951,44 @@ test("raw-answer selection preserves exact bytes and unfinished snapshots", () =
   const unfinishedText = renderAkumaText(parseArgv(["wait", id]).command, unfinished);
   assert.match(unfinishedText, /aku\/worker\/1234abcd/u);
   assert.equal(unfinishedText.split("\n").at(-1), "● STILL RUNNING");
+});
+
+test("plural wait renders came-back answers and completion count", () => {
+  const answered = akumaObservation({
+    id: "aku/worker/1234abcd",
+    life: "asleep",
+    timeline: {
+      kind: "idle",
+      entries: [],
+      omitted: 0,
+      outcome: {
+        kind: "outcome",
+        sequence: 1,
+        turnSequence: 1,
+        at: "2026-08-10T16:42:00.000Z",
+        outcome: { kind: "answered", answer: "returned\nverbatim", historyId: "history", session: { sessionId: "session" } },
+      },
+    },
+  });
+  const running = akumaObservation({
+    id: "aku/reviewer/5678abcd",
+    life: "running",
+    timeline: {
+      kind: "open",
+      turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T16:42:00.000Z" },
+      entries: [],
+      omitted: 0,
+    },
+  });
+  const result = {
+    kind: "akuma" as const,
+    action: "wait" as const,
+    result: { completion: "any" as const, observations: [answered, running], unobserved: [] },
+  };
+  const text = renderAkumaText(parseArgv(["wait", "aku/worker/*", "aku/reviewer/*", "--any"]).command, result);
+  assert.match(text, /^✓ came back aku\/worker\/1234abcd ─+\nreturned\nverbatim$/mu);
+  assert.match(text, /aku\/reviewer\/5678abcd[\s\S]*● STILL RUNNING/u);
+  assert.match(text, /\n\n1 of 2 done$/u);
 });
 
 test("Soul validation diagnostics name the Akuma without the internal term", () => {

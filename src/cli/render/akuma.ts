@@ -50,6 +50,12 @@ function snapshotHeading(id: string, alias?: string, contract?: DispatchAssociat
   ];
 }
 
+function answeredHeading(id: string, alias: string | undefined, columns: number): string {
+  const prefix = `✓ came back ${identity(id, alias)}`;
+  const ruler = "─".repeat(Math.max(1, columns - displayColumns(prefix) - 1));
+  return `${prefix} ${ruler}`;
+}
+
 function contractFacts(contract: DispatchAssociation): readonly string[] {
   return contract.kind === "failed" ? [`! contract failed ${safeText(contract.diagnostic)}`] : [];
 }
@@ -60,7 +66,7 @@ function unobservedText(id: string, diagnostic: string): string {
 
 function lifeLabel(life: AkumaObservation["status"]["life"]): string {
   if (life === "running") return "● STILL RUNNING";
-  if (life === "asleep") return "○ asleep";
+  if (life === "asleep") return "✓ came back";
   if (life === "killed") return "× killed";
   return `? ${life}`;
 }
@@ -290,15 +296,18 @@ function waitText(
   context: TextRenderContext,
 ): string {
   const alias = result.alias;
+  const total = result.result.observations.length + result.result.unobserved.length;
+  const done = result.result.observations.filter((observation) => observation.status.life !== "running").length;
   const blocks = [
-    ...result.result.observations.map((observation) => snapshotText(
-      observation,
-      context,
-      { ...(alias === undefined ? {} : { alias }) },
-    )),
+    ...result.result.observations.map((observation) => {
+      const answer = statusAnswer(observation);
+      if (answer !== undefined) return `${answeredHeading(observation.status.id, alias, context.columns)}\n${answer}`;
+      return snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) });
+    }),
     ...result.result.unobserved.map((member) => unobservedText(member.id, member.diagnostic)),
   ];
-  return blocks.join("\n\n");
+  if (total <= 1) return blocks.join("\n\n");
+  return [...blocks, `${done} of ${total} done`].join("\n\n");
 }
 
 function historyText(
