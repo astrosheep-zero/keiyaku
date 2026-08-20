@@ -1,7 +1,6 @@
 import { access } from "node:fs/promises";
 import { nukeContractWorktreeLock, nukeHereAppointments } from "../contract-worktree.js";
 import type { ContractId } from "../core/facts/types.js";
-import { nukeSettlementFences } from "../settlement/fence.js";
 import {
   nukeEmptyPlaceAuthority,
   readPlaceRegister,
@@ -9,7 +8,6 @@ import {
 } from "../workspace-place.js";
 import type { WorldRoot } from "../world.js";
 import { nukeWorktreeHookResidue } from "./hooks.js";
-import { nukeReconcileLocks } from "./reconcile.js";
 import { runGit, type GitRepository } from "./process.js";
 import { NoGitWorldError, registeredWorktrees, repositoryAt, worktreeGitDirectory } from "./repository.js";
 import { worktreePath } from "./workspace.js";
@@ -73,19 +71,18 @@ export async function nukeGit(world: WorldRoot): Promise<void> {
     if (error instanceof NoGitWorldError) return;
     throw error;
   }
-  const custody = await managedCustody(repository);
-  for (const entry of custody.entries) {
-    await removeManagedWorktree(repository, entry);
-    await releaseManagedWorktrees(repository, [entry.contract]);
-  }
-  await nukeHereAppointments(repository);
-  await nukeEmptyPlaceAuthority(repository);
-  await nukeContractWorktreeLock(repository);
-  await nukeReconcileLocks(repository);
-  await nukeSettlementFences(repository);
-  await removeOwnedRefs(repository, custody.refs);
-  if (custody.state) {
-    const oid = (await runGit(repository, ["rev-parse", "--verify", "refs/heads/keiyaku-state"])).toString("utf8").trim();
-    await runGit(repository, ["update-ref", "--no-deref", "-d", "refs/heads/keiyaku-state", oid]);
-  }
+  await nukeContractWorktreeLock(repository, async () => {
+    const custody = await managedCustody(repository);
+    for (const entry of custody.entries) {
+      await removeManagedWorktree(repository, entry);
+      await releaseManagedWorktrees(repository, [entry.contract]);
+    }
+    await nukeHereAppointments(repository);
+    await nukeEmptyPlaceAuthority(repository);
+    await removeOwnedRefs(repository, custody.refs);
+    if (custody.state) {
+      const oid = (await runGit(repository, ["rev-parse", "--verify", "refs/heads/keiyaku-state"])).toString("utf8").trim();
+      await runGit(repository, ["update-ref", "--no-deref", "-d", "refs/heads/keiyaku-state", oid]);
+    }
+  });
 }

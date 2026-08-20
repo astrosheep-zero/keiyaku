@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -16,7 +16,7 @@ import { renderRefusal } from "../src/cli/render/refusal.js";
 import { nukeExitCode } from "../src/cli/render/nuke.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { contractLocator } from "../src/git/identity.js";
-import { commonGitDirectory, repositoryAt } from "../src/git/repository.js";
+import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { reserveContractWorktree } from "../src/contract-worktree.js";
 import { settlementFencePath } from "../src/settlement/fence.js";
@@ -143,7 +143,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.equal(existsSync(join(world, ".keiyaku", "locks", "akuma-alias.sqlite")), true);
     assert.equal(existsSync(join(world, ".keiyaku", "tasks", "remove-me.md")), false);
     assert.equal(existsSync(join(world, ".keiyaku", "locks", "task-allocation.sqlite")), true);
-    for (const lock of locks) assert.equal(existsSync(lock), true);
+    for (const lock of locks) assert.equal(existsSync(lock), true, lock);
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
     assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
@@ -216,6 +216,71 @@ test("owner deletion attempts remain independent after the stop prerequisite", a
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
     assert.equal(existsSync(broken), true);
+  } finally {
+    rmSync(fixture.raw.path, { recursive: true, force: true });
+    rmSync(fixture.foreign, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke lock timeout preserves custody and retries after release", async () => {
+  const fixture = await gitNukeFixture();
+  const held = await acquireSqliteTransactionLock({ path: fixture.locks[0]!, mode: "immediate" });
+  try {
+    const failed = await Keiyaku.nuke({ world: fixture.world, confirm: fixture.world });
+    assert.equal(failed.kind, "failed");
+    assert.match(failed.diagnostic, /SQLite lock timed out after 3000ms/u);
+    assert.equal(existsSync(fixture.managedPath), true);
+  } finally {
+    held.close();
+  }
+  try {
+    assert.deepEqual(await Keiyaku.nuke({ world: fixture.world, confirm: fixture.world }), { kind: "success", world: fixture.world });
+  } finally {
+    rmSync(fixture.raw.path, { recursive: true, force: true });
+    rmSync(fixture.foreign, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke respects the linked worktree appointment writer lock", async () => {
+  const fixture = await gitNukeFixture();
+  const linkedContract = contractId("kei/nuke-linked");
+  const linkedRepository = { ...fixture.repository, effectiveCwd: fixture.foreign };
+  await reserveContractWorktree(linkedRepository, linkedContract);
+  const linkedAdmin = await worktreeGitDirectory(fixture.repository, fixture.foreign);
+  const linkedLock = join(linkedAdmin, "keiyaku", "contract-worktree.sqlite");
+  const held = await acquireSqliteTransactionLock({ path: linkedLock, mode: "immediate" });
+  const appointment = join(fixture.foreign, ".keiyaku", "KEIYAKU.md");
+  try {
+    const failed = await Keiyaku.nuke({ world: fixture.world, confirm: fixture.world });
+    assert.equal(failed.kind, "failed");
+    assert.match(failed.diagnostic, /SQLite lock timed out after 3000ms/u);
+    assert.equal(existsSync(appointment), true);
+  } finally {
+    held.close();
+  }
+  try {
+    assert.deepEqual(await Keiyaku.nuke({ world: fixture.world, confirm: fixture.world }), { kind: "success", world: fixture.world });
+    assert.equal(existsSync(appointment), false);
+  } finally {
+    rmSync(fixture.raw.path, { recursive: true, force: true });
+    rmSync(fixture.foreign, { recursive: true, force: true });
+  }
+});
+
+test("foreign reconcile and settlement lock bytes remain inert during Git nuke", async () => {
+  const fixture = await gitNukeFixture();
+  const common = commonGitDirectory(fixture.repository);
+  const reconcileForeign = join(common, "keiyaku", "locks", "reconcile", "foreign.bin");
+  const settlementForeign = join(common, "keiyaku", "locks", "settlement", "foreign-dir");
+  const settlementLink = join(common, "keiyaku", "locks", "settlement", "foreign-link");
+  try {
+    writeFileSync(reconcileForeign, "foreign\n");
+    mkdirSync(settlementForeign, { recursive: true });
+    symlinkSync(fixture.world, settlementLink);
+    assert.deepEqual(await Keiyaku.nuke({ world: fixture.world, confirm: fixture.world }), { kind: "success", world: fixture.world });
+    assert.equal(readFileSync(reconcileForeign, "utf8"), "foreign\n");
+    assert.equal(existsSync(settlementForeign), true);
+    assert.equal(existsSync(settlementLink), true);
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });

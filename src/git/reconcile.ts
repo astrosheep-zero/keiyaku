@@ -1,5 +1,5 @@
-import { access, mkdir, readdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { access, mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { acquireSqliteTransactionLock, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
@@ -623,34 +623,4 @@ export async function reconcileBatch(
     items.push({ contract, state: observation.state, result: observation.result });
   }
   return items;
-}
-
-/** Remove only validated Contract reconciliation lock residue. */
-export async function nukeReconcileLocks(repository: GitRepository): Promise<void> {
-  const root = join(commonGitDirectory(repository), "keiyaku", "locks", "reconcile");
-  let first: readonly import("node:fs").Dirent[];
-  try {
-    first = await readdir(root, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw error;
-  }
-  let paths: string[] = [];
-  for (const directory of first) {
-    if (!/^[0-9a-f]{2}$/u.test(directory.name) || !directory.isDirectory() || directory.isSymbolicLink()) {
-      throw new Error(`reconciliation lock custody is invalid: ${resolve(root, directory.name)}`);
-    }
-    const nested = resolve(root, directory.name);
-    const files = await readdir(nested, { withFileTypes: true });
-    for (const file of files) {
-      if (!/^[0-9a-f]{62}\.sqlite$/u.test(file.name) || !file.isFile() || file.isSymbolicLink()) {
-        throw new Error(`reconciliation lock custody is invalid: ${resolve(nested, file.name)}`);
-      }
-      paths.push(resolve(nested, file.name));
-    }
-  }
-  for (const path of paths) {
-    const held = await acquireSqliteTransactionLock({ path, mode: "immediate" });
-    held.close();
-  }
 }
