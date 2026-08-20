@@ -157,6 +157,38 @@ test("explicit materialization projects the judged conflict in the appointed wor
   assert.equal(mergeHead(repository, worktree), targetHead);
 });
 
+test("resolved merge delivery requires dirty authority and preserves native parents", async () => {
+  const { repository, bound, targetHead, worktree } = await conflictedTargetReview();
+  const git = await repositoryAt(repository.path);
+  const materialized = await bound.keiyaku.deliver({ materializeConflict: true });
+  assert.equal(materialized.kind, "integration-conflict-materialized");
+  const journal = await readRef(git, GIT_REF);
+
+  for (const includeDirty of [false, true]) {
+    await assert.rejects(
+      () => bound.keiyaku.deliver({ includeDirty }),
+      refused({ kind: "unmerged-paths", contractId: bound.keiyaku.id, paths: ["a.txt", "z.txt"] }),
+    );
+    assert.equal(await readRef(git, GIT_REF), journal);
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetHead);
+  }
+
+  writeFileSync(join(worktree, "a.txt"), "resolved\n");
+  writeFileSync(join(worktree, "z.txt"), "resolved\n");
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  await assert.rejects(
+    () => bound.keiyaku.deliver(),
+    (error: unknown) => error instanceof KeiyakuRefused && error.refusal.kind === "dirty-workspace",
+  );
+  const delivered = await bound.keiyaku.deliver({ includeDirty: true });
+  assert.equal("facts" in delivered, true);
+  if (!("facts" in delivered)) return;
+  assert.deepEqual(
+    repository.run(["show", "-s", "--format=%P", delivered.value.tenderSnapshot]).trim().split(" "),
+    [repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim(), targetHead],
+  );
+});
+
 test("materializeConflict is inert when the judge reports no conflict", async () => {
   const plain = await disjointTargetedDelivery();
   const flagged = await disjointTargetedDelivery(true);

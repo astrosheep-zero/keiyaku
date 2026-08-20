@@ -19,11 +19,19 @@ export type TenderCaptureCoordinates = Readonly<{
   coordinates: ContractCoordinates;
   place?: string;
   workspacePath?: string;
+  captureMergeState?: boolean;
+  rejectUnmerged?: boolean;
 }>;
 
-export type TenderCaptureRefusal = Readonly<{
+export type WorktreeMissingRefusal = Readonly<{
   kind: "worktree-missing";
   contractId: ContractId;
+}>;
+
+export type TenderCaptureRefusal = WorktreeMissingRefusal | Readonly<{
+  kind: "unmerged-paths";
+  contractId: ContractId;
+  paths: readonly string[];
 }>;
 
 export type WorkspaceDirtyDelta = Readonly<{
@@ -46,6 +54,7 @@ export type DirtyWorkspaceRefusal = Readonly<{
 export type TenderCapture = Readonly<{
   tree: GitObjectId;
   head: SnapshotId;
+  mergeHead?: SnapshotId;
   at: string;
   dirty: boolean;
   changes: Awaited<ReturnType<typeof captureWorkspaceTree>>["changes"];
@@ -62,7 +71,39 @@ function workspaceFor(repository: GitRepository, input: TenderCaptureCoordinates
   return input.place === undefined ? undefined : worktreePath(repository, input.place);
 }
 
+async function workspaceMergeHead(repository: GitRepository, workspace: string): Promise<SnapshotId | undefined> {
+  try {
+    return mintSnapshotId((await runGit(repository, ["-C", workspace, "rev-parse", "-q", "--verify", "MERGE_HEAD"]))
+      .toString("utf8")
+      .trim());
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 1) return undefined;
+    throw error;
+  }
+}
+
+async function unmergedWorkspacePaths(repository: GitRepository, workspace: string): Promise<readonly string[]> {
+  const records = (await runGit(repository, ["-C", workspace, "ls-files", "--unmerged", "-z"]))
+    .toString("utf8")
+    .split("\0");
+  const paths = new Set<string>();
+  for (const record of records.slice(0, -1)) {
+    const separator = record.indexOf("\t");
+    if (separator < 0) throw new Error(`malformed unmerged index record: ${record}`);
+    paths.add(record.slice(separator + 1));
+  }
+  return [...paths].sort();
+}
+
 /** Capture the complete workspace tree through Git's private index mechanics. */
+export function captureTender(
+  repository: GitRepository,
+  input: TenderCaptureCoordinates & Readonly<{ rejectUnmerged: true }>,
+): Promise<Preparation<TenderCapture, TenderCaptureRefusal>>;
+export function captureTender(
+  repository: GitRepository,
+  input: TenderCaptureCoordinates,
+): Promise<Preparation<TenderCapture, WorktreeMissingRefusal>>;
 export async function captureTender(
   repository: GitRepository,
   input: TenderCaptureCoordinates,
@@ -71,7 +112,18 @@ export async function captureTender(
   if (workspace === undefined || !(await workspaceExists(repository, input.coordinates.workspace, workspace))) {
     return { kind: "refused", refusal: { kind: "worktree-missing", contractId: input.contractId } };
   }
-  return { kind: "prepared", data: await captureWorkspaceTree(repository, workspace) };
+  if (input.rejectUnmerged === true) {
+    const paths = await unmergedWorkspacePaths(repository, workspace);
+    if (paths.length > 0) return { kind: "refused", refusal: { kind: "unmerged-paths", contractId: input.contractId, paths } };
+  }
+  const captured = await captureWorkspaceTree(repository, workspace);
+  const mergeHead = input.captureMergeState === true
+    ? await workspaceMergeHead(repository, workspace)
+    : undefined;
+  return {
+    kind: "prepared",
+    data: { ...captured, ...(mergeHead === undefined ? {} : { mergeHead }) },
+  };
 }
 
 async function dirtyShortStat(repository: GitRepository, tender: TenderCapture): Promise<WorkspaceDirtyDelta["shortStat"]> {
@@ -165,10 +217,12 @@ export async function materializeTenderSnapshot(
   tender: TenderCapture,
   commit: DeliveryCommitMetadata,
 ): Promise<SnapshotId> {
-  if (!tender.dirty) return tender.head;
+  if (!tender.dirty && tender.mergeHead === undefined) return tender.head;
+  const parents = ["-p", gitObjectIdForSnapshot(tender.head)];
+  if (tender.mergeHead !== undefined) parents.push("-p", gitObjectIdForSnapshot(tender.mergeHead));
   const oid = (await runGitWithEnvironment(
     repository,
-    ["commit-tree", tender.tree, "-p", gitObjectIdForSnapshot(tender.head)],
+    ["commit-tree", tender.tree, ...parents],
     commit.message,
     {
       GIT_AUTHOR_NAME: commit.identity.name,

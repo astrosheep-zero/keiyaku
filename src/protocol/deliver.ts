@@ -112,9 +112,11 @@ export async function prepareDelivery(
     coordinates,
     ...(appointed === undefined ? {} : { place: appointed.place }),
     ...(stage.workspacePath === undefined ? {} : { workspacePath: stage.workspacePath }),
+    captureMergeState: true,
+    rejectUnmerged: true,
   });
   if (tender.kind === "refused") return tender;
-  if ((tender.data.dirty && input.includeDirty !== true) || tender.data.changes.submodules.length > 0) {
+  if (((tender.data.dirty || tender.data.mergeHead !== undefined) && input.includeDirty !== true) || tender.data.changes.submodules.length > 0) {
     return { kind: "refused", refusal: await dirtyTenderRefusal(repository, contractId, tender.data) };
   }
   const commit = await prepareDeliveryCommitMetadata(repository, {
@@ -169,18 +171,23 @@ async function deliverAttempt(
     workspacePath = state.terminal === null && state.coordinates.workspace === "here"
       ? await input.resolveHereWorkspace?.(state.id)
       : undefined;
-    const prepared = await prepareDelivery(input.scope, {
-      contractId: state.id,
-      coordinates: state.coordinates,
-      ...(workspacePath === undefined ? {} : { workspacePath }),
-    }, {
-      title: derivation.title,
-      document: derivation.bytes,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      ...(input.message === undefined ? {} : { message: input.message }),
-      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-      includeDirty: input.includeDirty,
-    });
+    const materialization = input.materializeConflict === true && state.terminal === null
+      ? await materializationMergeStateRefusal(input)
+      : undefined;
+    const prepared = materialization === undefined
+      ? await prepareDelivery(input.scope, {
+        contractId: state.id,
+        coordinates: state.coordinates,
+        ...(workspacePath === undefined ? {} : { workspacePath }),
+      }, {
+        title: derivation.title,
+        document: derivation.bytes,
+        ...(input.actor === undefined ? {} : { actor: input.actor }),
+        ...(input.message === undefined ? {} : { message: input.message }),
+        requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+        includeDirty: input.includeDirty,
+      })
+      : { kind: "refused" as const, refusal: materialization };
     preparation = prepared.kind === "refused"
       ? { kind: "refused", document: derivation.document, refusal: prepared.refusal }
       : {
@@ -292,6 +299,22 @@ async function appointedDeliverWorkspace(
   };
 }
 
+async function materializationMergeStateRefusal(
+  input: DeliverOperationInput,
+): Promise<DeliveryPreparationRefusal | undefined> {
+  const appointed = await appointedDeliverWorkspace(input);
+  if ("kind" in appointed) return appointed.refusal;
+  return await mergeStatePresentRefusal(input, appointed.workspace);
+}
+
+async function mergeStatePresentRefusal(
+  input: DeliverOperationInput,
+  workspace: AppointedWorkspace,
+): Promise<Extract<DeliveryPreparationRefusal, { kind: "merge-state-present" }> | undefined> {
+  if (!(await workspaceMergeStatePresent(input.scope, workspace.path))) return undefined;
+  return { kind: "merge-state-present", contractId: input.contractId, workspace };
+}
+
 async function materializeDeliverConflict(
   input: DeliverOperationInput,
   refusal: IntegrationConflictRefusal,
@@ -300,12 +323,8 @@ async function materializeDeliverConflict(
   const appointed = await appointedDeliverWorkspace(input);
   if ("kind" in appointed) return appointed;
   const { workspace, coordinates } = appointed;
-  if (await workspaceMergeStatePresent(input.scope, workspace.path)) {
-    return {
-      kind: "refused",
-      refusal: { kind: "merge-state-present", contractId: input.contractId, workspace },
-    };
-  }
+  const mergeState = await mergeStatePresentRefusal(input, workspace);
+  if (mergeState !== undefined) return { kind: "refused", refusal: mergeState };
   const tender = await captureTender(input.scope, {
     contractId: input.contractId,
     coordinates,

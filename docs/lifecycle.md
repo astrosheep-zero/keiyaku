@@ -99,8 +99,15 @@ the flag, the same preparation and judge run first; on conflict, a clean
 appointed workspace with no Git merge state receives `git merge --no-commit`
 of that judged `targetHead` and returns `integration-conflict-materialized`.
 That result is not an accepted mutation: it admits no deliver fact, mints no
-candidate, and leaves the Contract `pending-delivery`. Continuation after a
-native resolve-and-commit is plain `deliver`.
+candidate, and leaves the Contract `pending-delivery`. Delivery first reads the
+appointed workspace's real index: any unmerged entry refuses as
+`unmerged-paths`, with its sorted unique complete paths, regardless of
+`includeDirty`. Once every path is resolved and staged, the existing dirty
+authorization applies even when the resolved tree equals `HEAD`: plain
+delivery returns `dirty-workspace`, while `includeDirty` captures the tree and
+materializes a tender whose ordered parents are workspace `HEAD` then
+`MERGE_HEAD`. Continuation after a native resolve-and-commit remains plain
+`deliver`.
 
 An authenticated Akuma `contract.deliver` is the same Contract operation at a
 different process boundary: the claim preserves the caller-selected Repo as

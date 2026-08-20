@@ -80,6 +80,12 @@ export function renderRefusalFacts(
     ];
   }
   if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
+  if (refusal.kind === "unmerged-paths") {
+    return [
+      ...renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns),
+      ...collectionLines("paths", refusal.paths, indent, columns),
+    ];
+  }
   if (refusal.kind === "integration-failed") {
     const lines = [
       ...renderOpaqueBlock(refusalHead(refusal.kind, identity, [`reason=${refusal.reason}`, `targetHead=${refusal.targetHead}`]), indent, columns),

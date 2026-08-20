@@ -1,5 +1,5 @@
 import { readDeliveryDiff } from "../git/integration.js";
-import { type DirtyWorkspaceRefusal } from "../git/tender.js";
+import type { DirtyWorkspaceRefusal } from "../git/tender.js";
 import { currentBranch, observeContractAt } from "../git/observe.js";
 import type { GitRepository } from "../git/process.js";
 import { repositoryAt } from "../git/repository.js";
@@ -41,6 +41,12 @@ export type MergeStatePresentRefusal = Readonly<{
   }>;
 }>;
 
+export type UnmergedPathsRefusal = Readonly<{
+  kind: "unmerged-paths";
+  contractId: ContractId;
+  paths: readonly string[];
+}>;
+
 export type DeliverConflictRefusal = Readonly<{
   kind: "integration-failed";
   contractId: ContractId;
@@ -58,6 +64,7 @@ export type DeliveryPreparationRefusal = Readonly<{
   contractId: ContractId;
 }>
   | DirtyWorkspaceRefusal
+  | UnmergedPathsRefusal
   | IntegrationPreparationRefusal
   | MergeStatePresentRefusal
   | TargetPlacementRefusal;

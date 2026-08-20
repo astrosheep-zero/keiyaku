@@ -212,6 +212,15 @@ workspace. It then projects the already-made judge as
 second conflict adjudicator and does not choose ours/theirs, write a merge
 commit, or move a ref. Git owns only that detection and projection.
 
+Before tender sealing, delivery reads the real index with Git. Any unmerged
+entries refuse as `unmerged-paths` with sorted unique complete paths; this is
+unconditional and admits no delivery fact, Verification, candidate, or target
+change. A resolved `MERGE_HEAD` makes the workspace dirty for delivery
+authorization even when its tree equals `HEAD`. With `includeDirty`, the
+existing private-index capture seals its final bytes in a deterministic tender
+whose parents are the appointed `HEAD`, then the captured `MERGE_HEAD`. This
+is custody of Git's already materialized state, not another conflict judge.
+
 Squash integration requires Git 2.38 or a compatible structured
 `merge-tree --write-tree` capability. Git probes that capability without
 parsing version prose. Absence returns `integration-unsupported` with

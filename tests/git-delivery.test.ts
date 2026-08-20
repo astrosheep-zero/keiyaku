@@ -254,6 +254,100 @@ test("Git merge-state detection and judged conflict projection stay with the one
   assert.equal(repository.run(["-C", worktree, "rev-parse", "MERGE_HEAD"]).trim(), targetHead);
 });
 
+test("delivery refuses unresolved index paths and captures a resolved merge as a native graph", async () => {
+  const { repository, state, worktree } = await targetedContract();
+  writeFileSync(join(repository.path, "a.txt"), "target\n");
+  writeFileSync(join(repository.path, "z.txt"), "target\n");
+  repository.run(["add", "a.txt", "z.txt"]);
+  repository.run(["commit", "--quiet", "-m", "target change"]);
+  const targetHead = repository.run(["rev-parse", "HEAD"]).trim();
+  writeFileSync(join(worktree, "a.txt"), "tender\n");
+  writeFileSync(join(worktree, "z.txt"), "tender\n");
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
+  const tenderHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+  const git = await repositoryAt(repository.path);
+  await materializeJudgedConflict(git, worktree, mintSnapshotId(targetHead));
+  const indexBefore = repository.run(["-C", worktree, "diff", "--cached", "--binary"]);
+  const statusBefore = repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]);
+
+  for (const includeDirty of [false, true]) {
+    assert.deepEqual(await prepareDelivery(git, preparationCoordinates(state), {
+      title: "Resolved merge",
+      document: contractBody(),
+      includeDirty,
+    }), {
+      kind: "refused",
+      refusal: { kind: "unmerged-paths", contractId: state.id, paths: ["a.txt", "z.txt"] },
+    });
+    assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), indexBefore);
+    assert.equal(repository.run(["-C", worktree, "status", "--porcelain=v2", "--untracked-files=all"]), statusBefore);
+  }
+
+  writeFileSync(join(worktree, "a.txt"), "resolved\n");
+  writeFileSync(join(worktree, "z.txt"), "resolved\n");
+  repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+  const plain = await prepareDelivery(git, preparationCoordinates(state), {
+    title: "Resolved merge",
+    document: contractBody(),
+  });
+  assert.equal(plain.kind, "refused");
+  if (plain.kind === "refused") {
+    assert.equal(plain.refusal.kind, "dirty-workspace");
+    if (plain.refusal.kind === "dirty-workspace") assert.deepEqual(plain.refusal.staged, ["a.txt", "z.txt"]);
+  }
+
+  const prepared = await prepareDelivery(git, preparationCoordinates(state), {
+    title: "Resolved merge",
+    document: contractBody(),
+    includeDirty: true,
+  });
+  assert.equal(prepared.kind, "prepared");
+  if (prepared.kind !== "prepared") return;
+  const tender = prepared.data.tenderSnapshot;
+  assert.deepEqual(repository.run(["show", "-s", "--format=%P", tender]).trim().split(" "), [tenderHead, targetHead]);
+
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "native resolved merge"]);
+  const native = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+  assert.equal(repository.run(["show", "-s", "--format=%T", tender]), repository.run(["show", "-s", "--format=%T", native]));
+  assert.equal(repository.run(["show", "-s", "--format=%P", tender]), repository.run(["show", "-s", "--format=%P", native]));
+});
+
+test("resolved merge state remains dirty authorization when its tree equals HEAD", async () => {
+  const { repository, state, worktree } = await targetedContract();
+  writeFileSync(join(repository.path, "shared.txt"), "target\n");
+  repository.run(["add", "shared.txt"]);
+  repository.run(["commit", "--quiet", "-m", "target change"]);
+  const targetHead = repository.run(["rev-parse", "HEAD"]).trim();
+  writeFileSync(join(worktree, "shared.txt"), "tender\n");
+  repository.run(["-C", worktree, "add", "shared.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender change"]);
+  const tenderHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+  const git = await repositoryAt(repository.path);
+  await materializeJudgedConflict(git, worktree, mintSnapshotId(targetHead));
+  writeFileSync(join(worktree, "shared.txt"), "tender\n");
+  repository.run(["-C", worktree, "add", "shared.txt"]);
+
+  const plain = await prepareDelivery(git, preparationCoordinates(state), {
+    title: "Equal resolved merge",
+    document: contractBody(),
+  });
+  assert.equal(plain.kind, "refused");
+  if (plain.kind === "refused") assert.equal(plain.refusal.kind, "dirty-workspace");
+  const prepared = await prepareDelivery(git, preparationCoordinates(state), {
+    title: "Equal resolved merge",
+    document: contractBody(),
+    includeDirty: true,
+  });
+  assert.equal(prepared.kind, "prepared");
+  if (prepared.kind !== "prepared") return;
+  assert.equal(repository.run(["show", "-s", "--format=%T", prepared.data.tenderSnapshot]), repository.run(["show", "-s", "--format=%T", tenderHead]));
+  assert.deepEqual(
+    repository.run(["show", "-s", "--format=%P", prepared.data.tenderSnapshot]).trim().split(" "),
+    [tenderHead, targetHead],
+  );
+});
+
 test("rebasing a managed tender onto the current target resolves its integration base", async () => {
   const { repository, state, worktree } = await targetedContract();
   writeFileSync(join(repository.path, "shared.txt"), "target\n");

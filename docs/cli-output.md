@@ -422,6 +422,9 @@ internals are present. JSON carries the same refusal facts plus the CLI-owned
 option projection. The renderer does not run Git or infer another path
 classification.
 
+An `unmerged-paths` refusal uses the refused header, then its kind and one
+complete path per row. JSON exposes that same public value.
+
 A deliver `integration-failed` conflict refusal exposes `reason`, `targetHead`,
 ordered `conflictPaths`, and both recovery values in text and JSON. Plain text
 labels them `recovery materialize conflicts · deliver --materialize-conflict`

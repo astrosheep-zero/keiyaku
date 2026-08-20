@@ -225,6 +225,7 @@ type DeliveryWorkspaceRefusal = Readonly<{
 type DeliveryPreparationRefusal =
   | Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
   | DirtyWorkspaceRefusal
+  | UnmergedPathsRefusal
   | IntegrationRefusal
   | MergeStatePresentRefusal
   | CheckoutNotFollowableRefusal
@@ -242,6 +243,12 @@ type DirtyWorkspaceRefusal = Readonly<{
     insertions: number
     deletions: number
   }>
+}>
+
+type UnmergedPathsRefusal = Readonly<{
+  kind: "unmerged-paths"
+  contractId: ContractId
+  paths: readonly string[]
 }>
 
 type DocumentMovedRefusal = Readonly<{
@@ -385,6 +392,13 @@ the complete final tree relative to `HEAD`; binary entries count as changed
 files with zero textual insertions/deletions. These refusals end the
 invocation; they do not trigger a reread, auto-retry, or adoption of a new
 document revision.
+
+`UnmergedPathsRefusal` is the delivery and audit refusal for a real index with
+unmerged entries. Its `paths` are Git-reported sorted unique complete paths;
+it applies with or without `includeDirty`, before candidate or Verification
+work. A resolved `MERGE_HEAD` remains ordinary dirty authorization: with
+`includeDirty`, its tender snapshot has workspace `HEAD` then `MERGE_HEAD` as
+its ordered parents.
 
 `TargetInputRefusal` is the `KeiyakuRefusal` member for `Keiyaku.bind` target
 validation, existence, and the targeted-here branch relationship. It has no

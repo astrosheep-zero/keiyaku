@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, Repo, type KeiyakuRefusal } from "../src/index.js";
 import { decodeContractDocument, verificationDefinition } from "../src/body/decode.js";
@@ -14,7 +15,7 @@ import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { resolveHereContractWorkspace } from "../src/contract-worktree.js";
-import { makeGitRepository, type TestGitRepository } from "./support/git.js";
+import { appointedWorktreePath, makeGitRepository, type TestGitRepository } from "./support/git.js";
 
 function repositoryWithMain(): TestGitRepository {
   const repository = makeGitRepository();
@@ -199,6 +200,41 @@ test("audit without Verification still returns an accepted ready candidate", asy
   assert.equal("diff" in result.value.candidate, false);
   assert.equal(result.value.verification.kind, "not-run");
   assert.equal(result.value.target.kind, "not-observed");
+});
+
+test("audit blocks an unresolved materialized merge with the delivery refusal", async () => {
+  const repository = repositoryWithMain();
+  writeFileSync(join(repository.path, "shared.txt"), "base\n");
+  repository.run(["add", "shared.txt"]);
+  repository.run(["commit", "--quiet", "-m", "base"]);
+  const bound = await Keiyaku.bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: verificationBody(null),
+    workspace: "worktree",
+    target: "refs/heads/main",
+  });
+  const state = await bound.keiyaku.state();
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), state.id);
+  writeFileSync(join(repository.path, "shared.txt"), "target\n");
+  repository.run(["add", "shared.txt"]);
+  repository.run(["commit", "--quiet", "-m", "target"]);
+  writeFileSync(join(worktree, "shared.txt"), "tender\n");
+  repository.run(["-C", worktree, "add", "shared.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender"]);
+  const materialized = await bound.keiyaku.deliver({ materializeConflict: true });
+  assert.equal(materialized.kind, "integration-conflict-materialized");
+
+  const audited = await bound.keiyaku.audit({ includeDirty: true });
+  assert.deepEqual(audited.facts, []);
+  assert.deepEqual(audited.value, {
+    candidate: {
+      kind: "blocked",
+      refusal: { kind: "unmerged-paths", contractId: state.id, paths: ["shared.txt"] },
+    },
+    verification: { kind: "not-run" },
+    target: { kind: "not-observed" },
+  });
+  assert.equal((await bound.keiyaku.state()).delivery, null);
 });
 
 test("audit accepts an attestation refusal as a stopped answer without facts", async () => {

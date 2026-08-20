@@ -285,3 +285,19 @@ test("merge-state-present and materialized conflict render their public fields",
     "   workspace worktree /tmp/wt",
   ].join("\n"));
 });
+
+test("unmerged index paths render as a complete public refusal", () => {
+  const contract = contractId("kei/conflicted");
+  assert.equal(renderText({
+    kind: "refused",
+    verb: "deliver",
+    contract,
+    refusal: { kind: "unmerged-paths", contractId: contract, paths: ["a.txt", "z.txt"] },
+  }), [
+    "! deliver refused — kei/conflicted",
+    "   unmerged-paths",
+    "   paths",
+    "   │ a.txt",
+    "   │ z.txt",
+  ].join("\n"));
+});
