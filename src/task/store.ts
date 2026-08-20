@@ -17,6 +17,8 @@ type TaskNukeCustody = Readonly<{
   lockPaths: readonly string[];
 }>;
 
+export const DEFAULT_TASK_LOCK_TIMEOUT_MS = 3_000;
+
 function syncTaskDirectory(path: string): void {
   if (process.platform === "win32") return;
   const directory = openSync(path, "r");
@@ -201,7 +203,7 @@ export async function nukeTaskAuthority(world: WorldRoot): Promise<void | "busy"
 }
 
 export async function withTaskLocks<T>(input: Readonly<{
-  world: WorldRoot; allocation: boolean; ids: readonly TaskId[]; signal?: AbortSignal;
+  world: WorldRoot; allocation: boolean; ids: readonly TaskId[]; timeoutMs?: number; signal?: AbortSignal;
 }>, action: () => Promise<T>): Promise<T | "busy"> {
   const paths = [
     ...(input.allocation ? [allocationLockPath(input.world)] : []),
@@ -209,7 +211,12 @@ export async function withTaskLocks<T>(input: Readonly<{
   ];
   const held: HeldSqliteTransactionLock[] = [];
   try {
-    for (const path of paths) held.push(await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 3_000, ...(input.signal === undefined ? {} : { signal: input.signal }) }));
+    for (const path of paths) held.push(await acquireSqliteTransactionLock({
+      path,
+      mode: "immediate",
+      timeoutMs: input.timeoutMs ?? DEFAULT_TASK_LOCK_TIMEOUT_MS,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }));
     return await action();
   } catch (error) {
     if (error instanceof SqliteTransactionLockError && error.reason === "timeout") return "busy";

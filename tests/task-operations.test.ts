@@ -14,7 +14,7 @@ import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transac
 import { parseTaskDocument, serializeTaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
 import { settleTask } from "../src/task/operations.js";
-import { replaceAuthority, withTaskLocks } from "../src/task/store.js";
+import { DEFAULT_TASK_LOCK_TIMEOUT_MS, replaceAuthority, withTaskLocks } from "../src/task/store.js";
 import { World } from "../src/world.js";
 
 async function world(): { root: string; tasks: ReturnType<typeof Tasks.of> } {
@@ -312,14 +312,15 @@ test("task lock cancellation propagates and exceptional actions release held loc
   assert.equal((await tasks.task({ id }).start()).kind, "accepted");
 });
 
-test("task writers classify the fixed three-second lock wait as busy", async () => {
+test("task lock wait budget defaults to three seconds and classifies busy cheaply", async () => {
   const { tasks } = await world(), id = acceptedId(await tasks.add({ title: "Busy" }));
   const path = join(tasks.root, ".keiyaku", "locks", "task", "busy.sqlite");
   const held = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 100 });
   const started = performance.now();
   try {
-    assert.deepEqual(await tasks.task({ id }).start(), { kind: "retry", reason: "busy" });
-    assert.ok(performance.now() - started >= 2_900);
+    assert.equal(DEFAULT_TASK_LOCK_TIMEOUT_MS, 3_000);
+    assert.equal(await withTaskLocks({ world: tasks.root, allocation: false, ids: [id], timeoutMs: 25 }, async () => "unreachable"), "busy");
+    assert.ok(performance.now() - started < 1_000);
   } finally { held.close(); }
 });
 
