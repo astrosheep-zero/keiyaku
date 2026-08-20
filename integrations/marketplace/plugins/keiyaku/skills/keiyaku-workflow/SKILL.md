@@ -85,7 +85,8 @@ Read first:
 - <owner documents governing this delivery>
 - <source files named or selected from the Contract Region for this work>
 Objective:
-<bounded assignment>
+<the assignment's high-level intent and goal — not implementation detail,
+not a restatement of the Contract terms>
 ```
 
 Every `Read first` path is relative to `Worktree` unless it is absolute. The
