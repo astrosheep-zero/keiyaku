@@ -1,5 +1,5 @@
 import { type ActorId, type ContractId, type Gate, type Keiyaku, type Repo, type WorktreeHooks } from "../../index.js";
-import type { ParsedAmend } from "../parse.js";
+import type { ParsedAmend } from "./contract.js";
 import { contractFromInput } from "../selectors.js";
 
 type AmendCommandInput = Readonly<{

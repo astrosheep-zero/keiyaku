@@ -1,3 +1,5 @@
+import type { CatalogQuery } from "../../library/catalog.js";
+
 export type ContractFlagKind = "boolean" | "value" | "raw-value" | "repeat-value";
 
 export type ContractCommandSpec = Readonly<{
@@ -8,6 +10,66 @@ export type ContractCommandSpec = Readonly<{
   purpose: string;
   help?: string;
 }>;
+
+type Output = Readonly<{ output: "text" | "json" }>;
+type Actor = Readonly<{ actor?: string }>;
+
+export type ParsedBind = Output & Actor & Readonly<{
+  command: "bind";
+  task?: string;
+  target?: string;
+  workspace?: "here";
+  after?: readonly string[];
+  gates?: readonly string[];
+}>;
+export type ParsedAmend = Output & Actor & Readonly<{
+  command: "amend";
+  contract?: string;
+  after?: readonly string[];
+  clearAfter?: true;
+  gates?: readonly string[];
+  stdin?: true;
+}>;
+export type ParsedDeliver = Output & Actor & Readonly<{
+  command: "deliver";
+  contract?: string;
+  message?: string;
+  includeDirty: boolean;
+  materializeConflict: boolean;
+}>;
+export type ParsedReview = Output & Actor & Readonly<{
+  command: "review";
+  contract?: string;
+  verdict: "satisfied" | "unsatisfied";
+  summary?: string;
+  summaryFromStdin?: true;
+}>;
+export type ParsedArc = Output & Actor & Readonly<{
+  command: "arc";
+  contract?: string;
+}>;
+export type ParsedAbandon = Output & Actor & Readonly<{
+  command: "abandon";
+  contract?: string;
+  note?: string;
+}>;
+export type ParsedStatus = Output & (
+  | Readonly<{ command: "status"; contract?: string; akuma?: never }>
+  | Readonly<{ command: "status"; contract: string; akuma: true }>
+);
+export type ParsedLs = Output & Readonly<{ command: "ls"; query: CatalogQuery }>;
+export type ParsedAudit = Output & Readonly<{
+  command: "audit";
+  contract?: string;
+  includeDirty: boolean;
+  showDiff: boolean;
+  actor?: string;
+}>;
+export type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
+export type ParsedNuke = Output & Readonly<{ command: "nuke"; confirm?: string }>;
+export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
+export type ParsedRegion = Output & Readonly<{ command: "region"; contract?: string; overlap: boolean; path?: string }>;
+export type ParsedShow = Output & Readonly<{ command: "show"; contract?: string }>;
 
 export const CONTRACT_COMMAND_SPECS = {
   bind: { positional: "none", stdin: "required", flags: { actor: "value", task: "value", target: "value", here: "boolean", after: "repeat-value", gates: "raw-value", json: "boolean" }, usage: "bind [--task <task/...>] [--target <ref>] [--here] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] -", purpose: "Create one Contract from stdin Markdown." },

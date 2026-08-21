@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { open } from "node:fs/promises";
+import { open, type FileHandle } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import crossSpawn from "cross-spawn";
@@ -172,6 +172,36 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
   await exit;
 }
 
+async function retainDetachedExitEvidence(
+  log: FileHandle,
+  path: string,
+  from: number,
+  code: number | null,
+  signal: NodeJS.Signals | null,
+): Promise<DetachedProcessExit> {
+  const status = detachedExitStatus(code, signal);
+  const marker = Buffer.from(`[child ${status}]\n`);
+  let written = 0;
+  while (written < marker.byteLength) {
+    const write = await log.write(marker, written, marker.byteLength - written);
+    if (write.bytesWritten === 0) throw new Error("run log exit marker write made no progress");
+    written += write.bytesWritten;
+  }
+  const evidence = await log.stat();
+  if (evidence.size < from) throw new Error("run log shrank before exit evidence was retained");
+  const referenced = await open(path, "r");
+  try {
+    const current = await referenced.stat();
+    if (current.dev !== evidence.dev || current.ino !== evidence.ino) {
+      throw new Error("run log path changed before exit evidence was retained");
+    }
+    if (current.size < evidence.size) throw new Error("run log path size changed before exit evidence was retained");
+  } finally {
+    await referenced.close();
+  }
+  return { code, signal, log: { path, from, to: evidence.size } };
+}
+
 export async function spawnDetachedProcess(input: DetachedProcessInput): Promise<OwnedProcess> {
   const log = await open(input.log, "a");
   let launched = false;
@@ -191,28 +221,7 @@ export async function spawnDetachedProcess(input: DetachedProcessInput): Promise
           let failure: unknown;
           let result: DetachedProcessExit | undefined;
           try {
-            const marker = Buffer.from(`[child ${status}]\n`);
-            let written = 0;
-            while (written < marker.byteLength) {
-              const write = await log.write(marker, written, marker.byteLength - written);
-              if (write.bytesWritten === 0) throw new Error("run log exit marker write made no progress");
-              written += write.bytesWritten;
-            }
-            const evidence = await log.stat();
-            if (evidence.size < from) throw new Error("run log shrank before exit evidence was retained");
-            const referenced = await open(input.log, "r");
-            try {
-              const current = await referenced.stat();
-              if (current.dev !== evidence.dev || current.ino !== evidence.ino) {
-                throw new Error("run log path changed before exit evidence was retained");
-              }
-              if (current.size < evidence.size) {
-                throw new Error("run log path size changed before exit evidence was retained");
-              }
-            } finally {
-              await referenced.close();
-            }
-            result = { code, signal, log: { path: input.log, from, to: evidence.size } };
+            result = await retainDetachedExitEvidence(log, input.log, from, code, signal);
           } catch (error) {
             failure = error;
           }

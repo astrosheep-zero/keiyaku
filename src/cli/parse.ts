@@ -16,12 +16,25 @@ import {
   type AkumaAction,
   type ParsedAkumaCommand,
 } from "./commands/akuma.js";
-import type { CatalogQuery } from "../library/catalog.js";
 import { INSTALL_USAGE, parseInstallCommand, renderInstallHelp, type ParsedInstallCommand } from "./commands/install.js";
 import {
   CONTRACT_COMMAND_SPECS,
   type ContractCommand as Command,
   type ContractCommandSpec as CommandSpec,
+  type ParsedAbandon,
+  type ParsedAmend,
+  type ParsedArc,
+  type ParsedAudit,
+  type ParsedBind,
+  type ParsedDeliver,
+  type ParsedLs,
+  type ParsedNuke,
+  type ParsedReconcile,
+  type ParsedRegion,
+  type ParsedReview,
+  type ParsedSettings,
+  type ParsedShow,
+  type ParsedStatus,
 } from "./commands/contract.js";
 import { CliUsageError, isBlankInput, usageLine } from "./usage.js";
 export { CliUsageError } from "./usage.js";
@@ -75,65 +88,6 @@ export function renderHelp(coordinate: CliHelpCoordinate): string {
   }
 }
 
-type Output = Readonly<{ output: "text" | "json" }>;
-type Actor = Readonly<{ actor?: string }>;
-
-export type ParsedBind = Output & Actor & Readonly<{
-  command: "bind";
-  task?: string;
-  target?: string;
-  workspace?: "here";
-  after?: readonly string[];
-  gates?: readonly string[];
-}>;
-export type ParsedAmend = Output & Actor & Readonly<{
-  command: "amend";
-  contract?: string;
-  after?: readonly string[];
-  clearAfter?: true;
-  gates?: readonly string[];
-  stdin?: true;
-}>;
-export type ParsedDeliver = Output & Actor & Readonly<{
-  command: "deliver";
-  contract?: string;
-  message?: string;
-  includeDirty: boolean;
-  materializeConflict: boolean;
-}>;
-export type ParsedReview = Output & Actor & Readonly<{
-  command: "review";
-  contract?: string;
-  verdict: "satisfied" | "unsatisfied";
-  summary?: string;
-  summaryFromStdin?: true;
-}>;
-export type ParsedArc = Output & Actor & Readonly<{
-  command: "arc";
-  contract?: string;
-}>;
-export type ParsedAbandon = Output & Actor & Readonly<{
-  command: "abandon";
-  contract?: string;
-  note?: string;
-}>;
-type ParsedStatus = Output & (
-  | Readonly<{ command: "status"; contract?: string; akuma?: never }>
-  | Readonly<{ command: "status"; contract: string; akuma: true }>
-);
-export type ParsedLs = Output & Readonly<{ command: "ls"; query: CatalogQuery }>;
-export type ParsedAudit = Output & Readonly<{
-  command: "audit";
-  contract?: string;
-  includeDirty: boolean;
-  showDiff: boolean;
-  actor?: string;
-}>;
-type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
-export type ParsedNuke = Output & Readonly<{ command: "nuke"; confirm?: string }>;
-export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
-export type ParsedRegion = Output & Readonly<{ command: "region"; contract?: string; overlap: boolean; path?: string }>;
-
 export type ParsedCommand =
   | ParsedBind
   | ParsedAmend
@@ -142,7 +96,7 @@ export type ParsedCommand =
   | ParsedArc
   | ParsedAbandon
   | ParsedStatus
-  | (Output & Readonly<{ command: "show"; contract?: string }>)
+  | ParsedShow
   | ParsedLs
   | ParsedAudit
   | ParsedReconcile
@@ -432,7 +386,7 @@ function parseStatus(parts: ParsedParts): ParsedStatus {
   };
 }
 
-function parseShow(parts: ParsedParts): Extract<ParsedCommand, { command: "show" }> {
+function parseShow(parts: ParsedParts): ParsedShow {
   const contract = parts.positionals[0];
   return { command: "show", ...(contract === undefined ? {} : { contract }), output: parts.output };
 }

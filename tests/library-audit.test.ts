@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { repositoryAt } from "../src/git/repository.js";
+import { adjudicateAuditTarget } from "../src/git/target-placement.js";
 import { releaseManagedWorktrees } from "../src/workspace-place.js";
 import { appointedWorktreePath, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
@@ -187,16 +188,10 @@ test("later target checkout mutation is reobserved at placement", async () => {
 
 test("operational target observation failure is target.failed", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: document("exit 0"),
-    workspace: "here",
-    target: "refs/heads/main",
-    gates: ["verified"],
-  });
-  commitCandidate(repository);
-
-  const audited = await withGitShim(
+  const git = await repositoryAt(repository.path);
+  const predecessor = repository.run(["rev-parse", "HEAD"]).trim();
+  const candidate = predecessor;
+  const answer = await withGitShim(
     [
       'if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then',
       '  printf "forced worktree list failure\\n" >&2',
@@ -205,13 +200,17 @@ test("operational target observation failure is target.failed", async () => {
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    () => bound.keiyaku.audit(),
+    async (gitPath) => adjudicateAuditTarget({ ...git, gitPath }, {
+      contractId: "kei/target-observation",
+      coordinates: { workspace: "here", target: "refs/heads/main" },
+      predecessor,
+      candidate,
+      hereWorkspacePath: repository.path,
+    }),
   );
-  assert.equal(audited.value.candidate.kind, "ready");
-  assert.equal(audited.value.target.kind, "failed");
-  if (audited.value.target.kind !== "failed") return;
-  assert.match(audited.value.target.diagnostic, /forced worktree list failure/);
-  assert.equal((await bound.keiyaku.state()).delivery, null);
+  assert.equal(answer.kind, "failed");
+  if (answer.kind !== "failed") return;
+  assert.match(answer.diagnostic, /forced worktree list failure/);
 });
 
 test("moved target wins over placeability", async () => {
@@ -274,7 +273,10 @@ test("completeMutation preserves accepted cleanup and leak", async () => {
     "fi",
     "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
   ].join("\n");
-  const audited = await withGitShim(cleanupFailure, {}, () => contract.audit());
+  const audited = await withGitShim(cleanupFailure, {}, async (gitPath) => (await Keiyaku.of({
+    repo: await Repo.at({ path: repository.path, gitPath }),
+    id: contract.id,
+  })).audit());
   assert.equal(audited.value.candidate.kind, "ready");
   assert.match(audited.leak?.diagnostic ?? "", /forced verification cleanup failure/);
   assert.equal("leak" in audited.value, false);
@@ -316,7 +318,10 @@ test("audit keeps its leading observation when the delivery candidate is unavail
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    () => bound.keiyaku.audit(),
+    async (gitPath) => (await Keiyaku.of({
+      repo: await Repo.at({ path: repository.path, gitPath }),
+      id: bound.keiyaku.id,
+    })).audit(),
   );
   assert.deepEqual(audited.facts, []);
   assert.equal(audited.value.candidate.kind, "ready");

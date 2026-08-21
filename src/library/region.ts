@@ -1,7 +1,7 @@
 import { decodeContractDocument } from "../body/decode.js";
 import { assertCanonicalRegionPath, regionPatternsMatchPath, regionsOverlap } from "../body/region.js";
 import type { ContractId } from "../core/facts/types.js";
-import type { GitDecodeChannel } from "../git/read-observation.js";
+import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { documentsOperationAt, type RepositoryScope } from "../protocol/operations.js";
 import type { ContractDocumentProjection } from "../protocol/read/documents.js";
 
@@ -67,4 +67,14 @@ export async function observeRegion(
   } catch (error) {
     return { overlapFailure: diagnostic(error) };
   }
+}
+
+export async function observeChangedRegion(
+  scope: RepositoryScope,
+  self: ContractId,
+  changed: ReadonlySet<string> | undefined,
+  mine: readonly string[],
+): Promise<AmendRegionObservation> {
+  if (!changed?.has("region")) return {};
+  return await withGitDecodeChannel(scope, async (channel) => await observeRegion(scope, channel, self, mine));
 }

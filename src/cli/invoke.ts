@@ -340,17 +340,21 @@ async function invokeExisting(input: ExistingInvocation): Promise<InvocationResu
 }
 
 type AkumaEdgeInput = Readonly<{
-  path: WorldRoot;
+  located: WorldRoot | null;
+  candidate: WorldRoot | null;
+  establish: () => Promise<WorldRoot>;
   statedCwd?: string;
   repo?: Repo;
   home?: string;
-  configuration?: Settings;
   edge: InvocationEdge;
 }>;
 
 async function invokeAkumaFromEdge(parsed: InvokedAkumaCommand, input: AkumaEdgeInput) {
   try {
-    const { path, statedCwd, repo, home, configuration, edge } = input;
+    const { statedCwd, repo, edge } = input;
+    const path = await akumaWorldFor(parsed, input.located, input.candidate, input.establish);
+    const home = parsed.command === "call" ? input.home : undefined;
+    const configuration = parsed.command === "call" ? await settingsAt(path, home) : undefined;
     if (parsed.command === "call" && parsed.contract !== undefined && repo === undefined) {
       throw new Error("call with Contract requires a resolved Repo");
     }
@@ -531,21 +535,15 @@ async function invokeParsed(
   invocation: NonInstallExecution,
   runtime: InvokeRuntime,
 ): Promise<InvocationResult | TaskInvocationResult | AkumaInvocationResult | SettingsInvocationResult> {
+  const environment = runtime.environment ?? process.env;
   const coordinates = await resolveInvocationCoordinates(invocation, runtime);
   const { cwd, cwdSource, repo, world, candidateWorld, establishWorld, taskContext } = coordinates;
-  const edge: InvocationEdge = {
-    environment: runtime.environment ?? process.env,
-    readStdin: runtime.readStdin ?? readStdin,
-  };
+  const edge: InvocationEdge = { environment, readStdin: runtime.readStdin ?? readStdin };
   const parsed = invocation.command;
   const mapped = edge.environment.KEIYAKU_HOME?.trim();
   const home = mapped === undefined || mapped.length === 0 ? undefined : mapped;
-  if (parsed.command === "settings") {
-    return { kind: "settings", value: await settingsAt(world ?? undefined, home) };
-  }
-  if (parsed.command === "nuke") {
-    return await (await import("./commands/nuke.js")).invokeNuke(parsed, world);
-  }
+  if (parsed.command === "settings") return { kind: "settings", value: await settingsAt(world ?? undefined, home) };
+  if (parsed.command === "nuke") return await (await import("./commands/nuke.js")).invokeNuke(parsed, world);
   if (parsed.command === "task") {
     const actor = runtime.actor ?? actorFromEdge(
       typeof parsed.flags.actor === "string" ? parsed.flags.actor : undefined,
@@ -562,14 +560,13 @@ async function invokeParsed(
   }
   if (parsed.command === "history" && "contract" in parsed) return await invokeContractHistory(repo, parsed.contract);
   if (isParsedAkumaCommand(parsed)) {
-    const akumaWorld = await akumaWorldFor(parsed, world, candidateWorld, coordinates.establishWorld);
-    const configuration = parsed.command === "call" ? await settingsAt(akumaWorld, home) : undefined;
     return await invokeAkumaFromEdge(parsed, {
-      path: akumaWorld,
+      located: world,
+      candidate: candidateWorld,
+      establish: coordinates.establishWorld,
       ...(cwdSource === "input" ? { statedCwd: cwd } : {}),
       ...(repo === undefined ? {} : { repo }),
-      ...(parsed.command === "call" && home !== undefined ? { home } : {}),
-      ...(configuration === undefined ? {} : { configuration }),
+      ...(home === undefined ? {} : { home }),
       edge,
     });
   }

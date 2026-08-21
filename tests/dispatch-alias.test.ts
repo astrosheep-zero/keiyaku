@@ -163,8 +163,8 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    () => publishDispatch({
-      repository,
+    async (gitPath) => publishDispatch({
+      repository: await repositoryAt(raw.path, gitPath),
       akuId: parseAkuId("aku/worker/88888888").id,
       contractId: owner,
     }),
@@ -186,8 +186,8 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     {},
-    () => publishDispatch({
-      repository,
+    async (gitPath) => publishDispatch({
+      repository: await repositoryAt(raw.path, gitPath),
       akuId: parseAkuId("aku/worker/99999999").id,
       contractId: owner,
     }),

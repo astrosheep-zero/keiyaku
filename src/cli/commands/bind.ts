@@ -1,5 +1,5 @@
 import { Keiyaku, type ActorId, type BindResult, type ContractId, type Gate, type Repo, type WorktreeHooks } from "../../index.js";
-import type { ParsedBind } from "../parse.js";
+import type { ParsedBind } from "./contract.js";
 import { contractFromInput } from "../selectors.js";
 
 type BindCommandInput = Readonly<{

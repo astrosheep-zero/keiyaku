@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { invocationStart } from "../src/cli/main.js";
+import { invocationStart } from "../src/cli/runtime.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv, type ParsedCommand } from "../src/cli/parse.js";
 

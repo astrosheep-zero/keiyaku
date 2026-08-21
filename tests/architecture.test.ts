@@ -27,14 +27,22 @@ test("architecture policy keeps request and body edges symbol-scoped", () => {
 test("architecture policy accepts public command adapters", () => {
   const diagnostics = check({
     "index.ts": "export class Repo {}; export const Keiyaku = { bind(): undefined { return undefined; } };",
-    "cli/parse.ts": "export type ParsedBind = { contract: string };",
+    "cli/commands/contract.ts": "export type ParsedBind = { contract: string };",
     "cli/commands/bind.ts": [
       'import { Keiyaku, Repo } from "../../index.js";',
-      'import type { ParsedBind } from "../parse.js";',
+      'import type { ParsedBind } from "./contract.js";',
       "export function adapt(value: ParsedBind, repo: Repo): void { void value; Keiyaku.bind(); void repo; }",
     ].join("\n"),
   });
   assert.deepEqual(diagnostics, []);
+});
+
+test("architecture policy rejects Contract task option imports from bind", () => {
+  const diagnostics = check({
+    "library/bind.ts": "export function taskOption(): void {}",
+    "library/contract.ts": 'import { taskOption } from "./bind.js"; export const task = taskOption;',
+  });
+  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
 
 test("architecture policy rejects runtime orchestration and an unowned task pillar", () => {
@@ -218,24 +226,16 @@ test("architecture policy checks the real CLI parse graph for provider SDK reach
   assert.ok(rules(rejected).includes("architecture/provider-sdk-reachable-from-cli"));
 });
 
-test("architecture policy gives activity codec directions exact runtime owners", () => {
+test("architecture policy rejects the removed Akuma activity codec edge", () => {
   const provider = [
     "export function encodeAgentEvent(): void {}",
     "export function decodeAgentEvent(): void {}",
   ].join("\n");
-  const accepted = check({
+  const diagnostics = check({
     "akuma/provider.ts": provider,
-    "akuma/body-turn.ts": 'import { encodeAgentEvent } from "./provider.js"; export const encode = encodeAgentEvent;',
     "akuma/akuma.ts": 'import { decodeAgentEvent } from "./provider.js"; export const decode = decodeAgentEvent;',
   });
-  assert.deepEqual(accepted, []);
-
-  const rejected = check({
-    "akuma/provider.ts": provider,
-    "akuma/body-turn.ts": 'import { decodeAgentEvent } from "./provider.js"; export const decode = decodeAgentEvent;',
-    "akuma/akuma.ts": 'import { encodeAgentEvent } from "./provider.js"; export const encode = encodeAgentEvent;',
-  });
-  assert.equal(rules(rejected).filter((rule) => rule === "architecture/dependency-direction").length, 2);
+  assert.deepEqual(rules(diagnostics), ["architecture/dependency-direction"]);
 });
 
 test("architecture policy excludes type-only edges from module-loading cycles", () => {

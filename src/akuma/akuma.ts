@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   CONTROL_RESPONSE_MS,
   recoverPendingTells,
@@ -78,9 +79,8 @@ async function canonicalBirthCwd(input: string): Promise<string> {
 }
 
 function callReadonly(value: unknown): Readonly<{ readonly?: true }> {
-  if (value === undefined) return {};
-  if (value !== true) throw new TypeError("Akuma call readonly must be true");
-  return { readonly: true };
+  if (value !== undefined && value !== true) throw new TypeError("Akuma call readonly must be true");
+  return value === true ? { readonly: true } : {};
 }
 
 export type AkumaListRow = Readonly<{
@@ -170,16 +170,12 @@ export class AkumaNotBornError extends Error {
     this.name = "AkumaNotBornError";
   }
 }
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
 async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<HeldAkumaLeash | null> {
   for (;;) {
     const leash = await HeldAkumaLeash.try(paths);
     if (leash !== null) return leash;
     if (performance.now() >= deadline) return null;
-    await wait(Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
+    await delay(Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
   }
 }
 
@@ -265,8 +261,7 @@ async function fleetListRow(
   }
 }
 
-async function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot?: HeartSnapshot): Promise<AkumaListRow> {
-  snapshot ??= await readHeart(paths);
+async function bornListRow(paths: AkumaPaths, expected: AkuId, snapshot: HeartSnapshot): Promise<AkumaListRow> {
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   if (snapshot.soul.id !== expected) throw new Error("Akuma soul does not match its coordinate");
   const currentLife = life({
@@ -392,7 +387,7 @@ export class AkumaHandle {
     for (;;) {
       const status = await this.status();
       if (predicate(status) || (deadline !== undefined && performance.now() >= deadline)) return status;
-      await wait(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
+      await delay(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
     }
   }
 
@@ -421,13 +416,12 @@ export class AkumaHandle {
     }
 
     const settledBody = (await readHeart(this.paths)).latestBody;
-    if (settledBody?.sequence === request.body.sequence && settledBody.hung !== undefined) {
+    const unavailable = settledBody?.sequence === request.body.sequence
+      ? settledBody?.hung !== undefined ? "hung" : settledBody?.end === undefined ? "untidy" : undefined
+      : "untidy";
+    if (settledBody === null || unavailable !== undefined) {
       try { await leash.clearPause(this.paths); } finally { leash.release(); }
-      return { kind: "unavailable", evidence: "hung" };
-    }
-    if (settledBody?.sequence !== request.body.sequence || settledBody.end === undefined) {
-      try { await leash.clearPause(this.paths); } finally { leash.release(); }
-      return { kind: "unavailable", evidence: "untidy" };
+      return { kind: "unavailable", evidence: unavailable ?? "untidy" };
     }
     if (request.body.end !== undefined || settledBody.end !== "put-down") putDown = "was-idle";
 
@@ -572,9 +566,9 @@ export class Akuma {
       allowed,
     });
     if (requests !== null) {
-      const cwd = input.cwd === undefined
-        ? undefined
-        : context?.cwdCanonical === true ? input.cwd : await canonicalBirthCwd(input.cwd);
+      const cwd = input.cwd === undefined || context?.cwdCanonical === true
+        ? input.cwd
+        : await canonicalBirthCwd(input.cwd);
       const child = await requestBodyCall({
         directory: requests,
         id: randomUUID(),
@@ -590,12 +584,9 @@ export class Akuma {
         source: cwd === undefined ? "caller" : "input",
       });
     }
-    const initiatorCwd = context.initiatorCwd;
-    const selectedCwd = input.cwd ?? initiatorCwd ?? this.path;
     const cwd = input.cwd !== undefined && context?.cwdCanonical === true
       ? input.cwd
-      : await canonicalBirthCwd(selectedCwd);
-    const recipe = requestRecipe;
+      : await canonicalBirthCwd(input.cwd ?? context.initiatorCwd ?? this.path);
     const published = await publishAkuma({
       worldPath: this.path,
       archetype: archetype.name,
@@ -605,7 +596,7 @@ export class Akuma {
           seed: {
             id: allocated.id,
             archetype: allocated.archetype,
-            ...recipe,
+            ...requestRecipe,
             cwd,
             origin: { kind: "direct" },
           },
@@ -615,7 +606,7 @@ export class Akuma {
     });
     return new AkumaHandle(published.id, this.path, {
       cwd,
-      source: input.cwd !== undefined ? "input" : initiatorCwd === undefined ? "world" : "process",
+      source: input.cwd !== undefined ? "input" : context.initiatorCwd === undefined ? "world" : "process",
     });
   }
 

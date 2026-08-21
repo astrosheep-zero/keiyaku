@@ -231,9 +231,9 @@ test("audit renders transient Verification cleanup leaks after accepted and obse
     "fi",
     "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
   ].join("\n");
-  const acceptedAudit = await withGitShim(cleanupFailure, {}, () => invoke(parseArgv(["audit", accepted.id]), {
+  const acceptedAudit = await withGitShim(cleanupFailure, {}, (gitPath) => invoke(parseArgv(["audit", accepted.id]), {
     cwd: accepted.raw.path,
-    environment: {},
+    environment: { KEIYAKU_GIT_PATH: gitPath },
   }));
 
   assert.equal(acceptedAudit.kind, "accepted");

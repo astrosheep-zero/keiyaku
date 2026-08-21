@@ -11,8 +11,8 @@ import { adjudicateAuditTarget, observeTargetPlacement } from "../src/git/target
 import { readRef, repositoryAt } from "../src/git/repository.js";
 import { materializeJudgedConflict, readDeliveryDiff, workspaceMergeStatePresent } from "../src/git/integration.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
-import { followManagedWorktree, reconcile } from "../src/git/reconcile.js";
-import { worktreePath } from "../src/git/workspace.js";
+import { reconcile } from "../src/git/reconcile.js";
+import { followManagedWorktree, worktreePath } from "../src/git/workspace.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { reserveContractWorktree, resolveHereContractWorkspace } from "../src/contract-worktree.js";
 import {
@@ -1063,7 +1063,10 @@ test("managed follow retains attached, moved, operating, and unsupported shapes"
   });
   repository.run(["checkout", "--detach", "--quiet", start]);
   const cherryPickHead = repository.run(["rev-parse", "--git-path", "CHERRY_PICK_HEAD"]).trim();
-  writeFileSync(cherryPickHead, `${tender}\n`);
+  writeFileSync(
+    cherryPickHead.startsWith("/") ? cherryPickHead : join(repository.path, cherryPickHead),
+    `${tender}\n`,
+  );
   assert.deepEqual(await followManagedWorktree(git, repository.path, mintSnapshotId(tender)), {
     kind: "retained", head: mintSnapshotId(start), reason: "operation-in-progress",
   });
@@ -1539,7 +1542,7 @@ test("terminal reconcile removes a delivered managed worktree reset to its seale
   assert.equal(repository.run(["cat-file", "-e", `${candidate}^{commit}`]), "");
 });
 
-test("terminal reconcile removes dirty deliver bytes over their sealed base HEAD", async () => {
+test("terminal reconcile removes dirty deliver bytes after following the sealed tender", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Test User"]);
   repository.run(["config", "user.email", "test@example.com"]);
@@ -1548,10 +1551,11 @@ test("terminal reconcile removes dirty deliver bytes over their sealed base HEAD
   await bound.keiyaku.reconcile();
   const path = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
   writeFileSync(join(path, "candidate.txt"), "dirty candidate\n");
-  const baseHead = repository.run(["-C", path, "rev-parse", "HEAD"]).trim();
-
   const delivered = await bound.keiyaku.deliver({ includeDirty: true });
-  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), baseHead);
+  const tender = (await bound.keiyaku.state()).delivery?.data.tenderSnapshot;
+  assert.notEqual(tender, undefined);
+  if (tender === undefined) return;
+  assert.equal(repository.run(["-C", path, "rev-parse", "HEAD"]).trim(), tender);
   assert.deepEqual(delivered.lags, []);
   const abandoned = await bound.keiyaku.abandon();
 

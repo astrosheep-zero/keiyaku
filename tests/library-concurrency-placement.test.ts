@@ -56,7 +56,10 @@ test("public amend returns the recovered journal head after unknown recovery", a
       KEIYAKU_CONTRACT_PATH: contractJournalPath(prior.id),
       KEIYAKU_EXTRA_ENTRY: encodeEntry(concurrent),
     },
-    () => contract.amend({ markdown: replacement }),
+    async (gitPath) => (await Keiyaku.of({
+      repo: await Repo.at({ path: repository.path, gitPath }),
+      id: contract.id,
+    })).amend({ markdown: replacement }),
   );
   assert.deepEqual(amended.facts.map((fact) => fact.kind), ["amend"]);
   const live = await contract.state();
@@ -97,7 +100,10 @@ test("a concurrent amend redecides and returns terms-moved without replaying old
       KEIYAKU_AMEND_RACE_REPO: repository.path,
       KEIYAKU_AMEND_RACE_MARKDOWN: B,
     },
-      () => contract.amend({ markdown: A }),
+      async (gitPath) => (await Keiyaku.of({
+        repo: await Repo.at({ path: repository.path, gitPath }),
+        id: contract.id,
+      })).amend({ markdown: A }),
     ),
     refused({ kind: "terms-moved", contractId: initial.id }),
   );
@@ -127,7 +133,10 @@ test("a hard publication failure is returned without replaying the operation", a
       'exec "$KEIYAKU_REAL_GIT" "$@"',
     ].join("\n"),
     { KEIYAKU_ATTEMPTS: attempts },
-      () => contract.amend({ markdown: "## Replace: Context\nNo coordinate moved.\n" }),
+      async (gitPath) => (await Keiyaku.of({
+        repo: await Repo.at({ path: repository.path, gitPath }),
+        id: contract.id,
+      })).amend({ markdown: "## Replace: Context\nNo coordinate moved.\n" }),
     ),
     (error: unknown) => {
       assert.ok(error instanceof KeiyakuRetry);
@@ -184,7 +193,10 @@ test("accepted head excludes an append made after admission", async () => {
       KEIYAKU_CONTRACT_PATH: contractJournalPath(prior.id),
       KEIYAKU_EXTRA_ENTRY: encodeEntry(concurrent),
     },
-    () => contract.amend({ markdown: replacement }),
+    async (gitPath) => (await Keiyaku.of({
+      repo: await Repo.at({ path: repository.path, gitPath }),
+      id: contract.id,
+    })).amend({ markdown: replacement }),
   );
   assert.deepEqual(amended.facts.map((fact) => fact.kind), ["amend"]);
   assert.equal((await contract.state()).currentArc?.data.title, "Concurrent");
@@ -257,7 +269,10 @@ test("delivery re-integrates its persisted tender when the target premise moves"
     KEIYAKU_CANDIDATE_PATH: resolve(worktree, "candidate.txt"),
     KEIYAKU_TARGET_HEAD: repository.run(["rev-parse", "HEAD"]).trim(),
     KEIYAKU_TARGET_RACED: raced,
-  }, () => result.keiyaku.deliver({ actor: "delivery-actor", message: "preserve this subject" }));
+  }, async (gitPath) => (await Keiyaku.of({
+    repo: await Repo.at({ path: repository.path, gitPath }),
+    id: result.keiyaku.id,
+  })).deliver({ actor: "delivery-actor", message: "preserve this subject" }));
 
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "reintegrated", "claimed"]);
   const reintegrated = delivered.facts.find((fact) => fact.kind === "reintegrated");
@@ -322,7 +337,10 @@ test("reintegrated delivery does not aggregate Verification from the superseded 
   ].join("\n"), {
     KEIYAKU_TARGET_HEAD: repository.run(["rev-parse", "HEAD"]).trim(),
     KEIYAKU_TARGET_RACED: raced,
-  }, () => result.keiyaku.deliver());
+  }, async (gitPath) => (await Keiyaku.of({
+    repo: await Repo.at({ path: repository.path, gitPath }),
+    id: result.keiyaku.id,
+  })).deliver());
 
   const reintegrated = delivered.facts.find((fact) => fact.kind === "reintegrated");
   assert.ok(reintegrated);
@@ -366,7 +384,10 @@ test("review re-integrates its accepted delivery when the target premise moves",
   ].join("\n");
   const reviewed = await withGitShim(shim, {
     KEIYAKU_PUBLICATION_FAILED: failed,
-  }, () => result.keiyaku.review({ verdict: "satisfied" }));
+  }, async (gitPath) => (await Keiyaku.of({
+    repo: await Repo.at({ path: repository.path, gitPath }),
+    id: result.keiyaku.id,
+  })).review({ verdict: "satisfied" }));
   assert.equal(reviewed.value.placement, undefined);
   assert.deepEqual(reviewed.facts.map((fact) => fact.kind), ["attestation", "reintegrated", "claimed"]);
   const reintegrated = reviewed.facts.find((fact) => fact.kind === "reintegrated");

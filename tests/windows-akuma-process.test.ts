@@ -214,7 +214,8 @@ test("handoff and retained paths preserve no-shell argv and log bytes", async ()
       log: retainedLog,
     });
     await waitForExit(owned.pid);
-    assert.equal(readFileSync(retainedLog, "utf8"), `${payload}\n${realpathSync(cwd)}\ncafé-✨`);
+    const childBytes = `${payload}\n${realpathSync(cwd)}\ncafé-✨`;
+    assert.equal(readFileSync(retainedLog, "utf8"), `${childBytes}[child exit 0]\n`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

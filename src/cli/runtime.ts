@@ -8,7 +8,7 @@ import { CliUsageError } from "./parse.js";
 import type { InvocationResult } from "./result.js";
 import type { Settings } from "../settings.js";
 
-function invocationStart(command: ParsedCommand): string | undefined {
+export function invocationStart(command: ParsedCommand): string | undefined {
   if (command.output === "json") return undefined;
   if (command.command === "bind") return "⧖ preparing keiyaku";
   if (command.command === "deliver") return "⧖ delivering";
@@ -32,15 +32,55 @@ async function writeTask(command: Extract<ParsedCommand, { command: "task" }>, r
   return taskExitCode(result);
 }
 
-async function writeAkuma(command: InvokedAkumaCommand | Extract<ParsedCommand, { command: "status" }>, result: AkumaInvocationResult): Promise<number> {
-  const { renderAkumaJson, akumaExitCode, akumaRawAnswer, renderAkumaText } = await import("./render/akuma.js");
-  const output = command.output === "json" ? renderAkumaJson(result) : renderAkumaText(command, result, {
+function displayContext() {
+  return {
     columns: process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : 80,
     color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
-  });
+  };
+}
+
+async function writeAkuma(
+  command: InvokedAkumaCommand | Extract<ParsedCommand, { command: "status" }>,
+  result: AkumaInvocationResult,
+): Promise<number> {
+  const { renderAkumaJson, akumaExitCode, akumaRawAnswer, renderAkumaText } = await import("./render/akuma.js");
+  const output = command.output === "json" ? renderAkumaJson(result) : renderAkumaText(command, result, displayContext());
   const raw = command.output === "text" && ((command.command === "history" && command.last) || akumaRawAnswer(result) !== undefined);
   process.stdout.write(raw ? output : `${output}\n`);
   return akumaExitCode(result);
+}
+
+function isAkumaOutput(
+  command: ParsedCommand,
+  result: unknown,
+): command is InvokedAkumaCommand | Extract<ParsedCommand, { command: "status" }> {
+  if (isParsedAkumaCommand(command)) return true;
+  return command.command === "status"
+    && typeof result === "object"
+    && result !== null
+    && "kind" in result
+    && result.kind === "akuma";
+}
+
+function invocationJson(result: InvocationResult): unknown {
+  switch (result.kind) {
+    case "guidance": return { contract: result.contract, guidance: result.guidance };
+    case "catalog": return result.catalog;
+    case "nuke": return result.result;
+    case "region": return result.region;
+    case "contract-history": return result.history;
+    case "status": return result.report;
+    default: return result;
+  }
+}
+
+async function invocationExitCode(result: InvocationResult): Promise<number> {
+  if (result.kind === "nuke") return (await import("./render/nuke.js")).nukeExitCode(result.result);
+  if (result.kind === "observation") {
+    const { worldObservationFailureText } = await import("./render/board.js");
+    return worldObservationFailureText(result) === undefined ? 0 : 1;
+  }
+  return result.kind === "refused" ? 1 : result.kind === "retry" ? 2 : 0;
 }
 
 async function writeResult(command: ParsedCommand, result: unknown): Promise<number> {
@@ -57,52 +97,13 @@ async function writeResult(command: ParsedCommand, result: unknown): Promise<num
     process.stdout.write(`${command.output === "json" ? JSON.stringify(settingsJsonValue(value)) : renderSettingsText(value)}\n`);
     return 0;
   }
-  if (typeof result === "object" && result !== null && "kind" in result && result.kind === "contract-history") {
-    const { renderText } = await import("./render/text.js");
-    const history = (result as Extract<InvocationResult, { kind: "contract-history" }>).history;
-    const output = command.output === "json" ? JSON.stringify(history) : renderText(result as InvocationResult);
-    process.stdout.write(`${output}\n`);
-    return 0;
-  }
-  const akumaResult = typeof result === "object" && result !== null && "kind" in result && result.kind === "akuma";
-  if (isParsedAkumaCommand(command)) return await writeAkuma(command, result as AkumaInvocationResult);
-  if (akumaResult && command.command === "status") return await writeAkuma(command, result as AkumaInvocationResult);
+  if (isAkumaOutput(command, result)) return await writeAkuma(command, result as AkumaInvocationResult);
   const contractResult = result as InvocationResult;
-  if (contractResult.kind === "guidance") {
-    if (command.output === "json") process.stdout.write(`${JSON.stringify({ contract: contractResult.contract, guidance: contractResult.guidance })}\n`);
-    else process.stdout.write(contractResult.guidance.endsWith("\n") ? contractResult.guidance : `${contractResult.guidance}\n`);
-    return 0;
-  }
-  if (contractResult.kind === "catalog") {
-    const { renderCatalogText } = await import("./render/catalog.js");
-    process.stdout.write(`${command.output === "json" ? JSON.stringify(contractResult.catalog) : renderCatalogText(contractResult.catalog)}\n`);
-    return 0;
-  }
-  if (contractResult.kind === "nuke") {
-    const { nukeExitCode } = await import("./render/nuke.js");
-    const { renderText } = await import("./render/text.js");
-    const output = command.output === "json" ? JSON.stringify(contractResult.result) : renderText(contractResult);
-    process.stdout.write(`${output}\n`);
-    return nukeExitCode(contractResult.result);
-  }
-  if (contractResult.kind === "region") {
-    const { renderText } = await import("./render/text.js");
-    process.stdout.write(`${command.output === "json" ? JSON.stringify(contractResult.region) : renderText(contractResult)}\n`);
-    return 0;
-  }
   const { renderText } = await import("./render/text.js");
-  const output = command.output === "json"
-    ? JSON.stringify(contractResult.kind === "status" ? contractResult.report : contractResult)
-    : renderText(contractResult, {
-      columns: process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : 80,
-      color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
-    });
-  process.stdout.write(`${output}\n`);
-  if (contractResult.kind === "observation") {
-    const { worldObservationFailureText } = await import("./render/board.js");
-    return worldObservationFailureText(contractResult) === undefined ? 0 : 1;
-  }
-  return contractResult.kind === "refused" ? 1 : contractResult.kind === "retry" ? 2 : 0;
+  const json = command.output === "json";
+  const body = json ? JSON.stringify(invocationJson(contractResult)) : renderText(contractResult, displayContext());
+  process.stdout.write(contractResult.kind === "guidance" && !json ? body : `${body}\n`);
+  return invocationExitCode(contractResult);
 }
 
 function writeWorldScopeRefusal(error: Readonly<{ refusal: { kind: string; world: string; ids: readonly string[] } }>, output: "text" | "json"): number {

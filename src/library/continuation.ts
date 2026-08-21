@@ -122,3 +122,17 @@ export async function continueDeliveredDependents<Value extends object>(input: R
     },
   };
 }
+
+export async function continueAcceptedCompletion<Value extends Readonly<{ completion?: unknown }>>(input: Readonly<{
+  scope: RepositoryScope;
+  channel: GitDecodeChannel;
+  contractId: ContractId;
+  accepted: AcceptedIntent<Value>;
+  deriveDocument: (state: ContractState) => DocumentDerivation;
+  resolveHereWorkspace?: HereWorkspaceResolver;
+  actor?: import("../core/facts/types.js").ActorId;
+  signal?: AbortSignal;
+}>): Promise<AcceptedIntent<Value & Readonly<{ continuation?: ContinuationReport }>>> {
+  if (input.accepted.value.completion === undefined) return input.accepted;
+  return await continueDeliveredDependents(input);
+}

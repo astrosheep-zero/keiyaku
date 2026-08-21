@@ -1,9 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
+import { worktreeGitDirectory } from "./repository.js";
 
 const WORKTREE_DIRECTORY = ["keiyaku", "wt"] as const;
 
@@ -24,6 +25,60 @@ export type WorkspaceTree = Readonly<{
 
 export function worktreePath(repository: GitRepository, place: string): string {
   return resolve(repository.commonDirectory, ...WORKTREE_DIRECTORY, place);
+}
+
+export type ManagedWorktreeFollow =
+  | Readonly<{ kind: "followed"; before: SnapshotId; after: SnapshotId }>
+  | Readonly<{ kind: "unchanged" }>
+  | Readonly<{
+      kind: "retained";
+      head: SnapshotId;
+      reason: "head-moved" | "head-attached" | "operation-in-progress" | "unsupported-parent-shape";
+    }>;
+
+async function workspaceRevision(repository: GitRepository, workspace: string, revision: string): Promise<SnapshotId | null> {
+  try {
+    const value = (await runGit(repository, ["-C", workspace, "rev-parse", "--verify", "--quiet", revision])).toString("utf8").trim();
+    return value.length === 0 ? null : mintSnapshotId(value);
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 1) return null;
+    throw error;
+  }
+}
+
+async function workspaceOperationState(repository: GitRepository, workspace: string, gitDirectory: string): Promise<Readonly<{ other: boolean; unmerged: boolean }>> {
+  const paths = ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD"];
+  const other = await Promise.all(paths.map(async (path) => {
+    try { await access(join(gitDirectory, path)); return true; } catch { return false; }
+  }));
+  const unmerged = (await runGit(repository, ["-C", workspace, "ls-files", "--unmerged", "-z"])).length > 0;
+  return { other: other.some(Boolean), unmerged };
+}
+
+/** Follow an accepted tender only through the native index-and-HEAD transition. */
+export async function followManagedWorktree(repository: GitRepository, workspace: string, tender: SnapshotId): Promise<ManagedWorktreeFollow> {
+  const head = await workspaceRevision(repository, workspace, "HEAD");
+  if (head === null) throw new Error("managed worktree HEAD is missing");
+  const attached = await runGit(repository, ["-C", workspace, "symbolic-ref", "--quiet", "HEAD"])
+    .then(() => true, (error: unknown) => {
+      if (error instanceof GitPlumbingError && error.status === 1) return false;
+      throw error;
+    });
+  if (attached) return { kind: "retained", head, reason: "head-attached" };
+  if (head === tender) return { kind: "unchanged" };
+  const parents = (await runGit(repository, ["show", "-s", "--format=%P", gitObjectId(tender)]))
+    .toString("utf8").trim().split(" ").filter((parent) => parent.length > 0).map((parent) => mintSnapshotId(parent));
+  if (parents.length > 0 && head !== parents[0]) return { kind: "retained", head, reason: "head-moved" };
+  if (parents.length !== 1 && parents.length !== 2) return { kind: "retained", head, reason: "unsupported-parent-shape" };
+  const gitDirectory = await worktreeGitDirectory(repository, workspace);
+  const mergeHead = await workspaceRevision(repository, workspace, "MERGE_HEAD");
+  const operation = await workspaceOperationState(repository, workspace, gitDirectory);
+  const admitted = parents.length === 1
+    ? mergeHead === null && !operation.other && !operation.unmerged
+    : mergeHead === parents[1] && !operation.other && !operation.unmerged;
+  if (!admitted) return { kind: "retained", head, reason: "operation-in-progress" };
+  await runGit(repository, ["-C", workspace, "reset", "--mixed", gitObjectId(tender)]);
+  return { kind: "followed", before: head, after: tender };
 }
 
 export async function withPrivateGitIndex<Value>(action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value | PromiseLike<Value>): Promise<Value> {

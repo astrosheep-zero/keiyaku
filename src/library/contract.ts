@@ -4,6 +4,7 @@ import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
 import {
   renderContractGuidance,
+  hereContractWorkspacePath,
   resolveHereContractWorkspace,
   type ContractFileEffect,
   type ContractFileLag,
@@ -19,19 +20,24 @@ import {
   optionalSignal,
   requireInput,
   requireMarkdown,
+  taskOption,
 } from "./input.js";
-import { observeRegion, type AmendRegionObservation, type RegionObservation, type RegionOverlap } from "./region.js";
+import {
+  observeChangedRegion,
+  observeRegion,
+  type AmendRegionObservation,
+  type RegionObservation,
+  type RegionOverlap,
+} from "./region.js";
 import { type Gate, type WorktreeHooks, worktreeHooksOption } from "./configuration.js";
 import {
-  type ActorId as FactActorId,
   contractId,
-  type ChangeId,
+  type ChangeId, type FactKind,
   type ContractId,
   type ContractState,
   type JournalEntry,
   type SnapshotId,
 } from "../core/facts/types.js";
-import { AuthorityCorruptionError } from "../core/facts/errors.js";
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 import {
   contractObservationOperation,
@@ -51,9 +57,8 @@ import type {
   ContractGateReport,
   ContractObservation,
   ContractPhase,
-  ContractRow,
+  ContractRow, AfterEndpointObservation, ContractAfterEdge, ContractDependent, ContractWorkspaceObservation,
 } from "../protocol/read/status.js";
-import type { AfterEndpointObservation, ContractAfterEdge, ContractDependent, ContractWorkspaceObservation } from "../protocol/read/status.js";
 import { abandonOperation } from "../protocol/abandon.js";
 import { amendOperation } from "../protocol/amend.js";
 import { arcOperation } from "../protocol/arc.js";
@@ -65,7 +70,6 @@ import {
 } from "../protocol/deliver.js";
 import type { ReconcileReport as ProtocolReconcileReport } from "../protocol/reconcile.js";
 import { reviewOperation, type ReviewValue } from "../protocol/review.js";
-import type { FactKind } from "../core/facts/types.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { mintSnapshotId } from "../git/identity.js";
 import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
@@ -77,7 +81,7 @@ import {
   releaseTaskHolderWithFence,
   taskHolderObservationSelection,
 } from "../settlement/holder.js";
-import { parseTaskId, type TaskId } from "../task/identity.js";
+import type { TaskId } from "../task/identity.js";
 import { Repo, reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
 import {
   injectedBodyRequests,
@@ -87,51 +91,57 @@ import {
 } from "../akuma/requests.js";
 import { auditContract, type AuditInput } from "./audit.js";
 import { Delivery, deliveryHandle, type DeliveryValue } from "./delivery.js";
-import { continueDeliveredDependents, type ContinuationReport } from "./continuation.js";
+import { continueAcceptedCompletion, type ContinuationReport } from "./continuation.js";
 import {
   completionInput,
   completeHolderMutation,
   completeMutation,
-  type AcceptedIntent,
   type MutationResult,
 } from "./mutation.js";
 import { completeReconcile } from "./reconcile.js";
 import { admitBindWithAppointment } from "./bind.js";
 import {
+  forwardedMutationFailure,
   KeiyakuRefused,
   KeiyakuRetry,
   requireAccepted,
   type KeiyakuRefusal,
   type KeiyakuRetryReason,
 } from "./refusal.js";
-export {
-  KeiyakuRefused,
-  type ContractAppointmentRefusal,
-} from "./refusal.js";
-export { KeiyakuRetry };
-export type { KeiyakuRefusal, KeiyakuRetryReason };
+export { KeiyakuRefused, type ContractAppointmentRefusal } from "./refusal.js";
+export { KeiyakuRetry, type KeiyakuRefusal, type KeiyakuRetryReason };
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "./configuration.js";
 export type { Gate, GatesFromInput, HookCommand, RequireBranchesToBeUpToDateFromInput, WorktreeHooks } from "./configuration.js";
 
 export type {
+  AuditInput,
   AuditReport,
-  DeliveryPreparationRefusal,
   ChangeId,
-  ContractId,
-  ContractState,
+  ContinuationReport,
   ContractBoard,
   ContractDisposition,
   ContractGateCurrent,
   ContractGateReport,
+  ContractAfterEdge,
+  ContractId,
+  ContractDependent,
   ContractObservation,
   ContractPhase,
   ContractRow,
+  ContractState,
+  ContractWorkspaceObservation,
+  DeliveryPreparationRefusal,
   FactKind,
+  IntegrationConflictMaterialized,
+  MutationResult,
+  PlacementStop,
+  RegionOverlap,
   SnapshotId,
+  TaskId,
+  VerificationReuse,
+  VerificationStop,
 };
-export type { AfterEndpointObservation, ContractAfterEdge, ContractDependent, ContractWorkspaceObservation };
-export type { TaskId };
-export type { RegionOverlap };
+export type { AfterEndpointObservation };
 
 export type Fact = JournalEntry;
 export type ContractHistoryEvent =
@@ -145,12 +155,9 @@ export type ContractHistory = Readonly<{
 export type ActorId = string;
 export type AttestationVerdict = "satisfied" | "unsatisfied";
 export type Review = ReviewValue & Readonly<{ continuation?: ContinuationReport }>;
-export type { PlacementStop, VerificationReuse, VerificationStop, IntegrationConflictMaterialized };
-export type { ContinuationReport };
 
 export type TopologyEffect = ProtocolReconcileReport["effects"][number] | ContractFileEffect;
 export type Lag = ProtocolReconcileReport["lag"][number] | ContractFileLag;
-export type { MutationResult };
 export { Delivery };
 
 export type BindResult = Readonly<Omit<MutationResult<Keiyaku>, "value"> & { keiyaku: Keiyaku } & RegionObservation>;
@@ -162,34 +169,28 @@ export type ReconcileReport = Readonly<{
 }>;
 export type { SettlementAction, SettlementLag, SettlementReport } from "../settlement/settle.js";
 
-export type BindInput = Readonly<{
+type ActorOptions = Readonly<{ actor?: ActorId; hooks?: WorktreeHooks }>;
+
+export type BindInput = ActorOptions & Readonly<{
   repo: Repo;
   markdown: string;
   task?: TaskId;
   target?: string;
   workspace?: "worktree" | "here";
-  actor?: ActorId;
   after?: readonly ContractId[];
   gates?: readonly Gate[];
-  hooks?: WorktreeHooks;
 }>;
 
-export type AmendInput = Readonly<{
+export type AmendInput = ActorOptions & Readonly<{
   markdown?: string;
-  actor?: ActorId;
   after?: readonly ContractId[];
   gates?: readonly Gate[];
-  hooks?: WorktreeHooks;
 }>;
 
-export type ArcInput = Readonly<{
+export type ArcInput = ActorOptions & Readonly<{
   markdown: string;
-  actor?: ActorId;
-  hooks?: WorktreeHooks;
 }>;
 
-type HookOptions = Readonly<{ hooks?: WorktreeHooks }>;
-type ActorOptions = Readonly<{ actor?: ActorId }> & HookOptions;
 export type ContractListInput = Readonly<{ repo: Repo }>;
 export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type KeiyakuOfInput = Readonly<{ repo: Repo; id: ContractId }>;
@@ -213,80 +214,45 @@ type ReviewExecutionInput = Readonly<{
   verdict: AttestationVerdict; summary?: string; hooks: WorktreeHooks;
 }>;
 
-type ForwardedDeliveryReceipt =
-  | Readonly<{ kind: "accepted"; result: MutationResult<DeliveryValue> }>
-  | Readonly<{ kind: "refused"; refusal: KeiyakuRefusal }>
-  | Readonly<{ kind: "retry"; reason: KeiyakuRetryReason }>
-  | IntegrationConflictMaterialized;
-type ForwardedReviewReceipt =
-  | Readonly<{ kind: "accepted"; result: MutationResult<Review> }>
+type ForwardedMutationReceipt<Value> =
+  | Readonly<{ kind: "accepted"; result: MutationResult<Value> }>
   | Readonly<{ kind: "refused"; refusal: KeiyakuRefusal }>
   | Readonly<{ kind: "retry"; reason: KeiyakuRetryReason }>;
-export type { AuditInput };
-
-function taskOption(value: unknown): TaskId | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string") throw new TypeError("task must be a TaskId");
-  try {
-    parseTaskId(value);
-  } catch (error) {
-    throw new TypeError(error instanceof Error ? error.message : "task must be a TaskId");
-  }
-  return value as TaskId;
-}
-
-async function resolveHereWorkspace(scope: RepositoryScope, id: ContractId): Promise<string | undefined> {
-  const appointment = await resolveHereContractWorkspace(scope, id);
-  if (appointment.kind === "failed") {
-    if (appointment.cause === "duplicate") throw new AuthorityCorruptionError(appointment.diagnostic);
-    throw new Error(appointment.diagnostic);
-  }
-  return appointment.kind === "appointed" ? appointment.path : undefined;
-}
+type ForwardedDeliveryReceipt = ForwardedMutationReceipt<DeliveryValue> | IntegrationConflictMaterialized;
+type ForwardedReviewReceipt = ForwardedMutationReceipt<Review>;
 
 function derivedDocument(state: ContractState) {
   return documentDerivation(decodeContractDocument(state.terms.document.bytes), state.terms.gates, state.id);
 }
 
-async function continueAfterCompletion<Value extends Readonly<{ completion?: unknown }>>(input: Readonly<{
-  scope: RepositoryScope;
-  channel: GitDecodeChannel;
-  contractId: ContractId;
-  accepted: AcceptedIntent<Value>;
-  actor?: FactActorId;
-  signal?: AbortSignal;
-}>): Promise<AcceptedIntent<Value & Readonly<{ continuation?: ContinuationReport }>>> {
-  if (input.accepted.value.completion === undefined) return input.accepted;
-  return await continueDeliveredDependents({
-    ...input,
+function operationContext(scope: RepositoryScope, channel: GitDecodeChannel, contractId: ContractId) {
+  return {
+    scope,
+    channel,
+    contractId,
     deriveDocument: derivedDocument,
-    resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
-  });
+    resolveHereWorkspace: async (id: ContractId) => await hereContractWorkspacePath(scope, id),
+  };
 }
 
 async function executeLocalDelivery(
   input: DeliveryExecutionInput,
 ): Promise<MutationResult<DeliveryValue> | IntegrationConflictMaterialized> {
   return withGitDecodeChannel(input.scope, async (channel) => {
+    const operation = operationContext(input.scope, channel, input.contractId);
     const outcome = await deliverOperation({
-      scope: input.scope,
-      channel,
-      contractId: input.contractId,
-      deriveDocument: derivedDocument,
+      ...operation,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       ...(input.message === undefined ? {} : { message: input.message }),
       requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
       includeDirty: input.includeDirty,
       materializeConflict: input.materializeConflict,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
-      resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
     });
     if (outcome.kind === "integration-conflict-materialized") return outcome;
     const accepted = requireAccepted(outcome);
-    const continued = await continueAfterCompletion({
-      scope: input.scope,
-      channel,
-      contractId: input.contractId,
+    const continued = await continueAcceptedCompletion({
+      ...operation,
       accepted,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -300,20 +266,15 @@ async function executeLocalDelivery(
 
 async function executeLocalReview(input: ReviewExecutionInput): Promise<MutationResult<Review>> {
   return withGitDecodeChannel(input.scope, async (channel) => {
+    const operation = operationContext(input.scope, channel, input.contractId);
     const accepted = requireAccepted(await reviewOperation({
-      scope: input.scope,
-      channel,
-      contractId: input.contractId,
-      deriveDocument: derivedDocument,
+      ...operation,
       verdict: input.verdict,
       ...(input.summary === undefined ? {} : { summary: input.summary }),
       ...(input.actor === undefined ? {} : { actor: input.actor }),
-      resolveHereWorkspace: async (id) => await resolveHereWorkspace(input.scope, id),
     }));
-    const continued = await continueAfterCompletion({
-      scope: input.scope,
-      channel,
-      contractId: input.contractId,
+    const continued = await continueAcceptedCompletion({
+      ...operation,
       accepted,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
@@ -333,18 +294,14 @@ function forwardedReceipt<Receipt>(outcome: UpstreamRequestOutcome, action: stri
   return outcome.result as Receipt;
 }
 
-function requireForwardedDelivery(
-  receipt: ForwardedDeliveryReceipt,
-): MutationResult<DeliveryValue> | IntegrationConflictMaterialized {
+function requireForwarded(receipt: ForwardedDeliveryReceipt): MutationResult<DeliveryValue> | IntegrationConflictMaterialized;
+function requireForwarded(receipt: ForwardedReviewReceipt): MutationResult<Review>;
+function requireForwarded(
+  receipt: ForwardedDeliveryReceipt | ForwardedReviewReceipt,
+): MutationResult<DeliveryValue> | MutationResult<Review> | IntegrationConflictMaterialized {
   if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
   if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
   return receipt.kind === "accepted" ? receipt.result : receipt;
-}
-
-function requireForwardedReview(receipt: ForwardedReviewReceipt): MutationResult<Review> {
-  if (receipt.kind === "refused") throw new KeiyakuRefused(receipt.refusal);
-  if (receipt.kind === "retry") throw new KeiyakuRetry(receipt.reason);
-  return receipt.result;
 }
 
 export async function executeForwardedDeliver(input: Readonly<{
@@ -372,19 +329,13 @@ export async function executeForwardedDeliver(input: Readonly<{
     if (delivery === undefined) throw new Error("accepted delivery is missing its journal fact");
     return { result: { kind: "accepted", result }, deliveryFactId: delivery.entry };
   } catch (error) {
-    if (error instanceof KeiyakuRefused) return { result: { kind: "refused", refusal: error.refusal } };
-    if (error instanceof KeiyakuRetry) return { result: { kind: "retry", reason: error.reason } };
-    throw error;
+    return forwardedMutationFailure(error);
   }
 }
 
 export async function executeForwardedReview(input: Readonly<{
-  repo: Repo;
-  contractId: string;
-  requester: string;
-  verdict: AttestationVerdict;
-  summary?: string;
-  hooks: WorktreeHooks;
+  repo: Repo; contractId: string; requester: string; verdict: AttestationVerdict;
+  summary?: string; hooks: WorktreeHooks;
 }>): Promise<Readonly<{ result: ForwardedReviewReceipt; reviewFactId?: string }>> {
   const id = contractId(input.contractId);
   const actor = actorOption(input.requester).actor;
@@ -405,9 +356,7 @@ export async function executeForwardedReview(input: Readonly<{
     if (review === undefined) throw new Error("accepted review is missing its journal fact");
     return { result: { kind: "accepted", result }, reviewFactId: review.entry };
   } catch (error) {
-    if (error instanceof KeiyakuRefused) return { result: { kind: "refused", refusal: error.refusal } };
-    if (error instanceof KeiyakuRetry) return { result: { kind: "retry", reason: error.reason } };
-    throw error;
+    return forwardedMutationFailure(error);
   }
 }
 
@@ -540,12 +489,12 @@ export class KeiyakuHandle {
         ),
       };
     });
-    const regionObservation = amendment.changedSections?.has("region")
-      ? await withGitDecodeChannel(
-        this.scope,
-        async (channel) => await observeRegion(this.scope, channel, this.id, amendment.document.region),
-      )
-      : {};
+    const regionObservation = await observeChangedRegion(
+      this.scope,
+      this.id,
+      amendment.changedSections,
+      amendment.document.region,
+    );
     return {
       ...amendment.completed,
       documentDiff: amendment.documentDiff,
@@ -577,7 +526,7 @@ export class KeiyakuHandle {
         ...(signal === undefined ? {} : { signal }),
         hooks,
       })
-      : requireForwardedDelivery(forwardedReceipt<ForwardedDeliveryReceipt>(await requestBodyDeliver({
+      : requireForwarded(forwardedReceipt<ForwardedDeliveryReceipt>(await requestBodyDeliver({
           directory: requests,
           repoRoot: this.scope.primaryWorktree,
           contractId: this.id,
@@ -600,7 +549,7 @@ export class KeiyakuHandle {
     const actor = actorOption(values.actor);
     const requests = injectedBodyRequests();
     if (requests !== null) {
-      return requireForwardedReview(forwardedReceipt<ForwardedReviewReceipt>(await requestBodyReview({
+      return requireForwarded(forwardedReceipt<ForwardedReviewReceipt>(await requestBodyReview({
         directory: requests,
         repoRoot: this.scope.primaryWorktree,
         contractId: this.id,

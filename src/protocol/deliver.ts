@@ -154,6 +154,52 @@ export async function prepareDelivery(
   };
 }
 
+async function assembleDeliveryPreparation(
+  input: DeliverOperationInput,
+  state: ContractState,
+  derivation: DocumentDerivation,
+): Promise<Readonly<{
+  preparation: Exclude<DeliverInput<DeliveryFailure>["preparation"], { kind: "unavailable" }>;
+  workspacePath?: string;
+}>> {
+  if (derivation.verification.kind === "refused") {
+    return {
+      preparation: { kind: "refused", document: derivation.document, refusal: derivation.verification.refusal },
+    };
+  }
+  const workspacePath = state.terminal === null && state.coordinates.workspace === "here"
+    ? await input.resolveHereWorkspace?.(state.id)
+    : undefined;
+  const materialization = input.materializeConflict === true && state.terminal === null
+    ? await materializationMergeStateRefusal(input)
+    : undefined;
+  const prepared = materialization === undefined
+    ? await prepareDelivery(input.scope, {
+      contractId: state.id,
+      coordinates: state.coordinates,
+      ...(workspacePath === undefined ? {} : { workspacePath }),
+    }, {
+      title: derivation.title,
+      document: derivation.bytes,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+      ...(input.message === undefined ? {} : { message: input.message }),
+      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+      includeDirty: input.includeDirty,
+    })
+    : { kind: "refused" as const, refusal: materialization };
+  return {
+    preparation: prepared.kind === "refused"
+      ? { kind: "refused", document: derivation.document, refusal: prepared.refusal }
+      : {
+        kind: "prepared",
+        document: derivation.document,
+        data: prepared.data,
+        ...(workspacePath === undefined ? {} : { workspacePath }),
+      },
+    ...(workspacePath === undefined ? {} : { workspacePath }),
+  };
+}
+
 async function deliverAttempt(
   input: DeliverOperationInput,
   attempt: AttemptContext,
@@ -161,42 +207,11 @@ async function deliverAttempt(
   const decisionObservation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(decisionObservation.decision, input.contractId);
   const derivation = state === null ? undefined : input.deriveDocument(state);
-  let preparation: DeliverInput<DeliveryFailure>["preparation"];
-  let workspacePath: string | undefined;
-  if (state === null || derivation === undefined) {
-    preparation = { kind: "unavailable" };
-  } else if (derivation.verification.kind === "refused") {
-    preparation = { kind: "refused", document: derivation.document, refusal: derivation.verification.refusal };
-  } else {
-    workspacePath = state.terminal === null && state.coordinates.workspace === "here"
-      ? await input.resolveHereWorkspace?.(state.id)
-      : undefined;
-    const materialization = input.materializeConflict === true && state.terminal === null
-      ? await materializationMergeStateRefusal(input)
-      : undefined;
-    const prepared = materialization === undefined
-      ? await prepareDelivery(input.scope, {
-        contractId: state.id,
-        coordinates: state.coordinates,
-        ...(workspacePath === undefined ? {} : { workspacePath }),
-      }, {
-        title: derivation.title,
-        document: derivation.bytes,
-        ...(input.actor === undefined ? {} : { actor: input.actor }),
-        ...(input.message === undefined ? {} : { message: input.message }),
-        requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-        includeDirty: input.includeDirty,
-      })
-      : { kind: "refused" as const, refusal: materialization };
-    preparation = prepared.kind === "refused"
-      ? { kind: "refused", document: derivation.document, refusal: prepared.refusal }
-      : {
-        kind: "prepared",
-        document: derivation.document,
-        data: prepared.data,
-        ...(workspacePath === undefined ? {} : { workspacePath }),
-      };
-  }
+  const assembled = state === null || derivation === undefined
+    ? undefined
+    : await assembleDeliveryPreparation(input, state, derivation);
+  const preparation = assembled?.preparation ?? { kind: "unavailable" };
+  const workspacePath = assembled?.workspacePath;
   const decision = decideDeliver({
     input: {
       contractId: input.contractId,
@@ -217,18 +232,16 @@ async function deliverAttempt(
     offer: decision.offer,
     primaryContract: input.contractId,
   });
-  if (admission.kind === "accepted") {
-    if (derivation === undefined) throw new Error("accepted delivery is missing its document derivation");
-    return {
-      ...admission,
-      value: {
-        delivery: preparation.data,
-        derivation,
-        ...(workspacePath === undefined ? {} : { workspacePath }),
-      },
-    };
-  }
-  return admission;
+  if (admission.kind !== "accepted") return admission;
+  if (derivation === undefined) throw new Error("accepted delivery is missing its document derivation");
+  return {
+    ...admission,
+    value: {
+      delivery: preparation.data,
+      derivation,
+      ...(workspacePath === undefined ? {} : { workspacePath }),
+    },
+  };
 }
 
 async function completeDelivery(

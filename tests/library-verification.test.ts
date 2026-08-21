@@ -313,7 +313,10 @@ test("public deliver preserves admission when Verification cleanup leaks a workt
       "exec \"$KEIYAKU_REAL_GIT\" \"$@\"",
     ].join("\n"),
     {},
-    () => contract.deliver(),
+    async (gitPath) => (await Keiyaku.of({
+      repo: await Repo.at({ path: repository.path, gitPath }),
+      id: contract.id,
+    })).deliver(),
   );
   assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
   assert.equal(delivered.value.leak?.path.startsWith("/"), true);

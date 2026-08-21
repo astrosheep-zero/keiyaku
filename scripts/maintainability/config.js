@@ -4,8 +4,8 @@ export const MARKDOWN_CHARACTERS = Object.freeze({ warning: 20_000, error: 30_00
 export const FILE_LINE_EXEMPTIONS = Object.freeze([
   {
     file: "scripts/architecture/policy.ts",
-    reason: "The centralized declarative architecture map must remain one policy authority.",
-    maxEffectiveLines: 1500,
+    reason: "The centralized declarative architecture map remains one policy authority; line compression had made active declarations unreadable.",
+    maxEffectiveLines: 1600,
   },
   {
     file: "scripts/architecture/engine.ts",

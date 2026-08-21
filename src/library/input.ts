@@ -9,6 +9,7 @@ import {
   type ContractTerms,
   type Gate,
 } from "../core/facts/types.js";
+import { parseTaskId, type TaskId } from "../task/identity.js";
 import type { DocumentDerivation } from "../protocol/operations.js";
 import { prepareVerificationDeclaration } from "../verification/declaration.js";
 
@@ -32,6 +33,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function requireInput(value: unknown, label: string): Record<string, unknown> {
   if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
   return value;
+}
+
+export function taskOption(value: unknown): TaskId | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new TypeError("task must be a TaskId");
+  try {
+    parseTaskId(value);
+  } catch (error) {
+    throw new TypeError(error instanceof Error ? error.message : "task must be a TaskId");
+  }
+  return value as TaskId;
 }
 
 export function optionalNonblank(value: unknown, label: string): string | undefined {

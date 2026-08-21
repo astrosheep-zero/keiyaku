@@ -19,6 +19,7 @@ import {
   placeRegisterPath,
   type PlaceRegister,
 } from "./workspace-place.js";
+import { AuthorityCorruptionError } from "./core/facts/errors.js";
 
 const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
 const APPOINTMENT_DESCRIPTION = "This is a read-only projection. Do not edit manually.";
@@ -157,6 +158,18 @@ export async function resolveHereContractWorkspace(
     return { kind: "failed", diagnostic: conflictDiagnostic(appointment.paths), cause: "duplicate" };
   }
   return appointment;
+}
+
+export async function hereContractWorkspacePath(
+  repository: GitRepository,
+  contract: ContractId,
+): Promise<string | undefined> {
+  const appointment = await resolveHereContractWorkspace(repository, contract);
+  if (appointment.kind === "failed") {
+    if (appointment.cause === "duplicate") throw new AuthorityCorruptionError(appointment.diagnostic);
+    throw new Error(appointment.diagnostic);
+  }
+  return appointment.kind === "appointed" ? appointment.path : undefined;
 }
 
 export type ContractReservation =

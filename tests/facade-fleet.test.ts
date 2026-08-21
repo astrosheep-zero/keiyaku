@@ -319,6 +319,8 @@ test("facade ls reads exactly one selected identity directory", async () => {
       state: "open",
       priority: 2,
       disposition: "ready",
+      updatedAt: task.value.updatedAt,
+      bodyPresent: false,
     }]);
     assert.deepEqual(await Keiyaku.ls({ query: { kind: "archetypes" }, home }), {
       kind: "archetypes",

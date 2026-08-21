@@ -220,12 +220,13 @@ test("resolved merge delivery requires dirty authority and preserves native pare
     () => bound.keiyaku.deliver(),
     (error: unknown) => error instanceof KeiyakuRefused && error.refusal.kind === "dirty-workspace",
   );
+  const workspaceHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
   const delivered = await bound.keiyaku.deliver({ includeDirty: true });
   assert.equal("facts" in delivered, true);
   if (!("facts" in delivered)) return;
   assert.deepEqual(
     repository.run(["show", "-s", "--format=%P", delivered.value.tenderSnapshot]).trim().split(" "),
-    [repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim(), targetHead],
+    [workspaceHead, targetHead],
   );
 });
 
