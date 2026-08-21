@@ -66,9 +66,7 @@ product owners create neither Git readers nor cross-call caches.
 
 Git mints `ContractCoordinates.start` at bind. With a target it is the
 resolved target head; without a target it is the caller worktree's current
-`HEAD`. It is the initial managed-worktree commit and the original comparison
-point for a `here` workspace. A targeted here contract is legal only while
-the caller's symbolic `HEAD` is that target.
+`HEAD`. It is the initial managed-worktree commit.
 
 Fork bind copies the source `coordinates.start` exactly after confirming its
 immutable commit remains observable. An omitted target copies the source target;
@@ -84,12 +82,6 @@ updates a ref. An OID movement, identity collision, or Git CAS retry therefore
 discards the attempt and re-observes coordinates; a fresh read alone is not the
 currentness judge.
 
-The symbolic branch and attachedness read for targeted `here` eligibility are
-not Contract facts. They can refuse that decision observation, but admission
-does not assert or persist them. Moving to another branch at the same OID
-between observation and admission is therefore legal and invisible; Git must
-not change the caller's checkout to restore the earlier observation.
-
 An explicit target must exist at bind observation. Absence is returned to
 the library as `target-missing` before any journal or ref publication. Git
 never creates the target branch and never substitutes another ref or the
@@ -98,12 +90,8 @@ caller's current `HEAD` for it.
 A target is an optional Git ref because a claimed placement may move it.
 `workspace: "worktree"` gives Git ownership of one deterministic delivery ref
 and linked worktree; its branch remains independent from the target.
-`workspace: "here"` uses the pinned caller worktree in place and never takes
-ownership of that worktree or its branch. Here is a commit-in-place capability,
-not a foreign-target delivery mode: bind refuses a targeted here workspace
-whose symbolic `HEAD` differs from that target or is detached. Delivery refuses
-before tender when the workspace no longer names its recorded target. A
-targetless here contract remains legal.
+Managed Contracts use only the appointed delivery worktree; caller-local
+workspaces are not Contract coordinates.
 
 The Git ref, managed delivery namespace, and candidate-pin namespace have
 this one Git owner. The library boundary rejects a target that names any
@@ -134,14 +122,13 @@ present may report `unchanged` and still prove absence. An ordinary
 unappointed terminal is not a missing-Place failure: appointment absence
 is the proof that physical cleanup already completed.
 
-Git owns workspace cleanliness and target lag at the appointed path, or at
-the pinned caller worktree for `here`, counting workspace `HEAD` against
-the same-epoch frozen `targetObservation.head` and never a live target ref.
+Git owns workspace cleanliness and target lag at the appointed path, counting
+workspace `HEAD` against the same-epoch frozen `targetObservation.head` and
+never a live target ref.
 A named target with a missing frozen head is unknown. Clean means empty
 staged, unstaged, untracked, and submodule sets; otherwise dirty;
 unavailable when unobservable. An unappointed managed Contract has no
-worktree to probe. Here never fabricates a managed path. These facts are
-not persisted.
+worktree to probe. These facts are not persisted.
 
 ## Tender, Integration, And Diff Ownership
 
@@ -164,8 +151,8 @@ predecessor, the tender is also the integration snapshot, and there is no target
 ref operation.
 
 It returns mechanical data or failure to the one lifecycle decision;
-it is not a lifecycle judge. The tender is the selected managed or here
-workspace content. Dirty content refuses delivery and Verification unless
+it is not a lifecycle judge. The tender is the selected managed-worktree
+content. Dirty content refuses delivery and Verification unless
 `includeDirty` is true. Review needs no such authorization and discloses the
 ordinary dirty paths and totals it observed. Dirty submodule internals always
 refuse because the superproject tree cannot seal them.
@@ -286,15 +273,6 @@ only predecessor-to-candidate writes, never follows symlinks or enumerates
 unrelated siblings, and lets Git judge whether a displaced scope contains
 ignored untracked bytes. Any such byte refuses as `untracked`; observation
 failure is nonpublishing `target-placement-failed`.
-
-When a targeted here workspace is itself the target checkout, placement
-follows Git commit semantics. Its captured dirty bytes are the verified
-candidate, so merge preconditions do not apply. After publication Git sets
-that checkout's index to the candidate tree and does not write its worktree.
-Captured staged, unstaged, and untracked bytes therefore become the clean
-candidate. Bytes edited after capture remain ordinary unstaged changes.
-Staging intent created after capture may be reclassified as unstaged, but its
-worktree bytes are never discarded.
 
 The target fence has no post-admission marker or ancestor search. Recovery is
 allowed only while the target names the claimed candidate. Candidate index and

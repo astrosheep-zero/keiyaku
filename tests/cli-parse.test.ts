@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
+import { decodeJournal } from "../src/core/facts/codec.js";
+import { contractId, documentKey, entryUlid, snapshotId } from "../src/core/facts/types.js";
 import { CliUsageError, parseArgv, renderContractHelp, renderRootHelp } from "../src/cli/parse.js";
 
 test("bind mints its contract identity and keeps JSON output separate from input", () => {
@@ -36,16 +39,24 @@ test("nuke admits only a literal WorldRoot confirmation", () => {
   assert.match(renderContractHelp("nuke"), /Remove Keiyaku-owned data/u);
 });
 
-test("bind accepts boolean --here and preserves -C outside the contract command", () => {
-  const parsed = parseArgv(["-C", "/repo/caller", "bind", "--here", "-"]);
-  assert.deepEqual(parsed, {
-    cwd: "/repo/caller",
-    command: {
-      command: "bind",
-      workspace: "here",
-      output: "text",
+test("persisted removed workspace bytes are authority corruption", () => {
+  const bind = {
+    v: 1,
+    kind: "bind",
+    contract: contractId("kei/corrupt-workspace"),
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+    at: "2026-08-06T00:00:00Z",
+    data: {
+      coordinates: { start: snapshotId("snapshot-initial"), workspace: "here" },
+      terms: {
+        document: { bytes: "# Corrupt\n", key: documentKey("document-corrupt") },
+        segments: [],
+        gates: [],
+        after: [],
+      },
     },
-  });
+  };
+  assert.throws(() => decodeJournal(`${JSON.stringify(bind)}\n`), AuthorityCorruptionError);
 });
 
 test("global coordinates are independent of command position", () => {
@@ -86,7 +97,7 @@ test("bind accepts one Task association at the Contract boundary", () => {
 
 test("unknown command syntax is refused with the exact command usage", () => {
   assert.throws(
-    () => parseArgv(["bind", "--workspace", "here", "-"]),
+    () => parseArgv(["bind", "--workspace-mode", "-"]),
     (error: unknown) => error instanceof CliUsageError
       && error.message.includes("usage: keiyaku bind [--task <task/...>] [--target <ref>]"),
   );

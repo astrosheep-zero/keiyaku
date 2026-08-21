@@ -81,7 +81,8 @@ test("unchanged deliver reuses unsatisfied pre-delivery audit Verification", asy
 test("audit showDiff belongs to this attempt and dirty failure is blocked evidence", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository, "exit 0");
-  writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contract.id);
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
 
   const blocked = await contract.audit();
   assert.deepEqual(blocked.facts, []);
@@ -190,7 +191,6 @@ test("operational target observation failure is target.failed", async () => {
   const repository = repositoryWithMain();
   const git = await repositoryAt(repository.path);
   const predecessor = repository.run(["rev-parse", "HEAD"]).trim();
-  const candidate = predecessor;
   const answer = await withGitShim(
     [
       'if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then',
@@ -202,10 +202,9 @@ test("operational target observation failure is target.failed", async () => {
     {},
     async (gitPath) => adjudicateAuditTarget({ ...git, gitPath }, {
       contractId: "kei/target-observation",
-      coordinates: { workspace: "here", target: "refs/heads/main" },
+      coordinates: { workspace: "worktree", target: "refs/heads/main" },
       predecessor,
-      candidate,
-      hereWorkspacePath: repository.path,
+      candidate: predecessor,
     }),
   );
   assert.equal(answer.kind, "failed");
@@ -222,7 +221,7 @@ test("moved target wins over placeability", async () => {
       'git update-ref refs/heads/main "$NEW"',
       "exit 0",
     ].join("\n")),
-    workspace: "here",
+    workspace: "worktree",
     target: "refs/heads/main",
     gates: ["verified"],
   });
@@ -248,7 +247,7 @@ test("stopped Verification forces target not-observed", async () => {
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document("kill -TERM $$"),
-    workspace: "here",
+    workspace: "worktree",
     target: "refs/heads/main",
     gates: ["verified"],
   });
@@ -302,7 +301,7 @@ test("audit keeps its leading observation when the delivery candidate is unavail
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: document("exit 0"),
-    workspace: "here",
+    workspace: "worktree",
     gates: ["reviewed"],
   });
   commitCandidate(repository);

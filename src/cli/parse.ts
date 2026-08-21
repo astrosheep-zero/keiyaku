@@ -291,7 +291,6 @@ function parseBind(parts: ParsedParts): ParsedBind {
       command: "bind",
       forkOf,
       ...(target === undefined ? {} : { target }),
-      ...(parts.flags.here === true ? { workspace: "here" as const } : {}),
       ...(parts.actor === undefined ? {} : { actor: parts.actor }),
       output: parts.output,
     };
@@ -306,7 +305,6 @@ function parseBind(parts: ParsedParts): ParsedBind {
     command: "bind",
     ...(task === undefined ? {} : { task }),
     ...(target === undefined ? {} : { target }),
-    ...(parts.flags.here === true ? { workspace: "here" as const } : {}),
     ...(parts.flags.after === undefined ? {} : { after }),
     ...(gates === undefined ? {} : { gates }),
     ...(parts.actor === undefined ? {} : { actor: parts.actor }),

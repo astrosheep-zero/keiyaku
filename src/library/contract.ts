@@ -4,8 +4,6 @@ import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
 import {
   renderContractGuidance,
-  hereContractWorkspacePath,
-  resolveHereContractWorkspace,
   type ContractFileEffect,
   type ContractFileLag,
 } from "../contract-worktree.js";
@@ -105,7 +103,7 @@ import {
   type KeiyakuRefusal,
   type KeiyakuRetryReason,
 } from "./refusal.js";
-export { KeiyakuRefused, type ContractAppointmentRefusal } from "./refusal.js";
+export { KeiyakuRefused } from "./refusal.js";
 export { KeiyakuRetry, type KeiyakuRefusal, type KeiyakuRetryReason };
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "./configuration.js";
 export type {
@@ -177,7 +175,7 @@ export type MarkdownBindInput = Readonly<{
   markdown: string;
   task?: TaskId;
   target?: string;
-  workspace?: "worktree" | "here";
+  workspace?: "worktree";
   actor?: ActorId;
   after?: readonly ContractId[];
   gates?: readonly Gate[];
@@ -187,7 +185,7 @@ export type ForkBindInput = Readonly<{
   repo: Repo;
   forkOf: ContractId;
   target?: string;
-  workspace?: "worktree" | "here";
+  workspace?: "worktree";
   actor?: ActorId;
   hooks?: WorktreeHooks;
 }>;
@@ -258,7 +256,6 @@ function operationContext(scope: RepositoryScope, channel: GitDecodeChannel, con
     channel,
     contractId,
     deriveDocument: derivedDocument,
-    resolveHereWorkspace: async (id: ContractId) => await hereContractWorkspacePath(scope, id),
   };
 }
 
@@ -727,11 +724,7 @@ export async function listKeiyaku(input: ContractListInput): Promise<ContractBoa
     if (key !== "repo") throw new TypeError(`Keiyaku.list input has unknown field: ${key}`);
   const scope = scopeForRepo(values.repo);
   return withGitDecodeChannel(scope, (channel) =>
-    contractsOperation({
-      scope,
-      channel,
-      hereWorkspace: async (id) => await resolveHereContractWorkspace(scope, id),
-    }),
+    contractsOperation({ scope, channel }),
   );
 }
 
@@ -748,12 +741,7 @@ export async function observeKeiyaku(input: ContractObservationInput): Promise<C
     throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
   }
   return withGitDecodeChannel(scope, (channel) =>
-    contractObservationOperation({
-      scope,
-      channel,
-      contractId: id,
-      hereWorkspace: async (contract) => await resolveHereContractWorkspace(scope, contract),
-    }),
+    contractObservationOperation({ scope, channel, contractId: id }),
   );
 }
 
@@ -772,7 +760,7 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
     try { sourceId = contractId(forkOf); } catch (error) { throw new TypeError(error instanceof Error ? error.message : "forkOf must be a ContractId"); }
     const sourceScope = scopeForRepo(values.repo);
     const sourceWorkspace = values.workspace === undefined ? "worktree" : values.workspace;
-    if (sourceWorkspace !== "worktree" && sourceWorkspace !== "here") throw new TypeError("workspace must be worktree or here");
+    if (sourceWorkspace !== "worktree") throw new TypeError("workspace must be worktree");
     const target = values.target;
     if (target !== undefined && typeof target !== "string") throw new TypeError("target must be a string");
     const actor = actorOption(values.actor);
@@ -828,7 +816,7 @@ export async function bindKeiyaku(input: BindInput): Promise<BindResult> {
   const task = taskOption(values.task);
   const document = decodeContractDocument(markdown);
   const workspace = values.workspace === undefined ? "worktree" : values.workspace;
-  if (workspace !== "worktree" && workspace !== "here") throw new TypeError("workspace must be worktree or here");
+  if (workspace !== "worktree") throw new TypeError("workspace must be worktree");
   const target = values.target;
   if (target !== undefined && typeof target !== "string") throw new TypeError("target must be a string");
   const actor = actorOption(values.actor);

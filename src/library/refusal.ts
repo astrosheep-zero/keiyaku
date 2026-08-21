@@ -2,11 +2,6 @@ import type { ContractId } from "../core/facts/types.js";
 import type { IntentOutcome, IntentRefusal, IntentRetry } from "../protocol/operations.js";
 import type { AcceptedIntent } from "./mutation.js";
 
-export type ContractAppointmentRefusal = Readonly<{
-  kind: "here-worktree-appointed";
-  path: string;
-  contract?: ContractId;
-}>;
 export type ForkSourceRefusal = Readonly<{
   kind: "fork-source-missing" | "fork-source-unavailable" | "fork-source-invalid" | "fork-source-moved";
   contractId: ContractId;
@@ -22,9 +17,7 @@ export type NukeConfirmationRequiredRefusal = Readonly<{
   world: string;
 }>;
 
-export type KeiyakuRefusal = IntentRefusal | ContractAppointmentRefusal
-  | ForkSourceRefusal
-  | NukeConfirmationRefusal | NukeConfirmationRequiredRefusal;
+export type KeiyakuRefusal = IntentRefusal | ForkSourceRefusal | NukeConfirmationRefusal | NukeConfirmationRequiredRefusal;
 export type KeiyakuRetryReason = IntentRetry;
 
 export class KeiyakuRefused extends Error {

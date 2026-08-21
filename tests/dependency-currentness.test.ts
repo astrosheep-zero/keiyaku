@@ -34,7 +34,7 @@ function state(candidate: string, document = "document-1"): ContractState {
   return {
     id,
     head: null,
-    coordinates: { start: snapshotId("base"), workspace: "here" },
+    coordinates: { start: snapshotId("base"), workspace: "worktree" },
     terms: {
       document: { bytes: "# Current", key: documentKeyValue },
       segments: [segment],

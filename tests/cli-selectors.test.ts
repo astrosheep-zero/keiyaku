@@ -6,7 +6,6 @@ import { resolveContextualContract, resolveKanshiContract } from "../src/cli/sel
 import { CliUsageError } from "../src/cli/parse.js";
 
 const active = "kei/active-contract" as ContractId;
-const here = "kei/here-contract" as ContractId;
 
 function board(): ContractBoard {
   return {
@@ -24,25 +23,6 @@ function board(): ContractBoard {
         workspaceObservation: {
           kind: "clean",
           location: { kind: "worktree", path: "/repo/.git/keiyaku/wt/active-contract" },
-          counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
-        },
-        target: "refs/heads/main",
-        targetLag: { kind: "counted", behind: 0 },
-        delivery: null,
-        targetObservation: null,
-        gates: { reports: [], satisfied: true },
-      },
-      {
-        id: here,
-        title: "Here contract",
-        phase: "bound",
-        phaseAt: "2026-08-12T00:00:00.000Z",
-        disposition: "active",
-        workspace: "here",
-        worktreePath: null,
-        workspaceObservation: {
-          kind: "clean",
-          location: { kind: "here" },
           counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
         },
         target: "refs/heads/main",
@@ -71,7 +51,7 @@ test("short selectors match normalized contract segments without a second gramma
   assert.equal(resolveContextualContract(report, "@修复-👩‍💻", "/repo"), normalized);
 });
 
-test("omitted selectors require an exact public scope and exclude here workspaces", () => {
+test("omitted selectors require an exact public scope", () => {
   assert.throws(
     () => resolveContextualContract(board(), undefined, "/repo/.git/keiyaku/wt/active-contract/subdirectory"),
     CliUsageError,

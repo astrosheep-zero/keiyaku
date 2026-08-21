@@ -13,10 +13,6 @@ import { safeText } from "./terminal.js";
 
 function workspaceLine(row: ContractRow): string {
   const observation = row.workspaceObservation;
-  if (row.workspace === "here" && observation.kind === "failed") {
-    return `workspace here · failed · ${observation.diagnostic}`;
-  }
-  if (row.workspace === "here") return `workspace here · ${observation.kind}`;
   if (observation.kind === "failed") return `worktree unavailable · ${observation.diagnostic}`;
   if (observation.kind === "unappointed") return "worktree unappointed";
   if (observation.kind === "unavailable") return "worktree unavailable";

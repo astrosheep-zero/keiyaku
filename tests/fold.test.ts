@@ -46,7 +46,7 @@ test("foldJournal preserves a large interleaved attestation history and final st
   let index = 0;
   const entries: JournalEntry[] = [
     entry("bind", {
-      coordinates: { start: snapshotId("initial"), workspace: "here" },
+      coordinates: { start: snapshotId("initial"), workspace: "worktree" },
       terms: {
         document: { bytes: "# Fold history\n", key: documentKey("fold-history") },
         segments: [],
@@ -108,7 +108,7 @@ test("foldJournal preserves a large interleaved attestation history and final st
 
 test("foldJournal materializes its total state from the first bind", () => {
   const bind = entry("bind", {
-    coordinates: { start: snapshotId("initial"), workspace: "here" },
+    coordinates: { start: snapshotId("initial"), workspace: "worktree" },
     terms: {
       document: { bytes: "# Initial\n", key: documentKey("initial") },
       segments: [],
@@ -125,7 +125,7 @@ test("foldJournal materializes its total state from the first bind", () => {
 
 test("foldJournal keeps the delivery identity while advancing current integration", () => {
   const bind = entry("bind", {
-    coordinates: { start: snapshotId("initial"), workspace: "here" },
+    coordinates: { start: snapshotId("initial"), workspace: "worktree" },
     terms: {
       document: { bytes: "# Initial\n", key: documentKey("initial") },
       segments: [],
@@ -170,7 +170,7 @@ test("reintegrated codec rejects malformed data and fold rejects out-of-order en
   assert.throws(() => decodeJournal(malformed), /data\.reintegrated\.snapshot/);
 
   const bind = entry("bind", {
-    coordinates: { start: snapshotId("initial"), workspace: "here" },
+    coordinates: { start: snapshotId("initial"), workspace: "worktree" },
     terms: {
       document: { bytes: "# Initial\n", key: documentKey("initial") },
       segments: [],
@@ -187,7 +187,7 @@ test("reintegrated codec rejects malformed data and fold rejects out-of-order en
 test("foldJournal accepts an after replacement after bound and delivery", () => {
   const prerequisite = contractId("kei/replacement-prerequisite");
   const bind = entry("bind", {
-    coordinates: { start: snapshotId("initial"), workspace: "here" },
+    coordinates: { start: snapshotId("initial"), workspace: "worktree" },
     terms: {
       document: { bytes: "# Initial\n", key: documentKey("initial") },
       segments: [],

@@ -18,7 +18,7 @@ import type {
 import { timestamp, unpackVerificationOutcome } from "./operations.js";
 
 type AuditWorkspace = Readonly<{
-  kind: "worktree" | "here";
+  kind: "worktree";
   path: string;
 }>;
 type DiffScope = DeliveryDiffScope;
@@ -53,7 +53,6 @@ type AuditOperationInput = MutationOperationInput &
 async function auditWorkspace(
   repository: RepositoryScope,
   state: ContractState,
-  resolveHereWorkspace?: import("./operations.js").HereWorkspaceResolver,
 ): Promise<
   | Readonly<{
       kind: "ready";
@@ -62,10 +61,6 @@ async function auditWorkspace(
     }>
   | Readonly<{ kind: "unappointed" }>
 > {
-  if (state.coordinates.workspace === "here") {
-    const path = resolveHereWorkspace === undefined ? repository.effectiveCwd : await resolveHereWorkspace(state.id);
-    return path === undefined ? { kind: "unappointed" } : { kind: "ready", answer: { kind: "here", path } };
-  }
   const appointed = await readManagedWorktreeAppointment(repository, state.id);
   if (appointed.kind === "failed") throw new Error(appointed.diagnostic);
   if (appointed.kind === "unappointed") return appointed;
@@ -137,7 +132,6 @@ async function auditTargetAnswer(
   repository: RepositoryScope,
   state: ContractState,
   candidate: DeliverData,
-  workspacePath?: string,
 ): Promise<AuditReport["target"]> {
   const target = state.coordinates.target;
   if (target === undefined) return { kind: "not-observed" };
@@ -146,7 +140,6 @@ async function auditTargetAnswer(
     coordinates: { ...state.coordinates, target },
     predecessor: candidate.integration.predecessor,
     candidate: candidate.integration.snapshot,
-    ...(workspacePath === undefined ? {} : { hereWorkspacePath: workspacePath }),
   });
 }
 
@@ -181,7 +174,7 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
     return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
   }
   if (derivation.verification.kind === "refused") return { kind: "refused", refusal: derivation.verification.refusal };
-  const workspace = await auditWorkspace(input.scope, state, input.resolveHereWorkspace);
+  const workspace = await auditWorkspace(input.scope, state);
   if (workspace.kind === "unappointed") {
     return accepted(state, [], blockedAudit({ kind: "worktree-missing", contractId: state.id }));
   }
@@ -191,7 +184,6 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
       contractId: state.id,
       coordinates: state.coordinates,
       ...(workspace.appointment === undefined ? {} : { appointment: workspace.appointment }),
-      ...(workspace.answer.kind === "here" ? { workspacePath: workspace.answer.path } : {}),
     },
     {
       title: derivation.title,
@@ -219,12 +211,7 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
     target:
       verification.kind === "stopped"
         ? { kind: "not-observed" }
-        : await auditTargetAnswer(
-            input.scope,
-            state,
-            prepared.data,
-            workspace.answer.kind === "here" ? workspace.answer.path : undefined,
-          ),
+        : await auditTargetAnswer(input.scope, state, prepared.data),
     ...(delivery === undefined ? {} : { delivery }),
   };
   return completedAudit(state, verified, value);

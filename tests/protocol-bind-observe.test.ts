@@ -24,6 +24,7 @@ import {
   observeContractsForAdmissionAt,
 } from "../src/git/observe.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
+import { runGit } from "../src/git/process.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { bindOperation as rawBindOperation } from "../src/protocol/bind.js";
 import { amendOperation as rawAmendOperation } from "../src/protocol/amend.js";
@@ -44,13 +45,8 @@ import { decideArc } from "../src/core/verbs/arc.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { admitIntent } from "../src/protocol/intent.js";
 import { admitPlacement } from "../src/protocol/placement.js";
-import {
-  readContractAppointment,
-  releaseContractWorktree,
-  reserveContractWorktree,
-  resolveHereContractWorkspace,
-} from "../src/contract-worktree.js";
 import { runProtocol } from "../src/protocol/run.js";
+import { appointManagedWorktrees, readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { makeGitRepository, observeContract, withGitShim } from "./support/git.js";
 
 const NO_VERIFICATION = { kind: "prepared", data: null } as const;
@@ -109,23 +105,11 @@ async function preparationCoordinates(
   repository: Awaited<ReturnType<typeof repositoryAt>>,
   state: NonNullable<Awaited<ReturnType<typeof observeContract>>["state"]>,
 ) {
-  if (state.coordinates.workspace === "worktree") {
-    return { contractId: state.id, coordinates: state.coordinates };
-  }
-  let workspace = await resolveHereContractWorkspace(repository, state.id);
-  if (workspace.kind === "unappointed") {
-    const current = await readContractAppointment(repository);
-    if (current.kind === "appointed") await releaseContractWorktree(repository, current.contract);
-    const reservation = await reserveContractWorktree(repository, state.id);
-    if (reservation.kind !== "reserved" && (reservation.kind !== "appointed" || reservation.contract !== state.id)) {
-      throw new Error(`unable to appoint fixture workspace for ${state.id}: ${reservation.kind}`);
-    }
-    workspace = await resolveHereContractWorkspace(repository, state.id);
-  }
-  if (workspace.kind !== "appointed") {
-    throw new Error(`fixture here workspace is ${workspace.kind} for ${state.id}`);
-  }
-  return { contractId: state.id, coordinates: state.coordinates, workspacePath: workspace.path };
+  await appointManagedWorktrees(repository, [state.id]);
+  const appointment = await readManagedWorktreeAppointment(repository, state.id);
+  if (appointment.kind !== "appointed") throw new Error(`managed worktree appointment missing for ${state.id}`);
+  if (!existsSync(appointment.path)) await runGit(repository, ["worktree", "add", "--detach", appointment.path, "HEAD"]);
+  return { contractId: state.id, coordinates: state.coordinates };
 }
 
 test("observes a targetless current snapshot when bind target is omitted", async () => {
@@ -246,7 +230,7 @@ async function publishMalformedUnrelatedJournal(repository: Awaited<ReturnType<t
 
 test("batches full Contract observation through one call-scoped object process", async () => {
   const repository = repositoryWithHead();
-  await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
+  await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   for (let index = 1; index < 4; index += 1) {
     await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   }
@@ -282,7 +266,7 @@ function gitProcessCounts(invocations: readonly string[]): Record<string, number
 
 test("known publication failure is returned without a post-result ref read", async () => {
   const repository = repositoryWithHead();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   const id = (await bound.keiyaku.state()).id;
   const git = await repositoryAt(repository.path);
   const failed = join(repository.path, "publication-failed.marker");
@@ -330,7 +314,7 @@ test("known publication failure is returned without a post-result ref read", asy
 
 test("admission publishes a journal append and opaque companion in one Git snapshot", async () => {
   const repository = repositoryWithHead();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   const id = (await bound.keiyaku.state()).id;
   const git = await repositoryAt(repository.path);
   const { before, result } = await withGitDecodeChannel(git, async (channel) => {
@@ -376,7 +360,7 @@ test("admission publishes a journal append and opaque companion in one Git snaps
 
 test("a failed Git CAS publishes neither its journal append nor its companion", async () => {
   const repository = repositoryWithHead();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   const id = (await bound.keiyaku.state()).id;
   const git = await repositoryAt(repository.path);
   const observation = await withGitDecodeChannel(git, (channel) => observeContractsForAdmissionAt(git, channel, [id]));
@@ -437,7 +421,7 @@ async function appendUnrelatedGitJournals(
       entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
       at: "2026-08-06T00:00:00Z",
       data: {
-        coordinates: { start, workspace: "here" },
+        coordinates: { start, workspace: "worktree" },
         terms: terms([]),
       },
     };
@@ -499,13 +483,13 @@ async function amendBatchRequests(
 test("single-contract amend object I/O stays fixed as the git grows", async () => {
   const one = repositoryWithHead();
   const oneGit = await repositoryAt(one.path);
-  const oneBound = await bindOperation({ scope: oneGit, terms: terms([]), workspace: "here" });
+  const oneBound = await bindOperation({ scope: oneGit, terms: terms([]), workspace: "worktree" });
   assert.equal(oneBound.kind, "accepted");
   if (oneBound.kind !== "accepted") throw new Error("one-contract bind was not accepted");
 
   const many = repositoryWithHead();
   const manyGit = await repositoryAt(many.path);
-  const manyBound = await bindOperation({ scope: manyGit, terms: terms([]), workspace: "here" });
+  const manyBound = await bindOperation({ scope: manyGit, terms: terms([]), workspace: "worktree" });
   assert.equal(manyBound.kind, "accepted");
   if (manyBound.kind !== "accepted") throw new Error("many-contract bind was not accepted");
   const manyState = (await observeContract(manyGit, manyBound.value.contractId)).state;
@@ -564,7 +548,7 @@ test("protocol bind admits one explicit identity and refuses a second use of it"
     scope: git,
     contractId: id,
     terms: terms([]),
-    workspace: "here",
+    workspace: "worktree",
   });
   assert.equal(first.kind, "accepted");
   if (first.kind !== "accepted") throw new Error("explicit bind was not accepted");
@@ -582,66 +566,7 @@ test("protocol bind admits one explicit identity and refuses a second use of it"
   });
 });
 
-test("protocol bind does not own here-worktree appointment", async () => {
-  const repository = repositoryWithHead();
-  const git = await repositoryAt(repository.path);
-  const first = await bindOperation({
-    scope: git,
-    terms: terms([]),
-    workspace: "here",
-  });
-  assert.equal(first.kind, "accepted");
-  if (first.kind !== "accepted") throw new Error("first here bind was not accepted");
-
-  const second = await bindOperation({
-    scope: git,
-    terms: terms([]),
-    workspace: "here",
-  });
-  assert.equal(second.kind, "accepted");
-});
-
-test("here appointment identity is the contract field and reservation cleanup is exact", async () => {
-  const repository = repositoryWithHead();
-  const git = await repositoryAt(repository.path);
-  const id = contractId("kei/appointment-identity");
-  const reserved = await reserveContractWorktree(git, id);
-  assert.equal(reserved.kind, "reserved");
-  const path = reserved.path;
-  const canonical = "---\ncontract: kei/appointment-identity\ndescription: This is a read-only projection. Do not edit manually.\n---\n";
-  assert.equal(readFileSync(path, "utf8"), canonical);
-
-  const again = await reserveContractWorktree(git, contractId("kei/other"));
-  assert.deepEqual(again, { kind: "appointed", path, contract: id });
-
-  chmodSync(path, 0o644);
-  writeFileSync(path, "---\ncontract: kei/appointment-identity\n---\n");
-  assert.deepEqual(await reserveContractWorktree(git, contractId("kei/other")), { kind: "appointed", path, contract: id });
-
-  chmodSync(path, 0o644);
-  writeFileSync(path, "---\ncontract: kei/appointment-identity\ndescription: edited by hand\n---\n");
-  assert.deepEqual(await reserveContractWorktree(git, contractId("kei/other")), { kind: "appointed", path, contract: id });
-  await releaseContractWorktree(git, id);
-  assert.equal(readFileSync(path, "utf8"), "---\ncontract: kei/appointment-identity\ndescription: edited by hand\n---\n");
-
-  chmodSync(path, 0o644);
-  writeFileSync(path, canonical);
-  await releaseContractWorktree(git, id);
-  assert.equal(existsSync(path), false);
-
-  writeFileSync(path, "---\ncontract: kei/appointment-identity\ncontract: kei/other\n---\n");
-  assert.deepEqual(await reserveContractWorktree(git, id), { kind: "invalid", path });
-
-  chmodSync(path, 0o644);
-  writeFileSync(path, "---\ndescription: This is a read-only projection. Do not edit manually.\ncontract: kei/appointment-identity\n---\n");
-  assert.deepEqual(await reserveContractWorktree(git, id), { kind: "invalid", path });
-
-  chmodSync(path, 0o644);
-  writeFileSync(path, "---\ncontract: kei/appointment-identity\ndescription: line one\n  line two\n---\n");
-  assert.deepEqual(await reserveContractWorktree(git, id), { kind: "invalid", path });
-});
-
-test("bind never restores a targeted here checkout that moved to a same-OID branch", async () => {
+test("bind never restores a targeted checkout that moved to a same-OID branch", async () => {
   const repository = repositoryWithHead();
   repository.run(["branch", "feature"]);
   const start = repository.run(["rev-parse", "HEAD"]).trim();
@@ -657,7 +582,7 @@ test("bind never restores a targeted here checkout that moved to a same-OID bran
     title: "Same OID checkout movement",
     terms: terms([]),
     target: "refs/heads/main",
-    workspace: "here",
+    workspace: "worktree",
   }));
 
   assert.equal(bound.kind, "accepted");
@@ -696,7 +621,7 @@ test("targetless bind reobserves a different HEAD OID after atomic verification 
 
 test("runProtocol observes only watched contracts", async () => {
   const repository = repositoryWithHead();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   const id = (await bound.keiyaku.state()).id;
 
   const git = await readGit(await repositoryAt(repository.path));
@@ -728,7 +653,7 @@ test("runProtocol observes only watched contracts", async () => {
 
 test("contract-local intent ignores an unrelated malformed journal", async () => {
   const repository = repositoryWithHead();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   const id = (await bound.keiyaku.state()).id;
   const git = await repositoryAt(repository.path);
   await publishMalformedUnrelatedJournal(git);
@@ -765,7 +690,7 @@ test("Git journal depth is independent of contract identity length", () => {
 test("placement claims only the selected contract", async () => {
   const repository = repositoryWithHead();
   const git = await repositoryAt(repository.path);
-  const source = await bindOperation({ scope: git, terms: terms([]), workspace: "here" });
+  const source = await bindOperation({ scope: git, terms: terms([]), workspace: "worktree" });
   assert.equal(source.kind, "accepted");
   if (source.kind !== "accepted") throw new Error("source bind was not accepted");
   const dependent = await bindOperation({
@@ -806,7 +731,7 @@ test("placement claims only the selected contract", async () => {
 
 test("public reconcile and admission observation retain canonical journal validation", async () => {
   const repository = repositoryWithHead();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   const id = (await bound.keiyaku.state()).id;
   const git = await repositoryAt(repository.path);
   const snapshot = await readGit(git);
@@ -843,7 +768,7 @@ test("bind and amend eligibility read only self and their after contracts", asyn
   const dependency = await bindOperation({
     scope: git,
     terms: terms([]),
-    workspace: "here",
+    workspace: "worktree",
   });
   assert.equal(dependency.kind, "accepted");
   if (dependency.kind !== "accepted") throw new Error("dependency bind was not accepted");
@@ -875,7 +800,7 @@ test("bind and amend eligibility read only self and their after contracts", asyn
 test("amend reads the current prerequisite before replacing it", async () => {
   const repository = repositoryWithHead();
   const git = await repositoryAt(repository.path);
-  const dependency = await bindOperation({ scope: git, terms: terms([]), workspace: "here" });
+  const dependency = await bindOperation({ scope: git, terms: terms([]), workspace: "worktree" });
   assert.equal(dependency.kind, "accepted");
   if (dependency.kind !== "accepted") throw new Error("dependency bind was not accepted");
   const waiting = await bindOperation({
@@ -902,7 +827,7 @@ test("amend reads the current prerequisite before replacing it", async () => {
 test("amend refuses a stale complete-terms replacement when document bytes did not move", async () => {
   const repository = repositoryWithHead();
   const git = await repositoryAt(repository.path);
-  const bound = await bindOperation({ scope: git, terms: terms([]), workspace: "here" });
+  const bound = await bindOperation({ scope: git, terms: terms([]), workspace: "worktree" });
   assert.equal(bound.kind, "accepted");
   if (bound.kind !== "accepted") throw new Error("bind was not accepted");
   const before = (await observeContract(git, bound.value.contractId)).state;
@@ -934,7 +859,7 @@ test("bind and amend reject unresolved after", async () => {
   const bound = await bindOperation({
     scope: git,
     terms: terms([missing]),
-    workspace: "here",
+    workspace: "worktree",
   });
   assert.equal(bound.kind, "refused");
   if (bound.kind !== "refused") throw new Error("bind must refuse an unresolved prerequisite");
@@ -943,7 +868,7 @@ test("bind and amend reject unresolved after", async () => {
   const existing = await bindOperation({
     scope: git,
     terms: terms([]),
-    workspace: "here",
+    workspace: "worktree",
   });
   assert.equal(existing.kind, "accepted");
   if (existing.kind !== "accepted") throw new Error("existing bind was not accepted");
@@ -964,13 +889,13 @@ test("bind and amend reject unresolved after", async () => {
 test("amend observes the transitive prerequisite closure before judging cycles", async () => {
   const repository = repositoryWithHead();
   const git = await repositoryAt(repository.path);
-  const a = await bindOperation({ scope: git, terms: terms([]), workspace: "here", title: "A" });
+  const a = await bindOperation({ scope: git, terms: terms([]), workspace: "worktree", title: "A" });
   assert.equal(a.kind, "accepted");
   if (a.kind !== "accepted") throw new Error("A bind was not accepted");
-  const c = await bindOperation({ scope: git, terms: terms([a.value.contractId]), workspace: "here", title: "C" });
+  const c = await bindOperation({ scope: git, terms: terms([a.value.contractId]), workspace: "worktree", title: "C" });
   assert.equal(c.kind, "accepted");
   if (c.kind !== "accepted") throw new Error("C bind was not accepted");
-  const b = await bindOperation({ scope: git, terms: terms([c.value.contractId]), workspace: "here", title: "B" });
+  const b = await bindOperation({ scope: git, terms: terms([c.value.contractId]), workspace: "worktree", title: "B" });
   assert.equal(b.kind, "accepted");
   if (b.kind !== "accepted") throw new Error("B bind was not accepted");
 
@@ -992,8 +917,8 @@ test("amend observes the transitive prerequisite closure before judging cycles",
 test("delivery binds before after and placement reads amended prerequisites", async () => {
   const repository = repositoryWithHead();
   const git = await repositoryAt(repository.path);
-  const originalPrerequisite = await bindOperation({ scope: git, terms: terms([]), workspace: "here" });
-  const replacementPrerequisite = await bindOperation({ scope: git, terms: terms([]), workspace: "here" });
+  const originalPrerequisite = await bindOperation({ scope: git, terms: terms([]), workspace: "worktree" });
+  const replacementPrerequisite = await bindOperation({ scope: git, terms: terms([]), workspace: "worktree" });
   assert.equal(originalPrerequisite.kind, "accepted");
   assert.equal(replacementPrerequisite.kind, "accepted");
   if (originalPrerequisite.kind !== "accepted" || replacementPrerequisite.kind !== "accepted") {
@@ -1002,7 +927,7 @@ test("delivery binds before after and placement reads amended prerequisites", as
   const dependent = await bindOperation({
     scope: git,
     terms: terms([originalPrerequisite.value.contractId]),
-    workspace: "here",
+    workspace: "worktree",
   });
   assert.equal(dependent.kind, "accepted");
   if (dependent.kind !== "accepted") throw new Error("dependent bind was not accepted");
@@ -1111,7 +1036,7 @@ test("bind and amend leave eligible prerequisites unmaterialized", async () => {
   const activeDependency = await bindOperation({
     scope: await repositoryAt(repository.path),
     terms: terms([]),
-    workspace: "here",
+    workspace: "worktree",
   });
   assert.equal(activeDependency.kind, "accepted");
   if (activeDependency.kind !== "accepted") throw new Error("active dependency bind was not accepted");
@@ -1126,7 +1051,7 @@ test("bind and amend leave eligible prerequisites unmaterialized", async () => {
   const claimedDependency = await bindOperation({
     scope: await repositoryAt(repository.path),
     terms: terms([]),
-    workspace: "here",
+    workspace: "worktree",
   });
   assert.equal(claimedDependency.kind, "accepted");
   if (claimedDependency.kind !== "accepted") throw new Error("claimable dependency bind was not accepted");
@@ -1182,7 +1107,7 @@ test("placement redecides after a world advance without binding a dependent", as
   const source = await bindOperation({
     scope: await repositoryAt(repository.path),
     terms: terms([]),
-    workspace: "here",
+    workspace: "worktree",
   });
   assert.equal(source.kind, "accepted");
   if (source.kind !== "accepted") throw new Error("source bind was not accepted");
@@ -1211,7 +1136,7 @@ test("placement redecides after a world advance without binding a dependent", as
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
     at: "2026-08-06T00:00:01Z",
     data: {
-      coordinates: { start: sourceState.coordinates.start, workspace: "here" },
+      coordinates: { start: sourceState.coordinates.start, workspace: "worktree" },
       terms: terms([source.value.contractId]),
     },
   };
@@ -1256,7 +1181,7 @@ test("placement redecides after a world advance without binding a dependent", as
 
 test("delivery preparation ignores an unrelated malformed journal", async () => {
   const repository = repositoryWithHead();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: contractBody(), workspace: "worktree" });
   const id = (await bound.keiyaku.state()).id;
   const git = await repositoryAt(repository.path);
   await publishMalformedUnrelatedJournal(git);

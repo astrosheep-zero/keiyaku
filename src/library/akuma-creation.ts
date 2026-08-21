@@ -231,9 +231,6 @@ async function currentManagedContract(contract: Keiyaku, contractId: ContractId)
     throw error;
   }
   if (state.terminal !== null) throw new KeiyakuRefused({ kind: "terminal", contractId: state.id });
-  if (state.coordinates.workspace !== "worktree") {
-    throw unavailableWorkspace(state.id, "is here");
-  }
   return state;
 }
 

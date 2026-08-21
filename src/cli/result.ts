@@ -57,7 +57,7 @@ export type AcceptedEnvelope = Readonly<{
 export type AcceptedBindResult = AcceptedEnvelope &
   Readonly<{
     verb: "bind";
-    workspace: "worktree" | "here";
+    workspace: "worktree";
     target: string | null;
     completion?: never;
     verification?: never;

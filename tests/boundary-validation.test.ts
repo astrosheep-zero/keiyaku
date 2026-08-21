@@ -30,7 +30,7 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
       && error.message === "contract ID must be kei/<contract-segment>",
   );
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => Reflect.apply(Keiyaku.bind, Keiyaku, [{ repo, markdown: null, workspace: "here" }])),
+    () => withGitShim("exit 99", {}, () => Reflect.apply(Keiyaku.bind, Keiyaku, [{ repo, markdown: null, workspace: "worktree" }])),
     TypeError,
   );
 
@@ -66,14 +66,14 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
     Keiyaku.bind({ repo,
       markdown: ["# T", "", "## Context", "C", "", "## Objective", "O", "", "## Design", "D", "", "## Region", "~~~", "src/**", "~~~", "", "## Criteria", "### C", "C", ""].join("\n"),
       target: "bad\0target",
-      workspace: "here",
+      workspace: "worktree",
     }),
     (error: unknown) => error instanceof KeiyakuRefused && error.code === "invalid-target",
   );
 
   const bound = await Keiyaku.bind({ repo,
     markdown: ["# T", "", "## Context", "C", "", "## Objective", "O", "", "## Design", "D", "", "## Region", "~~~", "src/**", "~~~", "", "## Criteria", "### C", "C", ""].join("\n"),
-    workspace: "here",
+    workspace: "worktree",
     gates: ["security-audited"],
   });
   await assert.rejects(

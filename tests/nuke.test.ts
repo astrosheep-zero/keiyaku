@@ -15,7 +15,6 @@ import { renderRefusal } from "../src/cli/render/refusal.js";
 import { nukeExitCode } from "../src/cli/render/nuke.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { worktreePath } from "../src/git/workspace.js";
-import { reserveContractWorktree } from "../src/contract-worktree.js";
 import { appointManagedWorktrees, readPlaceRegister } from "../src/workspace-place.js";
 import { contractId } from "../src/core/facts/types.js";
 import { Tasks } from "../src/task/index.js";
@@ -37,7 +36,6 @@ async function gitNukeFixture() {
   const place = (await readPlaceRegister(repository)).byContract.get(managed)!;
   const managedPath = worktreePath(repository, place.place);
   raw.run(["worktree", "add", "--detach", managedPath, "HEAD"]);
-  await reserveContractWorktree(repository, contractId("kei/nuke-here"));
   raw.run(["branch", "business-branch"]);
   raw.run(["update-ref", "refs/heads/keiyaku-delivery/nuke-managed", "HEAD"]);
   raw.run(["update-ref", "refs/heads/keiyaku-candidate/nuke-managed", "HEAD"]);

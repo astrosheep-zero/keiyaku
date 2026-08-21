@@ -415,7 +415,7 @@ test("CLI ls invokes each selected identity directory and emits selected JSON", 
     assert.equal(task.kind, "accepted");
     const bound = await Keiyaku.bind({
       repo,
-      workspace: "here",
+      workspace: "worktree",
       markdown: [
         "# Listed Contract", "", "## Context", "List it.", "", "## Objective", "Expose it.", "",
         "## Design", "Use the selected Contract board.", "", "## Region", "```", "src/**", "```", "",

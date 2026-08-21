@@ -101,7 +101,7 @@ function commitTasks(world: ReturnType<typeof repository>, message = "track Task
 test("a Task document untracked in Git still completes through delivery", async () => {
   const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Untracked completion");
-  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Untracked completion"), workspace: "here", gates: [] });
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Untracked completion"), workspace: "worktree", gates: [] });
   const state = await bound.keiyaku.state();
   const git = await repositoryAt(world.path);
   assert.equal((await readGit(git)).paths.has(contractJournalPath(state.id)), true);
@@ -131,7 +131,7 @@ test("placement keeps post-bind Task edits and changes only state to done", asyn
   const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Edited completion");
   commitTasks(world);
-  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Edited completion"), workspace: "here", gates: [] });
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Edited completion"), workspace: "worktree", gates: [] });
   const authority = join(world.path, taskPath(taskId));
   const before = readFileSync(authority, "utf8");
   writeFileSync(authority, `${before}Manual edit after bind.\n`);
@@ -152,7 +152,7 @@ test("a held Task already done still delivers without refusal", async () => {
   const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Already done", "done");
   commitTasks(world);
-  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Already done"), workspace: "here", gates: [] });
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Already done"), workspace: "worktree", gates: [] });
   const state = await bound.keiyaku.state();
   writeFileSync(`${world.path}/already.txt`, "already\n");
 
@@ -173,7 +173,7 @@ test("a held Task already done still delivers without refusal", async () => {
 test("reconcile replay of an owed completion is an idempotent no-op the second time", async () => {
   const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Replay completion", "drop");
-  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Replay completion"), workspace: "here", gates: [] });
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Replay completion"), workspace: "worktree", gates: [] });
   writeFileSync(`${world.path}/replay.txt`, "replay\n");
   const delivered = await bound.keiyaku.deliver({ includeDirty: true });
 
@@ -196,7 +196,7 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
 test("abandon decodes TaskHolders through the shared batch without legacy readers", async () => {
   const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Batch-only release");
-  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Batch-only release"), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Batch-only release"), workspace: "worktree" });
   const id = (await bound.keiyaku.state()).id;
   const log = join(world.path, "abandon-holder-reads.log");
 
@@ -216,7 +216,7 @@ test("abandon releases the holder without reopening Task authority", async () =>
   const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Abandoned Task", "done");
   commitTasks(world);
-  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("No reopen"), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("No reopen"), workspace: "worktree" });
 
   const abandoned = await bound.keiyaku.abandon();
 
@@ -238,7 +238,7 @@ test("abandon releases the holder without reopening Task authority", async () =>
 test("a superseded Contract cannot release or settle a newer holder", async () => {
   const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Superseded Holder");
-  const first = await Keiyaku.bind({ repo, task: taskId, markdown: document("Old holder"), workspace: "here" });
+  const first = await Keiyaku.bind({ repo, task: taskId, markdown: document("Old holder"), workspace: "worktree" });
   const second = await Keiyaku.bind({ repo, task: taskId, markdown: document("Current holder"), workspace: "worktree", gates: [] });
 
   const abandoned = await first.keiyaku.abandon();
@@ -254,7 +254,7 @@ test("a superseded Contract cannot release or settle a newer holder", async () =
 test("a missing holder target remains an explicit Task settlement lag", async () => {
   const world = repository(), repo = await Repo.at({ path: world.path });
   const missing = "task/missing" as const;
-  const bound = await Keiyaku.bind({ repo, task: missing, markdown: document("Missing holder target"), workspace: "here", gates: [] });
+  const bound = await Keiyaku.bind({ repo, task: missing, markdown: document("Missing holder target"), workspace: "worktree", gates: [] });
   writeFileSync(`${world.path}/missing.txt`, "missing\n");
   const claimed = await bound.keiyaku.deliver({ includeDirty: true });
   assert.equal(claimed.settlement.lags.length, 1);
@@ -271,7 +271,7 @@ test("abandon rejects corrupt authority assigning one Contract multiple holders"
   const world = repository(), repo = await Repo.at({ path: world.path });
   const firstTask = await task(world.path, "First holder");
   const secondTask = await task(world.path, "Second holder");
-  const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("First holder"), workspace: "here" });
+  const first = await Keiyaku.bind({ repo, task: firstTask, markdown: document("First holder"), workspace: "worktree" });
   await Keiyaku.bind({ repo, task: secondTask, markdown: document("Second holder"), workspace: "worktree" });
   const firstId = (await first.keiyaku.state()).id;
   const git = await repositoryAt(world.path);
@@ -298,7 +298,7 @@ test("abandon rejects corrupt authority assigning one Contract multiple holders"
 test("settlement ignores an unrelated missing private-state subtree", async () => {
   const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Subtree settlement", "drop");
-  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Subtree settlement"), workspace: "here", gates: [] });
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Subtree settlement"), workspace: "worktree", gates: [] });
   writeFileSync(`${world.path}/subtree.txt`, "subtree\n");
   await bound.keiyaku.deliver({ includeDirty: true });
   replaceTaskState(world.path, taskId, "drop", "open");
@@ -323,7 +323,7 @@ test("settlement ignores an unrelated missing private-state subtree", async () =
 
 test("TaskHolder reads reject unexpected authority paths", async () => {
   const world = repository();
-  await Keiyaku.bind({ repo: await Repo.at({ path: world.path }), markdown: document("Initialize authority"), workspace: "here" });
+  await Keiyaku.bind({ repo: await Repo.at({ path: world.path }), markdown: document("Initialize authority"), workspace: "worktree" });
   const git = await repositoryAt(world.path);
   const snapshot = await readGit(git);
   const tree = await updateGitTree(git, snapshot.tree, new Map([
@@ -424,7 +424,7 @@ test("holder claim executes inside the Task settlement fence", async () => {
 test("settlement replays from the primary worktree when the invocation cwd is gone", async () => {
   const world = repository(), repo = await Repo.at({ path: world.path });
   const taskId = await task(world.path, "Dead cwd claim");
-  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Dead cwd"), workspace: "here", gates: [] });
+  const bound = await Keiyaku.bind({ repo, task: taskId, markdown: document("Dead cwd"), workspace: "worktree", gates: [] });
   writeFileSync(`${world.path}/candidate.txt`, "candidate\n");
   const delivered = await bound.keiyaku.deliver({ includeDirty: true });
   assert.deepEqual(delivered.settlement.lags, []);

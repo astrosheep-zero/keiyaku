@@ -12,7 +12,7 @@ test("fork bind copies current terms and the exact source start into fresh custo
   const prerequisite = await Keiyaku.bind({ repo, markdown: document().replace("# Library verbs", "# Prerequisite"), gates: [] });
   const sourceMarkdown = document().replace("# Library verbs", "# Source terms");
   const source = await Keiyaku.bind({
-    repo, markdown: sourceMarkdown, workspace: "here", gates: ["reviewed"], after: [prerequisite.keiyaku.id],
+    repo, markdown: sourceMarkdown, workspace: "worktree", gates: ["reviewed"], after: [prerequisite.keiyaku.id],
   });
   const sourceState = await source.keiyaku.state();
 
@@ -50,7 +50,7 @@ test("fork bind refuses missing sources and incompatible term inputs", async () 
 test("fork CLI reads no stdin and keeps its form disjoint", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const source = await Keiyaku.bind({ repo, markdown: document().replace("# Library verbs", "# CLI source"), workspace: "here", gates: [] });
+  const source = await Keiyaku.bind({ repo, markdown: document().replace("# Library verbs", "# CLI source"), workspace: "worktree", gates: [] });
   const result = await invoke(parseArgv(["bind", "--fork-of", source.keiyaku.id]), {
     cwd: repository.path,
     environment: {},
@@ -67,7 +67,7 @@ test("fork CLI reads no stdin and keeps its form disjoint", async () => {
 test("fork admission rejects a source amend interleaved at the state transaction", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const source = await Keiyaku.bind({ repo, markdown: document().replace("# Library verbs", "# Race source"), workspace: "here", gates: [] });
+  const source = await Keiyaku.bind({ repo, markdown: document().replace("# Library verbs", "# Race source"), workspace: "worktree", gates: [] });
   const marker = `${repository.path}/fork-race.marker`;
   await assert.rejects(
     withGitShim(

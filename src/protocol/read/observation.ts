@@ -8,8 +8,7 @@ export type CurrentPhysicalIssue =
   | Readonly<{ kind: "hook-failure"; diagnostic: string }>
   | Readonly<{ kind: "target-checkout-retained"; target: string }>;
 
-function appointedWorkspacePath(row: ContractRow, hereWorkspacePath?: string): string | null {
-  if (hereWorkspacePath !== undefined) return hereWorkspacePath;
+function appointedWorkspacePath(row: ContractRow): string | null {
   const observation = row.workspaceObservation;
   if (observation.kind !== "clean" && observation.kind !== "dirty") return null;
   return observation.location.kind === "worktree" ? observation.location.path : null;
@@ -19,9 +18,8 @@ function appointedWorkspacePath(row: ContractRow, hereWorkspacePath?: string): s
 export async function observeCurrentPhysicalIssue(
   repository: GitRepository,
   row: ContractRow,
-  hereWorkspacePath?: string,
 ): Promise<CurrentPhysicalIssue | undefined> {
-  const workspacePath = appointedWorkspacePath(row, hereWorkspacePath);
+  const workspacePath = appointedWorkspacePath(row);
   if (workspacePath !== null) {
     const marker = await observeWorktreeHookMarker(await worktreeGitDirectory(repository, workspacePath));
     if (marker.kind === "failed") return { kind: "hook-failure", diagnostic: marker.diagnostic };

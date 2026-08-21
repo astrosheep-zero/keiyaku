@@ -37,9 +37,9 @@ already present in the current worktree. `Reviewer` reviews the complete
 current worktree snapshot without modifying it. Candidate commits are only
 for historical review.
 
-The same canonical frontmatter projection feeds initial here-worktree reservation
-and complete rendered guidance, so `Keiyaku.guidance()`, `keiyaku show`,
-managed worktree materialization, here projection, and reconciliation cannot
+The same canonical frontmatter projection feeds complete rendered guidance,
+so `Keiyaku.guidance()`, `keiyaku show`, managed worktree materialization,
+and reconciliation cannot
 diverge. `show` text is exactly those bytes; JSON contains the Contract
 identity and identical guidance. `audit` does not include guidance by default,
 and `--diff` retains its delivery-diff meaning. The description is
@@ -50,66 +50,10 @@ cannot collide with the derived sections. No harness identity, worker identity,
 or selected seat becomes a Contract or Dispatch fact. A commissioning harness
 transports its selected seat and read-first file list in its own dispatch body.
 
-## Worktree Appointment
-
-For a `here` Contract, the frontmatter in `.keiyaku/KEIYAKU.md` is the only
-worktree appointment. Bind reserves it atomically before admission while
-holding one lock scoped to the caller worktree. An existing valid, invalid, or
-foreign appointment refuses another here bind. A failed admission releases
-only the exact reservation bytes it created. A terminal Contract removes its
-own appointment; it never removes a foreign or replaced file.
-
-Appointment reading recognizes the current canonical two-field projection. It
-also recognizes the previous derived one-field form and a one-line manually
-changed description when the first and only identity field is a valid
-`contract`. Those bytes still appoint the same Contract; the next successful
-projection restores the canonical description. Missing, duplicate, reordered,
-multiline, or additional identity fields remain invalid. This repair
-tolerance is only for derived workspace custody and creates no compatibility
-or migration path for journal facts.
-
-The file is not imported into Contract state. Editing it cannot amend,
-reappoint, or otherwise change the journal. When the intended appointment is
-known, a later workspace projection restores canonical bytes. Terminal
-cleanup and foreign-appointment refusal use the parsed Contract identity and
-never treat the description as lifecycle authority.
-
-Here-workspace lookup is one workspace-owner fold: it enumerates registered Git
-worktrees, reads their existing appointment bytes, and returns appointed for
-one matching path, unappointed for none, or failed with a bounded diagnostic
-for duplicate matching paths. Status and observe receive that read-facing fold
-through the Contract status projection, and Kanshi supplies it to that same
-projection. Protocol and tender consumers receive its appointment result rather
-than discovering worktrees themselves. One matching appointment supplies the
-workspace path for projection, audit, tender, review, target handling,
-conflict materialization, and
-terminal cleanup; no
-operation consults invocation cwd after bind. Conflict materialization may run
-only when that appointed workspace is clean and has no existing Git merge
-state. A dirty workspace reuses `dirty-workspace` even when `includeDirty` is
-true. Existing merge state refuses `merge-state-present` with the appointed
-`{ kind, path }`. Neither refusal mutates bytes, refs, facts, pins, or
-lifecycle. Read-only status observes that same merge as the clean/dirty
-`merge` field, independent of dirty counts. Keiyaku adds no merge-abort command. No matching appointment uses the
-existing unavailable or `worktree-missing` behavior. Multiple valid matching
-appointments are authority corruption. Pre-admission delivery, review, and
-audit, and nonterminal projection or reconciliation, throw
-`AuthorityCorruptionError`; they do not mint a refusal or lag. Read-only
-status, observe, and Kanshi retain the row with `worktreePath` null and report
-one generic failed workspace observation whose bounded diagnostic may name the
-matching paths. Terminal cleanup is deliberately different: it removes every
-appointment whose decoded ContractId matches the terminal Contract and leaves
-foreign appointments untouched.
-
 ## Managed Place Appointment
 
-Fork bind defaults to a fresh managed worktree regardless of the source
-workspace. Explicit `here` uses ordinary here custody; source appointments and
-mutable workspace bytes are never shared.
-
-Place is the managed form of this same local appointment. It is not a Git
-identity, journal field, or a second product. A here Contract never enters
-the Place register.
+Place is the sole managed local appointment. It is not a Git identity, journal
+field, or a second product.
 
 The sole managed appointment authority is one canonical file and one
 coordination lock under the pinned common Git directory:
@@ -169,9 +113,7 @@ this order: fold the admitted Contract; under the register lock, decode once
 and reuse the Contract's appointment or durably appoint by its hash-derived
 forward scan; if that
 appointment failed operationally, return typed lag and perform no Git
-effect. World reconcile applies that lag only to observed managed
-Contracts; every here Contract continues the ordinary single-Contract
-lifecycle. Realize Git at `<git-common-dir>/keiyaku/wt/<place>`; project
+effect. Realize Git at `<git-common-dir>/keiyaku/wt/<place>`; project
 workspace guidance at that realized worktree. Once an appointment is durable
 it survives every later failure, and retry uses the same Place. Existing
 appointments are never reselected from Git or filesystem topology.
@@ -197,8 +139,8 @@ second persisted release marker.
 
 The sole appointment read returns `appointed` with place and path,
 `unappointed`, or `failed` with a diagnostic. `appointed` comes only from the
-decoded register. `unappointed` includes an
-admitted managed Contract not yet appointed and every here Contract.
+decoded register. `unappointed` includes an admitted managed Contract not yet
+appointed.
 Register corruption or an unavailable read is one `failed` arm. The reader
 does not inspect the journal, Git registration, or filesystem existence and
 does not reconcile. Public status uses that same appointment fact: an
@@ -215,7 +157,7 @@ managed worktree.
 
 Post-admission Place lifecycle composition has one private concrete Library
 owner. That owner appoints a managed Place
-before Git realization, then passes the freshly folded Contract state here
+before Git realization, then passes the freshly folded Contract state
 for guidance. Mutation and Repo remain thin entry points and do not repeat
 that appointment, cleanup, release, or register-lag policy. The workspace
 owner creates or repairs these derived files atomically:
@@ -239,8 +181,7 @@ After every successful guidance create or replacement, Keiyaku attempts
 A write or cleanup failure returns a `contract-file-failed` lag naming the
 worktree, path, and diagnostic while preserving admitted facts and completed
 effects. Managed terminal cleanup stays governed by Git's sealed-byte and
-ephemeral-abandonment-recovery law; a here terminal removes only its matching
-appointment projection.
+ephemeral-abandonment-recovery law.
 
 Git reconciliation has no projection callback, does not parse the frontmatter,
 and neither reads nor writes these files. Explicit reconcile remains a public

@@ -284,9 +284,6 @@ Placement follows the Git mental model you already have:
   any `✓ reviewed` verdict are kept, but nothing claims and nothing moves.
   The target ref, its checkout, and your bytes stay exactly where they were,
   and the Contract stays `tendered`.
-- A `--here` Contract behaves like a commit with gates: it lands on the current
-  branch and cannot deliver to a foreign checked-out target.
-
 After a refusal, handle the listed paths, then `deliver` again or record a
 satisfied review; either command requests placement again.
 

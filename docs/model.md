@@ -138,7 +138,7 @@ reconstruct public identity from a path.
 type ContractCoordinates = Readonly<{
   start: SnapshotId
   target?: string
-  workspace: "worktree" | "here"
+  workspace: "worktree"
 }>
 
 type DocumentKey = Opaque<"document-key">
@@ -171,9 +171,13 @@ type JournalEnvelope<Kind extends string, Data> = Readonly<{
 `BindData` is immutable `ContractCoordinates` plus revision-zero
 `ContractTerms`. `AmendData` is a complete replacement `ContractTerms` and
 never changes coordinates. Revision identity is the journal-entry coordinate.
-When present, `ContractCoordinates.target` is the canonical full
-`refs/heads/...` ref produced at the public library boundary; target validation
-and rejection are owned by [public-api.md](public-api.md).
+`ContractCoordinates.workspace` is always `"worktree"`. A bind fact whose
+coordinates contain any other workspace value, including the removed `"here"`
+spelling, is invalid authority and throws `AuthorityCorruptionError`; there is
+no journal migration or compatibility decoder. When present,
+`ContractCoordinates.target` is the canonical full `refs/heads/...` ref
+produced at the public library boundary; target validation and rejection are
+owned by [public-api.md](public-api.md).
 The edge library supplies the opaque whole-document bytes and mints the whole
 document and ordered segment keys from its Markdown methodology. Core stores
 those bytes and keys with the machine terms `gates` and `after`; it knows none

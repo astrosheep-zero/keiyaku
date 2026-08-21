@@ -78,7 +78,7 @@ function acceptedAmendRegion(result: AmendResult): AmendRegionObservation {
 
 export function acceptedBind(
   result: BindResult,
-  coordinates: Readonly<{ workspace: "worktree" | "here"; target?: string }>,
+  coordinates: Readonly<{ workspace: "worktree"; target?: string }>,
 ): AcceptedBindResult {
   return {
     ...acceptedEnvelope(result, undefined),

@@ -1,7 +1,6 @@
 import { Repo } from "../library/repo.js";
 import type { ContractBoard, ContractDisposition } from "../library/contract.js";
 import { scopeForRepo } from "../library/repo.js";
-import { resolveHereContractWorkspace } from "../contract-worktree.js";
 import { observeTaskBoard } from "../task/operations.js";
 import { contractNamespace } from "../settlement/settle.js";
 import { Akuma } from "../akuma/index.js";
@@ -155,11 +154,7 @@ async function readContracts(
   try {
     return {
       kind: "present",
-      value: await readContractBoard(
-        observation,
-        include,
-        async (id) => await resolveHereContractWorkspace(observation.repository, id),
-      ),
+      value: await readContractBoard(observation, include),
     };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
@@ -176,13 +171,7 @@ async function attachSelectedIssue(
     const rows = await Promise.all(
       contracts.value.rows.map(async (row) => {
         if (row.id !== selected) return row;
-        const here =
-          row.workspace === "here" ? await resolveHereContractWorkspace(observation.repository, row.id) : undefined;
-        const issue = await observeCurrentPhysicalIssue(
-          observation.repository,
-          row,
-          here?.kind === "appointed" ? here.path : undefined,
-        );
+        const issue = await observeCurrentPhysicalIssue(observation.repository, row);
         return issue === undefined ? row : { ...row, issue };
       }),
     );

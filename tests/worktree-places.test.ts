@@ -291,7 +291,7 @@ test("the three-arm reader does not inspect the journal or filesystem", async ()
   assert.match(failed.diagnostic, /Place file has invalid fields/u);
 });
 
-test("here Contracts stay unappointed in the Place register", async () => {
+test("unbound Contracts stay unappointed in the Place register", async () => {
   const repository = await repositoryAt(repositoryWithCommit().path);
   assert.deepEqual(await readManagedWorktreeAppointment(repository, EXAMPLE), { kind: "unappointed" });
   assert.deepEqual(await readPlaceRegister(repository), emptyPlaceRegister());
@@ -593,55 +593,4 @@ test("an already-absent appointed path may release without a removal effect", as
   assert.deepEqual(abandoned.lags, []);
   assert.equal(existsSync(appointment.path), false);
   assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), { kind: "unappointed" });
-});
-
-test("repo reconcile isolates a Place-register outage from here repair", async () => {
-  const repository = repositoryWithCommit();
-  const here = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: contractBody("Here isolated"),
-    workspace: "here",
-    hooks: { create: [], destroy: [] },
-  });
-  const managed = await Keiyaku.bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: contractBody("Managed isolated"),
-    workspace: "worktree",
-    hooks: { create: [], destroy: [] },
-  });
-  const git = await repositoryAt(repository.path);
-  const appointment = await readManagedWorktreeAppointment(git, managed.keiyaku.id);
-  assert.equal(appointment.kind, "appointed");
-  const derived = join(git.primaryWorktree, ".keiyaku", ".gitignore");
-  unlinkSync(derived);
-  const lock = join(git.commonDirectory, "keiyaku", "locks", "places.sqlite");
-  unlinkSync(lock);
-  mkdirSync(lock);
-  const worktrees = repository.run(["worktree", "list", "--porcelain"]);
-  let world;
-  try {
-    world = await (await Repo.at({ path: repository.path })).reconcile();
-  } finally {
-    rmSync(lock, { recursive: true, force: true });
-  }
-  const observed = await withGitDecodeChannel(git, (channel) => worldContractStates({ scope: git, channel }));
-  assert.equal(world.kind, "completed");
-  if (world.kind !== "completed") throw new Error("expected completed repo reconcile");
-  assert.deepEqual(world.contracts.map((contract) => contract.contractId), observed.map((state) => state.id));
-  assert.deepEqual(new Set(world.contracts.map((contract) => contract.contractId)), new Set([
-    here.keiyaku.id,
-    managed.keiyaku.id,
-  ]));
-  const hereReport = world.contracts.find((contract) => contract.contractId === here.keiyaku.id)!.report;
-  const managedReport = world.contracts.find((contract) => contract.contractId === managed.keiyaku.id)!.report;
-  assert.equal(managedReport.effects.length, 0);
-  assert.equal(managedReport.settlement.actions.length, 0);
-  assert.ok(managedReport.lag.some((lag) =>
-    lag.kind === "contract-file-failed" && lag.path === placeRegisterPath(git)));
-  assert.deepEqual(await readManagedWorktreeAppointment(git, managed.keiyaku.id), appointment);
-  assert.equal(repository.run(["worktree", "list", "--porcelain"]), worktrees);
-  assert.equal(existsSync(derived), true);
-  assert.ok(hereReport.effects.some((effect) =>
-    effect.kind === "contract-file" && effect.path === derived));
-  assert.deepEqual(hereReport.lag, []);
 });

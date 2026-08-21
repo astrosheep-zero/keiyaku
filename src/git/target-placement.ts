@@ -7,17 +7,9 @@ import {
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import type { RefOperation } from "../core/facts/offer.js";
 import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { currentBranch } from "./observe.js";
 import { commonGitDirectory, readRef, registeredWorktrees } from "./repository.js";
 import { consumeGitStdout, GitPlumbingError, runGit, type GitRepository } from "./process.js";
 import { captureWorkspaceTree } from "./workspace.js";
-
-export type WorkspaceNotOnTargetRefusal = Readonly<{
-  kind: "workspace-not-on-target";
-  contractId: ContractId;
-  target: string;
-  branch: string | null;
-}>;
 
 export type CheckoutNotFollowableRefusal = Readonly<{
   kind: "checkout-not-followable";
@@ -28,7 +20,7 @@ export type CheckoutNotFollowableRefusal = Readonly<{
   paths: readonly string[];
 }>;
 
-export type TargetPlacementRefusal = CheckoutNotFollowableRefusal | WorkspaceNotOnTargetRefusal;
+export type TargetPlacementRefusal = CheckoutNotFollowableRefusal;
 
 export type TargetCheckoutEffect = Readonly<{
   kind: "target-checkout";
@@ -49,10 +41,7 @@ export type TargetPlacementPhysicalResult = Readonly<{
   lag: readonly TargetCheckoutLag[];
 }>;
 
-type FollowArm = Readonly<{
-  kind: "ordinary" | "here";
-  path: string;
-}>;
+type FollowArm = Readonly<{ kind: "ordinary"; path: string }>;
 
 export type PreparedTargetPlacement = Readonly<{
   target: RefOperation;
@@ -330,7 +319,6 @@ export type TargetPlacementObservationInput = Readonly<{
   coordinates: TargetedContractCoordinates;
   predecessor: SnapshotId;
   candidate: SnapshotId;
-  hereWorkspacePath?: string;
 }>;
 
 export type TargetPlacementObservation =
@@ -350,35 +338,12 @@ export async function observeTargetPlacement(
   const worktrees = (await registeredWorktrees(repository))
     .filter((worktree) => worktree.branch === target.target)
     .sort((left, right) => left.path.localeCompare(right.path));
-  const hereSource = input.coordinates.workspace === "here" ? (input.hereWorkspacePath ?? null) : null;
-  if (hereSource !== null) {
-    const branch = await currentBranch(repository, hereSource);
-    if (branch !== target.target) {
-      return {
-        kind: "refused",
-        refusal: {
-          kind: "workspace-not-on-target",
-          contractId: input.contractId,
-          target: target.target,
-          branch,
-        },
-      };
-    }
-  }
-
   const arms: FollowArm[] = [];
   for (const worktree of worktrees) {
-    const kind = hereSource !== null && resolve(worktree.path) === hereSource ? "here" : "ordinary";
-    if (kind === "ordinary") {
-      const refusal = await ordinaryPrecheck(repository, input.contractId, target, worktree.path);
-      if (refusal !== null) return { kind: "refused", refusal };
-    }
-    arms.push({ kind, path: worktree.path });
+    const refusal = await ordinaryPrecheck(repository, input.contractId, target, worktree.path);
+    if (refusal !== null) return { kind: "refused", refusal };
+    arms.push({ kind: "ordinary", path: worktree.path });
   }
-  if (input.coordinates.workspace === "here" && hereSource === null)
-    throw new Error("targeted here workspace is unappointed");
-  if (hereSource !== null && !arms.some((arm) => arm.kind === "here"))
-    throw new Error("targeted here workspace is not a registered checkout of its target");
   return { kind: "ready", arms };
 }
 
@@ -414,7 +379,6 @@ export async function prepareTargetPlacement(
   repository: GitRepository,
   state: ContractState,
   target: RefOperation,
-  hereWorkspacePath?: string,
 ): Promise<TargetPlacementPreparation> {
   if (state.coordinates.target !== target.target || state.currentIntegration?.snapshot !== target.newOid) {
     throw new Error("placement state does not match its offered target movement");
@@ -424,7 +388,6 @@ export async function prepareTargetPlacement(
     coordinates: { ...state.coordinates, target: target.target },
     predecessor: target.expectedOid,
     candidate: target.newOid,
-    ...(hereWorkspacePath === undefined ? {} : { hereWorkspacePath }),
   });
   return observation.kind === "refused"
     ? observation
@@ -441,8 +404,7 @@ export async function followTargetPlacement(
   const candidate = gitObjectIdForSnapshot(prepared.target.newOid);
   for (const arm of prepared.arms) {
     try {
-      if (arm.kind === "here") await runGit(repository, ["-C", arm.path, "read-tree", candidate]);
-      else await runGit(repository, ["-C", arm.path, "read-tree", "-m", "-u", predecessor, candidate]);
+      await runGit(repository, ["-C", arm.path, "read-tree", "-m", "-u", predecessor, candidate]);
       effects.push({ kind: "target-checkout", path: arm.path, target: prepared.target.target, action: "followed" });
     } catch (error) {
       lag.push({

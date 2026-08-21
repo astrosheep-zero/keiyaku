@@ -9,6 +9,7 @@ import { Delivery, Keiyaku, KeiyakuRefused, KeiyakuRetry, Repo, type ContractId 
 import { contractId, documentKey } from "../src/core/facts/types.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { repositoryAt } from "../src/git/repository.js";
+import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { bindOperation } from "../src/protocol/bind.js";
 import { makeGitRepository } from "./support/git.js";
 
@@ -157,11 +158,11 @@ test("package root exposes only the ruled library values and declarations", () =
     'const contractDisposition: ContractDisposition = "active";',
     'const contractGateCurrent: ContractGateCurrent = { kind: "missing" };',
     'const contractGateReport: ContractGateReport = { gate: "custom", current: contractGateCurrent };',
-    'const workspaceObservation: ContractWorkspaceObservation = { kind: "clean", location: { kind: "here" }, counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 }, merge: null };',
+    'const workspaceObservation: ContractWorkspaceObservation = { kind: "clean", location: { kind: "worktree", path: "/repo/.git/keiyaku/wt/boundary" }, counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 }, merge: null };',
     'const failedWorkspaceObservation: ContractWorkspaceObservation = { kind: "failed", diagnostic: "duplicate appointment" };',
     'const after: ContractAfterEdge[] = [{ contractId: id, endpoint: { kind: "active", phase: contractPhase } }];',
     'const dependents: ContractDependent[] = [{ contractId: id, phase: contractPhase }];',
-    'const statusRow: ContractRow = { id, title: "Boundary", phase: contractPhase, phaseAt: "2026-08-16T00:00:00.000Z", lastJournalAt: "2026-08-16T00:00:01.000Z", disposition: contractDisposition, workspace: "here", worktreePath: null, workspaceObservation, target: null, targetLag: { kind: "none" }, delivery: null, targetObservation: null, gates: { reports: [contractGateReport], satisfied: false }, after, dependents };',
+    'const statusRow: ContractRow = { id, title: "Boundary", phase: contractPhase, phaseAt: "2026-08-16T00:00:00.000Z", lastJournalAt: "2026-08-16T00:00:01.000Z", disposition: contractDisposition, workspace: "worktree", worktreePath: null, workspaceObservation, target: null, targetLag: { kind: "none" }, delivery: null, targetObservation: null, gates: { reports: [contractGateReport], satisfied: false }, after, dependents };',
     'const statusBoard: ContractBoard = { root: ".", state: null, observedAt: "2026-08-16T00:00:02.000Z", rows: [statusRow] };',
     'const statusObservation: ContractObservation = { kind: "present", row: statusRow };',
     'const deliverInput = null as unknown as DeliverInput;',
@@ -310,13 +311,13 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   assert.deepEqual(Object.getOwnPropertyNames(Repo.prototype).filter((name) => name !== "constructor").sort(), ["currentBranch", "reconcile"]);
   assert.equal(await repo.currentBranch(), "refs/heads/main");
   await assert.rejects(
-    Keiyaku.bind({ repo, markdown: markdown("Invalid gate"), workspace: "here", gates: ["Edge-owned"] }),
+    Keiyaku.bind({ repo, markdown: markdown("Invalid gate"), workspace: "worktree", gates: ["Edge-owned"] }),
     (error: unknown) => error instanceof TypeError && error.message === "gates[0] must match ^[a-z][a-z0-9-]{0,63}$",
   );
   await assert.rejects(
     Keiyaku.bind({ repo,
       markdown: markdown("Duplicate gate"),
-      workspace: "here",
+      workspace: "worktree",
       gates: ["reviewed", "reviewed"],
     }),
     (error: unknown) => error instanceof TypeError && error.message === "gates must not contain duplicates",
@@ -324,7 +325,7 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
 
   const bound = await Keiyaku.bind({ repo,
     markdown: markdown("Markdown input"),
-    workspace: "here",
+    workspace: "worktree",
   });
   const state = await bound.keiyaku.state();
   assert.equal(state.id, "kei/markdown-input");
@@ -337,7 +338,10 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   ));
   assert.ok(guidance.includes(markdown("Markdown input")));
   assert.equal(guidance.match(/^## Fulfillment$/gmu)?.length, 1);
-  assert.equal(readFileSync(resolve(repo.root, ".keiyaku", "KEIYAKU.md"), "utf8"), guidance);
+  const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), state.id);
+  assert.equal(appointment.kind, "appointed");
+  if (appointment.kind !== "appointed") throw new Error("expected appointed worktree");
+  assert.equal(readFileSync(join(appointment.path, ".keiyaku", "KEIYAKU.md"), "utf8"), guidance);
 
   const sameTitle = await Keiyaku.bind({ repo, markdown: markdown("Markdown input"), workspace: "worktree" });
   assert.match((await sameTitle.keiyaku.state()).id, /^kei\/markdown-input-[0-9a-f]{16}$/);
@@ -351,15 +355,10 @@ test("Keiyaku owns contract construction over one pinned Repo capability", async
   );
 });
 
-test("package-root observe and list carry failed here workspace observations", async () => {
+test("package-root observe and list carry managed workspace observations", async () => {
   const repository = repositoryWithInitialCommit();
   const repo = await Repo.at({ path: repository.path });
-  const bound = await Keiyaku.bind({ repo, markdown: markdown("Duplicate here workspace"), workspace: "here" });
-  const linked = join(mkdtempSync(join(tmpdir(), "keiyaku-public-library-linked-")), "worktree");
-  repository.run(["worktree", "add", "--detach", linked, "HEAD"]);
-  const appointment = readFileSync(join(repository.path, ".keiyaku", "KEIYAKU.md"));
-  mkdirSync(join(linked, ".keiyaku"), { recursive: true });
-  writeFileSync(join(linked, ".keiyaku", "KEIYAKU.md"), appointment);
+  const bound = await Keiyaku.bind({ repo, markdown: markdown("Managed workspace"), workspace: "worktree" });
 
   const observed = await Keiyaku.observe({ repo, id: bound.keiyaku.id });
   assert.equal(observed.kind, "present");
@@ -367,15 +366,8 @@ test("package-root observe and list carry failed here workspace observations", a
   const listed = await Keiyaku.list({ repo });
   const listedRow = listed.rows.find((row) => row.id === bound.keiyaku.id);
 
-  for (const row of [observed.row, listedRow]) {
-    assert.equal(row?.worktreePath, null);
-    assert.equal(row?.workspaceObservation.kind, "failed");
-    if (row?.workspaceObservation.kind === "failed") {
-      assert.match(row.workspaceObservation.diagnostic, /duplicate here Contract workspace appointments/u);
-    }
-  }
-
-  repository.run(["worktree", "remove", "--force", linked]);
+  assert.equal(typeof observed.row.worktreePath, "string");
+  assert.equal(listedRow?.workspaceObservation.kind, "clean");
 });
 
 test("public handle values are type tokens, not alternate constructors", () => {
@@ -386,7 +378,7 @@ test("public handle values are type tokens, not alternate constructors", () => {
 test("bind canonicalizes branch targets and refuses invalid names before birth", async () => {
   const repository = repositoryWithInitialCommit();
   const repo = await Repo.at({ path: repository.path });
-  const bound = await Keiyaku.bind({ repo, markdown: markdown("Short target"), target: "main", workspace: "here" });
+  const bound = await Keiyaku.bind({ repo, markdown: markdown("Short target"), target: "main", workspace: "worktree" });
   assert.equal((await bound.keiyaku.state()).coordinates.target, "refs/heads/main");
 
   const gitBefore = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
@@ -408,7 +400,7 @@ test("bind canonicalizes branch targets and refuses invalid names before birth",
 
 test("public amend rejects a transitive prerequisite cycle without moving its head", async () => {
   const repo = await Repo.at({ path: repositoryWithInitialCommit().path });
-  const prerequisite = await Keiyaku.bind({ repo, markdown: markdown("Prerequisite"), workspace: "here" });
+  const prerequisite = await Keiyaku.bind({ repo, markdown: markdown("Prerequisite"), workspace: "worktree" });
   const prerequisiteId = (await prerequisite.keiyaku.state()).id;
 
   const amended = await Keiyaku.bind({ repo,
@@ -436,7 +428,7 @@ test("public amend rejects a transitive prerequisite cycle without moving its he
 
 test("amend applies Markdown once and preserves structured values unless replaced", async () => {
   const repository = repositoryWithInitialCommit();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: markdown("Amend input"), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: markdown("Amend input"), workspace: "worktree" });
 
   await assert.rejects(
     bound.keiyaku.amend({ markdown: "## Append: Context\ninvalid gate\n", gates: ["Edge-owned"] }),
@@ -479,11 +471,11 @@ test("amend applies Markdown once and preserves structured values unless replace
 test("arc decodes its Markdown input and worktree paths are computed", async () => {
   const repository = repositoryWithInitialCommit();
   const repo = await Repo.at({ path: repository.path });
-  const here = await Keiyaku.bind({ repo, markdown: markdown("Arc input"), workspace: "here" });
-  await here.keiyaku.arc({
+  const arcInput = await Keiyaku.bind({ repo, markdown: markdown("Arc input"), workspace: "worktree" });
+  await arcInput.keiyaku.arc({
     markdown: ["# Chapter", "", "## Objective", "advance", "", "## Brief", "dispatch", ""].join("\n"),
   });
-  assert.equal((await here.keiyaku.state()).currentArc?.data.seq, 1);
+  assert.equal((await arcInput.keiyaku.state()).currentArc?.data.seq, 1);
 
   const managed = await Keiyaku.bind({ repo, markdown: markdown("Managed"), workspace: "worktree" });
   const status = await Keiyaku.list({ repo });
@@ -520,14 +512,14 @@ test("library bind retries a colliding title stem with a hexadecimal suffix", as
   assert.match((await bound.keiyaku.state()).id, /^kei\/collision-title-[0-9a-f]{16}$/);
 });
 
-test("a non-collision here refusal stops after the first candidate and releases its reservation", async () => {
+test("a non-collision refusal stops after the first candidate and releases its reservation", async () => {
   const repository = repositoryWithInitialCommit();
   const appointment = resolve(repository.path, ".keiyaku", "KEIYAKU.md");
   await assert.rejects(
     Keiyaku.bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: markdown("Stop after refusal"),
-      workspace: "here",
+      workspace: "worktree",
       after: ["kei/missing-prerequisite" as ContractId],
     }),
     (error: unknown) => error instanceof KeiyakuRefused
@@ -542,7 +534,7 @@ test("ordinary review retains its complete local mutation result without a reque
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: markdown("Local review"),
-    workspace: "here",
+    workspace: "worktree",
     gates: ["reviewed"],
   });
 
@@ -556,10 +548,12 @@ test("ordinary review retains its complete local mutation result without a reque
 
 test("Delivery.diff remains a nullable Promise-backed Git read", async () => {
   const repository = repositoryWithInitialCommit();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: markdown("Diff input"), workspace: "here" });
-  writeFileSync(join(repository.path, "candidate.txt"), "candidate\n");
-  repository.run(["add", "candidate.txt"]);
-  repository.run(["commit", "--quiet", "-m", "candidate"]);
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: markdown("Diff input"), workspace: "worktree" });
+  const appointment = await readManagedWorktreeAppointment(await repositoryAt(repository.path), bound.keiyaku.id);
+  if (appointment.kind !== "appointed") throw new Error("expected appointed worktree");
+  writeFileSync(join(appointment.path, "candidate.txt"), "candidate\n");
+  repository.run(["-C", appointment.path, "add", "candidate.txt"]);
+  repository.run(["-C", appointment.path, "commit", "--quiet", "-m", "candidate"]);
   const delivered = await bound.keiyaku.deliver();
   const diff = await delivered.value.diff();
   assert.equal(typeof diff, "string");

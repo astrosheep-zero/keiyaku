@@ -66,9 +66,6 @@ failure remains `reconcile-failed`; it is not a retained follow shape. A
 follow reports `worktree` action `followed` with its before and after snapshot.
 No target ref moves, attached branch follows, extra commits, refs, markers, or
 persisted follow state exist.
-For a here contract, reconciliation never creates, removes, switches,
-detaches, or resets the caller-supplied worktree or its branch.
-
 Target-checkout reconciliation exists only to finish the current claimed
 placement's interrupted follow. It takes the same canonical target fence as
 placement, rereads the claimed delivery and target ref, and applies only the
@@ -84,7 +81,7 @@ lock, mutates no refs or worktrees, and executes no hooks. World status and
 the Contract catalog omit it.
 
 A pending tender keeps its tender and integration reachable through
-Keiyaku-owned refs in either workspace mode. Cleanup never moves the target ref.
+Keiyaku-owned refs for the managed worktree. Cleanup never moves the target ref.
 
 Terminal removal of a managed worktree resolves the immutable tree and parent
 metadata for its sealed commit identities once through the current Git decode

@@ -136,26 +136,6 @@ export function renderRefusalFacts(
     lines.push(...collectionLines("paths", refusal.paths, indent, columns));
     return lines;
   }
-  if (refusal.kind === "workspace-not-on-target") {
-    return renderOpaqueBlock(
-      refusalHead(refusal.kind, identity, [`target=${refusal.target}`, `branch=${refusal.branch}`]),
-      indent,
-      columns,
-    );
-  }
-  if (refusal.kind === "here-target-mismatch") {
-    return renderOpaqueBlock(`here-target-mismatch target=${refusal.target} branch=${refusal.branch}`, indent, columns);
-  }
-  if (refusal.kind === "here-worktree-appointed") {
-    return renderOpaqueBlock(
-      refusalHead(refusal.kind, undefined, [
-        refusal.contract === undefined ? "" : `contract=${refusal.contract}`,
-        `path=${refusal.path}`,
-      ]),
-      indent,
-      columns,
-    );
-  }
   return renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns);
 }
 

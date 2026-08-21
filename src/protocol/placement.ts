@@ -42,7 +42,6 @@ type PlacementAdmissionInput<ExtraRefusal> = Readonly<{
   repository: GitRepository;
   target: string | undefined;
   placement: PlacementProtocolInput;
-  hereWorkspacePath?: string;
   onDeliveryMissing?: () => Promise<PlacementProtocolResult<ExtraRefusal> | undefined>;
 }>;
 
@@ -65,7 +64,6 @@ async function runFencedPlacement(
   repository: GitRepository,
   input: PlacementProtocolInput,
   protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal>,
-  hereWorkspacePath?: string,
 ): Promise<PlacementProtocolResult> {
   for (let index = 0; index < protocol.attempts.length; index += 1) {
     const prepared = await prepareProtocolAttempt(protocol, protocol.attempts[index]!);
@@ -83,7 +81,7 @@ async function runFencedPlacement(
         observed,
       };
     }
-    const physical = await prepareTargetPlacement(repository, state, prepared.offer.target, hereWorkspacePath);
+    const physical = await prepareTargetPlacement(repository, state, prepared.offer.target);
     if (physical.kind === "refused") return physical;
     const result = await admitDecidedOffer({
       channel: protocol.channel,
@@ -155,7 +153,7 @@ function isDeliveryMissing(result: PlacementProtocolResult): boolean {
 export async function admitPlacement<ExtraRefusal = never>(
   admission: PlacementAdmissionInput<ExtraRefusal>,
 ): Promise<PlacementProtocolResult<ExtraRefusal>> {
-  const { channel, repository, target, placement: input, hereWorkspacePath, onDeliveryMissing } = admission;
+  const { channel, repository, target, placement: input, onDeliveryMissing } = admission;
   const attempts = mintAttempts({ entryCount: 1 });
   const protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal> = {
     input,
@@ -172,7 +170,7 @@ export async function admitPlacement<ExtraRefusal = never>(
     repository,
     target,
     async () => {
-      const result = await runFencedPlacement(repository, input, protocol, hereWorkspacePath);
+      const result = await runFencedPlacement(repository, input, protocol);
       if (onDeliveryMissing === undefined || !isDeliveryMissing(result)) return result;
       return (await onDeliveryMissing()) ?? result;
     },

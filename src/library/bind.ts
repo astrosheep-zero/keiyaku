@@ -1,9 +1,4 @@
 import { randomBytes } from "node:crypto";
-import {
-  releaseContractWorktree,
-  reserveContractWorktree,
-  withContractWorktreeAppointment,
-} from "../contract-worktree.js";
 import { contractIdFromSegment, type ActorId, type ContractId } from "../core/facts/types.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js";
@@ -20,7 +15,7 @@ type BindAttemptInput = Readonly<{
   title: string;
   terms: Parameters<typeof bindOperation>[0]["terms"];
   verification: VerificationDeclarationPreparation;
-  workspace: "worktree" | "here";
+  workspace: "worktree";
   target?: string;
   coordinates?: Readonly<{ start: import("../core/facts/types.js").SnapshotId }>;
   source?: Parameters<typeof bindOperation>[0]["source"];
@@ -61,30 +56,13 @@ async function attemptCandidates(
   let result!: IntentOutcome<Readonly<{ contractId: ContractId }>, KeiyakuRefusal>;
   for (let collision = 0; collision <= 3; collision += 1) {
     const id = candidateId(input.title, collision);
-    let reserved = false;
-    if (input.workspace === "here") {
-      const reservation = await reserveContractWorktree(input.scope, id);
-      if (reservation.kind !== "reserved") {
-        return {
-          kind: "refused",
-          refusal: {
-            kind: "here-worktree-appointed",
-            path: reservation.path,
-            ...(reservation.kind === "appointed" ? { contract: reservation.contract } : {}),
-          },
-        };
-      }
-      reserved = true;
-    }
     result = await attempt(input, id);
     if (result.kind === "accepted") return result;
-    if (reserved) await releaseContractWorktree(input.scope, id);
     if (result.kind !== "refused" || result.refusal.kind !== "contract-exists") return result;
   }
   return result;
 }
 
 export async function admitBindWithAppointment(input: BindAttemptInput) {
-  const action = () => attemptCandidates(input);
-  return input.workspace === "here" ? await withContractWorktreeAppointment(input.scope, action) : action();
+  return await attemptCandidates(input);
 }

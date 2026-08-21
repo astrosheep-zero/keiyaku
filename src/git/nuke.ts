@@ -1,5 +1,4 @@
 import { access } from "node:fs/promises";
-import { nukeHereAppointments } from "../contract-worktree.js";
 import type { ContractId } from "../core/facts/types.js";
 import { nukeEmptyPlaceAuthority, readPlaceRegister, releaseManagedWorktrees } from "../workspace-place.js";
 import type { WorldRoot } from "../world.js";
@@ -98,7 +97,6 @@ export async function nukeGit(world: WorldRoot): Promise<void> {
     await removeManagedWorktree(repository, entry);
     await releaseManagedWorktrees(repository, [entry.contract]);
   }
-  await nukeHereAppointments(repository);
   await nukeEmptyPlaceAuthority(repository);
   await removeOwnedRefs(repository, custody.refs);
   if (custody.state) {

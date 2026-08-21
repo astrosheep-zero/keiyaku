@@ -2,12 +2,7 @@ import type { ContractId, ContractState, JournalEntry } from "../core/facts/type
 import { observeActiveContractWorld } from "../git/observe.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import { continueDeliveryOperation } from "../protocol/deliver.js";
-import type {
-  DocumentDerivation,
-  HereWorkspaceResolver,
-  PlacementStop,
-  RepositoryScope,
-} from "../protocol/operations.js";
+import type { DocumentDerivation, PlacementStop, RepositoryScope } from "../protocol/operations.js";
 import type { AcceptedIntent } from "./mutation.js";
 
 export type ContinuationReport = Readonly<{
@@ -62,7 +57,6 @@ export async function continueDeliveredDependents<Value extends object>(
     contractId: ContractId;
     accepted: AcceptedIntent<Value>;
     deriveDocument: (state: ContractState) => DocumentDerivation;
-    resolveHereWorkspace?: HereWorkspaceResolver;
     actor?: import("../core/facts/types.js").ActorId;
     signal?: AbortSignal;
   }>,
@@ -99,7 +93,6 @@ export async function continueDeliveredDependents<Value extends object>(
         state: candidate.state,
         journal: candidate.journal,
         deriveDocument: input.deriveDocument,
-        ...(input.resolveHereWorkspace === undefined ? {} : { resolveHereWorkspace: input.resolveHereWorkspace }),
         ...(input.actor === undefined ? {} : { actor: input.actor }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
@@ -136,7 +129,6 @@ export async function continueAcceptedCompletion<Value extends Readonly<{ comple
     contractId: ContractId;
     accepted: AcceptedIntent<Value>;
     deriveDocument: (state: ContractState) => DocumentDerivation;
-    resolveHereWorkspace?: HereWorkspaceResolver;
     actor?: import("../core/facts/types.js").ActorId;
     signal?: AbortSignal;
   }>,

@@ -14,7 +14,6 @@ import { deliverOperation } from "../src/protocol/deliver.js";
 import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
-import { resolveHereContractWorkspace } from "../src/contract-worktree.js";
 import { appointedWorktreePath, type TestGitRepository } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 
@@ -59,10 +58,11 @@ async function failedStoredVerification(): Promise<Readonly<{
   state: Awaited<ReturnType<Keiyaku["state"]>>;
 }>> {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(), workspace: "here", gates: ["verified"] });
-  writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
-  repository.run(["add", "candidate.txt"]);
-  repository.run(["commit", "--quiet", "-m", "candidate"]);
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(), workspace: "worktree", gates: ["verified"] });
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), bound.keiyaku.id);
+  writeFileSync(`${worktree}/candidate.txt`, "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
   const delivered = await bound.keiyaku.deliver();
   const state = await bound.keiyaku.state();
   assert.equal(state.attestations.at(-1)?.data.verdict, "unsatisfied");
@@ -75,7 +75,7 @@ test("a verified placement gate without a Verification declaration is refused at
   await assert.rejects(
     Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
       markdown: verificationBody(null),
-      workspace: "here",
+      workspace: "worktree",
       gates: ["verified"],
     }),
     refused({ kind: "verification-declaration-invalid" }),
@@ -84,7 +84,7 @@ test("a verified placement gate without a Verification declaration is refused at
 
 test("an active amend cannot admit verified terms without a Verification declaration", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "worktree" });
   const before = await bound.keiyaku.state();
 
   await assert.rejects(
@@ -102,7 +102,7 @@ test("an active amend cannot admit verified terms without a Verification declara
 
 test("terminal amend refusal outranks a missing Verification declaration", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "worktree" });
   const id = (await bound.keiyaku.state()).id;
   await bound.keiyaku.abandon();
 
@@ -117,7 +117,7 @@ test("terminal amend refusal outranks a missing Verification declaration", async
 
 test("a stale document derivation is refused inside its E-decision", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: verificationBody(null), workspace: "worktree" });
   const state = await bound.keiyaku.state();
   const decoded = decodeContractDocument(state.terms.document.bytes);
   const derivation = {
@@ -156,7 +156,7 @@ test("audit without Verification still returns an accepted ready candidate", asy
   const repository = repositoryWithMain();
   const bound = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
-    workspace: "here",
+    workspace: "worktree",
   });
 
   const scope = await scopeOperation({ coordinate: repository.path });
@@ -177,10 +177,6 @@ test("audit without Verification still returns an accepted ready candidate", asy
         contractId,
       }),
     }),
-    resolveHereWorkspace: async (id) => {
-      const appointment = await resolveHereContractWorkspace(scope, id);
-      return appointment.kind === "appointed" ? appointment.path : undefined;
-    },
   }));
   assert.equal(result.kind, "accepted");
   if (result.kind !== "accepted") return;

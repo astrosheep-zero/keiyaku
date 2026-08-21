@@ -373,13 +373,7 @@ function continuationLines(result: AcceptedDeliverResult | AcceptedReviewResult,
 
 function renderAcceptedBind(result: AcceptedBindResult, columns: number): string {
   const lines = titleLines("✓", "bound", result.contract, columns);
-  receiptRow(
-    lines,
-    " ",
-    "workspace",
-    [{ text: result.workspace === "worktree" ? "managed worktree" : "here" }],
-    columns,
-  );
+  receiptRow(lines, " ", "workspace", [{ text: "managed worktree" }], columns);
   if (result.target === null) receiptRow(lines, " ", "no target", [], columns);
   else receiptRow(lines, " ", "target", [{ text: result.target, opaque: true }], columns);
   lines.push(...acceptedDeviations(result, columns), ...recordBlock(result, columns));

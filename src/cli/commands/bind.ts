@@ -25,7 +25,6 @@ export async function bindFromCommand({ command, repo, markdown, gates, actor, h
       repo,
       forkOf: contractFromInput(repo, command.forkOf).id,
       ...(command.target === undefined ? {} : { target: command.target }),
-      ...(command.workspace === undefined ? {} : { workspace: command.workspace }),
       ...(actor === undefined ? {} : { actor }),
       ...(hooks === undefined ? {} : { hooks }),
     });
@@ -38,7 +37,6 @@ export async function bindFromCommand({ command, repo, markdown, gates, actor, h
     markdown,
     ...(command.task === undefined ? {} : { task: command.task as `task/${string}` }),
     ...(target === null ? {} : { target }),
-    ...(command.workspace === undefined ? {} : { workspace: command.workspace }),
     ...(actor === undefined ? {} : { actor }),
     ...(hooks === undefined ? {} : { hooks }),
     ...(after === undefined ? {} : { after }),

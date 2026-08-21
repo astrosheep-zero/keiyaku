@@ -35,7 +35,7 @@ function waitingState(contract: ReturnType<typeof contractId>, after: readonly R
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
     at: "2026-08-07T00:00:00Z",
     data: {
-      coordinates: { start: snapshotId("start"), workspace: "here" },
+      coordinates: { start: snapshotId("start"), workspace: "worktree" },
       terms: terms(after),
     },
   }]);
@@ -50,7 +50,7 @@ function deliveredState(contract: ReturnType<typeof contractId>, after: readonly
       entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
       at: "2026-08-07T00:00:00Z",
       data: {
-        coordinates: { start: snapshotId("start"), workspace: "here" },
+        coordinates: { start: snapshotId("start"), workspace: "worktree" },
         terms: terms(after),
       },
     },
@@ -155,7 +155,7 @@ test("decision accessor rejects a missing key, while explicit null is domain abs
       preparation: {
         kind: "prepared",
         data: {
-          coordinates: { start: snapshotId("start"), workspace: "here" },
+          coordinates: { start: snapshotId("start"), workspace: "worktree" },
           terms: terms([dependency]),
         },
       },
@@ -208,7 +208,7 @@ test("the decision map cannot carry a disagreeing state identity", () => {
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
     at: "2026-08-07T00:00:00Z",
     data: {
-      coordinates: { start: snapshotId("start"), workspace: "here" },
+      coordinates: { start: snapshotId("start"), workspace: "worktree" },
       terms: terms(),
     },
   }]);
@@ -254,7 +254,7 @@ test("lifecycle and document refusals outrank a refused preparation", () => {
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
     at: "2026-08-07T00:00:00Z",
     data: {
-      coordinates: { start: snapshotId("start"), workspace: "here" },
+      coordinates: { start: snapshotId("start"), workspace: "worktree" },
       terms: terms(),
     },
   };

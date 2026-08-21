@@ -45,7 +45,6 @@ type CompletionInput = Readonly<{
   verification: VerificationDeclarationPreparation;
   initial: AcceptedProtocolStep;
   verifyInitial: boolean;
-  hereWorkspacePath?: string;
 }>;
 
 export type CompletionResult = Readonly<{
@@ -189,7 +188,6 @@ async function admitCurrentPlacement(input: CompletionInput) {
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
     },
-    ...(input.hereWorkspacePath === undefined ? {} : { hereWorkspacePath: input.hereWorkspacePath }),
   });
 }
 
@@ -223,7 +221,6 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
       contractId: input.contractId,
       target: input.target,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
-      ...(input.hereWorkspacePath === undefined ? {} : { hereWorkspacePath: input.hereWorkspacePath }),
     });
     if (reintegrated.kind !== "accepted") {
       return { admission, evidence: mergeEvidence(evidence, { placement: reintegrationStop(reintegrated) }) };

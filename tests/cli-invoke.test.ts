@@ -954,61 +954,6 @@ test("bind defaults to reviewed unless a present default bundle overrides it", a
   );
 });
 
-test("audit --diff renders the prospective candidate without a prior Delivery read", async () => {
-  const repository = repositoryWithMain();
-  const bound = await invokeWithDocument(
-    repository.path,
-    ["bind", "--here", "--actor", "external-test", "-"],
-    contractDocument("Audit terminal diff"),
-  );
-  const id = acceptedContract(bound);
-  writeFileSync(resolve(repository.path, "candidate.txt"), "candidate\n");
-
-  const contract = Keiyaku.of({ repo: await Repo.at({ path: repository.path }), id });
-  const delivery = Keiyaku.prototype.delivery;
-  let deliveryReads = 0;
-  Keiyaku.prototype.delivery = async function() {
-    deliveryReads += 1;
-    return delivery.call(this);
-  };
-  try {
-    const result = await invokeWithDocument(
-      repository.path,
-      ["audit", id, "--include-dirty", "--diff", "--actor", "external-test"],
-      "",
-    );
-    assert.equal(result.kind, "accepted");
-    if (result.kind !== "accepted") return;
-    const text = renderText(result);
-    const json = JSON.parse(JSON.stringify(result)) as {
-      diff?: unknown;
-      report?: { candidate?: { kind?: string; diff?: unknown } };
-    };
-    assert.equal("diff" in result, false);
-    assert.equal("diff" in json, false);
-    assert.equal(result.report?.candidate.kind === "ready" ? result.report.candidate.diff?.includes("+candidate") : false, true);
-    assert.equal(typeof json.report?.candidate?.diff, "string");
-    assert.match(String(json.report?.candidate?.diff), /\+candidate/);
-    assert.equal(text.split("+candidate").length - 1, 1);
-    assert.match(text, /✓ candidate ready/);
-    assert.doesNotMatch(text, /"diff":"diff --git/);
-    assert.equal(deliveryReads, 0);
-    assert.equal((await contract.delivery()), null);
-
-    const hidden = await invokeWithDocument(
-      repository.path,
-      ["audit", id, "--include-dirty", "--actor", "external-test"],
-      "",
-    );
-    assert.equal(hidden.kind, "accepted");
-    if (hidden.kind !== "accepted") return;
-    assert.equal(hidden.report?.candidate.kind === "ready" && "diff" in hidden.report.candidate, false);
-    assert.equal("diff" in hidden, false);
-    assert.equal(renderText(hidden).includes("+candidate"), false);
-  } finally {
-    Keiyaku.prototype.delivery = delivery;
-  }
-});
 
 test("managed delivery follows an eligible deterministic worktree", async () => {
   const repository = repositoryWithMain();
@@ -1270,72 +1215,6 @@ test("reconcile world command carries a typed discovery failure", async () => {
   assert.equal(jsonOutput.report.diagnostic, report.diagnostic);
 });
 
-test("--here delivers in place without owning a managed worktree", async () => {
-  const repository = repositoryWithMain();
-  const main = repository.run(["rev-parse", "refs/heads/main"]).trim();
-  repository.run(["checkout", "--quiet", "-b", "feature"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "feature candidate"]);
-  const candidate = repository.run(["rev-parse", "HEAD"]).trim();
-  const command = (argv: readonly string[], source = contractDocument("Here Worktree")) => invoke(
-    parseArgv(["-C", repository.path, ...argv]),
-    { environment: {}, readStdin: () => source },
-  );
-
-  const bound = await command(["bind", "--here", "--actor", "external-test", "-"]);
-  const id = acceptedContract(bound);
-  assert.deepEqual((await observeContract(await repositoryAt(repository.path), id)).state?.coordinates, {
-    start: candidate,
-    target: "refs/heads/feature",
-    workspace: "here",
-  });
-
-  await assert.rejects(
-    () => command(["deliver", "--actor", "external-test"]),
-    (error: unknown) => error instanceof CliUsageError && /explicit full or @ contract selector/.test(error.message),
-  );
-
-  const deliver = await command(["deliver", id, "--actor", "external-test"]);
-  assert.equal(deliver.kind, "accepted");
-  const state = (await observeContract(await repositoryAt(repository.path), id)).state;
-  assert.equal(state?.delivery?.data.integration.predecessor, candidate);
-  assert.equal(state?.delivery?.data.tenderSnapshot, candidate);
-  assert.notEqual(state?.delivery?.data.integration.snapshot, candidate);
-  assert.equal(await readRef(await repositoryAt(repository.path), candidatePinRefFor(id)), state?.delivery?.data.integration.snapshot);
-  assert.equal(await readRef(await repositoryAt(repository.path), "refs/heads/main"), main);
-  assert.equal(await readRef(await repositoryAt(repository.path), "refs/heads/feature"), candidate);
-  assert.equal(repository.run(["symbolic-ref", "--short", "HEAD"]).trim(), "feature");
-  assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), candidate);
-  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)), null);
-  assert.deepEqual(await readManagedWorktreeAppointment(await repositoryAt(repository.path), id), { kind: "unappointed" });
-  const reconcileRepository = await repositoryAt(repository.path);
-  const reconciled = await withGitDecodeChannel(reconcileRepository, (channel) => reconcile({
-    repository: reconcileRepository,
-    channel,
-    contractId: id,
-    hooks: { create: [], destroy: [] },
-    retryHooks: false,
-  }));
-  assert.equal(reconciled.result.effects.some((effect) => effect.kind === "worktree"), false);
-
-  const changesRequested = await command(
-    ["review", id, "--unsatisfied", "--actor", "external-test", "-"],
-    "summary from stdin\r\n",
-  );
-  assert.equal(changesRequested.kind, "accepted");
-  assert.equal(
-    (await observeContract(await repositoryAt(repository.path), id)).state?.attestations.at(-1)?.data.summary,
-    "summary from stdin\r\n",
-  );
-  const abandoned = await command(["abandon", id, "--actor", "external-test"]);
-  assert.equal(abandoned.kind, "accepted");
-  assert.equal(await readRef(await repositoryAt(repository.path), candidatePinRefFor(id)), state?.delivery?.data.integration.snapshot);
-  assert.equal(await readRef(await repositoryAt(repository.path), "refs/heads/main"), main);
-  assert.equal(await readRef(await repositoryAt(repository.path), "refs/heads/feature"), candidate);
-  assert.equal(repository.run(["symbolic-ref", "--short", "HEAD"]).trim(), "feature");
-  assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), candidate);
-  assert.equal(await readRef(await repositoryAt(repository.path), deliveryRefFor(id)), null);
-  assert.deepEqual(await readManagedWorktreeAppointment(await repositoryAt(repository.path), id), { kind: "unappointed" });
-});
 
 test("selector refusal does not use sole-active fallback and accepts only active @short", async () => {
   const repository = repositoryWithMain();

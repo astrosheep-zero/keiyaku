@@ -69,7 +69,7 @@ type MarkdownBindInput = Readonly<{
   markdown: string
   task?: TaskId
   target?: string
-  workspace?: "worktree" | "here"
+  workspace?: "worktree"
   actor?: ActorId
   after?: readonly ContractId[]
   gates?: readonly Gate[]
@@ -80,7 +80,7 @@ type ForkBindInput = Readonly<{
   repo: Repo
   forkOf: ContractId
   target?: string
-  workspace?: "worktree" | "here"
+  workspace?: "worktree"
   actor?: ActorId
   hooks?: WorktreeHooks
 }>
@@ -134,10 +134,11 @@ The result union is owned by [public-results.md](public-results.md). The
 confirmation and reset semantics are owned by [world.md](world.md).
 
 `markdown` is the complete contract document and is decoded at the library
-edge. `workspace` defaults to `"worktree"`. `task`, `target`, `workspace`, `actor`,
-`after`, `gates`, and `hooks` are structured construction inputs. The edge mints opaque
-document keys, while `gates` and `after` remain machine terms; their ownership
-is defined by [document.md](document.md) and [lifecycle.md](lifecycle.md).
+edge. `workspace` defaults to `"worktree"` and admits only that value. `task`,
+`target`, `workspace`, `actor`, `after`, `gates`, and `hooks` are structured
+construction inputs. The edge mints opaque document keys, while `gates` and
+`after` remain machine terms; their ownership is defined by
+[document.md](document.md) and [lifecycle.md](lifecycle.md).
 
 `task`, when present, is one complete `TaskId`. The Library composes the
 Contract bind with the TaskHolder claim defined by [settlement.md](settlement.md)
@@ -170,14 +171,6 @@ current `HEAD`. The canonical full ref is the only target value persisted in
 contract coordinates; its Git meaning is defined in
 [git.md](git.md).
 
-The one coupling is explicit `workspace: "here"`: when it also carries a
-target, the caller worktree's symbolic branch must equal that canonical target.
-A different or detached branch returns `here-target-mismatch` before Contract
-birth. A later deliver from a here workspace rechecks the immutable coordinate;
-`workspace-not-on-target` is a mechanical delivery refusal before a tender fact
-when that branch moved. Both refusals report the expected target and observed
-branch; `null` denotes detached HEAD. Targetless here remains valid.
-
 `Repo.at` resolves and pins the Git world before returning; omitted `path` uses
 the caller cwd. Optional nonblank `gitPath` selects and pins the executable for
 every Git subprocess issued through that Repo; omission uses the literal
@@ -192,8 +185,7 @@ read-time `KanshiInput.region` selection and typed `RegionRead` values. This is
 a current active-document read using the document Region owner; it is not
 persisted and is independent of delivery or audit paths.
 `Repo.at` throws outside a repository; `root` is the primary-worktree absolute
-path, so its worktrees share one journal while retaining the caller coordinate
-needed by `workspace: "here"`.
+path, so its worktrees share one journal.
 `Keiyaku.list` enumerates the active Contract world from one Git observation
 and samples `observedAt` with that observation. `Keiyaku.observe` performs one
 targeted journal observation without enumerating the world. Both project the
@@ -229,9 +221,7 @@ type ContractTargetLag =
   | Readonly<{ kind: "counted"; behind: number }>
   | Readonly<{ kind: "unknown" }>
   | Readonly<{ kind: "none" }>
-type ContractWorkspaceLocation =
-  | Readonly<{ kind: "worktree"; path: string }>
-  | Readonly<{ kind: "here" }>
+type ContractWorkspaceLocation = Readonly<{ kind: "worktree"; path: string }>
 type ContractWorkspaceMerge = Readonly<{
   head: SnapshotId
   unmergedPaths: readonly string[]
@@ -264,7 +254,7 @@ type ContractRow = Readonly<{
   phaseAt: string
   lastJournalAt: string
   disposition: "active" | "terminal"
-  workspace: "worktree" | "here"
+  workspace: "worktree"
   worktreePath: string | null
   workspaceObservation: ContractWorkspaceObservation
   target: string | null
@@ -307,10 +297,8 @@ Git object IDs — `state`, tender snapshot, integration predecessor/snapshot,
 target HEAD, and merge head — with unique prefixes, minimum 7 and lengthened as
 required. ChangeId, ContractId, EntryUlid, TaskId, and AkuId remain complete.
 The generic `failed { diagnostic: string }` arm reports workspace-appointment
-authority corruption or an unreadable workspace fact without a new refusal. A
-duplicate valid here appointment produces that arm for list, observe, and
-Kanshi; `worktreePath` remains null. Its diagnostic is bounded text and may
-include matching worktree paths, but has no structured path field. Mutating
+authority corruption or an unreadable workspace fact without a new refusal.
+Its diagnostic is bounded text and has no structured path field. Mutating
 pre-admission paths and nonterminal reconciliation instead throw
 `AuthorityCorruptionError`.
 

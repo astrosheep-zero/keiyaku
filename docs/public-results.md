@@ -190,7 +190,7 @@ type MergeStatePresentRefusal = Readonly<{
   kind: "merge-state-present"
   contractId: ContractId
   workspace: Readonly<{
-    kind: "here" | "worktree"
+    kind: "worktree"
     path: string
   }>
 }>
@@ -200,7 +200,7 @@ type IntegrationConflictMaterialized = Readonly<{
   targetHead: SnapshotId
   conflictPaths: readonly string[]
   workspace: Readonly<{
-    kind: "here" | "worktree"
+    kind: "worktree"
     path: string
   }>
 }>
@@ -214,13 +214,6 @@ type CheckoutNotFollowableRefusal = Readonly<{
   paths: readonly string[]
 }>
 
-type DeliveryWorkspaceRefusal = Readonly<{
-  kind: "workspace-not-on-target"
-  contractId: ContractId
-  target: string
-  branch: string | null
-}>
-
 type DeliveryPreparationRefusal =
   | Readonly<{ kind: "target-missing" | "worktree-missing"; contractId: ContractId }>
   | DirtyWorkspaceRefusal
@@ -228,7 +221,6 @@ type DeliveryPreparationRefusal =
   | IntegrationRefusal
   | MergeStatePresentRefusal
   | CheckoutNotFollowableRefusal
-  | DeliveryWorkspaceRefusal
 
 type DirtyWorkspaceRefusal = Readonly<{
   kind: "dirty-workspace"
@@ -258,11 +250,6 @@ type DocumentMovedRefusal = Readonly<{
 type TargetInputRefusal =
   | Readonly<{ kind: "invalid-target" }>
   | Readonly<{ kind: "target-missing" }>
-  | Readonly<{
-      kind: "here-target-mismatch"
-      target: string
-      branch: string | null
-    }>
 
 type VerificationStop =
   | StepStop<AttestationRefusal>
@@ -280,7 +267,7 @@ type VerificationStop =
   | Readonly<{ failure: "spawn-error"; diagnostic: string }>
 
 type PlacementStop =
-  | StepStop<PlacementRefusal | IntegrationRefusal | CheckoutNotFollowableRefusal | DeliveryWorkspaceRefusal>
+  | StepStop<PlacementRefusal | IntegrationRefusal | CheckoutNotFollowableRefusal>
   | Readonly<{
       failure: "target-moved"
       contractId: ContractId
@@ -401,9 +388,8 @@ derive its complete replacement no longer matches the attempt observation.
 `DocumentMovedRefusal` for their key-stamped document derivation. Review receives no decoded-document
 derivation and does not expose `document-moved`; its testimony remains keyed to
 the subject actually reviewed. `KeiyakuRefusal` therefore includes
-`terms-moved` for amend, `DocumentMovedRefusal` for deliver and audit, and
-`DeliveryWorkspaceRefusal` for a here deliver whose caller workspace left its
-target. It also includes `DirtyWorkspaceRefusal` when delivery lacks explicit
+`terms-moved` for amend and `DocumentMovedRefusal` for deliver and audit.
+It also includes `DirtyWorkspaceRefusal` when delivery lacks explicit
 dirty authorization, when dirty submodule internals cannot be sealed or
 observed, or when conflict materialization finds a dirty appointed workspace,
 including when `includeDirty` is also supplied. Existing Git merge state
@@ -424,9 +410,8 @@ work. A resolved `MERGE_HEAD` remains ordinary dirty authorization: with
 its ordered parents.
 
 `TargetInputRefusal` is the `KeiyakuRefusal` member for `Keiyaku.bind` target
-validation, existence, and the targeted-here branch relationship. It has no
-contract coordinate because a rejected target establishes no contract
-identity.
+validation and existence. It has no contract coordinate because a rejected
+target establishes no contract identity.
 
 Every accepted `AmendResult` includes its nonoptional `documentDiff`. The
 library computes it exactly once with the JavaScript `diff` package from the
@@ -533,7 +518,7 @@ Read-only `ContractWorkspaceObservation` is owned by
 second read-result shape.
 
 ```ts
-type AuditWorkspace = Readonly<{ kind: "worktree" | "here"; path: string }>
+type AuditWorkspace = Readonly<{ kind: "worktree"; path: string }>
 type DiffScope = Readonly<{
   filesChanged: number
   insertions: number

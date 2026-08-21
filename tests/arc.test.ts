@@ -50,7 +50,7 @@ function entry<K extends JournalEntry["kind"]>(
 
 function bind(suffix = "AA") {
   const document = decodeContractDocument(contractDocument(body.title));
-  return entry("bind", { coordinates: { start: initial, workspace: "here" }, terms: { document: document.document, segments: document.segments, gates: [], after: [] } }, suffix);
+  return entry("bind", { coordinates: { start: initial, workspace: "worktree" }, terms: { document: document.document, segments: document.segments, gates: [], after: [] } }, suffix);
 }
 
 function arc(seq: number, suffix: string) {

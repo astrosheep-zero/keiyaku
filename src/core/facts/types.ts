@@ -99,7 +99,7 @@ export function gate(value: string): Gate {
 export type ContractCoordinates = Readonly<{
   start: SnapshotId;
   target?: string;
-  workspace: "worktree" | "here";
+  workspace: "worktree";
 }>;
 
 export type ContractTerms = Readonly<{

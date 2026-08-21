@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
@@ -15,22 +14,6 @@ import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { completeRepoReconcile } from "../src/library/reconcile.js";
 import { appointedWorktreePath, makeGitRepository, withGitShim } from "./support/git.js";
 import { bind, commitCandidate, document, refused, repositoryWithMain } from "./support/library-verbs.js";
-
-const CANONICAL_DESCRIPTION = "This is a read-only projection. Do not edit manually.";
-
-function appoint(repositoryPath: string, contract: string, description?: string): string {
-  const root = realpathSync(repositoryPath);
-  const path = resolve(root, ".keiyaku", "KEIYAKU.md");
-  mkdirSync(resolve(root, ".keiyaku"), { recursive: true });
-  writeFileSync(path, description === undefined
-    ? `---\ncontract: ${contract}\n---\n`
-    : `---\ncontract: ${contract}\ndescription: ${description}\n---\n`);
-  return path;
-}
-
-function appointmentPath(repositoryPath: string): string {
-  return resolve(realpathSync(repositoryPath), ".keiyaku", "KEIYAKU.md");
-}
 
 async function bindRetained(
   repo: Repo,
@@ -292,170 +275,6 @@ test("native resolution continues through plain deliver against the then-current
   assert.equal(delivered.value.tenderSnapshot, mergeCommit);
   assert.equal(delivered.value.integration.predecessor, thenHead);
   assert.equal(mergeHead(repository, worktree), null);
-});
-
-test("here bind preserves and refuses an appointment whose journal is missing", async () => {
-  const repository = repositoryWithMain();
-  const contract = "kei/missing-appointment";
-  const path = appoint(repository.path, contract);
-  const before = readFileSync(path, "utf8");
-
-  await assert.rejects(
-    Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
-    refused({ kind: "here-worktree-appointed", path, contract }),
-  );
-
-  assert.equal(readFileSync(path, "utf8"), before);
-});
-
-test("here bind preserves and refuses a residual terminal appointment", async () => {
-  const repository = repositoryWithMain();
-  const terminal = await bind(repository);
-  const contract = (await terminal.state()).id;
-  await terminal.abandon();
-  const path = appoint(repository.path, contract);
-  const before = readFileSync(path, "utf8");
-
-  await assert.rejects(
-    Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
-    refused({ kind: "here-worktree-appointed", path, contract }),
-  );
-
-  assert.equal(readFileSync(path, "utf8"), before);
-});
-
-test("here bind preserves a manually changed one-line description appointment", async () => {
-  const repository = repositoryWithMain();
-  const contract = "kei/edited-description";
-  const path = appoint(repository.path, contract, "edited by hand");
-  const before = readFileSync(path, "utf8");
-
-  await assert.rejects(
-    Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
-    refused({ kind: "here-worktree-appointed", path, contract }),
-  );
-
-  assert.equal(readFileSync(path, "utf8"), before);
-});
-
-test("here bind preserves an appointment with an additional identity field", async () => {
-  const repository = repositoryWithMain();
-  const path = appoint(repository.path, "kei/first");
-  const before = "---\ncontract: kei/first\ncontract: kei/second\n---\n";
-  writeFileSync(path, before);
-
-  await assert.rejects(
-    Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here" }),
-    refused({ kind: "here-worktree-appointed", path }),
-  );
-
-  assert.equal(readFileSync(path, "utf8"), before);
-});
-
-test("failed here bind releases only the exact reservation it created", async () => {
-  const repository = repositoryWithMain();
-  const path = appointmentPath(repository.path);
-
-  await assert.rejects(
-    Keiyaku.bind({
-      repo: await Repo.at({ path: repository.path }),
-      markdown: document(),
-      workspace: "here",
-      after: ["kei/missing-prerequisite"],
-    }),
-    (error: unknown) => error instanceof KeiyakuRefused && error.refusal.kind === "unknown-prerequisite",
-  );
-
-  assert.equal(existsSync(path), false);
-});
-
-test("here projection repairs a stale one-field appointment and a changed description", async () => {
-  const repository = repositoryWithMain();
-  const bound = await bind(repository);
-  const id = (await bound.state()).id;
-  const path = appointmentPath(repository.path);
-  const guidance = await bound.guidance();
-  assert.ok(guidance.startsWith(
-    `---\ncontract: ${id}\ndescription: ${CANONICAL_DESCRIPTION}\n---\n\n`,
-  ));
-
-  chmodSync(path, 0o644);
-  writeFileSync(path, `---\ncontract: ${id}\n---\n`);
-  const repairedStale = await bound.reconcile();
-  assert.equal(readFileSync(path, "utf8"), guidance);
-  assert.ok(repairedStale.effects.some((effect) => effect.kind === "contract-file" && effect.action === "updated"));
-
-  chmodSync(path, 0o644);
-  writeFileSync(path, guidance.replace(
-    `description: ${CANONICAL_DESCRIPTION}`,
-    "description: edited by hand",
-  ));
-  await bound.reconcile();
-  assert.equal(readFileSync(path, "utf8"), guidance);
-});
-
-test("here projection does not overwrite an additional identity field", async () => {
-  const repository = repositoryWithMain();
-  const bound = await bind(repository);
-  const id = (await bound.state()).id;
-  const path = appointmentPath(repository.path);
-  const before = `---\ncontract: ${id}\ncontract: kei/other\n---\n`;
-  chmodSync(path, 0o644);
-  writeFileSync(path, before);
-
-  const report = await bound.reconcile();
-  assert.equal(readFileSync(path, "utf8"), before);
-  assert.ok(report.lag.some((lag) => lag.kind === "contract-file-failed"));
-});
-
-test("terminal here cleanup uses appointment identity and ignores description", async () => {
-  const repository = repositoryWithMain();
-  const bound = await bind(repository);
-  const id = (await bound.state()).id;
-  const path = appointmentPath(repository.path);
-  chmodSync(path, 0o644);
-  writeFileSync(path, `---\ncontract: ${id}\ndescription: edited by hand\n---\n`);
-
-  await bound.abandon();
-  assert.equal(existsSync(path), false);
-});
-
-test("terminal here cleanup does not remove an invalid additional identity appointment", async () => {
-  const repository = repositoryWithMain();
-  const bound = await bind(repository);
-  const id = (await bound.state()).id;
-  const path = appointmentPath(repository.path);
-  const before = `---\ncontract: ${id}\ncontract: kei/other\n---\n`;
-  chmodSync(path, 0o644);
-  writeFileSync(path, before);
-
-  await bound.abandon();
-  assert.equal(readFileSync(path, "utf8"), before);
-});
-
-test("duplicate here appointments fail reads generically, reject mutation, and all terminal bytes are removed", async () => {
-  const repository = repositoryWithMain();
-  const bound = await bind(repository);
-  const id = (await bound.state()).id;
-  const parent = mkdtempSync(join(tmpdir(), "keiyaku-here-duplicate-"));
-  const linked = join(parent, "linked");
-  repository.run(["worktree", "add", "--detach", linked, "HEAD"]);
-  const primaryAppointment = appointmentPath(repository.path);
-  const linkedAppointment = appoint(linked, id);
-  writeFileSync(linkedAppointment, readFileSync(primaryAppointment));
-
-  const listed = await Keiyaku.list({ repo: await Repo.at({ path: repository.path }) });
-  const row = listed.rows.find((value) => value.id === id);
-  assert.equal(row?.worktreePath, null);
-  assert.equal(row?.workspaceObservation.kind, "failed");
-  if (row?.workspaceObservation.kind === "failed") {
-    assert.match(row.workspaceObservation.diagnostic, /duplicate here Contract workspace appointments/u);
-  }
-  await assert.rejects(() => bound.deliver(), AuthorityCorruptionError);
-  await bound.abandon();
-  assert.equal(existsSync(primaryAppointment), false);
-  assert.equal(existsSync(linkedAppointment), false);
-  repository.run(["worktree", "remove", "--force", linked]);
 });
 
 test("Delivery.diff freshly reads its pinned candidate diff", async () => {
@@ -799,7 +618,7 @@ test("a dependent claimed during continuation reports already-terminal", async (
 
 test("review records before delivery and the same patch can be placed", async () => {
   const repository = repositoryWithMain();
-  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "worktree", gates: ["reviewed"] });
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
 
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
@@ -1073,7 +892,7 @@ test("a satisfied review cannot interleave a stale integration stop across the t
 
 test("a whitespace-only worktree change stales prior review testimony", async () => {
   const repository = repositoryWithMain();
-  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "worktree", gates: ["reviewed"] });
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
   const reviewedChangeId = changeIdFromSubject((await result.keiyaku.state()).attestations.at(-1)?.data.subject);
@@ -1089,7 +908,7 @@ test("a whitespace-only worktree change stales prior review testimony", async ()
 
 test("a changed worktree patch leaves the reviewed placement pending", async () => {
   const repository = repositoryWithMain();
-  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "worktree", gates: ["reviewed"] });
   writeFileSync(`${repository.path}/candidate.txt`, "first\n");
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
   assert.deepEqual(reviewed.value.workspace?.untracked, ["candidate.txt"]);
@@ -1112,7 +931,7 @@ test("terms-only amend copies Markdown bytes and identities without rendering", 
   const bound = await Keiyaku.bind({
     repo: await Repo.at({ path: repository.path }),
     markdown,
-    workspace: "here",
+    workspace: "worktree",
     gates: ["reviewed", "held"],
   });
   commitCandidate(repository);
@@ -1136,7 +955,7 @@ test("terms-only amend copies Markdown bytes and identities without rendering", 
 
 test("a changed document leaves an otherwise unchanged reviewed patch pending", async () => {
   const repository = repositoryWithMain();
-  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: ["reviewed"] });
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "worktree", gates: ["reviewed"] });
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
   const reviewed = await result.keiyaku.review({ verdict: "satisfied" });
 
@@ -1152,7 +971,7 @@ test("a changed document leaves an otherwise unchanged reviewed patch pending", 
 
 test("review testimony is recorded when reviewed is not a placement gate", async () => {
   const repository = repositoryWithMain();
-  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "here", gates: [] });
+  const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }), markdown: document(), workspace: "worktree", gates: [] });
   writeFileSync(`${repository.path}/candidate.txt`, "candidate\n");
 
   const reviewed = await result.keiyaku.review({ verdict: "unsatisfied" });

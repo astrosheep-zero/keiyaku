@@ -19,7 +19,7 @@ test("the journal codec accepts only the opaque current format", () => {
     entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
     at: "2026-08-06T00:00:00Z",
     data: {
-      coordinates: { start: snapshotId("snapshot-initial"), workspace: "here" },
+      coordinates: { start: snapshotId("snapshot-initial"), workspace: "worktree" },
       terms: {
         document: { bytes: "# Current\n", key: documentKey("document-current") },
         segments: [documentSegmentKey("segment-current")],

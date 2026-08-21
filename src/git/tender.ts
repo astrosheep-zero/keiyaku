@@ -54,16 +54,12 @@ export type TenderCapture = Readonly<{
   changes: Awaited<ReturnType<typeof captureWorkspaceTree>>["changes"];
 }>;
 
-async function workspaceExists(
-  repository: GitRepository,
-  workspace: "worktree" | "here",
-  path: string,
-): Promise<boolean> {
+async function workspaceExists(repository: GitRepository, path: string): Promise<boolean> {
   const exists = await access(path).then(
     () => true,
     () => false,
   );
-  return workspace === "here" || (exists && (await registeredWorktreePaths(repository)).includes(path));
+  return exists && (await registeredWorktreePaths(repository)).includes(path);
 }
 
 function workspaceFor(repository: GitRepository, input: TenderCaptureCoordinates): string | undefined {
@@ -85,7 +81,7 @@ export async function captureTender(
   input: TenderCaptureCoordinates,
 ): Promise<Preparation<TenderCapture, TenderCaptureRefusal>> {
   const workspace = workspaceFor(repository, input);
-  if (workspace === undefined || !(await workspaceExists(repository, input.coordinates.workspace, workspace))) {
+  if (workspace === undefined || !(await workspaceExists(repository, workspace))) {
     return { kind: "refused", refusal: { kind: "worktree-missing", contractId: input.contractId } };
   }
   if (input.rejectUnmerged === true) {

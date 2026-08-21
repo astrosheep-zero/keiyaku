@@ -136,7 +136,7 @@ function validateCoordinates(value: unknown, path: string): ContractCoordinates 
   const object = requireRecord(value, path);
   requireKeys(object, ["start", "workspace"], path, ["target"]);
   const workspace = stringValue(object.workspace, `${path}.workspace`);
-  if (workspace !== "worktree" && workspace !== "here") fail(`${path}.workspace`, "unknown workspace");
+  if (workspace !== "worktree") fail(`${path}.workspace`, "unknown workspace");
   return {
     start: brandedValue(object.start, `${path}.start`, snapshotId),
     workspace,

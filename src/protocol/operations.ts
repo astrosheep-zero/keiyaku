@@ -36,7 +36,7 @@ export type MergeStatePresentRefusal = Readonly<{
   kind: "merge-state-present";
   contractId: ContractId;
   workspace: Readonly<{
-    kind: "here" | "worktree";
+    kind: "worktree" | "worktree";
     path: string;
   }>;
 }>;
@@ -92,12 +92,7 @@ type OperationInput = Readonly<{
   contractId: ContractId;
   actor?: import("../core/facts/types.js").ActorId;
 }>;
-export type HereWorkspaceResolver = (contractId: ContractId) => Promise<string | undefined>;
-export type MutationOperationInput = OperationInput &
-  Readonly<{
-    channel: GitDecodeChannel;
-    resolveHereWorkspace?: HereWorkspaceResolver;
-  }>;
+export type MutationOperationInput = OperationInput & Readonly<{ channel: GitDecodeChannel }>;
 
 export type DocumentDerivation = Readonly<{
   document: DocumentKey;
@@ -205,12 +200,9 @@ export async function contractsOperation(
   input: Readonly<{
     scope: RepositoryScope;
     channel: GitDecodeChannel;
-    hereWorkspace?: import("./read/status.js").HereWorkspaceObservationResolver;
   }>,
 ): Promise<ContractBoard> {
-  return withGitReadObservation(input.scope, input.channel, (observation) =>
-    readContractBoard(observation, undefined, input.hereWorkspace),
-  );
+  return withGitReadObservation(input.scope, input.channel, (observation) => readContractBoard(observation));
 }
 
 export async function contractObservationOperation(
@@ -218,10 +210,9 @@ export async function contractObservationOperation(
     scope: RepositoryScope;
     channel: GitDecodeChannel;
     contractId: ContractId;
-    hereWorkspace?: import("./read/status.js").HereWorkspaceObservationResolver;
   }>,
 ): Promise<ContractObservation> {
-  return await readContractObservationAt(input.scope, input.channel, input.contractId, input.hereWorkspace);
+  return await readContractObservationAt(input.scope, input.channel, input.contractId);
 }
 
 export async function documentsOperationAt(

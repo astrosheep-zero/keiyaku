@@ -37,7 +37,7 @@ function document(title: string, region: readonly string[]): string {
   ].join("\n");
 }
 
-async function bind(repository: TestGitRepository, title: string, region: readonly string[], workspace: "worktree" | "here" = "here") {
+async function bind(repository: TestGitRepository, title: string, region: readonly string[]) {
   const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: document(title, region),
     workspace,
@@ -50,7 +50,7 @@ test("bind and amend expose only live-peer Region witnesses from one document re
   const first = await bind(repository, "First", ["src/**"]);
   const firstId = (await first.keiyaku.state()).id;
 
-  const second = await bind(repository, "Second", ["src/api/**"], "worktree");
+  const second = await bind(repository, "Second", ["src/api/**"]);
   const secondId = (await second.keiyaku.state()).id;
   assert.deepEqual(second.overlaps, [{
     contract: firstId,

@@ -100,59 +100,6 @@ test("deliver adapts a failing Verification without a private producer injection
   assert.equal((await observeContract(repository, id)).state?.attestations.at(-1)?.data.verdict, "unsatisfied");
 });
 
-test("dirty --here delivery materializes and lands the verified candidate cleanly", async () => {
-  const setup = await repositoryWithCandidate();
-  setup.raw.run(["checkout", "--quiet", "main"]);
-  writeFileSync(resolve(setup.raw.path, "candidate.txt"), "failing\n");
-  setup.raw.run(["add", "candidate.txt"]);
-  setup.raw.run(["commit", "--quiet", "-m", "failing candidate"]);
-  mkdirSync(resolve(setup.raw.path, ".keiyaku"), { recursive: true });
-  writeFileSync(resolve(setup.raw.path, ".keiyaku", "settings.json"), JSON.stringify({ gates: {
-    default: { kind: "bundle", gates: ["verified"] },
-  } }));
-
-  const contractDocument = document('test "$(cat candidate.txt)" = "passing"');
-  const bound = await invoke(parseArgv([
-    "bind", "--target", "refs/heads/main", "--here", "--actor", "external-test", "-",
-  ]), {
-    cwd: setup.raw.path,
-    environment: {},
-    readStdin: () => contractDocument,
-  });
-  assert.equal(bound.kind, "accepted");
-  if (bound.kind !== "accepted") return;
-
-  writeFileSync(resolve(setup.raw.path, "candidate.txt"), "passing\n");
-  const worktreePathsBefore = setup.raw.run(["worktree", "list", "--porcelain"])
-    .split("\n")
-    .filter((line) => line.startsWith("worktree "));
-  const indexBefore = setup.raw.run(["diff", "--cached", "--binary"]);
-  const result = await invoke(parseArgv([
-    "deliver", bound.contract, "--include-dirty", "--actor", "external-test", "--message", "Verified dirty candidate",
-  ]), {
-    cwd: setup.raw.path,
-    environment: {},
-  });
-
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") return;
-  assert.deepEqual(result.facts.map((fact) => fact.kind), ["bound", "deliver", "attestation", "claimed"]);
-  const state = (await observeContract(setup.repository, bound.contract)).state;
-  assert.equal(state?.attestations.at(-1)?.data.verdict, "satisfied");
-  assert.equal(state?.delivery?.data.integration.snapshot, setup.raw.run(["rev-parse", "HEAD"]).trim());
-  assert.equal(setup.raw.run(["show", `${state?.delivery?.data.integration.snapshot}:candidate.txt`]), "passing\n");
-  assert.equal(
-    setup.raw.run(["show", "-s", "--format=%B", state?.delivery?.data.integration.snapshot ?? "HEAD"]),
-    `Verified dirty candidate\n\n${contractDocument.trimEnd()}\n\nKeiyaku-Contract: ${bound.contract}\n\n`,
-  );
-  assert.equal(setup.raw.run(["diff", "--cached", "--binary"]), indexBefore);
-  assert.deepEqual(
-    setup.raw.run(["worktree", "list", "--porcelain"])
-      .split("\n")
-      .filter((line) => line.startsWith("worktree ")),
-    worktreePathsBefore,
-  );
-});
 
 test("audit stays accepted when it admits a verified attestation", async () => {
   const pending = await bindAndDeliver("exit 1");

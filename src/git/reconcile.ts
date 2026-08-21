@@ -28,7 +28,7 @@ import {
   type TargetCheckoutLag,
 } from "./target-placement.js";
 import { runCreateHooks, runDestroyHooks, type WorktreeHookLag, type WorktreeHooks } from "./hooks.js";
-import { followManagedWorktree, worktreePath } from "./workspace.js";
+import { worktreePath } from "./workspace.js";
 import { collectableScratchWorktrees } from "./scratch.js";
 import {
   terminalSealExpectations as decodeTerminalSealExpectations,
@@ -71,6 +71,7 @@ type ReconcileInput = Readonly<{
   retainTerminalWorktree?: boolean;
   place?: string;
 }>;
+type ReconcileEffectsInput = ReconcileInput;
 type WorktreeRetained = Readonly<{ kind: "worktree-retained"; path: string }>;
 type WorktreeFollowRetained = Readonly<{
   kind: "worktree-follow-retained";
@@ -103,6 +104,14 @@ export type GitReconcileObservation = Readonly<{
 }>;
 type WorktreeTopology = Readonly<{ paths: Set<string> }>;
 type ReconcileAccumulation = Readonly<{ effects: Effect[]; lag: ReconcileLag[] }>;
+export type ManagedWorktreeFollow =
+  | Readonly<{ kind: "followed"; before: SnapshotId; after: SnapshotId }>
+  | Readonly<{ kind: "unchanged" }>
+  | Readonly<{
+      kind: "retained";
+      head: SnapshotId;
+      reason: "head-moved" | "head-attached" | "operation-in-progress" | "unsupported-parent-shape";
+    }>;
 type EphemeralRecovery = Readonly<{ snapshot: SnapshotId; workspace: TerminalWorkspace }>;
 type TerminalWorktreeCleanup = Readonly<{
   repository: GitRepository;
@@ -189,6 +198,70 @@ function fromPrimaryWorktree(repository: GitRepository): GitRepository {
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function revisionAt(repository: GitRepository, workspace: string, revision: string): Promise<SnapshotId | null> {
+  try {
+    const value = (await runGit(repository, ["-C", workspace, "rev-parse", "--verify", "--quiet", revision]))
+      .toString("utf8")
+      .trim();
+    return value.length === 0 ? null : mintSnapshotId(value);
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 1) return null;
+    throw error;
+  }
+}
+
+async function operationState(
+  repository: GitRepository,
+  workspace: string,
+  gitDirectory: string,
+): Promise<Readonly<{ other: boolean; unmerged: boolean }>> {
+  const other = await Promise.all(
+    ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD"].map((path) =>
+      pathExists(join(gitDirectory, path)),
+    ),
+  );
+  const unmerged = (await runGit(repository, ["-C", workspace, "ls-files", "--unmerged", "-z"])).length > 0;
+  return { other: other.some(Boolean), unmerged };
+}
+
+/** Follow an accepted tender only through the native index-and-HEAD transition. */
+export async function followManagedWorktree(
+  repository: GitRepository,
+  workspace: string,
+  tender: SnapshotId,
+): Promise<ManagedWorktreeFollow> {
+  const head = await revisionAt(repository, workspace, "HEAD");
+  if (head === null) throw new Error("managed worktree HEAD is missing");
+  const attached = await runGit(repository, ["-C", workspace, "symbolic-ref", "--quiet", "HEAD"]).then(
+    () => true,
+    (error: unknown) => {
+      if (error instanceof GitPlumbingError && error.status === 1) return false;
+      throw error;
+    },
+  );
+  if (attached) return { kind: "retained", head, reason: "head-attached" };
+  if (head === tender) return { kind: "unchanged" };
+  const parents = (await runGit(repository, ["show", "-s", "--format=%P", gitObjectIdForSnapshot(tender)]))
+    .toString("utf8")
+    .trim()
+    .split(" ")
+    .filter((parent) => parent.length > 0)
+    .map((parent) => mintSnapshotId(parent));
+  if (parents.length > 0 && head !== parents[0]) return { kind: "retained", head, reason: "head-moved" };
+  if (parents.length !== 1 && parents.length !== 2)
+    return { kind: "retained", head, reason: "unsupported-parent-shape" };
+  const gitDirectory = await worktreeGitDirectory(repository, workspace);
+  const mergeHead = await revisionAt(repository, workspace, "MERGE_HEAD");
+  const operation = await operationState(repository, workspace, gitDirectory);
+  const admitted =
+    parents.length === 1
+      ? mergeHead === null && !operation.other && !operation.unmerged
+      : mergeHead === parents[1] && !operation.other && !operation.unmerged;
+  if (!admitted) return { kind: "retained", head, reason: "operation-in-progress" };
+  await runGit(repository, ["-C", workspace, "reset", "--mixed", gitObjectIdForSnapshot(tender)]);
+  return { kind: "followed", before: head, after: tender };
 }
 
 function complete(effects: readonly Effect[] = [], lag: readonly ReconcileLag[] = []): ReconcileResult {
@@ -336,38 +409,6 @@ async function reconcileTargetCheckouts(repository: GitRepository, state: Contra
   if (result === undefined) throw new Error("target checkout reconcile produced no result");
   if (releaseFailure !== undefined) result = failed("effect", releaseFailure, result.effects, result.lag);
   return result;
-}
-
-async function reconcileHereWorkspaceRefs(
-  { repository }: ReconcileInput,
-  state: ContractState,
-  { effects, lag }: ReconcileAccumulation,
-): Promise<ReconcileResult> {
-  const pin = candidatePinRefFor(state.id);
-  if (state.terminal) {
-    if (state.delivery === null) effects.push(await removeRef(repository, pin));
-    else {
-      const integration = state.currentIntegration?.snapshot;
-      if (integration === undefined) return complete();
-      const custodian = await snapshotCustodian(repository, integration);
-      effects.push(
-        await (custodian === null
-          ? await updateRef(repository, pin, integration)
-          : await removeRefWithCustody(repository, pin, custodian.ref, custodian.oid)),
-      );
-    }
-  } else if (state.bound) {
-    effects.push(
-      await (state.delivery === null
-        ? await removeRef(repository, pin)
-        : await updateRef(
-            repository,
-            pin,
-            state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot,
-          )),
-    );
-  }
-  return complete(effects, lag);
 }
 
 function retainTerminalWorktree(
@@ -523,7 +564,7 @@ async function releaseTerminalCustody({
 }
 
 async function reconcileTerminalManagedWorktree(
-  { repository, channel, hooks, retryHooks, retainTerminalWorktree, place }: ReconcileInput,
+  { repository, channel, hooks, retryHooks, retainTerminalWorktree, place }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
   acc: ReconcileAccumulation,
@@ -575,7 +616,7 @@ async function reconcileTerminalManagedWorktree(
 }
 
 async function reconcileActiveManagedWorktree(
-  { repository, hooks, retryHooks, place }: ReconcileInput,
+  { repository, hooks, retryHooks, place }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
   { effects, lag }: ReconcileAccumulation,
@@ -619,7 +660,7 @@ async function reconcileActiveManagedWorktree(
 }
 
 async function reconcileWithTopology(
-  input: ReconcileInput,
+  input: ReconcileEffectsInput,
   state: ContractState | null,
   topology: WorktreeTopology,
 ): Promise<ReconcileResult> {
@@ -632,7 +673,6 @@ async function reconcileWithTopology(
     const targetCheckouts = await reconcileTargetCheckouts(repository, state);
     effects.push(...targetCheckouts.effects);
     lag.push(...targetCheckouts.lag);
-    if (state.coordinates.workspace === "here") return await reconcileHereWorkspaceRefs(input, state, { effects, lag });
     if (state.terminal) return await reconcileTerminalManagedWorktree(input, state, topology, { effects, lag });
     return await reconcileActiveManagedWorktree(input, state, topology, { effects, lag });
   } catch (error) {

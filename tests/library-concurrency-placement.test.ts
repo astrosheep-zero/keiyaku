@@ -206,7 +206,7 @@ test("claim does not mutate eligible dependents", async () => {
   const repository = repositoryWithMain();
   const sourceResult = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: document(),
-    workspace: "here",
+    workspace: "worktree",
     gates: ["reviewed"],
   });
   const source = sourceResult.keiyaku;

@@ -164,7 +164,7 @@ test("Keiyaku.call keeps optional Dispatch and Alias stages honest", async () =>
     assert.equal(independent.observation.kind, "observed");
     assert.equal(await readDispatch(git, independent.akuma), null);
 
-    const bound = await Keiyaku.bind({ repo, markdown: markdown("Akuma dispatch"), workspace: "here" });
+    const bound = await Keiyaku.bind({ repo, markdown: markdown("Akuma dispatch"), workspace: "worktree" });
     const owner = (await bound.keiyaku.state()).id;
     const alias = parseAkumaAlias("@worker");
     const executionCwd = join(raw.path, "nested-worktree");
@@ -295,22 +295,6 @@ test("managed Contract calls use the appointed Place only when cwd is omitted", 
 
     await managed.keiyaku.abandon({ hooks: { create: [], destroy: [] } });
 
-    const here = await Keiyaku.bind({
-      repo,
-      markdown: markdown("Here Contract"),
-      workspace: "here",
-    });
-    await assert.rejects(
-      Keiyaku.call({
-        path: world,
-        archetype: "worker",
-        body: "must refuse",
-        ...configured.placement,
-        contract: here.keiyaku,
-      }),
-      /Contract workspace is unavailable: .* is here/u,
-    );
-    await here.keiyaku.abandon();
   } finally {
     await pump.close();
     leash.release();
@@ -526,7 +510,7 @@ type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapt
 test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async () => {
   const { raw, repo, git } = await repositoryFixture();
   const world = await World.at(raw.path);
-  const bound = await Keiyaku.bind({ repo, markdown: markdown("Fork dispatch"), workspace: "here" });
+  const bound = await Keiyaku.bind({ repo, markdown: markdown("Fork dispatch"), workspace: "worktree" });
   const owner = (await bound.keiyaku.state()).id;
   const source = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "face0001" });
   await initializeHeart(source.paths);

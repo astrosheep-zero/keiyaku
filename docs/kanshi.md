@@ -24,11 +24,11 @@ bounded diagnostic. One section's failure does not suppress another section.
 The WorldRoot is shared by every worktree in one Git repository; Kanshi never
 re-resolves it from cwd or a worktree marker.
 
-Kanshi consumes the Contract workspace owner's one here-appointment fold and
-supplies it to the Contract status projection. It does not enumerate Git
-worktrees, read appointment files, or select a here workspace itself. Thus a
-duplicate here appointment remains the same bounded failed workspace
-observation in Kanshi as in ordinary Contract status and observe.
+Kanshi consumes the Contract workspace owner's one managed-worktree appointment
+fold and supplies it to the Contract status projection. It does not enumerate
+Git worktrees, read appointment files, or select a workspace itself. Managed
+workspace failures remain the same bounded observations in Kanshi as in
+ordinary Contract status and observe.
 
 The report is:
 
@@ -363,8 +363,7 @@ Hot world-board Contract rows use this aligned field order:
 
 `GIT` carries the worktree state. `DIR` appears for a hot managed Contract
 when its observation supplies a managed worktree location, including an
-unavailable location; unappointed and failed observations never invent one,
-and here rows never name a managed path.
+unavailable location; unappointed and failed observations never invent one.
 Cold live rows keep the complete identity, title, phase, and target facts in
 one compact row, without repeating clean worktree state or a path. IDs and
 paths are never shortened; they may overflow the terminal. `LINKED` is an

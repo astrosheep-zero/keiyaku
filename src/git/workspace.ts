@@ -232,7 +232,7 @@ export type WorkspaceChangeCounts = Readonly<{
   submodules: number;
 }>;
 
-export type ContractWorkspaceLocation = Readonly<{ kind: "worktree"; path: string }> | Readonly<{ kind: "here" }>;
+export type ContractWorkspaceLocation = Readonly<{ kind: "worktree"; path: string }>;
 
 export type ContractWorkspaceMerge = Readonly<{
   head: SnapshotId;

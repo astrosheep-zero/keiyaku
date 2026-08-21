@@ -89,15 +89,14 @@ The command vocabulary is:
 
 `bind --fork-of kei/<complete-id>` reads no stdin and creates a sibling from the
 source's current folded terms and original start snapshot. It accepts only
-`--target`, `--here`, `--actor`, and `--json`; `-`, `--task`, `--gates`, and
+`--target`, `--actor`, and `--json`; `-`, `--task`, `--gates`, and
 `--after` are syntax refusals. `bind` accepts no contract positional. Existing Contract commands accept a full
 `kei/<contract-segment>` or active `@<contract-segment>` reference. The short
 reference resolves over `ContractBoard` rows and is never stored.
 
 An omitted contract selector is valid only when the invocation coordinate matches
-the reported `worktreePath` of exactly one active worktree contract. A here
-workspace never supplies omitted-selector inference. The adapter issues a
-typed usage refusal when this test has no unique match.
+the reported `worktreePath` of exactly one active worktree contract. The adapter
+issues a typed usage refusal when this test has no unique match.
 
 Inside an Akuma request channel, `deliver` still resolves its Contract
 selector to one complete ContractId before publishing the claim and preserves
@@ -155,19 +154,16 @@ the bind result or exit status. The receipt is CLI-owned transient input custody
 not Contract or Library state; recovery submits it through the ordinary `bind -`
 entry point.
 
-Ordinary `bind` maps `--target`, `--here`, repeated `--after`, `--gates`, and `--actor`
+Ordinary `bind` maps `--target`, repeated `--after`, `--gates`, and `--actor`
 to `Keiyaku.bind`. An explicit `--target` remains literal input for the public
 target boundary. When it is omitted, the adapter supplies
 `repo.currentBranch()`; an attached branch therefore becomes the canonical
 target, while detached HEAD remains explicitly targetless. The parser itself
 does not inspect Git. An accepted bind result exposes the persisted canonical
-target, or `null`, so this default is never hidden. `--here`
-maps to `workspace: "here"`; on an attached branch the same default target
-makes it a commit-in-place contract. An explicit foreign target with `--here`
-is a typed bind refusal. The omitted form maps to the public managed-worktree
-default.
-Fork bind copies the source target when `--target` is omitted, copies its start
-exactly, and defaults to managed worktree even when the source used `--here`.
+target, or `null`, so this default is never hidden. The omitted form maps to
+the public managed-worktree default.
+Fork bind copies the source target when `--target` is omitted and copies its
+start exactly. It always uses a fresh managed worktree.
 It stores no source or comparison relation.
 `amend` maps optional Markdown, `--actor`, repeated `--after`,
 and `--gates` to `keiyaku.amend`. Its omitted `after` leaves the current value

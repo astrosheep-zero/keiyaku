@@ -78,7 +78,7 @@ async function populatedWorld() {
     repo: await Repo.at({ path: repository.path }),
     task: added.value.id,
     markdown: document(),
-    workspace: "here",
+    workspace: "worktree",
     target: "main",
   });
   const contract = await bound.keiyaku.state();
@@ -111,7 +111,7 @@ function deleteLooseObject(repository: ReturnType<typeof makeGitRepository>, oid
   unlinkSync(join(repository.path, ".git", "objects", oid.slice(0, 2), oid.slice(2)));
 }
 
-test("one-target Kanshi observation has an eight-process Git topology with one here locator fold", async () => {
+test("one-target Kanshi observation has an eight-process Git topology", async () => {
   const { repository } = await populatedWorld();
   const tasks = Tasks.of(await World.at(repository.path));
   const added = await tasks.add({ title: "Second status row" });
@@ -133,7 +133,7 @@ test("one-target Kanshi observation has an eight-process Git topology with one h
   })).kind, "dispatched");
   const invocations = await observedGitInvocations(repository);
 
-  assert.equal(invocations.filter((command) => command === "worktree list --porcelain -z").length, 2);
+  assert.equal(invocations.filter((command) => command === "worktree list --porcelain -z").length, 1);
   assert.equal(invocations.filter((command) => command === "rev-parse --path-format=absolute --git-common-dir").length, 1);
   assert.equal(invocations.filter((command) => command === "symbolic-ref --quiet HEAD").length, 1);
   assert.equal(invocations.filter((command) => command === `rev-parse --verify --quiet ${GIT_REF}`).length, 1);
@@ -314,36 +314,6 @@ test("Kanshi Git topology adds one ref read per distinct Contract target", async
   assert.equal(invocations.filter((command) => command.includes("status --porcelain=v2")).length, 2);
   assert.equal(invocations.filter((command) => /rev-list --count HEAD\.\.[0-9a-f]{40}$/u.test(command)).length, 2);
   assert.equal(invocations.some((command) => /rev-list --count HEAD\.\.refs\//u.test(command)), false);
-});
-
-test("Kanshi reports duplicate here Contract appointments as a failed workspace observation", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Test User"]);
-  repository.run(["config", "user.email", "test@example.com"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const repo = await Repo.at({ path: repository.path });
-  const bound = await Keiyaku.bind({ repo, markdown: document("Duplicate here workspace"), workspace: "here" });
-  const state = await bound.keiyaku.state();
-  const linked = join(mkdtempSync(join(tmpdir(), "keiyaku-kanshi-linked-")), "worktree");
-  repository.run(["worktree", "add", "--detach", linked]);
-  const appointment = readFileSync(join(repository.path, ".keiyaku", "KEIYAKU.md"));
-  mkdirSync(join(linked, ".keiyaku"), { recursive: true });
-  writeFileSync(join(linked, ".keiyaku", "KEIYAKU.md"), appointment);
-
-  const report = await observe(repository.path, repo);
-
-  assert.equal(report.contracts.kind, "present");
-  if (report.contracts.kind !== "present") return;
-  const row = report.contracts.value.rows.find((candidate) => candidate.id === state.id);
-  assert.equal(row?.worktreePath, null);
-  assert.equal(row?.workspaceObservation.kind, "failed");
-  if (row?.workspaceObservation.kind === "failed") {
-    assert.match(row.workspaceObservation.diagnostic, /duplicate here Contract workspace appointments/u);
-  }
-  assert.match(
-    renderKanshiText(report, { columns: 120, color: false }),
-    /workspace here · failed · duplicate here Contract workspace appointments/u,
-  );
 });
 
 test("a dead shared Kanshi batch fails every Git-backed owner without restarting", async () => {
@@ -645,12 +615,6 @@ function worktreeObservation(
     : { kind, location: { kind: "worktree" as const, path }, counts, merge: null };
 }
 
-function hereObservation(kind: "clean" | "dirty" | "unavailable" = "clean", counts = zeros()) {
-  return kind === "unavailable"
-    ? { kind, location: { kind: "here" as const } }
-    : { kind, location: { kind: "here" as const }, counts, merge: null };
-}
-
 function contractRow(input: Partial<Extract<KanshiReport["contracts"], { kind: "present" }>["value"]["rows"][number]> & { id: string }) {
   const workspace = input.workspace ?? "worktree";
   const path = input.worktreePath ?? `/repo/.git/keiyaku/wt/${input.id.slice("kei/".length)}`;
@@ -662,7 +626,7 @@ function contractRow(input: Partial<Extract<KanshiReport["contracts"], { kind: "
     disposition: "active" as const,
     workspace,
     worktreePath: workspace === "worktree" ? path : null,
-    workspaceObservation: workspace === "here" ? hereObservation() : worktreeObservation(path),
+    workspaceObservation: worktreeObservation(path),
     target: "refs/heads/main",
     targetLag: { kind: "counted" as const, behind: 0 },
     delivery: null,
@@ -748,13 +712,6 @@ function attentionReport(): KanshiReport {
             targetObservation: null,
           }),
           contractRow({
-            id: "kei/here-contract",
-            title: "Here Contract",
-            workspace: "here",
-            worktreePath: null,
-            workspaceObservation: hereObservation("dirty", { staged: 0, unstaged: 1, untracked: 0, submodules: 0 }),
-          }),
-          contractRow({
             id: "kei/unavailable-contract",
             title: "Unavailable Contract",
             worktreePath: "/repo/.git/keiyaku/wt/unavailable-contract",
@@ -815,7 +772,7 @@ test("Kanshi text keeps complete identities in the aperture grammar", async () =
   const world = await World.at(repository.path);
   const signature = text.split("\n", 1)[0]!;
   assert.equal(signature, "[ KEIYAKU ]  1 live");
-  assert.equal(text.includes(world), false);
+  assert.equal(text.includes(world), true);
   assert.equal(report.contracts.kind, "present");
   assert.equal(text.includes(contract.id), true);
   assert.equal(text.includes(taskId), true);
@@ -897,7 +854,7 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   const before = structuredClone(report);
   const text = renderKanshiText(report, { columns: 120, color: false });
 
-  assert.equal(text.split("\n", 1)[0], "[ KEIYAKU ]  6 live");
+  assert.equal(text.split("\n", 1)[0], "[ KEIYAKU ]  5 live");
   assert.match(text, /\n\n\[ FLEET \]  7 akuma/u);
   assert.match(text, /\n\n\[ TASK \]  4 live/u);
   assert.doesNotMatch(text, /attention|kanshi ───|──\[/u);
@@ -941,9 +898,6 @@ test("Kanshi text uses live sections, preserves important facts, and omits termi
   assert.doesNotMatch(unknownBlock, /commits behind main unknown/u);
   assert.doesNotMatch(contracts, /target unknown/u);
   assert.match(contracts, /no target/u);
-  assert.match(contracts, /workspace here · dirty/u);
-  const hereBlock = contracts.split("kei/here-contract")[1]!.split(/^[!●○✓?×] /mu)[0]!;
-  assert.doesNotMatch(hereBlock, /↳ /u);
   assert.match(contracts, /worktree unavailable/u);
   assert.match(contracts, /^ {2}DIR     \/repo\/\.git\/keiyaku\/wt\/unavailable-contract$/mu);
   assert.doesNotMatch((nextCold === -1 ? cold : cold.slice(0, nextCold)), /↳ /u);
@@ -1136,7 +1090,7 @@ test("Kanshi retains a Contract whose title is unavailable", () => {
   const contracts = sectionBody(text, "KEIYAKU");
   assert.match(contracts, /^\? kei\/no-target$/mu);
   assert.match(contracts, /title unavailable/u);
-  assert.match(text, /\[ KEIYAKU \]  6 live/u);
+  assert.match(text, /\[ KEIYAKU \]  5 live/u);
 });
 
 test("Kanshi wraps complete Task titles on the plumb line", () => {
