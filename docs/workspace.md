@@ -133,12 +133,18 @@ corruption diagnostic as exit 3; observation returns a typed failed arm
 without suppressing other independently readable status sections.
 
 The first-generation Place vocabulary is the exact ordered 173-entry catalog
-owned by the workspace Place owner. A later
-generation appends its canonical decimal integer, at least 2 and without a
-leading zero, to each base. Allocation order is generation-major: the
-complete catalog in listed order, then the same catalog with suffix `2`,
-then suffix `3`, without bound. Generation arithmetic is exact beyond
-`Number.MAX_SAFE_INTEGER`. Allocation chooses the first unappointed Place.
+owned by the workspace Place owner. A later generation appends its canonical
+decimal integer, at least 2 and without a leading zero, to each base.
+Allocation is generation-major with a per-Contract stable start: for a new
+Contract, SHA-256 its complete UTF-8 ContractId bytes, interpret all 32 digest
+bytes as one unsigned big-endian integer, and reduce it modulo 173. For each
+generation, scan the ordered catalog from that start with one wraparound and
+choose the first unappointed Place; when a generation is full, advance to the
+next generation and scan again from the same start. Generation arithmetic is
+exact beyond `Number.MAX_SAFE_INTEGER`. Existing appointments return unchanged
+before this hash is computed. Within one locked mutation, supplied ContractIds
+are processed in input order, so earlier new appointments occupy their
+candidates before later collisions probe forward.
 The register stores only current appointments; it has no cursor,
 free list, tombstone, reverse index, migration bit, or physical occupancy
 fact. Decode builds one immutable in-memory snapshot with derived by-Place
@@ -156,7 +162,8 @@ and is never a writer premise or a later Git-effect authorization.
 
 Managed bind admission remains journal-only. Materialization then runs in
 this order: fold the admitted Contract; under the register lock, decode once
-and reuse the Contract's appointment or durably appoint first-free; if that
+and reuse the Contract's appointment or durably appoint by its hash-derived
+forward scan; if that
 appointment failed operationally, return typed lag and perform no Git
 effect. World reconcile applies that lag only to observed managed
 Contracts; every here Contract continues the ordinary single-Contract

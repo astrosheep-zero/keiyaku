@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { replaceFileDurably } from "./coordination/durable-file.js";
@@ -351,17 +352,30 @@ function withAppointments(register: PlaceRegister, contracts: readonly ContractI
   const additions: PlaceAppointment[] = [];
   const occupied = new Set(register.byPlace.keys());
   const known = new Set(register.byContract.keys());
-  let cursor: Place | undefined;
   for (const contract of contracts) {
     if (known.has(contract)) continue;
-    let candidate = cursor === undefined ? nextPlace() : nextPlace(cursor);
-    while (occupied.has(candidate)) candidate = nextPlace(candidate);
+    const candidate = firstUnoccupiedPlace(contract, occupied);
     additions.push({ place: candidate, contract });
     occupied.add(candidate);
     known.add(contract);
-    cursor = candidate;
   }
   return additions.length === 0 ? register : indexedRegister([...register.appointments, ...additions]);
+}
+
+function stableStartIndex(contract: ContractId): number {
+  const digest = createHash("sha256").update(contract, "utf8").digest("hex");
+  return Number(BigInt(`0x${digest}`) % BigInt(CONTRACT_PLACES.length));
+}
+
+function firstUnoccupiedPlace(contract: ContractId, occupied: ReadonlySet<Place>): Place {
+  const start = stableStartIndex(contract);
+  for (let generation = 1n; ; generation += 1n) {
+    for (let offset = 0; offset < CONTRACT_PLACES.length; offset += 1) {
+      const base = CONTRACT_PLACES[(start + offset) % CONTRACT_PLACES.length]!;
+      const candidate = composePlace(base, generation);
+      if (!occupied.has(candidate)) return candidate;
+    }
+  }
 }
 
 export async function appointManagedWorktrees(

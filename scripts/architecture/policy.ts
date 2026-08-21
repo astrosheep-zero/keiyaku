@@ -1438,7 +1438,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       module: "node:crypto",
       owners: [
         ...ownersFor(["randomBytes"], "coordination/durable-file.ts", "git/scratch.ts", "library/bind.ts", "protocol/attempt.ts", "task/context.ts", "task/store.ts", "akuma/identity.ts"),
-        ...ownersFor(["createHash"], "cli/draft.ts", "git/identity.ts", "git/tree.ts", "settlement/fence.ts", "settlement/holder.ts", "body/keys.ts", "dispatch/index.ts"),
+        ...ownersFor(["createHash"], "cli/draft.ts", "git/identity.ts", "git/tree.ts", "settlement/fence.ts", "settlement/holder.ts", "body/keys.ts", "dispatch/index.ts", "workspace-place.ts"),
         { source: "coordination/sqlite-transaction-lock.ts", symbols: ["randomInt"] },
         ...ownersFor(["randomUUID"], "akuma/akuma.ts", "akuma/providers/claude/index.ts", "akuma/providers/opencode-sdk/index.ts", "akuma/requests.ts", "akuma/request-wire.ts"),
       ],

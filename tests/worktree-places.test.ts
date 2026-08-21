@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,6 +39,34 @@ const ATLANTIS = place("atlantis");
 const HOGWARTS = place("hogwarts");
 const CANONICAL = '{"version":1,"appointments":{"atlantis":"kei/example"}}\n';
 const EMPTY = '{"version":1,"appointments":{}}\n';
+const EXAMPLE_SHA256 = "6c56a4cd5854176ebf341f0731837916caaac309215095407d50d5e262f6330e";
+const EXAMPLE_START_INDEX = 15;
+const OTHER_START_INDEX = 86;
+const STABLE_START_VECTORS = [
+  { contract: EXAMPLE, startIndex: EXAMPLE_START_INDEX, expected: place("namek") },
+  { contract: OTHER, startIndex: OTHER_START_INDEX, expected: place("toilet") },
+  { contract: contractId("kei/stable-third"), startIndex: 161, expected: place("sidequest") },
+] as const;
+const WRAPS_AT_CATALOG_END = {
+  contract: contractId("kei/start-172-0-5"),
+  startIndex: 172,
+  expected: HOGWARTS,
+} as const;
+const SAME_BATCH_COLLISIONS = [
+  { contract: contractId("kei/start-24-0-30"), startIndex: 24, expected: place("chineseroom") },
+  { contract: contractId("kei/start-24-1-97"), startIndex: 24, expected: place("catbox") },
+] as const;
+const NEXT_GENERATION = {
+  contract: contractId("kei/start-83-0-193"),
+  startIndex: 83,
+  expected: place("sock2"),
+} as const;
+const RELEASE_REUSE = {
+  contract: contractId("kei/start-16-0-274"),
+  startIndex: 16,
+  expected: place("laputa"),
+} as const;
+const BULK_NEXT = { contract: contractId("kei/bulk-next"), startIndex: 28 } as const;
 
 function repositoryWithCommit() {
   const repository = makeGitRepository();
@@ -55,6 +84,25 @@ function registerOf(appointments: readonly { place: ReturnType<typeof place>; co
   }));
 }
 
+function expectedForwardAllocation(
+  startIndex: number,
+  occupied: ReadonlySet<ReturnType<typeof place>>,
+): ReturnType<typeof place> {
+  for (let generation = 1n; ; generation += 1n) {
+    for (let offset = 0; offset < CONTRACT_PLACES.length; offset += 1) {
+      const base = CONTRACT_PLACES[(startIndex + offset) % CONTRACT_PLACES.length]!;
+      const candidate = place(generation === 1n ? base : `${base}${generation.toString()}`);
+      if (!occupied.has(candidate)) return candidate;
+    }
+  }
+}
+
+function writeRegister(repository: Awaited<ReturnType<typeof repositoryAt>>, appointments: readonly { place: ReturnType<typeof place>; contract: ContractId }[]) {
+  const path = placeRegisterPath(repository);
+  mkdirSync(join(repository.commonDirectory, "keiyaku"), { recursive: true });
+  writeFileSync(path, canonicalPlaceRegister(registerOf(appointments)));
+}
+
 test("Place register bytes are one canonical JSON line", () => {
   const appointed = registerOf([{ place: ATLANTIS, contract: EXAMPLE }]);
   assert.equal(canonicalPlaceRegister(appointed), CANONICAL);
@@ -65,7 +113,7 @@ test("Place register bytes are one canonical JSON line", () => {
   assert.deepEqual(decodePlaceRegister("places.json", EMPTY).appointments, []);
 });
 
-test("Place allocation is generation-major and first-free", async () => {
+test("Place allocation preserves catalog vocabulary and suffix arithmetic", () => {
   assert.equal(CONTRACT_PLACES.length, 173);
   assert.equal(CONTRACT_PLACES[0], "atlantis");
   assert.equal(CONTRACT_PLACES[1], "hogwarts");
@@ -82,17 +130,73 @@ test("Place allocation is generation-major and first-free", async () => {
   assert.throws(() => place("atlantis1"), TypeError);
   assert.throws(() => place("atlantis01"), TypeError);
   assert.throws(() => place("not-a-place"), TypeError);
-  const repository = await repositoryAt(repositoryWithCommit().path);
-  const seed = [EXAMPLE, contractId("kei/seed-hogwarts"), OTHER];
-  await appointManagedWorktrees(repository, seed);
-  await releaseManagedWorktrees(repository, [seed[1]!]);
-  const firstFree = await appointManagedWorktrees(repository, [contractId("kei/first-free")]);
-  assert.equal(firstFree.byContract.get(contractId("kei/first-free"))?.place, HOGWARTS);
+});
 
-  const fullRepository = await repositoryAt(repositoryWithCommit().path);
-  await appointManagedWorktrees(fullRepository, CONTRACT_PLACES.map((_, index) => contractId(`kei/letter-${index}`)));
-  const nextGeneration = await appointManagedWorktrees(fullRepository, [contractId("kei/next-generation")]);
-  assert.equal(nextGeneration.byContract.get(contractId("kei/next-generation"))?.place, place("atlantis2"));
+test("Place allocation pins complete-digest big-endian stable-start vectors", async () => {
+  assert.equal(createHash("sha256").update(EXAMPLE, "utf8").digest("hex"), EXAMPLE_SHA256);
+  for (const vector of STABLE_START_VECTORS) {
+    assert.equal(CONTRACT_PLACES[vector.startIndex], vector.expected);
+  }
+  const first = await repositoryAt(repositoryWithCommit().path);
+  const second = await repositoryAt(repositoryWithCommit().path);
+  const contracts = STABLE_START_VECTORS.map((vector) => vector.contract);
+  const firstRegister = await appointManagedWorktrees(first, contracts);
+  const secondRegister = await appointManagedWorktrees(second, contracts);
+  assert.deepEqual(
+    contracts.map((contract) => firstRegister.byContract.get(contract)?.place),
+    STABLE_START_VECTORS.map((vector) => vector.expected),
+  );
+  assert.deepEqual(
+    contracts.map((contract) => secondRegister.byContract.get(contract)?.place),
+    STABLE_START_VECTORS.map((vector) => vector.expected),
+  );
+});
+
+test("Place allocation wraps from a fixed stable start and resolves fixed same-batch collisions", async () => {
+  const last = CONTRACT_PLACES.length - 1;
+  assert.equal(WRAPS_AT_CATALOG_END.startIndex, last);
+  assert.equal(CONTRACT_PLACES[WRAPS_AT_CATALOG_END.startIndex], "clawmachine");
+  const repository = await repositoryAt(repositoryWithCommit().path);
+  writeRegister(repository, [
+    { place: place(CONTRACT_PLACES[last]!), contract: contractId("kei/occupied-last") },
+    { place: ATLANTIS, contract: contractId("kei/occupied-first") },
+  ]);
+  const wrapped = await appointManagedWorktrees(repository, [WRAPS_AT_CATALOG_END.contract]);
+  assert.equal(wrapped.byContract.get(WRAPS_AT_CATALOG_END.contract)?.place, WRAPS_AT_CATALOG_END.expected);
+
+  const collisionRepository = await repositoryAt(repositoryWithCommit().path);
+  const collision = await appointManagedWorktrees(
+    collisionRepository,
+    SAME_BATCH_COLLISIONS.map((vector) => vector.contract),
+  );
+  for (const vector of SAME_BATCH_COLLISIONS) {
+    assert.equal(CONTRACT_PLACES[vector.startIndex], "chineseroom");
+    assert.equal(collision.byContract.get(vector.contract)?.place, vector.expected);
+  }
+});
+
+test("Place allocation repeats its stable start in the next generation", async () => {
+  const repository = await repositoryAt(repositoryWithCommit().path);
+  writeRegister(repository, CONTRACT_PLACES.map((base, index) => ({
+    place: place(base),
+    contract: contractId(`kei/first-generation-${index}`),
+  })));
+  assert.equal(CONTRACT_PLACES[NEXT_GENERATION.startIndex], "sock");
+  const next = await appointManagedWorktrees(repository, [NEXT_GENERATION.contract]);
+  assert.equal(next.byContract.get(NEXT_GENERATION.contract)?.place, NEXT_GENERATION.expected);
+});
+
+test("existing appointments win before hashing and release restores a coordinate to hash allocation", async () => {
+  const original = RELEASE_REUSE.expected;
+  const repository = await repositoryAt(repositoryWithCommit().path);
+  writeRegister(repository, [{ place: original, contract: EXAMPLE }]);
+  const retried = await appointManagedWorktrees(repository, [EXAMPLE]);
+  assert.equal(retried.byContract.get(EXAMPLE)?.place, original);
+
+  await releaseManagedWorktrees(repository, [EXAMPLE]);
+  assert.equal(CONTRACT_PLACES[RELEASE_REUSE.startIndex], "laputa");
+  const reused = await appointManagedWorktrees(repository, [RELEASE_REUSE.contract]);
+  assert.equal(reused.byContract.get(RELEASE_REUSE.contract)?.place, original);
 });
 
 test("missing Place file is empty and written empty remains canonical", async () => {
@@ -149,23 +253,25 @@ test("appointment after a concurrent release uses the locked on-disk register", 
   const reused = reusedRegister.byContract.get(OTHER)!;
   const appointed = await appointManagedWorktrees(repository, [EXAMPLE]);
   assert.equal(snapshot.byContract.get(EXAMPLE)?.place, first.place);
-  assert.equal(reused.place, first.place);
-  assert.equal(appointed.byContract.get(EXAMPLE)?.place, HOGWARTS);
-  assert.deepEqual(await readPlaceRegister(repository), appointed);
-  assert.notEqual(appointed.byContract.get(EXAMPLE)?.place, snapshot.byContract.get(EXAMPLE)?.place);
+  assert.equal(reused.place, expectedForwardAllocation(OTHER_START_INDEX, new Set()));
+  assert.equal(
+    appointed.byContract.get(EXAMPLE)?.place,
+    expectedForwardAllocation(EXAMPLE_START_INDEX, new Set([reused.place])),
+  );
+  assert.deepEqual((await readPlaceRegister(repository)).byContract, appointed.byContract);
 });
 
 test("retry reuses the durable Place and never inspects Git topology", async () => {
   const repository = await repositoryAt(repositoryWithCommit().path);
   const firstRegister = await appointManagedWorktrees(repository, [EXAMPLE]);
   const first = firstRegister.byContract.get(EXAMPLE)!;
-  assert.equal(first.place, ATLANTIS);
+  assert.equal(first.place, expectedForwardAllocation(EXAMPLE_START_INDEX, new Set()));
   mkdirSync(worktreePath(repository, "hogwarts"), { recursive: true });
   writeFileSync(join(worktreePath(repository, "hogwarts"), "noise.txt"), "not an appointment\n");
   const retry = await appointManagedWorktrees(repository, [EXAMPLE]);
   assert.deepEqual(retry.byContract.get(EXAMPLE), first);
   const other = await appointManagedWorktrees(repository, [OTHER]);
-  assert.equal(other.byContract.get(OTHER)?.place, HOGWARTS);
+  assert.equal(other.byContract.get(OTHER)?.place, expectedForwardAllocation(OTHER_START_INDEX, new Set([first.place])));
 });
 
 test("the three-arm reader does not inspect the journal or filesystem", async () => {
@@ -216,14 +322,16 @@ test("a 10000-appointment observation decodes the register once", async () => {
   mkdirSync(join(git.commonDirectory, "keiyaku"), { recursive: true });
   writeFileSync(path, bytes);
   const register = decodePlaceRegister(path, bytes);
-  const nextContract = contractId("kei/bulk-next");
-  const next = await appointManagedWorktrees(git, [nextContract]);
+  const next = await appointManagedWorktrees(git, [BULK_NEXT.contract]);
   writeFileSync(path, "not-canonical\n");
   assert.equal(register.byPlace.size, 10_000);
   assert.equal(register.byContract.size, 10_000);
   assert.equal(register.byContract.get(appointments[0]!.contract)?.place, appointments[0]!.place);
   assert.equal(register.byPlace.get(appointments[9_999]!.place)?.contract, appointments[9_999]!.contract);
-  assert.equal(next.byContract.get(nextContract)?.place, placeAt(10_000));
+  assert.equal(
+    next.byContract.get(BULK_NEXT.contract)?.place,
+    expectedForwardAllocation(BULK_NEXT.startIndex, new Set(appointments.map((appointment) => appointment.place))),
+  );
   for (const appointment of appointments) {
     assert.deepEqual(await readManagedWorktreeAppointment(git, appointment.contract, register), {
       kind: "appointed",
@@ -321,7 +429,10 @@ test("terminal cleanup releases the Place only after hooks and removal succeed",
   assert.equal(existsSync(appointment.path), true);
   assert.deepEqual(await readManagedWorktreeAppointment(git, bound.keiyaku.id), appointment);
   const other = await appointManagedWorktrees(git, [OTHER]);
-  assert.equal(other.byContract.get(OTHER)?.place, HOGWARTS);
+  assert.equal(
+    other.byContract.get(OTHER)?.place,
+    expectedForwardAllocation(OTHER_START_INDEX, new Set([appointment.place])),
+  );
   writeFileSync(ready, "ready\n");
   const released = await bound.keiyaku.reconcile({ hooks, retryHooks: true });
   assert.deepEqual(released.lag, []);
