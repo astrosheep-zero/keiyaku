@@ -38,9 +38,6 @@ test("amend H2 operations form one complete body replacement", () => {
     "### Added",
     "added",
     "",
-    "## Update: Criterion Keep",
-    "after",
-    "",
     "## Remove: Criterion Drop",
     "",
     "## Append: Notes",
@@ -56,7 +53,7 @@ test("amend H2 operations form one complete body replacement", () => {
   assert.equal(amended.context.trim(), "current\n\nmore");
   assert.deepEqual(amended.region, ["lib/**"]);
   assert.deepEqual(amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })), [
-    { title: "Keep", body: "after" },
+    { title: "Keep", body: "before" },
     { title: "Added", body: "added" },
   ]);
   assert.deepEqual(amended.verification, [{ executor: "zsh", script: "print ok" }]);
@@ -102,9 +99,6 @@ test("amend supports every ruled core, criterion, and extension operation", () =
     "### Add me",
     "added",
     "",
-    "## Update: Criterion Replace me",
-    "updated",
-    "",
     "## Remove: Criterion Remove me",
     "",
     "## Replace: Verification",
@@ -133,7 +127,7 @@ test("amend supports every ruled core, criterion, and extension operation", () =
   assert.equal(amended.design.trim(), "replaced design\n\nappended design");
   assert.deepEqual(amended.region, ["lib/**"]);
   assert.deepEqual(amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })), [
-    { title: "Replace me", body: "updated" },
+    { title: "Replace me", body: "replacement" },
     { title: "Add me", body: "added" },
   ]);
   assert.deepEqual(amended.verification, [{ executor: "pwsh", script: "Write-Output ok" }]);
@@ -150,9 +144,6 @@ test("amend keeps criterion and extension targets indexed across ordered mutatio
   const amended = applyAmendOperations([
     "## Remove: Criterion Keep",
     "",
-    "## Update: Criterion Drop",
-    "kept after earlier removal",
-    "",
     "## Replace: Criteria",
     "### Replaced",
     "replacement",
@@ -164,9 +155,6 @@ test("amend keeps criterion and extension targets indexed across ordered mutatio
     "## Add: Criteria",
     "### Added",
     "added",
-    "",
-    "## Update: Criterion Added",
-    "updated added",
     "",
     "## Remove: Criterion Replaced",
     "",
@@ -193,7 +181,7 @@ test("amend keeps criterion and extension targets indexed across ordered mutatio
 
   assert.deepEqual(amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })), [
     { title: "Appended", body: "appended" },
-    { title: "Added", body: "updated added" },
+    { title: "Added", body: "added" },
   ]);
   assert.deepEqual(amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })), [
     { title: "Archive", content: "updated archive" },

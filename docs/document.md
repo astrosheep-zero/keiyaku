@@ -117,14 +117,14 @@ heading has exactly this grammar:
 ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>
 ## Append: Context|Objective|Design|Criteria|<extension>
 ## Add: Criteria|<new-extension-title>
-## Update: Criterion <existing-title>|<existing-extension-title>
-## Remove: Criterion <existing-title>|<existing-extension-title>
+## Update: <existing-extension-title>
+## Remove: Criterion <existing-title>
+## Remove: <existing-extension-title>
 ```
 
 `Replace` supplies the target's complete canonical content. `Append` adds
 canonical prose or canonical collection entries. `Add` creates an extension or
-adds one or more H3 criteria. `Update: Criterion <title>` replaces the named
-criterion's canonical body; `Remove: Criterion <title>` has no body and
+adds one or more H3 criteria. `Remove: Criterion <title>` has no body and
 removes that keyed criterion. Extension update and remove use the exact
 extension title in the H2 target. A target occurs at most once for an operation
 kind when duplicate application would be ambiguous.

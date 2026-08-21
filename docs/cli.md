@@ -165,9 +165,8 @@ with `--after`. Final `-` selects one nonblank H2 operation document. Its
 absence requires at least one of `--after`, `--clear-after`, or `--gates` and
 does not acquire stdin; otherwise parsing is usage before observation. `bind`
 and `arc` still require their final `-` document input. Amend leaf help
-enumerates the five operation headings verbatim from
-[document.md](document.md) and points there for body semantics; the complete
-amendment-operation grammar remains owned by document.md.
+enumerates the operation headings and keeps the target forms distinct for
+criteria and extensions. Body semantics remain owned by the document chapter.
 
 Every Contract mutation and `reconcile` passes one CLI-observed `WorktreeHooks`
 value to the public operation; the CLI never runs hooks or reads markers.

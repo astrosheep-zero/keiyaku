@@ -169,14 +169,6 @@ function applyRemove(body: MutableBody, operation: Operation, document: Document
 }
 
 function applyUpdate(body: MutableBody, operation: Operation, document: DocumentNode): void {
-  if (operation.target.startsWith("Criterion ")) {
-    const title = operation.target.slice("Criterion ".length);
-    const index = criterionIndex(body, title);
-    if (index < 0) refusal(`unknown criterion '${title}'`);
-    const criterion = body.criteria[index]!;
-    body.criteria[index] = { ...criterion, body: prose(document, operation.section, "criterion") };
-    return;
-  }
   const index = extensionIndex(body, operation.target);
   if (index < 0) refusal(`unknown extension '${operation.target}'`);
   const extension = body.extensions[index]!;

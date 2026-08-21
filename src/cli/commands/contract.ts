@@ -9,14 +9,12 @@ export type ContractCommandSpec = Readonly<{
 }>;
 
 export const AMEND_OPERATIONS_HELP = [
-  "stdin operations (H2 sections only, no H1):",
   "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
   "  ## Append: Context|Objective|Design|Criteria|<extension>",
   "  ## Add: Criteria|<new-extension-title>",
-  "  ## Update: Criterion <existing-title>|<existing-extension-title>",
-  "  ## Remove: Criterion <existing-title>|<existing-extension-title>",
-  "",
-  "full operation grammar: docs/document.md, Amend Operations",
+  "  ## Update: <existing-extension-title>",
+  "  ## Remove: Criterion <existing-title>",
+  "  ## Remove: <existing-extension-title>",
 ].join("\n");
 
 export const CONTRACT_COMMAND_SPECS = {

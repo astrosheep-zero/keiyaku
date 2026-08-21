@@ -81,14 +81,12 @@ test("amend leaf help enumerates the operation grammar", () => {
     "",
     "usage: keiyaku amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]",
     "",
-    "stdin operations (H2 sections only, no H1):",
     "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",
     "  ## Append: Context|Objective|Design|Criteria|<extension>",
     "  ## Add: Criteria|<new-extension-title>",
-    "  ## Update: Criterion <existing-title>|<existing-extension-title>",
-    "  ## Remove: Criterion <existing-title>|<existing-extension-title>",
-    "",
-    "full operation grammar: docs/document.md, Amend Operations",
+    "  ## Update: <existing-extension-title>",
+    "  ## Remove: Criterion <existing-title>",
+    "  ## Remove: <existing-extension-title>",
   ].join("\n"));
 });
 
@@ -100,6 +98,17 @@ test("only amend leaf help carries the operation grammar", () => {
     assert.equal(renderContractHelp(command), `${spec.purpose}\n\n${usageLine(spec.usage)}`);
     assert.doesNotMatch(renderContractHelp(command), /stdin operations/u);
   }
+});
+
+test("help contains no Markdown file pointers", () => {
+  const help = [
+    renderRootHelp(),
+    ...Object.keys(CONTRACT_COMMAND_SPECS).map((command) => renderContractHelp(command as ContractCommand)),
+    renderTaskHelp(),
+    ...(["tell", "history"] as const).map((action) => renderAkumaHelp(action)),
+    renderInstallHelp(),
+  ].join("\n");
+  assert.doesNotMatch(help, /(?:docs\/|\.md\b)/u);
 });
 
 test("amend syntax refusal keeps the stored usage block", () => {
