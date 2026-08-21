@@ -281,7 +281,7 @@ function tellInvocation(observation: AkumaObservation) {
     body: "steer",
     result: {
       akuma: observation.status.id,
-      tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: "spawned" as const },
+      tell: { admission: { tellId: "tell-1", fact: "recorded" as const }, wake: { kind: "pursuing" as const, bodySequence: 1 } },
       observation: { kind: "observed" as const, ...observation },
     },
   };

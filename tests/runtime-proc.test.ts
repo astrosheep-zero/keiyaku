@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
@@ -399,6 +401,69 @@ test("a direct spawner terminates through its live owned-process handle", async 
   }
 });
 
+test("a direct spawner retains its waitpid result and bounded shared-log reference", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-exit-"));
+  try {
+    const log = join(root, "stdio.log");
+    writeFileSync(log, "prior stdout\n");
+    const owned = await spawnDetachedProcess({
+      argv: [process.execPath, "-e", "process.exit(7)"],
+      cwd: root,
+      log,
+    });
+    const exit = await owned.exited;
+    assert.deepEqual({ code: exit.code, signal: exit.signal }, { code: 7, signal: null });
+    assert.deepEqual(exit.log, { path: log, from: "prior stdout\n".length, to: readFileSync(log).length });
+    assert.match(readFileSync(log, "utf8"), /prior stdout/u);
+    assert.match(readFileSync(log, "utf8"), /\[child exit 7\]/u);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a direct spawner retains a short exit marker write before its exit receipt", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-boundary-"));
+  try {
+    const log = join(root, "stdio.log");
+    const handle = await open(log, "a");
+    type WritableHandle = { write(...args: unknown[]): Promise<{ bytesWritten: number }> };
+    const prototype = Object.getPrototypeOf(handle) as WritableHandle;
+    const originalWrite = prototype.write;
+    let shortened = false;
+    t.mock.method(prototype, "write", async function(this: WritableHandle, ...args: unknown[]) {
+      if (!shortened && Buffer.isBuffer(args[0]) && typeof args[1] === "number" && typeof args[2] === "number" && args[2] > 1) {
+        shortened = true;
+        return Reflect.apply(originalWrite, this, [args[0], args[1], 1, args[3]]);
+      }
+      return Reflect.apply(originalWrite, this, args);
+    });
+    await handle.close();
+
+    const owned = await spawnDetachedProcess({
+      argv: [process.execPath, "-e", "process.exit(0)"],
+      cwd: root,
+      log,
+    });
+    const exit = await owned.exited;
+    const content = readFileSync(log, "utf8");
+    assert.equal(shortened, true);
+    assert.match(content, /\[child exit 0\]\n$/u);
+    assert.equal(exit.log.to, content.length);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a direct spawner rejects exit evidence when its run-log path disappears", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-missing-log-"));
+  try {
+    const log = join(root, "stdio.log");
+    const owned = await spawnDetachedProcess({
+      argv: [process.execPath, "-e", "setTimeout(() => process.exit(7), 50)"],
+      cwd: root,
+      log,
+    });
+    rmSync(log);
+    await assert.rejects(owned.exited, /pre-admission exit 7: run-log evidence unavailable/u);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("an owned process capability is inert after termination and repeated terminate", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-reap-"));
   let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
@@ -461,4 +526,19 @@ test("an owned process capability is inert after release and repeated terminate"
     }
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("release lets the parent reach beforeExit while the detached child continues", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-before-exit-"));
+  try {
+    const runtime = pathToFileURL(join(process.cwd(), "src/runtime/proc/run.ts")).href;
+    const script = [
+      `import { spawnDetachedProcess } from ${JSON.stringify(runtime)};`,
+      `const owned = await spawnDetachedProcess({ argv: [process.execPath, "-e", "setTimeout(() => {}, 1000)"], cwd: ${JSON.stringify(root)}, log: ${JSON.stringify(join(root, "stdio.log"))} });`,
+      "owned.release();",
+      'process.once("beforeExit", () => console.log("before-exit"));',
+    ].join("\n");
+    const outcome = await runProcess(input([process.execPath, "--import", "tsx", "--input-type=module", "-e", script]));
+    assert.deepEqual(outcome, { kind: "terminal", code: 0, stdout: "before-exit\n", stderr: "", truncated: false });
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

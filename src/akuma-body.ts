@@ -1,4 +1,4 @@
-import { runAkumaBody, type BodyLaunch } from "./akuma/body.js";
+import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import type { UpstreamExecutionPort } from "./akuma/request-serve.js";
 import type { WorldRoot } from "./world.js";
@@ -113,4 +113,4 @@ const configuration = {
   ...(mappedHome === undefined || mappedHome.length === 0 ? {} : { home: mappedHome }),
   ...(mappedGitPath === undefined ? {} : { gitPath: mappedGitPath }),
 };
-await runAkumaBody(launch, upstreamFor(launch, configuration));
+if (await runAkumaBody(launch, upstreamFor(launch, configuration)) === "held") process.exitCode = LEASH_HELD_EXIT;

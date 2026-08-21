@@ -76,6 +76,14 @@ suppresses it.
 
 ## Shared Scanner Grammar
 
+Tell renders its wake receipt before the shared observation as exactly `wake
+told`, `wake pursuing · body <bodySequence>`, `wake held`, or `! wake failed ·
+<diagnostic>`. A failed receipt with child evidence appends its factual shared
+run-log path and byte range without calling those bytes stderr. Ordinary Tell
+exits 0 for `told`, `pursuing`, and `held`, and 2 for `failed`; JSON remains the
+typed result. When pending Tell rows exist without a live Body, shared Akuma
+text adds `pending <N> tells · no live body`.
+
 Text surfaces share a small scanner grammar, not a shared layout. Renderer words
 are lowercase; `·` separates facts on a summary line; evidence is indented by
 two spaces; a glyph is paired with its word; and a complete coordinate remains

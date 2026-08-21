@@ -69,6 +69,7 @@ export type AkumaTellResult = Readonly<{
   tell: TellResult;
   observation: AkumaObservationStage;
 }>;
+export type { TellResult, TellWake } from "../akuma/index.js";
 export type AkumaInterruptInput = AkumaAddressInput & Readonly<{ body: string }>;
 export type AkumaInterruptResult = Readonly<{
   id: AkumaStatus["id"];
@@ -262,7 +263,13 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
   const handle = source(input.path).of({ id: input.id });
   const tell = input.tellId === undefined
     ? await handle.tell(input.body)
-    : await tellAkumaWithId(input.path, input.id, input.body, input.tellId, input.recordedAt);
+    : await tellAkumaWithId({
+      worldPath: input.path,
+      id: input.id,
+      body: input.body,
+      tellId: input.tellId,
+      ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
+    });
   input.signal?.throwIfAborted();
   return {
     akuma: input.id,

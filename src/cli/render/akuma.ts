@@ -73,6 +73,12 @@ function lifeLabel(life: AkumaObservation["status"]["life"]): string {
   return `? ${life}`;
 }
 
+function pendingWithoutLiveBody(status: AkumaObservation["status"]): number {
+  if (status.life === "running") return 0;
+  return status.timeline.entries.reduce((count, entry) => count
+    + (entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending" ? 1 : 0), 0);
+}
+
 function clock(at: string): string {
   const date = new Date(at);
   return Number.isFinite(date.getTime()) ? `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}` : "unknown";
@@ -296,11 +302,13 @@ function snapshotText(
   ];
   const taskContext = renderTaskContextLines(view.createdTasks, context.columns);
   const changes = renderReportedChangeLines(snapshot);
+  const pending = pendingWithoutLiveBody(view.status);
   const footer = options.showLife === false ? [] : ["", lifeLabel(view.status.life)];
   return [
     ...snapshotHeading(view.status.id, options.alias, view.contract, context.columns),
     ...facts,
     ...activity,
+    ...(pending === 0 ? [] : [`pending ${pending} tells · no live body`]),
     ...(activity.length > 0 && taskContext.length > 0 ? [""] : []),
     ...taskContext,
     ...changes,
@@ -348,7 +356,12 @@ function historyText(
 }
 
 function tellText(result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>, context: TextRenderContext): string {
-  const facts = typeof result.result.tell.wake === "string" ? [] : [`! error ${safeText(result.result.tell.wake.diagnostic)}`];
+  const wake = result.result.tell.wake;
+  const facts = wake.kind === "failed"
+    ? [`! wake failed · ${safeText(wake.diagnostic)}${wake.child === undefined ? "" : ` · log ${wake.child.log.path} ${wake.child.log.from}..${wake.child.log.to}`}`]
+    : wake.kind === "pursuing"
+      ? [`wake pursuing · body ${wake.bodySequence}`]
+      : [`wake ${wake.kind}`];
   return observationStageText(result.result.akuma, result.result.observation, context, {
     ...(result.alias === undefined ? {} : { alias: result.alias }),
     facts,
@@ -477,7 +490,7 @@ function killExitCode(result: Extract<AkumaInvocationResult, { action: "kill" }>
 }
 
 function tellExitCode(result: Extract<AkumaInvocationResult, { action: "tell" }>): number {
-  if (result.mode === "ordinary") return typeof result.result.tell.wake === "string" ? 0 : 2;
+  if (result.mode === "ordinary") return result.result.tell.wake.kind === "failed" ? 2 : 0;
   return result.result.receipt.kind === "interrupted" ? 0 : 1;
 }
 

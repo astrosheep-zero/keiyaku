@@ -119,6 +119,7 @@ export type { Dispatch, DispatchFailure } from "../dispatch/index.js";
 export type { AkumaAlias } from "../identity/selector.js";
 export type { AkumaGlob } from "../identity/selector.js";
 export type { AkuId } from "../akuma/identity.js";
+export type { TellResult, TellWake } from "./fleet.js";
 export type { AllowedAction, AllowedActions } from "../akuma/allowed.js";
 export type { Catalog, CatalogInput, CatalogQuery } from "./catalog.js";
 export type {

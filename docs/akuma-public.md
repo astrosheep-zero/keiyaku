@@ -87,8 +87,30 @@ it never re-evaluates provider capability or turns that fact into a warning
 type.
 
 `tell(body)` returns one typed mutation result: the allocated TellId, its
-recorded Heart admission, and whether the level-triggered waker was spawned. It
-does not imply delivery, provider observation, or turn entry. Delivery and
+recorded Heart admission, and durable wake custody evidence. It does not imply
+delivery, provider observation, or turn entry:
+
+```ts
+type RunLogReference = Readonly<{ path: string; from: number; to: number }>;
+type TellWake =
+  | Readonly<{ kind: "told" }>
+  | Readonly<{ kind: "pursuing"; bodySequence: number }>
+  | Readonly<{ kind: "held" }>
+  | Readonly<{
+      kind: "failed";
+      diagnostic: string;
+      child?: Readonly<{ code: number | null; signal: string | null; log: RunLogReference }>;
+    }>;
+type TellResult = Readonly<{ admission: Readonly<{ tellId: string; fact: "recorded" }>; wake: TellWake }>;
+```
+
+`told` names the Tell's Heart delivery witness; `pursuing` names only a later
+Body fact; and `held` is the waker child's atomic leash refusal, without a
+holder identity or a delivery claim. `bodySequence` is the narrow exception
+that exposes a Body coordinate as custody evidence. A failed arm retains the
+Tell pending and can carry its actual waitpid code or signal with a bounded
+reference into the shared run log; those referenced bytes are not stderr.
+Delivery and
 provider receipts fold into ordinary Akuma observation as one `pending` or
 `told` tell row at the admission's original timeline position. Tell admission
 is Body-scoped and does not imply entry into a Turn. Pending tell rows therefore

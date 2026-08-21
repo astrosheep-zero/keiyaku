@@ -1,9 +1,9 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { open } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import crossSpawn from "cross-spawn";
 import {
-  spawnLoggedProcess,
   spawnOptionsFor,
   type DetachedProcessInput,
 } from "./launch.js";
@@ -72,8 +72,20 @@ export type ProcessConsumption = Readonly<{
   readonly pid: number | null;
 }>;
 
+export type RunLogReference = Readonly<{
+  path: string;
+  from: number;
+  to: number;
+}>;
+
+export type DetachedProcessExit = Readonly<{
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  log: RunLogReference;
+}>;
 export type OwnedProcess = Readonly<{
   pid: number;
+  exited: Promise<DetachedProcessExit>;
   terminate(force?: boolean): Promise<void>;
   release(): void;
 }>;
@@ -109,6 +121,10 @@ function tailCapture(limit: number) {
 
 function ignoreMissingProcess(error: unknown): void {
   if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+}
+
+function detachedExitStatus(code: number | null, signal: NodeJS.Signals | null): string {
+  return code === null ? `signal ${signal ?? "unknown"}` : `exit ${code}`;
 }
 
 const WINDOWS_TERMINATION_TIMEOUT_MS = 1_000;
@@ -157,28 +173,87 @@ export async function terminateOwnedProcess(child: ChildProcess, force = false):
 }
 
 export async function spawnDetachedProcess(input: DetachedProcessInput): Promise<OwnedProcess> {
-  const child = await spawnLoggedProcess(input, "retained");
-  const pid = child.pid!;
-  let state: "active" | "terminating" | "inert" = "active";
-  let termination: Promise<void> | undefined;
-  const invalidate = (): void => { state = "inert"; };
-  child.once("exit", invalidate);
-  child.once("close", invalidate);
-  return {
-    pid,
-    terminate(force = false) {
-      if (state === "inert") return Promise.resolve();
-      if (termination !== undefined) return termination;
-      state = "terminating";
-      termination = terminateOwnedProcess(child, force).finally(invalidate);
-      return termination;
-    },
-    release: () => {
-      if (state === "inert") return;
-      state = "inert";
-      child.unref();
-    },
-  };
+  const log = await open(input.log, "a");
+  let launched = false;
+  try {
+    const from = (await log.stat()).size;
+    const child = spawn(input.argv[0]!, input.argv.slice(1), spawnOptionsFor("retained", input, ["ignore", log.fd, log.fd]));
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
+    if (child.pid === undefined) throw new Error("detached process spawned without a pid");
+    const pid = child.pid;
+    const exited = new Promise<DetachedProcessExit>((resolve, reject) => {
+      child.once("close", (code, signal) => {
+        void (async () => {
+          const status = detachedExitStatus(code, signal);
+          let failure: unknown;
+          let result: DetachedProcessExit | undefined;
+          try {
+            const marker = Buffer.from(`[child ${status}]\n`);
+            let written = 0;
+            while (written < marker.byteLength) {
+              const write = await log.write(marker, written, marker.byteLength - written);
+              if (write.bytesWritten === 0) throw new Error("run log exit marker write made no progress");
+              written += write.bytesWritten;
+            }
+            const evidence = await log.stat();
+            if (evidence.size < from) throw new Error("run log shrank before exit evidence was retained");
+            const referenced = await open(input.log, "r");
+            try {
+              const current = await referenced.stat();
+              if (current.dev !== evidence.dev || current.ino !== evidence.ino) {
+                throw new Error("run log path changed before exit evidence was retained");
+              }
+              if (current.size < evidence.size) {
+                throw new Error("run log path size changed before exit evidence was retained");
+              }
+            } finally {
+              await referenced.close();
+            }
+            result = { code, signal, log: { path: input.log, from, to: evidence.size } };
+          } catch (error) {
+            failure = error;
+          }
+          try {
+            await log.close();
+          } catch (error) {
+            failure ??= error;
+          }
+          if (failure !== undefined) {
+            throw new Error(`pre-admission ${status}: run-log evidence unavailable: ${failure instanceof Error ? failure.message : String(failure)}`);
+          }
+          resolve(result!);
+        })().catch(reject);
+      });
+    });
+    void exited.catch(() => undefined);
+    let state: "active" | "terminating" | "inert" = "active";
+    let termination: Promise<void> | undefined;
+    const invalidate = (): void => { state = "inert"; };
+    child.once("exit", invalidate);
+    child.once("close", invalidate);
+    launched = true;
+    return {
+      pid,
+      exited,
+      terminate(force = false) {
+        if (state === "inert") return Promise.resolve();
+        if (termination !== undefined) return termination;
+        state = "terminating";
+        termination = terminateOwnedProcess(child, force).finally(invalidate);
+        return termination;
+      },
+      release: () => {
+        if (state === "inert") return;
+        state = "inert";
+        child.unref();
+      },
+    };
+  } finally {
+    if (!launched) await log.close();
+  }
 }
 
 function terminalOutcome(

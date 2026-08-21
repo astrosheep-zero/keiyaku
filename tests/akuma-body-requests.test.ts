@@ -1172,11 +1172,12 @@ test("Fleet resolves Alias glob and duplicate selectors before publishing a wait
   }
 });
 
-test("duplicate tell claims enter the existing tell executor once with request id as TellId", async () => {
+test("a forwarded Tell writes its transport and the direct parent enters the tell executor once", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-tell-")));
   const parent = await born(root, "parent", "11111111", ["akuma.tell"]);
   const target = await born(root, "worker", "22222222");
   const targetLeash = (await HeldAkumaLeash.try(target.paths))!;
+  await targetLeash.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
   let calls = 0;
   const pump = await openPump(parent, {
     ...noDeliver(),

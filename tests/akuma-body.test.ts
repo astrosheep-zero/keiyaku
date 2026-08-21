@@ -1160,7 +1160,20 @@ test("pause interrupts pre-drive request settlement within the control window", 
       const body = driveAkumaBody({ paths: allocated.paths }, undefined, {
         now: () => new Date().toISOString(),
       });
-      while ((await readHeart(allocated.paths)).latestBody === null) await new Promise((resolve) => setTimeout(resolve, 5));
+      const current = await Promise.race([
+        (async () => {
+          for (let attempt = 0; attempt < 100; attempt += 1) {
+            const observed = (await readHeart(allocated.paths)).latestBody;
+            if (observed !== null) return observed;
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          }
+          throw new Error("Body did not record request-settlement custody");
+        })(),
+        body.then(
+          () => { throw new Error("Body ended before request-settlement custody"); },
+          (error) => { throw new Error(`Body failed before request-settlement custody: ${error instanceof Error ? error.message : String(error)}`); },
+        ),
+      ]);
       const requestedAt = performance.now();
       await requestPause(allocated.paths, new Date().toISOString());
       await Promise.race([
@@ -1168,6 +1181,7 @@ test("pause interrupts pre-drive request settlement within the control window", 
         new Promise((_, reject) => setTimeout(() => reject(new Error("Body did not interrupt request settlement")), 500)),
       ]);
       assert.ok(performance.now() - requestedAt < CONTROL_RESPONSE_MS);
+      assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, current.sequence);
       assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
       assert.equal(await probeLeash(allocated.paths), "free");
     } finally { childLeash.release(); }

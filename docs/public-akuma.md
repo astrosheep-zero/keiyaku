@@ -4,6 +4,9 @@ This chapter owns package-root Akuma creation, addressing, fleet, and cross-prod
 
 ## Observation
 
+The package root exports the Akuma-owned `TellResult` and `TellWake` unchanged;
+Fleet embeds that same four-outcome wake receipt and adds no second wake schema.
+
 All Akuma observations expose the same typed timeline snapshot. Mutation
 receipts and the fresh observation remain separate values, while status, wait,
 call, tell, interrupt, and kill use the same semantic rows. Snapshot selection

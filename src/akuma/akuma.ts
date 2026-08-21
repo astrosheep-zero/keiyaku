@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { CONTROL_RESPONSE_MS, spawnAkumaBody } from "./body.js";
+import {
+  CONTROL_RESPONSE_MS,
+  recoverPendingTells,
+  spawnAkumaBody,
+  type TellResult,
+  type TellWakeRuntime,
+  wakeRecordedTell,
+} from "./body.js";
 import {
   HeldAkumaLeash,
   activitySlice,
@@ -128,10 +135,7 @@ export type AkumaCallInput = Readonly<{
 }>;
 type AkumaCallContext = Readonly<{ initiatorCwd?: string; cwdCanonical?: true }>;
 
-export type TellResult = Readonly<{
-  admission: Readonly<{ tellId: string; fact: "recorded" }>;
-  wake: "spawned" | Readonly<{ kind: "failed"; diagnostic: string }>;
-}>;
+export type { TellResult, TellWake } from "./body.js";
 
 export type InterruptReceipt =
   | Readonly<{
@@ -183,32 +187,58 @@ async function recordTellBody(
   return { kind: "recorded", tellId: admitted.tell.id };
 }
 
-async function wakeTell(paths: AkumaPaths, tellId: string): Promise<TellResult> {
-  try {
-    await spawnAkumaBody({ paths });
-    return { admission: { tellId, fact: "recorded" }, wake: "spawned" };
-  } catch (error) {
-    return {
-      admission: { tellId, fact: "recorded" },
-      wake: { kind: "failed", diagnostic: diagnostic(error) },
-    };
-  }
-}
-
 export async function tellAkumaWithId(
-  worldPath: WorldRoot,
-  id: AkuId,
-  body: string,
-  tellId: string,
-  recordedAt = new Date().toISOString(),
+  input: Readonly<{
+    worldPath: WorldRoot;
+    id: AkuId;
+    body: string;
+    tellId: string;
+    recordedAt?: string;
+    runtime?: TellWakeRuntime;
+  }>,
 ): Promise<TellResult> {
-  const paths = pathsForAkuId(worldPath, id);
-  const recorded = await recordTellBody(paths, id, body, tellId, recordedAt);
-  return await wakeTell(paths, recorded.tellId);
+  const paths = pathsForAkuId(input.worldPath, input.id);
+  const recorded = await recordTellBody(paths, input.id, input.body, input.tellId, input.recordedAt);
+  return await wakeRecordedTell(paths, recorded.tellId, input.runtime);
 }
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export async function killAkumaWithRecovery(
+  paths: AkumaPaths,
+  recover: (paths: AkumaPaths) => Promise<void> = recoverPendingTells,
+): Promise<KillEvidence> {
+  try {
+    const request = await requestStop(paths, new Date().toISOString());
+    if (request.kind !== "requested") return request.kind;
+    const target = request.body;
+    const leash = await takeLeashUntil(paths, performance.now() + CONTROL_RESPONSE_MS);
+    if (await readKill(paths, target.sequence) !== null) {
+      leash?.release();
+      return "killed";
+    }
+    if (leash === null) {
+      if (await readKill(paths, target.sequence) !== null) return "killed";
+      const body = (await readHeart(paths)).latestBody;
+      return body?.sequence === target.sequence && body.hung !== undefined ? "hung" : "unavailable";
+    }
+    try {
+      const settledBody = (await readHeart(paths)).latestBody;
+      if (settledBody?.sequence !== target.sequence) return await readKill(paths, target.sequence) === null ? "unavailable" : "killed";
+      if (settledBody.end !== "put-down") {
+        await leash.clearStop(paths);
+        return "untidy";
+      }
+      const settled = await leash.settleStop(paths, target.sequence);
+      return settled === null ? "unavailable" : "killed";
+    } finally {
+      leash.release();
+    }
+  } finally {
+    await recover(paths).catch(() => undefined);
+  }
 }
 
 async function fleetListRow(
@@ -360,7 +390,7 @@ export class AkumaHandle {
 
   async tell(body: string): Promise<TellResult> {
     const recorded = await recordTellBody(this.paths, this.id, body);
-    return await wakeTell(this.paths, recorded.tellId);
+    return await wakeRecordedTell(this.paths, recorded.tellId);
   }
 
   async interrupt(body: string): Promise<InterruptReceipt> {
@@ -407,7 +437,7 @@ export class AkumaHandle {
     } finally {
       leash.release();
     }
-    return { kind: "interrupted", putDown, tell: await wakeTell(this.paths, recorded.tellId) };
+    return { kind: "interrupted", putDown, tell: await wakeRecordedTell(this.paths, recorded.tellId) };
   }
 
   async fork(input: Readonly<{ at: string }>): Promise<ForkReceipt> {
@@ -440,21 +470,23 @@ export class AkumaHandle {
         worldPath: this.worldPath,
         archetype: source.archetype,
         awaitAsleep: true,
-        launch: async (allocated) => await spawnAkumaBody({
-          paths: allocated.paths,
-          seed: {
-            id: allocated.id,
-            archetype: source.archetype,
-            ...(source.description === undefined ? {} : { description: source.description }),
-            provider: source.provider,
-            options: source.options,
-            ...(source.readonly === undefined ? {} : { readonly: source.readonly }),
-            allowed: source.allowed,
-            cwd: source.cwd,
-            origin: { kind: "fork", parent: this.id, at: input.at },
-          },
-          birthSession,
-        }),
+        launch: async (allocated) => {
+          (await spawnAkumaBody({
+            paths: allocated.paths,
+            seed: {
+              id: allocated.id,
+              archetype: source.archetype,
+              ...(source.description === undefined ? {} : { description: source.description }),
+              provider: source.provider,
+              options: source.options,
+              ...(source.readonly === undefined ? {} : { readonly: source.readonly }),
+              allowed: source.allowed,
+              cwd: source.cwd,
+              origin: { kind: "fork", parent: this.id, at: input.at },
+            },
+            birthSession,
+          })).release();
+        },
       });
       return { kind: "forked", child: child.id };
     } catch (error) {
@@ -467,34 +499,7 @@ export class AkumaHandle {
   }
 
   async kill(): Promise<KillEvidence> {
-    const at = new Date().toISOString();
-    const request = await requestStop(this.paths, at);
-    if (request.kind !== "requested") return request.kind;
-    const target = request.body;
-    const graceDeadline = performance.now() + CONTROL_RESPONSE_MS;
-    const leash = await takeLeashUntil(this.paths, graceDeadline);
-    if (await readKill(this.paths, target.sequence) !== null) {
-      leash?.release();
-      return "killed";
-    }
-    if (leash === null) {
-      if (await readKill(this.paths, target.sequence) !== null) return "killed";
-      const body = (await readHeart(this.paths)).latestBody;
-      return body?.sequence === target.sequence && body.hung !== undefined ? "hung" : "unavailable";
-    }
-    try {
-      const settledBody = (await readHeart(this.paths)).latestBody;
-      if (settledBody?.sequence !== target.sequence) return await readKill(this.paths, target.sequence) === null ? "unavailable" : "killed";
-      if (settledBody.end !== "put-down") {
-        await leash.clearStop(this.paths);
-        return "untidy";
-      }
-      const settled = await leash.settleStop(this.paths, target.sequence);
-      if (settled === null) return "unavailable";
-      return "killed";
-    } finally {
-      leash.release();
-    }
+    return await killAkumaWithRecovery(this.paths);
   }
 
   async lastAnswer(): Promise<LastAnswer> {
@@ -586,17 +591,19 @@ export class Akuma {
     const published = await publishAkuma({
       worldPath: this.path,
       archetype: archetype.name,
-      launch: async (allocated) => await spawnAkumaBody({
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: allocated.archetype,
-          ...recipe,
-          cwd,
-          origin: { kind: "direct" },
-        },
-        initialBody: input.body,
-      }),
+      launch: async (allocated) => {
+        (await spawnAkumaBody({
+          paths: allocated.paths,
+          seed: {
+            id: allocated.id,
+            archetype: allocated.archetype,
+            ...recipe,
+            cwd,
+            origin: { kind: "direct" },
+          },
+          initialBody: input.body,
+        })).release();
+      },
     });
     return new AkumaHandle(published.id, this.path, {
       cwd,

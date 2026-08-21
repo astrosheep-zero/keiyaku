@@ -1,5 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
+import { watch as watchDirectory } from "node:fs";
 import { lstat } from "node:fs/promises";
+import { basename, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AkumaPaths } from "../identity.js";
 import type {
@@ -32,6 +34,49 @@ import { insertSoulFact, soulFact } from "./soul.js";
 
 const ACTIVITY_LIMIT = 5_000;
 const SQLITE_CANTOPEN = 14;
+
+export async function watchHeart(paths: AkumaPaths, signal: AbortSignal): Promise<AsyncGenerator<void>> {
+  const heart = basename(paths.heart);
+  const changes: void[] = [];
+  let failure: unknown;
+  let wake: (() => void) | undefined;
+  // fs.watch opens the directory synchronously. Its throw is therefore the
+  // observer's ready/failure boundary, before a waker can spawn a child.
+  const watcher = watchDirectory(dirname(paths.heart), { signal }, (_event, filename) => {
+    const name = filename?.toString();
+    if (name === undefined || name === heart || name === `${heart}-wal`) {
+      changes.push(undefined);
+      wake?.();
+    }
+  });
+  watcher.on("error", (error) => { failure = error; wake?.(); });
+  const abort = (): void => {
+    wake?.();
+    watcher.close();
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  return (async function*(): AsyncGenerator<void> {
+    try {
+      for (;;) {
+        if (changes.length > 0) {
+          changes.shift();
+          yield;
+          continue;
+        }
+        if (failure !== undefined) throw failure;
+        if (signal.aborted) return;
+        await new Promise<void>((resolve) => { wake = resolve; });
+        wake = undefined;
+      }
+    } catch (error) {
+      if (signal.aborted && (error as NodeJS.ErrnoException).name === "AbortError") return;
+      throw error;
+    } finally {
+      signal.removeEventListener("abort", abort);
+      watcher.close();
+    }
+  })();
+}
 
 export class HeartAbsentError extends Error {
   constructor(readonly path: string, options?: ErrorOptions) {

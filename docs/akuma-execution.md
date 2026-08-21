@@ -34,15 +34,40 @@ records its Body fact, and resumes the latest session or starts fresh at
 `soul.cwd`. While it owns the leash, Heart rows become provider actions,
 provider events become Heart facts, and Body Requests become in-process calls.
 
-**Wake is level-triggered.** A waker that finds the leash held does not exit
-blind: it nudges the current Body and re-observes, and it may stop only when
-the tell that woke it is told, or it takes
-the leash itself and serves it. Two wakers converge through the same rule: the
-leash serializes replacement Bodies, and the second finds the work already done.
+**Wake is level-triggered.** The wake predicate is `pending Tells exist && no
+live Body holds the leash`. Tell, interrupt, kill, and every existing
+Heart-custody entry re-evaluate it; after releasing its leash, a Body performs
+one final re-evaluation and wakes the pending debt when the predicate holds.
+No daemon heals it without a later interaction.
 
-The pursuit is only as alive as its pursuers: a reboot can kill body and
-waker together, leaving a recorded tell honestly pending — served at the
-next wake, visible until then. No daemon wakes anyone spontaneously.
+A waker establishes its cancellable Heart observer before unconditionally
+spawning one child. It never probes the leash or joins a leash observation to a
+Body row. Fresh Heart delivery evidence returns `told`; a later Body fact
+returns `pursuing` with that fact's sequence; only the child's atomic leash
+refusal returns `held`; and any other child exit before either Heart witness
+returns `failed`. A held result names no holder, promises no delivery, and
+writes no losing Body fact. Concurrent callers can therefore receive different
+honest receipts while their children converge through the one leash.
+
+Observer establishment failure returns `failed` before spawn and leaves the
+Tell pending. Aborting an established observer wakes a pending generator read,
+closes its filesystem watcher, and lets cleanup finish; there is no polling
+fallback. A pre-admission child failure records its actual waitpid code or
+signal plus a bounded `{ path, from, to }` reference into the shared run log.
+The interval may contain interleaved output, includes the child's exit marker,
+and is not captured stderr or a child-attributed file tail.
+
+The pursuit is only as alive as its pursuers: a reboot or pre-admission child
+exit leaves the recorded Tell honestly pending. The next ordinary Heart
+interaction re-evaluates and pursues that debt. No daemon wakes anyone
+spontaneously, and no bootstrap-failure fact is recorded.
+
+Heart change observation belongs to the direct caller that executes wake under
+its host permission. A forwarded provider Tell writes only its granted Body
+Request transport; its direct parent executes the Tell and observes Heart. The
+observer is established before spawn. An observation failure retains the Tell,
+spawns no child, and returns failed; a filesystem event only prompts a fresh
+Heart read, whose successor Body fact is the sole custody evidence.
 
 **Succession.** A new Body never reconstructs custody of its predecessor. A
 held leash means wait. A free leash with an explicitly ended predecessor is

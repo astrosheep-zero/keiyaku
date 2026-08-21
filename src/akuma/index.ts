@@ -28,6 +28,7 @@ export type {
   ForkReceipt,
   InterruptReceipt,
   TellResult,
+  TellWake,
   UnbornAkumaListRow,
 } from "./akuma.js";
 export type {

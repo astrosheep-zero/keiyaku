@@ -6,6 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
+import { killAkumaWithRecovery, tellAkumaWithId } from "../src/akuma/akuma.js";
+import { LEASH_HELD_EXIT } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
   admitRequest,
@@ -35,10 +37,12 @@ import {
   reserveRequest,
   serveRequest,
   stopRequested,
+  watchHeart,
   refuseRequest,
   voidRequest,
   type Soul,
 } from "../src/akuma/heart/index.js";
+import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { insertActivityFact, insertKillFact, insertSessionFact, insertStopControl } from "../src/akuma/heart/rows.js";
 import { decodeSoul, decodeSoulRow, encodeSoul, encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
@@ -220,6 +224,221 @@ test("tell admission shares activity order and delivery witnesses fold without m
   } finally { value.close(); }
 });
 
+test("Tell observes Body admission between observer registration and spawn", async () => {
+  const value = await fixture();
+  let spawned = 0;
+  let body: Promise<Awaited<ReturnType<HeldAkumaLeash["recordBody"]>>> | undefined;
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const result = await tellAkumaWithId({
+      worldPath: value.root,
+      id: value.allocated.id,
+      body: "continue",
+      tellId: "tell-registered-body",
+      recordedAt: value.soul.createdAt,
+      runtime: {
+        async observeHeart() {
+          body = leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+          return (async function*() { await body; yield; })();
+        },
+        async spawn(): Promise<OwnedProcess> {
+          spawned += 1;
+          return {
+            pid: 1,
+            exited: Promise.resolve({ code: LEASH_HELD_EXIT, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } }),
+            async terminate() {},
+            release() {},
+          };
+        },
+      },
+    });
+    assert.deepEqual(result.wake, { kind: "pursuing", bodySequence: (await body!).sequence });
+    assert.equal(spawned, 1);
+    leash.release();
+  } finally { value.close(); }
+});
+
+test("Tell fails before spawn when asynchronous Heart observation is denied", async () => {
+  const value = await fixture();
+  let spawned = 0;
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    leash.release();
+    const result = await tellAkumaWithId({
+      worldPath: value.root,
+      id: value.allocated.id,
+      body: "continue",
+      tellId: "tell-observation-denied",
+      recordedAt: value.soul.createdAt,
+      runtime: {
+        async observeHeart() { throw new Error("EACCES: Heart observation denied"); },
+        async spawn(): Promise<OwnedProcess> {
+          spawned += 1;
+          throw new Error("must not spawn");
+        },
+      },
+    });
+    assert.deepEqual(result.wake, { kind: "failed", diagnostic: "EACCES: Heart observation denied" });
+    assert.equal(spawned, 0);
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-observation-denied"]);
+  } finally { value.close(); }
+});
+
+test("Tell reports held only from its spawned child's private leash refusal", async () => {
+  const value = await fixture();
+  let spawned = 0;
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const result = await tellAkumaWithId({
+      worldPath: value.root,
+      id: value.allocated.id,
+      body: "continue",
+      tellId: "tell-held",
+      recordedAt: value.soul.createdAt,
+      runtime: {
+        async observeHeart(_paths, signal) {
+          return (async function*() {
+            await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+          })();
+        },
+        async spawn(): Promise<OwnedProcess> {
+          spawned += 1;
+          return {
+            pid: 1,
+            exited: Promise.resolve({ code: LEASH_HELD_EXIT, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } }),
+            async terminate() {},
+            release() {},
+          };
+        },
+      },
+    });
+    assert.deepEqual(result.wake, { kind: "held" });
+    assert.equal(spawned, 1);
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-held"]);
+    leash.release();
+  } finally { value.close(); }
+});
+
+test("Tell lets a durably told successor win against a losing child exit", async () => {
+  const value = await fixture();
+  let winnerSequence: number | undefined;
+  try {
+    const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await born.birth(value.allocated.paths, value.soul);
+    born.release();
+    const result = await tellAkumaWithId({
+      worldPath: value.root,
+      id: value.allocated.id,
+      body: "continue",
+      tellId: "tell-won-before-exit",
+      recordedAt: value.soul.createdAt,
+      runtime: {
+        async observeHeart() { return (async function*() { yield; })(); },
+        async spawn(): Promise<OwnedProcess> {
+          const winner = (await HeldAkumaLeash.try(value.allocated.paths))!;
+          const body = await winner.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+          winnerSequence = body.sequence;
+          const turn = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
+          await recordTellDeliveries(value.allocated.paths, [{
+            tellId: "tell-won-before-exit", route: "launch", turnSequence: turn.sequence, fence: "winner", deliveredAt: value.soul.createdAt,
+          }]);
+          await recordTellReceipt(value.allocated.paths, {
+            tellId: "tell-won-before-exit", evidence: "exact", kind: "consumed", receivedAt: value.soul.createdAt,
+          });
+          winner.release();
+          return {
+            pid: 1,
+            exited: Promise.resolve({ code: 7, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } }),
+            async terminate() {},
+            release() {},
+          };
+        },
+      },
+    });
+    assert.deepEqual(result.wake, { kind: "told" });
+    assert.equal((await readHeart(value.allocated.paths)).pending.length, 0);
+  } finally { value.close(); }
+});
+
+test("Tell lets a successor Body win when its child exit races Heart observation", async () => {
+  const value = await fixture();
+  let winnerSequence: number | undefined;
+  try {
+    const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await born.birth(value.allocated.paths, value.soul);
+    born.release();
+    const result = await tellAkumaWithId({
+      worldPath: value.root,
+      id: value.allocated.id,
+      body: "continue",
+      tellId: "tell-successor-race",
+      recordedAt: value.soul.createdAt,
+      runtime: {
+        async observeHeart(_paths, signal) {
+          return (async function*() {
+            yield;
+            await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+          })();
+        },
+        async spawn(): Promise<OwnedProcess> {
+          const winner = (await HeldAkumaLeash.try(value.allocated.paths))!;
+          const body = await winner.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+          winnerSequence = body.sequence;
+          winner.release();
+          return {
+            pid: 1,
+            exited: Promise.resolve({ code: 7, signal: null, log: { path: value.allocated.paths.log, from: 0, to: 0 } }),
+            async terminate() {},
+            release() {},
+          };
+        },
+      },
+    });
+    assert.deepEqual(result.wake, { kind: "pursuing", bodySequence: winnerSequence });
+  } finally { value.close(); }
+});
+
+test("a filesystem nudge cannot hide pre-admission child exit", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    leash.release();
+    const result = await tellAkumaWithId({
+      worldPath: value.root,
+      id: value.allocated.id,
+      body: "continue",
+      tellId: "tell-pre-admission-exit",
+      recordedAt: value.soul.createdAt,
+      runtime: {
+        async observeHeart(_paths, signal) {
+          return (async function*() {
+            yield;
+            await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+          })();
+        },
+        async spawn(): Promise<OwnedProcess> {
+          return {
+            pid: 1,
+            exited: Promise.resolve({ code: 7, signal: null, log: { path: value.allocated.paths.log, from: 12, to: 34 } }),
+            async terminate() {},
+            release() {},
+          };
+        },
+      },
+    });
+    assert.deepEqual(result.wake, {
+      kind: "failed",
+      diagnostic: "pre-admission exit 7",
+      child: { code: 7, signal: null, log: { path: value.allocated.paths.log, from: 12, to: 34 } },
+    });
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending.map((tell) => tell.id), ["tell-pre-admission-exit"]);
+  } finally { value.close(); }
+});
+
 test("tell admission refuses an unborn heart without writing its timeline", async () => {
   const value = await fixture();
   try {
@@ -228,6 +447,21 @@ test("tell admission refuses an unborn heart without writing its timeline", asyn
     }), { kind: "not-born" });
     assert.deepEqual((await activitySlice(value.allocated.paths)).rows, []);
     assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
+  } finally { value.close(); }
+});
+
+test("watchHeart abort settles a pending read and closes promptly", async () => {
+  const value = await fixture();
+  try {
+    const controller = new AbortController();
+    const watcher = await watchHeart(value.allocated.paths, controller.signal);
+    const pending = watcher.next();
+    controller.abort();
+    assert.deepEqual(await Promise.race([
+      pending,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Heart watcher did not stop")), 250)),
+    ]), { value: undefined, done: true });
+    assert.deepEqual(await watcher.return(undefined), { value: undefined, done: true });
   } finally { value.close(); }
 });
 
@@ -359,6 +593,27 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
     assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
     assert.equal((await readRequest(value.allocated.paths, request.id))?.state, "admitted");
     successor.release();
+  } finally { value.close(); }
+});
+
+test("kill evaluates stranded pending Tell recovery exactly once", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+    await breakBody(value.allocated.paths, { sequence: body.sequence, end: "put-down", at: value.soul.createdAt });
+    await recordTell(value.allocated.paths, {
+      id: "tell-recover-on-kill", body: "continue", recordedAt: value.soul.createdAt,
+    });
+    leash.release();
+    let recoveries = 0;
+    assert.equal(await killAkumaWithRecovery(value.allocated.paths, async (paths) => {
+      recoveries += 1;
+      assert.deepEqual((await readHeart(paths)).pending.map((tell) => tell.id), ["tell-recover-on-kill"]);
+      assert.equal(await probeLeash(paths), "free");
+    }), "already-stopped");
+    assert.equal(recoveries, 1);
   } finally { value.close(); }
 });
 
