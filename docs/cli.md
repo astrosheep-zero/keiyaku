@@ -299,7 +299,8 @@ Each `ls` path reads only its selected Task, Contract, Akuma configuration, or
 Akuma identity catalog. JSON is that catalog, not an aggregate envelope.
 `status @name` refuses ambiguity between an active Contract short selector and
 an Akuma Alias.
-CLI `wait` uses the public default predicate (`life !== "running"`). Its
+CLI `wait` uses the Akuma public default completion judgment: life is not
+`running` and the observed snapshot contains no pending Tell row. Its
 optional `--timeout` value and `call --wait` value match exactly
 `^(0|[1-9][0-9]*)(ms|s|m|h)$`: integers and units are required, leading zeroes
 are refused except for zero itself, and the units convert to milliseconds
@@ -340,8 +341,11 @@ by [cli-output.md](cli-output.md).
 Readonly `none` renders its diagnostic; native or absent restraint renders
 nothing. Snapshots name the complete AkuId, optional frozen Alias, and Dispatch
 relation. Dispatch read failures render their diagnostic. Status, non-answer waits, multi-waits, unfinished call, and
-kill include public life; tell and history do not. Answered default call,
-answered single wait, and `history --last` write exact answer bytes. Plural wait
+kill include public life; tell and history do not. Only a default-complete asleep
+snapshot whose latest outcome is answered may write raw answer bytes for call
+or single wait. A pending Tell keeps the snapshot rendering, including its
+queued Tell. `history --last` writes its retained exact answer independently.
+Plural wait
 renders each answered member with its identity header and exact answer, then a
 `<done> of <total> done` line. Detached
 call prints the copyable canonical-world wait command. Text never exposes

@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { moveAlias } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { HeldAkumaLeash, initializeHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, initializeHeart, readSoul, recordTell, type Soul } from "../src/akuma/heart/index.js";
 import { decodeSoul } from "../src/akuma/heart/soul.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import type { ProviderAdapter } from "../src/akuma/provider.js";
@@ -652,6 +652,25 @@ test("Akuma status, wait, and history share public observations without embeddin
     assert.deepEqual(waitResult.result.observations, [statusResult.status]);
     assert.equal(renderAkumaText(parseArgv(["wait", allocated.id]).command, waitResult), "cli answer");
     assert.equal(akumaRawAnswer(waitResult), "cli answer");
+
+    await recordTell(allocated.paths, {
+      id: "queued-cli-tell",
+      body: "continue",
+      recordedAt: "2026-08-16T00:00:01.000Z",
+    });
+    const pendingWait = {
+      kind: "akuma" as const,
+      action: "wait" as const,
+      result: await executeWaitAkuma({
+        path: root as import("../src/world.js").WorldRoot,
+        ids: [allocated.id],
+        completion: "all",
+        timeoutMs: 0,
+      }),
+    };
+    assert.equal(akumaRawAnswer(pendingWait), undefined);
+    assert.match(renderAkumaText(parseArgv(["wait", allocated.id]).command, pendingWait), /continue/u);
+
     const historyParsed = parseArgv(["-C", root, "history", allocated.id]);
     const historyResult = await invoke(historyParsed, { environment, readStdin: () => { throw new Error("history must not read stdin"); } });
     if (!("kind" in historyResult) || historyResult.kind !== "akuma" || historyResult.action !== "history") return;

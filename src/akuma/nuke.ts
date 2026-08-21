@@ -16,7 +16,7 @@ import {
   type AkumaPaths,
 } from "./identity.js";
 
-const POLL_MS = 25;
+const POLL_MS = 100;
 
 type NukeAkumaEntry = Readonly<{ id: AkuId; paths: AkumaPaths }>;
 
@@ -39,7 +39,7 @@ async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<Held
     const leash = await HeldAkumaLeash.try(paths);
     if (leash !== null) return leash;
     if (performance.now() >= deadline) return null;
-    await wait(POLL_MS);
+    await wait(Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
   }
 }
 

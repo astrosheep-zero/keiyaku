@@ -1,6 +1,7 @@
 import {
   Akuma,
   AkumaNotBornError,
+  defaultWaitComplete,
   type ActivityHistory,
   type AkumaStatus,
   type InterruptReceipt,
@@ -185,6 +186,7 @@ function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
 }
 
 const SHARED_ORDINARY_BUDGET = 30;
+const POLL_MS = 100;
 
 type WaitRound = Readonly<{
   statuses: readonly AkumaStatus[];
@@ -233,7 +235,7 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
   const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
   for (;;) {
     const round = await observeWaitRound(input.path, input.ids, input.signal);
-    const settled = round.statuses.map((status) => status.life !== "running");
+    const settled = round.statuses.map(defaultWaitComplete);
     const completed = round.statuses.length > 0
       && (input.completion === "any" ? settled.some(Boolean) : settled.every(Boolean));
     if (completed
@@ -244,7 +246,7 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
         unobserved: round.unobserved,
       };
     }
-    await delay(deadline === undefined ? 25 : Math.min(25, Math.max(0, deadline - performance.now())), input.signal);
+    await delay(deadline === undefined ? POLL_MS : Math.min(POLL_MS, Math.max(0, deadline - performance.now())), input.signal);
   }
 }
 

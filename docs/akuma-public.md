@@ -130,8 +130,10 @@ exists but the selected adapter lacks resume. The coordinate and pending tells
 remain intact; status does not suggest or perform a fresh start.
 
 `wait(predicate?, options?)` polls `status()` and returns the first complete
-`AkumaStatus` accepted by the predicate. Its default predicate is
-`status.life !== "running"`. `options.timeoutMs`, when present, is a
+`AkumaStatus` accepted by the predicate. Its default predicate is one Akuma-owned
+judgment over that complete snapshot: `status.life !== "running"` and no
+timeline Tell row has state `pending`. A caller-supplied predicate is an exact
+override. `options.timeoutMs`, when present, is a
 nonnegative millisecond duration. If it arrives first, `wait` returns the
 current `AkumaStatus`; it adds no timeout arm or flag. The caller can reapply
 its predicate to the returned observation. One status read prevents a torn

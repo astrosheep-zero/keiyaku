@@ -31,7 +31,7 @@ import {
   type RunLogReference,
 } from "../runtime/proc/run.js";
 
-const LEASH_RETRY_MS = 25;
+const LEASH_RETRY_MS = 100;
 export const LEASH_HELD_EXIT = 75;
 export { CONTROL_RESPONSE_MS } from "./body-turn.js";
 

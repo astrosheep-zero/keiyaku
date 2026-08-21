@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { Akuma, AkumaNotBornError } from "../src/akuma/akuma.js";
+import { Akuma, AkumaNotBornError, defaultWaitComplete } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { ordinarySelectedCount, ordinarySnapshotBudget, projectTurns, selectHistory, selectSnapshot } from "../src/akuma/projection.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
@@ -638,6 +638,64 @@ test("wait timeout returns the same running status carrier", async () => {
     } finally {
       leash.release();
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("default wait completion keeps an asleep answered Akuma pending while a Tell is actionable", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wait-pending-tell-"));
+  try {
+    const source = await answeredSource(root, "de1ad102");
+    const handle = (await akumaAt(root)).of({ id: source.id });
+    await recordTell(source.paths, {
+      id: "wait-pending-tell",
+      body: "continue",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+
+    const pending = await handle.status();
+    assert.equal(pending.life, "asleep");
+    assert.equal(defaultWaitComplete(pending), false);
+    assert.deepEqual(await handle.wait(undefined, { timeoutMs: 0 }), pending);
+    assert.deepEqual(await handle.wait((status) => status.life === "asleep"), pending);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("ordinary wait returns the successor answer after a pending Tell is consumed", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-wait-successor-"));
+  try {
+    const source = await answeredSource(root, "de1ad103");
+    const handle = (await akumaAt(root)).of({ id: source.id });
+    await recordTell(source.paths, {
+      id: "successor-tell",
+      body: "continue",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    const waiting = handle.wait();
+    const successor: ProviderAdapter = {
+      admitOptions(options) { return { kind: "admitted", options }; },
+      async start() { throw new Error("successor must resume"); },
+      async resume(input) {
+        assert.deepEqual(input.launchTells, [{ id: "successor-tell", text: "continue" }]);
+        return {
+          admission: { fence: "successor-wait" },
+          events: { async *[Symbol.asyncIterator]() {} },
+          completion: Promise.resolve({ kind: "answered", answer: "successor answer", historyId: "successor-history" }),
+          async abort() {},
+        };
+      },
+    };
+    await driveAkumaBody({ paths: source.paths }, successor, {
+      now: () => "2026-08-08T00:00:02.000Z",
+    });
+
+    const settled = await waiting;
+    assert.equal(settled.life, "asleep");
+    assert.equal(settled.timeline.kind === "idle" && settled.timeline.outcome?.outcome.kind === "answered"
+      && settled.timeline.outcome.outcome.answer, "successor answer");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

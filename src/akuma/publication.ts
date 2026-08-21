@@ -13,7 +13,7 @@ import {
 } from "./identity.js";
 import { abortableDelay } from "./abort.js";
 
-const POLL_MS = 25;
+const POLL_MS = 100;
 export const BIRTH_TIMEOUT_MS = 30_000;
 
 function diagnostic(error: unknown): string {
@@ -60,7 +60,7 @@ async function awaitBirth(paths: AkumaPaths, signal?: AbortSignal): Promise<Soul
       const settled = await settleTimedOutBirth(paths);
       if (settled !== null) return settled;
     }
-    await abortableDelay(POLL_MS, signal);
+    await abortableDelay(Math.min(POLL_MS, Math.max(0, deadline - performance.now())), signal);
   }
 }
 
@@ -69,7 +69,7 @@ async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<Held
     const leash = await HeldAkumaLeash.try(paths);
     if (leash !== null) return leash;
     if (performance.now() >= deadline) return null;
-    await abortableDelay(POLL_MS);
+    await abortableDelay(Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
   }
 }
 

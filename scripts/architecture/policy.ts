@@ -1281,6 +1281,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "cli/render/akuma.ts",
       allow: [
+        any("akuma/index.ts", ["defaultWaitComplete"]),
         types("akuma/index.ts"),
         types("index.ts"),
         types("cli/commands/akuma-invoke.ts"),

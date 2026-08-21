@@ -64,7 +64,7 @@ import {
   type AllowedAction,
 } from "./allowed.js";
 
-const POLL_MS = 25;
+const POLL_MS = 100;
 
 async function canonicalBirthCwd(input: string): Promise<string> {
   const selected = resolve(input);
@@ -100,6 +100,14 @@ export type AkumaStatus = Readonly<{
   timeline: ActivitySnapshot;
   strandedReason?: "resume-unsupported";
 }>;
+
+/** The default completion judgment over one complete status snapshot. */
+export function defaultWaitComplete(status: AkumaStatus): boolean {
+  return status.life !== "running"
+    && !status.timeline.entries.some((entry) => entry.kind === "row"
+      && entry.row.kind === "tell" && entry.row.state === "pending");
+}
+
 export type { ReadonlyRestraint } from "./provider-recipe.js";
 export type * from "./projection.js";
 
@@ -171,7 +179,7 @@ async function takeLeashUntil(paths: AkumaPaths, deadline: number): Promise<Held
     const leash = await HeldAkumaLeash.try(paths);
     if (leash !== null) return leash;
     if (performance.now() >= deadline) return null;
-    await wait(POLL_MS);
+    await wait(Math.min(POLL_MS, Math.max(0, deadline - performance.now())));
   }
 }
 
@@ -373,7 +381,7 @@ export class AkumaHandle {
   }
 
   async wait(
-    predicate: (status: AkumaStatus) => boolean = (status) => status.life !== "running",
+    predicate: (status: AkumaStatus) => boolean = defaultWaitComplete,
     options: Readonly<{ timeoutMs?: number }> = {},
   ): Promise<AkumaStatus> {
     if (options.timeoutMs !== undefined

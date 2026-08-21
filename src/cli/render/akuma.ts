@@ -5,6 +5,7 @@ import type {
   ReportedFileChange,
   SnapshotRow,
 } from "../../akuma/index.js";
+import { defaultWaitComplete } from "../../akuma/index.js";
 import type {
   AkumaObservation,
   AkumaObservationStage,
@@ -332,7 +333,7 @@ function waitText(
 ): string {
   const alias = result.alias;
   const total = result.result.observations.length + result.result.unobserved.length;
-  const done = result.result.observations.filter((observation) => observation.status.life !== "running").length;
+  const done = result.result.observations.filter((observation) => defaultWaitComplete(observation.status)).length;
   const blocks = [
     ...result.result.observations.map((observation) => {
       const answer = statusAnswer(observation);
@@ -383,6 +384,7 @@ function callFailed(result: Extract<AkumaInvocationResult, { action: "call" }>["
 }
 
 function statusAnswer(view: Readonly<{ status: AkumaObservation["status"] }>): string | undefined {
+  if (!defaultWaitComplete(view.status)) return undefined;
   if (view.status.life !== "asleep") return undefined;
   if (view.status.readonly?.enforcement === "none") return undefined;
   const timeline = view.status.timeline;

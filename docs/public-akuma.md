@@ -266,7 +266,7 @@ failure becomes `{ kind: "failed", diagnostic }` and never suppresses an Akuma
 status, Dispatch association, mutation receipt, kill evidence, or another
 member. Each direct status or single-member mutation first obtains its existing
 fresh Akuma status, then performs one Task board observation. Multi-member wait
-performs no Task read during its polling loop; once the existing completion
+performs no Task read during its polling loop; once the Akuma-owned default completion
 predicate or timeout selects the final statuses, it reads the Task board
 exactly once and projects every member from that same board snapshot.
 Multi-member kill likewise reads the Task board once for all post-action
@@ -281,7 +281,9 @@ Wait and kill freeze their subject set at entry. A one-member wait defaults to
 `completion: "any" | "all"`. In each plural polling round, Fleet reads every
 frozen id in byte order. A status-read failure is discarded in an intermediate
 round; it creates no history or retry record, and the next round attempts that
-id again. `any` and `all` apply only to the readable statuses and require at
+id again. Each readable status uses Akuma's default completion judgment: life
+is not `running` and the same snapshot has no pending Tell row. `any` and `all`
+apply only to those per-member booleans and require at
 least one readable status. Thus a readable settled peer may complete either
 mode; an all-unreadable round does not fabricate completion. On the completing
 or timed-out round, Fleet freezes every selected id exactly once: readable

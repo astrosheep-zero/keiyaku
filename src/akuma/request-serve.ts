@@ -38,7 +38,7 @@ import {
 } from "./request-wire.js";
 import { isTaskMutationAction, type TaskMutationRequest } from "../task/mutation.js";
 
-const POLL_MS = 25;
+const POLL_MS = 100;
 
 export type RequestChildLaunch = Readonly<{
   paths: AkumaPaths;
@@ -594,7 +594,7 @@ async function settleReserved(
       return true;
     }
     if (performance.now() >= deadline) return false;
-    await abortableDelay(POLL_MS, signal);
+    await abortableDelay(Math.min(POLL_MS, Math.max(0, deadline - performance.now())), signal);
   }
 }
 

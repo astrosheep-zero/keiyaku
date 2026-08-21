@@ -25,7 +25,7 @@ import { isTaskMutationAction, type TaskMutationRequest } from "../task/mutation
 
 export type { UpstreamRequestOutcome } from "./request-wire.js";
 
-const POLL_MS = 25;
+const POLL_MS = 100;
 
 export class AkumaBodyRequestError extends Error {
   readonly kind = "akuma-body-request";
