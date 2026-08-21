@@ -494,6 +494,7 @@ test("Akuma mutation snapshots omit observation context", () => {
   });
   const waitText = renderAkumaText(waitCommand(observation.status.id), waitInvocation(observation));
   const waitLines = waitText.split("\n");
+  assert.equal(waitLines[1], "────────────");
   assert.equal(waitLines.at(-1), "● STILL RUNNING");
   assert.equal(waitLines[waitLines.indexOf("tasks 1") - 1], "");
   assert.ok(waitLines.indexOf("tasks 1") < waitLines.indexOf("changes 0"));
@@ -1030,7 +1031,7 @@ test("plural wait renders came-back answers and completion count", () => {
     result: { completion: "any" as const, observations: [answered, running], unobserved: [] },
   };
   const text = renderAkumaText(parseArgv(["wait", "aku/worker/*", "aku/reviewer/*", "--any"]).command, result);
-  assert.match(text, /^✓ came back aku\/worker\/1234abcd\n─+\nreturned\nverbatim$/mu);
+  assert.match(text, /^✓ came back aku\/worker\/1234abcd\n────────────\nreturned\nverbatim$/mu);
   assert.match(text, /returned\nverbatim\n\ntasks 1\n  ✓ task\/result · Return result context · done · P0\nchanges 1/u);
   assert.match(text, /aku\/reviewer\/5678abcd[\s\S]*● STILL RUNNING/u);
   assert.match(text, /\n\n1 of 2 done$/u);

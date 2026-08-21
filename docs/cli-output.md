@@ -149,8 +149,8 @@ Akuma text shares that snapshot across the named commands; history remains the
 unbounded browsing surface. An idle answered default call or ordinary single
 wait writes the exact answer, including empty bytes, with no framing or added
 newline. Every other state remains an identity-bearing snapshot, and plural
-wait renders each answered member as `✓ came back <AkuId>`, the
-snapshot-width ruler, and its exact answer, followed by its `tasks` and
+wait renders each answered member as `✓ came back <AkuId>`, the fixed twelve-
+character ruler, and its exact answer, followed by its `tasks` and
 `changes` blocks; the collection then ends with
 `<done> of <total> done`. Successful detach ends with
 `$ keiyaku -C <world> wait <@alias|AkuId> --timeout 5m`, using the successful
@@ -194,7 +194,7 @@ with one `unspecified` change renders as `edit` with its path.
 
 ```text
 aku/expert-akuma/5659b10d (@expert)
-─────
+────────────
 └─ kei/make-non-git-runtime-observation-honestly-async
       ⋮ 171 omitted
 14:36 │ say    “I’m editing the architecture allowlist to mirror the completed-”
@@ -221,7 +221,7 @@ changes 15
 ```
 
 The identity and optional alias occupy the first line. The next line is a
-`U+2500` ruler spanning the requested display width; it marks the boundary
+fixed twelve-character `U+2500` ruler; it marks the boundary
 between identity and the rest of the snapshot. When a Contract is associated,
 its complete `kei/...` coordinate follows on the separate hanging relation line
 beginning with `U+2514` and `U+2500`; an unassociated Akuma omits that line.
