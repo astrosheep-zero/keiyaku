@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Akuma, AkumaNotBornError, defaultWaitComplete } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { ordinarySelectedCount, ordinarySnapshotBudget, projectTurns, selectHistory, selectSnapshot } from "../src/akuma/projection.js";
+import { ordinarySnapshotBudget, projectTurns, selectHistory, selectSnapshot, type ActivitySnapshot, type TurnLedger } from "../src/akuma/projection.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
@@ -372,6 +372,14 @@ test("public observation classifies a vanished Heart without recreating heart.db
   }
 });
 
+function snapshot(
+  ledger: TurnLedger,
+  budget?: Readonly<{ tail: number; voice?: number }>,
+  aperture: "monitoring" | "receipt" = "receipt",
+): ActivitySnapshot {
+  return selectSnapshot(ledger, { aperture, ...(budget === undefined ? {} : { budget }) }).snapshot;
+}
+
 test("snapshot selects one current focus while history keeps honest tool lifecycle", () => {
   const facts = [
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
@@ -384,13 +392,13 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
     { kind: "activity" as const, sequence: 8, turnSequence: 4, at: "2026-08-10T00:00:07.000Z", event: { type: "tool", phase: "started", id: "current", name: "Search", call: { kind: "search", query: "TODO" } } },
   ];
   const ledger = projectTurns(facts);
-  const snapshot = selectSnapshot(ledger, { tail: 1 });
-  assert.equal(snapshot.kind, "open");
-  if (snapshot.kind !== "open") return;
-  assert.deepEqual(snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:1", 6, 7, 8]);
-  assert.equal(snapshot.omitted, 1);
-  assert.equal(snapshot.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"), true);
-  assert.equal(snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 2), false);
+  const selected = snapshot(ledger, { tail: 1 });
+  assert.equal(selected.kind, "open");
+  if (selected.kind !== "open") return;
+  assert.deepEqual(selected.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:1", 6, 7, 8]);
+  assert.equal(selected.omitted, 1);
+  assert.equal(selected.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"), true);
+  assert.equal(selected.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 2), false);
   assert.equal(ledger.rows.some((row) => row.kind === "tool" && row.sequence === 2 && row.state === "unsettled"), true);
   assert.equal(ledger.rows.some((row) => row.kind === "tool" && row.sequence === 8 && row.state === "active"), true);
   assert.equal(ledger.turns[0]?.kind, "closed");
@@ -401,7 +409,7 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
     { kind: "activity" as const, sequence: 9, turnSequence: 4, at: "2026-08-10T00:00:08.000Z", event: { type: "assistant", text: "done" } },
     { kind: "turn-end" as const, sequence: 10, turnSequence: 4, completedAt: "2026-08-10T00:00:09.000Z", outcome: { kind: "answered", answer: "done", session: { sessionId: "session" } } },
   ]);
-  const idle = selectSnapshot(closed);
+  const idle = snapshot(closed);
   assert.equal(idle.kind, "idle");
   if (idle.kind !== "idle") return;
   assert.equal(idle.outcome?.outcome.kind, "answered");
@@ -423,7 +431,7 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
   assert.equal(mixedLedger.turns[1]?.kind, "closed");
   assert.equal(mixedLedger.openTurn, undefined);
   assert.equal(mixedLedger.rows.some((row) => row.kind === "tool" && row.sequence === 2 && row.state === "active"), true);
-  assert.equal(selectSnapshot(mixedLedger).kind, "idle");
+  assert.equal(snapshot(mixedLedger).kind, "idle");
 });
 
 test("reported file changes follow the open or latest closed frontier", () => {
@@ -454,7 +462,7 @@ test("reported file changes follow the open or latest closed frontier", () => {
     { kind: "activity" as const, sequence: 11, turnSequence: 5, at: "2026-08-10T00:00:11.000Z", event: { type: "tool" as const, phase: "started" as const, id: "run", name: "Bash", call: { kind: "run" as const, command: "touch src/non-file.ts" } } },
     { kind: "activity" as const, sequence: 12, turnSequence: 5, at: "2026-08-10T00:00:12.000Z", event: { type: "tool" as const, phase: "completed" as const, id: "run", name: "Bash", call: { kind: "run" as const, command: "touch src/non-file.ts" }, result: { status: "ok" as const } } },
   ];
-  const reported = (snapshot: ReturnType<typeof selectSnapshot>) => snapshot.reportedChanges.map((change) => ({
+  const reported = (view: ActivitySnapshot) => view.reportedChanges.map((change) => ({
     sequence: change.sequence,
     at: change.at,
     op: change.op,
@@ -466,7 +474,7 @@ test("reported file changes follow the open or latest closed frontier", () => {
   assert.ok(openFrontier !== undefined && openFrontier.kind === "tool" && openFrontier.call.kind === "fileChange");
   (openFrontier.call.changes[3] as unknown as { op: "unspecified" }).op = "unspecified";
 
-  const open = selectSnapshot(openLedger);
+  const open = snapshot(openLedger);
   assert.equal(open.kind, "open");
   assert.deepEqual(reported(open), [
     { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "add", path: "src/created.ts", diffstat: { added: 4, removed: 0 } },
@@ -490,7 +498,7 @@ test("reported file changes follow the open or latest closed frontier", () => {
   assert.ok(closedChange !== undefined && closedChange.kind === "tool" && closedChange.call.kind === "fileChange");
   (closedChange.call.changes[3] as unknown as { op: "unspecified" }).op = "unspecified";
 
-  const idle = selectSnapshot(closedLedger);
+  const idle = snapshot(closedLedger);
   assert.equal(idle.kind, "idle");
   assert.deepEqual(reported(idle), reported(open));
   assert.equal(idle.reportedChangesOmitted, 0);
@@ -524,15 +532,15 @@ test("reported file changes keep the newest five independently of ordinary omiss
     { kind: "activity" as const, sequence: 7, turnSequence: 1, at: "2026-08-10T00:00:07.000Z", event: { type: "note" as const, text: "ordinary two" } },
     { kind: "activity" as const, sequence: 8, turnSequence: 1, at: "2026-08-10T00:00:08.000Z", event: { type: "note" as const, text: "ordinary three" } },
   ]);
-  const snapshot = selectSnapshot(ledger, { tail: 0, voice: 0 });
-  assert.equal(snapshot.kind, "open");
-  assert.deepEqual(snapshot.reportedChanges.map((change) => change.path), [
+  const view = snapshot(ledger, { tail: 0, voice: 0 });
+  assert.equal(view.kind, "open");
+  assert.deepEqual(view.reportedChanges.map((change) => change.path), [
     "src/three.ts", "src/four.ts", "src/five.ts", "src/six.ts", "src/seven.ts",
   ]);
-  assert.deepEqual(snapshot.reportedChanges.map((change) => change.sequence), [2, 5, 5, 5, 5]);
-  assert.equal(snapshot.reportedChangesOmitted, 2);
-  assert.equal(snapshot.omitted, 5);
-  assert.deepEqual(snapshot.entries, [{ kind: "gap", count: 5 }]);
+  assert.deepEqual(view.reportedChanges.map((change) => change.sequence), [2, 5, 5, 5, 5]);
+  assert.equal(view.reportedChangesOmitted, 2);
+  assert.equal(view.omitted, 5);
+  assert.deepEqual(view.entries, [{ kind: "gap", count: 5 }]);
 });
 
 test("open snapshot independently retains pre-tail voice and actionable pins", () => {
@@ -551,15 +559,15 @@ test("open snapshot independently retains pre-tail voice and actionable pins", (
     { kind: "activity" as const, sequence: 12, turnSequence: 1, at: "2026-08-10T00:00:12.000Z", event: { type: "thought", text: "tail thought" } },
   ]);
 
-  const snapshot = selectSnapshot(ledger, { tail: 3, voice: 3 });
-  assert.equal(snapshot.kind, "open");
-  if (snapshot.kind !== "open") return;
-  const positions = snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence);
+  const view = snapshot(ledger, { tail: 3, voice: 3 });
+  assert.equal(view.kind, "open");
+  if (view.kind !== "open") return;
+  const positions = view.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence);
   assert.deepEqual(positions, [2, "gap:1", 4, "gap:1", 6, "gap:1", 8, 9, 10, 11, 12]);
-  assert.equal(snapshot.entries.filter((entry) => entry.kind === "row").length, 8);
-  assert.equal(snapshot.omitted, 3);
+  assert.equal(view.entries.filter((entry) => entry.kind === "row").length, 8);
+  assert.equal(view.omitted, 3);
 
-  const pinnedOnly = selectSnapshot(ledger, { tail: 0, voice: 0 });
+  const pinnedOnly = snapshot(ledger, { tail: 0, voice: 0 });
   assert.equal(pinnedOnly.kind, "open");
   if (pinnedOnly.kind !== "open") return;
   assert.deepEqual(pinnedOnly.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:6", 8, 9, "gap:3"]);
@@ -582,11 +590,11 @@ test("budgeted snapshot spends newest tail first under the public 3 + 3 proporti
     { kind: "activity" as const, sequence: 6, turnSequence: 1, at: "2026-08-10T00:00:06.000Z", event: { type: "tool", phase: "started", id: "pin", name: "Search", call: { kind: "search", query: "pin" } } },
     { kind: "tell" as const, sequence: 7, id: "tell-pin", body: "pin", recordedAt: "2026-08-10T00:00:07.000Z", state: "pending" as const, deliveries: [] },
   ]);
-  const snapshot = selectSnapshot(ledger, ordinarySnapshotBudget(2));
-  assert.equal(snapshot.kind, "open");
-  if (snapshot.kind !== "open") return;
-  assert.deepEqual(snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:2", 4, 5, 6, 7]);
-  assert.equal(ordinarySelectedCount(snapshot), 2);
+  const selected = selectSnapshot(ledger, { aperture: "receipt", budget: ordinarySnapshotBudget(2) });
+  assert.equal(selected.snapshot.kind, "open");
+  if (selected.snapshot.kind !== "open") return;
+  assert.deepEqual(selected.snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), ["gap:2", 4, 5, 6, 7]);
+  assert.equal(selected.ordinaryCount, 2);
 });
 
 test("a newer running tool does not displace a complete 3 + 3 ordinary selection", () => {
@@ -603,14 +611,66 @@ test("a newer running tool does not displace a complete 3 + 3 ordinary selection
     { kind: "activity" as const, sequence: 10, turnSequence: 1, at: "2026-08-10T00:00:10.000Z", event: { type: "tool", phase: "started", id: "running", name: "Bash", call: { kind: "run", command: "npm test" } } },
     { kind: "tell" as const, sequence: 11, id: "pending", body: "continue", recordedAt: "2026-08-10T00:00:11.000Z", state: "pending" as const, deliveries: [] },
   ]);
-  const snapshot = selectSnapshot(ledger, { tail: 3, voice: 3 });
-  assert.equal(snapshot.kind, "open");
-  if (snapshot.kind !== "open") return;
-  assert.deepEqual(snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), [
+  const selected = selectSnapshot(ledger, { aperture: "receipt", budget: { tail: 3, voice: 3 } });
+  assert.equal(selected.snapshot.kind, "open");
+  if (selected.snapshot.kind !== "open") return;
+  assert.deepEqual(selected.snapshot.entries.map((entry) => entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence), [
     "gap:2", 4, 5, 6, 7, 8, 9, 10, 11,
   ]);
-  assert.equal(ordinarySelectedCount(snapshot), 6);
-  assert.equal(snapshot.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"), true);
+  assert.equal(selected.ordinaryCount, 6);
+  assert.equal(selected.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"), true);
+});
+
+test("monitoring snapshots pin the latest settled Tell outside the ordinary budget", () => {
+  const facts = [
+    { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
+    { kind: "tell" as const, sequence: 2, id: "stale", body: "old steer", recordedAt: "2026-08-10T00:00:02.000Z", state: "told" as const, deliveries: [] },
+    { kind: "turn-end" as const, sequence: 3, turnSequence: 1, completedAt: "2026-08-10T00:00:03.000Z", outcome: { kind: "answered" as const, answer: "first", session: { sessionId: "session" } } },
+    { kind: "turn-start" as const, sequence: 4, bodySequence: 1, startedAt: "2026-08-10T00:00:04.000Z" },
+    { kind: "tell" as const, sequence: 5, id: "latest", body: "new steer", recordedAt: "2026-08-10T00:00:05.000Z", state: "told" as const, deliveries: [] },
+    { kind: "activity" as const, sequence: 6, turnSequence: 4, at: "2026-08-10T00:00:06.000Z", event: { type: "note" as const, text: "hidden" } },
+    { kind: "activity" as const, sequence: 7, turnSequence: 4, at: "2026-08-10T00:00:07.000Z", event: { type: "note" as const, text: "tail one" } },
+    { kind: "activity" as const, sequence: 8, turnSequence: 4, at: "2026-08-10T00:00:08.000Z", event: { type: "note" as const, text: "tail two" } },
+    { kind: "activity" as const, sequence: 9, turnSequence: 4, at: "2026-08-10T00:00:09.000Z", event: { type: "note" as const, text: "tail three" } },
+    { kind: "tell" as const, sequence: 10, id: "pending", body: "continue", recordedAt: "2026-08-10T00:00:10.000Z", state: "pending" as const, deliveries: [] },
+  ];
+  const ledger = projectTurns(facts);
+  const sequences = (view: ActivitySnapshot) => view.entries.map((entry) =>
+    entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence);
+  const told = (view: ActivitySnapshot) => view.entries.flatMap((entry) =>
+    entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "told" ? [entry.row.tellId] : []);
+
+  const monitoring = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 3, voice: 0 } });
+  assert.equal(monitoring.snapshot.kind, "open");
+  assert.deepEqual(sequences(monitoring.snapshot), [5, "gap:1", 7, 8, 9, 10]);
+  assert.deepEqual(told(monitoring.snapshot), ["latest"]);
+  assert.equal(monitoring.ordinaryCount, 3);
+  assert.equal(monitoring.snapshot.omitted, 1);
+  assert.equal(monitoring.snapshot.entries.filter((entry) => entry.kind === "row").length, 5);
+
+  const receipt = selectSnapshot(ledger, { aperture: "receipt", budget: { tail: 3, voice: 0 } });
+  assert.deepEqual(sequences(receipt.snapshot), ["gap:1", 7, 8, 9, 10]);
+  assert.deepEqual(told(receipt.snapshot), []);
+  assert.equal(receipt.ordinaryCount, 3);
+
+  const closed = projectTurns([...facts, {
+    kind: "turn-end" as const,
+    sequence: 11,
+    turnSequence: 4,
+    completedAt: "2026-08-10T00:00:11.000Z",
+    outcome: { kind: "answered" as const, answer: "second", session: { sessionId: "session" } },
+  }]);
+  const idleMonitoring = selectSnapshot(closed, { aperture: "monitoring" });
+  assert.equal(idleMonitoring.snapshot.kind, "idle");
+  assert.deepEqual(sequences(idleMonitoring.snapshot), [5, 10]);
+  assert.deepEqual(told(idleMonitoring.snapshot), ["latest"]);
+  assert.equal(idleMonitoring.ordinaryCount, 0);
+  assert.equal(idleMonitoring.snapshot.omitted, 0);
+
+  const idleReceipt = selectSnapshot(closed, { aperture: "receipt" });
+  assert.deepEqual(sequences(idleReceipt.snapshot), [10]);
+  assert.deepEqual(told(idleReceipt.snapshot), []);
+  assert.equal(idleReceipt.ordinaryCount, 0);
 });
 
 test("outcome folding preserves a truncated final voice equal to the answer", () => {
@@ -965,7 +1025,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
       historyId: "public-history",
       session: { sessionId: "public-session" },
     });
-    assert.deepEqual(status.timeline.entries, []);
+    assert.equal(status.timeline.entries.length, 0);
     assert.deepEqual(await handle.wait((candidate) => candidate.timeline.kind === "idle"
       && candidate.timeline.outcome?.outcome.kind === "answered"), status);
     assert.equal(await handle.kill(), "already-stopped");

@@ -12,6 +12,14 @@ only that Turn's tail-three plus independent pre-tail voice-three union, active
 tools, and actionable pending tells. Tail and voice are taken from ordinary
 window rows; an active tool does not occupy a tail slot. With
 no open Turn it exposes only the latest outcome and actionable pending tells.
+Monitoring snapshots (`status`, `wait`, and `call`) also pin the single
+retained Tell row with the greatest timeline sequence whose state is `told`,
+when one exists. That latest settled Tell is pinned outside the ordinary
+budget, even when it sits outside the current open Turn or idle ordinary
+window, and it appears once at its persisted sequence. Pin selection happens
+before tail and voice fill, so the Tell never consumes an ordinary slot.
+Mutation receipt snapshots (`tell` and `kill`) keep the ordinary last-activity
+policy and do not pin a settled Tell.
 Every snapshot arm, including unborn, also carries `reportedChanges` and
 `reportedChangesOmitted` from that same frontier Turn. Eligible source rows
 are completed `fileChange` tools with successful result status; each native
@@ -74,8 +82,11 @@ heart admission.
 `status()` watches one Akuma through fresh life evidence and one bounded
 timeline snapshot. It is not a fleet row and does not extend or embed the fleet
 projection. `status`, `wait`, `call`, `tell`, `interrupt`, and `kill` use the
-same readonly snapshot union and selector policy. An open snapshot may contain
-an `active` tool; an idle or unborn snapshot cannot represent one. A closed
+same readonly snapshot union. Monitoring observations (`status`, `wait`,
+`call`) and mutation receipts (`tell`, `kill`) share one snapshot policy;
+only the observation kind chooses whether the latest settled Tell is pinned.
+An open snapshot may contain an `active` tool; an idle or unborn snapshot
+cannot represent one. A closed
 Turn's unmatched tool start remains `unsettled` in history and is not a claim
 that its process is live. The projected ledger likewise exposes readonly
 `open` and `closed` Turn arms: only the open arm admits an `active` tool row,
@@ -115,8 +126,9 @@ provider receipts fold into ordinary Akuma observation as one `pending` or
 `told` tell row at the admission's original timeline position. Tell admission
 is Body-scoped and does not imply entry into a Turn. Pending tell rows therefore
 remain visible outside the open-Turn selection because they can still change the
-caller's action; settled tell rows are visible through the current Turn or
-history like other settled activity. Text and
+caller's action. Monitoring snapshots pin the latest settled Tell the same way;
+other settled tell rows remain visible through history like other settled
+activity. Receipt snapshots do not pin a settled Tell. Text and
 JSON expose the same two-state row and no provider fence, five-stage
 lifecycle, or stage timeline. Tell
 rows are the sole detailed public tell projection; `AkumaStatus` carries no

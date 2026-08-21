@@ -657,7 +657,10 @@ test("Akuma status, wait, and history share public observations without embeddin
     assert.equal(statusResult.status.status.timeline.kind === "idle"
       && statusResult.status.status.timeline.outcome?.outcome.kind === "answered", true);
     assert.equal("history" in statusResult.status.status, false);
-    assert.deepEqual(statusResult.status.status.timeline.entries, []);
+    assert.equal(statusResult.status.status.timeline.entries.length, 1);
+    assert.equal(statusResult.status.status.timeline.entries[0]?.kind === "row"
+      && statusResult.status.status.timeline.entries[0].row.kind === "tell"
+      && statusResult.status.status.timeline.entries[0].row.state === "told", true);
 
     const waitResult = {
       kind: "akuma" as const,

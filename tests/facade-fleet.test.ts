@@ -103,7 +103,12 @@ function ordinaryEntries(view: Awaited<ReturnType<typeof Keiyaku.wait>>["observa
   return view.status.timeline.entries.filter((entry) =>
     entry.kind === "row"
       && !(entry.row.kind === "tool" && entry.row.state === "active")
-      && !(entry.row.kind === "tell" && entry.row.state === "pending"));
+      && entry.row.kind !== "tell");
+}
+
+function toldEntries(view: Awaited<ReturnType<typeof Keiyaku.wait>>["observations"][number]) {
+  return view.status.timeline.entries.filter((entry) =>
+    entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "told");
 }
 
 function hasPinned(view: Awaited<ReturnType<typeof Keiyaku.wait>>["observations"][number]): boolean {
@@ -212,12 +217,13 @@ test("plural wait skips an earlier unreadable member without spending its shared
     const ordinary = waited.observations.flatMap(ordinaryEntries);
     assert.equal(ordinary.length, 30);
     assert.deepEqual(waited.observations.slice(0, 5).map((view) => ordinaryEntries(view).length), [6, 6, 6, 6, 6]);
+    assert.equal(waited.observations.every((view) => toldEntries(view).length === 1), true);
     assert.equal(hasPinned(waited.observations[4]!), true);
     assert.equal(waited.observations[5]!.status.timeline.kind, "open");
     assert.equal(ordinaryEntries(waited.observations[5]!).length, 0);
     assert.equal(hasPinned(waited.observations[5]!), true);
     assert.deepEqual(waited.observations[5]!.status.timeline.entries.map((entry) =>
-      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:2", "tool", "tell"]);
+      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["tell", "gap:2", "tool", "tell"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -264,6 +270,7 @@ test("plural wait carries unused allowance and keeps pins after exhaustion", asy
     assert.equal(waited.observations.flatMap(ordinaryEntries).length, 30);
     assert.equal(ordinaryEntries(waited.observations[0]!).length, 2);
     assert.deepEqual(waited.observations.slice(1, 5).map((view) => ordinaryEntries(view).length), [6, 6, 6, 6]);
+    assert.equal(waited.observations.every((view) => toldEntries(view).length === 1), true);
     const later = waited.observations[5]!;
     assert.deepEqual(
       ordinaryEntries(later).map((entry) => entry.kind === "row" && (entry.row.kind === "said" || entry.row.kind === "note")
@@ -276,7 +283,35 @@ test("plural wait carries unused allowance and keeps pins after exhaustion", asy
     assert.equal(hasPinned(waited.observations[6]!), true);
     assert.equal(waited.observations[6]!.status.timeline.kind, "open");
     assert.deepEqual(waited.observations[6]!.status.timeline.entries.map((entry) =>
-      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["gap:7", "tool", "tell"]);
+      entry.kind === "gap" ? `gap:${entry.count}` : entry.row.kind), ["tell", "gap:7", "tool", "tell"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("status and wait do not fabricate a settled Tell; tell and kill receipts do not", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-facade-tell-pin-"));
+  try {
+    const source = await answered(root, "worker", "00000001");
+    const hasTold = (entries: Awaited<ReturnType<typeof Keiyaku.status>>["status"]["timeline"]["entries"]) =>
+      entries.some((entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "told");
+    const status = await Keiyaku.status({ path: root, akuma: source.id });
+    assert.equal(hasTold(status.status.timeline.entries), false);
+    const waited = await Keiyaku.wait({ path: root, akuma: [source.id], timeoutMs: 0 });
+    assert.equal(hasTold(waited.observations[0]!.status.timeline.entries), false);
+    const killed = await Keiyaku.kill({ path: root, akuma: [source.id] });
+    assert.equal(killed.results[0]!.observation.kind, "observed");
+    if (killed.results[0]!.observation.kind === "observed") {
+      assert.equal(hasTold(killed.results[0]!.observation.status.timeline.entries), false);
+    }
+    const told = await Keiyaku.tell({ path: root, akuma: source.id, body: "continue" });
+    assert.equal(told.observation.kind, "observed");
+    if (told.observation.kind === "observed") {
+      assert.ok(told.observation.status.timeline.entries.some((entry) => entry.kind === "row"
+        && entry.row.kind === "tell" && entry.row.tellId === told.tell.admission.tellId
+        && entry.row.state === "pending"));
+      assert.equal(hasTold(told.observation.status.timeline.entries), false);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
