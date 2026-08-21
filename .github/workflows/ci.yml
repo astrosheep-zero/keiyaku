@@ -69,6 +69,11 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
 
+      - name: Configure x64 MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Build
         run: npm run build
 
@@ -90,6 +95,7 @@ jobs:
           tests/normalized-identity.test.ts
           tests/observation.test.ts
           tests/runtime-proc.test.ts
+          tests/windows-akuma-process.test.ts
           tests/settings.test.ts
           tests/sqlite-transaction-lock.test.ts
           tests/task-document.test.ts
@@ -116,6 +122,11 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --prefer-offline
+
+      - name: Configure x64 MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: Run packaged CLI end-to-end test
         run: npm run test:e2e

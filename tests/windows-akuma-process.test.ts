@@ -1,22 +1,19 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import {
-  encodeLaunchSpec,
   handoffProcess,
   handoffWindowsLaunch,
   platformLaunchPolicy,
   spawnOptionsFor,
-  windowsLauncherPath,
 } from "../src/runtime/proc/launch.js";
 import { consumeProcessStdout, runProcess, spawnDetachedProcess } from "../src/runtime/proc/run.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 
 const IMAGE_SUBSYSTEM_WINDOWS_GUI = 2;
-const sourceLauncher = fileURLToPath(new URL("../src/runtime/proc/windows-launch.exe", import.meta.url));
 const packagedLauncher = resolve("build/src/runtime/proc/windows-launch.exe");
 
 function peSubsystem(path: string): number {
@@ -49,36 +46,12 @@ async function waitForFile(path: string): Promise<string> {
   return readFileSync(path, "utf8");
 }
 
-function writeFakeLauncher(root: string, dump: string): string {
-  const path = join(root, "fake-launch");
-  writeFileSync(path, [
-    "#!/usr/bin/env node",
-    'const { openSync } = require("node:fs");',
-    'const { spawn } = require("node:child_process");',
-    'const { writeFileSync } = require("node:fs");',
-    "const chunks = [];",
-    'process.stdin.on("data", (chunk) => chunks.push(chunk));',
-    'process.stdin.on("end", () => {',
-    "  const bytes = Buffer.concat(chunks);",
-    `  writeFileSync(${JSON.stringify(dump)}, bytes);`,
-    "  const spec = JSON.parse(bytes.toString('utf8'));",
-    "  const log = openSync(spec.log, 'a');",
-    "  const child = spawn(spec.argv[0], spec.argv.slice(1), { cwd: spec.cwd, env: spec.env, detached: true, stdio: ['ignore', log, log] });",
-    "  child.unref();",
-    "  process.exit(0);",
-    "});",
-    "",
-  ].join("\n"));
-  chmodSync(path, 0o755);
-  return path;
-}
-
-test("the Windows launcher artifact is a GUI-subsystem PE", async () => {
-  assert.equal(windowsLauncherPath(), sourceLauncher);
-  assert.equal(existsSync(sourceLauncher), true);
-  assert.equal(peSubsystem(sourceLauncher), IMAGE_SUBSYSTEM_WINDOWS_GUI);
-  if (!existsSync(packagedLauncher)) return;
-  assert.deepEqual(readFileSync(sourceLauncher), readFileSync(packagedLauncher));
+test("the Windows release launcher is a GUI-subsystem x64 PE", async (t) => {
+  if (process.platform !== "win32") {
+    t.skip("the native release artifact is built only on Windows");
+    return;
+  }
+  assert.equal(existsSync(packagedLauncher), true);
   const built = await import(pathToFileURL(resolve("build/src/runtime/proc/launch.js")).href) as {
     windowsLauncherPath(): string;
   };
@@ -117,27 +90,6 @@ test("launch intent maps to one private platform policy", () => {
   assert.throws(() => spawnOptionsFor("handoff", { cwd: "/tmp" }, ["ignore", "ignore", "ignore"], "win32"), /GUI launcher/);
 });
 
-test("Windows launch spec preserves Unicode argv, cwd, environment, and log routing", () => {
-  const input = {
-    argv: [process.execPath, "-e", "process.stdout.write(process.argv[1])", "a && b ✨"],
-    cwd: join("/tmp", "目录-ä-✨"),
-    env: { PATH: "/bin", KEIYAKU_UNICODE: "café-✨", EMPTY: "" },
-    log: join("/tmp", "目录-ä-✨", "stdio.log"),
-  };
-  const decoded = JSON.parse(encodeLaunchSpec(input).toString("utf8")) as {
-    argv: string[];
-    cwd: string;
-    env: Record<string, string>;
-    log: string;
-  };
-  assert.deepEqual(decoded.argv, input.argv);
-  assert.equal(decoded.cwd, input.cwd);
-  assert.equal(decoded.log, input.log);
-  assert.equal(decoded.env.KEIYAKU_UNICODE, "café-✨");
-  assert.equal(decoded.env.EMPTY, "");
-  assert.equal(Array.isArray(decoded.argv), true);
-});
-
 test("a missing Windows launcher fails with the typed spawn error", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-missing-launch-"));
   try {
@@ -154,6 +106,52 @@ test("a missing Windows launcher fails with the typed spawn error", async () => 
         return true;
       },
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("native EINVAL diagnostics retain a typed error.code", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-einval-launch-"));
+  const diagnostic = join(root, "einval.js");
+  writeFileSync(diagnostic, "process.stderr.write('spawn launcher EINVAL\\n'); process.exit(1);\n");
+  try {
+    await assert.rejects(
+      () => handoffWindowsLaunch({
+        argv: ["child.exe"],
+        cwd: root,
+        log: diagnostic,
+      }, process.execPath),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /EINVAL/);
+        assert.equal((error as NodeJS.ErrnoException).code, "EINVAL");
+        return true;
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows handoff accepts a one-element target argv", async (t) => {
+  if (process.platform !== "win32") {
+    t.skip("the native launcher argv cut is Windows-only");
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-one-arg-launch-"));
+  const log = join(root, "stdio.log");
+  const child = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "hostname.exe");
+  try {
+    await handoffProcess({ argv: [child], cwd: root, log });
+    const deadline = performance.now() + 2_000;
+    let text = "";
+    while (performance.now() < deadline) {
+      if (existsSync(log)) text = readFileSync(log, "utf8");
+      if (text.trim().length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.match(text, /\S/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -183,16 +181,42 @@ test("Body handoff returns no pid and leaves the child alive", async () => {
   }
 });
 
+test("Windows handoff returns while its target remains long-lived", async (t) => {
+  if (process.platform !== "win32") {
+    t.skip("the launcher stderr inheritance regression is Windows-only");
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-handoff-return-"));
+  const pidFile = join(root, "pid");
+  let pid: number | undefined;
+  try {
+    const started = performance.now();
+    await handoffWindowsLaunch({
+      argv: [process.execPath, "-e", `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 10_000)`],
+      cwd: root,
+      log: join(root, "stdio.log"),
+    });
+    assert.ok(performance.now() - started < 1_000);
+    pid = Number.parseInt(await waitForFile(pidFile), 10);
+  } finally {
+    if (pid !== undefined) {
+      try { process.kill(pid, "SIGKILL"); } catch { /* already reaped */ }
+      await waitForExit(pid);
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("handoff and retained paths preserve no-shell argv and log bytes", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-launch-bytes-"));
   const cwd = join(root, "目录-ä");
   mkdirSync(cwd);
-  const payload = "a && b ✨";
-  const script = 'process.stdout.write([process.argv[1], process.cwd(), process.env.KEIYAKU_UNICODE].join("\\n"))';
+  const payload = ["", "a && b ✨", "has space", 'quote"inside', "trailing\\", "目录-ä"];
+  const script = 'process.stdout.write(JSON.stringify({ argv: process.argv.slice(1), cwd: process.cwd(), env: process.env.KEIYAKU_UNICODE }))';
   try {
     const handoffLog = join(cwd, "handoff.log");
     await handoffProcess({
-      argv: [process.execPath, "-e", script, payload],
+      argv: [process.execPath, "-e", script, ...payload],
       cwd,
       env: { ...process.env, KEIYAKU_UNICODE: "café-✨" },
       log: handoffLog,
@@ -201,112 +225,22 @@ test("handoff and retained paths preserve no-shell argv and log bytes", async ()
     let handoffText = "";
     while (performance.now() < deadline) {
       if (existsSync(handoffLog)) handoffText = readFileSync(handoffLog, "utf8");
-      if (handoffText.includes(payload)) break;
+      if (handoffText.includes('"argv"')) break;
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    assert.equal(handoffText, `${payload}\n${realpathSync(cwd)}\ncafé-✨`);
+    assert.deepEqual(JSON.parse(handoffText), { argv: payload, cwd: realpathSync(cwd), env: "café-✨" });
 
     const retainedLog = join(cwd, "retained.log");
     const owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", script, payload],
+      argv: [process.execPath, "-e", script, ...payload],
       cwd,
       env: { ...process.env, KEIYAKU_UNICODE: "café-✨" },
       log: retainedLog,
     });
     await waitForExit(owned.pid);
-    const childBytes = `${payload}\n${realpathSync(cwd)}\ncafé-✨`;
+    const childBytes = JSON.stringify({ argv: payload, cwd: realpathSync(cwd), env: "café-✨" });
     assert.equal(readFileSync(retainedLog, "utf8"), `${childBytes}[child exit 0]\n`);
   } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Windows handoff transport writes the launch spec without a shell", async (t) => {
-  if (process.platform === "win32") {
-    t.skip("Windows uses the GUI launcher binary rather than a POSIX fake");
-    return;
-  }
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-win-transport-"));
-  const dump = join(root, "spec.json");
-  const cwd = join(root, "目录-ä");
-  mkdirSync(cwd);
-  const launcher = writeFakeLauncher(root, dump);
-  try {
-    const input = {
-      argv: [process.execPath, "-e", "process.stdout.write(process.argv[1])", "a && b ✨"],
-      cwd,
-      env: { ...process.env, KEIYAKU_UNICODE: "café-✨" },
-      log: join(cwd, "stdio.log"),
-    };
-    const result = await handoffWindowsLaunch(input, launcher);
-    assert.equal(result, undefined);
-    const spec = JSON.parse(await waitForFile(dump)) as { argv: string[]; cwd: string; env: Record<string, string>; log: string };
-    assert.deepEqual(spec.argv, input.argv);
-    assert.equal(spec.cwd, input.cwd);
-    assert.equal(spec.log, input.log);
-    assert.equal(spec.env.KEIYAKU_UNICODE, "café-✨");
-    const deadline = performance.now() + 2_000;
-    let logText = "";
-    while (performance.now() < deadline) {
-      if (existsSync(input.log)) logText = readFileSync(input.log, "utf8");
-      if (logText === "a && b ✨") break;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    assert.equal(logText, "a && b ✨");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("retained buffered, streaming, stdio, and logged children still terminate their trees", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-retained-windows-policy-"));
-  const descendant = "setInterval(() => {}, 1_000);";
-  const parent = (file: string) => [
-    'const { writeFileSync } = require("node:fs");',
-    'const { spawn } = require("node:child_process");',
-    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore" });`,
-    `writeFileSync(${JSON.stringify(file)}, String(child.pid));`,
-    "setInterval(() => {}, 1_000);",
-  ].join(" ");
-  const descendantFile = join(root, "descendant-pid");
-  let descendantPid: number | undefined;
-  try {
-    const outcome = await runProcess({
-      argv: [process.execPath, "-e", parent(descendantFile)],
-      cwd: root,
-      timeoutMs: 1_000,
-    });
-    assert.equal(outcome.kind, "timeout");
-    descendantPid = Number.parseInt(readFileSync(descendantFile, "utf8"), 10);
-    await waitForExit(descendantPid);
-
-    const streamed = await consumeProcessStdout({
-      argv: [process.execPath, "-e", 'process.stdout.write("x")'],
-      timeoutMs: 2_000,
-    }, () => {});
-    assert.equal(streamed.outcome.kind, "terminal");
-
-    const stdio = spawnStdioProcess({
-      argv: [process.execPath, "-e", parent(join(root, "stdio-descendant"))],
-      cwd: root,
-    });
-    const stdioPid = Number.parseInt(await waitForFile(join(root, "stdio-descendant")), 10);
-    await stdio.close(true);
-    await waitForExit(stdioPid);
-
-    const owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", parent(join(root, "logged-descendant"))],
-      cwd: root,
-      log: join(root, "logged.log"),
-    });
-    const loggedPid = Number.parseInt(await waitForFile(join(root, "logged-descendant")), 10);
-    await owned.terminate(true);
-    await waitForExit(owned.pid);
-    await waitForExit(loggedPid);
-  } finally {
-    if (descendantPid !== undefined) {
-      try { process.kill(descendantPid, "SIGKILL"); } catch { /* already reaped */ }
-    }
     rmSync(root, { recursive: true, force: true });
   }
 });

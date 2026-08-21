@@ -32,7 +32,9 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.json && node scripts/copy-integrations.js && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('build/src/cli/index.js', 0o755)\"",
+    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.json && node scripts/copy-integrations.js && node scripts/build-windows-launcher.js && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('build/src/cli/index.js', 0o755)\"",
+    "prepack": "node scripts/verify-package.js",
+    "postpack": "node scripts/verify-package.js",
     "review:model-impact": "node --import tsx scripts/model-change-impact.ts",
     "format": "prettier --write --print-width 120 \"src/**/*.ts\" \"scripts/**/*.ts\"",
     "format:check": "prettier --check --print-width 120 \"src/**/*.ts\" \"scripts/**/*.ts\"",

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { open } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type LaunchIntent = "handoff" | "retained";
@@ -18,7 +19,9 @@ export type SpawnLaunchPolicy = Readonly<{
   shell: false;
 }>;
 
-export type PlatformLaunchPolicy = Readonly<{ kind: "windows-launcher" }> | SpawnLaunchPolicy;
+export type PlatformLaunchPolicy =
+  | Readonly<{ kind: "windows-launcher" }>
+  | SpawnLaunchPolicy;
 
 export function platformLaunchPolicy(
   intent: LaunchIntent,
@@ -59,33 +62,17 @@ export function spawnOptionsFor<Stdio>(
 }
 
 export function windowsLauncherPath(): string {
-  return fileURLToPath(new URL("./windows-launch.exe", import.meta.url));
-}
-
-function envRecord(env: NodeJS.ProcessEnv | undefined): Readonly<Record<string, string>> {
-  const record: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env ?? process.env)) {
-    if (value !== undefined) record[key] = value;
+  const sourcePath = fileURLToPath(new URL("./windows-launch.exe", import.meta.url));
+  if (process.platform === "win32" && !/[\\/]build[\\/]/u.test(sourcePath)) {
+    return resolve(sourcePath, "../../../../build/src/runtime/proc/windows-launch.exe");
   }
-  return record;
-}
-
-export function encodeLaunchSpec(input: DetachedProcessInput): Buffer {
-  return Buffer.from(
-    JSON.stringify({
-      argv: input.argv,
-      cwd: input.cwd,
-      env: envRecord(input.env),
-      log: input.log,
-    }),
-    "utf8",
-  );
+  return sourcePath;
 }
 
 function launchFailure(command: string, diagnostic: string): NodeJS.ErrnoException {
   const error = new Error(diagnostic.length > 0 ? diagnostic : `spawn ${command} UNKNOWN`) as NodeJS.ErrnoException;
-  if (/\bENOENT\b/.test(error.message)) error.code = "ENOENT";
-  else if (/\bEACCES\b/.test(error.message)) error.code = "EACCES";
+  const code = /\b(?:ENOENT|EACCES|EINVAL)\b/.exec(error.message)?.[0];
+  if (code) error.code = code;
   error.syscall = "spawn";
   error.path = command;
   return error;
@@ -102,11 +89,7 @@ async function waitSpawned(child: ChildProcess): Promise<void> {
 export async function spawnLoggedProcess(input: DetachedProcessInput, intent: LaunchIntent): Promise<ChildProcess> {
   const log = await open(input.log, "a");
   try {
-    const child = spawn(
-      input.argv[0]!,
-      input.argv.slice(1),
-      spawnOptionsFor(intent, input, ["ignore", log.fd, log.fd]),
-    );
+    const child = spawn(input.argv[0]!, input.argv.slice(1), spawnOptionsFor(intent, input, ["ignore", log.fd, log.fd]));
     await waitSpawned(child);
     return child;
   } finally {
@@ -118,18 +101,16 @@ export async function handoffWindowsLaunch(
   input: DetachedProcessInput,
   launcher = windowsLauncherPath(),
 ): Promise<void> {
-  const spec = encodeLaunchSpec(input);
-  const child = spawn(launcher, [], {
-    stdio: ["pipe", "ignore", "pipe"],
+  const child = spawn(launcher, [input.log, ...input.argv], {
+    cwd: input.cwd,
+    env: input.env,
+    stdio: ["ignore", "ignore", "pipe"],
     windowsHide: true,
     shell: false,
-    env: process.env,
   });
   let stderr = "";
   child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk: string) => {
-    stderr = `${stderr}${chunk}`.slice(-4_000);
-  });
+  child.stderr?.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-4_000); });
   const closed = new Promise<number | null>((resolve) => {
     child.once("close", (exitCode) => resolve(exitCode));
   });
@@ -138,10 +119,6 @@ export async function handoffWindowsLaunch(
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error));
   }
-  await new Promise<void>((resolve, reject) => {
-    child.stdin!.once("error", reject);
-    child.stdin!.end(spec, resolve);
-  });
   const code = await closed;
   if (code === 0) return;
   throw launchFailure(input.argv[0] ?? launcher, stderr.trim());

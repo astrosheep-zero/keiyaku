@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+  copyFileSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,6 +53,10 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   const archives = readdirSync(packed).filter((name) => name.endsWith(".tgz"));
   assert.equal(archives.length, 1, `expected one package archive, got ${archives.join(", ")}`);
   const packageArchive = join(packed, archives[0]!);
+  if (process.platform === "win32") {
+    const listing = command("tar", ["-tzf", packageArchive], root);
+    assert.ok(listing.split(/\r?\n/u).includes("package/build/src/runtime/proc/windows-launch.exe"));
+  }
   const claudePackage = join(root, "node_modules", "@anthropic-ai", "claude-agent-sdk");
   npmCommand(["pack", "--ignore-scripts", "--pack-destination", packed, "--cache", cache], claudePackage);
   const claudeArchives = readdirSync(packed).filter((name) => name.startsWith("anthropic-ai-claude-agent-sdk-") && name.endsWith(".tgz"));
@@ -157,4 +163,31 @@ test("published package installs one keiyaku CLI and runs against a real reposit
     'const selected = await resolveProviderExecution({ name: "claude", kind: "claude-agent-sdk" });',
     'await selected.adapter.start({ body: "start", launchTells: [], cwd: process.cwd(), options: {}, session: { kind: "fresh" } });',
   ]), /Cannot find package/u);
+});
+
+test("Windows packaging refuses a missing or corrupt launcher artifact", (t) => {
+  if (process.platform !== "win32") {
+    t.skip("the native release guard runs on Windows");
+    return;
+  }
+  const artifact = join(root, "build", "src", "runtime", "proc", "windows-launch.exe");
+  const backup = join(mkdtempSync(join(tmpdir(), "keiyaku-launcher-backup-")), "windows-launch.exe");
+  const packed = mkdtempSync(join(tmpdir(), "keiyaku-launcher-refusal-"));
+  copyFileSync(artifact, backup);
+  try {
+    writeFileSync(artifact, "corrupt");
+    assert.throws(
+      () => npmCommand(["pack", "--pack-destination", packed], root),
+      /not a PE image/u,
+    );
+    assert.equal(readdirSync(packed).filter((name) => name.endsWith(".tgz")).length, 0);
+    unlinkSync(artifact);
+    assert.throws(
+      () => npmCommand(["pack", "--pack-destination", packed], root),
+      /artifact is missing/u,
+    );
+    assert.equal(readdirSync(packed).filter((name) => name.endsWith(".tgz")).length, 0);
+  } finally {
+    copyFileSync(backup, artifact);
+  }
 });
