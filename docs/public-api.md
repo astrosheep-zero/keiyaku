@@ -181,9 +181,12 @@ symbolic branch or `null`, without choosing a target. `Keiyaku.of` and
 coordinate, and no raw scope, token, registry, or orchestrator is public.
 
 The `@astrosheep/keiyaku/kanshi` surface additionally exports the optional
-read-time `KanshiInput.region` selection and typed `RegionRead` values. This is
-a current active-document read using the document Region owner; it is not
-persisted and is independent of delivery or audit paths.
+read-time `KanshiInput.region` selection and typed `RegionRead` values. The
+selection and read unions have exactly three arms: world declarations, one
+active Contract with grouped counterpart overlaps, and one or more query
+patterns with grouped overlaps. This is a current active-document read using
+the document Region owner; it is not persisted and is independent of delivery
+or audit paths.
 `Repo.at` throws outside a repository; `root` is the primary-worktree absolute
 path, so its worktrees share one journal.
 `Keiyaku.list` enumerates the active Contract world from one Git observation

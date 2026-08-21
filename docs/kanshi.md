@@ -211,37 +211,56 @@ sections stay typed and remain distinct from an observed empty section.
 
 ```ts
 type KanshiRegionSelection =
-  | { kind: "declarations" }
-  | { kind: "contract"; contract: ContractId }
-  | { kind: "overlap"; contract?: ContractId }
-  | { kind: "path"; path: string }
+  | Readonly<{ kind: "declarations" }>
+  | Readonly<{ kind: "contract"; contract: ContractId }>
+  | Readonly<{ kind: "path"; patterns: readonly [string, ...string[]] }>
 
-type RegionDeclaration = {
-  contract: ContractId;
-  patterns: readonly string[];
-}
-type RegionIntersection = {
-  left: ContractId;
-  right: ContractId;
-  patterns: readonly { left: string; right: string }[];
-}
-type RegionPathMatch = { contract: ContractId; pattern: string }
+type RegionDeclaration = Readonly<{
+  contract: ContractId
+  patterns: readonly string[]
+}>
+
+type RegionOverlap = Readonly<{
+  contract: ContractId
+  patterns: readonly Readonly<{ mine: string; theirs: string }>[]
+}>
+
 type RegionRead =
-  | { kind: "declarations"; declarations: readonly RegionDeclaration[] }
-  | { kind: "contract"; declaration: RegionDeclaration }
-  | { kind: "overlap"; subject?: ContractId; intersections: readonly RegionIntersection[] }
-  | { kind: "path"; path: string; matches: readonly RegionPathMatch[] }
+  | Readonly<{
+      kind: "declarations"
+      declarations: readonly RegionDeclaration[]
+    }>
+  | Readonly<{
+      kind: "contract"
+      declaration: RegionDeclaration
+      overlaps: readonly RegionOverlap[]
+    }>
+  | Readonly<{
+      kind: "path"
+      patterns: readonly string[]
+      overlaps: readonly RegionOverlap[]
+    }>
 ```
 
 Declarations preserve each active Contract's pattern order. Bare declarations
-contain no relation data; overlap is the only relation view and reports both
-decisive patterns. Path reads match active declarations against one canonical
-repository-relative path. Empty arrays are typed empty results. A malformed or
-unreadable document fails only this section, while a missing world is absent.
-The public input validates this exact discriminated union, rejects unknown
-fields, and validates ContractId/path values before any repository observation.
-This planning read uses the document Region owner and never reports actual
-touched paths, Git conflicts, ownership, gates, or serialization advice.
+contain no relation data. A Contract read returns that Contract's declaration
+and every intersection with other active declarations, excluding the subject
+from its counterpart set. A path read accepts one or more query patterns in
+the Contract Region line grammar from [document.md](document.md); a literal
+repository path is that grammar's degenerate case. Pattern order and
+duplicates are preserved. For every `RegionOverlap`, `contract` is the
+counterpart active Contract, `mine` is the query-side pattern, and `theirs` is
+that Contract's declared pattern. Path reads may include every active
+Contract. This subpath exports the Region types needed to name the union,
+including the same `RegionOverlap` shape exported at the package root; it does
+not retain `RegionIntersection`, `RegionPathMatch`, or an `overlap` selection
+arm. Empty arrays are typed empty results. A malformed or unreadable document
+fails only this section, while a missing world is absent. The public input
+validates this exact discriminated union, rejects unknown fields, and
+validates ContractId and query-pattern values before any repository
+observation. This planning read uses the document Region owner and one
+pattern-intersection calculator; it never reports actual touched paths, Git
+conflicts, ownership, gates, or serialization advice.
 
 ## Text board
 

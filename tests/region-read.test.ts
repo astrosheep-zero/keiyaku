@@ -52,60 +52,143 @@ async function read(repository: ReturnType<typeof repositoryWithMain>, region: P
   return kanshi({ world: await World.at(repository.path), repo: await Repo.at({ path: repository.path }), ...(region === undefined ? {} : { region }) });
 }
 
-test("Kanshi Region reads own declarations, explicit intersections, and active path matches", async () => {
+test("Kanshi Region reads own declarations, grouped contract overlaps, and query-pattern overlaps", async () => {
   const repository = repositoryWithMain();
   const first = await bind(repository, "Region first", ["src/**", "docs/guide/**"]);
   const second = await bind(repository, "Region second", ["src/cli/**", "tests/**"]);
+  const firstIsLeft = first.id.localeCompare(second.id) < 0;
 
   const defaultReport = await read(repository, undefined);
   assert.equal("region" in defaultReport, false);
 
-  const own = await read(repository, { kind: "contract", contract: first.id });
-  assert.deepEqual(own.region, { kind: "present", value: { kind: "contract", declaration: { contract: first.id, patterns: ["src/**", "docs/guide/**"] } } });
-
-  const overlap = await read(repository, { kind: "overlap", contract: first.id });
-  assert.deepEqual(overlap.region, {
+  const world = await read(repository, { kind: "declarations" });
+  assert.deepEqual(world.region, {
     kind: "present",
     value: {
-      kind: "overlap",
-      subject: first.id,
-      intersections: [{ left: first.id, right: second.id, patterns: [{ left: "src/**", right: "src/cli/**" }] }],
+      kind: "declarations",
+      declarations: firstIsLeft
+        ? [
+          { contract: first.id, patterns: ["src/**", "docs/guide/**"] },
+          { contract: second.id, patterns: ["src/cli/**", "tests/**"] },
+        ]
+        : [
+          { contract: second.id, patterns: ["src/cli/**", "tests/**"] },
+          { contract: first.id, patterns: ["src/**", "docs/guide/**"] },
+        ],
     },
   });
 
-  const path = await read(repository, { kind: "path", path: "src/cli/invoke.ts" });
+  const own = await read(repository, { kind: "contract", contract: first.id });
+  assert.deepEqual(own.region, {
+    kind: "present",
+    value: {
+      kind: "contract",
+      declaration: { contract: first.id, patterns: ["src/**", "docs/guide/**"] },
+      overlaps: [{ contract: second.id, patterns: [{ mine: "src/**", theirs: "src/cli/**" }] }],
+    },
+  });
+
+  const path = await read(repository, { kind: "path", patterns: ["src/cli/invoke.ts"] });
   assert.deepEqual(path.region, {
     kind: "present",
     value: {
       kind: "path",
-      path: "src/cli/invoke.ts",
-      matches: [{ contract: first.id, pattern: "src/**" }, { contract: second.id, pattern: "src/cli/**" }],
+      patterns: ["src/cli/invoke.ts"],
+      overlaps: firstIsLeft
+        ? [
+          { contract: first.id, patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/**" }] },
+          { contract: second.id, patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/cli/**" }] },
+        ]
+        : [
+          { contract: second.id, patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/cli/**" }] },
+          { contract: first.id, patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/**" }] },
+        ],
     },
   });
 });
 
-test("CLI Region keeps overlaps explicit, rejects invalid paths, and refuses terminal selectors", async () => {
+test("CLI Region renders grouped overlaps, empty facts, and refuses deleted dialects", async () => {
   const repository = repositoryWithMain();
   const first = await bind(repository, "CLI region first", ["src/**", "docs/guide/**"]);
-  await bind(repository, "CLI region second", ["lib/**"]);
+  const second = await bind(repository, "CLI region second", ["src/cli/**", "tests/**"]);
   mkdirSync(join(repository.path, ".keiyaku"), { recursive: true });
   writeFileSync(join(repository.path, ".keiyaku", "settings.json"), "{ malformed", "utf8");
+
+  const emptyWorld = repositoryWithMain();
+  const empty = await invoke(parseArgv(["region"]), { cwd: emptyWorld.path, environment: {} });
+  assert.equal(empty.kind, "region");
+  if (empty.kind === "region") {
+    assert.deepEqual(empty.region, { kind: "present", value: { kind: "declarations", declarations: [] } });
+    assert.equal(renderText(empty), "no active Region declarations");
+  }
+
+  const world = await invoke(parseArgv(["region"]), { cwd: repository.path, environment: {} });
+  assert.equal(world.kind, "region");
+  if (world.kind === "region") {
+    assert.match(renderText(world), new RegExp(`^region ${first.id} src/\\*\\* docs/guide/\\*\\*$`, "m"));
+    assert.match(renderText(world), new RegExp(`^region ${second.id} src/cli/\\*\\* tests/\\*\\*$`, "m"));
+  }
 
   const declaration = await invoke(parseArgv(["region", first.id, "--json"]), { cwd: repository.path, environment: {} });
   assert.equal(declaration.kind, "region");
   if (declaration.kind !== "region" || declaration.region.kind !== "present") return;
-  assert.deepEqual(declaration.region.value, { kind: "contract", declaration: { contract: first.id, patterns: ["src/**", "docs/guide/**"] } });
-  assert.equal(renderText(declaration), `region ${first.id} src/** docs/guide/**`);
+  assert.deepEqual(declaration.region.value, {
+    kind: "contract",
+    declaration: { contract: first.id, patterns: ["src/**", "docs/guide/**"] },
+    overlaps: [{ contract: second.id, patterns: [{ mine: "src/**", theirs: "src/cli/**" }] }],
+  });
+  assert.equal(
+    renderText(declaration),
+    [`region ${first.id} src/** docs/guide/**`, `overlap ${second.id} 1 pair`, "  src/** ~ src/cli/**"].join("\n"),
+  );
 
-  const noOverlap = await invoke(parseArgv(["region", "--overlap"]), { cwd: repository.path, environment: {} });
+  const isolated = await bind(repository, "CLI region isolated", ["lib/**"]);
+  const noOverlap = await invoke(parseArgv(["region", isolated.id]), { cwd: repository.path, environment: {} });
   assert.equal(noOverlap.kind, "region");
-  if (noOverlap.kind === "region") assert.equal(renderText(noOverlap), "");
+  if (noOverlap.kind === "region") {
+    assert.equal(renderText(noOverlap), `region ${isolated.id} lib/**\nno overlap with active declarations`);
+  }
+
+  const path = await invoke(
+    parseArgv(["region", "--path", "src/**", "--path", "tests/**"]),
+    { cwd: repository.path, environment: {} },
+  );
+  assert.equal(path.kind, "region");
+  if (path.kind === "region" && path.region.kind === "present" && path.region.value.kind === "path") {
+    assert.deepEqual(path.region.value.patterns, ["src/**", "tests/**"]);
+    assert.deepEqual(path.region.value.overlaps.find((overlap) => overlap.contract === first.id), {
+      contract: first.id,
+      patterns: [{ mine: "src/**", theirs: "src/**" }],
+    });
+    assert.deepEqual(path.region.value.overlaps.find((overlap) => overlap.contract === second.id), {
+      contract: second.id,
+      patterns: [
+        { mine: "src/**", theirs: "src/cli/**" },
+        { mine: "tests/**", theirs: "tests/**" },
+      ],
+    });
+    const text = renderText(path);
+    assert.match(text, new RegExp(`overlap ${second.id} 2 pairs`));
+    assert.match(text, /^ {2}src\/\*\* ~ src\/cli\/\*\*$/m);
+    assert.match(text, /^ {2}tests\/\*\* ~ tests\/\*\*$/m);
+  }
+
+  const miss = await invoke(parseArgv(["region", "--path", "other/**"]), { cwd: repository.path, environment: {} });
+  assert.equal(miss.kind, "region");
+  if (miss.kind === "region") assert.equal(renderText(miss), "no active Region declares: other/**");
 
   await assert.rejects(
     () => invoke(parseArgv(["region", "--path", "../outside"]), { cwd: repository.path, environment: {} }),
-    (error: unknown) => error instanceof CliUsageError && error.message.includes("canonical repository-relative path"),
+    (error: unknown) => error instanceof CliUsageError && error.message.includes("may not contain .."),
   );
+  await assert.rejects(
+    () => invoke(parseArgv(["region", "--path", "docs/[draft].md"]), { cwd: repository.path, environment: {} }),
+    (error: unknown) => error instanceof CliUsageError && error.message.includes("forbidden glob form"),
+  );
+  assert.throws(() => parseArgv(["region", "--overlap"]), CliUsageError);
   assert.throws(() => parseArgv(["region", first.id, "--path", "src/file.ts"]), CliUsageError);
+  assert.throws(() => parseArgv(["region", first.id, second.id]), CliUsageError);
+  assert.throws(() => parseArgv(["region", "-"]), CliUsageError);
 
   await first.contract.abandon();
   await assert.rejects(
@@ -114,33 +197,62 @@ test("CLI Region keeps overlaps explicit, rejects invalid paths, and refuses ter
   );
 });
 
-test("Kanshi Region path and overlap results contain no delivery or audit path facts", async () => {
+test("Kanshi Region path results contain no delivery or audit path facts", async () => {
   const repository = repositoryWithMain();
   const { id } = await bind(repository, "No actual paths", ["src/**"]);
-  const report = await read(repository, { kind: "path", path: "src/file.ts" });
+  const report = await read(repository, { kind: "path", patterns: ["src/file.ts"] });
   assert.equal(report.region?.kind, "present");
   if (report.region?.kind !== "present") return;
-  assert.deepEqual(report.region.value, { kind: "path", path: "src/file.ts", matches: [{ contract: id as ContractId, pattern: "src/**" }] });
+  assert.deepEqual(report.region.value, {
+    kind: "path",
+    patterns: ["src/file.ts"],
+    overlaps: [{ contract: id as ContractId, patterns: [{ mine: "src/file.ts", theirs: "src/**" }] }],
+  });
   assert.equal(JSON.stringify(report.region.value).includes("diff"), false);
   assert.equal(JSON.stringify(report.region.value).includes("conflict"), false);
 });
 
-test("Kanshi validates Region selections and matches literal repository paths", async () => {
+test("Kanshi validates Region selections and query patterns", async () => {
   const repository = repositoryWithMain();
   const { id } = await bind(repository, "Literal paths", ["docs/**"]);
-  const dotted = await read(repository, { kind: "path", path: "docs/foo..bar.md" });
-  const bracketed = await read(repository, { kind: "path", path: "docs/[draft].md" });
-  assert.deepEqual(dotted.region, { kind: "present", value: { kind: "path", path: "docs/foo..bar.md", matches: [{ contract: id, pattern: "docs/**" }] } });
-  assert.deepEqual(bracketed.region, { kind: "present", value: { kind: "path", path: "docs/[draft].md", matches: [{ contract: id, pattern: "docs/**" }] } });
 
   await assert.rejects(
     async () => kanshi({ world: await World.at(repository.path), repo: await Repo.at({ path: repository.path }), region: { kind: "bogus" } as never }),
     (error: unknown) => error instanceof TypeError && error.message.includes("kind is invalid"),
   );
   await assert.rejects(
-    async () => kanshi({ world: await World.at(repository.path), repo: await Repo.at({ path: repository.path }), region: { kind: "path", path: "docs/[draft].md", extra: true } as never }),
+    async () => kanshi({
+      world: await World.at(repository.path),
+      repo: await Repo.at({ path: repository.path }),
+      region: { kind: "path", patterns: ["docs/**"], extra: true } as never,
+    }),
     (error: unknown) => error instanceof TypeError && error.message.includes("unknown field"),
   );
+  await assert.rejects(
+    async () => kanshi({
+      world: await World.at(repository.path),
+      repo: await Repo.at({ path: repository.path }),
+      region: { kind: "overlap" } as never,
+    }),
+    (error: unknown) => error instanceof TypeError && error.message.includes("kind is invalid"),
+  );
+  await assert.rejects(
+    async () => kanshi({
+      world: await World.at(repository.path),
+      repo: await Repo.at({ path: repository.path }),
+      region: { kind: "path", patterns: ["docs/[draft].md"] },
+    }),
+    (error: unknown) => error instanceof TypeError && error.message.includes("forbidden glob form"),
+  );
+  const canonical = await read(repository, { kind: "path", patterns: ["docs/"] });
+  assert.deepEqual(canonical.region, {
+    kind: "present",
+    value: {
+      kind: "path",
+      patterns: ["docs/**"],
+      overlaps: [{ contract: id, patterns: [{ mine: "docs/**", theirs: "docs/**" }] }],
+    },
+  });
 });
 
 test("a malformed active document fails only the selected Region section", async () => {
@@ -172,4 +284,7 @@ test("a malformed active document fails only the selected Region section", async
   if (report.contracts.kind !== "present") return;
   assert.equal(report.contracts.value.rows.find((row) => row.id === id)?.title, null);
   assert.equal(report.region?.kind, "failed");
+  const failed = await invoke(parseArgv(["region"]), { cwd: repository.path, environment: {} });
+  assert.equal(failed.kind, "region");
+  if (failed.kind === "region") assert.match(renderText(failed), /^region failed /);
 });

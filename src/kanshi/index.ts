@@ -16,8 +16,7 @@ export type {
   TaskKanshiWorld,
   KanshiRegionSelection,
   RegionDeclaration,
-  RegionIntersection,
-  RegionPathMatch,
+  RegionOverlap,
   RegionRead,
 } from "./report.js";
 export type { KanshiSelection } from "./select.js";

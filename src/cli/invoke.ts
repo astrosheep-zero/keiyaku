@@ -539,14 +539,12 @@ async function invokeRegion(
       throw error;
     }
   };
+  if (parsed.paths !== undefined) {
+    const report = await read({ kind: "path", patterns: parsed.paths });
+    return { kind: "region", region: report.region ?? { kind: "absent" } };
+  }
   if (parsed.contract === undefined) {
-    const selection: KanshiRegionSelection =
-      parsed.path !== undefined
-        ? { kind: "path", path: parsed.path }
-        : parsed.overlap
-          ? { kind: "overlap" }
-          : { kind: "declarations" };
-    const report = await read(selection);
+    const report = await read({ kind: "declarations" });
     return { kind: "region", region: report.region ?? { kind: "absent" } };
   }
   const report = await read({ kind: "declarations" });
@@ -561,13 +559,7 @@ async function invokeRegion(
   if (report.region?.kind !== "present" || report.region.value.kind !== "declarations") {
     return { kind: "region", region: report.region ?? { kind: "absent" } };
   }
-  const selection: KanshiRegionSelection = parsed.overlap
-    ? { kind: "overlap", contract }
-    : { kind: "contract", contract };
-  return {
-    kind: "region",
-    region: { kind: "present", value: selectRegion({ declarations: report.region.value.declarations, selection }) },
-  };
+  return { kind: "region", region: { kind: "present", value: selectRegion({ declarations: report.region.value.declarations, selection: { kind: "contract", contract } }) } };
 }
 
 async function invokeContractHistory(repo: Repo | undefined, contract: string): Promise<InvocationResult> {

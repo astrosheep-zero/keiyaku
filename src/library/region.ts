@@ -1,5 +1,5 @@
 import { decodeContractDocument } from "../body/decode.js";
-import { assertCanonicalRegionPath, regionPatternsMatchPath, regionsOverlap } from "../body/region.js";
+import { assertRegionPattern, regionsOverlap } from "../body/region.js";
 import type { ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { documentsOperationAt, type RepositoryScope } from "../protocol/operations.js";
@@ -32,20 +32,28 @@ export function readRegionDeclarations(
   }));
 }
 
-export function regionIntersections(
-  left: readonly string[],
-  right: readonly string[],
-): readonly Readonly<{ left: string; right: string }>[] {
-  return regionsOverlap(left, right).map(([leftPattern, rightPattern]) => ({ left: leftPattern, right: rightPattern }));
+export function regionOverlaps(
+  mine: readonly string[],
+  declarations: readonly RegionDeclarationRead[],
+): readonly RegionOverlap[] {
+  const overlaps: RegionOverlap[] = [];
+  for (const declaration of declarations) {
+    const pairs = regionsOverlap(mine, declaration.patterns);
+    if (pairs.length === 0) continue;
+    overlaps.push({
+      contract: declaration.contract,
+      patterns: pairs.map(([minePattern, theirsPattern]) => ({ mine: minePattern, theirs: theirsPattern })),
+    });
+  }
+  return overlaps;
 }
 
-export function regionPathMatches(patterns: readonly string[], path: string): readonly string[] {
-  return regionPatternsMatchPath(patterns, path);
-}
-
-export function validateRegionPath(path: unknown): asserts path is string {
-  if (typeof path !== "string") throw new Error("Region path must be a string");
-  assertCanonicalRegionPath(path);
+export function validateRegionPatterns(patterns: unknown): readonly [string, ...string[]] {
+  if (!Array.isArray(patterns) || patterns.length === 0) throw new Error("Region query requires one or more path patterns");
+  return patterns.map((pattern) => {
+    if (typeof pattern !== "string") throw new Error("Region path patterns must be strings");
+    return assertRegionPattern(pattern);
+  }) as [string, ...string[]];
 }
 
 function diagnostic(error: unknown): string {

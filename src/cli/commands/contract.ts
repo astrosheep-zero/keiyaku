@@ -82,7 +82,11 @@ export type ParsedAudit = Output &
 export type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
 export type ParsedNuke = Output & Readonly<{ command: "nuke"; confirm?: string }>;
 export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
-export type ParsedRegion = Output & Readonly<{ command: "region"; contract?: string; overlap: boolean; path?: string }>;
+export type ParsedRegion = Output & Readonly<{
+  command: "region";
+  contract?: string;
+  paths?: readonly [string, ...string[]];
+}>;
 export type ParsedShow = Output & Readonly<{ command: "show"; contract?: string }>;
 
 export const CONTRACT_COMMAND_SPECS = {
@@ -213,8 +217,8 @@ export const CONTRACT_COMMAND_SPECS = {
   region: {
     positional: "optional",
     stdin: "none",
-    flags: { overlap: "boolean", path: "value", json: "boolean" },
-    usage: "region [<contract>] [--overlap]\n       region --path <repo-relative-path>",
+    flags: { path: "repeat-value", json: "boolean" },
+    usage: "region [<contract>]\n       region --path <pattern> [--path <pattern> ...]",
     purpose: "Read active declared Contract Regions.",
   },
 } as const satisfies Readonly<Record<string, ContractCommandSpec>>;

@@ -513,10 +513,26 @@ scratch destroy command renders as an unresolved cleanup obligation without
 claiming that the worktree remains. A leak row reports a disposable Verification
 worktree that could not be removed after admission; it does not change the
 accepted exit status and is not a repair command.
-Region reads render one row per declaration, decisive overlap pair, or path
-match. Empty arrays render no rows; a failed Region section renders one
-`region failed <diagnostic>` row. JSON carries the same Kanshi `Section` value,
-with no actual touched paths, Git conflicts, ownership, or action advice. A
-Region read is an observation, so both present and failed sections exit `0`;
-the failure remains visible in the typed/text value rather than being mapped to
-the mutation retry status.
+Region reads render as follows:
+
+```text
+region <contract> <pattern> [<pattern> ...]
+overlap <counterpart-contract> <N> pair|pairs
+  <mine> ~ <theirs>
+```
+
+Bare `region` emits one `region` row per active declaration and emits
+`no active Region declarations` for a present empty declaration set. A
+Contract read emits its `region` row first, then one grouped `overlap` block
+per counterpart in active declaration order, with pairs in calculator order.
+If it has none, it emits `no overlap with active declarations`. A path read
+emits only the same grouped overlap blocks, using each supplied query pattern
+as `mine`. If the complete query has no matches, it emits
+`no active Region declares: <pattern> [<pattern> ...]`. A failed Region
+section remains `region failed <diagnostic>`. JSON carries the same typed
+`Section<RegionRead>`. Present empty observations exit successfully and always
+render their explicit empty fact. A Region read is an observation, so both
+present and failed sections exit `0`; the failure remains visible in the
+typed/text value rather than being mapped to the mutation retry status. JSON
+and text carry no actual touched paths, Git conflicts, ownership, or action
+advice.

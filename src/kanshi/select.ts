@@ -1,6 +1,6 @@
 import type { KanshiReport } from "./report.js";
-import { regionIntersections, regionPathMatches } from "../library/region.js";
-import type { KanshiRegionSelection, RegionDeclaration, RegionIntersection, RegionRead } from "./report.js";
+import { regionOverlaps } from "../library/region.js";
+import type { KanshiRegionSelection, RegionDeclaration, RegionRead } from "./report.js";
 
 export type KanshiSelection = Readonly<{ contract: string }>;
 
@@ -57,38 +57,15 @@ export function selectRegion(
   if (selection.kind === "contract") {
     const declaration = declarations.find((value) => value.contract === selection.contract);
     if (declaration === undefined) throw new Error(`active contract not found: ${selection.contract}`);
-    return { kind: "contract", declaration };
-  }
-  if (selection.kind === "path") {
-    const matches = declarations.flatMap((declaration) =>
-      regionPathMatches(declaration.patterns, selection.path).map((pattern) => ({
-        contract: declaration.contract,
-        pattern,
-      })),
-    );
-    return { kind: "path", path: selection.path, matches };
-  }
-  const intersections: RegionIntersection[] = [];
-  for (let leftIndex = 0; leftIndex < declarations.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < declarations.length; rightIndex += 1) {
-      const left = declarations[leftIndex]!;
-      const right = declarations[rightIndex]!;
-      if (
-        selection.contract !== undefined &&
-        left.contract !== selection.contract &&
-        right.contract !== selection.contract
-      )
-        continue;
-      const patterns = regionIntersections(left.patterns, right.patterns);
-      if (patterns.length > 0) intersections.push({ left: left.contract, right: right.contract, patterns });
-    }
-  }
-  if (selection.contract !== undefined && !declarations.some((value) => value.contract === selection.contract)) {
-    throw new Error(`active contract not found: ${selection.contract}`);
+    return {
+      kind: "contract",
+      declaration,
+      overlaps: regionOverlaps(declaration.patterns, declarations.filter((value) => value.contract !== selection.contract)),
+    };
   }
   return {
-    kind: "overlap",
-    ...(selection.contract === undefined ? {} : { subject: selection.contract }),
-    intersections,
+    kind: "path",
+    patterns: selection.patterns,
+    overlaps: regionOverlaps(selection.patterns, declarations),
   };
 }

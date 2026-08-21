@@ -323,6 +323,10 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["task", "hold", "task/a", "  "], /task hold requires a nonblank value/],
     [["wait", "aku/claude/1234abcd", " "], /wait requires a nonblank value/],
     [["region", "--path", "  "], /--path requires a nonblank value/],
+    [["region", "--overlap"], /option --overlap is not valid for region/],
+    [["region", "kei/one", "kei/two"], /region accepts at most one contract/],
+    [["region", "-"], /region reads no stdin/],
+    [["region", "kei/one", "--path", "src/**"], /--path cannot combine with a contract/],
   ];
   for (const [argv, pattern] of cases) {
     assert.throws(() => parseArgv(argv), (error: unknown) => error instanceof CliUsageError && pattern.test(error.message));
@@ -343,4 +347,20 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     positionals: ["task/a"],
     flags: { priority: "1" },
   });
+});
+
+test("region accepts repeated --path patterns and omits deleted overlap grammar", () => {
+  assert.deepEqual(parseArgv(["region", "--path", "src/**", "--path", "tests/**", "--json"]).command, {
+    command: "region",
+    paths: ["src/**", "tests/**"],
+    output: "json",
+  });
+  assert.deepEqual(parseArgv(["region", "kei/example"]).command, {
+    command: "region",
+    contract: "kei/example",
+    output: "text",
+  });
+  assert.match(renderRootHelp(), /region \[<contract>\]/);
+  assert.doesNotMatch(renderRootHelp(), /--overlap/);
+  assert.doesNotMatch(renderContractHelp("region"), /--overlap/);
 });

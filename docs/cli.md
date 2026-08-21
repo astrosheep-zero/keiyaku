@@ -406,14 +406,27 @@ Task mutation; the CLI merely renders package-root results. Bind, amend,
 deliver, review, and abandon share the mutation receipt grammar owned by
 [cli-output.md](cli-output.md).
 
-`region [<contract>] [--overlap] [--json]` reads active declared Regions;
-`region --path <repo-relative-path> [--json]` reverse-queries one canonical
-path. A positional selector without `--overlap` is the Contract's own
-declaration. Bare `region` declares the world view, while `--overlap` is the
-only relation trigger. `--path` cannot combine with a selector or overlap.
-The CLI adapts Kanshi's typed Region section and never decodes documents or
-recomputes patterns. Missing or terminal selectors use the existing typed
-selector refusal; invalid paths are usage refusals before the read.
+The Region command grammar is exactly:
+
+```text
+region [--json]
+region <contract> [--json]
+region --path <pattern> [--path <pattern> ...] [--json]
+```
+
+Bare `region` returns every active declaration. `region <contract>` returns
+that active Contract's declaration and every intersection with the other
+active declarations. `region --path` accepts one or more repeated flags and
+returns every intersection between the ordered query patterns and active
+declarations. Query patterns use the Contract Region line grammar owned by
+[document.md](document.md); a literal repository path is its degenerate case.
+Pattern order and duplicates are preserved. `--path` cannot combine with a
+selector. The `--overlap` flag, world-wide pairwise overlap, stdin or
+multi-line query input, multiple Contract selectors, and a second
+query-pattern dialect are usage refusals or absent grammar. The CLI adapts
+Kanshi's typed Region section and never decodes documents or implements
+matching. Missing or terminal selectors use the existing typed selector
+refusal; invalid query patterns are usage refusals before the read.
 
 The surface has no interactive mode, input envelope, independent JSON schema,
 configurable attempt count, command alias, or `scope` alias. The

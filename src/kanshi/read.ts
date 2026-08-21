@@ -11,7 +11,7 @@ import { observeCurrentPhysicalIssue } from "../protocol/read/observation.js";
 import { readContractBoard } from "../protocol/read/status.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { readDocuments } from "../protocol/read/documents.js";
-import { readRegionDeclarations, validateRegionPath } from "../library/region.js";
+import { readRegionDeclarations, validateRegionPatterns } from "../library/region.js";
 import { contractId } from "../core/facts/types.js";
 import { selectKanshi, selectRegion } from "./select.js";
 import { FLEET_SNAPSHOT_ROWS, visibleFleetRows } from "./fleet.js";
@@ -83,24 +83,10 @@ function regionSelection(value: unknown): KanshiRegionSelection {
       throw new TypeError("kanshi region contract must be a canonical ContractId");
     }
   }
-  if (selection.kind === "overlap") {
-    exactKeys(selection, ["kind", "contract"], "region selection");
-    if (selection.contract === undefined) return { kind: "overlap" };
-    if (typeof selection.contract !== "string") throw new TypeError("kanshi region contract must be a ContractId");
-    try {
-      return { kind: "overlap", contract: contractId(selection.contract) };
-    } catch {
-      throw new TypeError("kanshi region contract must be a canonical ContractId");
-    }
-  }
   if (selection.kind === "path") {
-    exactKeys(selection, ["kind", "path"], "region selection");
-    try {
-      validateRegionPath(selection.path);
-    } catch (error) {
-      throw new TypeError(error instanceof Error ? error.message : String(error));
-    }
-    return { kind: "path", path: selection.path };
+    exactKeys(selection, ["kind", "patterns"], "region selection");
+    try { return { kind: "path", patterns: validateRegionPatterns(selection.patterns) }; }
+    catch (error) { throw new TypeError(error instanceof Error ? error.message : String(error)); }
   }
   throw new TypeError(`kanshi region selection kind is invalid: ${selection.kind}`);
 }
@@ -392,7 +378,7 @@ async function readDispatches(
 
 export async function observeKanshi(input: KanshiInput): Promise<KanshiObservation> {
   const observedAt = new Date().toISOString();
-  const { world, repo } = coordinate(input);
+  const { world, repo, region, contract } = coordinate(input);
   const branch = await readBranch(repo);
   if (repo === undefined) {
     const contracts = { kind: "absent" as const };
@@ -410,52 +396,49 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
         contracts,
         tasks,
         akuma,
-        ...(input.region === undefined ? {} : { region: { kind: "absent" as const } }),
+        ...(region === undefined ? {} : { region: { kind: "absent" as const } }),
       },
       aliases,
     };
   }
   try {
     const repository = scopeForRepo(repo);
-    return await withGitDecodeChannel(repository, (channel) =>
-      withGitReadObservation(repository, channel, async (observation) => {
-        const [contractSection, holders, dispatches, region, board] = await Promise.all([
-          readContracts(observation, input.contract),
-          readHolders(observation),
-          readDispatches(observation),
-          input.region === undefined ? Promise.resolve(undefined) : readRegion(observation, input.region),
-          readTaskWorld(world),
-        ]);
-        const contracts = decorateContracts(contractSection, holders, (id) => namespaceTaskSection(board, id));
-        const observeContract = contractEndpointObserver(contracts);
-        const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
-        const tasks = world === null ? { kind: "absent" as const } : readTasks(world, board, holders, observeContract);
-        const akuma =
-          world === null
-            ? { kind: "absent" as const }
-            : dispatches.kind === "failed"
-              ? dispatches
-              : await joinAkuma(world, observeContract, dispatches.value, aliases);
-        const assembled = {
-          root: world,
-          observedAt,
-          branch,
-          contracts: attachFleet(contracts, akuma),
-          tasks,
-          akuma,
-          ...(region === undefined ? {} : { region }),
-        } satisfies KanshiReport;
-        if (input.contract === undefined) return { report: assembled, aliases };
-        const selected = selectKanshi({ report: assembled, contract: input.contract });
-        return {
-          report: {
-            ...selected,
-            contracts: await attachSelectedIssue(observation, selected.contracts, input.contract),
-          },
-          aliases,
-        };
-      }),
-    );
+    return await withGitDecodeChannel(repository, (channel) => withGitReadObservation(repository, channel, async (observation) => {
+      const [contractSection, holders, dispatches, regionSection, board] = await Promise.all([
+        readContracts(observation, contract),
+        readHolders(observation),
+        readDispatches(observation),
+        region === undefined ? Promise.resolve(undefined) : readRegion(observation, region),
+        readTaskWorld(world),
+      ]);
+      const contracts = decorateContracts(contractSection, holders, (id) => namespaceTaskSection(board, id));
+      const observeContract = contractEndpointObserver(contracts);
+      const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
+      const tasks = world === null ? { kind: "absent" as const } : readTasks(world, board, holders, observeContract);
+      const akuma = world === null
+        ? { kind: "absent" as const }
+        : dispatches.kind === "failed"
+          ? dispatches
+          : await joinAkuma(world, observeContract, dispatches.value, aliases);
+      const assembled = {
+        root: world,
+        observedAt,
+        branch,
+        contracts: attachFleet(contracts, akuma),
+        tasks,
+        akuma,
+        ...(regionSection === undefined ? {} : { region: regionSection }),
+      } satisfies KanshiReport;
+      if (contract === undefined) return { report: assembled, aliases };
+      const selected = selectKanshi({ report: assembled, contract });
+      return {
+        report: {
+          ...selected,
+          contracts: await attachSelectedIssue(observation, selected.contracts, contract),
+        },
+        aliases,
+      };
+    }));
   } catch (error) {
     const failure = { kind: "failed" as const, failure: { message: diagnostic(error) } };
     return {
@@ -466,7 +449,7 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
         contracts: failure,
         tasks: world === null ? { kind: "absent" } : failure,
         akuma: world === null ? { kind: "absent" } : failure,
-        ...(input.region === undefined ? {} : { region: failure }),
+        ...(region === undefined ? {} : { region: failure }),
       },
       aliases: world === null ? { kind: "absent" } : failure,
     };

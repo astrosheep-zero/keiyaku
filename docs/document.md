@@ -66,9 +66,10 @@ Regions. The overlap helps the flagship decide whether optimistic parallel work
 is sensible; it does not adjudicate ownership or reject either Contract.
 
 Kanshi may read the current Region declaration directly from active Contract
-documents for planning. This uses the same grammar and exact calculator as
-bind and amend; it creates no journal fact, cache, scope alias, ownership
-decision, or projection of actual touched paths.
+documents for planning. Query patterns on that read use this same line grammar
+and the same exact calculator as bind and amend; a literal repository path is
+the grammar's degenerate case. The read creates no journal fact, cache, scope
+alias, ownership decision, or projection of actual touched paths.
 
 Each nonblank line in `Region` is one repository-relative positive path
 pattern. `/` separates segments. Within a segment, `*` matches any number of

@@ -424,15 +424,13 @@ function parseShow(parts: ParsedParts): ParsedShow {
 
 function parseRegion(parts: ParsedParts): ParsedRegion {
   const contract = parts.positionals[0];
-  const path = optionalFlag(parts.flags, "path");
-  const overlap = parts.flags.overlap === true;
-  if (path !== undefined && (contract !== undefined || overlap))
-    refuse("region", "--path cannot combine with a contract or --overlap");
+  const pathFlag = parts.flags.path;
+  const paths = pathFlag === undefined ? undefined : Array.isArray(pathFlag) ? pathFlag : [pathFlag];
+  if (paths !== undefined && contract !== undefined) refuse("region", "--path cannot combine with a contract");
   return {
     command: "region",
     ...(contract === undefined ? {} : { contract }),
-    ...(path === undefined ? {} : { path }),
-    overlap,
+    ...(paths === undefined ? {} : { paths: paths as [string, ...string[]] }),
     output: parts.output,
   };
 }

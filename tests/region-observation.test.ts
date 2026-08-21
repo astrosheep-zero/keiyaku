@@ -40,7 +40,7 @@ function document(title: string, region: readonly string[]): string {
 async function bind(repository: TestGitRepository, title: string, region: readonly string[]) {
   const result = await Keiyaku.bind({ repo: await Repo.at({ path: repository.path }),
     markdown: document(title, region),
-    workspace,
+    workspace: "worktree",
   });
   return result;
 }
